@@ -1926,11 +1926,9 @@ class AiChatAgentLoopServiceTest {
     /**
      * A trailing word character stays pending as task-handle boundary context. The other 299
      * characters must stream before the malformed attempt resets and repair starts at offset zero.
-     * A hidden-field screening bound must reset too, even without any projected answer text.
      */
-    @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
-    void streamedMalformedAttemptResetsBeforeRepairStreamsFromOffsetZero(boolean hiddenBound) {
+    @Test
+    void streamedMalformedAttemptResetsBeforeRepairStreamsFromOffsetZero() {
         AiChatQueuedTurn streamedTurn = new AiChatQueuedTurn(
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId(), TURN.turnId(),
                 TURN.userMessageId(), TURN.userMessageSeq(), TURN.restrictionEpoch(),
@@ -1968,12 +1966,8 @@ class AiChatAgentLoopServiceTest {
                 .thenAnswer(invocation -> {
                     AiInvocation providerInvocation = invocation.getArgument(0);
                     if (attempts.getAndIncrement() == 0) {
-                        if (hiddenBound) {
-                            providerInvocation.streamObserver().onProviderField("reasoning", "x".repeat(16_001));
-                        } else {
-                            providerInvocation.streamObserver().onContentDelta(
-                                    "{\"tool\":null,\"final\":{\"text\":\"" + "x".repeat(300));
-                        }
+                        providerInvocation.streamObserver().onContentDelta(
+                                "{\"tool\":null,\"final\":{\"text\":\"" + "x".repeat(300));
                         return malformed;
                     }
                     providerInvocation.streamObserver().onContentDelta(
@@ -1991,19 +1985,16 @@ class AiChatAgentLoopServiceTest {
                 any(AiInvocation.class), eq(AiAssistantStep.class),
                 any(AiRawOutputGuard.class), any(AiResponseSchema.class),
                 eq(directAdmission), any(Runnable.class));
-        verify(persistenceService).resetPartialContent(streamedTurn, hiddenBound ? 0 : 299);
+        verify(persistenceService).resetPartialContent(streamedTurn, 299);
         ArgumentCaptor<Integer> offsets = ArgumentCaptor.forClass(Integer.class);
         ArgumentCaptor<String> batches = ArgumentCaptor.forClass(String.class);
-        verify(persistenceService, times(hiddenBound ? 1 : 2)).appendPartialBatch(
+        verify(persistenceService, times(2)).appendPartialBatch(
                 eq(streamedTurn), offsets.capture(), batches.capture());
-        assertEquals(hiddenBound ? List.of(0) : List.of(0, 0), offsets.getAllValues());
-        assertEquals(hiddenBound ? List.of("Repaired answer") : List.of("x".repeat(299), "Repaired answer"),
-                batches.getAllValues());
+        assertEquals(List.of(0, 0), offsets.getAllValues());
+        assertEquals(List.of("x".repeat(299), "Repaired answer"), batches.getAllValues());
         InOrder order = inOrder(persistenceService);
-        if (!hiddenBound) {
-            order.verify(persistenceService).appendPartialBatch(streamedTurn, 0, "x".repeat(299));
-        }
-        order.verify(persistenceService).resetPartialContent(streamedTurn, hiddenBound ? 0 : 299);
+        order.verify(persistenceService).appendPartialBatch(streamedTurn, 0, "x".repeat(299));
+        order.verify(persistenceService).resetPartialContent(streamedTurn, 299);
         order.verify(persistenceService).appendPartialBatch(streamedTurn, 0, "Repaired answer");
         verify(persistenceService).resolve(
                 eq(streamedTurn), eq("Repaired answer"), any(), eq(5), eq(8));
@@ -5244,6 +5235,26 @@ class AiChatAgentLoopServiceTest {
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.MethodSource("streamFailureCases")
     void inventedReferenceWithdrawsDurablePartialsBeforeTransportFailure(boolean nativeProtocol, String failure, ooo.klae.connex.backend.ai.masking.EntityKind kind, String spelling, boolean hiddenField) {
+        assertReferenceWithdrawal(nativeProtocol, failure, kind, spelling, hiddenField ? "reasoning" : "public", "ordinary");
+    }
+
+    static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> postTruncationFailureCases() {
+        return java.util.stream.Stream.of("public", "reasoning", "tool:0:arguments")
+                .flatMap(field -> java.util.stream.Stream.of("after", "crossing", "overlong")
+                        .flatMap(scenario -> java.util.stream.Stream.of("timeout", "disconnect")
+                                .map(failure -> org.junit.jupiter.params.provider.Arguments.of(field, scenario, failure))));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("postTruncationFailureCases")
+    void referencesAfterLongStreamsWithdrawBeforeTransportFailure(String field, String scenario, String failure) {
+        assertReferenceWithdrawal(field.startsWith("tool:"), failure,
+                ooo.klae.connex.backend.ai.masking.EntityKind.PERSON, "canonical", field, scenario);
+    }
+
+    private void assertReferenceWithdrawal(boolean nativeProtocol, String failure,
+            ooo.klae.connex.backend.ai.masking.EntityKind kind, String spelling, String field, String scenario) {
+        boolean hiddenField = !field.equals("public");
         AiChatQueuedTurn streamedTurn = new AiChatQueuedTurn(
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId(), TURN.turnId(),
                 TURN.userMessageId(), TURN.userMessageSeq(), TURN.restrictionEpoch(),
@@ -5282,9 +5293,40 @@ class AiChatAgentLoopServiceTest {
             String reference = invocation.context().tokenFor(kind, "Unsent label");
             String guess = spelling.equals("newline") ? "{{\n" + kind.tokenPrefix() + "1}}"
                     : spelling.equals("tab") ? "{{" + kind.tokenPrefix() + "1\t}}" : reference;
-            if (hiddenField) {
+            if (!scenario.equals("ordinary")) {
+                String opening = nativeProtocol ? "{\"text\":\"" : "{\"tool\":null,\"final\":{\"text\":\"";
+                invocation.streamObserver().onContentDelta(nativeProtocol
+                        ? AiAssistantMaskingTestSupport.finalOutput(true, prefix) : opening + prefix);
+                assertTrue(!partial.get().isEmpty());
+                java.util.function.Consumer<String> append = hiddenField
+                        ? delta -> invocation.streamObserver().onProviderField(field, delta)
+                        : invocation.streamObserver()::onContentDelta;
+                if (scenario.equals("crossing")) {
+                    String filler = "x".repeat(15_998 - opening.length() - prefix.length());
+                    if (!nativeProtocol) {
+                        invocation.streamObserver().onContentDelta(filler + (hiddenField ? "" : "{{"));
+                    }
+                    if (hiddenField) {
+                        append.accept("x".repeat(15_998) + "{{");
+                    }
+                    if (hiddenField) {
+                        invocation.streamObserver().onContentDelta("x".repeat(1_000));
+                    } else {
+                        append.accept(" ".repeat(1_000));
+                    }
+                    append.accept("P99}}");
+                } else {
+                    if (nativeProtocol) {
+                        invocation.streamObserver().onProviderField("reasoning", "x".repeat(17_000));
+                    } else {
+                        invocation.streamObserver().onContentDelta("x".repeat(17_000));
+                    }
+                    append.accept(scenario.equals("overlong") ? "{{" + " ".repeat(16_385) : "{{P99}}");
+                }
+                assertEquals("", partial.get());
+            } else if (hiddenField) {
                 invocation.streamObserver().onContentDelta(AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, prefix));
-                invocation.streamObserver().onProviderField("reasoning", guess);
+                invocation.streamObserver().onProviderField(field, guess);
             } else {
                 String output = AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, prefix + guess);
                 int token = output.indexOf("{{");
@@ -5318,7 +5360,7 @@ class AiChatAgentLoopServiceTest {
                 : AiGenerationTaskResult.Outcome.FAILED, result.outcome());
         assertEquals("timeout".equals(failure) ? "provider_idle_timeout" : "provider_error", result.reason());
         assertEquals("", partial.get());
-        verify(persistenceService).resetPartialContent(eq(streamedTurn), org.mockito.ArgumentMatchers.intThat(offset -> hiddenField || !nativeProtocol ? offset > 0 : offset == 0));
+        verify(persistenceService).resetPartialContent(eq(streamedTurn), org.mockito.ArgumentMatchers.intThat(offset -> hiddenField || !nativeProtocol || !scenario.equals("ordinary") ? offset > 0 : offset == 0));
         verify(persistenceService, never()).resolve(eq(streamedTurn), any(), any(), anyInt(), anyInt());
         verify(writeToolService, never()).prepare(any(), any(), any(), org.mockito.ArgumentMatchers.anyLong());
         verify(persistenceService, never()).proposeWriteTool(eq(streamedTurn), anyInt(), any());

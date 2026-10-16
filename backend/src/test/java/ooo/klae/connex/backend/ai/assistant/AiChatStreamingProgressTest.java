@@ -51,7 +51,7 @@ class AiChatStreamingProgressTest {
     }
 
     @Test
-    void retainedTerminalContentStillPreventsToolExecutionAfterPublicationStops() {
+    void hiddenFieldLengthDoesNotSuppressTerminalContentGuard() {
         var observer = new AiChatStreamingProgress(turn(AiPrivacyMode.MASKED),
                 mock(AiChatTurnPersistenceService.class), new MaskingContext()).observer(true);
         observer.onProviderField("reasoning", "x".repeat(16_001));
@@ -61,25 +61,24 @@ class AiChatStreamingProgressTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void oneAggregateBudgetBoundsHiddenFieldHistoryBeforeAllocatingOversizedCallbacks(boolean oneHugeDelta) {
+    void hiddenFieldsContinueScreeningAfterTheFormerAggregateBound(boolean oneHugeDelta) {
         var persistence = mock(AiChatTurnPersistenceService.class);
         var observer = new AiChatStreamingProgress(turn(AiPrivacyMode.MASKED), persistence,
                 new MaskingContext()).observer(false);
         if (oneHugeDelta) {
-            observer.onProviderField("reasoning", "x".repeat(2_097_152));
-            assertEquals(0, observer.screenedCharacters());
+            observer.onProviderField("reasoning", "x".repeat(50_000));
         } else {
-            for (int index = 0; index < 200; index++) {
-                observer.onProviderField("field:" + index, "x".repeat(100));
+            for (int index = 0; index < 500; index++) {
+                observer.onProviderField("reasoning", "x".repeat(100));
             }
-            assertEquals(16_000, observer.screenedCharacters());
         }
+        assertEquals(50_000, observer.screenedCharacters());
+        assertEquals(2, observer.activeScreens());
+        observer.onProviderField("reasoning", "{{P99}}");
+        verify(persistence).resetPartialContent(any(), anyInt());
         assertEquals(0, observer.activeScreens());
-        long scanned = observer.screenedCharacters();
-        observer.onContentDelta("{\"tool\":null,\"final\":{\"text\":\"Complete answer.\"}}");
-        assertEquals(scanned, observer.screenedCharacters());
-        assertEquals("Complete answer.", observer.finish("Complete answer."));
-        org.mockito.Mockito.verifyNoInteractions(persistence);
+        assertEquals("invented_placeholder", assertThrows(AiAssistantLoopException.class,
+                () -> observer.finish("unused")).detailReason());
     }
 
     @ParameterizedTest
@@ -132,8 +131,8 @@ class AiChatStreamingProgressTest {
     }
 
     @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    void truncationStopsScreeningButTheFullFinalAnswerStillDecidesRefusal(boolean invented) {
+    @org.junit.jupiter.params.provider.CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void screeningContinuesAfterPublicationTruncationAndWithdrawsImmediately(boolean hidden, boolean overlong) {
         var persistence = mock(AiChatTurnPersistenceService.class);
         when(persistence.appendPartialBatch(any(), anyInt(), any())).thenAnswer(call ->
                 call.<Integer>getArgument(1) + call.<String>getArgument(2).length());
@@ -143,22 +142,28 @@ class AiChatStreamingProgressTest {
         observer.onContentDelta("{\"tool\":null,\"final\":{\"text\":\"" + prefix);
         observer.onContentDelta("x".repeat(17_000));
         long screened = observer.screenedCharacters();
-        observer.onProviderField("reasoning", "{{P99}}");
-        String tail = invented ? "{{P99}}" : "safe ending";
-        for (int index = 0; index < tail.length(); index++) {
-            observer.onContentDelta(tail.substring(index, index + 1));
-        }
-        observer.onContentDelta("\"}}");
-        assertEquals(screened, observer.screenedCharacters());
-        String complete = prefix + "x".repeat(17_000) + tail;
-        if (invented) {
-            assertEquals("invented_placeholder", assertThrows(AiAssistantLoopException.class,
-                    () -> observer.finish(complete)).detailReason());
-            verify(persistence).resetPartialContent(any(), anyInt());
-        } else {
-            assertEquals(complete, observer.finish(complete));
-            org.mockito.Mockito.verify(persistence, org.mockito.Mockito.never()).resetPartialContent(any(), anyInt());
-        }
+        java.util.function.Consumer<String> append = hidden
+                ? delta -> observer.onProviderField("tool:0:arguments", delta) : observer::onContentDelta;
+        append.accept("{{");
+        append.accept(overlong ? " ".repeat(16_385) : "P99}}");
+        assertTrue(observer.screenedCharacters() > screened);
+        verify(persistence).resetPartialContent(any(), org.mockito.ArgumentMatchers.intThat(offset -> offset > 0));
+        assertEquals("invented_placeholder", assertThrows(AiAssistantLoopException.class,
+                () -> observer.finish("unused")).detailReason());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void placeholdersCrossingTheFormerScreeningBudgetWithdrawImmediately(boolean hidden) {
+        var persistence = mock(AiChatTurnPersistenceService.class);
+        var observer = new AiChatStreamingProgress(turn(AiPrivacyMode.MASKED), persistence,
+                new MaskingContext()).observer(false);
+        java.util.function.Consumer<String> append = hidden
+                ? delta -> observer.onProviderField("reasoning", delta) : observer::onContentDelta;
+        append.accept("x".repeat(15_998) + "{{");
+        org.mockito.Mockito.verify(persistence, org.mockito.Mockito.never()).resetPartialContent(any(), anyInt());
+        append.accept("P99}}");
+        verify(persistence).resetPartialContent(any(), anyInt());
     }
 
     private static AiChatQueuedTurn turn(AiPrivacyMode privacyMode) {
@@ -330,7 +335,7 @@ class AiChatStreamingProgressTest {
         AiChatStreamingProgress progress = new AiChatStreamingProgress(
                 turn(AiPrivacyMode.UNMASKED), persistence, new MaskingContext(AiPrivacyMode.UNMASKED));
         var observer = progress.observer(false);
-        String prefix = "x".repeat(15_950) + " ";
+        String prefix = "x".repeat(15_995) + " ";
         observer.onContentDelta("{\"tool\":null,\"final\":{\"text\":\"" + prefix + "t1");
         observer.onContentDelta("alpha continues past the stream limit.\"}}");
         observer.finish(prefix + "t1alpha continues past the stream limit.");

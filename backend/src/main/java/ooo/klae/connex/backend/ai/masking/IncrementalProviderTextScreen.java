@@ -2,25 +2,32 @@ package ooo.klae.connex.backend.ai.masking;
 
 import java.text.Normalizer;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.regex.Pattern;
 
 /**
  * Incremental counterpart of {@link MaskingContext#containsUnexposedTokenInProviderText}.
- * Each projection keeps rollback checkpoints, rather than rescanning an open placeholder or
- * link. Candidates may contain arbitrarily many spaces or digits. Refusal is sampled only after
- * the entire callback: a completed record link can remove a match from its target.
- * The caller bounds aggregate input before append and releases this linear rollback history when
- * partial publication stops; final complete-result validation remains independent of this screen.
+ * Projection checkpoints contain parser state, never field history. Open record labels advance
+ * an alternate downstream checkpoint, so completing a link retracts its target without replay.
+ * Refusal is sampled after the callback because a completed link can remove a speculative match.
+ * An open placeholder or nested Unicode escape exceeding 16,384 units fails closed.
  */
 public final class IncrementalProviderTextScreen {
+    /**
+     * Exceeds the 16,000-character durable partial limit while bounding one unresolved candidate.
+     * Ordinary field length never consumes this bound.
+     */
+    public static final int MAX_CANDIDATE_CHARACTERS = 16_384;
     private static final Pattern GRAPHEME = Pattern.compile("\\X");
     private static final List<String> TARGETS = List.of("(person:", "(company:", "(deal:", "(record:");
     private final Projection raw;
     private final Projection decoded;
     private final Sink escapes;
-    private final StringBuilder unicode = new StringBuilder();
+    private final ArrayList<EscapeUnit> unicode = new ArrayList<>();
+    private boolean overlong;
     private final Cost cost = new Cost();
     private long inputCharacters;
 
@@ -36,23 +43,26 @@ public final class IncrementalProviderTextScreen {
         escapes = replacement;
     }
 
-    /** Appends new field text and returns the complete-field oracle's current refusal decision. */
+    /**
+     * Appends new text and returns the complete-field oracle's decision, or a permanent refusal
+     * when an unresolved candidate exceeds {@link #MAX_CANDIDATE_CHARACTERS}.
+     */
     public boolean append(String delta) {
         Objects.requireNonNull(delta, "delta");
         inputCharacters += delta.length();
-        for (int index = 0; index < delta.length(); index++) {
+        for (int index = 0; index < delta.length() && !overlong; index++) {
+            cost.beginCharacter();
             char value = delta.charAt(index);
             raw.normalizer.append(new Unit(value, true));
-            unicode.append(value);
-            escapes.append(new Unit(value, true));
-            while (unicode.length() >= 6) {
-                int start = unicode.length() - 6;
-                if (unicode.charAt(start) != '\\' || unicode.charAt(start + 1) != 'u') {
+            appendEscape(value);
+            while (unicode.size() >= 6) {
+                int start = unicode.size() - 6;
+                if (unicode.get(start).value() != '\\' || unicode.get(start + 1).value() != 'u') {
                     break;
                 }
                 int code = 0;
                 for (int offset = start + 2; offset < start + 6; offset++) {
-                    int digit = Character.digit(unicode.charAt(offset), 16);
+                    int digit = Character.digit(unicode.get(offset).value(), 16);
                     if (digit < 0) {
                         code = -1;
                         break;
@@ -62,13 +72,41 @@ public final class IncrementalProviderTextScreen {
                 if (code < 0) {
                     break;
                 }
-                unicode.setLength(start);
-                escapes.pop(6);
-                unicode.append((char) code);
-                escapes.append(new Unit((char) code, true));
+                escapes.restore(unicode.get(start).before());
+                unicode.subList(start, unicode.size()).clear();
+                appendEscape((char) code);
+            }
+            trimEscapes();
+            overlong = unicode.size() > MAX_CANDIDATE_CHARACTERS || cost.overlong;
+        }
+        return overlong || raw.refused() || decoded.refused();
+    }
+
+    private void appendEscape(char value) {
+        unicode.add(new EscapeUnit(value, escapes.top));
+        escapes.append(new Unit(value, true));
+    }
+
+    /** Only incomplete, potentially nested Unicode escape prefixes can participate in reductions. */
+    private void trimEscapes() {
+        int end = unicode.size();
+        int start = end - 1;
+        while (start >= 0 && unicode.get(start).value() != '\\') {
+            start--;
+        }
+        if (start < 0 || end - start > 5 || end - start > 1 && unicode.get(start + 1).value() != 'u') {
+            unicode.clear();
+            return;
+        }
+        for (int index = start + 2; index < end; index++) {
+            if (Character.digit(unicode.get(index).value(), 16) < 0) {
+                unicode.clear();
+                return;
             }
         }
-        return raw.refused() || decoded.refused();
+    }
+
+    private record EscapeUnit(char value, Frame before) {
     }
 
     /** Counts actual projection/recognizer character visits for deterministic complexity tests. */
@@ -81,8 +119,58 @@ public final class IncrementalProviderTextScreen {
         return inputCharacters;
     }
 
+    /** Counts reachable semantic snapshots, excluding the current character's temporary memo tables. */
+    int retainedSnapshots() {
+        var seen = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<Frame, Boolean>());
+        var pending = new java.util.ArrayDeque<Frame>();
+        if (raw.normalizer.top != null) {
+            pending.add(raw.normalizer.top);
+        }
+        if (escapes.top != null) {
+            pending.add(escapes.top);
+        }
+        for (EscapeUnit unit : unicode) {
+            if (unit.before() != null) {
+                pending.add(unit.before());
+            }
+        }
+        while (!pending.isEmpty()) {
+            Frame frame = pending.removeLast();
+            if (!seen.add(frame)) {
+                continue;
+            }
+            if (frame.output != null) {
+                pending.add(frame.output);
+            }
+            if (frame.state instanceof LinkState link && link.label() != null) {
+                pending.add(link.label());
+            } else if (frame.state instanceof ControlState control && control.before() != null) {
+                pending.add(control.before());
+            } else if (frame.state instanceof UnicodeState state) {
+                for (Scalar scalar : new Scalar[] {state.current(), state.preceding()}) {
+                    if (scalar != null && scalar.start() != null) {
+                        pending.add(scalar.start());
+                    }
+                }
+            }
+        }
+        return seen.size();
+    }
+
     private static final class Cost {
         private long characters;
+        private boolean overlong;
+        private final Map<Frame, Frame> frames = new HashMap<>();
+        private final Map<Transition, Frame> transitions = new HashMap<>();
+
+        void beginCharacter() {
+            frames.clear();
+            transitions.clear();
+        }
+
+        Frame intern(Frame frame) {
+            return frames.computeIfAbsent(frame, key -> key);
+        }
     }
 
     private record Unit(char value, boolean literal) {
@@ -91,7 +179,10 @@ public final class IncrementalProviderTextScreen {
         }
     }
 
-    /** Persistent checkpoints restore speculative rewrites without replaying a retained prefix. */
+    private record Transition(Sink sink, Frame before, Unit unit) {
+    }
+
+    /** Immutable semantic snapshots have no same-stage history or source-position identity. */
     private abstract static class Sink {
         final Sink target;
         final Cost cost;
@@ -103,9 +194,16 @@ public final class IncrementalProviderTextScreen {
         }
 
         final void append(Unit unit) {
+            Transition transition = new Transition(this, top, unit);
+            Frame cached = cost.transitions.get(transition);
+            if (cached != null) {
+                restore(cached);
+                return;
+            }
             cost.characters++;
             Object state = project(unit);
-            top = new Frame(unit, top, state, target == null ? null : target.top);
+            top = cost.intern(new Frame(state, target == null ? null : target.top));
+            cost.transitions.put(transition, top);
         }
 
         abstract Object project(Unit unit);
@@ -113,24 +211,40 @@ public final class IncrementalProviderTextScreen {
         final void restore(Frame checkpoint) {
             top = checkpoint;
             if (target != null) {
-                target.restore(top == null ? null : top.output());
+                target.restore(top == null ? null : top.output);
             }
         }
 
-        final void pop(int count) {
-            Frame checkpoint = top;
-            for (int index = 0; index < count; index++) {
-                checkpoint = checkpoint.previous();
+        void poisonLast() {
+            cost.characters++;
+            if (target != null) {
+                target.poisonLast();
+                top = cost.intern(new Frame(top == null ? null : top.state, target.top));
             }
-            restore(checkpoint);
-        }
-
-        final Frame outputBeforeLast() {
-            return top == null || top.previous() == null ? null : top.previous().output();
         }
     }
 
-    private record Frame(Unit input, Frame previous, Object state, Frame output) {
+    private static final class Frame {
+        private final Object state;
+        private final Frame output;
+        private final int hash;
+
+        Frame(Object state, Frame output) {
+            this.state = state;
+            this.output = output;
+            hash = 31 * Objects.hashCode(state) + Objects.hashCode(output);
+        }
+
+        @Override
+        public int hashCode() {
+            return hash;
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            return this == other || other instanceof Frame frame && hash == frame.hash
+                    && Objects.equals(state, frame.state) && Objects.equals(output, frame.output);
+        }
     }
 
     private static final class Projection {
@@ -149,7 +263,7 @@ public final class IncrementalProviderTextScreen {
         }
 
         boolean refused() {
-            if (convergence.state().removed() != 0) {
+            if (convergence.state().removed()) {
                 throw new MaskingLeakException("Outbound AI text transformation did not converge");
             }
             return tokens.state().refused();
@@ -171,19 +285,20 @@ public final class IncrementalProviderTextScreen {
         @Override
         Object project(Unit unit) {
             String source = String.valueOf(unit.value());
-            Frame prior = top;
+            UnicodeState old = top == null ? new UnicodeState(null, null) : (UnicodeState) top.state;
+            Scalar prior = old.current();
             Frame start = target.top;
             if (prior != null && Character.isLowSurrogate(unit.value())
-                    && Character.isHighSurrogate(prior.input().value())) {
-                source = String.valueOf(prior.input().value()) + unit.value();
-                target.restore(outputBeforeLast());
+                    && prior.source().length() == 1 && Character.isHighSurrogate(prior.source().charAt(0))) {
+                source = prior.source() + unit.value();
+                target.restore(prior.start());
                 start = target.top;
-                prior = prior.previous();
+                prior = old.preceding();
             }
             String normalized = Normalizer.normalize(source, Normalizer.Form.NFKC);
             boolean literal = source.equals(normalized) && unit.literal();
             if (prior != null) {
-                UnicodeState preceding = (UnicodeState) prior.state();
+                Scalar preceding = prior;
                 if (GRAPHEME.matcher(preceding.source() + source).matches()) {
                     if (preceding.source().equals("}")) {
                         target.restore(preceding.start());
@@ -196,7 +311,7 @@ public final class IncrementalProviderTextScreen {
                 }
             }
             emit(normalized, literal);
-            return new UnicodeState(source, normalized, start);
+            return new UnicodeState(new Scalar(source, normalized, start), prior);
         }
 
         private void emit(String text, boolean literal) {
@@ -206,7 +321,10 @@ public final class IncrementalProviderTextScreen {
         }
     }
 
-    private record UnicodeState(String source, String normalized, Frame start) {
+    private record Scalar(String source, String normalized, Frame start) {
+    }
+
+    private record UnicodeState(Scalar current, Scalar preceding) {
     }
 
     /** One ordered String.replace pass, with checkpoints for nested Unicode reductions. */
@@ -222,14 +340,19 @@ public final class IncrementalProviderTextScreen {
 
         @Override
         Object project(Unit unit) {
-            if (unit.value() == escaped && top != null && top.input().value() == '\\') {
-                target.restore(outputBeforeLast());
+            ControlState prior = top == null ? new ControlState(false, null) : (ControlState) top.state;
+            Frame before = target.top;
+            if (unit.value() == escaped && prior.backslash()) {
+                target.restore(prior.before());
                 target.append(new Unit(replacement, true));
             } else {
                 target.append(unit);
             }
-            return null;
+            return new ControlState(unit.value() == '\\', unit.value() == '\\' ? before : null);
         }
+    }
+
+    private record ControlState(boolean backslash, Frame before) {
     }
 
     private static final class BackslashRemoval extends Sink {
@@ -247,19 +370,18 @@ public final class IncrementalProviderTextScreen {
     }
 
     /**
-     * A single ConversationText link pass. Completed links on this pass are disjoint; replaying
-     * only their labels visits each source character a bounded number of times over 17 passes.
-     * Checkpoints retract speculative target text and its refusal state without rescanning it.
+     * A record-link pass advances both the literal output and a label-only semantic checkpoint.
+     * Interning equal states shares nested alternatives; neither path retains the label text.
      */
     private static final class LinkProjection extends Sink {
-        private static final LinkState EMPTY = new LinkState(null, null, null, false, 0);
+        private static final LinkState EMPTY = new LinkState(false, null, false, null, false, false);
 
         LinkProjection(Sink target, Cost cost) {
             super(target, cost);
         }
 
         LinkState state() {
-            return top == null ? EMPTY : (LinkState) top.state();
+            return top == null ? EMPTY : (LinkState) top.state;
         }
 
         @Override
@@ -269,51 +391,60 @@ public final class IncrementalProviderTextScreen {
             char value = unit.value();
             if (prior.target()) {
                 if (value == ')') {
-                    target.restore(prior.start().output());
-                    var reversed = new ArrayList<Unit>();
-                    for (Frame label = prior.end(); label.previous() != prior.start().input(); label = label.previous()) {
-                        reversed.add(label.input());
-                    }
-                    if (reversed.isEmpty() && target.top != null) {
-                        Unit previous = target.top.input();
-                        target.pop(1);
-                        target.append(previous.transformed());
-                    }
-                    for (int index = reversed.size() - 1; index >= 0; index--) {
-                        Unit label = reversed.get(index);
-                        target.append(index == 0 || index == reversed.size() - 1 ? label.transformed() : label);
-                    }
-                    return new LinkState(null, null, null, false, prior.removed() + 1);
+                    target.restore(prior.label());
+                    target.poisonLast();
+                    return new LinkState(false, null, false, null, false, true);
                 }
             } else if (prior.prefix() != null) {
                 String prefix = prior.prefix() + value;
                 if (TARGETS.contains(prefix)) {
-                    next = new LinkState(prior.start(), prior.end(), "", true, prior.removed());
+                    next = new LinkState(true, prior.label(), prior.nonempty(), "", true, prior.removed());
                 } else if (TARGETS.stream().anyMatch(candidate -> candidate.startsWith(prefix))) {
-                    next = new LinkState(prior.start(), prior.end(), prefix, false, prior.removed());
+                    next = new LinkState(true, prior.label(), prior.nonempty(), prefix, false, prior.removed());
                 } else {
-                    next = value == '[' ? new LinkState(new LinkStart(top, target.top), null, null, false, prior.removed())
-                            : new LinkState(null, null, null, false, prior.removed());
+                    next = value == '[' ? new LinkState(true, target.top, false, null, false, prior.removed())
+                            : new LinkState(false, null, false, null, false, prior.removed());
                 }
-            } else if (value == '[' && prior.start() == null) {
-                next = new LinkState(new LinkStart(top, target.top), null, null, false, prior.removed());
-            } else if (value == ']' && prior.start() != null) {
-                next = new LinkState(prior.start(), top, "", false, prior.removed());
+            } else if (value == '[' && !prior.open()) {
+                next = new LinkState(true, target.top, false, null, false, prior.removed());
+            } else if (value == ']' && prior.open()) {
+                next = new LinkState(true, prior.label(), prior.nonempty(), "", false, prior.removed());
+            } else if (prior.open()) {
+                Frame literal = target.top;
+                target.restore(prior.label());
+                target.append(prior.nonempty() ? unit : unit.transformed());
+                Frame label = target.top;
+                target.restore(literal);
+                next = new LinkState(true, label, true, null, false, prior.removed());
             }
             target.append(unit);
             return next;
         }
+
+        @Override
+        void poisonLast() {
+            cost.characters++;
+            LinkState prior = state();
+            Frame label = prior.label();
+            if (prior.open() && prior.prefix() == null && !prior.target() && prior.nonempty()) {
+                Frame literal = target.top;
+                target.restore(label);
+                target.poisonLast();
+                label = target.top;
+                target.restore(literal);
+            }
+            target.poisonLast();
+            top = cost.intern(new Frame(new LinkState(prior.open(), label, prior.nonempty(), prior.prefix(),
+                    prior.target(), prior.removed()), target.top));
+        }
     }
 
-    private record LinkStart(Frame input, Frame output) {
+    private record LinkState(boolean open, Frame label, boolean nonempty, String prefix, boolean target, boolean removed) {
     }
 
-    private record LinkState(LinkStart start, Frame end, String prefix, boolean target, int removed) {
-    }
-
-    /** The exact ASCII placeholder grammar, with constant state even for unbounded digit runs. */
+    /** The exact ASCII placeholder grammar, retaining only bounded recognition state. */
     private static final class TokenRecognizer extends Sink {
-        private static final TokenState EMPTY = new TokenState(0, '\0', 0, true, false, true, false);
+        private static final TokenState EMPTY = new TokenState(0, '\0', 0, true, false, true, false, false, 0);
         private final MaskingContext context;
 
         TokenRecognizer(MaskingContext context, Cost cost) {
@@ -322,7 +453,7 @@ public final class IncrementalProviderTextScreen {
         }
 
         TokenState state() {
-            return top == null ? EMPTY : (TokenState) top.state();
+            return top == null ? EMPTY : (TokenState) top.state;
         }
 
         @Override
@@ -334,6 +465,8 @@ public final class IncrementalProviderTextScreen {
             int number = prior.number();
             boolean literal = prior.literal() && unit.literal();
             boolean refused = prior.refused();
+            boolean completed = false;
+            int length = prior.phase() == 0 ? 0 : prior.length() + 1;
             boolean whitespace = value == ' ' || value >= '\t' && value <= '\r';
             if (phase == 2 && whitespace || phase == 5 && whitespace) {
                 phase = prior.phase();
@@ -351,19 +484,40 @@ public final class IncrementalProviderTextScreen {
             } else if ((phase == 4 || phase == 5) && value == '}') {
                 phase = 6;
             } else if (phase == 6 && value == '}') {
+                completed = true;
                 refused |= !literal || kind < 'A' || kind > 'Z' || number < 0
                         || context.demaskableValueForToken("{{" + kind + number + "}}") == null;
                 phase = 0;
             } else if (value == '{') {
                 phase = prior.lastBrace() ? 2 : 1;
                 literal = unit.literal() && (phase == 1 || prior.lastLiteral());
+                length = phase == 1 ? 1 : 2;
             } else {
                 phase = 0;
             }
-            return new TokenState(phase, kind, number, literal, value == '{', unit.literal(), refused);
+            if (phase == 0) {
+                length = 0;
+                kind = '\0';
+                number = 0;
+                literal = true;
+            }
+            cost.overlong |= length > MAX_CANDIDATE_CHARACTERS;
+            return new TokenState(phase, kind, number, literal, value == '{', value != '{' || unit.literal(),
+                    refused, completed, length);
         }
+
+        @Override
+        void poisonLast() {
+            cost.characters++;
+            TokenState state = state();
+            top = cost.intern(new Frame(new TokenState(state.phase(), state.kind(), state.number(),
+                    state.phase() == 0, state.lastBrace(), false,
+                    state.refused() || state.completed(), state.completed(), state.length()), null));
+        }
+
     }
 
-    private record TokenState(int phase, char kind, int number, boolean literal, boolean lastBrace, boolean lastLiteral, boolean refused) {
+    private record TokenState(int phase, char kind, int number, boolean literal, boolean lastBrace,
+            boolean lastLiteral, boolean refused, boolean completed, int length) {
     }
 }

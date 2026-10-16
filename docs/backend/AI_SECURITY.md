@@ -205,20 +205,25 @@ subsequent timeout or disconnect retains its provider classification with no par
 Terminal persistence also purges partials for `malformed_output`. Provider stream adapters deliver
 new native-call field and separate/flagged reasoning fragments through a screening-only callback
 with stable per-field identities; public content is delivered only once through its content callback.
-Incremental screening retains candidate and rollback state across fragments, including unbounded
-placeholder whitespace, nested Unicode escapes and the bounded record-link projection passes.
-It samples refusal after each complete callback, matching the complete-text screen even when a
-completed link removes a speculative target match. Screening stops and releases its state on refusal
-or when publication permanently stops at the length or screening bound. One aggregate 16,000-character
-screening budget covers public and hidden fields, bounding rollback history even during long private
-reasoning. A callback that would exceed it disables partial publication before allocating or screening
-any of that callback; screening a prefix separately could misclassify a subsequently completed link.
-Malformed-attempt reset clears this stopped state even when hidden reasoning prevented any answer
-text from being projected, allowing the repaired attempt to stream from offset zero.
-The answer projector then only retains subsequent content for one final validation; invocation still screens the complete
-provider result, including hidden fields and text beyond the publication bound, before parsing or
-settlement. A later timeout/disconnect retains only the previously screened prefix unless an earlier
-refusal withdrew it. Final invented-reference refusal withdraws that prefix before settlement.
+Incremental screening continues for public, reasoning and native fields after publication reaches
+its 16,000-character bound. Only an already detected reference, whose partial has been withdrawn,
+stops screening. Parser checkpoints retain semantic state instead of field history: an open record
+label advances an alternate downstream checkpoint, and completed links restore that checkpoint
+without replaying the label. Equal checkpoints are shared; the 16 projection passes and convergence
+probe bound the parser depth. Unicode reduction retains only incomplete escape prefixes. Ordinary
+field length never consumes a screening budget.
+A single open placeholder candidate exceeding 16,384 projected characters, or an incomplete nested
+Unicode escape suffix exceeding 16,384 reduced characters, fails closed and withdraws immediately. This
+bound measures projected UTF-16 units and unresolved reduced escape units, rather than cumulative
+encoding bytes. It exceeds the durable publication limit and accommodates long whitespace/escape forms while
+bounding unresolved candidate state. It never discards a candidate to resume publication.
+Refusal is sampled after each complete callback, matching the complete-text screen when a completed
+link removes a speculative target match; the overlong-candidate refusal is permanent.
+Malformed-attempt reset creates fresh screening state and permits repaired output from offset zero.
+After truncation the answer projector retains subsequent content for final validation; invocation
+also screens the complete provider result, including hidden fields and text beyond the publication
+bound, before parsing or settlement. A later timeout/disconnect retains its provider classification,
+with no durable partial if any callback detected a reference. Final validation remains independent.
 Hidden fields never enter the answer projection. Both raw and decoded content receive the same
 check, including JSON whitespace escapes within a placeholder. Incomplete lowercase and NFKC-equivalent token prefixes use the same
 normalization and source offsets as token validation, and are withheld across streaming flushes.

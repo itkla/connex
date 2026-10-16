@@ -21,8 +21,6 @@ final class AiChatStreamingProgress {
     private static final Pattern SOURCE_GRAPHEME = Pattern.compile("\\X");
     /** The durable partial-content bound this batcher must never hand to persistence. */
     private static final int MAX_STREAM_CHARACTERS = 16_000;
-    /** Bounds rollback history across public and hidden fields before disabling partial publication. */
-    private static final int MAX_SCREEN_CHARACTERS = 16_000;
     private static final long CHECK_NANOS = java.time.Duration.ofMillis(250).toNanos();
 
     private final AiChatQueuedTurn turn;
@@ -79,11 +77,8 @@ final class AiChatStreamingProgress {
      * carry special-care content has already become a placeholder by then.
      */
     private void acceptDecoded(String text) {
-        if (excluded || streamTruncated || taskHandle || refusedReference) {
-            return;
-        }
         screenProviderText(text);
-        if (refusedReference) {
+        if (excluded || streamTruncated || taskHandle || refusedReference) {
             return;
         }
         String decoded = demasking && !text.isBlank()
@@ -334,11 +329,7 @@ final class AiChatStreamingProgress {
             if (text == null || text.isEmpty() || refusedReference) {
                 return;
             }
-            if (!admitScreening(text)) {
-                stopScreening();
-                projector.retain(text);
-                return;
-            }
+            screenedCharacters += text.length();
             if (providerText.append(text)) {
                 refuseReference();
             }
@@ -346,8 +337,12 @@ final class AiChatStreamingProgress {
                 stopScreening();
                 return;
             }
-            projector.accept(text);
-            if (streamTruncated || excluded || taskHandle || refusedReference) {
+            if (streamTruncated || excluded || taskHandle) {
+                projector.retain(text);
+            } else {
+                projector.accept(text);
+            }
+            if (refusedReference) {
                 stopScreening();
             }
         }
@@ -357,10 +352,7 @@ final class AiChatStreamingProgress {
             if (delta == null || delta.isEmpty() || refusedReference) {
                 return;
             }
-            if (!admitScreening(delta)) {
-                stopScreening();
-                return;
-            }
+            screenedCharacters += delta.length();
             if (fields.computeIfAbsent(field, ignored -> new IncrementalProviderTextScreen(maskingContext)).append(delta)) {
                 refuseReference();
                 stopScreening();
@@ -370,19 +362,6 @@ final class AiChatStreamingProgress {
         private void stopScreening() {
             providerText = null;
             fields.clear();
-        }
-
-        /** A whole callback is admitted atomically because its suffix may remove a target match. */
-        private boolean admitScreening(String delta) {
-            if (streamTruncated || excluded || taskHandle) {
-                return false;
-            }
-            if (delta.length() > MAX_SCREEN_CHARACTERS - screenedCharacters) {
-                streamTruncated = true;
-                return false;
-            }
-            screenedCharacters += delta.length();
-            return true;
         }
 
         int activeScreens() {

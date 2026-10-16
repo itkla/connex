@@ -40,7 +40,7 @@ class AiExposureBoundaryTest {
 
     @ParameterizedTest
     @EnumSource(EntityKind.class)
-    void completeValidationRefusesUnscreenedAnswersAndSuffixesAfterPublicationStops(EntityKind kind) {
+    void completeValidationRefusesAnswersAndSuffixesAfterLongHiddenFields(EntityKind kind) {
         for (boolean nativeProtocol : List.of(false, true)) {
             for (boolean suffix : List.of(false, true)) {
                 var context = new MaskingContext();
@@ -58,8 +58,7 @@ class AiExposureBoundaryTest {
                 var refused = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, List.of(),
                         output, false, observer);
 
-                assertEquals(0, observer.screenedCharacters());
-                assertEquals(0, observer.activeScreens());
+                assertTrue(observer.screenedCharacters() >= 20_000);
                 assertEquals("invented_placeholder", refused.refusalReason());
                 assertFalse(refused.repairPresent());
             }
@@ -182,7 +181,7 @@ class AiExposureBoundaryTest {
 
     @ParameterizedTest
     @EnumSource(EntityKind.class)
-    void fragmentedGuessesWithdrawImmediatelyOrAtCompletionAfterTruncation(EntityKind kind) {
+    void fragmentedGuessesWithdrawBeforeFinishEvenAfterStreamTruncation(EntityKind kind) {
         for (boolean nativeProtocol : List.of(false, true)) {
             String token = "{{" + kind.tokenPrefix() + "1}}";
             for (String spelling : List.of(token, token.toLowerCase(Locale.ROOT),
@@ -207,16 +206,9 @@ class AiExposureBoundaryTest {
                     observer.onContentDelta(spelling.substring(0, split));
                     observer.onContentDelta(spelling.substring(split));
 
-                    if (truncated) {
-                        org.mockito.Mockito.verify(persistence, org.mockito.Mockito.never())
-                                .resetPartialContent(any(), anyInt());
-                        observer.onContentDelta(nativeProtocol ? "\"}" : "\"}}");
-                    } else {
-                        verify(persistence).resetPartialContent(org.mockito.ArgumentMatchers.eq(turn), anyInt());
-                    }
+                    verify(persistence).resetPartialContent(org.mockito.ArgumentMatchers.eq(turn), anyInt());
                     var refused = assertThrows(AiAssistantLoopException.class, () -> observer.finish("unused"));
                     assertEquals("invented_placeholder", refused.detailReason());
-                    verify(persistence).resetPartialContent(org.mockito.ArgumentMatchers.eq(turn), anyInt());
                     progress.reset();
                     var reconnected = progress.observer(nativeProtocol);
                     reconnected.onContentDelta(AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"));
