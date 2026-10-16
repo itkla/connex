@@ -9,6 +9,13 @@
     <result property="value" column="value"/>
   </resultMap>
 
+  <resultMap id="KeyBackfillRow" type="AiIdentifierKeyBackfillRow">
+    <id property="kind" column="kind"/>
+    <id property="id" column="id"/>
+    <result property="value" column="value"/>
+    <result property="needsBackfill" column="needs_backfill"/>
+  </resultMap>
+
   <sql id="canonicalOperand">
     LOWER(TRIM(REGEXP_REPLACE(
         REGEXP_REPLACE(${operand}, '[{}｛｝﹛﹜︷︸]', ''), '[[:space:][:cntrl:]]+', ' ')))
@@ -115,18 +122,23 @@
   </select>
 
 
-  <select id="findPersonKeysToBackfill" resultMap="IdentifierMention">
-    SELECT 'person' AS kind, p.id, p.name AS value
-    FROM person p
-    WHERE p.workspace_id = #{workspaceId} AND p.id &gt; #{afterId}
+  <select id="findPersonKeyBackfillWindow" resultMap="KeyBackfillRow">
+    SELECT 'person' AS kind, owned_window.id, p.name AS value, (p.id IS NOT NULL) AS needs_backfill
+    FROM (
+      SELECT owned.id
+      FROM person owned FORCE INDEX (idx_person_workspace)
+      WHERE owned.workspace_id = #{workspaceId} AND owned.id &gt; #{afterId}
+      ORDER BY owned.id
+      LIMIT #{limit}
+    ) owned_window
+    LEFT JOIN person p ON p.id = owned_window.id AND p.workspace_id = #{workspaceId}
       AND p.archived_at IS NULL AND p.suspended_at IS NULL AND p.provision_ceased_at IS NULL
       AND p.name IS NOT NULL
       AND NOT (<include refid="currentKeyBundle"><property name="alias" value="p"/></include>)
-    ORDER BY p.id
-    LIMIT #{limit}
+    ORDER BY owned_window.id
   </select>
 
-  <update id="updatePersonKeysIfNameCurrent">
+  <update id="updatePersonKeysIfNameCurrent" timeout="5">
     UPDATE person p
     SET ai_identifier_literal_key = CONVERT(#{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler} USING utf8mb4),
         ai_identifier_label_key = CONVERT(#{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler} USING utf8mb4),
@@ -139,18 +151,23 @@
       AND NOT (<include refid="currentKeyBundle"><property name="alias" value="p"/></include>)
   </update>
 
-  <select id="findCompanyKeysToBackfill" resultMap="IdentifierMention">
-    SELECT 'company' AS kind, c.id, c.name AS value
-    FROM company c
-    WHERE c.workspace_id = #{workspaceId} AND c.id &gt; #{afterId}
+  <select id="findCompanyKeyBackfillWindow" resultMap="KeyBackfillRow">
+    SELECT 'company' AS kind, owned_window.id, c.name AS value, (c.id IS NOT NULL) AS needs_backfill
+    FROM (
+      SELECT owned.id
+      FROM company owned FORCE INDEX (idx_company_workspace)
+      WHERE owned.workspace_id = #{workspaceId} AND owned.id &gt; #{afterId}
+      ORDER BY owned.id
+      LIMIT #{limit}
+    ) owned_window
+    LEFT JOIN company c ON c.id = owned_window.id AND c.workspace_id = #{workspaceId}
       AND c.archived_at IS NULL
       AND c.name IS NOT NULL
       AND NOT (<include refid="currentKeyBundle"><property name="alias" value="c"/></include>)
-    ORDER BY c.id
-    LIMIT #{limit}
+    ORDER BY owned_window.id
   </select>
 
-  <update id="updateCompanyKeysIfNameCurrent">
+  <update id="updateCompanyKeysIfNameCurrent" timeout="5">
     UPDATE company c
     SET ai_identifier_literal_key = CONVERT(#{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler} USING utf8mb4),
         ai_identifier_label_key = CONVERT(#{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler} USING utf8mb4),
@@ -163,18 +180,22 @@
       AND NOT (<include refid="currentKeyBundle"><property name="alias" value="c"/></include>)
   </update>
 
-  <select id="findDealKeysToBackfill" resultMap="IdentifierMention">
-    SELECT 'deal' AS kind, d.id, d.name AS value
-    FROM deal d
-    WHERE d.workspace_id = #{workspaceId} AND d.id &gt; #{afterId}
-
+  <select id="findDealKeyBackfillWindow" resultMap="KeyBackfillRow">
+    SELECT 'deal' AS kind, owned_window.id, d.name AS value, (d.id IS NOT NULL) AS needs_backfill
+    FROM (
+      SELECT owned.id
+      FROM deal owned FORCE INDEX (idx_deal_workspace)
+      WHERE owned.workspace_id = #{workspaceId} AND owned.id &gt; #{afterId}
+      ORDER BY owned.id
+      LIMIT #{limit}
+    ) owned_window
+    LEFT JOIN deal d ON d.id = owned_window.id AND d.workspace_id = #{workspaceId}
       AND d.name IS NOT NULL
       AND NOT (<include refid="currentKeyBundle"><property name="alias" value="d"/></include>)
-    ORDER BY d.id
-    LIMIT #{limit}
+    ORDER BY owned_window.id
   </select>
 
-  <update id="updateDealKeysIfNameCurrent">
+  <update id="updateDealKeysIfNameCurrent" timeout="5">
     UPDATE deal d
     SET ai_identifier_literal_key = CONVERT(#{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler} USING utf8mb4),
         ai_identifier_label_key = CONVERT(#{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler} USING utf8mb4),

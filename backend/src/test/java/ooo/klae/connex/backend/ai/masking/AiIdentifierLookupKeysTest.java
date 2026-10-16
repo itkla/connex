@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class AiIdentifierLookupKeysTest {
     static Stream<Arguments> canonicalPairs() {
@@ -37,6 +38,13 @@ class AiIdentifierLookupKeysTest {
             assertTrue(turn.literalText().contains(keys.literal()));
             assertFalse(keys.literal().isEmpty());
         }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"John \ud800{\udc00 Smith", "\ud800", "\udc00", "x\ud800y", "\ud800\ud800", "\udc00\ud800"})
+    void malformedUtf16IsMarkedBeforeCanonicalizationCanJoinSurrogates(String name) {
+        assertEquals(new AiIdentifierLookupKeys(AiIdentifierLookupKeys.UNKEYED, AiIdentifierLookupKeys.UNKEYED),
+                AiIdentifierLookupKeys.fromName(name));
     }
 
     @Test

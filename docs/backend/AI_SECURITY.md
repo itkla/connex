@@ -62,12 +62,16 @@ are empty strings; a missing bundle remains null. Canonical text and snapshots a
 CRM data: they stay in the owning parent row, its tenant export and physical erasure, never logs,
 provider metadata or a new authority source.
 
-A bundle is processed only when its version equals `AiIdentifierLookupKeys.VERSION` (version 2),
+A bundle is processed only when its version equals `AiIdentifierLookupKeys.VERSION` (version 3),
 both keys are non-null, and the snapshot equals the current name byte-for-byte (`CAST(... AS BINARY)`).
-Each alias is capped at 512 Unicode code points. If either exceeds the cap, both store the explicit
-NUL `UNKEYED` marker: controls cannot survive as a canonical alias. Such processed rows always use
-legacy SQL fallback; aliases are never truncated and coverage is never omitted. They are excluded
-from pending-backfill counts because reconciliation cannot make them selective.
+Each alias is capped at 512 Unicode code points. Before canonicalization, any unpaired UTF-16
+surrogate marks both aliases `UNKEYED`; brace deletion must never join malformed surrogate halves
+into a key that differs from the UTF-8-persisted name. Version 3 invalidates all earlier bundles,
+including ones derived from malformed source strings. If either alias exceeds the cap, both also
+store the explicit NUL `UNKEYED` marker: controls cannot survive as a canonical alias. Such rows use
+legacy SQL fallback; aliases are never truncated and coverage is never omitted. Processed markers
+are excluded from pending-backfill counts; retries do not reinterpret malformed input or truncate
+oversized aliases.
 
 Current keyed rows use binary `LOCATE` against separately bound Java literal/label turn projections.
 Authoritative names, snapshots, canonical keys, turn projections and CAS-name operands use explicit UTF-8 byte parameter handlers
@@ -90,16 +94,32 @@ Visibility stays owned-or-shared within the control-derived organization ceiling
 processing-restricted people and archived companies remain excluded.
 
 `AiIdentifierKeyBackfillRunner` is a fixed-delay background worker, never an application runner or
-readiness dependency. Every 30 seconds after an initial 30-second delay, it resumes at most four
-100-row CAS pages across active workspaces. Workspace discovery is keyset-paged, and the scheduler
-thread installs each workspace's real placement before opening its transaction. It rejects a
-placement change before reusing a cursor, logs failures without names and retries on a later
-traversal. There are no domain events or timestamp changes. Each page reports scanned, written,
-skipped and remaining eligible pending counts. Restarts safely begin from zero; completed bundles
-are durable, and traversal wraps to revisit races behind its cursor while fallback keeps coverage.
-Drain old writers, allow reconciliation to complete and check pending=0
+readiness dependency. A dedicated single-thread scheduler waits 30 seconds initially and between
+invocations, then resumes at most four 100-row windows across active workspaces. Each window uses
+the owning-workspace/id index and applies its limit before evaluating freshness or processing
+eligibility. Every examined row advances the cursor, including current, archived, restricted and
+nameless rows. A mostly-current corpus therefore cannot turn one window into a full-table scan.
+Workspace discovery is keyset-paged, and the dedicated thread installs each workspace's real
+placement before opening its transaction. It rejects placement changes before reusing a cursor.
+CAS statements have a five-second query timeout, and each transaction has a ten-second deadline;
+contention rolls back the page and retries on a later traversal without delaying other scheduled
+maintenance. There are no session-wide timeout changes, domain events or timestamp changes.
+
+Per-page logs report examined, written, skipped and observed pending rows. Workspace completion
+logs accumulate those bounded observations; they are not a point-in-time pending count under
+concurrent writes. No page performs a full pending count. The optional exact `pendingCount`
+diagnostic remains a separate full-corpus query. Failures log only workspace id and exception
+class. Restarts safely begin from zero; traversal wraps to revisit races while fallback keeps
+coverage. Drain old writers, allow reconciliation to complete and check an exact pending=0
 before claiming steady-state retrieval cost. A canonicalization, eligibility or JDK Unicode change
 requires a version bump and reconciliation; do not silently reinterpret current stored keys.
+
+The real-MySQL mostly-current regression (2026-10-16) populated 50,200 people with only the last
+bundle stale. Two consecutive invocations each examined 400 owned ids in four windows, with 1,204
+handler reads and no CAS or full pending-count calls. `EXPLAIN ANALYZE` used the existing
+`idx_person_workspace` range before `LIMIT 100`, followed by at most 100 primary-key lookups per
+window. The cursor advanced to 400 then 800. These are deterministic row/call bounds; full-sweep
+duration still grows with the owned population.
 
 Name-writing CSV inserts and seeder flushes retain their enclosing transactions and generated-id
 ordering while using at most 100 rows and a conservative 1 MiB estimated payload per chunk.

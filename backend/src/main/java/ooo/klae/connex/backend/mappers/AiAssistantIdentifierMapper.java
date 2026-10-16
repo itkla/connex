@@ -6,6 +6,7 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.AiAssistantIdentifierMention;
+import ooo.klae.connex.backend.beans.AiIdentifierKeyBackfillRow;
 
 /** Visibility-scoped bounded identifier lookup used by Ask Connex masking. */
 @Mapper
@@ -42,8 +43,8 @@ public interface AiAssistantIdentifierMapper {
             @Param("afterKind") String afterKind,
             @Param("afterId") int afterId);
 
-    /** Returns a keyset page of owned, processable rows whose canonical bundle is stale. */
-    List<AiAssistantIdentifierMention> findPersonKeysToBackfill(
+    /** Examines a bounded owned-id window, marking processable stale rows after the limit. */
+    List<AiIdentifierKeyBackfillRow> findPersonKeyBackfillWindow(
             @Param("workspaceId") int workspaceId,
             @Param("afterId") int afterId,
             @Param("limit") int limit,
@@ -56,8 +57,8 @@ public interface AiAssistantIdentifierMapper {
             @Param("name") String name,
             @Param("keyVersion") int keyVersion);
 
-    /** Returns a keyset page of owned, processable rows whose canonical bundle is stale. */
-    List<AiAssistantIdentifierMention> findCompanyKeysToBackfill(
+    /** Examines a bounded owned-id window, marking processable stale rows after the limit. */
+    List<AiIdentifierKeyBackfillRow> findCompanyKeyBackfillWindow(
             @Param("workspaceId") int workspaceId,
             @Param("afterId") int afterId,
             @Param("limit") int limit,
@@ -70,8 +71,8 @@ public interface AiAssistantIdentifierMapper {
             @Param("name") String name,
             @Param("keyVersion") int keyVersion);
 
-    /** Returns a keyset page of owned, processable rows whose canonical bundle is stale. */
-    List<AiAssistantIdentifierMention> findDealKeysToBackfill(
+    /** Examines a bounded owned-id window, marking processable stale rows after the limit. */
+    List<AiIdentifierKeyBackfillRow> findDealKeyBackfillWindow(
             @Param("workspaceId") int workspaceId,
             @Param("afterId") int afterId,
             @Param("limit") int limit,

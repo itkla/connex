@@ -11,30 +11,38 @@ migration-discipline part of #87 §9 / #102).
 
 V230 adds four nullable derived columns to each of person, company and deal. Each ALTER explicitly
 requires `ALGORITHM=INSTANT` and fails instead of falling back to a core-table rebuild. No index,
-generated-column or trigger DDL is added. Canonical key format 2 caps each alias at 512 Unicode code
-points; oversized aliases store an explicit unkeyed marker and retain legacy lookup. DDL still
-needs metadata locks; deploy outside long-running transactions.
+generated-column or trigger DDL is added. Canonical key format 3 caps each alias at 512 Unicode code
+points and detects malformed UTF-16 before canonicalization. Oversized or malformed source names
+store an explicit unkeyed marker and retain legacy lookup. The version bump invalidates earlier
+bundles, including keys that could differ from the UTF-8-persisted name after surrogate replacement.
+DDL still needs metadata locks; deploy outside long-running transactions.
 
 Flyway only adds columns. `AiIdentifierKeyBackfillRunner` is a scheduled background worker on every
 ordinary `dev`, `test`, SaaS, silo and on-prem backend, regardless of the AI feature switch. It never
 blocks startup or readiness. Its fixed delay defaults to 30 seconds with a 30-second initial delay
 (`connex.ai.identifier-backfill.delay-ms` / `initial-delay-ms`). Each invocation processes at most
-four sorted 100-row pages. It keyset-pages workspace discovery through the control plane and pins
-each placement on the scheduler thread before starting a transaction. Maintenance modes other than
-`off` (including `seeder`) do not instantiate it. In single-database mode its null catalog is the
-default database; catalog-per-placement mode reconciles each active placement. Tests keep the bean
+four sorted 100-row owned-id windows. The owning-workspace/id index bounds each window before
+freshness and processing checks, and every examined row advances the cursor. It keyset-pages
+workspace discovery through the control plane and pins each placement on its dedicated
+single-thread scheduler before starting a transaction. Each transaction has a ten-second deadline
+and each CAS a five-second query timeout; contention rolls back the page for a later traversal
+without blocking unrelated scheduled maintenance or changing pooled connection session settings.
+Maintenance modes other than `off` (including `seeder`) do not instantiate it. In single-database
+mode its null catalog is the default database; catalog-per-placement mode reconciles each active placement. Tests keep the bean
 and delay automatic ticks for one hour so explicit sweeps do not race other fixtures.
 
 The sweep is restartable and safe with multiple replicas: byte-exact compare-and-set skips changed,
 deleted, restricted or already-current rows, and preserves `updated_at`. Workspace data failures
 leave that workspace on compatibility lookup and log its id and exception class; unservable or
 changed placements fail closed and retry on a later traversal. Per-page logs report
-scanned/written/skipped and eligible pending counts. In-memory cursors resume between invocations
-and wrap after traversal; a restart safely begins from zero. During a rolling deployment, old
-binaries can create pending rows or rename current ones. After draining them, wait for reconciliation
+scanned/written/skipped and observed pending rows; workspace completion totals accumulate those
+bounded observations. No page runs a full pending count. These totals are not point-in-time counts
+under concurrent writes; the optional exact `pendingCount` diagnostic is a separate full scan.
+In-memory cursors resume between invocations and wrap after traversal; a restart safely begins
+from zero. During a rolling deployment, old binaries can create pending rows or rename current ones. After draining them, wait for reconciliation
 and confirm pending=0 in each servable workspace. Archived/restricted rows and processed unkeyed
-rows are excluded from that count. Restored rows retain fallback until reconciled; oversized names
-retain fallback permanently.
+rows are excluded from that count. Restored rows retain fallback until reconciled. Unkeyed names
+keep fallback; subsequent name changes can supply a keyed bundle.
 
 CSV name-writing inserts and volume-seeder name flushes use ordered chunks of at most 100 rows and
 a conservative 1 MiB estimated payload. Chunking keeps the enclosing transaction and bean/id order;

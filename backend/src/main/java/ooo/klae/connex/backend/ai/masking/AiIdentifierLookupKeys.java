@@ -5,12 +5,12 @@ import java.util.Objects;
 /** Versioned, derived lookup aliases; these keys never grant record or masking authority. */
 public record AiIdentifierLookupKeys(String literal, String label) {
     /** Bump whenever canonicalization or dictionary eligibility changes, including JDK Unicode changes. */
-    public static final int VERSION = 2;
+    public static final int VERSION = 3;
 
     /** Bounds each persisted alias independently of compatibility expansion. */
     public static final int MAX_KEY_CODE_POINTS = 512;
 
-    /** A control character cannot be a canonical alias; processed oversized names keep legacy lookup. */
+    /** A control character cannot be a canonical alias; unrepresentable names keep legacy lookup. */
     public static final String UNKEYED = "\u0000";
 
     /** Retains explicit empty aliases for ineligible values, distinct from an unprocessed null bundle. */
@@ -24,10 +24,13 @@ public record AiIdentifierLookupKeys(String literal, String label) {
      * An exhausted label projection retains literal coverage. A literal-ineligible name cannot be
      * admitted by the existing gate, even when its label alone would be eligible.
      * @param name authoritative source name
-     * @return literal and label keys, empty strings for unavailable aliases, or UNKEYED for an oversized bundle
+     * @return aliases, empty strings for unavailable aliases, or UNKEYED for oversized or malformed input
      */
     public static AiIdentifierLookupKeys fromName(String name) {
         Objects.requireNonNull(name, "name");
+        if (hasUnpairedSurrogate(name)) {
+            return new AiIdentifierLookupKeys(UNKEYED, UNKEYED);
+        }
         if (name.isBlank()) {
             return new AiIdentifierLookupKeys("", "");
         }
@@ -41,5 +44,21 @@ public record AiIdentifierLookupKeys(String literal, String label) {
         }
         return new AiIdentifierLookupKeys(stored.literal(),
                 MaskingContext.isCanonicalDictionaryEligible(stored.label()) ? stored.label() : "");
+    }
+
+    /** Detects malformed source text before canonicalization can join separated surrogate halves. */
+    private static boolean hasUnpairedSurrogate(String name) {
+        for (int index = 0; index < name.length(); index++) {
+            char current = name.charAt(index);
+            if (Character.isHighSurrogate(current)) {
+                if (index + 1 == name.length() || !Character.isLowSurrogate(name.charAt(index + 1))) {
+                    return true;
+                }
+                index++;
+            } else if (Character.isLowSurrogate(current)) {
+                return true;
+            }
+        }
+        return false;
     }
 }

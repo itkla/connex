@@ -644,11 +644,12 @@ critical section above. Current canonical keys reduce returned rows and round tr
 containment prefilter still examines the visible corpus. Stale rows deliberately keep legacy
 lookup cost until reconciliation finishes. No new queue locks or network work are introduced.
 
-`AiIdentifierKeyBackfillRunner` runs on the scheduler thread with a fixed delay, outside startup
-readiness. An invocation resumes at most four pages and installs `TenantWorkScope` placement before
+`AiIdentifierKeyBackfillRunner` runs on a dedicated single-thread scheduler with a fixed delay,
+outside startup readiness. An invocation resumes at most four pages and installs `TenantWorkScope` placement before
 each independent transaction. A changed organization/catalog invalidates the saved cursor instead
 of reusing it in a different data plane. Each `AiIdentifierKeyBackfillTransaction` page
-uses `READ_COMMITTED`, reads a non-locking keyset page, then CAS-updates at most 100 exact parent
+uses `READ_COMMITTED` with a ten-second transaction deadline, reads a non-locking owned-id window
+limited to 100 rows before freshness/processing checks, then CAS-updates at most 100 exact parent
 rows of **one table**, in ascending id order. It touches only derived aliases/snapshot/version and
 explicitly retains `updated_at`; it publishes no events and reads/writes no identity groups,
 duplicate-decision roots, share grants or other aggregates. Consequently it takes no domain mutex
@@ -657,11 +658,17 @@ transaction or uses a range `FOR UPDATE` scan.
 
 The update rechecks owning workspace, original name byte-for-byte, archive/processing state
 and bundle freshness after contention. A rename, deletion, restriction or competing reconciliation
-wins safely; skipped rows remain stale and are reported in per-page pending counts. The traversal
-wraps to revisit races behind the cursor; restart also safely begins from zero. Restored
+wins safely; skipped rows remain stale. Each CAS has a five-second query timeout: contention
+rolls back the page and retries on a later traversal. These timeouts apply to backfill statements
+and transactions, without changing pooled connection session settings. The dedicated scheduler
+keeps such waits away from other scheduled maintenance; a real scheduled-job test holds a CAS lock
+and observes an unrelated scheduled job executing before the query timeout. Every examined owned
+row advances the cursor, including current, archived, restricted and nameless rows. Per-page logs
+and workspace totals accumulate pending observations without a per-page full-corpus count. The
+traversal wraps to revisit races behind the cursor; restart also safely begins from zero. Restored
 archived/restricted rows retain compatibility lookup until a current writer or a later sweep repairs
-them. Oversized aliases have a processed unkeyed marker and remain on fallback without repeated
-backfill attempts. Committed two-connection tests observe a CAS waiting behind rename/restriction
+them. Oversized or malformed-source aliases have a processed unkeyed marker and remain on fallback
+without repeated backfill attempts. Committed two-connection tests observe a CAS waiting behind rename/restriction
 writes, and a separate connection reacquiring a previous page's locks before the next page starts.
 
 CSV/import and volume-seeder name inserts are split by row/payload budgets inside the same enclosing

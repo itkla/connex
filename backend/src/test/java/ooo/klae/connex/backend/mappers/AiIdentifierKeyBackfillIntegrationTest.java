@@ -103,8 +103,8 @@ class AiIdentifierKeyBackfillIntegrationTest extends AbstractMapperTest {
         assertTrue(lookup("unrelated turn").isEmpty());
         assertEquals(1, lookup("株式会社 case").size());
 
-        jdbc.update("UPDATE company SET ai_identifier_key_version = 0, updated_at = updated_at WHERE workspace_id = ? AND id = ?",
-                workspace.getId(), company.getId());
+        jdbc.update("UPDATE company SET ai_identifier_key_version = ?, updated_at = updated_at WHERE workspace_id = ? AND id = ?",
+                AiIdentifierLookupKeys.VERSION - 1, workspace.getId(), company.getId());
         assertEquals(1, lookup("unrelated turn").size());
         assertEquals(1, backfill.backfillPage(workspace.getId(), "company", 0).written());
         jdbc.update("UPDATE company SET ai_identifier_label_key = NULL, updated_at = updated_at WHERE workspace_id = ? AND id = ?",
@@ -142,7 +142,12 @@ class AiIdentifierKeyBackfillIntegrationTest extends AbstractMapperTest {
         var first = backfill.backfillPage(workspace.getId(), "person", 0);
         assertEquals(100, first.written());
         assertEquals(105L, backfill.pendingCount(workspace.getId()));
-        var resumed = backfill.backfillPage(workspace.getId(), "person", 0);
+        var restarted = backfill.backfillPage(workspace.getId(), "person", 0);
+        assertEquals(100, restarted.scanned());
+        assertEquals(0, restarted.written());
+        assertEquals(first.lastId(), restarted.lastId());
+        assertEquals(105L, backfill.pendingCount(workspace.getId()));
+        var resumed = backfill.backfillPage(workspace.getId(), "person", restarted.lastId());
         assertEquals(100, resumed.written());
         assertTrue(resumed.lastId() > first.lastId());
         assertEquals(5, backfill.backfillPage(workspace.getId(), "person", resumed.lastId()).written());
@@ -159,7 +164,7 @@ class AiIdentifierKeyBackfillIntegrationTest extends AbstractMapperTest {
         Person person = newPerson(newCompany());
         jdbc.update("UPDATE person SET ai_identifier_key_version = NULL, updated_at = updated_at WHERE workspace_id = ? AND id = ?",
                 workspace.getId(), person.getId());
-        var selected = identifiers.findPersonKeysToBackfill(workspace.getId(), 0, 100, AiIdentifierLookupKeys.VERSION).getFirst();
+        var selected = identifiers.findPersonKeyBackfillWindow(workspace.getId(), 0, 100, AiIdentifierLookupKeys.VERSION).getFirst();
         jdbc.update("UPDATE person SET name = 'New Japanese 名前' WHERE workspace_id = ? AND id = ?", workspace.getId(), person.getId());
         assertEquals(0, identifiers.updatePersonKeysIfNameCurrent(workspace.getId(), person.getId(), selected.getValue(), AiIdentifierLookupKeys.VERSION));
         personMapper.updateProcessingRestrictions(workspace.getId(), person.getId(), true, false);

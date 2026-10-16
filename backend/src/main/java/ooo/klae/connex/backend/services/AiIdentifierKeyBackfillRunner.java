@@ -32,9 +32,13 @@ public class AiIdentifierKeyBackfillRunner {
     private int afterId;
     private Integer pinnedOrgId;
     private String pinnedCatalog;
+    private long workspaceScanned;
+    private long workspaceWritten;
+    private long workspaceSkipped;
 
     /** Resumes at most four pages; each placement is installed before its independent transaction. */
-    @Scheduled(fixedDelayString = "${connex.ai.identifier-backfill.delay-ms:30000}",
+    @Scheduled(scheduler = "aiIdentifierKeyBackfillScheduler",
+            fixedDelayString = "${connex.ai.identifier-backfill.delay-ms:30000}",
             initialDelayString = "${connex.ai.identifier-backfill.initial-delay-ms:30000}")
     public synchronized void reconcile() {
         try {
@@ -87,12 +91,17 @@ public class AiIdentifierKeyBackfillRunner {
         if (batch.scanned() > 0 && batch.lastId() <= afterId) {
             throw new IllegalStateException("Identifier backfill row cursor did not advance");
         }
-        log.info("AI identifier key backfill workspace {} kind={}: scanned={}, written={}, skipped={}, pending={}",
-                workspaceId, kind, batch.scanned(), batch.written(), batch.skipped(), transaction.pendingCount(workspaceId));
+        workspaceScanned += batch.scanned();
+        workspaceWritten += batch.written();
+        workspaceSkipped += batch.skipped();
+        log.info("AI identifier key backfill workspace {} kind={}: scanned={}, written={}, skipped={}, pendingObserved={}",
+                workspaceId, kind, batch.scanned(), batch.written(), batch.skipped(), batch.written() + batch.skipped());
         if (batch.scanned() < AiIdentifierKeyBackfillTransaction.PAGE_SIZE) {
             afterId = 0;
             kindIndex++;
             if (kindIndex == KINDS.size()) {
+                log.info("AI identifier key backfill completed workspace {}: scanned={}, written={}, pendingObserved={}, unrepairedObserved={}",
+                        workspaceId, workspaceScanned, workspaceWritten, workspaceWritten + workspaceSkipped, workspaceSkipped);
                 finishWorkspace();
             }
         } else {
@@ -106,5 +115,8 @@ public class AiIdentifierKeyBackfillRunner {
         afterId = 0;
         pinnedOrgId = null;
         pinnedCatalog = null;
+        workspaceScanned = 0;
+        workspaceWritten = 0;
+        workspaceSkipped = 0;
     }
 }

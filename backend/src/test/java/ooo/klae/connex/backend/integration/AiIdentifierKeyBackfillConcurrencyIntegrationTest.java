@@ -8,17 +8,24 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.SQLTimeoutException;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Pattern;
 
 import javax.sql.DataSource;
 
 import org.apache.ibatis.builder.xml.XMLMapperBuilder;
 import org.apache.ibatis.datasource.unpooled.UnpooledDataSource;
 import org.apache.ibatis.executor.Executor;
+import org.apache.ibatis.executor.parameter.ParameterHandler;
 import org.apache.ibatis.mapping.Environment;
 import org.apache.ibatis.mapping.MappedStatement;
 import org.apache.ibatis.plugin.Interceptor;
@@ -26,6 +33,8 @@ import org.apache.ibatis.plugin.Intercepts;
 import org.apache.ibatis.plugin.Invocation;
 import org.apache.ibatis.plugin.Signature;
 import org.apache.ibatis.session.Configuration;
+import org.apache.ibatis.session.ResultHandler;
+import org.apache.ibatis.session.RowBounds;
 import org.apache.ibatis.session.SqlSessionFactoryBuilder;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -35,15 +44,23 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.mybatis.spring.SqlSessionTemplate;
 import org.mybatis.spring.transaction.SpringManagedTransactionFactory;
 import org.springframework.aop.framework.ProxyFactory;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.context.annotation.Bean;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.core.env.MapPropertySource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.springframework.jdbc.datasource.init.ScriptUtils;
+import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource;
 import org.springframework.transaction.interceptor.TransactionInterceptor;
 import org.springframework.web.context.request.RequestContextHolder;
 
+import ooo.klae.connex.backend.ai.masking.AiIdentifierLookupKeys;
+import ooo.klae.connex.backend.config.AiIdentifierKeyBackfillSchedulingConfig;
 import ooo.klae.connex.backend.mappers.AiAssistantIdentifierMapper;
 import ooo.klae.connex.backend.mappers.OrgPlacementMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
@@ -70,6 +87,7 @@ class AiIdentifierKeyBackfillConcurrencyIntegrationTest {
     private AiIdentifierKeyBackfillTransaction backfill;
     private AiIdentifierKeyBackfillRunner worker;
     private CasProbe probe;
+    private WindowProbe windows;
 
     @BeforeEach
     void routedCatalogs() throws Exception {
@@ -99,6 +117,8 @@ class AiIdentifierKeyBackfillConcurrencyIntegrationTest {
         configuration.addInterceptor(new TenantScopeInterceptor(context, true, true));
         probe = new CasProbe();
         configuration.addInterceptor(probe);
+        windows = new WindowProbe();
+        configuration.addInterceptor(windows);
         for (String resource : List.of("mappers/WorkspaceMapper.xml", "mappers/OrgPlacementMapper.xml", "mappers/AiAssistantIdentifierMapper.xml")) {
             try (var input = getClass().getClassLoader().getResourceAsStream(resource)) {
                 assertNotNull(input);
@@ -211,6 +231,134 @@ class AiIdentifierKeyBackfillConcurrencyIntegrationTest {
         assertEquals("Between pages 名前", tenant.queryForObject("SELECT ai_identifier_source_name FROM person WHERE id = 1", String.class));
     }
 
+    @Test
+    void mostlyCurrentLargePopulationExaminesOnlyFourOwnedWindowsPerInvocation() throws Exception {
+        try (Connection connection = dataSource(tenantCatalog.url()).getConnection();
+                var insert = connection.prepareStatement("INSERT INTO person (id, workspace_id, name, ai_identifier_literal_key, ai_identifier_label_key, ai_identifier_source_name, ai_identifier_key_version) VALUES (?, 1, ?, ?, ?, ?, ?)")) {
+            connection.setAutoCommit(false);
+            for (int id = 1; id <= 50_200; id++) {
+                String name = "名前%05d".formatted(id);
+                var keys = AiIdentifierLookupKeys.fromName(name);
+                insert.setInt(1, id);
+                insert.setString(2, name);
+                insert.setString(3, keys.literal());
+                insert.setString(4, keys.label());
+                insert.setString(5, name);
+                insert.setInt(6, id == 50_200 ? AiIdentifierLookupKeys.VERSION - 1 : AiIdentifierLookupKeys.VERSION);
+                insert.addBatch();
+                if (id % 100 == 0) {
+                    insert.executeBatch();
+                }
+            }
+            connection.commit();
+        }
+        windows.capture = true;
+        for (int invocation = 1; invocation <= 2; invocation++) {
+            int before = windows.observations.size();
+            worker.reconcile();
+            List<WindowObservation> observed = windows.observations.subList(before, windows.observations.size());
+            assertEquals(4, observed.size());
+            assertEquals(400, observed.stream().mapToInt(WindowObservation::rows).sum());
+            assertEquals(invocation * 400, observed.getLast().lastId());
+            for (WindowObservation window : observed) {
+                assertTrue(window.handlerReads() <= 5L * AiIdentifierKeyBackfillTransaction.PAGE_SIZE + 32,
+                        "Owned-window handler reads must remain bounded: " + window);
+                var actualRows = Pattern.compile("actual time=[^)]*?rows=([0-9.]+) loops=([0-9.]+)").matcher(window.plan());
+                int iterators = 0;
+                while (actualRows.find()) {
+                    iterators++;
+                    assertTrue(Double.parseDouble(actualRows.group(1)) * Double.parseDouble(actualRows.group(2)) <= 100,
+                            window.plan());
+                }
+                assertTrue(iterators >= 3, window.plan());
+                assertTrue(window.plan().contains("idx_person_workspace"), window.plan());
+            }
+            System.out.printf("Identifier backfill mostly-current population=50200 invocation=%d windows=%d rowsExamined=%d handlerReads=%d%n",
+                    invocation, observed.size(), observed.stream().mapToInt(WindowObservation::rows).sum(),
+                    observed.stream().mapToLong(WindowObservation::handlerReads).sum());
+        }
+        assertEquals(0, windows.pendingCounts);
+        assertEquals(0, probe.updates.get());
+        assertEquals(1, tenant.queryForObject("SELECT COUNT(*) FROM person WHERE ai_identifier_key_version != ?",
+                Integer.class, AiIdentifierLookupKeys.VERSION));
+        System.out.println(windows.observations.getFirst().plan());
+    }
+
+    @Test
+    void unrelatedScheduledJobRunsWhileDedicatedBackfillWaitsAndTheQueryTimesOut() throws Exception {
+        tenant.update("INSERT INTO person (id, workspace_id, name) VALUES (1, 1, 'Contended 名前')");
+        probe.started = new CountDownLatch(1);
+        probe.completed = new CountDownLatch(1);
+        var ticker = new UnrelatedScheduledJob(probe.completed);
+        try (Connection holder = dataSource(tenantCatalog.url()).getConnection();
+                var schedulerContext = new AnnotationConfigApplicationContext()) {
+            holder.setAutoCommit(false);
+            try {
+                try (var statement = holder.createStatement()) {
+                    statement.executeUpdate("UPDATE person SET name = 'Renamed 名前' WHERE id = 1");
+                }
+                schedulerContext.getEnvironment().getPropertySources().addFirst(new MapPropertySource("identifier-scheduler-test",
+                        Map.of("connex.ai.identifier-backfill.initial-delay-ms", "0",
+                                "connex.ai.identifier-backfill.delay-ms", "3600000")));
+                schedulerContext.register(AiIdentifierKeyBackfillSchedulingConfig.class, SchedulerFixture.class);
+                schedulerContext.registerBean(AiIdentifierKeyBackfillRunner.class, () -> worker);
+                schedulerContext.registerBean(UnrelatedScheduledJob.class, () -> ticker);
+                schedulerContext.refresh();
+                assertTrue(probe.started.await(30, TimeUnit.SECONDS));
+                MySqlLockWaitProbe.awaitExclusiveRecordLock(new JdbcTemplate(new SingleConnectionDataSource(holder, true)),
+                        probe.connectionId.get(), "person", "1");
+                ticker.armed.set(true);
+                assertTrue(ticker.ranWhileBlocked.await(30, TimeUnit.SECONDS));
+                assertTrue(probe.completed.await(30, TimeUnit.SECONDS));
+                assertTrue(probe.threadName.get().startsWith("ai-identifier-backfill-"));
+                assertTrue(ticker.threadName.get().startsWith("unrelated-scheduled-"));
+                Throwable failure = probe.failure.get();
+                while (failure != null && !(failure instanceof SQLTimeoutException)) {
+                    failure = failure.getCause();
+                }
+                assertTrue(failure instanceof SQLTimeoutException, "Contended CAS must fail through its bounded query timeout");
+                assertEquals(0, keyed(tenant));
+                holder.commit();
+                worker.reconcile();
+                assertEquals(1, keyed(tenant));
+                assertEquals("Renamed 名前", tenant.queryForObject("SELECT ai_identifier_source_name FROM person WHERE id = 1", String.class));
+            } finally {
+                holder.rollback();
+            }
+        }
+    }
+
+    @org.springframework.context.annotation.Configuration(proxyBeanMethods = false)
+    @EnableScheduling
+    static class SchedulerFixture {
+        @Bean
+        ThreadPoolTaskScheduler taskScheduler() {
+            var scheduler = new ThreadPoolTaskScheduler();
+            scheduler.setPoolSize(1);
+            scheduler.setThreadNamePrefix("unrelated-scheduled-");
+            return scheduler;
+        }
+    }
+
+    static class UnrelatedScheduledJob {
+        private final CountDownLatch backfillCompleted;
+        private final AtomicBoolean armed = new AtomicBoolean();
+        private final AtomicReference<String> threadName = new AtomicReference<>();
+        private final CountDownLatch ranWhileBlocked = new CountDownLatch(1);
+
+        UnrelatedScheduledJob(CountDownLatch backfillCompleted) {
+            this.backfillCompleted = backfillCompleted;
+        }
+
+        @Scheduled(fixedDelay = 10)
+        public void tick() {
+            if (armed.get() && backfillCompleted.getCount() > 0) {
+                threadName.set(Thread.currentThread().getName());
+                ranWhileBlocked.countDown();
+            }
+        }
+    }
+
     private int keyed(JdbcTemplate jdbc) {
         return jdbc.queryForObject("SELECT COUNT(*) FROM person WHERE ai_identifier_key_version IS NOT NULL", Integer.class);
     }
@@ -236,12 +384,22 @@ class AiIdentifierKeyBackfillConcurrencyIntegrationTest {
     @Intercepts(@Signature(type = Executor.class, method = "update", args = {MappedStatement.class, Object.class}))
     public static class CasProbe implements Interceptor {
         private final AtomicLong connectionId = new AtomicLong();
+        private final AtomicLong updates = new AtomicLong();
+        private final AtomicReference<String> threadName = new AtomicReference<>();
+        private final AtomicReference<Throwable> failure = new AtomicReference<>();
         private volatile CountDownLatch started;
+        private volatile CountDownLatch completed;
 
         @Override
         public Object intercept(Invocation invocation) throws Throwable {
             MappedStatement statement = (MappedStatement) invocation.getArgs()[0];
-            if (started != null && statement.getId().endsWith(".updatePersonKeysIfNameCurrent")) {
+            if (!statement.getId().endsWith(".updatePersonKeysIfNameCurrent")) {
+                return invocation.proceed();
+            }
+            updates.incrementAndGet();
+            if (started != null) {
+                assertEquals(5, statement.getTimeout());
+                threadName.set(Thread.currentThread().getName());
                 try (var query = ((Executor) invocation.getTarget()).getTransaction().getConnection().createStatement();
                         var rows = query.executeQuery("SELECT CONNECTION_ID()")) {
                     assertTrue(rows.next());
@@ -249,7 +407,72 @@ class AiIdentifierKeyBackfillConcurrencyIntegrationTest {
                 }
                 started.countDown();
             }
-            return invocation.proceed();
+            try {
+                return invocation.proceed();
+            } catch (Throwable exception) {
+                failure.set(exception);
+                throw exception;
+            } finally {
+                if (completed != null) {
+                    completed.countDown();
+                }
+            }
+        }
+    }
+
+    private record WindowObservation(int rows, int lastId, long handlerReads, String plan) {
+    }
+
+    @Intercepts(@Signature(type = Executor.class, method = "query",
+            args = {MappedStatement.class, Object.class, RowBounds.class, ResultHandler.class}))
+    public static class WindowProbe implements Interceptor {
+        private final List<WindowObservation> observations = new ArrayList<>();
+        private boolean capture;
+        private int pendingCounts;
+
+        @Override
+        public Object intercept(Invocation invocation) throws Throwable {
+            MappedStatement statement = (MappedStatement) invocation.getArgs()[0];
+            if (!capture) {
+                return invocation.proceed();
+            }
+            if (statement.getId().endsWith(".countPendingKeys")) {
+                pendingCounts++;
+            }
+            if (!statement.getId().endsWith("KeyBackfillWindow")) {
+                return invocation.proceed();
+            }
+            Connection connection = ((Executor) invocation.getTarget()).getTransaction().getConnection();
+            long before = handlerReads(connection);
+            Object result = invocation.proceed();
+            long reads = handlerReads(connection) - before;
+            Object parameters = invocation.getArgs()[1];
+            var bound = statement.getBoundSql(parameters);
+            String plan;
+            try (var explain = connection.prepareStatement("EXPLAIN ANALYZE FORMAT=TREE " + bound.getSql())) {
+                ParameterHandler handler = statement.getConfiguration().newParameterHandler(statement, parameters, bound);
+                handler.setParameters(explain);
+                try (var rows = explain.executeQuery()) {
+                    assertTrue(rows.next());
+                    plan = rows.getString(1);
+                }
+            }
+            List<?> rows = (List<?>) result;
+            int lastId = rows.isEmpty() ? 0
+                    : ((ooo.klae.connex.backend.beans.AiIdentifierKeyBackfillRow) rows.getLast()).getId();
+            observations.add(new WindowObservation(rows.size(), lastId, reads, plan));
+            return result;
+        }
+
+        private long handlerReads(Connection connection) throws Exception {
+            long count = 0;
+            try (var query = connection.createStatement();
+                    var rows = query.executeQuery("SHOW SESSION STATUS WHERE Variable_name LIKE 'Handler_read%'")) {
+                while (rows.next()) {
+                    count += rows.getLong(2);
+                }
+            }
+            return count;
         }
     }
 }

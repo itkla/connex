@@ -70,6 +70,7 @@ import tools.jackson.databind.json.JsonMapper;
 @Transactional
 class AiAssistantIdentifierMaskingIntegrationTest {
     @Autowired private AiAssistantIdentifierMapper identifierMapper;
+    @Autowired private jakarta.validation.Validator validator;
     @Autowired private CompanyMapper companyMapper;
     @Autowired private DealMapper dealMapper;
     @Autowired private OrganizationMapper organizationMapper;
@@ -933,6 +934,40 @@ class AiAssistantIdentifierMaskingIntegrationTest {
         String key() {
             return kind + ":" + id;
         }
+    }
+
+    @Test
+    void malformedUtf16JsonWriterKeepsStoredNameOutOfProviderPayload() throws Exception {
+        ObjectMapper mapper = JsonMapper.builder().build();
+        byte[] json = "{\"name\":\"John \\ud800{\\udc00 Smith\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        var dto = mapper.readValue(json, ooo.klae.connex.backend.dto.PersonDto.class);
+        assertTrue(validator.validate(dto).isEmpty());
+        assertEquals("John \ud800{\udc00 Smith", dto.getName());
+        Person person = dto.toBean();
+        person.setWorkspaceId(workspace.getId());
+        assertEquals(1, personMapper.insert(person));
+        var stored = jdbc.queryForMap("SELECT name, ai_identifier_source_name, ai_identifier_literal_key, ai_identifier_label_key, ai_identifier_key_version FROM person WHERE workspace_id = ? AND id = ?",
+                workspace.getId(), person.getId());
+        assertEquals("John ?{? Smith", stored.get("name"));
+        assertEquals(stored.get("name"), stored.get("ai_identifier_source_name"));
+        assertEquals(ooo.klae.connex.backend.ai.masking.AiIdentifierLookupKeys.UNKEYED, stored.get("ai_identifier_literal_key"));
+        assertEquals(ooo.klae.connex.backend.ai.masking.AiIdentifierLookupKeys.UNKEYED, stored.get("ai_identifier_label_key"));
+        assertEquals(ooo.klae.connex.backend.ai.masking.AiIdentifierLookupKeys.VERSION, ((Number) stored.get("ai_identifier_key_version")).intValue());
+        String turn = "Ask John ?{? Smith today.";
+        AiAssistantIdentifierResolver resolver = resolver();
+        var resolution = resolver.resolve(turn);
+        assertEquals(List.of(person.getId()), resolution.resources().stream().map(resource -> resource.id()).toList());
+        assertEquals(List.of("John ?{? Smith"), resolution.identifiers().stream()
+                .map(AiAssistantIdentifierResolver.Identifier::value).toList());
+        MaskingContext context = new MaskingContext();
+        resolver.seed(resolution, context);
+        String payload = mapper.writeValueAsString(support.firstProviderRequest(
+                support.invocation(turn, context, mapper), mapper).messages());
+        assertTrue(payload.contains("Ask {{P1}} today."));
+        assertFalse(payload.contains("John"));
+        assertFalse(payload.contains("Smith"));
+        assertFalse(payload.contains((String) stored.get("name")));
+        OutboundLeakScan.assertNoLeakStrict(payload, context, mapper);
     }
 
     @Test
