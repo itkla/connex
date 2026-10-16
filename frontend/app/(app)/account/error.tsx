@@ -5,6 +5,6 @@ import ErrorState, { type SegmentErrorProps } from '@/app/components/ErrorState'
 /**
  * Error boundary for the account segment; renders the shared recovery state.
  */
-export default function AccountError({ error, reset, unstable_retry }: SegmentErrorProps) {
-    return <ErrorState error={error} retry={unstable_retry ?? reset} />;
+export default function AccountError({ error, retry }: SegmentErrorProps) {
+    return <ErrorState error={error} retry={retry} />;
 }

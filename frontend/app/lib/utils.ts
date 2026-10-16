@@ -246,6 +246,11 @@ export function pickDominantCurrency(items: { currency?: string | null }[]): str
  * 
  * NOTE: this will also format things like JPY, CNY, EUR, etc. but it'll be in english formatting (￥10,000,000 will become ￥10M and NOT 1千万円)
  * TODO: add support for Japanese-style number formatting, but not a priority
+ *
+ * The minimum fraction digits are pinned to 0 because engines disagree on the default for compact
+ * currency. Current V8 (Chromium, Node 24) defaults it to 0, as ECMA-402 now specifies; Node 22's V8
+ * still starts from the currency's own digits, so a server render there printed `$173.0K` and `$0.0`
+ * where the browser hydrated `$173K` and `$0`, and React reported a hydration mismatch.
  * @param value - the value to format
  * @param currency - the currency to format the value in
  * @returns the formatted value
@@ -254,6 +259,7 @@ export function formatCompactCurrency(value: number, currency = 'USD', locale = 
     try {
         return new Intl.NumberFormat(locale, {
             notation: 'compact',
+            minimumFractionDigits: 0,
             maximumFractionDigits: 1,
             style: 'currency',
             currency,

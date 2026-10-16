@@ -84,6 +84,46 @@ export function writeSavedViewToUrl(pathname: string, sv: string | null): void {
 }
 
 /**
+ * The `history.state` an owned-params write hands `replaceState`, chosen so the write keeps the app's
+ * own marker on the entry, keeps the entry owned by the app router, and lets the router hear the write.
+ *
+ * Next's app router installs a patched `history.replaceState` from its root mount effect. The patch
+ * hands a call straight to the native method whenever the state it is given already carries `__NA` or
+ * `_N`, on the assumption that the router made the call itself; only otherwise does it copy `__NA` and
+ * the internals tree onto the state and dispatch the `ACTION_RESTORE` that moves the router's
+ * `canonicalUrl` to the written URL. A stale `canonicalUrl` is what `useSearchParams` keeps reading and
+ * what the next router action — the refresh behind an app-shell error boundary's retry among them —
+ * writes back over the address bar, erasing the param (#1781). So once the patch is installed the
+ * writer hands it a copy of the state without those markers: the patch puts `__NA` back before the
+ * native write, and the restore commits with `preserveCustomHistoryState`, so a record-return marker
+ * stamped on the entry survives both writes.
+ *
+ * Before the patch is installed — a write from a mount effect in the hydration commit, which React
+ * runs ahead of `AppRouter`'s own — the call reaches the native method directly, which would write the
+ * copy through and drop `__NA`, leaving an entry a later back navigation cannot restore. There the
+ * state is carried through untouched. The router does not hear that write, but a mount effect can
+ * only canonicalize the deep link the page hydrated from, which the router already holds in an
+ * equivalent form: the next owned write brings `canonicalUrl` back in step, and a refresh before it
+ * republishes nothing but that equivalent deep link.
+ *
+ * The patch is an own property assigned on `window.history`, while the native method is inherited
+ * from `History.prototype`; `test/unit/listStateUrl.test.ts` pins both facts against the installed Next.
+ * Next's cleanup leaves a bound native method behind as an own property, but it runs only when the
+ * router itself unmounts, which takes every owned-param browser with it.
+ *
+ * @returns the state to hand `history.replaceState`
+ */
+function ownedWriteHistoryState(): unknown {
+    const state: unknown = window.history.state;
+    if (!Object.hasOwn(window.history, 'replaceState')) return state;
+    if (state === null || typeof state !== 'object') return null;
+    const custom: Record<string, unknown> = { ...state };
+    delete custom.__NA;
+    delete custom._N;
+    return custom;
+}
+
+/**
  * Reflects an arbitrary set of owned params into the URL via shallow `history.replaceState`, following
  * the same #405 records-browser contract as {@link writeListStateToUrl}: it reads live
  * `window.location.search` as its base and only ever set/deletes the keys present in `owned`, so every
@@ -91,8 +131,8 @@ export function writeSavedViewToUrl(pathname: string, sv: string | null): void {
  * untouched. An `undefined` or empty value deletes its key, which is how a closed deep-linked record
  * clears itself without disturbing the surrounding query, sort, and filter state.
  *
- * The existing `history.state` is carried through rather than overwritten with null, so the router's own
- * bookkeeping and the record-return marker stamped on a list entry both survive a URL write.
+ * The record-return marker stamped on a list entry is carried through rather than overwritten with
+ * null, in the shape {@link ownedWriteHistoryState} picks so that the app router still hears the write.
  *
  * @param pathname - the current path, used to rebuild the URL without a full navigation
  * @param owned - the complete set of keys this writer owns, mapped to their current values
@@ -108,7 +148,7 @@ export function writeOwnedParamsToUrl(
     }
     const next = params.toString();
     if (next === window.location.search.replace(/^\?/, '')) return;
-    window.history.replaceState(window.history.state, '', listStateAddress(pathname, next));
+    window.history.replaceState(ownedWriteHistoryState(), '', listStateAddress(pathname, next));
 }
 
 /** Reflects only the query owner into the URL while preserving sort, pagination, filters, and deep links. */
