@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -53,6 +54,7 @@ import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
 import ooo.klae.connex.backend.beans.Organization;
+import ooo.klae.connex.backend.beans.ReportDefinition;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.beans.WorkspaceRole;
@@ -63,6 +65,7 @@ import ooo.klae.connex.backend.exceptions.GlobalExceptionHandler;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.PrivilegedMfaEnrollmentRequiredException;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
@@ -86,6 +89,8 @@ import tools.jackson.databind.ObjectMapper;
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class PrivilegedMfaLockedAuthorizationConcurrencyIntegrationTest {
     @Autowired private WorkspaceService workspaceService;
+    @Autowired private ReportService reportService;
+    @Autowired private ReportMapper reportMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private OrganizationMapper organizationMapper;
     @Autowired private UserMapper userMapper;
@@ -103,11 +108,15 @@ class PrivilegedMfaLockedAuthorizationConcurrencyIntegrationTest {
     private Workspace workspace;
     private User actor;
     private WorkspaceRole customRole;
+    private ReportDefinition report;
     private MockMvc mvc;
     private TransactionTemplate transaction;
     private final CountDownLatch snapshotWarmed = new CountDownLatch(1);
     private final CountDownLatch startLocking = new CountDownLatch(1);
+    private final CountDownLatch filterAdmitted = new CountDownLatch(1);
+    private final CountDownLatch startTransaction = new CountDownLatch(1);
     private boolean waitBeforeLocking;
+    private boolean waitBeforeTransaction;
     private boolean expectOrdinarySnapshot;
     private boolean patFixture;
 
@@ -163,15 +172,76 @@ class PrivilegedMfaLockedAuthorizationConcurrencyIntegrationTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"plain", "snapshot", "shared", "mutex", "member", "authorization", "approval"})
+    @ValueSource(strings = {"plain", "snapshot", "shared", "mutex", "member", "authorization", "approval",
+        "administrator", "administratorWithAssignedRoles", "reportDelete"})
     void customPermissionGrantCommittedWhileMutationWaitsIsRefused(String helper) throws Exception {
-        customRole = new WorkspaceRole();
-        customRole.setWorkspaceId(workspace.getId());
-        customRole.setName("Ordinary role");
-        roleMapper.insertRole(customRole);
-        roleMapper.insertPermissions(workspace.getId(), customRole.getId(), List.of(Permission.PERSON_UPDATE.name()));
-        workspaceMapper.setMemberCustomRole(workspace.getId(), actor.getId(), customRole.getId());
+        assignOrdinaryCustomRole();
+        if ("reportDelete".equals(helper)) {
+            createOwnReport();
+        }
         racePromotion(helper, true, false);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"owner", "admin"})
+    void sameOrganizationPromotionAfterTheFilterAndBeforeTheTransactionIsRefused(String role) throws Exception {
+        waitBeforeTransaction = true;
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> mutation = executor.submit(() -> {
+                authenticate();
+                try {
+                    var response = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/locked-mfa-fixture").param("helper", "snapshot")).andReturn().getResponse();
+                    assertEquals(403, response.getStatus(), response.getContentAsString());
+                    assertTrue(response.getContentAsString().contains("PRIVILEGED_MFA_ENROLLMENT_REQUIRED"));
+                } finally {
+                    clearContext();
+                }
+                return null;
+            });
+            assertTrue(filterAdmitted.await(30, TimeUnit.SECONDS));
+            assertEquals(1L, snapshotWarmed.getCount());
+            grantOrganizationRole(role);
+            startTransaction.countDown();
+            mutation.get(30, TimeUnit.SECONDS);
+        } finally {
+            startTransaction.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(30, TimeUnit.SECONDS));
+        }
+        assertEquals("Before", workspaceMapper.getActiveById(workspace.getId()).getName());
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM audit_log WHERE entity_id = ? AND action = 'auth.mfa.policy.denied'",
+            Integer.class, actor.getId()));
+    }
+
+    @Test
+    void organizationPromotionAfterTheRepeatableReadSnapshotRemainsOutsideTheFence() throws Exception {
+        waitBeforeLocking = true;
+        expectOrdinarySnapshot = true;
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> mutation = executor.submit(() -> {
+                authenticate();
+                try {
+                    var response = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/locked-mfa-fixture").param("helper", "snapshot")).andReturn().getResponse();
+                    assertEquals(200, response.getStatus(), response.getContentAsString());
+                } finally {
+                    clearContext();
+                }
+                return null;
+            });
+            assertTrue(snapshotWarmed.await(30, TimeUnit.SECONDS));
+            grantOrganizationRole("admin");
+            startLocking.countDown();
+            mutation.get(30, TimeUnit.SECONDS);
+        } finally {
+            startLocking.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(30, TimeUnit.SECONDS));
+        }
+        assertEquals("After", workspaceMapper.getActiveById(workspace.getId()).getName());
     }
 
     @Test
@@ -247,6 +317,9 @@ class PrivilegedMfaLockedAuthorizationConcurrencyIntegrationTest {
             assertTrue(executor.awaitTermination(30, TimeUnit.SECONDS));
         }
         assertEquals("Before", workspaceMapper.getActiveById(workspace.getId()).getName());
+        if (report != null) {
+            assertNotNull(reportMapper.getDefinition(workspace.getId(), report.getId()));
+        }
         assertEquals(1, jdbc.queryForObject("""
             SELECT COUNT(*) FROM audit_log WHERE entity_type = 'user' AND entity_id = ?
               AND action = 'auth.mfa.policy.denied' AND workspace_id IS NULL AND org_id IS NULL
@@ -334,9 +407,8 @@ class PrivilegedMfaLockedAuthorizationConcurrencyIntegrationTest {
         transaction.executeWithoutResult(status -> {
             userMapper.lockByIdForShare(actor.getId());
             workspaceMapper.lockActiveWorkspaceForShare(workspace.getId());
-            userMapper.lockWorkspaceMfaOrganizationForShare(workspace.getId());
             assertEquals(List.of(false), userMapper.lockedWorkspaceMfaPasskeySufficiency(actor.getId(), workspace.getId(), true));
-            jdbc.update("UPDATE webauthn_credential SET privileged_assurance = 'BREAK_GLASS' WHERE user_entity_user_id = ?", actor.getUsername());
+            jdbc.update("UPDATE webauthn_credential SET privileged_assurance = 'BREAK_GLASS', privileged_assured_at = UTC_TIMESTAMP() WHERE user_entity_user_id = ?", actor.getUsername());
             assertEquals(List.of(true), userMapper.lockedWorkspaceMfaPasskeySufficiency(actor.getId(), workspace.getId(), true));
         });
     }
@@ -352,7 +424,6 @@ class PrivilegedMfaLockedAuthorizationConcurrencyIntegrationTest {
             transaction.executeWithoutResult(status -> {
                 userMapper.lockByIdForShare(actor.getId());
                 workspaceMapper.lockActiveWorkspaceForShare(workspace.getId());
-                userMapper.lockWorkspaceMfaOrganizationForShare(workspace.getId());
                 int credential = jdbc.queryForObject("SELECT id FROM webauthn_credential WHERE user_entity_user_id = ?",
                     Integer.class, actor.getUsername());
                 jdbc.update("INSERT INTO privileged_credential_attestation (credential_row_id, org_id, source) VALUES (?, ?, 'GRANTOR')",
@@ -459,7 +530,6 @@ class PrivilegedMfaLockedAuthorizationConcurrencyIntegrationTest {
             transaction.executeWithoutResult(status -> {
                 userMapper.lockByIdForShare(actor.getId());
                 workspaceMapper.lockActiveWorkspaceForShare(workspace.getId());
-                userMapper.lockWorkspaceMfaOrganizationForShare(workspace.getId());
                 assertEquals(List.of(true), userMapper.lockedWorkspaceMfaPasskeySufficiency(actor.getId(), workspace.getId(), false));
             });
             assertFalse(coverage.isDone());
@@ -546,38 +616,32 @@ class PrivilegedMfaLockedAuthorizationConcurrencyIntegrationTest {
     }
 
     @Test
-    void organizationGrantWaitsOnTheParentBeforeWritingCoverage() throws Exception {
-        enroll(true);
-        workspaceMapper.updateMemberRole(workspace.getId(), actor.getId(), "owner");
-        int credential = jdbc.queryForObject("SELECT id FROM webauthn_credential WHERE user_entity_user_id = ?",
-            Integer.class, actor.getUsername());
-        bindRequest();
-        ExecutorService executor = Executors.newSingleThreadExecutor();
-        Future<?>[] grant = new Future<?>[1];
-        try {
-            transaction.executeWithoutResult(status -> {
-                long holder = jdbc.queryForObject("SELECT CONNECTION_ID()", Long.class);
-                authorize("snapshot");
-                grant[0] = executor.submit(() -> transaction.executeWithoutResult(grantStatus -> {
-                    userMapper.lockByIdForShare(actor.getId());
-                    organizationMapper.lockById(organization.getId());
-                    jdbc.update("INSERT INTO privileged_credential_attestation (credential_row_id, org_id, source) VALUES (?, ?, 'GRANTOR')",
-                        credential, organization.getId());
-                }));
-                try {
-                    awaitBlockedBy(holder, grant[0], "organization");
-                } catch (Exception failure) {
-                    throw new IllegalStateException(failure);
-                }
-                assertNotNull(organizationMapper.lockByIdForShare(organization.getId()));
-                workspaceMapper.updateIdentity(workspace.getId(), "After", null);
-            });
-            grant[0].get(30, TimeUnit.SECONDS);
-        } finally {
-            executor.shutdownNow();
-            assertTrue(executor.awaitTermination(30, TimeUnit.SECONDS));
+    void freshOrganizationPrivilegeStatementDiscardsAnEarlierMyBatisAnswer() {
+        transaction.executeWithoutResult(status -> {
+            assertFalse(userMapper.hasWorkspaceOrganizationPrivilege(actor.getId(), workspace.getId()));
+            jdbc.update("INSERT INTO org_member (org_id, user_id, org_role) VALUES (?, ?, 'admin')",
+                organization.getId(), actor.getId());
+            assertTrue(userMapper.hasWorkspaceOrganizationPrivilege(actor.getId(), workspace.getId()));
+            jdbc.update("UPDATE organization SET lifecycle_state = 'tearing_down' WHERE id = ?", organization.getId());
+            assertFalse(userMapper.hasWorkspaceOrganizationPrivilege(actor.getId(), workspace.getId()));
+        });
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"administrator", "administratorWithAssignedRoles", "reportDelete"})
+    void ordinaryCustomOverlaysRemainAdmittedByAdministratorHelpers(String helper) throws Exception {
+        assignOrdinaryCustomRole();
+        if ("reportDelete".equals(helper)) {
+            createOwnReport();
         }
+        authenticate();
+        var response = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+            .post("/api/locked-mfa-fixture").param("helper", helper)).andReturn().getResponse();
+        assertEquals(200, response.getStatus(), response.getContentAsString());
         assertEquals("After", workspaceMapper.getActiveById(workspace.getId()).getName());
+        if (report != null) {
+            assertNull(reportMapper.getDefinition(workspace.getId(), report.getId()));
+        }
     }
 
     @ParameterizedTest
@@ -668,9 +732,11 @@ class PrivilegedMfaLockedAuthorizationConcurrencyIntegrationTest {
             case "mutex" -> workspaceService.lockAndRequirePermissionsWithWorkspaceMutex(workspaceId, required);
             case "member" -> workspaceService.lockedMemberPermissionsAndMemberships(workspaceId, actorId, Set.of());
             case "authorization" -> workspaceService.lockedMemberAuthorization(workspaceId, actorId);
-            case "administrator" -> assertTrue(workspaceService.isLockedBuiltInAdministrator(workspaceId, actorId));
-            case "administratorWithAssignedRoles" -> assertTrue(workspaceService
+            case "administrator" -> assertEquals(customRole == null,
+                workspaceService.isLockedBuiltInAdministrator(workspaceId, actorId));
+            case "administratorWithAssignedRoles" -> assertEquals(customRole == null, workspaceService
                 .isLockedBuiltInAdministratorWithAssignedRoles(workspaceId, actorId, actorId));
+            case "reportDelete" -> reportService.delete(report.getId());
             case "approval" -> workspaceService.lockApprovalMutationMemberships(workspaceId, actorId, Set.of());
             case "identity" -> ReflectionTestUtils.invokeMethod(workspaceService, "lockWorkspaceIdentityMutation", workspaceId, actorId);
             case "invite" -> workspaceService.lockInviteGrantAuthorization(workspaceId, actorId, null, "member");
@@ -707,11 +773,41 @@ class PrivilegedMfaLockedAuthorizationConcurrencyIntegrationTest {
         return response;
     }
 
+    private void assignOrdinaryCustomRole() {
+        customRole = new WorkspaceRole();
+        customRole.setWorkspaceId(workspace.getId());
+        customRole.setName("Ordinary role");
+        roleMapper.insertRole(customRole);
+        roleMapper.insertPermissions(workspace.getId(), customRole.getId(),
+            List.of(Permission.PERSON_UPDATE.name(), Permission.REPORT_DELETE.name()));
+        workspaceMapper.setMemberCustomRole(workspace.getId(), actor.getId(), customRole.getId());
+    }
+
+    private void createOwnReport() {
+        report = new ReportDefinition();
+        report.setWorkspaceId(workspace.getId());
+        report.setName("Unscheduled own report");
+        report.setCadence("weekly");
+        report.setConfigJson("{}");
+        report.setCreatedBy(actor.getId());
+        reportMapper.insertDefinition(report);
+    }
+
+    private void grantOrganizationRole(String role) {
+        transaction.executeWithoutResult(status -> {
+            userMapper.lockByIdForShare(actor.getId());
+            organizationMapper.lockById(organization.getId());
+            jdbc.update("INSERT INTO org_member (org_id, user_id, org_role) VALUES (?, ?, ?)",
+                organization.getId(), actor.getId(), role);
+        });
+    }
+
     private void enroll(boolean approved) {
         jdbc.update("INSERT INTO webauthn_user_entity (id, user_id, name, display_name) VALUES (?, ?, ?, ?)",
             actor.getUsername(), actor.getId(), actor.getUsername(), actor.getDisplayName());
-        jdbc.update("INSERT INTO webauthn_credential (credential_id, user_entity_user_id, public_key, privileged_assurance) VALUES (?, ?, ?, ?)",
-            UUID.randomUUID().toString().getBytes(StandardCharsets.UTF_8), actor.getUsername(), new byte[] {1}, approved ? "BREAK_GLASS" : null);
+        jdbc.update("INSERT INTO webauthn_credential (credential_id, user_entity_user_id, public_key, privileged_assurance, privileged_assured_at) VALUES (?, ?, ?, ?, ?)",
+            UUID.randomUUID().toString().getBytes(StandardCharsets.UTF_8), actor.getUsername(), new byte[] {1},
+            approved ? "BREAK_GLASS" : null, approved ? LocalDateTime.now() : null);
     }
 
     private void bindRequest() {
@@ -775,6 +871,10 @@ class PrivilegedMfaLockedAuthorizationConcurrencyIntegrationTest {
         @PostMapping({"/api/locked-mfa-fixture", "/api/auth/webauthn/register", "/api/workspaces/{id}/leave",
             "/api/document-acceptance/exchange"})
         void mutate(@RequestParam String helper) {
+            if (waitBeforeTransaction) {
+                filterAdmitted.countDown();
+                await(startTransaction);
+            }
             transaction.executeWithoutResult(status -> {
                 var standing = userMapper.privilegedMfaStanding(actor.getId());
                 assertNotNull(standing);

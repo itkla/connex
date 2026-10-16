@@ -418,6 +418,10 @@ public class AuditService {
      * registration; completion never consults thread/request context. The failure callback returns
      * the limiter admission on either capture or append failure. Delivery remains best-effort and
      * never changes the refusal; no independent append runs while the authorization roots are held.
+     * Completion is synchronous and may delay the HTTP response while an already-running writer
+     * commits, bounded by that writer's transaction or the database lock timeout. After rollback the
+     * outer holder owns no locks, so this wait cannot cycle back through that holder. Append failure
+     * remains best-effort and cannot replace the confinement exception.
      *
      * @param action action name
      * @param entityType audited entity type

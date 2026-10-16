@@ -1679,24 +1679,28 @@ member permissions/memberships and wrappers, member authorization for credential
 administrator authorization, approval membership authorization, workspace identity, invite grants,
 and role mutations. It uses the retained active membership and custom-role permission rows for
 privilege **in this workspace**, not another account-wide membership scan. Built-in owner/admin
-without an overlay requires no custom-role lookup. An empty permission requirement remains
-membership-only for custom-role targets; their authority is not resolved by that entry.
+without an overlay requires no custom-role lookup. Administrator helpers read the request actor's
+local custom-role permissions shared before returning false for built-in qualification; shared mode
+preserves the report deletion fence without upgrading its role roots. An empty permission requirement
+remains membership-only for custom-role targets; their authority is not resolved by that entry.
 
 For a non-exempt HTTP actor with enforcement enabled the order is:
 
 1. The helper's existing account roots and reservation checks, ascending as before.
 2. Existing workspace root, memberships, role roots and permission rows, in their existing order.
-3. If those rows show local privilege, retain the workspace's organization shared with
-   `lockWorkspaceMfaOrganizationForShare`, NOWAIT, before any new credential/coverage lock. The
-   workspace root is already retained. The organization parent prevents an organization grant from
-   holding it exclusively while waiting on a coverage gap and blocking the mutation's later audit.
-   This new parent acquisition never waits while membership/role locks are held.
+3. If those rows show no local privilege, `hasWorkspaceOrganizationPrivilege` checks owner/admin
+   membership in this workspace's active organization. This distinct, cache-flushed statement is
+   nonlocking and uses the same transaction's isolation. The guard adds no organization lock,
+   neither here nor in a new parent phase. Retaining organization S before aggregate rows could
+   cycle with a queued organization writer and an aggregate holder's trailing audit; NOWAIT at the
+   initial acquisition cannot prevent that later cycle.
 4. `lockedWorkspaceMfaPasskeySufficiency` reads owned
    credentials and, only with attestation enforced, coverage in that workspace's organization,
    shared and NOWAIT. Handle, credential and coverage locks follow authority, matching the
    role-before-credential order of registration/deletion and attestation redemption. The query's
-   workspace lock is already retained by step 2. Ordinary actors acquire neither of these added
-   parent/credential locks.
+   workspace lock is already retained by step 2. Only privilege from the retained workspace authority
+   or the organization lookup triggers credential reads. Actors ordinary in both scopes take no
+   added credential locks.
 5. Existing aggregate locks and business writes, only if confinement is satisfied.
 
 Report deletion uses the assigned-role administrator variant to retain its existing account-wide
@@ -1707,12 +1711,15 @@ existing acquisition into the authorization helper without adding global members
 changing the step-up actor.
 
 These control-plane statements run through control-catalog routing on the **same connection**.
-Both new statements are cache-flushed (`flushCache="true" useCache="false"`) and use
-current locking reads, so an old REPEATABLE READ snapshot or MyBatis answer cannot hide a promotion or
+Both new statements are cache-flushed (`flushCache="true" useCache="false"`). The credential
+statement uses current locking reads, so an old REPEATABLE READ snapshot or MyBatis answer cannot
 resurrect a deleted passkey. A nonlocking credential read would be unsafe: a transaction can open
 its snapshot while the actor is ordinary, then observe a promotion under locks after that account
-deleted its last passkey. The query avoids opening a consistent-read snapshot before a campaign
-or other aggregate mutex. No nested transaction or second pooled connection is added to admission.
+deleted its last passkey. The credential query does not open a consistent-read snapshot. The
+organization lookup is a consistent read, performed only when workspace authority is ordinary;
+campaign authoring's privileged permissions take the workspace branch without that read, preserving
+its first consistent read after the campaign mutex. No nested transaction or second pooled
+connection is added to admission.
 
 NOWAIT is necessary because assertion updates can already hold a credential row before their
 trailing audit requests the account root shared. Waiting for that credential while retaining a
@@ -1727,13 +1734,20 @@ mutation transaction**, after returning from all reads. The entry and limiter ad
 captured there; only append and admission release run after completion. Immediate independent
 auditing can wait on the holder's own exclusive root or queue behind an account writer waiting
 on its shared root. Delivery is best-effort under `deferFailure`'s existing contract; a failed
-capture/append releases the limiter admission and never changes the refusal.
+capture/append releases the limiter admission and never changes the refusal. Completion is
+synchronous, so the HTTP response can wait on an already-running writer until that writer commits
+or the database lock timeout fires. The refusing transaction has already rolled back and owns no
+locks; the append cannot cycle back through it. No background delivery queue is added.
 
 This is a local authority fence, not a global account-wide barrier. Remote workspace promotions
 after the filter check (including custom-role permission grants outside this workspace),
-organization grants taking a shared grantee root, and self-service workspace founding remain
-outside it. Direct-lock ordinary record writes, mutations without a locked-authorization helper
-(including existing `TagService` administration), and reads receive no new recheck. Several operations
+organization grants committed after the transaction's REPEATABLE READ snapshot was established
+and before the guard, grants committed after the guard, and self-service workspace founding remain
+outside it. Organization grants committed before that snapshot are seen; at READ COMMITTED the
+organization statement sees grants committed before it runs. The shared grantee root does not
+serialize organization grants against the reader. Direct-lock ordinary record writes, mutations
+without a locked-authorization helper (including existing `TagService` administration), and reads
+receive no new recheck. Several operations
 can already be in flight, and a bulk request can contain several writes; their existing workspace
 authorization still governs them. See
 [the confinement contract](../PRIVILEGED_MFA.md#confinement-recheck-during-locked-workspace-authorization)

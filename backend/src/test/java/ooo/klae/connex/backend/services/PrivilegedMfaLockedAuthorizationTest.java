@@ -15,6 +15,7 @@ import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import java.nio.file.Files;
@@ -76,7 +77,6 @@ class PrivilegedMfaLockedAuthorizationTest {
         membership.setUserId(7);
         membership.setStatus("active");
         membership.setRole("admin");
-        when(userMapper.lockWorkspaceMfaOrganizationForShare(11)).thenReturn(13);
         bind("POST", "/api/companies");
     }
 
@@ -87,13 +87,25 @@ class PrivilegedMfaLockedAuthorizationTest {
     }
 
     @Test
-    void organizationParentIsRetainedBeforeCredentialAndCoverageLocks() {
+    void organizationPrivilegeConfinesAnOrdinaryWorkspaceMemberWithoutAnOrganizationLock() {
+        membership.setRole("member");
+        when(userMapper.hasWorkspaceOrganizationPrivilege(7, 11)).thenReturn(true);
+        when(userMapper.lockedWorkspaceMfaPasskeySufficiency(7, 11, true)).thenReturn(List.of());
+        assertThrows(PrivilegedMfaEnrollmentRequiredException.class,
+            () -> guard.requireAllowed(guard.requestActor(Set.of(7)), 11, membership, Set.of()));
+
+        var order = inOrder(userMapper);
+        order.verify(userMapper).hasWorkspaceOrganizationPrivilege(7, 11);
+        order.verify(userMapper).lockedWorkspaceMfaPasskeySufficiency(7, 11, true);
+    }
+
+    @Test
+    void workspacePrivilegeNeedsNoOrganizationMembershipLookup() {
         when(userMapper.lockedWorkspaceMfaPasskeySufficiency(7, 11, true)).thenReturn(List.of(true));
         guard.requireAllowed(guard.requestActor(Set.of(7)), 11, membership, Set.of());
 
-        var order = inOrder(userMapper);
-        order.verify(userMapper).lockWorkspaceMfaOrganizationForShare(11);
-        order.verify(userMapper).lockedWorkspaceMfaPasskeySufficiency(7, 11, true);
+        verify(userMapper).lockedWorkspaceMfaPasskeySufficiency(7, 11, true);
+        verifyNoMoreInteractions(userMapper);
     }
 
     @Test
@@ -137,7 +149,9 @@ class PrivilegedMfaLockedAuthorizationTest {
         Integer actor = guard.requestActor(Set.of(7));
         membership.setRole("member");
         assertDoesNotThrow(() -> guard.requireAllowed(actor, 11, membership, Set.of(Permission.PERSON_UPDATE)));
-        verifyNoInteractions(userMapper, auditService);
+        verify(userMapper).hasWorkspaceOrganizationPrivilege(7, 11);
+        verifyNoMoreInteractions(userMapper);
+        verifyNoInteractions(auditService);
         membership.setRole("owner");
         when(userMapper.lockedWorkspaceMfaPasskeySufficiency(7, 11, true)).thenReturn(List.of(false, true));
         assertDoesNotThrow(() -> guard.requireAllowed(actor, 11, membership, Set.of()));

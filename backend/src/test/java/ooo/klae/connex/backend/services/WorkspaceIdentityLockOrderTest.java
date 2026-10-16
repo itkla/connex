@@ -2,7 +2,9 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
@@ -89,6 +91,26 @@ class WorkspaceIdentityLockOrderTest {
         order.verify(userMapper).lockAssignedCustomRoleRowsForShare(ACTOR_ID);
         order.verify(privilegedMfaLockedAuthorization).requestActor(Set.of(ACTOR_ID));
         order.verify(privilegedMfaLockedAuthorization).requireAllowed(ACTOR_ID, WORKSPACE_ID, membership, Set.of());
+    }
+
+    @Test
+    void reportOverlayConfinementKeepsAssignedRolesSharedBeforeLocalPermissions() {
+        WorkspaceMember membership = membership("admin", 5, "active");
+        when(userMapper.isAccountDeletionReservedForShare(ACTOR_ID)).thenReturn(false);
+        when(workspaceMapper.lockActiveWorkspaceForShare(WORKSPACE_ID)).thenReturn(ORG_ID);
+        when(workspaceMapper.lockAuthorizationMembership(WORKSPACE_ID, ACTOR_ID)).thenReturn(membership);
+        when(privilegedMfaLockedAuthorization.requestActor(Set.of(ACTOR_ID))).thenReturn(ACTOR_ID);
+        when(roleMapper.lockPermissionsForShare(WORKSPACE_ID, 5)).thenReturn(List.of(Permission.TEAM_MANAGE.name()));
+
+        assertFalse(service.isLockedBuiltInAdministratorWithAssignedRoles(WORKSPACE_ID, ACTOR_ID, ACTOR_ID));
+
+        InOrder order = inOrder(userMapper, roleMapper, privilegedMfaLockedAuthorization);
+        order.verify(userMapper).lockAssignedCustomRoleRowsForShare(ACTOR_ID);
+        order.verify(roleMapper).lockPermissionsForShare(WORKSPACE_ID, 5);
+        order.verify(privilegedMfaLockedAuthorization).requireAllowed(
+            ACTOR_ID, WORKSPACE_ID, membership, Set.of(Permission.TEAM_MANAGE));
+        verify(roleMapper, never()).lockRole(WORKSPACE_ID, 5);
+        verify(roleMapper, never()).lockPermissions(WORKSPACE_ID, 5);
     }
 
     @Test

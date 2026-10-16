@@ -351,12 +351,15 @@
       ) AS hasSufficientPasskey
   </select>
 
-  <select id="lockWorkspaceMfaOrganizationForShare" resultType="int" flushCache="true" useCache="false">
-    SELECT o.id
-    FROM workspace w
-    JOIN organization o ON o.id = w.org_id
-    WHERE w.id = #{workspaceId}
-    FOR SHARE OF w, o NOWAIT
+  <select id="hasWorkspaceOrganizationPrivilege" resultType="boolean" flushCache="true" useCache="false">
+    SELECT EXISTS (
+      SELECT 1
+      FROM workspace w
+      JOIN organization o ON o.id = w.org_id AND o.lifecycle_state = 'active'
+      JOIN org_member om ON om.org_id = o.id
+      WHERE w.id = #{workspaceId} AND om.user_id = #{id}
+        AND om.org_role IN ('owner', 'admin')
+    )
   </select>
 
   <select id="lockedWorkspaceMfaPasskeySufficiency" resultType="boolean" flushCache="true" useCache="false">

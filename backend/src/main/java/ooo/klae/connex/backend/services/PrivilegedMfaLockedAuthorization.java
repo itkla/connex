@@ -67,22 +67,26 @@ public class PrivilegedMfaLockedAuthorization {
     }
 
     /**
-     * Refuses only the authenticated actor whose locked membership is privileged in this workspace.
+     * Refuses only the authenticated actor privileged in this workspace or its organization.
      * Built-in owner/admin authority needs no role lookup; a custom overlay uses only its retained
      * permission rows, with the closed list mirrored from UserMapper's privilegedOrgBranches.
      *
      * <p>The distinct, cache-flushed standing statement uses current shared reads on the same
      * connection after account, workspace, membership and role authority, matching registration and
-     * deletion's role-before-credential order. The organization parent is retained shared before
-     * coverage, so an organization grant cannot hold it exclusively while waiting on our coverage
-     * gap and blocking a later audit's organization read. These new acquisitions use NOWAIT so
-     * they never wait while authority roots are retained. A consistent credential read is unsafe even under the
+     * deletion's role-before-credential order. No organization lock is added: retaining that parent
+     * before an aggregate can cycle against a queued organization writer and the aggregate holder's
+     * trailing audit. A consistent credential read is unsafe even under the
      * account root: its old REPEATABLE READ snapshot can predate an ordinary member deleting its last
      * passkey and then becoming privileged. NOWAIT avoids waiting on an assertion's credential update
      * while an account writer queues ahead of its trailing audit; the caller translates contention
      * through the existing workspace retry contract. This neither opens a consistent-read snapshot
      * ahead of a caller's aggregate mutex nor borrows another pooled connection. The check
      * covers this workspace's organization, leaving account-wide remote promotions to the filters.
+     *
+     * <p>When workspace authority is ordinary, a separate cache-flushed, nonlocking read checks
+     * owner/admin membership in this workspace's active organization. It adds no lock edge and uses
+     * this transaction's isolation: under REPEATABLE READ a grant committed before its consistent
+     * snapshot is visible, but one committed after that snapshot and before this check is not.
      *
      * @param actorId authenticated actor selected for confinement, or null
      * @param workspaceId workspace whose authorization is retained
@@ -100,11 +104,8 @@ public class PrivilegedMfaLockedAuthorization {
         boolean privileged = membership.getRoleId() == null
             ? role == WorkspaceService.Role.OWNER || role == WorkspaceService.Role.ADMIN
             : permissions.stream().anyMatch(PRIVILEGED_PERMISSIONS::contains);
-        if (!privileged) {
+        if (!privileged && !userMapper.hasWorkspaceOrganizationPrivilege(actorId, workspaceId)) {
             return;
-        }
-        if (userMapper.lockWorkspaceMfaOrganizationForShare(workspaceId) == null) {
-            throw new IllegalStateException("Locked workspace organization is unavailable");
         }
         boolean attestationEnforced = properties.isAttestationEnforced();
         List<Boolean> passkeys = userMapper.lockedWorkspaceMfaPasskeySufficiency(actorId, workspaceId,

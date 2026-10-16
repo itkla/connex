@@ -719,7 +719,9 @@ public class WorkspaceService {
      * the user root, the active workspace root, and the exact membership — so a demotion
      * committing while the caller's transaction is open cannot be missed by its consistent-read
      * snapshot. Must run inside a transaction and be acquired before any tenant record lock so it
-     * keeps the repository's membership then record order.
+     * keeps the repository's membership then record order. Custom overlays cannot qualify as built-in
+     * administrators, but the request actor's current local permissions still determine confinement
+     * before this helper returns false.
      */
     public boolean isLockedBuiltInAdministrator(int workspaceId, int userId) {
         return isLockedBuiltInAdministrator(workspaceId, userId, null);
@@ -744,19 +746,24 @@ public class WorkspaceService {
 
     private boolean isLockedBuiltInAdministrator(
             int workspaceId, int userId, Integer assignedRoleUserId) {
-        WorkspaceMember membership = lockBuiltInAdministratorMembership(workspaceId, userId);
+        WorkspaceMember membership = lockAdministratorAuthorizationMembership(workspaceId, userId);
         if (assignedRoleUserId != null) {
             userMapper.lockAssignedCustomRoleRowsForShare(assignedRoleUserId);
         }
         if (membership == null) {
             return false;
         }
+        Integer confinementActor = confinementActor(Set.of(userId));
+        Set<Permission> permissions = Set.of();
+        if (confinementActor != null && membership.getRoleId() != null) {
+            permissions = parsePermissions(roleMapper.lockPermissionsForShare(workspaceId, membership.getRoleId()));
+        }
+        requireLockedMfa(confinementActor, workspaceId, membership, permissions);
         Role role = Role.of(membership.getRole());
-        requireLockedMfa(confinementActor(Set.of(userId)), workspaceId, membership, Set.of());
-        return role != null && role.ordinal() >= Role.ADMIN.ordinal();
+        return membership.getRoleId() == null && role != null && role.ordinal() >= Role.ADMIN.ordinal();
     }
 
-    private WorkspaceMember lockBuiltInAdministratorMembership(int workspaceId, int userId) {
+    private WorkspaceMember lockAdministratorAuthorizationMembership(int workspaceId, int userId) {
         if (!Boolean.FALSE.equals(userMapper.isAccountDeletionReservedForShare(userId))) {
             return null;
         }
@@ -765,8 +772,7 @@ public class WorkspaceService {
         }
         WorkspaceMember membership = workspaceMapper.lockAuthorizationMembership(workspaceId, userId);
         if (!isExactMembership(membership, workspaceId, userId)
-                || !"active".equals(membership.getStatus())
-                || membership.getRoleId() != null) {
+                || !"active".equals(membership.getStatus())) {
             return null;
         }
         return membership;
