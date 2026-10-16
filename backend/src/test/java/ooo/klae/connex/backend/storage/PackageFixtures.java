@@ -3,9 +3,14 @@ package ooo.klae.connex.backend.storage;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.time.Instant;
+import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.zip.CRC32;
@@ -13,6 +18,18 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 import javax.imageio.ImageIO;
+
+import org.bouncycastle.asn1.ASN1Encoding;
+import org.bouncycastle.asn1.ASN1ObjectIdentifier;
+import org.bouncycastle.asn1.x500.X500Name;
+import org.bouncycastle.cert.X509CertificateHolder;
+import org.bouncycastle.cert.X509v2CRLBuilder;
+import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder;
+import org.bouncycastle.cms.CMSAbsentContent;
+import org.bouncycastle.cms.CMSSignedDataGenerator;
+import org.bouncycastle.operator.ContentSigner;
+import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
+import org.bouncycastle.pkcs.jcajce.JcaPKCS10CertificationRequestBuilder;
 
 import ooo.klae.connex.backend.storage.UploadPolicy.UploadFormat;
 
@@ -46,6 +63,10 @@ final class PackageFixtures {
         "http://schemas.openxmlformats.org/package/2006/relationships/digital-signature/origin";
     static final String SIGNATURE_RELATIONSHIP =
         "http://schemas.openxmlformats.org/package/2006/relationships/digital-signature/signature";
+    static final String SIGNATURE_CERTIFICATE_CONTENT_TYPE =
+        "application/vnd.openxmlformats-package.digital-signature-certificate";
+    static final String SIGNATURE_CERTIFICATE_RELATIONSHIP =
+        "http://schemas.openxmlformats.org/package/2006/relationships/digital-signature/certificate";
     static final String ODF_MANIFEST_NAMESPACE =
         "urn:oasis:names:tc:opendocument:xmlns:manifest:1.0";
 
@@ -279,6 +300,124 @@ final class PackageFixtures {
     static byte[] signedOoxml(UploadFormat format, String signatureXml) throws IOException {
         return signedOoxml(
             format, signatureXml, true, true, "_xmlsignatures/sig1.xml", SIGNATURE_CONTENT_TYPE);
+    }
+
+    /** @return the origin and first signature declarations for certificate-package fixtures */
+    static String signatureContentTypes() {
+        return defaultType("sigs", SIGNATURE_ORIGIN_CONTENT_TYPE)
+            + override("/_xmlsignatures/sig1.xml", SIGNATURE_CONTENT_TYPE);
+    }
+
+    /** @return the root relationship reaching the fixed signature origin */
+    static String signatureOriginRelationship() {
+        return relationship("rIdSigOrigin", SIGNATURE_ORIGIN_RELATIONSHIP,
+            "_xmlsignatures/origin.sigs");
+    }
+
+    static String relationship(String id, String type, String target) {
+        return "<Relationship Id=\"" + id + "\" Type=\"" + type + "\" Target=\""
+            + target + "\"/>";
+    }
+
+    static String relationships(String entries) {
+        return "<Relationships xmlns=\"" + RELATIONSHIPS_NAMESPACE + "\">"
+            + entries + "</Relationships>";
+    }
+
+    /** @return a mutable signed-package member map with a signature-owned certificate reference */
+    static Map<String, byte[]> signatureCertificateParts(
+            UploadFormat format, String certificatePart, byte[] certificate) {
+        String target = certificatePart.startsWith("_xmlsignatures/")
+            ? certificatePart.substring("_xmlsignatures/".length())
+            : "../" + certificatePart;
+        return members(
+            "_xmlsignatures/origin.sigs", new byte[0],
+            "_xmlsignatures/_rels/origin.sigs.rels", ascii(relationships(
+                relationship("rIdSig1", SIGNATURE_RELATIONSHIP, "sig1.xml"))),
+            "_xmlsignatures/sig1.xml", ascii(officeSignatureXml(format, false, false, "")),
+            "_xmlsignatures/_rels/sig1.xml.rels", ascii(relationships(
+                relationship("rIdCert", SIGNATURE_CERTIFICATE_RELATIONSHIP, target))),
+            certificatePart, certificate);
+    }
+
+    /** @return signed OOXML with a DER signer certificate and content types written last */
+    static byte[] signedOoxmlWithCertificate(UploadFormat format, byte[] certificate)
+            throws IOException {
+        return ooxml(format, defaultMainXml(format), signatureContentTypes()
+            + defaultType("cer", SIGNATURE_CERTIFICATE_CONTENT_TYPE),
+            signatureOriginRelationship(),
+            signatureCertificateParts(format, "_xmlsignatures/cert1.cer", certificate), true);
+    }
+
+    /** @return a real self-signed DER certificate with synthetic identity data */
+    static byte[] signerCertificate() throws Exception {
+        return signerCertificateWithPadding(0);
+    }
+
+    /** @return a valid DER certificate of exactly the requested size, using an inert extension */
+    static byte[] signerCertificate(int length) throws Exception {
+        int padding = Math.max(0, length - 1024);
+        for (int attempt = 0; attempt < 5; attempt++) {
+            byte[] certificate = signerCertificateWithPadding(padding);
+            if (certificate.length == length) {
+                return certificate;
+            }
+            padding += length - certificate.length;
+            if (padding < 0) {
+                break;
+            }
+        }
+        throw new IllegalArgumentException("Cannot construct certificate at requested size");
+    }
+
+    private static byte[] signerCertificateWithPadding(int padding) throws Exception {
+        X500Name subject = new X500Name("CN=Connex upload fixture");
+        JcaX509v3CertificateBuilder builder = new JcaX509v3CertificateBuilder(
+            subject, BigInteger.ONE,
+            Date.from(Instant.parse("2026-01-01T00:00:00Z")),
+            Date.from(Instant.parse("2027-01-01T00:00:00Z")),
+            subject, CertificateKeys.KEY_PAIR.getPublic());
+        if (padding > 0) {
+            builder.addExtension(new ASN1ObjectIdentifier("1.3.6.1.4.1.55555.1"),
+                false, obfuscatedFont(padding));
+        }
+        return builder.build(certificateSigner()).getEncoded();
+    }
+
+    /** @return real DER objects that must never be accepted as a single X.509 certificate */
+    static Map<String, byte[]> nonCertificateDerObjects() throws Exception {
+        X500Name subject = new X500Name("CN=Connex upload fixture");
+        CMSSignedDataGenerator bundle = new CMSSignedDataGenerator();
+        bundle.setEncoding(ASN1Encoding.DER);
+        bundle.addCertificate(new X509CertificateHolder(signerCertificate()));
+        return members(
+            "pkcs7", bundle.generate(new CMSAbsentContent()).getEncoded(),
+            "crl", new X509v2CRLBuilder(subject,
+                Date.from(Instant.parse("2026-01-01T00:00:00Z")))
+                .build(certificateSigner()).getEncoded(),
+            "csr", new JcaPKCS10CertificationRequestBuilder(
+                subject, CertificateKeys.KEY_PAIR.getPublic())
+                .build(certificateSigner()).getEncoded(),
+            "private-key", CertificateKeys.KEY_PAIR.getPrivate().getEncoded());
+    }
+
+    private static ContentSigner certificateSigner() throws Exception {
+        return new JcaContentSignerBuilder("SHA256withRSA")
+            .build(CertificateKeys.KEY_PAIR.getPrivate());
+    }
+
+    private static final class CertificateKeys {
+        private static final KeyPair KEY_PAIR = generate();
+
+        private static KeyPair generate() {
+            try {
+                KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
+                generator.initialize(2048);
+                return generator.generateKeyPair();
+            } catch (java.security.GeneralSecurityException exception) {
+                throw new IllegalStateException("Cannot generate certificate fixture key", exception);
+            }
+        }
     }
 
     /**
