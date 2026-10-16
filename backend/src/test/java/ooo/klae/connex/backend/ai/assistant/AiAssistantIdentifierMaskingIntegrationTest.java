@@ -56,6 +56,7 @@ import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.services.MutationAdmission;
 import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlAccess;
 import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlOperations.WorkspaceScope;
 import ooo.klae.connex.backend.services.WorkspaceService;
@@ -1165,7 +1166,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
                 new AiAssistantWriteTool.Row(new AiAssistantWriteTool.Target("task", storedTask.getId()), request),
                 List.of(), null, new AiAssistantWriteTool.LockedTarget(null, null), (start, end) -> {
                     throw new AssertionError("Task writes cannot read schedule conflicts");
-                }, Map.of(), ooo.klae.connex.backend.services.MutationAdmission.UNRESTRICTED));
+                }, Map.of(), MutationAdmission.UNRESTRICTED));
         ObjectMapper mapper = JsonMapper.builder().build();
         String storedJson = mapper.writeValueAsString(Map.of("tier", "confirm", "outcome", outcome.data()));
         assertFalse(storedJson.contains("{{M"));

@@ -59,6 +59,7 @@ import ooo.klae.connex.backend.recordcreation.RecordCreationFieldValueType;
 import ooo.klae.connex.backend.recordcreation.RecordCreationRecordType;
 import ooo.klae.connex.backend.recordcreation.RecordCreationTemplateAvailability;
 import ooo.klae.connex.backend.services.GuidedRecordCreationService;
+import ooo.klae.connex.backend.services.MutationAdmission;
 import ooo.klae.connex.backend.services.PipelineService;
 import ooo.klae.connex.backend.services.RecordCreationPresetService;
 import tools.jackson.databind.JsonNode;
@@ -344,7 +345,7 @@ class AiAssistantCreateRecordsWriteToolTest {
             AiAssistantWriteToolRequest request, Resolution resolution, Map<String, Object> pinned) {
         return new Execution(new Authority(4, 17, 91, Instant.EPOCH), new Row(COMPANY, request),
                 List.of(), resolution, new LockedTarget(null, null),
-                (start, end) -> { throw new AssertionError("Creation has no calendar dependency"); }, pinned, ooo.klae.connex.backend.services.MutationAdmission.UNRESTRICTED);
+                (start, end) -> { throw new AssertionError("Creation has no calendar dependency"); }, pinned, MutationAdmission.UNRESTRICTED);
     }
 
     private Review review(
