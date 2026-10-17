@@ -988,6 +988,7 @@ function ContactDetailsFields({
                     acknowledged={duplicatePreflight.acknowledged}
                     onAcknowledgedChange={duplicatePreflight.setAcknowledged}
                     onRetry={duplicatePreflight.retry}
+                    workspaceRefusal={duplicatePreflight.workspaceRefusal}
                     personResolution={reusablePersonCandidate && duplicateReviewSignature
                         ? {
                             selected: currentPersonResolution,
@@ -1124,6 +1125,7 @@ function ContactDetailsFields({
                         acknowledged={companyDuplicatePreflight.acknowledged}
                         onAcknowledgedChange={companyDuplicatePreflight.setAcknowledged}
                         onRetry={companyDuplicatePreflight.retry}
+                        workspaceRefusal={companyDuplicatePreflight.workspaceRefusal}
                     />
                 )}
             </div>

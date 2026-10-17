@@ -578,6 +578,7 @@ export default function NewCompanyDialog({
                                 acknowledged={duplicatePreflight.acknowledged}
                                 onAcknowledgedChange={duplicatePreflight.setAcknowledged}
                                 onRetry={duplicatePreflight.retry}
+                                workspaceRefusal={duplicatePreflight.workspaceRefusal}
                             />
                         </div>
 
@@ -1020,6 +1021,7 @@ export function NewCompanyForm({
                             acknowledged={duplicatePreflight.acknowledged}
                             onAcknowledgedChange={duplicatePreflight.setAcknowledged}
                             onRetry={duplicatePreflight.retry}
+                            workspaceRefusal={duplicatePreflight.workspaceRefusal}
                         />
                     </div>
 

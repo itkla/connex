@@ -77,12 +77,21 @@ import ooo.klae.connex.backend.services.WorkspaceService;
  * exempt route and takes ordinary workspace resolution, which fails closed.
  *
  * <p>The write protection is scoped to the first request that observes the revocation. A safe
- * read heals the selection to a workspace the caller still belongs to, and subsequent writes go
- * to the healed workspace by design — that is the pre-existing #1108 contract, and the healed
- * cookie is what the client reads back to render the active workspace. Requiring an explicit
- * reselection for the next unsafe request instead would need per-client state the interceptor
- * does not have (the cookie is the client's only selection channel), so a composer that must
- * not follow a heal has to compare its origin workspace before submitting (frontend follow-up #1732).
+ * read heals the selection to a workspace the caller still belongs to, and a later write that names
+ * no workspace of its own goes to the healed workspace — that is the pre-existing #1108 contract,
+ * and the healed cookie is what the client reads back to render the active workspace on its next
+ * load. Requiring an explicit reselection for the next unsafe request would need per-client state
+ * the interceptor does not have, so the browser app shell supplies it instead (#1732): its shared
+ * request pipeline sends every workspace-bound state-changing request with an explicit
+ * {@code X-Workspace-Id} naming the workspace the page renders rather than the cookie's, and surfaces
+ * that save after a delay name the workspace the content was composed in. The routes this
+ * interceptor exempts, those {@code WebConfig} excludes, and account and organization routes that
+ * authorize their own target keep sending the cookie's selection. A page still rendering a revoked
+ * workspace therefore arrives here as a matching stale pair before the heal, or as an explicit pin
+ * that disagrees with the healed cookie after it, and both get the 403 above instead of following
+ * the heal into another organization. The client recognizes that refusal by its exact message,
+ * {@code "Not a member of workspace " + id}, to tell the user that the workspace their draft
+ * belongs to is no longer available, so that message is a client-visible contract.
  *
  * <p>{@link TenantContext} is a {@code ThreadLocal} on a pooled container thread,
  * so the scope's teardown is load-bearing for tenant isolation (#988). Two rules

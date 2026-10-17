@@ -168,6 +168,7 @@ import { AiGenerationError } from '@/app/lib/aiGeneration';
 import { LEAD_SOURCES } from '@/app/lib/contactProvenance';
 import { proposalReviewNow } from '@/app/lib/proposalReviewClock';
 import { createAiChatSocket } from '@/app/lib/realtime';
+import { workspaceUnavailableDescription } from '@/app/lib/errorMessages';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { formatDate, formatRelativeTime, formatUtcDateTime } from '@/app/lib/utils';
 import type {
@@ -385,6 +386,7 @@ export function useAskConnexMount(): AskConnexMountValue {
 /** Owns Ask Connex continuity, transcript, accepted-turn reconciliation, and responsive surfaces. */
 export default function AskConnexProvider({ children }: { children: ReactNode }) {
     const t = useTranslations('AskConnex');
+    const tRoot = useTranslations();
     const showApiError = useApiErrorToast('AskConnex');
     const deferApiError = useCallback(
         (error: unknown, fallbackKey?: string) => {
@@ -1926,12 +1928,14 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     }, [canPersist, activeSession, router, sessionKey, t, workspaceMode]);
 
     const uploadErrorMessage = useCallback((error: unknown): string => {
+        const workspaceMessage = workspaceUnavailableDescription(error, tRoot);
+        if (workspaceMessage !== null) return workspaceMessage;
         if (!(error instanceof ApiError)) return t('upload.failed');
         if (error.status === 413) return t('upload.tooLarge');
         if (error.status === 415) return t('upload.unsupported');
         if (error.status === 409) return t('upload.limit');
         return t('upload.failed');
-    }, [t]);
+    }, [t, tRoot]);
 
     const attachFiles = useCallback(async (files: File[]) => {
         const signal = identityControllerRef.current?.signal;

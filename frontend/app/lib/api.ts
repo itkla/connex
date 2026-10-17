@@ -15,6 +15,11 @@ import { isProtectedPath } from "@/app/lib/protectedRoutes";
 import { isProtectedMediaPath } from "@/app/lib/protectedMedia";
 import { observeProposalReviewClock } from "@/app/lib/proposalReviewClock";
 import { settingsDestination } from "@/app/lib/settingsEntryPoints";
+import {
+    pinsToRenderedWorkspace,
+    rememberedWorkspaceName,
+    renderedWorkspaceId,
+} from "@/app/lib/renderedWorkspace";
 
 import type {
     AuthenticationResponseJSON,
@@ -48,8 +53,12 @@ function clientWorkspaceId(): string | null {
 
 function workspaceIdFromCookieHeader(cookie: string): number | null {
     const match = cookie.match(/(?:^|;\s*)connex_workspace=([^;]+)/);
-    if (!match) return null;
-    const value = match[1].trim();
+    return match ? parseWorkspaceId(match[1]) : null;
+}
+
+/** Parses a workspace id the way the backend reads its header and cookie: a trimmed decimal integer. */
+function parseWorkspaceId(raw: string): number | null {
+    const value = raw.trim();
     if (!/^[+-]?\d+$/.test(value)) return null;
     const workspaceId = Number(value);
     return Number.isInteger(workspaceId) && workspaceId > 0 && workspaceId <= 2_147_483_647
@@ -57,8 +66,94 @@ function workspaceIdFromCookieHeader(cookie: string): number | null {
         : null;
 }
 
+/**
+ * Whether a request is a workspace-bound write: it changes state on a route outside the account,
+ * organization and selection routes that `UNPINNED_WRITE_ROUTES` keeps on the cookie (#1732).
+ * @param path the request path
+ * @param mutating whether the request changes state
+ */
+function isWorkspaceBoundWrite(path: string, mutating: boolean): boolean {
+    return mutating && pinsToRenderedWorkspace(path);
+}
+
+/**
+ * The workspace a browser request is sent for. Reads, and writes to account, organization and
+ * selection routes, follow the `connex_workspace` cookie as before, so the first safe read after a
+ * revocation can heal the selection (#1108). Workspace-bound writes follow the workspace the app
+ * shell renders instead, so content composed in one workspace can never ride a healed cookie into
+ * another; the server refuses the pinned write when that workspace is gone (#1732). An explicit
+ * `X-Workspace-Id` in the caller's init overrides both.
+ * @param path the request path
+ * @param mutating whether the request changes state
+ * @returns the header value to send, or null to send none
+ */
+function requestWorkspaceId(path: string, mutating: boolean): string | null {
+    const rendered = isWorkspaceBoundWrite(path, mutating) ? renderedWorkspaceId() : null;
+    return rendered === null ? clientWorkspaceId() : String(rendered);
+}
+
+/**
+ * The `X-Workspace-Id` a request actually carries: the caller's explicit header, or else the one
+ * {@link requestWorkspaceId} chose.
+ */
+function outgoingWorkspaceId(init: RequestInit, chosen: string | null): string | null {
+    return new Headers(init.headers).get("X-Workspace-Id") ?? chosen;
+}
+
+/**
+ * Re-codes a failed workspace-bound write as {@link WORKSPACE_UNAVAILABLE_CODE} when the workspace
+ * it carried refused it, and returns every other failure unchanged.
+ * @param error the failure the response produced
+ * @param path the request path
+ * @param mutating whether the request changed state
+ * @param pinnedWorkspace the `X-Workspace-Id` value the request carried
+ */
+function refusalFor(
+    error: ApiError,
+    path: string,
+    mutating: boolean,
+    pinnedWorkspace: string | null,
+): ApiError {
+    return isWorkspaceBoundWrite(path, mutating) ? workspaceRefusal(error, pinnedWorkspace) : error;
+}
+
+/**
+ * Recognizes the backend's refusal of a request pinned to a workspace the caller no longer belongs
+ * to — `TenantResolutionInterceptor` answers `403 FORBIDDEN "Not a member of workspace {id}"` — and
+ * re-codes it as {@link WORKSPACE_UNAVAILABLE_CODE}, carrying the workspace and the name the viewer
+ * last saw for it. Any other failure is returned unchanged.
+ * @param error the failure the response produced
+ * @param pinnedWorkspace the `X-Workspace-Id` value the request carried
+ */
+function workspaceRefusal(error: ApiError, pinnedWorkspace: string | null): ApiError {
+    const workspaceId = pinnedWorkspace === null ? null : parseWorkspaceId(pinnedWorkspace);
+    if (workspaceId === null
+            || error.status !== 403
+            || error.code !== "FORBIDDEN"
+            || error.message !== `Not a member of workspace ${workspaceId}`) {
+        return error;
+    }
+    const refusal = new ApiError(
+        error.message,
+        error.status,
+        WORKSPACE_UNAVAILABLE_CODE,
+        undefined,
+        error.correlationId,
+    );
+    refusal.workspaceId = workspaceId;
+    refusal.workspaceName = rememberedWorkspaceName(workspaceId) ?? undefined;
+    return refusal;
+}
+
+/**
+ * The workspace a business-card capture is scoped to and later submitted under. It follows the
+ * rendered workspace like every other write, so a capture started after a safe read healed the
+ * cookie is still pinned to the workspace on screen (#1732).
+ */
 function clientRecoveryWorkspaceId(): string | null {
     if (typeof document === "undefined") return null;
+    const rendered = renderedWorkspaceId();
+    if (rendered !== null) return String(rendered);
     const workspaceId = workspaceIdFromCookieHeader(document.cookie);
     return workspaceId == null ? null : String(workspaceId);
 }
@@ -761,8 +856,9 @@ async function requestJson<T>(
         throw privilegedMfaConfinementError(suppression);
     }
     const locale = requestLocale(init);
-    const workspaceId = clientWorkspaceId();
     const mutating = isMutating(init.method);
+    const workspaceId = requestWorkspaceId(path, mutating);
+    const pinnedWorkspace = outgoingWorkspaceId(init, workspaceId);
     const stepUpGeneration = passkeyStepUpGeneration;
     const hasMultipartBody = typeof FormData !== "undefined" && init.body instanceof FormData;
 
@@ -802,7 +898,7 @@ async function requestJson<T>(
     }
 
     if (!res.ok) {
-        throw await getAuthenticatedApiError(res);
+        throw refusalFor(await getAuthenticatedApiError(res), path, mutating, pinnedWorkspace);
     }
 
     try {
@@ -895,7 +991,8 @@ async function requestMultipart<T>(
         throw privilegedMfaConfinementError(suppression);
     }
     const locale = requestLocale(init);
-    const workspaceId = clientWorkspaceId();
+    const workspaceId = requestWorkspaceId(path, true);
+    const pinnedWorkspace = outgoingWorkspaceId(init, workspaceId);
     const stepUpGeneration = passkeyStepUpGeneration;
     const send = (csrf: Record<string, string>) => {
         const headers = new Headers({
@@ -927,7 +1024,7 @@ async function requestMultipart<T>(
         response = await sendWithCsrfRetry();
     }
     if (!response.ok) {
-        throw await getAuthenticatedApiError(response);
+        throw refusalFor(await getAuthenticatedApiError(response), path, true, pinnedWorkspace);
     }
     const text = await response.text();
     return text ? JSON.parse(text) as T : undefined as T;
@@ -1434,6 +1531,10 @@ export class ApiError extends Error {
      * denial, which the backend answers with an explanatory body.
      */
     emptyBody?: boolean;
+    /** For {@link WORKSPACE_UNAVAILABLE_CODE} only: the workspace the refused request was pinned to. */
+    workspaceId?: number;
+    /** For {@link WORKSPACE_UNAVAILABLE_CODE} only: that workspace's name, when the shell ever listed it. */
+    workspaceName?: string;
 
     constructor(
         message: string,
@@ -1451,6 +1552,21 @@ export class ApiError extends Error {
         this.correlationId = correlationId;
         this.emptyBody = emptyBody;
     }
+}
+
+/**
+ * A state-changing request refused because the workspace it was pinned to no longer includes the
+ * caller (#1732). Nothing was written anywhere; whatever the user composed is still on screen and
+ * belongs to that workspace, so it must be reported rather than resubmitted elsewhere. Assigned by
+ * the client from the backend's membership refusal, never sent by the backend itself.
+ */
+export const WORKSPACE_UNAVAILABLE_CODE = "WORKSPACE_UNAVAILABLE";
+
+/** Whether a rejection is the {@link WORKSPACE_UNAVAILABLE_CODE} refusal of a pinned write. */
+export function isWorkspaceUnavailableError(error: unknown): error is ApiError & { workspaceId: number } {
+    return error instanceof ApiError
+        && error.code === WORKSPACE_UNAVAILABLE_CODE
+        && typeof error.workspaceId === "number";
 }
 
 export function isFieldError(err: unknown): err is ApiError & { fieldErrors: ApiFieldErrors } {
@@ -2999,8 +3115,9 @@ export function commitInteractionHistoryImport(
  */
 export async function downloadCsv(path: string, filename: string, init: RequestInit = {}): Promise<void> {
     const locale = localeFromCookieHeader(document.cookie);
-    const workspaceId = clientWorkspaceId();
     const mutating = isMutating(init.method);
+    const workspaceId = requestWorkspaceId(path, mutating);
+    const pinnedWorkspace = outgoingWorkspaceId(init, workspaceId);
     const send = (csrf: Record<string, string>) => {
         const headers = new Headers({
             ...(init.body ? { "Content-Type": "application/json" } : {}),
@@ -3024,7 +3141,7 @@ export async function downloadCsv(path: string, filename: string, init: RequestI
         res = await send(mutating ? await csrfHeader() : {});
     }
     if (!res.ok) {
-        throw await getAuthenticatedApiError(res);
+        throw refusalFor(await getAuthenticatedApiError(res), path, mutating, pinnedWorkspace);
     }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
@@ -6257,7 +6374,8 @@ export async function uploadAiChatAttachment(
 ): Promise<Types.AiChatAttachment> {
     const path = `/api/ai/assistant/sessions/${sessionId}/attachments`;
     const locale = requestLocale(init);
-    const workspaceId = clientWorkspaceId();
+    const workspaceId = requestWorkspaceId(path, true);
+    const pinnedWorkspace = outgoingWorkspaceId(init, workspaceId);
     const send = async (forceRefresh: boolean): Promise<Response> => {
         const csrf = await csrfHeader(forceRefresh);
         const formData = new FormData();
@@ -6302,7 +6420,9 @@ export async function uploadAiChatAttachment(
     if (await shouldRetryWithFreshCsrf(path, response, true)) {
         response = await send(true);
     }
-    if (!response.ok) throw await getAuthenticatedApiError(response);
+    if (!response.ok) {
+        throw refusalFor(await getAuthenticatedApiError(response), path, true, pinnedWorkspace);
+    }
     const text = await response.text();
     if (!text) throw new TypeError('Assistant attachment response was empty');
     const attachment: unknown = JSON.parse(text);
@@ -6546,8 +6666,8 @@ export async function getDashboardLayoutFromCookie(
     }
 }
 
-export function saveDashboardLayout(layout: Types.DashboardLayout) {
-    return putJson<Types.DashboardLayoutResponse>(`/api/dashboard-layout`, { layout });
+export function saveDashboardLayout(layout: Types.DashboardLayout, init: RequestInit = {}) {
+    return putJson<Types.DashboardLayoutResponse>(`/api/dashboard-layout`, { layout }, init);
 }
 
 export function resetDashboardLayout(init: RequestInit = {}) {
@@ -6775,19 +6895,23 @@ function downloadBlob(blob: Blob, filename: string): void {
 async function fetchReportCsv(path: string, init: RequestInit): Promise<Blob> {
     return withReportRequestIdentity(async (signal) => {
         const locale = localeFromCookieHeader(document.cookie);
-        const workspaceId = clientWorkspaceId();
         const mutating = isMutating(init.method);
-        const send = (csrf: Record<string, string>) => fetch(`${API_BASE}${path}`, {
+        const workspaceId = requestWorkspaceId(path, mutating);
+        const pinnedWorkspace = outgoingWorkspaceId(init, workspaceId);
+        const send = (csrf: Record<string, string>) => {
+            const headers = new Headers({
+                "Accept-Language": locale,
+                ...(workspaceId ? { "X-Workspace-Id": workspaceId } : {}),
+                ...csrf,
+            });
+            new Headers(init.headers).forEach((value, key) => headers.set(key, value));
+            return fetch(`${API_BASE}${path}`, {
                 ...init,
                 signal,
                 credentials: "include",
-                headers: {
-                    "Accept-Language": locale,
-                    ...(workspaceId ? { "X-Workspace-Id": workspaceId } : {}),
-                    ...csrf,
-                    ...init.headers,
-                },
+                headers,
             });
+        };
         let res = await send(mutating ? await csrfHeader() : {});
         if (await shouldRetryWithFreshCsrf(path, res, mutating)) {
             res = await send(await csrfHeader(true));
@@ -6797,7 +6921,7 @@ async function fetchReportCsv(path: string, init: RequestInit): Promise<Blob> {
             res = await send(mutating ? await csrfHeader() : {});
         }
         if (!res.ok) {
-            throw await getAuthenticatedApiError(res);
+            throw refusalFor(await getAuthenticatedApiError(res), path, mutating, pinnedWorkspace);
         }
         return res.blob();
     });

@@ -15,13 +15,18 @@ import {
 } from "@heroicons/react/24/outline";
 import type { Contact, Deal, Note, NoteVisibility, User } from "@/app/lib/types";
 import { SegmentedControl } from "@/components/ui/segmented-control";
-import { createNote, updateNote } from "@/app/lib/api";
+import { createNote, isWorkspaceUnavailableError, updateNote } from "@/app/lib/api";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
+import { useWorkspace } from "@/app/hooks/useWorkspace";
+import { DRAFT_VERSIONS, draftKey, writeDraft } from "@/app/lib/formDrafts";
+import { workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
 import { toastError } from "@/app/lib/toast";
 import { deriveNoteTitle } from "@/app/lib/noteText";
 import { CrumbLabel } from "@/app/hooks/useNavTrail";
 import RecordReturnLink from "@/app/components/records/RecordReturnLink";
 import { PageShell } from "@/app/components/PageShell";
 import BacklinksPanel from "./BacklinksPanel";
+import type { NoteDraftData } from "./NoteDialog";
 
 const RichNoteEditor = dynamic(() => import("./RichNoteEditor"), { ssr: false });
 
@@ -45,9 +50,20 @@ type Props = {
 /**
  * Full-page rich note editor. Handles both an existing note and a new draft,
  * persisting via debounced autosave (creating on the first non-empty change).
+ *
+ * Every save, including the flush when the editor unmounts, is pinned to the workspace the editor
+ * was opened in (#1732). A workspace switch publishes the new selection before navigation unmounts
+ * this page, so an unpinned flush would write this note's text into the newly selected workspace.
+ * Once that workspace refuses a save because the viewer is no longer a member, autosave stops for
+ * good: retrying could only fail again. The text stays in the editor and is also kept as that
+ * workspace's note draft, so leaving the page does not discard it and it is only ever offered for
+ * resume in the workspace it was written in.
  */
 export default function NoteEditorView({ note, currentUserId, persons, deals, users, returnPath }: Props) {
     const t = useTranslations("ActivityNotesEditor");
+    const showApiError = useApiErrorToast("ActivityNotesEditor");
+    const { activeWorkspaceId } = useWorkspace();
+    const [originWorkspaceId] = useState(activeWorkspaceId);
 
     const [noteId, setNoteId] = useState<number | null>(note?.id ?? null);
     const [title, setTitle] = useState(note?.title ?? "");
@@ -58,7 +74,9 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
     const [status, setStatus] = useState<SaveStatus>("idle");
     const [titleError, setTitleError] = useState<string | null>(null);
     const dirtyRef = useRef(false);
+    const workspaceRefusedRef = useRef(false);
     const savingRef = useRef(false);
+    const mountedRef = useRef(true);
     const saveRef = useRef<() => void>(() => {});
     const stateRef = useRef({ noteId, title, content, visibility });
 
@@ -66,12 +84,52 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
         stateRef.current = { noteId, title, content, visibility };
     }, [noteId, title, content, visibility]);
 
+    useEffect(() => {
+        mountedRef.current = true;
+        return () => {
+            mountedRef.current = false;
+        };
+    }, []);
+
+    const notePersonId = note?.person ?? null;
+    const noteDealId = note?.deal ?? null;
+    const keepRefusedText = useCallback(() => {
+        const snapshot = stateRef.current;
+        if (!snapshot.content.trim()) return;
+        const data: NoteDraftData = {
+            title: snapshot.title,
+            content: snapshot.content,
+            visibility: snapshot.visibility,
+            personId: notePersonId,
+            dealId: noteDealId,
+        };
+        writeDraft(
+            draftKey({ userId: currentUserId, workspaceId: originWorkspaceId, formType: "note", scope: "global" }),
+            { version: DRAFT_VERSIONS.note, scope: "global", formType: "note", data },
+        );
+    }, [currentUserId, noteDealId, notePersonId, originWorkspaceId]);
+
+    const noteWorkspaceRefused = useCallback((error: unknown): boolean => {
+        if (!isWorkspaceUnavailableError(error)) return false;
+        if (!workspaceRefusedRef.current) {
+            workspaceRefusedRef.current = true;
+            showApiError(error, "saveError");
+        }
+        keepRefusedText();
+        return true;
+    }, [keepRefusedText, showApiError]);
+
     const person = note?.person ? persons.find((item) => item.id === note.person) ?? null : null;
     const deal = note?.deal ? deals.find((item) => item.id === note.deal) ?? null : null;
     const author = users.find((item) => item.id === (note?.author ?? currentUserId)) ?? null;
 
     const save = useCallback(() => {
         if (savingRef.current) return;
+        if (workspaceRefusedRef.current) {
+            dirtyRef.current = false;
+            keepRefusedText();
+            return;
+        }
         const snapshot = stateRef.current;
         const body = snapshot.content;
         const nextTitle = snapshot.title.trim() ? snapshot.title.trim() : null;
@@ -89,29 +147,34 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
         savingRef.current = true;
         dirtyRef.current = false;
         setStatus("saving");
+        const pinned = workspacePinnedRequest(originWorkspaceId);
         const request =
             snapshot.noteId == null
-                ? createNote({ content: body, title: nextTitle, visibility: snapshot.visibility, author: currentUserId })
-                : updateNote(snapshot.noteId, { content: body, title: nextTitle, visibility: snapshot.visibility });
+                ? createNote(
+                    { content: body, title: nextTitle, visibility: snapshot.visibility, author: currentUserId },
+                    pinned,
+                )
+                : updateNote(snapshot.noteId, { content: body, title: nextTitle, visibility: snapshot.visibility }, pinned);
         request
             .then((saved) => {
                 if (snapshot.noteId == null && saved?.id) {
                     stateRef.current = { ...stateRef.current, noteId: saved.id };
                     setNoteId(saved.id);
-                    window.history.replaceState(null, "", `/activity/notes/${saved.id}`);
+                    if (mountedRef.current) window.history.replaceState(null, "", `/activity/notes/${saved.id}`);
                 }
                 setStatus("saved");
             })
-            .catch(() => {
-                dirtyRef.current = true;
+            .catch((error: unknown) => {
                 setStatus("error");
+                if (noteWorkspaceRefused(error)) return;
+                dirtyRef.current = true;
                 toastError(t("saveError"));
             })
             .finally(() => {
                 savingRef.current = false;
                 if (dirtyRef.current) saveRef.current();
             });
-    }, [currentUserId, t]);
+    }, [currentUserId, keepRefusedText, noteWorkspaceRefused, originWorkspaceId, t]);
 
     const ensureNoteId = useCallback(async (): Promise<number> => {
         const existing = stateRef.current.noteId;
@@ -124,6 +187,7 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
             const createdWhileWaiting = stateRef.current.noteId;
             if (createdWhileWaiting != null) return createdWhileWaiting;
         }
+        if (workspaceRefusedRef.current) throw new Error("workspace-unavailable");
 
         const snapshot = stateRef.current;
         const nextTitle = snapshot.title.trim() ? snapshot.title.trim() : null;
@@ -143,23 +207,23 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
                 title: nextTitle,
                 visibility: snapshot.visibility,
                 author: currentUserId,
-            });
+            }, workspacePinnedRequest(originWorkspaceId));
             if (!saved?.id) throw new Error("missing-note-id");
             stateRef.current = { ...stateRef.current, noteId: saved.id };
             setNoteId(saved.id);
-            window.history.replaceState(null, "", `/activity/notes/${saved.id}`);
+            if (mountedRef.current) window.history.replaceState(null, "", `/activity/notes/${saved.id}`);
             dirtyRef.current = false;
             setStatus("saved");
             return saved.id;
         } catch (error) {
-            dirtyRef.current = true;
             setStatus("error");
+            if (!noteWorkspaceRefused(error)) dirtyRef.current = true;
             throw error;
         } finally {
             savingRef.current = false;
             if (dirtyRef.current) saveRef.current();
         }
-    }, [currentUserId, t]);
+    }, [currentUserId, noteWorkspaceRefused, originWorkspaceId, t]);
 
     useEffect(() => {
         saveRef.current = save;
