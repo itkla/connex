@@ -20,7 +20,7 @@ const startAuthentication = vi.hoisted(() => vi.fn(async (): Promise<Authenticat
 
 vi.mock("@simplewebauthn/browser", () => ({ startAuthentication }));
 
-const FILTER_SOURCE = path.resolve(
+const POLICY_SOURCE = path.resolve(
     process.cwd(),
     "..",
     "backend",
@@ -32,7 +32,7 @@ const FILTER_SOURCE = path.resolve(
     "connex",
     "backend",
     "config",
-    "PrivilegedMfaEnforcementFilter.java",
+    "PrivilegedMfaRequestPolicy.java",
 );
 const CLIENT_SOURCE = path.resolve(process.cwd(), "app", "lib", "api.ts");
 
@@ -201,10 +201,10 @@ describe("passkey approval code requests", () => {
             .toEqual(["/api/orgs/3/leave"]);
     });
 
-    it("keeps the client's safe exits exactly the server filter's", () => {
-        const filter = readFileSync(FILTER_SOURCE, "utf8");
+    it("keeps the client's safe exits exactly the server policy's", () => {
+        const policy = readFileSync(POLICY_SOURCE, "utf8");
         const client = readFileSync(CLIENT_SOURCE, "utf8");
-        const server = filter.match(/SAFE_EXIT_PATH = Pattern\.compile\("([^"]+)"\)/);
+        const server = policy.match(/SAFE_EXIT_PATH = Pattern\.compile\(\s*"([^"]+)"\s*\)/);
         const browser = client.match(/PRIVILEGED_MFA_SAFE_EXIT_POST_PATH = \/\^(.+)\$\/;/);
 
         expect(server).not.toBeNull();
@@ -212,14 +212,14 @@ describe("passkey approval code requests", () => {
         expect(browser?.[1].replaceAll("\\/", "/")).toBe(server?.[1].replaceAll("\\\\", "\\"));
     });
 
-    it("keeps the client's confinement allowlist exactly the server filter's", () => {
-        const filter = readFileSync(FILTER_SOURCE, "utf8");
+    it("keeps the client's confinement allowlist exactly the server policy's", () => {
+        const policy = readFileSync(POLICY_SOURCE, "utf8");
         const client = readFileSync(CLIENT_SOURCE, "utf8");
 
         expect(declaredPaths(client, "const PRIVILEGED_MFA_ENROLLMENT_GET_PATHS"))
-            .toEqual(declaredPaths(filter, "Set<String> ENROLLMENT_GET_PATHS"));
+            .toEqual(declaredPaths(policy, "Set<String> ENROLLMENT_GET_PATHS"));
         expect(declaredPaths(client, "const PRIVILEGED_MFA_ENROLLMENT_POST_PATHS"))
-            .toEqual(declaredPaths(filter, "Set<String> ENROLLMENT_POST_PATHS"));
+            .toEqual(declaredPaths(policy, "Set<String> ENROLLMENT_POST_PATHS"));
         expect(declaredPaths(client, "const PRIVILEGED_MFA_ENROLLMENT_POST_PATHS")).toEqual(expect.arrayContaining([
             "/api/auth/webauthn/attestation",
             "/api/auth/webauthn/attestation/options",

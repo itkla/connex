@@ -58,6 +58,9 @@ import org.springframework.transaction.support.TransactionTemplate;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.config.PrivilegedMfaEnforcementFilter;
+import ooo.klae.connex.backend.exceptions.PrivilegedMfaAttestationRequiredException;
+import ooo.klae.connex.backend.exceptions.PrivilegedMfaEnrollmentRequiredException;
+import jakarta.servlet.ServletException;
 import ooo.klae.connex.backend.publicapi.ApiCredentialAuthenticationFilter.RouteTransactionMode;
 import ooo.klae.connex.backend.publicapi.ApiCredentialService.AuthenticatedCredential;
 import ooo.klae.connex.backend.publicapi.ApiCredentialService.RoutingBinding;
@@ -677,6 +680,30 @@ class ApiCredentialAuthenticationFilterTest {
         transactionTemplate.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
         transactionTemplate.setReadOnly(true);
         return authenticatedFilter(transactionMode, transactionTemplate);
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void lockedConfinementPropagatingOutOfDispatchKeepsUnauthorizedEnvelope(boolean wrapped) throws Exception {
+        for (boolean attestation : new boolean[] {false, true}) {
+            var filter = authenticatedFilter(RouteTransactionMode.WRITE, new TestTransactionManager(false));
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            RuntimeException refusal = attestation ? new PrivilegedMfaAttestationRequiredException()
+                : new PrivilegedMfaEnrollmentRequiredException();
+            filter.doFilter(authenticatedRequest("POST"), response, (request, servletResponse) -> {
+                assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
+                if (wrapped) {
+                    throw new ServletException(refusal);
+                }
+                throw refusal;
+            });
+            JsonNode error = new ObjectMapper().readTree(response.getContentAsByteArray()).path("error");
+            assertEquals(401, response.getStatus());
+            assertEquals(attestation ? "privileged_mfa_attestation_required" : "privileged_mfa_enrollment_required",
+                error.path("code").stringValue());
+            assertEquals(refusal.getMessage(), error.path("message").stringValue());
+            assertTrue(error.has("request_id"));
+        }
     }
 
     private ApiCredentialAuthenticationFilter authenticatedFilter(

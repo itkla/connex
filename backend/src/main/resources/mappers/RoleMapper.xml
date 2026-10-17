@@ -64,6 +64,14 @@
     FOR UPDATE
   </select>
 
+  <select id="lockPermissionsForShare" resultType="string" flushCache="true" useCache="false">
+    SELECT wrp.permission FROM workspace_role_permission wrp
+    JOIN workspace_role wr ON wr.id = wrp.workspace_role_id AND wr.workspace_id = #{workspaceId}
+    WHERE wrp.workspace_role_id = #{roleId}
+    ORDER BY wrp.permission
+    FOR SHARE
+  </select>
+
   <update id="updateRoleName">
     UPDATE workspace_role SET name = #{name}
     WHERE workspace_id = #{workspaceId} AND id = #{id}

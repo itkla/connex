@@ -639,6 +639,70 @@ class UploadMaliciousFixtureCorpusTest {
             format, PackageFixtures.officeSignatureXml(format, false, false, ""))));
     }
 
+    /**
+     * Keeps the origin graph connected so only the directory-casing refusal stops markup outside
+     * the closed signature vocabulary from being accepted by the general XML rules.
+     */
+    @ParameterizedTest
+    @MethodSource("nonCanonicalSignatureParts")
+    void rejectsSignaturePartsWithNonCanonicalDirectoryCasing(String signaturePart) throws Exception {
+        refused(UploadFormat.DOCX, signatureCasingPackage(
+            "_xmlsignatures/origin.sigs", "_xmlsignatures/_rels/origin.sigs.rels", signaturePart,
+            "<Signature xmlns=\"" + PackageFixtures.XMLDSIG_NAMESPACE + "\"><Unexpected/></Signature>"));
+    }
+
+    private static Stream<String> nonCanonicalSignatureParts() {
+        return Stream.of("_XMLSIGNATURES/sig1.xml", "_XmlSignatures/sig1.xml",
+            "_XmlSignatures/nested/sig1.XML");
+    }
+
+    @ParameterizedTest(name = "{0}, {1}")
+    @MethodSource("nonCanonicalSignatureOriginPaths")
+    void rejectsSignatureOriginPathsWithNonCanonicalCasing(String originPart, String relationshipsPart)
+            throws Exception {
+        refused(UploadFormat.DOCX, signatureCasingPackage(originPart, relationshipsPart,
+            "_xmlsignatures/sig1.xml",
+            PackageFixtures.officeSignatureXml(UploadFormat.DOCX, false, false, "")));
+    }
+
+    private static Stream<Arguments> nonCanonicalSignatureOriginPaths() {
+        return Stream.of(
+            Arguments.of("_XmlSignatures/origin.sigs", "_XmlSignatures/_rels/origin.sigs.rels"),
+            Arguments.of("_xmlsignatures/Origin.sigs", "_xmlsignatures/_rels/Origin.sigs.rels"),
+            Arguments.of("_xmlsignatures/origin.SIGS", "_xmlsignatures/_rels/origin.SIGS.rels"),
+            Arguments.of("_xmlsignatures/origin.sigs", "_XMLSIGNATURES/_rels/origin.sigs.rels"),
+            Arguments.of("_xmlsignatures/origin.sigs", "_xmlsignatures/_ReLs/origin.sigs.rels"),
+            Arguments.of("_xmlsignatures/origin.sigs", "_xmlsignatures/_rels/Origin.sigs.rels"),
+            Arguments.of("_xmlsignatures/origin.sigs", "_xmlsignatures/_rels/origin.sigs.ReLs"));
+    }
+
+    private static byte[] signatureCasingPackage(
+            String originPart, String relationshipsPart, String signaturePart, String signatureXml)
+            throws IOException {
+        return PackageFixtures.ooxml(UploadFormat.DOCX,
+            PackageFixtures.defaultType("sigs", PackageFixtures.SIGNATURE_ORIGIN_CONTENT_TYPE)
+                + PackageFixtures.override("/" + signaturePart, PackageFixtures.SIGNATURE_CONTENT_TYPE),
+            PackageFixtures.relationship("rIdSigOrigin", PackageFixtures.SIGNATURE_ORIGIN_RELATIONSHIP,
+                originPart),
+            PackageFixtures.members(
+                originPart, new byte[0],
+                relationshipsPart, PackageFixtures.ascii(PackageFixtures.relationships(
+                    PackageFixtures.relationship("rIdSig1", PackageFixtures.SIGNATURE_RELATIONSHIP,
+                        "../" + signaturePart))),
+                signaturePart, PackageFixtures.ascii(signatureXml)));
+    }
+
+    @ParameterizedTest
+    @MethodSource("nonCanonicalSignatureDirectories")
+    void rejectsEmptySignatureDirectoriesWithNonCanonicalCasing(String directory) throws Exception {
+        refused(UploadFormat.DOCX, PackageFixtures.ooxml(UploadFormat.DOCX, "", "",
+            PackageFixtures.members(directory, new byte[0])));
+    }
+
+    private static Stream<String> nonCanonicalSignatureDirectories() {
+        return Stream.of("_XMLSIGNATURES/", "_XmlSignatures/nested/", "_XMLSIGNATURES/_rels/");
+    }
+
     @ParameterizedTest
     @EnumSource(value = UploadFormat.class, names = {"DOCX", "XLSX", "PPTX"})
     void acceptsSignedOoxmlWithDerCertificateParts(UploadFormat format) throws Exception {
@@ -839,7 +903,22 @@ class UploadMaliciousFixtureCorpusTest {
             "_xmlsignatures/cert.pem", "_xmlsignatures/cert.p7b", "_xmlsignatures/cert",
             "_xmlsignatures/.cer", "_xmlsignatures/_rels/cert.cer",
             "_xmlsignatures/nested/_ReLs/cert.cer", "word/cert.cer", "cert.cer",
-            "_XMLSIGNATURES/cert.cer", "package/services/digital-signature/certificate/cert.cer");
+            "_XMLSIGNATURES/cert.cer", "_XmlSignatures/cert.cer",
+            "package/services/digital-signature/certificate/cert.cer");
+    }
+
+    @ParameterizedTest
+    @MethodSource("nonCanonicalSignatureCompanions")
+    void rejectsSignatureCompanionsWithNonCanonicalCasing(String relationshipsPart) throws Exception {
+        Map<String, byte[]> parts = certificateParts();
+        parts.put(relationshipsPart, parts.remove("_xmlsignatures/_rels/sig1.xml.rels"));
+        refused(UploadFormat.DOCX, certificatePackage(certificateDefaultType(), parts));
+    }
+
+    private static Stream<String> nonCanonicalSignatureCompanions() {
+        return Stream.of("_XMLSIGNATURES/_rels/sig1.xml.rels", "_XmlSignatures/_rels/sig1.xml.rels",
+            "_xmlsignatures/_ReLs/sig1.xml.rels", "_xmlsignatures/_rels/sig1.xml.ReLs",
+            "_xmlsignatures/_rels/Sig1.xml.rels");
     }
 
     @Test

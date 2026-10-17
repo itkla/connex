@@ -18,6 +18,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.PrivilegedMfaAttestationRequiredException;
+import ooo.klae.connex.backend.exceptions.PrivilegedMfaEnrollmentRequiredException;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.DenialAuditRateLimiter;
 import ooo.klae.connex.backend.services.PrivilegedAccountService;
@@ -40,34 +41,13 @@ import ooo.klae.connex.backend.util.ClientIpResolver;
  * Every denied request is still refused.
  */
 public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
-    public static final String ENROLLMENT_REQUIRED_CODE = "PRIVILEGED_MFA_ENROLLMENT_REQUIRED";
+    public static final String ENROLLMENT_REQUIRED_CODE = PrivilegedMfaEnrollmentRequiredException.CODE;
     public static final String ATTESTATION_REQUIRED_CODE = PrivilegedMfaAttestationRequiredException.CODE;
     private static final Logger log = LoggerFactory.getLogger(PrivilegedMfaEnforcementFilter.class);
     private static final String ENROLLMENT_DENIED_ACTION = "auth.mfa.policy.denied";
     private static final String RECENT_AUTHENTICATION_REQUIRED_CODE = "RECENT_AUTHENTICATION_REQUIRED";
-    private static final Set<String> ENROLLMENT_GET_PATHS = Set.of(
-            "/api/auth/me",
-            "/api/auth/csrf",
-            "/api/auth/webauthn/register/requirements",
-            "/api/auth/webauthn/credentials",
-            "/api/capabilities",
-            "/api/workspaces",
-            "/api/ownership-offers");
-    private static final Set<String> ENROLLMENT_POST_PATHS = Set.of(
-            "/api/auth/logout",
-            "/api/auth/webauthn/register/options",
-            "/api/auth/webauthn/register",
-            "/api/auth/webauthn/register/confirmation",
-            "/api/auth/webauthn/register/confirmation/exchange",
-            "/api/auth/webauthn/recover",
-            "/api/auth/webauthn/attestation/options",
-            "/api/auth/webauthn/attestation");
-    private static final Pattern SAFE_EXIT_PATH = Pattern.compile("(?:/api/(?:workspaces|orgs)/\\d+/leave|/api/ownership-offers/\\d+/decline)");
     private static final Set<String> EXACT_EXPORT_PATHS = Set.of(
             "/api/audit/export");
-    private static final Set<String> LINK_FLOW_PATHS = Set.of(
-            "/api/document-acceptance",
-            "/api/delivery/unsubscribe");
     private static final String IDENTIFIER_SEGMENT = "[^/]+";
     private static final Pattern ORG_AUDIT_EXPORT = Pattern.compile(
             "/api/orgs/" + IDENTIFIER_SEGMENT + "/audit/export");
@@ -108,10 +88,9 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
             return;
         }
         String path = RequestPathNormalizer.apiPath(request);
+        boolean exempt = PrivilegedMfaRequestPolicy.bindBrowser(request, user.getId(), path);
         if (properties.isEnforced()
-                && !isEnrollmentPath(request.getMethod(), path)
-                && !isSafeExitPath(request.getMethod(), path)
-                && !isLinkFlowPath(path)) {
+                && !exempt) {
             PrivilegedMfaStanding standing = privilegedAccountService.enforcedStanding(user.getId());
             if (standing == PrivilegedMfaStanding.ENROLLMENT_REQUIRED) {
                 recordDenial(request, user, ENROLLMENT_DENIED_ACTION,
@@ -209,21 +188,7 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
 
     /** Whether the request is a grant-cookie recipient surface rather than a session-authorized one. */
     static boolean isLinkFlowPath(String path) {
-        return LINK_FLOW_PATHS.stream()
-                .anyMatch(prefix -> path.equals(prefix) || path.startsWith(prefix + "/"));
-    }
-
-    /**
-     * The safe exits (#1534): leaving the workspace or organization whose membership confines the
-     * account. Leaving only gives up authority, so a confined account can always do it.
-     */
-    private static boolean isSafeExitPath(String method, String path) {
-        return "POST".equals(method) && SAFE_EXIT_PATH.matcher(path).matches();
-    }
-
-    private static boolean isEnrollmentPath(String method, String path) {
-        return ("GET".equals(method) && ENROLLMENT_GET_PATHS.contains(path))
-                || ("POST".equals(method) && ENROLLMENT_POST_PATHS.contains(path));
+        return PrivilegedMfaRequestPolicy.isLinkFlowPath(path);
     }
 
     private static void deny(HttpServletResponse response, String code, String message) throws IOException {

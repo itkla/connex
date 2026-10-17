@@ -87,6 +87,7 @@ public class WorkspaceService {
     private final AccountDeletionReservationRead accountDeletionReservationRead;
     private final RegistrationVerificationService registrationVerificationService;
     private final OwnershipOfferWriter ownershipOfferWriter;
+    private final PrivilegedMfaLockedAuthorization privilegedMfaLockedAuthorization;
 
     private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final int WORKSPACE_NAME_MAX = 128;
@@ -549,6 +550,7 @@ public class WorkspaceService {
                 throw authorizationRequired(userId, required);
             }
         }
+        Integer confinementActor = confinementActor(userIds);
         boolean workspaceAvailable = exclusiveWorkspace
             ? workspaceMapper.lockActiveIdentity(workspaceId) != null
             : workspaceMapper.lockActiveWorkspaceForShare(workspaceId) != null;
@@ -613,6 +615,10 @@ public class WorkspaceService {
                 }
             }
             effectiveByUser.put(userId, Set.copyOf(effective));
+        }
+        if (confinementActor != null) {
+            requireLockedMfa(confinementActor, workspaceId, memberships.get(confinementActor),
+                effectiveByUser.get(confinementActor));
         }
         return Map.copyOf(effectiveByUser);
     }
@@ -713,23 +719,69 @@ public class WorkspaceService {
      * the user root, the active workspace root, and the exact membership — so a demotion
      * committing while the caller's transaction is open cannot be missed by its consistent-read
      * snapshot. Must run inside a transaction and be acquired before any tenant record lock so it
-     * keeps the repository's membership then record order.
+     * keeps the repository's membership then record order. Custom overlays cannot qualify as built-in
+     * administrators, but the request actor's current local permissions still determine confinement
+     * before this helper returns false. Their role root and permissions are retained exclusively so
+     * a later permission authorization in the same transaction never upgrades shared role locks.
      */
     public boolean isLockedBuiltInAdministrator(int workspaceId, int userId) {
-        if (!Boolean.FALSE.equals(userMapper.isAccountDeletionReservedForShare(userId))) {
+        return isLockedBuiltInAdministrator(workspaceId, userId, null);
+    }
+
+    /**
+     * Retains an existing account-wide step-up fence before the confinement credential read.
+     * Report deletion already locks these assigned role roots; acquiring them between membership
+     * and credential locks prevents a coverage-gap lock from preceding a later role-root wait.
+     * The caller already holds the assigned-role account's root. Ordinary administrator checks
+     * continue to use {@link #isLockedBuiltInAdministrator(int, int)} without this extra fence.
+     *
+     * @param workspaceId workspace whose administrator authority is required
+     * @param userId member whose built-in administrator authority is resolved
+     * @param assignedRoleUserId step-up actor whose account root the caller already holds
+     * @return current built-in administrator authority with the existing role fence retained
+     */
+    public boolean isLockedBuiltInAdministratorWithAssignedRoles(
+            int workspaceId, int userId, int assignedRoleUserId) {
+        return isLockedBuiltInAdministrator(workspaceId, userId, Integer.valueOf(assignedRoleUserId));
+    }
+
+    private boolean isLockedBuiltInAdministrator(
+            int workspaceId, int userId, Integer assignedRoleUserId) {
+        WorkspaceMember membership = lockAdministratorAuthorizationMembership(workspaceId, userId);
+        if (assignedRoleUserId != null) {
+            userMapper.lockAssignedCustomRoleRowsForShare(assignedRoleUserId);
+        }
+        if (membership == null) {
             return false;
         }
+        Integer confinementActor = confinementActor(Set.of(userId));
+        Set<Permission> permissions = Set.of();
+        if (confinementActor != null && membership.getRoleId() != null) {
+            int roleId = membership.getRoleId();
+            if (assignedRoleUserId != null) {
+                permissions = parsePermissions(roleMapper.lockPermissionsForShare(workspaceId, roleId));
+            } else if (roleMapper.lockRole(workspaceId, roleId) != null) {
+                permissions = parsePermissions(roleMapper.lockPermissions(workspaceId, roleId));
+            }
+        }
+        requireLockedMfa(confinementActor, workspaceId, membership, permissions);
+        Role role = Role.of(membership.getRole());
+        return membership.getRoleId() == null && role != null && role.ordinal() >= Role.ADMIN.ordinal();
+    }
+
+    private WorkspaceMember lockAdministratorAuthorizationMembership(int workspaceId, int userId) {
+        if (!Boolean.FALSE.equals(userMapper.isAccountDeletionReservedForShare(userId))) {
+            return null;
+        }
         if (workspaceMapper.lockActiveWorkspaceForShare(workspaceId) == null) {
-            return false;
+            return null;
         }
         WorkspaceMember membership = workspaceMapper.lockAuthorizationMembership(workspaceId, userId);
         if (!isExactMembership(membership, workspaceId, userId)
-                || !"active".equals(membership.getStatus())
-                || membership.getRoleId() != null) {
-            return false;
+                || !"active".equals(membership.getStatus())) {
+            return null;
         }
-        Role role = Role.of(membership.getRole());
-        return role != null && role.ordinal() >= Role.ADMIN.ordinal();
+        return membership;
     }
 
     /** Fail-closed form of {@link #isLockedBuiltInAdministrator(int, int)}. */
@@ -804,6 +856,7 @@ public class WorkspaceService {
         if (!Boolean.FALSE.equals(userMapper.isAccountDeletionReservedForShare(userId))) {
             return new LockedMemberPermissionsAndMemberships(Set.of(), Set.of());
         }
+        Integer confinementActor = confinementActor(Set.of(userId));
         if (workspaceMapper.lockActiveWorkspaceForShare(workspaceId) == null) {
             return new LockedMemberPermissionsAndMemberships(Set.of(), Set.of());
         }
@@ -838,6 +891,7 @@ public class WorkspaceService {
                 }
             }
         }
+        requireLockedMfa(confinementActor, workspaceId, membership, permissions);
         return new LockedMemberPermissionsAndMemberships(Set.copyOf(permissions), Set.copyOf(activeAdditionalIds));
     }
 
@@ -915,6 +969,7 @@ public class WorkspaceService {
         if (!Boolean.FALSE.equals(userMapper.isAccountDeletionReservedForShare(userId))) {
             return null;
         }
+        Integer confinementActor = confinementActor(Set.of(userId));
         Integer organizationId = workspaceMapper.lockActiveWorkspaceForShare(workspaceId);
         if (organizationId == null) {
             return null;
@@ -942,6 +997,7 @@ public class WorkspaceService {
             }
             permissions = parsePermissions(roleMapper.lockPermissions(workspaceId, roleId));
         }
+        requireLockedMfa(confinementActor, workspaceId, membership, permissions);
         return new LockedMemberAuthorization(
             membershipId, organizationId, Set.copyOf(permissions));
     }
@@ -973,6 +1029,7 @@ public class WorkspaceService {
                     && !userMapper.isAccountDeletionReserved(userId);
             }
         }
+        Integer confinementActor = confinementActor(Set.of(actorId));
         if (workspaceMapper.lockActiveWorkspaceForShare(workspaceId) == null) {
             return EnumSet.noneOf(Permission.class);
         }
@@ -1005,12 +1062,12 @@ public class WorkspaceService {
                 || !"active".equals(actorMembership.getStatus())) {
             return EnumSet.noneOf(Permission.class);
         }
-        if (actorMembership.getRoleId() != null) {
-            return rolePermissions.getOrDefault(
-                actorMembership.getRoleId(), EnumSet.noneOf(Permission.class));
-        }
         Role role = Role.of(actorMembership.getRole());
-        return role == null ? EnumSet.noneOf(Permission.class) : builtInPermissions(role);
+        Set<Permission> permissions = actorMembership.getRoleId() != null
+            ? rolePermissions.getOrDefault(actorMembership.getRoleId(), EnumSet.noneOf(Permission.class))
+            : role == null ? EnumSet.noneOf(Permission.class) : builtInPermissions(role);
+        requireLockedMfa(confinementActor, workspaceId, actorMembership, permissions);
+        return permissions;
     }
 
     /** Returns the current member's effective permissions in the active workspace. */
@@ -1101,6 +1158,7 @@ public class WorkspaceService {
                 || userMapper.isAccountDeletionReserved(actorId)) {
             throw workspaceSettingsForbidden();
         }
+        Integer confinementActor = confinementActor(Set.of(actorId));
         Workspace workspace = workspaceMapper.lockActiveIdentity(workspaceId);
         if (workspace == null) {
             throw workspaceSettingsForbidden();
@@ -1130,6 +1188,7 @@ public class WorkspaceService {
         if (!permissions.contains(Permission.WORKSPACE_SETTINGS)) {
             throw workspaceSettingsForbidden();
         }
+        requireLockedMfa(confinementActor, workspaceId, membership, permissions);
         return workspace;
     }
 
@@ -1288,6 +1347,7 @@ public class WorkspaceService {
                 throw new ConflictException("Invite recipient changed; refresh and retry");
             }
         }
+        Integer confinementActor = confinementActor(Set.of(actorId));
 
         Workspace workspace = workspaceMapper.lockActiveIdentity(workspaceId);
         if (workspace == null
@@ -1336,6 +1396,7 @@ public class WorkspaceService {
             throw permissionRequired(Permission.MEMBER_MANAGE);
         }
         requireGrantable(actorPermissions, builtInPermissions(requestedRole));
+        requireLockedMfa(confinementActor, workspaceId, actorMembership, actorPermissions);
         return targetActive;
     }
 
@@ -1837,6 +1898,7 @@ public class WorkspaceService {
                 throw roleMutationTargetNotFound();
             }
         }
+        Integer confinementActor = confinementActor(Set.of(actorId));
         lockWorkspaceMutationRoot(workspaceId);
         Map<Integer, WorkspaceMember> memberships = new LinkedHashMap<>();
         for (int userId : userIds) {
@@ -1911,6 +1973,7 @@ public class WorkspaceService {
             throw new ForbiddenException(
                 "Requires the " + requiredPermission + " permission in this workspace");
         }
+        requireLockedMfa(confinementActor, workspaceId, actorMembership, actorPermissions);
         Map<Integer, Set<Permission>> lockedRolePermissions = Map.copyOf(rolePermissions);
         return new LockedRoleMutation(
             actorMembership,
@@ -1921,9 +1984,21 @@ public class WorkspaceService {
             new OwnerRecovery(overlayByOwner(activeOwners), lockedRolePermissions));
     }
 
+    private Integer confinementActor(Set<Integer> userIds) {
+        return privilegedMfaLockedAuthorization.requestActor(userIds);
+    }
+
+    private void requireLockedMfa(Integer actorId, int workspaceId, WorkspaceMember membership,
+            Set<Permission> permissions) {
+        lockWithoutWaiting(() -> {
+            privilegedMfaLockedAuthorization.requireAllowed(actorId, workspaceId, membership, permissions);
+            return null;
+        });
+    }
+
     /**
-     * Departure cleanup can hold a membership before requesting the workspace root. Refusing
-     * contention here prevents a cycle while retaining a current owner/assignee snapshot.
+     * Membership-first cleanup and credential-first assertion updates can invert against these
+     * authorization roots. Refusing exact NOWAIT contention preserves the existing retry contract.
      */
     private <T> T lockWithoutWaiting(Supplier<T> lockingRead) {
         try {

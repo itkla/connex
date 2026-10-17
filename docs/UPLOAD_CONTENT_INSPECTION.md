@@ -121,6 +121,16 @@ extension families (`.svg`, `.svm`, `.wdp`, `.hdp`, `.html`, `.htm`, `.xhtml`, `
 refused, and every `META-INF/` part other than `manifest.xml` and `documentsignatures.xml` is
 refused, so `macrosignatures.xml` never gets an exemption.
 
+OOXML members whose paths start with `_xmlsignatures/` ignoring case must use that exact
+lower-case prefix. Non-canonical prefixes such as `_XMLSIGNATURES/` or `_XmlSignatures/` are
+refused during classification, including empty directory entries, so they cannot select general
+XML inspection in place of the closed signature vocabulary. The origin part and its companion
+must be exactly `_xmlsignatures/origin.sigs` and `_xmlsignatures/_rels/origin.sigs.rels`.
+Signature-owned companions require the exact `_rels/` directory and `.rels` suffix, with an
+owner name matching an admitted signature exactly. Signature `.xml` and certificate `.cer`
+extensions remain case-insensitive; relationship targets preserve case and must resolve to the
+exact admitted member.
+
 ### Declared-type binding
 
 The package's own declared media types are bound to the members they describe, **after** the pass,

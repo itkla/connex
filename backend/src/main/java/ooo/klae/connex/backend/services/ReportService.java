@@ -452,9 +452,8 @@ public class ReportService {
         if (userMapper.lockByIdForShare(actorId) == null) {
             throw new ForbiddenException("Authenticated user is unavailable");
         }
-        boolean builtInAdministrator = workspaceService.isLockedBuiltInAdministrator(
-            workspaceId, currentUserId);
-        userMapper.lockAssignedCustomRoleRowsForShare(actorId);
+        boolean builtInAdministrator = workspaceService.isLockedBuiltInAdministratorWithAssignedRoles(
+            workspaceId, currentUserId, actorId);
         reportMapper.lockDefinitions(workspaceId);
         ReportDefinition definition = reportMapper.getDefinition(workspaceId, id);
         if (definition == null) {

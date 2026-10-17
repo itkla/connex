@@ -1181,6 +1181,73 @@ class AuditServiceTest {
                 "document.accept", "document", 6, "Quote", "Accepted quote", null));
     }
 
+    @ParameterizedTest
+    @ValueSource(ints = {TransactionSynchronization.STATUS_COMMITTED, TransactionSynchronization.STATUS_ROLLED_BACK})
+    void lockedDenialCapturesMetadataAndAppendsOnlyAfterCompletion(int completion) {
+        User actor = new User();
+        actor.setId(42);
+        actor.setDisplayName("Refused actor");
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken(actor, null, actor.getAuthorities()));
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/companies");
+        request.addHeader("User-Agent", "captured-agent");
+        request.addHeader("Sec-Fetch-Site", "same-origin");
+        request.getSession().setAttribute("proof", "captured");
+        Runnable appendFailed = mock(Runnable.class);
+        TransactionSynchronizationManager.initSynchronization();
+        List<TransactionSynchronization> callbacks;
+        try {
+            service.deferStrictFailureIndependentScoped("auth.mfa.policy.denied", "user", 42,
+                null, null, actor.getDisplayName(), "Privileged account confined pending MFA enrollment",
+                "enrollment_required", request, "192.0.2.73", appendFailed);
+            verifyNoInteractions(auditIntegrityService, appendFailed);
+            callbacks = TransactionSynchronizationManager.getSynchronizations();
+            assertEquals(1, callbacks.size());
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+            SecurityContextHolder.clearContext();
+            RequestContextHolder.resetRequestAttributes();
+        }
+        request.removeHeader("User-Agent");
+        request.addHeader("User-Agent", "later-agent");
+        request.removeHeader("Sec-Fetch-Site");
+        callbacks.getFirst().afterCompletion(completion);
+        ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).appendIndependent(captor.capture());
+        AuditLog entry = captor.getValue();
+        assertEquals(42, entry.getActorId());
+        assertEquals(42, entry.getEntityId());
+        assertEquals("Refused actor", entry.getActorLabel());
+        assertNull(entry.getWorkspaceId());
+        assertNull(entry.getOrgId());
+        assertEquals("192.0.2.73", entry.getIpAddress());
+        assertEquals("captured-agent", entry.getUserAgent());
+        assertNotNull(entry.getSessionId());
+        assertEquals("same-origin", objectMapper.readTree(entry.getContext()).path("secFetchSite").stringValue());
+        assertEquals("enrollment_required", objectMapper.readTree(entry.getContext()).path("error").stringValue());
+        verifyNoInteractions(appendFailed);
+    }
+
+    @Test
+    void deferredDenialAppendFailureReturnsItsRateLimiterAdmission() {
+        Runnable appendFailed = mock(Runnable.class);
+        doThrow(new IllegalStateException("append rejected"))
+            .when(auditIntegrityService).appendIndependent(any(AuditLog.class));
+        TransactionSynchronizationManager.initSynchronization();
+        List<TransactionSynchronization> callbacks;
+        try {
+            service.deferStrictFailureIndependentScoped("auth.mfa.policy.denied", "user", 42,
+                null, null, null, "Refused", "enrollment_required",
+                new MockHttpServletRequest(), "192.0.2.73", appendFailed);
+            verifyNoInteractions(appendFailed, auditIntegrityService);
+            callbacks = TransactionSynchronizationManager.getSynchronizations();
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+        assertDoesNotThrow(() -> callbacks.getFirst().afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK));
+        verify(appendFailed).run();
+    }
+
     /**
      * An independent append runs in its own transaction, so even inside the caller's transaction its
      * failed commit leaves the caller's transaction standing.
