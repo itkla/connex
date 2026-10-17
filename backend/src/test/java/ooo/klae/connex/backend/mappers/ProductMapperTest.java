@@ -173,15 +173,15 @@ class ProductMapperTest extends AbstractMapperTest {
             facetIds(search, null, null, List.of("bounded")));
         assertEquals(
             List.of(oneTimeActive.getId(), recurringActive.getId()),
-            facetIds(search, null, null, List.of("none")));
+            facetIds(search, null, null, List.of("__empty__")));
         assertEquals(
             List.of(oneTimeActive.getId(), recurringActive.getId(), recurringInactiveStarting.getId(),
                 oneTimeEnding.getId()),
-            facetIds(search, null, null, List.of("bounded", "none")));
+            facetIds(search, null, null, List.of("bounded", "__empty__")));
         assertEquals(
             List.of(oneTimeEnding.getId()),
             facetIds(search, List.of("one_time"), List.of("true"), List.of("bounded")));
-        assertTrue(facetIds(search, List.of("recurring"), List.of("false"), List.of("none")).isEmpty());
+        assertTrue(facetIds(search, List.of("recurring"), List.of("false"), List.of("__empty__")).isEmpty());
     }
 
     private List<Integer> facetIds(

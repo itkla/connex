@@ -122,11 +122,11 @@ class ExportControllerTest {
         ExportController controller = new ExportController(
             exportService, memberScopeResolver, warmthFilterResolver, workspaceService);
         ProductFacetFilter facets = ProductFacetFilter.fromRequest(
-            List.of("recurring"), List.of("true", "false"), List.of("none"));
+            List.of("recurring"), List.of("true", "false"), List.of("__empty__"));
         when(exportService.exportProducts(null, facets)).thenReturn("id\r\n");
 
         controller.exportProducts(
-            " ", List.of(" Recurring "), List.of("TRUE", "false"), List.of("none"));
+            " ", List.of("recurring"), List.of("true", "false"), List.of("__empty__"));
 
         verify(exportService).exportProducts(null, facets);
     }
@@ -139,9 +139,9 @@ class ExportControllerTest {
         assertThrows(BadRequestException.class,
             () -> controller.exportProducts(null, List.of("weekly"), null, null));
         assertThrows(BadRequestException.class,
-            () -> controller.exportProducts(null, null, List.of("yes"), null));
+            () -> controller.exportProducts(null, null, List.of("TRUE"), null));
         assertThrows(BadRequestException.class,
-            () -> controller.exportProducts(null, null, null, List.of("expired")));
+            () -> controller.exportProducts(null, null, null, List.of("none")));
         verify(exportService, never()).exportProducts(any(), any());
     }
 }

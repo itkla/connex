@@ -21,29 +21,34 @@ class ProductFacetFilterTest {
     }
 
     @Test
-    void valuesAreTrimmedCaseFoldedAndDeduplicated() {
+    void theBrowserFacetKeysResolveAndRepeatsCollapse() {
         ProductFacetFilter filter = ProductFacetFilter.fromRequest(
-            List.of(" ONE_TIME", "one_time", "Recurring "),
-            List.of("True", "false", "TRUE"),
-            List.of("Bounded", " none"));
+            List.of("one_time", "recurring", "one_time"),
+            List.of("true", "false", "true"),
+            List.of("bounded", "__empty__"));
 
         assertEquals(Set.of("one_time", "recurring"), filter.billingFrequencies());
         assertEquals(Set.of(true, false), filter.availability());
-        assertEquals(Set.of(ProductFacetFilter.BOUNDED, ProductFacetFilter.UNBOUNDED), filter.effectiveDates());
+        assertEquals(
+            Set.of(ProductFacetFilter.BOUNDED, ProductFacetFilter.NO_DATE_LIMIT), filter.effectiveDates());
     }
 
+    /**
+     * The browser matches facet keys exactly, so a key it would match against no product must not
+     * be read leniently here, or the export would hold rows the view does not list.
+     */
     @Test
-    void anyValueTheBrowserCannotSendIsABadRequest() {
-        assertThrows(BadRequestException.class,
-            () -> ProductFacetFilter.fromRequest(List.of("monthly"), null, null));
-        assertThrows(BadRequestException.class,
-            () -> ProductFacetFilter.fromRequest(null, List.of("1"), null));
-        assertThrows(BadRequestException.class,
-            () -> ProductFacetFilter.fromRequest(null, null, List.of("__empty__")));
-        assertThrows(BadRequestException.class,
-            () -> ProductFacetFilter.fromRequest(null, Arrays.asList((String) null), null));
-        assertThrows(BadRequestException.class,
-            () -> ProductFacetFilter.fromRequest(List.of(""), null, null));
+    void anyKeyTheBrowserWouldNotMatchIsABadRequest() {
+        for (List<String> billing : List.of(
+                List.of("monthly"), List.of("Recurring"), List.of(" recurring"), List.of(""))) {
+            assertThrows(BadRequestException.class, () -> ProductFacetFilter.fromRequest(billing, null, null));
+        }
+        for (List<String> active : List.of(List.of("TRUE"), List.of("1"), Arrays.asList((String) null))) {
+            assertThrows(BadRequestException.class, () -> ProductFacetFilter.fromRequest(null, active, null));
+        }
+        for (List<String> dates : List.of(List.of("none"), List.of("Bounded"), List.of("bounded", "none"))) {
+            assertThrows(BadRequestException.class, () -> ProductFacetFilter.fromRequest(null, null, dates));
+        }
     }
 
     @Test

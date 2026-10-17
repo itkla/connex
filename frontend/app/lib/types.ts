@@ -101,8 +101,8 @@ export type ProductSearchParams = {
 
 /**
  * The product export's filter: the catalog search plus the products browser's facets. Values are
- * the browser's own facet keys (`one_time`/`recurring`, `true`/`false`, `bounded`/`none`); the
- * server rejects anything else.
+ * the browser's own facet keys (`one_time`/`recurring`, `true`/`false`, `bounded`/`__empty__`),
+ * matched exactly; the server rejects anything else.
  */
 export type ProductExportParams = ProductSearchParams & {
     billingFrequency?: string[];

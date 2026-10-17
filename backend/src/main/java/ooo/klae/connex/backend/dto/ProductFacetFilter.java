@@ -2,7 +2,6 @@ package ooo.klae.connex.backend.dto;
 
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 
@@ -13,8 +12,14 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
  * as the CSV export narrows the catalog exactly as the browser's client-side facets do: values
  * selected within one facet match any of them, and every facet with a selection must match.
  *
+ * <p>The browser filters in the client and matches facet keys exactly, so this accepts exactly the
+ * keys the browser produces and nothing else: no trimming or case folding. A hand-edited key the
+ * browser would match against no product is rejected rather than read leniently, so an export can
+ * never hold rows the view does not list.
+ *
  * <p>Effective dates has two buckets: {@link #BOUNDED} for products with a start or an end date,
- * and {@link #UNBOUNDED} for products with neither, which the browser labels "No date limit".
+ * and {@link #NO_DATE_LIMIT} for products with neither, which is the browser's shared empty-facet
+ * key.
  *
  * @param billingFrequencies selected billing frequencies, empty when the facet is unrestricted
  * @param availability selected availability states, empty when the facet is unrestricted
@@ -29,10 +34,11 @@ public record ProductFacetFilter(
     public static final String BOUNDED = "bounded";
 
     /** Effective-dates bucket for products with neither a start nor an end date. */
-    public static final String UNBOUNDED = "none";
+    public static final String NO_DATE_LIMIT = "__empty__";
 
     private static final Set<String> BILLING_FREQUENCIES = Set.of("one_time", "recurring");
-    private static final Set<String> EFFECTIVE_DATES = Set.of(BOUNDED, UNBOUNDED);
+    private static final Set<String> AVAILABILITY = Set.of("true", "false");
+    private static final Set<String> EFFECTIVE_DATES = Set.of(BOUNDED, NO_DATE_LIMIT);
     private static final ProductFacetFilter NONE = new ProductFacetFilter(Set.of(), Set.of(), Set.of());
 
     /**
@@ -60,11 +66,11 @@ public record ProductFacetFilter(
     }
 
     /**
-     * Resolves the request-level facet syntax, rejecting any value the browser could not have sent.
+     * Resolves the request-level facet keys, rejecting any key the browser's facets do not produce.
      *
-     * @param billingFrequency raw billing frequencies ({@code one_time}, {@code recurring})
-     * @param active raw availability states ({@code true}, {@code false})
-     * @param effectiveDates raw effective-date buckets ({@code bounded}, {@code none})
+     * @param billingFrequency billing frequency keys ({@code one_time}, {@code recurring})
+     * @param active availability keys ({@code true}, {@code false})
+     * @param effectiveDates effective-date keys ({@code bounded}, {@code __empty__})
      * @return canonical filter
      */
     public static ProductFacetFilter fromRequest(
@@ -72,9 +78,9 @@ public record ProductFacetFilter(
         Set<String> billing = canonical(billingFrequency, BILLING_FREQUENCIES,
             "billingFrequency must contain only: one_time, recurring");
         Set<String> dates = canonical(effectiveDates, EFFECTIVE_DATES,
-            "effectiveDates must contain only: bounded, none");
+            "effectiveDates must contain only: bounded, __empty__");
         Set<Boolean> availability = new LinkedHashSet<>();
-        for (String state : canonical(active, Set.of("true", "false"), "active must contain only: true, false")) {
+        for (String state : canonical(active, AVAILABILITY, "active must contain only: true, false")) {
             availability.add(Boolean.parseBoolean(state));
         }
         return new ProductFacetFilter(billing, availability, dates);
@@ -86,11 +92,10 @@ public record ProductFacetFilter(
             return out;
         }
         for (String value : values) {
-            String normalized = value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
-            if (!allowed.contains(normalized)) {
+            if (value == null || !allowed.contains(value)) {
                 throw new BadRequestException(message);
             }
-            out.add(normalized);
+            out.add(value);
         }
         return out;
     }

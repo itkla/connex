@@ -56,22 +56,25 @@ describe("the params a products export is narrowed by", () => {
             q: "plan",
             billingFrequency: ["recurring"],
             active: ["true", "false"],
-            effectiveDates: ["bounded", "none"],
+            effectiveDates: ["bounded", FILTER_EMPTY],
         });
     });
 
-    it("name the no-date-limit bucket on the wire as none", () => {
+    it("send the no-date-limit bucket as the browser's own empty-facet key", () => {
         expect(productExportParams("", { [PRODUCT_EFFECTIVE_DATES_FILTER_KEY]: [FILTER_EMPTY] }))
-            .toEqual({ effectiveDates: ["none"] });
+            .toEqual({ effectiveDates: [FILTER_EMPTY] });
     });
 
     it("ignore filter keys that are not product facets", () => {
         expect(productExportParams("", { owner: ["me"] })).toEqual({});
     });
 
-    it("pass a value the server cannot honour through, so the export fails instead of widening", () => {
-        expect(productExportParams("", { [PRODUCT_BILLING_FILTER_KEY]: ["weekly"] }))
-            .toEqual({ billingFrequency: ["weekly"] });
+    it("send hand-edited keys the view matches nothing on unchanged, so the server refuses them", () => {
+        expect(productExportParams("", {
+            [PRODUCT_BILLING_FILTER_KEY]: ["Recurring"],
+            [PRODUCT_AVAILABILITY_FILTER_KEY]: ["TRUE"],
+            [PRODUCT_EFFECTIVE_DATES_FILTER_KEY]: ["none"],
+        })).toEqual({ billingFrequency: ["Recurring"], active: ["TRUE"], effectiveDates: ["none"] });
     });
 });
 
@@ -94,7 +97,7 @@ describe("the products export request", () => {
         expect(url.searchParams.get("q")).toBe("plan");
         expect(url.searchParams.getAll("billingFrequency")).toEqual(["one_time", "recurring"]);
         expect(url.searchParams.getAll("active")).toEqual(["false"]);
-        expect(url.searchParams.getAll("effectiveDates")).toEqual(["none"]);
+        expect(url.searchParams.getAll("effectiveDates")).toEqual([FILTER_EMPTY]);
     });
 });
 
