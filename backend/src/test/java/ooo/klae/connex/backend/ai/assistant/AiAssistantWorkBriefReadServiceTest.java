@@ -39,6 +39,24 @@ class AiAssistantWorkBriefReadServiceTest {
     private ActivityMapper activityMapper;
     private AiAssistantWorkBriefReadService service;
 
+    @Test
+    void incompleteCommitmentProseDoesNotDiscardOtherCommitments() throws Exception {
+        when(taskMapper.getAiAssistantWorkCommitments(anyInt(), anyInt(), any(), any(), anyList(), anyInt()))
+                .thenReturn(List.of(
+                        new AiAssistantWorkCommitment(1, "`[Unknown Former Alias](user:42)`", null, true, null, null),
+                        new AiAssistantWorkCommitment(2, "Keep this commitment", null, false, null, null)));
+        var context = new MaskingContext();
+        var result = service.workCommitments(11, 7, 10, new AiChatResourceRegistry(context));
+        var data = JsonMapper.builder().build().valueToTree(result.data());
+        org.junit.jupiter.api.Assertions.assertEquals(2, result.data().get("returnedCommitments"));
+        org.junit.jupiter.api.Assertions.assertEquals("(unavailable reference)",
+                data.path("commitments").path(0).path("description").asString());
+        org.junit.jupiter.api.Assertions.assertEquals("Keep this commitment",
+                data.path("commitments").path(1).path("description").asString());
+        assertFalse(data.toString().contains("Unknown Former Alias"));
+        assertFalse(context.identifierDictionary().contains("Unknown Former Alias"));
+    }
+
     @BeforeEach
     void setUp() {
         taskMapper = mock(TaskMapper.class);

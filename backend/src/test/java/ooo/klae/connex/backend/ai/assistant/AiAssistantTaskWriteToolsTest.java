@@ -26,6 +26,56 @@ import ooo.klae.connex.backend.tenant.Permission;
 
 /** Task proposals preserve semantics, authorization, lock order and verified delegate outcomes. */
 class AiAssistantTaskWriteToolsTest extends AbstractAiAssistantWriteToolTest {
+
+    @ParameterizedTest
+    @CsvSource({"complete_task,false", "complete_task,true", "reschedule_task,false", "reschedule_task,true"})
+    void incompleteDescriptionDegradesAfterTheWriteAndOnEveryStoredReplay(String tool, boolean nativeProtocol)
+            throws Exception {
+        Task task = task();
+        String description = "`[Unknown Former Alias](user:42)`";
+        task.setDescription(description);
+        when(taskService.assistantStateVersion(73)).thenReturn(TaskService.assistantStateVersion(task));
+        when(taskService.complete(73)).thenReturn(task);
+        when(taskService.reschedule(73, "2026-10-15")).thenReturn(task);
+        var service = service();
+        String date = tool.equals("reschedule_task") ? ",\"due_date\":\"2026-10-15\"" : "";
+        var write = propose(service, tool, "{\"handle\":\"t1\"" + date + "}", "task", 73);
+        service.approve(TURN.sessionId(), TOOL_CALL_ID);
+        String stored = capturedExecutedResult();
+        assertEquals(description, objectMapper.readTree(stored).path("outcome").path("description").asString());
+        var support = new AiAssistantMaskingTestSupport(TURN.workspaceId(), 11);
+        try {
+            for (int replay = 0; replay < 2; replay++) {
+                var result = service.proposalResult(write,
+                        new AiAssistantToolProposal(TOOL_CALL_ID, "executed", stored, true));
+                var outcome = objectMapper.valueToTree(result.data()).path("outcome");
+                assertEquals("(unavailable reference)", outcome.path("description").asString());
+                assertEquals("task", outcome.path("recordType").asString());
+                assertEquals("executed", result.data().get("status"));
+                assertTrue(result.identifiers().isEmpty());
+                var context = new ooo.klae.connex.backend.ai.masking.MaskingContext();
+                var resources = new AiChatResourceRegistry(context);
+                var assembler = new AiAssistantPromptAssembler(objectMapper, catalog);
+                var prompt = nativeProtocol
+                        ? assembler.assembleNative(List.of(), result, List.of(), context, resources, List.of(),
+                                new AiAssistantPromptBudget(64, 4_096, 8_000, 8_000, 8_000, 64_000), AiAssistantToolCatalog.ALL)
+                        : assembler.assemble(List.of(), result, List.of(), context, resources, AiAssistantToolCatalog.ALL);
+                var capture = support.captureAssistantPayload(prompt, context, objectMapper, nativeProtocol, List.of(),
+                        AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null);
+                String payload = objectMapper.writeValueAsString(capture.request().messages());
+                assertTrue(payload.contains("(unavailable reference)"));
+                assertFalse(payload.contains("Unknown Former Alias"));
+                assertTrue(context.identifierDictionary().isEmpty());
+                assertTrue(context.tokenBindings().isEmpty());
+                assertEquals(0, capture.warnings());
+            }
+        } finally {
+            support.releaseFixtureMocks();
+        }
+        verify(taskService, times(tool.equals("complete_task") ? 1 : 0)).complete(73);
+        verify(taskService, times(tool.equals("reschedule_task") ? 1 : 0)).reschedule(73, "2026-10-15");
+        assertEquals(description, objectMapper.readTree(stored).path("outcome").path("description").asString());
+    }
     private Task task() {
         Task task = new Task();
         task.setId(73);

@@ -125,6 +125,9 @@ public class AiAssistantCompleteTaskWriteTool implements AiAssistantWriteTool {
         Map<String, Object> result = new LinkedHashMap<>();
         AiAssistantWriteTool.copyText(storedOutcome, result, "recordType");
         AiAssistantWriteTool.copyText(storedOutcome, result, "description");
+        if (result.get("description") instanceof String description) {
+            result.put("description", AiAssistantMemberIdentifiers.readerVisibleContent(description));
+        }
         result.put("completed", storedOutcome.path("completed").asBoolean());
         return result;
     }

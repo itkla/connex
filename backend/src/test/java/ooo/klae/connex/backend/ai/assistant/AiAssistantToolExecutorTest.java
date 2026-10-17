@@ -28,6 +28,8 @@ import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.beans.Activity;
@@ -71,6 +73,52 @@ class AiAssistantToolExecutorTest {
     private DealMapper dealMapper;
     private AiAssistantDateResolver dateResolver;
     private AiAssistantToolExecutor executor;
+
+    @ParameterizedTest
+    @ValueSource(strings = {"get_record", "list_activities", "list_tasks"})
+    void incompleteStoredProseDegradesOnlyItsOwnItem(String tool) throws Exception {
+        String incomplete = "`[Unknown Former Alias](user:42)`";
+        String safe = "Keep this other item's prose";
+        Company company = new Company();
+        company.setId(5);
+        company.setName("Routine Account");
+        when(companyService.getCompanyById(5)).thenReturn(company);
+        Note badNote = new Note();
+        badNote.setContent(incomplete);
+        badNote.setVisibility("workspace");
+        Note goodNote = new Note();
+        goodNote.setContent(safe);
+        goodNote.setVisibility("workspace");
+        when(historyService.notesForCompany(eq(5), eq(10), org.mockito.ArgumentMatchers.anyBoolean()))
+                .thenReturn(List.of(badNote, goodNote));
+        Activity badActivity = new Activity();
+        badActivity.setNotes(incomplete);
+        Activity goodActivity = new Activity();
+        goodActivity.setNotes(safe);
+        when(historyService.activitiesForCompany(eq(5), any(), any(), eq(10)))
+                .thenReturn(List.of(badActivity, goodActivity));
+        Task badTask = new Task();
+        badTask.setId(1);
+        badTask.setDescription(incomplete);
+        Task goodTask = new Task();
+        goodTask.setId(2);
+        goodTask.setDescription(safe);
+        when(historyService.tasksForCompany(5, 10)).thenReturn(List.of(badTask, goodTask));
+        var context = new MaskingContext();
+        var resources = new AiChatResourceRegistry(context);
+        resources.register("company", 5);
+
+        var result = executor.execute(tool, objectMapper.readTree("{\"handle\":\"r1\"}"), resources, true);
+
+        var tree = objectMapper.valueToTree(result.data());
+        String rows = tool.equals("get_record") ? "notes" : tool.equals("list_activities") ? "activities" : "tasks";
+        String field = tool.equals("get_record") ? "content" : tool.equals("list_activities") ? "notes" : "description";
+        assertEquals(2, tree.path(rows).size());
+        assertEquals("(unavailable reference)", tree.path(rows).path(0).path(field).asString());
+        assertEquals(safe, tree.path(rows).path(1).path(field).asString());
+        assertFalse(objectMapper.writeValueAsString(result.data()).contains("Unknown Former Alias"));
+        assertFalse(context.identifierDictionary().contains("Unknown Former Alias"));
+    }
 
     @BeforeEach
     void setUp() {
