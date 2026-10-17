@@ -30,6 +30,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.beans.DataSubjectRequest;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto;
+import ooo.klae.connex.backend.dto.DataSubjectDisclosureNotes;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.AuditEntryDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.ThirdPartyProvisionDto;
 import ooo.klae.connex.backend.dto.DataSubjectRequestDto;
@@ -47,6 +48,7 @@ class DataSubjectRequestServiceUnitTest {
     @Mock private DataSubjectRequestControlOperations controlOperations;
     @Mock private DataSubjectDisclosureAccess disclosureAccess;
     @Mock private TenantWorkScope tenantWorkScope;
+    @Mock private DataSubjectDisclosureAuditAccess disclosureAuditAccess;
 
     private DataSubjectRequestService service;
 
@@ -82,7 +84,8 @@ class DataSubjectRequestServiceUnitTest {
                 Supplier<?> work = invocation.getArgument(3);
                 return work.get();
             });
-        service = new DataSubjectRequestService(controlOperations, disclosureAccess, tenantWorkScope);
+        service = new DataSubjectRequestService(controlOperations, disclosureAccess, tenantWorkScope,
+            disclosureAuditAccess, new DataSubjectDisclosureJsonWriter(new tools.jackson.databind.ObjectMapper()));
     }
 
     @Test
@@ -269,18 +272,30 @@ class DataSubjectRequestServiceUnitTest {
         provision.setTargetWorkspaceId(6);
         DataSubjectDisclosureDto assembled = new DataSubjectDisclosureDto();
         assembled.setThirdPartyProvisions(List.of(provision));
-        when(disclosureAccess.assemble(3, 7, 4, 5, List.of(4, 6))).thenReturn(assembled);
+        snapshot(assembled, List.of(4, 6));
 
-        DataSubjectDisclosureDto disclosure = service.disclosure(3, 9, 7);
+        java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
+        service.disclosure(3, 9, 7, fingerprint -> {
+            verify(disclosureAuditAccess).record(org.mockito.ArgumentMatchers.eq(3),
+                org.mockito.ArgumentMatchers.eq(9L), org.mockito.ArgumentMatchers.eq(5),
+                org.mockito.ArgumentMatchers.eq(4), any());
+            return output;
+        });
+        DataSubjectDisclosureDto disclosure = assembled;
+        assertEquals(0, new tools.jackson.databind.ObjectMapper().readTree(output.toByteArray()).path("notes").size());
 
         assertEquals("Overlay", disclosure.getThirdPartyProvisions().getFirst().getTargetWorkspaceName());
         assertEquals(List.of(audit), disclosure.getAuditTrail());
         assertEquals(1_234, disclosure.getAuditTrailTotal());
         assertNotNull(disclosure.getGeneratedAt());
-        InOrder order = inOrder(controlOperations, disclosureAccess);
+        InOrder order = inOrder(controlOperations, disclosureAccess, disclosureAuditAccess);
         order.verify(controlOperations).prepareDisclosure(3, 9, 7);
-        order.verify(disclosureAccess).assemble(3, 7, 4, 5, List.of(4, 6));
-        order.verify(controlOperations).recordDisclosureAudit(3, 9, 5, 4);
+        order.verify(disclosureAccess).withSnapshot(org.mockito.ArgumentMatchers.eq(3),
+            org.mockito.ArgumentMatchers.eq(7), org.mockito.ArgumentMatchers.eq(4),
+            org.mockito.ArgumentMatchers.eq(5), org.mockito.ArgumentMatchers.eq(List.of(4, 6)), any());
+        order.verify(disclosureAuditAccess).record(org.mockito.ArgumentMatchers.eq(3),
+            org.mockito.ArgumentMatchers.eq(9L), org.mockito.ArgumentMatchers.eq(5),
+            org.mockito.ArgumentMatchers.eq(4), any());
     }
 
     @Test
@@ -293,11 +308,13 @@ class DataSubjectRequestServiceUnitTest {
             .thenReturn(new DisclosureControlData(request, workspaces, List.of(), 0));
         DataSubjectDisclosureDto assembled = new DataSubjectDisclosureDto();
         assembled.setThirdPartyProvisions(List.of());
-        when(disclosureAccess.assemble(3, 7, 4, 5, List.of(4))).thenReturn(assembled);
+        snapshot(assembled, List.of(4));
         org.mockito.Mockito.doThrow(new IllegalStateException("audit unavailable"))
-            .when(controlOperations).recordDisclosureAudit(3, 9, 5, 4);
+            .when(disclosureAuditAccess).record(org.mockito.ArgumentMatchers.eq(3),
+                org.mockito.ArgumentMatchers.eq(9L), org.mockito.ArgumentMatchers.eq(5),
+                org.mockito.ArgumentMatchers.eq(4), any());
 
-        assertThrows(ServiceUnavailableException.class, () -> service.disclosure(3, 9, 7));
+        assertThrows(ServiceUnavailableException.class, () -> service.disclosure(3, 9, 7, fingerprint -> java.io.OutputStream.nullOutputStream()));
     }
 
     @Test
@@ -308,12 +325,84 @@ class DataSubjectRequestServiceUnitTest {
         WorkspaceSnapshot workspaces = new WorkspaceSnapshot(List.of(4), Map.of(4, "Owner"));
         when(controlOperations.prepareDisclosure(3, 9, 7))
             .thenReturn(new DisclosureControlData(request, workspaces, List.of(), 0));
-        when(disclosureAccess.assemble(3, 7, 4, 5, List.of(4)))
+        when(disclosureAccess.withSnapshot(org.mockito.ArgumentMatchers.eq(3),
+                org.mockito.ArgumentMatchers.eq(7), org.mockito.ArgumentMatchers.eq(4),
+                org.mockito.ArgumentMatchers.eq(5), org.mockito.ArgumentMatchers.eq(List.of(4)), any()))
             .thenThrow(new IllegalStateException("tenant unavailable"));
 
-        assertThrows(IllegalStateException.class, () -> service.disclosure(3, 9, 7));
-        verify(controlOperations, never()).recordDisclosureAudit(any(Integer.class), any(Long.class),
-            any(Integer.class), any(Integer.class));
+        assertThrows(IllegalStateException.class, () -> service.disclosure(3, 9, 7, fingerprint -> java.io.OutputStream.nullOutputStream()));
+        verify(disclosureAuditAccess, never()).record(any(Integer.class), any(Long.class),
+            any(Integer.class), any(Integer.class), any());
+    }
+
+    @Test
+    void preflightFailureDoesNotAuditOrOpenOutputAndReleasesAdmission() {
+        DataSubjectDisclosureDto assembled = prepareDisclosure();
+        assembled.setNotes(new DataSubjectDisclosureNotes(consumer -> {
+            throw new IllegalStateException("preflight failed");
+        }));
+        var opened = new java.util.concurrent.atomic.AtomicBoolean();
+        assertThrows(IllegalStateException.class, () -> service.disclosure(3, 9, 7, fingerprint -> {
+            opened.set(true);
+            return java.io.OutputStream.nullOutputStream();
+        }));
+        assertEquals(false, opened.get());
+        verify(disclosureAuditAccess, never()).record(anyInt(), any(Long.class), anyInt(), anyInt(), any());
+        assembled.setNotes(new DataSubjectDisclosureNotes(consumer -> {}));
+        service.disclosure(3, 9, 7, fingerprint -> java.io.OutputStream.nullOutputStream());
+        verify(disclosureAuditAccess).record(org.mockito.ArgumentMatchers.eq(3),
+            org.mockito.ArgumentMatchers.eq(9L), org.mockito.ArgumentMatchers.eq(5),
+            org.mockito.ArgumentMatchers.eq(4), any());
+    }
+
+    @Test
+    void overlappingDisclosureIsRejectedBeforeOpeningAnotherSnapshot() {
+        prepareDisclosure();
+        service.disclosure(3, 9, 7, fingerprint -> {
+            assertThrows(ServiceUnavailableException.class,
+                () -> service.disclosure(3, 9, 7, unexpected -> java.io.OutputStream.nullOutputStream()));
+            return java.io.OutputStream.nullOutputStream();
+        });
+        verify(disclosureAccess).withSnapshot(org.mockito.ArgumentMatchers.eq(3),
+            org.mockito.ArgumentMatchers.eq(7), org.mockito.ArgumentMatchers.eq(4),
+            org.mockito.ArgumentMatchers.eq(5), org.mockito.ArgumentMatchers.eq(List.of(4)), any());
+    }
+
+    @Test
+    void poolWithFewerThanTwoConnectionsIsRefusedBeforeOpeningSnapshot() {
+        DataSubjectRequest request = storedVerifiedRequest();
+        request.setSubjectWorkspaceId(4);
+        request.setSubjectPersonId(5);
+        when(controlOperations.prepareDisclosure(3, 9, 7)).thenReturn(new DisclosureControlData(
+            request, new WorkspaceSnapshot(List.of(4), Map.of(4, "Owner")), List.of(), 0));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "maximumPoolSize", 1);
+        assertThrows(ServiceUnavailableException.class,
+            () -> service.disclosure(3, 9, 7, fingerprint -> java.io.OutputStream.nullOutputStream()));
+        verify(disclosureAccess, never()).withSnapshot(anyInt(), anyInt(), anyInt(), anyInt(), any(), any());
+        verify(disclosureAuditAccess, never()).record(anyInt(), any(Long.class), anyInt(), anyInt(), any());
+    }
+
+    private DataSubjectDisclosureDto prepareDisclosure() {
+        DataSubjectRequest request = storedVerifiedRequest();
+        request.setSubjectWorkspaceId(4);
+        request.setSubjectPersonId(5);
+        when(controlOperations.prepareDisclosure(3, 9, 7)).thenReturn(new DisclosureControlData(
+            request, new WorkspaceSnapshot(List.of(4), Map.of(4, "Owner")), List.of(), 0));
+        DataSubjectDisclosureDto assembled = new DataSubjectDisclosureDto();
+        assembled.setThirdPartyProvisions(List.of());
+        snapshot(assembled, List.of(4));
+        return assembled;
+    }
+
+    private void snapshot(DataSubjectDisclosureDto assembled, List<Integer> workspaceIds) {
+        assembled.setNotes(new DataSubjectDisclosureNotes(consumer -> {}));
+        when(disclosureAccess.withSnapshot(org.mockito.ArgumentMatchers.eq(3),
+                org.mockito.ArgumentMatchers.eq(7), org.mockito.ArgumentMatchers.eq(4),
+                org.mockito.ArgumentMatchers.eq(5), org.mockito.ArgumentMatchers.eq(workspaceIds), any()))
+            .thenAnswer(invocation -> {
+                Function<DataSubjectDisclosureDto, ?> work = invocation.getArgument(5);
+                return work.apply(assembled);
+            });
     }
 
     private static DataSubjectRequest storedVerifiedRequest() {

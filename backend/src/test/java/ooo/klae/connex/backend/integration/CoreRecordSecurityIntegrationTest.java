@@ -224,8 +224,14 @@ class CoreRecordSecurityIntegrationTest {
         authenticate(member);
         statementProbe.reset();
 
-        JsonNode notes = objectMapper.readTree(objectMapper.writeValueAsString(disclosureReadTransaction.assemble(
-            workspace.getId(), subject.getId(), workspaceIds))).path("notes");
+        JsonNode notes = disclosureReadTransaction.withSnapshot(
+            workspace.getId(), subject.getId(), workspaceIds, disclosure -> {
+                var writer = new ooo.klae.connex.backend.services.DataSubjectDisclosureJsonWriter(objectMapper);
+                var fingerprint = writer.measure(disclosure);
+                var output = new java.io.ByteArrayOutputStream();
+                writer.write(disclosure, fingerprint, measured -> output);
+                return objectMapper.readTree(output.toByteArray()).path("notes");
+            });
 
         assertTrue(notes.isArray());
         assertEquals(250, notes.size());
@@ -237,9 +243,9 @@ class CoreRecordSecurityIntegrationTest {
             assertEquals(index % 2 == 0 ? workspace.getId() : sibling.getId(), note.path("workspaceId").asInt());
         }
         String namespace = DataSubjectDisclosureMapper.class.getName() + ".";
-        assertEquals(List.of(250), statementProbe.rowCounts.get(namespace + "findNoteIds"));
-        assertEquals(List.of(100, 100, 50), statementProbe.rowCounts.get(namespace + "findNotePage"));
-        assertEquals(List.of(false, false), statementProbe.previousDisclosurePageCached);
+        assertEquals(List.of(100, 100, 50, 0, 100, 100, 50, 0), statementProbe.rowCounts.get(namespace + "findNoteIds"));
+        assertEquals(List.of(100, 100, 50, 100, 100, 50), statementProbe.rowCounts.get(namespace + "findNotePage"));
+        assertEquals(List.of(false, false, false, false, false), statementProbe.previousDisclosurePageCached);
 
         var scopedPage = disclosureMapper.findNotePage(workspace.getId(), subject.getId(), workspaceIds,
             List.of(noteIds.getFirst(), foreignNote.getId(), unrelatedNote.getId()));

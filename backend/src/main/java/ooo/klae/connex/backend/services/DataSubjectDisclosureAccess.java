@@ -66,10 +66,10 @@ public class DataSubjectDisclosureAccess {
         }
     }
 
-    public DataSubjectDisclosureDto assemble(int orgId, int actorId, int workspaceId, int personId,
-            List<Integer> workspaceIds) {
+    public <T> T withSnapshot(int orgId, int actorId, int workspaceId, int personId,
+            List<Integer> workspaceIds, Function<DataSubjectDisclosureDto, T> work) {
         return inSubjectWorkspace(orgId, actorId, workspaceId,
-            () -> readTransaction.assemble(workspaceId, personId, workspaceIds));
+            () -> readTransaction.withSnapshot(workspaceId, personId, workspaceIds, work));
     }
 
     private <T> T inSubjectWorkspace(int expectedOrgId, int actorId, int workspaceId, Supplier<T> work) {

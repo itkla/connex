@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.function.BiFunction;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -34,10 +35,16 @@ class DataSubjectDisclosureAccessTest {
 
     @BeforeEach
     void setUp() {
+        tenantContext.clear();
         access = new DataSubjectDisclosureAccess(
             tenantWorkScope,
             tenantContext,
             readTransaction);
+    }
+
+    @AfterEach
+    void clearContext() {
+        tenantContext.clear();
     }
 
     @Test
@@ -67,18 +74,19 @@ class DataSubjectDisclosureAccessTest {
         routeWorkspace(4, 8, "cnx_foreign");
 
         assertThrows(ResourceNotFoundException.class,
-            () -> access.assemble(7, 9, 4, 5, List.of(4)));
-        verify(readTransaction, never()).assemble(any(Integer.class), any(Integer.class), any());
+            () -> access.withSnapshot(7, 9, 4, 5, List.of(4), value -> null));
+        verify(readTransaction, never()).withSnapshot(any(Integer.class), any(Integer.class), any(), any());
     }
 
     @Test
     void restoresAnUnresolvedCallerWhenTenantAssemblyThrows() {
         routeWorkspace(4, 7, "cnx_subject");
-        when(readTransaction.assemble(4, 5, List.of(4)))
+        when(readTransaction.withSnapshot(org.mockito.ArgumentMatchers.eq(4),
+                org.mockito.ArgumentMatchers.eq(5), org.mockito.ArgumentMatchers.eq(List.of(4)), any()))
             .thenThrow(new IllegalArgumentException("broken tenant row"));
 
         assertThrows(IllegalArgumentException.class,
-            () -> access.assemble(7, 9, 4, 5, List.of(4)));
+            () -> access.withSnapshot(7, 9, 4, 5, List.of(4), value -> null));
         assertTrue(!tenantContext.isResolved());
     }
 
@@ -144,6 +152,32 @@ class DataSubjectDisclosureAccessTest {
             any(Integer.class),
             any(),
             any());
+    }
+
+    @Test
+    void snapshotCallbackKeepsSubjectContextUntilSynchronousWorkFinishes() {
+        tenantContext.set(1, 2, 3, "member", "cnx_previous");
+        routeWorkspace(4, 7, "cnx_subject");
+        when(readTransaction.withSnapshot(org.mockito.ArgumentMatchers.eq(4),
+                org.mockito.ArgumentMatchers.eq(5), org.mockito.ArgumentMatchers.eq(List.of(4)), any()))
+            .thenAnswer(invocation -> {
+                java.util.function.Function<DataSubjectDisclosureDto, ?> work = invocation.getArgument(3);
+                return work.apply(new DataSubjectDisclosureDto());
+            });
+        String result = access.withSnapshot(7, 9, 4, 5, List.of(4), value -> {
+            assertEquals(4, tenantContext.getWorkspaceId());
+            assertEquals(7, tenantContext.getOrgId());
+            assertEquals(9, tenantContext.getUserId());
+            assertEquals("org_admin", tenantContext.getRole());
+            assertEquals("cnx_subject", tenantContext.getCatalog());
+            return "complete";
+        });
+        assertEquals("complete", result);
+        assertEquals(1, tenantContext.getWorkspaceId());
+        assertEquals(2, tenantContext.getOrgId());
+        assertEquals(3, tenantContext.getUserId());
+        assertEquals("member", tenantContext.getRole());
+        assertEquals("cnx_previous", tenantContext.getCatalog());
     }
 
     private void routeWorkspace(int workspaceId, int orgId, String catalog) {

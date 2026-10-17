@@ -6,8 +6,10 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.concurrent.Semaphore;
 import java.util.function.Supplier;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,6 +31,9 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
 @RequiredArgsConstructor
 public class DataSubjectRequestService {
     static final int DISCLOSURE_AUDIT_LIMIT = 1_000;
+    /** One retained snapshot may borrow a second connection for its independent audit. */
+    static final int MAX_CONCURRENT_DISCLOSURES = 1;
+    private static final int MIN_DISCLOSURE_POOL_SIZE = 2;
     private static final Set<String> REQUEST_TYPES = Set.of(
         "disclosure", "correction", "cease_use", "cease_provision");
     private static final Set<String> STATUSES = Set.of(
@@ -37,6 +42,11 @@ public class DataSubjectRequestService {
     private final DataSubjectRequestControlOperations controlOperations;
     private final DataSubjectDisclosureAccess disclosureAccess;
     private final TenantWorkScope tenantWorkScope;
+    private final DataSubjectDisclosureAuditAccess disclosureAuditAccess;
+    private final DataSubjectDisclosureJsonWriter disclosureJsonWriter;
+    private final Semaphore disclosureAdmission = new Semaphore(MAX_CONCURRENT_DISCLOSURES);
+    @Value("${spring.datasource.hikari.maximum-pool-size:10}")
+    private int maximumPoolSize = 10;
 
     public List<DataSubjectRequestDto> list(int orgId, int actorId, String status, int limit, int offset) {
         return tenantWorkScope.unroutedRead(
@@ -107,17 +117,40 @@ public class DataSubjectRequestService {
      * section is capped at {@link #DISCLOSURE_AUDIT_LIMIT} entries with the uncapped total exposed
      * for truncation detection.
      *
-     * <p>The response is assembled in memory and has no size ceiling: a subject holding a very
-     * large corpus of notes produces a correspondingly large payload and a matching peak heap on
-     * the serving instance. Operators exporting such a subject should expect a slow response.
+     * <p>Two synchronous serialization passes share one explicit REPEATABLE READ snapshot.
+     * Notes retain one bounded ID/body page. The strict control audit commits independently
+     * between passes, before the response is opened; a failed release requires an explicit retry.
      */
-    public DataSubjectDisclosureDto disclosure(int orgId, long requestId, int actorId) {
+    public void disclosure(int orgId, long requestId, int actorId,
+            DataSubjectDisclosureJsonWriter.Output output) {
         DisclosureControlData control = tenantWorkScope.unroutedRead(
             () -> controlOperations.prepareDisclosure(orgId, requestId, actorId));
-        int workspaceId = control.request().getSubjectWorkspaceId();
-        int personId = control.request().getSubjectPersonId();
-        DataSubjectDisclosureDto disclosure = disclosureAccess.assemble(
-            orgId, actorId, workspaceId, personId, control.workspaces().ids());
+        if (maximumPoolSize < MIN_DISCLOSURE_POOL_SIZE || !disclosureAdmission.tryAcquire()) {
+            throw new ServiceUnavailableException("Disclosure capacity is unavailable");
+        }
+        try {
+            int workspaceId = control.request().getSubjectWorkspaceId();
+            int personId = control.request().getSubjectPersonId();
+            disclosureAccess.withSnapshot(orgId, actorId, workspaceId, personId,
+                control.workspaces().ids(), disclosure -> {
+                    enrichDisclosure(disclosure, control, requestId, workspaceId, personId);
+                    var fingerprint = disclosureJsonWriter.measure(disclosure);
+                    try {
+                        disclosureAuditAccess.record(orgId, requestId, personId, workspaceId, fingerprint);
+                    } catch (RuntimeException exception) {
+                        throw new ServiceUnavailableException(
+                            "Disclosure requires a durable audit record and none could be written", exception);
+                    }
+                    disclosureJsonWriter.write(disclosure, fingerprint, output);
+                    return null;
+                });
+        } finally {
+            disclosureAdmission.release();
+        }
+    }
+
+    private void enrichDisclosure(DataSubjectDisclosureDto disclosure, DisclosureControlData control,
+            long requestId, int workspaceId, int personId) {
         for (ThirdPartyProvisionDto provision : disclosure.getThirdPartyProvisions()) {
             String workspaceName = control.workspaces().names().get(provision.getTargetWorkspaceId());
             if (workspaceName == null) {
@@ -132,17 +165,6 @@ public class DataSubjectRequestService {
         disclosure.setAuditTrail(control.auditTrail());
         disclosure.setAuditTrailTotal(control.auditTrailTotal());
         disclosure.setGeneratedAt(LocalDateTime.now());
-
-        try {
-            tenantWorkScope.unrouted(() -> {
-                controlOperations.recordDisclosureAudit(orgId, requestId, personId, workspaceId);
-                return null;
-            });
-        } catch (RuntimeException exception) {
-            throw new ServiceUnavailableException(
-                "Disclosure requires a durable audit record and none could be written", exception);
-        }
-        return disclosure;
     }
 
     private void apply(DataSubjectRequest target, int orgId, int actorId,
