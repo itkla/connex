@@ -197,6 +197,11 @@ class ReportServiceTest {
         when(reportMapper.getDefinition(WORKSPACE_ID, REPORT_ID)).thenReturn(new ReportDefinition());
         when(scheduleMapper.getByReport(WORKSPACE_ID, REPORT_ID)).thenReturn(new ReportSchedule());
         when(privilegedAccountService.isPrivileged(ACTOR_ID)).thenReturn(false, true);
+        when(workspaceService.isLockedBuiltInAdministratorWithAssignedRoles(WORKSPACE_ID, ACTOR_ID, ACTOR_ID))
+                .thenAnswer(invocation -> {
+                    userMapper.lockAssignedCustomRoleRowsForShare(ACTOR_ID);
+                    return false;
+                });
         doThrow(new RecentAuthenticationRequiredException())
                 .when(sessionSecurityService).requireRecentAuthentication(ACTOR_ID);
 
@@ -207,7 +212,7 @@ class ReportServiceTest {
         ordered.verify(scheduleMapper).getByReport(WORKSPACE_ID, REPORT_ID);
         ordered.verify(privilegedAccountService).isPrivileged(ACTOR_ID);
         ordered.verify(userMapper).lockByIdForShare(ACTOR_ID);
-        ordered.verify(workspaceService).isLockedBuiltInAdministrator(WORKSPACE_ID, ACTOR_ID);
+        ordered.verify(workspaceService).isLockedBuiltInAdministratorWithAssignedRoles(WORKSPACE_ID, ACTOR_ID, ACTOR_ID);
         ordered.verify(userMapper).lockAssignedCustomRoleRowsForShare(ACTOR_ID);
         ordered.verify(reportMapper).lockDefinitions(WORKSPACE_ID);
         ordered.verify(reportMapper).getDefinition(WORKSPACE_ID, REPORT_ID);

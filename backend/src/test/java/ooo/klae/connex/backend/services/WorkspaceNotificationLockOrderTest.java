@@ -68,6 +68,7 @@ class WorkspaceNotificationLockOrderTest {
     @Mock private AuditService auditService;
     @Mock private SystemActor systemActor;
     @Mock private SessionSecurityService sessionSecurityService;
+    @Mock private PrivilegedMfaLockedAuthorization privilegedMfaLockedAuthorization;
     @Mock private PrivilegedAccountService privilegedAccountService;
     @Mock private AccountDeletionReservationRead accountDeletionReservationRead;
     @Mock private RegistrationVerificationService registrationVerificationService;

@@ -33,6 +33,8 @@ import ooo.klae.connex.backend.config.SecurityResponseHeaders;
 import ooo.klae.connex.backend.controllers.v1.PublicApiIdentityController;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.PrivilegedMfaAttestationRequiredException;
+import ooo.klae.connex.backend.exceptions.PrivilegedMfaEnrollmentRequiredException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.observability.CorrelationIds;
@@ -68,6 +70,12 @@ public class PublicApiErrorAdvice {
     @ExceptionHandler({ResourceNotFoundException.class, NoResourceFoundException.class})
     public ResponseEntity<ErrorEnvelope> notFound(Exception exception) {
         return response(HttpStatus.NOT_FOUND, "not_found", "Resource not found");
+    }
+
+    /** Preserves the authentication filter's confinement envelope for refusals under write locks. */
+    @ExceptionHandler({PrivilegedMfaEnrollmentRequiredException.class, PrivilegedMfaAttestationRequiredException.class})
+    public ResponseEntity<ErrorEnvelope> privilegedMfaRequired(ForbiddenException exception) {
+        return response(HttpStatus.UNAUTHORIZED, exception.getCode(), exception.getMessage());
     }
 
     /** Maps live RBAC or tenant-scope refusals. */

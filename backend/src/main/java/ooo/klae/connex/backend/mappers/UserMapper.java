@@ -106,6 +106,19 @@ public interface UserMapper {
      */
     PrivilegedMfaStandingRow privilegedMfaStanding(int id);
     /**
+     * Reads owner/admin membership in the workspace's active organization without locks, flushing
+     * MyBatis caches while retaining the caller's database snapshot and transaction isolation.
+     */
+    boolean hasWorkspaceOrganizationPrivilege(@Param("id") int id, @Param("workspaceId") int workspaceId);
+    /**
+     * Current per-passkey sufficiency, including organization coverage only when enforced. The caller
+     * retains account and workspace authorization roots; credential/coverage locks follow authority.
+     * The distinct statement flushes MyBatis caches and takes no consistent-read snapshot.
+     */
+    List<Boolean> lockedWorkspaceMfaPasskeySufficiency(
+        @Param("id") int id, @Param("workspaceId") int workspaceId,
+        @Param("attestationEnforced") boolean attestationEnforced);
+    /**
      * Whether the passkey belongs to the account and is sufficient for its privileged MFA (#1534).
      *
      * @param userId the account
