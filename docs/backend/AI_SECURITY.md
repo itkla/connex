@@ -678,14 +678,22 @@ ineligible for manual decisions; its existing generation-owned failure settlemen
 
 Every list captures one injected-clock instant for SQL and projection. Pending reads filter trusted
 `proposed` rows with `created_at > now - 72 hours` before their existing ordering and 100-row limit,
-including audited retained reads. Historical and individual reads retain authorized expired rows.
+including audited retained reads. Historical reads retain the oldest 100 rows and supplement them
+with up to 100 newest trusted undecided rows beyond that raw `(message.seq, tool-call.id)` window,
+filtering trust and proposed status before the separate limit. The supplement includes both open
+and expired proposals; it cannot consume the live-pending read's budget. The same bounds apply to
+audited retained history. Individual reads retain authorized expired rows.
 False-marker proposed/failed rows and malformed envelopes retain existing exclusion rules; legacy
 terminal history remains visible without being promoted to trusted, with a null review deadline.
 Current visibility, special-care masking, processing restrictions, local restriction fences and
 retained-read audits remain authoritative.
 
-Frontend Apply and Discard require a valid open deadline and client time strictly before it. A
-local timer, focus and visibility resume disarm them without a network frame; the typed expiry
+Frontend Apply and Discard require a valid open deadline and server-relative time strictly before
+it. Assistant API responses calibrate that clock from their HTTP `Date` header, advanced with
+monotonic elapsed time rather than the device wall clock; missing samples disarm action guards.
+The header's second precision and transport delay can leave the client slightly behind, so the
+server's locked expiry checks remain authoritative. A local timer, focus and visibility resume
+disarm controls without a network frame, and recalibration reschedules mounted timers; the typed expiry
 error clears the action and settles the individual row without retry. EN/JA expiry copy and
 historical/pending reload merging preserve the existing surfaces. This deadline is decision
 expiry, not erasure: deletion cascades, export ownership, retention and account-erasure handling

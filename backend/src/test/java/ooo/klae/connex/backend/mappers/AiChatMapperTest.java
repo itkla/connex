@@ -309,6 +309,69 @@ class AiChatMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void cappedHistorySupplementRetainsUndecidedProposalsWithoutStarvingLivePending() {
+        User owner = newUser();
+        AiChatSession session = session(workspace, owner, "Capped proposal history", "private");
+        AiChatMessage firstMessage = message(session, owner, 1, "Earlier calls");
+        AiChatMessage laterMessage = message(session, owner, 2, "Later proposals");
+        LocalDateTime cutoff = AiAssistantProposalExpiry.pendingCreatedAfter(Instant.now());
+        for (int index = 0; index < 101; index++) {
+            proposalAt(firstMessage, cutoff.minusSeconds(1), true, "proposed");
+        }
+        AiChatToolCall expiresNext = proposalAt(laterMessage, cutoff.plusNanos(1_000), true, "proposed");
+        AiChatToolCall live = proposalAt(laterMessage, cutoff.plusHours(1), true, "proposed");
+        proposalAt(laterMessage, cutoff.plusHours(2), false, "proposed");
+        proposalAt(laterMessage, cutoff.plusHours(2), true, "rejected");
+        sqlSession.clearCache();
+
+        List<AiChatToolCall> history = chatMapper.listToolCallsBySession(
+                workspace.getId(), session.getId(), false, 100, null);
+        assertEquals(100, history.size());
+        AiChatToolCall boundary = history.getLast();
+        assertEquals(List.of(expiresNext.getId(), live.getId()), chatMapper.listToolCallsBySession(
+                        workspace.getId(), session.getId(), true, 100, cutoff).stream()
+                .map(AiChatToolCall::getId).toList());
+        assertEquals(List.of(live.getId(), expiresNext.getId()), chatMapper.listUndecidedToolCallsAfterHistory(
+                        workspace.getId(), session.getId(), boundary.getMessageId(), boundary.getId(), 2).stream()
+                .map(AiChatToolCall::getId).toList());
+
+        LocalDateTime expiredCutoff = cutoff.plusNanos(1_000);
+        assertEquals(List.of(live.getId()), chatMapper.listToolCallsBySession(
+                        workspace.getId(), session.getId(), true, 100, expiredCutoff).stream()
+                .map(AiChatToolCall::getId).toList());
+        List<AiChatToolCall> supplement = chatMapper.listUndecidedToolCallsAfterHistory(
+                workspace.getId(), session.getId(), boundary.getMessageId(), boundary.getId(), 2);
+        assertEquals(List.of(live.getId(), expiresNext.getId()), supplement.stream()
+                .map(AiChatToolCall::getId).toList());
+        assertTrue(AiAssistantProposalExpiry.isExpired(
+                AiAssistantProposalExpiry.reviewExpiresAt(supplement.getLast().getCreatedAt()),
+                expiredCutoff.plusHours(72).toInstant(java.time.ZoneOffset.UTC)));
+        assertTrue(chatMapper.listUndecidedToolCallsAfterHistory(
+                workspace.getId() + 1, session.getId(), boundary.getMessageId(), boundary.getId(), 100).isEmpty());
+        AiChatSession another = session(workspace, owner, "Other session", "private");
+        assertTrue(chatMapper.listUndecidedToolCallsAfterHistory(
+                workspace.getId(), another.getId(), boundary.getMessageId(), boundary.getId(), 100).isEmpty());
+        AiChatMessage otherMessage = message(another, owner, 1, "Other boundary");
+        assertTrue(chatMapper.listUndecidedToolCallsAfterHistory(
+                workspace.getId(), session.getId(), otherMessage.getId(), boundary.getId(), 100).isEmpty());
+    }
+
+    private AiChatToolCall proposalAt(
+            AiChatMessage message, LocalDateTime createdAt, boolean trusted, String status) {
+        AiChatToolCall call = new AiChatToolCall();
+        call.setWorkspaceId(workspace.getId());
+        call.setMessageId(message.getId());
+        call.setToolName("assign_owner");
+        call.setStatus(status);
+        call.setArgumentsJson("{}");
+        call.setServerProposal(trusted);
+        chatMapper.insertToolCall(call);
+        jdbcTemplate.update("UPDATE ai_chat_tool_call SET created_at = ? WHERE workspace_id = ? AND id = ?",
+                createdAt, workspace.getId(), call.getId());
+        return call;
+    }
+
+    @Test
     void durableTurnToolAndStructuredMessageStateRoundTripsWithinWorkspace() throws Exception {
         User owner = newUser();
         LocalDateTime reviewCreatedAfter = AiAssistantProposalExpiry.pendingCreatedAfter(Instant.now());

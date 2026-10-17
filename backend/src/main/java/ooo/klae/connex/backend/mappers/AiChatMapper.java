@@ -499,6 +499,14 @@ public interface AiChatMapper {
         @Param("limit") int limit,
         @Param("reviewCreatedAfter") LocalDateTime reviewCreatedAfter);
 
+    /** Returns the newest trusted undecided rows beyond a session's raw history window, newest first. */
+    List<AiChatToolCall> listUndecidedToolCallsAfterHistory(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId,
+        @Param("afterMessageId") int afterMessageId,
+        @Param("afterToolCallId") int afterToolCallId,
+        @Param("limit") int limit);
+
     List<AiChatToolCall> listToolCallsByTurn(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,

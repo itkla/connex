@@ -180,6 +180,7 @@ export default function AskConnexProposalReview({
                     const targetName = card.target.label ?? cardLabels.restrictedTarget;
                     const removal = askConnexToolProposesRemoval(card);
                     const appliable = askConnexProposalAppliable(card, now);
+                    const affordances = new Set(askConnexToolCardAffordances(card, now));
                     const expired = askConnexToolCardStatus(card, now) === 'proposalExpired';
                     const changes = askConnexToolChanges(card);
                     const included = group.included.has(card.id) && appliable;
@@ -267,7 +268,7 @@ export default function AskConnexProposalReview({
                                         size="dialog"
                                         aria-label={cardLabels.discardAria(targetName)}
                                         disabled={busy || actionsDisabled
-                                            || !askConnexToolCardAffordances(card, now).includes('reject')}
+                                            || !affordances.has('reject')}
                                         onClick={() => onAction(card.id, 'reject')}
                                     >
                                         {card.pendingAction === 'reject'

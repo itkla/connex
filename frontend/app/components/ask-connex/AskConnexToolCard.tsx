@@ -16,6 +16,7 @@ import {
 import Link from 'next/link';
 import { Fragment, useEffect, useId, useRef, useState, type ComponentType, type SVGProps } from 'react';
 
+import { useLiveNow } from '@/app/hooks/useNow';
 import { useProposalReviewNow } from '@/app/hooks/useProposalReviewNow';
 import {
     ANSWER_ROW_PLACEHOLDER,
@@ -418,7 +419,9 @@ export default function AskConnexToolCard({
     formatDeadline,
     formatRemaining,
 }: AskConnexToolCardProps) {
-    const now = useProposalReviewNow(card.status === 'proposed' ? [card.reviewExpiresAt] : []);
+    const reviewNow = useProposalReviewNow(card.status === 'proposed' ? [card.reviewExpiresAt] : []);
+    const liveNow = useLiveNow();
+    const now = card.status === 'proposed' ? reviewNow : liveNow;
     const titleId = useId();
     const articleRef = useRef<HTMLElement>(null);
     const failureRef = useRef<HTMLDivElement>(null);

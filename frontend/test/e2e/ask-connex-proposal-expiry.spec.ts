@@ -69,7 +69,10 @@ test('reloadFindsFreshLegacyProposalWithoutFrame', async ({ page }, testInfo) =>
         async (route) => {
             const pending = new URL(route.request().url()).searchParams.get('pendingOnly') === 'true';
             if (pending) pendingReads++;
-            await route.fulfill({ json: pending ? [fresh] : expired.slice(0, 100) });
+            await route.fulfill({
+                headers: { Date: new Date(now).toUTCString() },
+                json: pending ? [fresh] : expired.slice(0, 100),
+            });
         });
 
     await page.goto(`/ask-connex/${sessionId}`);
