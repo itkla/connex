@@ -245,7 +245,7 @@ public class DataSubjectRequestControlOperations {
                 "organization", orgId, null, orgId, "Mission holdings purge",
                 "Conservative mission holdings erasure accepted", accepted.metadata());
         var saved = missionPurgeMapper.findAcceptanceByKey(orgId, requestId, request.idempotencyKey());
-        if (saved == null || !missionJson.readTree(saved.getChanges()).equals(missionJson.valueToTree(accepted.metadata()))) {
+        if (saved == null || !missionJson.readTree(saved.getChanges()).equals(missionJson.readTree(missionJson.writeValueAsString(accepted.metadata())))) {
             throw new IllegalStateException("Mission purge acceptance audit did not preserve its contract");
         }
         return ooo.klae.connex.backend.ai.mission.AiAgentPurgeAcceptance.from(saved, missionJson);
@@ -291,7 +291,7 @@ public class DataSubjectRequestControlOperations {
                 "Conservative mission holdings erasure verified", accepted.metadata());
         var completion = missionPurgeMapper.findCompletion(accepted.orgId(), accepted.requestId(), accepted.operationId());
         if (completion == null
-                || !missionJson.readTree(completion.getChanges()).equals(missionJson.valueToTree(accepted.metadata()))) {
+                || !missionJson.readTree(completion.getChanges()).equals(missionJson.readTree(missionJson.writeValueAsString(accepted.metadata())))) {
             throw new IllegalStateException("Mission purge completion audit did not preserve its contract");
         }
     }

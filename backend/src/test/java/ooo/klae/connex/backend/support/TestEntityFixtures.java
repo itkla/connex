@@ -2,6 +2,8 @@ package ooo.klae.connex.backend.support;
 
 import java.util.UUID;
 
+import org.springframework.jdbc.core.JdbcTemplate;
+
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
@@ -27,6 +29,19 @@ public final class TestEntityFixtures {
 
     private static String unique() {
         return UUID.randomUUID().toString().substring(0, 8);
+    }
+
+    /** Seeds privacy authority for a freshly inserted fixture workspace that bypasses provisioning. */
+    public static void initializeChatPrivacy(JdbcTemplate jdbc, int workspaceId) {
+        jdbc.update("INSERT INTO ai_agent_privacy_barrier (workspace_id) VALUES (?)"
+                + " ON DUPLICATE KEY UPDATE workspace_id = workspace_id", workspaceId);
+    }
+
+    /** Removes privacy maintenance state after an ordinary-chat fixture's content has been deleted. */
+    public static void deleteChatPrivacy(JdbcTemplate jdbc, int workspaceId) {
+        jdbc.update("UPDATE ai_agent_privacy_barrier SET latest_operation_key = NULL WHERE workspace_id = ?", workspaceId);
+        jdbc.update("DELETE FROM ai_agent_privacy_work WHERE workspace_id = ?", workspaceId);
+        jdbc.update("DELETE FROM ai_agent_privacy_barrier WHERE workspace_id = ?", workspaceId);
     }
 
     /** Inserts a fresh user in the caller's workspace and transaction. */

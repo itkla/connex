@@ -439,6 +439,7 @@ class AiAgentPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivacyInt
         session.setWorkspaceId(workspace.getId());
         session.setCreatedByUserId(currentUser.getId());
         session.setTitle("Private cleanup fixture");
+        session.setTitleUserSet(false);
         session.setVisibility("private");
         session.setStatus("active");
         chatMapper.insertSession(session);

@@ -15,6 +15,7 @@ import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.Workspace;
@@ -31,6 +32,7 @@ import ooo.klae.connex.backend.tenant.TenantContext;
 
 @ExtendWith(MockitoExtension.class)
 class WorkspaceProvisioningLockOrderTest {
+    @Mock private ApplicationEventPublisher applicationEvents;
     @Mock private WorkspaceMapper workspaceMapper;
     @Mock private UserMapper userMapper;
     @Mock private OrganizationMapper organizationMapper;

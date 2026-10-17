@@ -119,10 +119,10 @@ public abstract class AbstractServiceTest {
     @BeforeEach
     protected void setUpWorkspaceAndAuthentication() {
         workspace = resolveDefaultWorkspace();
-        fixtureTenantScope.inWorkspace(workspace.getId(), () -> fixturePrivacy.initialize(workspace.getId()));
         currentUser = newUser();
         workspaceMapper.updateMemberRole(workspace.getId(), currentUser.getId(), "owner");
         authenticateAs(currentUser, workspace.getId());
+        fixtureTenantScope.inWorkspace(workspace.getId(), () -> fixturePrivacy.initialize(workspace.getId()));
         approveForStepUp(currentUser);
     }
 

@@ -60,6 +60,7 @@ import ooo.klae.connex.backend.services.CompanyService;
 import ooo.klae.connex.backend.services.IdentityBackfillTransaction;
 import ooo.klae.connex.backend.services.PersonService;
 import ooo.klae.connex.backend.services.SessionSecurityService;
+import ooo.klae.connex.backend.support.TestEntityFixtures;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -109,6 +110,7 @@ class DuplicateReviewIntegrationTest {
         workspace.setName("Duplicate review " + suffix);
         workspace.setSlug("duplicate-review-" + suffix);
         workspaceMapper.insert(workspace);
+        TestEntityFixtures.initializeChatPrivacy(jdbcTemplate, workspace.getId());
         member = newMember("member", List.of(
             "COMPANY_CREATE", "COMPANY_UPDATE", "COMPANY_DELETE",
             "PERSON_CREATE", "PERSON_UPDATE", "PERSON_DELETE", "REPORT_READ"));
@@ -135,11 +137,13 @@ class DuplicateReviewIntegrationTest {
                     + "WHERE wr.workspace_id = ?",
                 workspace.getId());
             jdbcTemplate.update("DELETE FROM workspace_role WHERE workspace_id = ?", workspace.getId());
+            TestEntityFixtures.deleteChatPrivacy(jdbcTemplate, workspace.getId());
             jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", workspace.getId());
         }
         for (Workspace sibling : siblingWorkspaces.reversed()) {
             jdbcTemplate.update("DELETE FROM company WHERE workspace_id = ?", sibling.getId());
             jdbcTemplate.update("DELETE FROM workspace_member WHERE workspace_id = ?", sibling.getId());
+            TestEntityFixtures.deleteChatPrivacy(jdbcTemplate, sibling.getId());
             jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", sibling.getId());
         }
         for (User user : createdUsers.reversed()) {
@@ -957,6 +961,7 @@ class DuplicateReviewIntegrationTest {
         sibling.setName("Duplicate review sibling " + suffix);
         sibling.setSlug("duplicate-review-sibling-" + suffix);
         workspaceMapper.insert(sibling);
+        TestEntityFixtures.initializeChatPrivacy(jdbcTemplate, sibling.getId());
         siblingWorkspaces.add(sibling);
         return sibling;
     }

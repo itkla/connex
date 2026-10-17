@@ -13,6 +13,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -21,6 +22,9 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -37,6 +41,7 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.observability.JobRunRecorder;
 import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunStatus;
+import ooo.klae.connex.backend.seeder.SeederExitListener;
 import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
@@ -94,6 +99,24 @@ class AiAgentMaintenanceRoutingTest {
         assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
     }
 
+    @Test
+    void privacyReadinessCompletesBeforeTheSeederClosesTheReadyContext() {
+        when(workspaces.findWorkspaceIdsPage(0, 100)).thenReturn(List.of());
+        var initializer = new AiAgentPrivacyInitializer(workspaces, scope, mock(AiAgentPrivacyService.class),
+                mock(AiAgentStartupRecoveryService.class), mock(JobRunRecorder.class));
+        try (var application = new AnnotationConfigApplicationContext()) {
+            application.addApplicationListener(new SeederExitListener(application));
+            application.registerBean(AiAgentPrivacyInitializer.class, () -> initializer);
+            application.refresh();
+
+            application.publishEvent(new ApplicationReadyEvent(new SpringApplication(), new String[0],
+                    application, Duration.ZERO));
+
+            assertTrue(initializer.isReady());
+            assertFalse(application.isActive());
+        }
+    }
+
     @ParameterizedTest
     @CsvSource({"scheduler,false", "scheduler,true", "initializer,false", "initializer,true", "cleanup,false", "cleanup,true"})
     void maintenanceRecordsSuccessAndFailureInsideDedicatedPlacement(String job, boolean fails) throws Exception {
@@ -107,7 +130,7 @@ class AiAgentMaintenanceRoutingTest {
         doAnswer(call -> {
             observed.complete(new Recorded(call.getArgument(0), context.getCatalog(), call.getArgument(2)));
             return null;
-        }).when(recorder).record(any(), eq(WORKSPACE), any(), any());
+        }).when(recorder).record(any(), eq("cleanup".equals(job) ? null : WORKSPACE), any(), any());
         if (fails) {
             doThrow(new IllegalStateException("fixture")).when(privacy).initialize(WORKSPACE);
             doThrow(new IllegalStateException("fixture")).when(privacy).reconcileErasedOwners(WORKSPACE);
@@ -140,7 +163,7 @@ class AiAgentMaintenanceRoutingTest {
             }
             default -> throw new AssertionError(job);
         }
-        assertEquals(new Recorded(expectedJob, CATALOG, fails ? JobRunStatus.FAILED : JobRunStatus.SUCCEEDED),
+        assertEquals(new Recorded(expectedJob, "cleanup".equals(job) ? null : CATALOG, fails ? JobRunStatus.FAILED : JobRunStatus.SUCCEEDED),
                 observed.get(10, TimeUnit.SECONDS));
         assertNull(context.getCatalog());
     }

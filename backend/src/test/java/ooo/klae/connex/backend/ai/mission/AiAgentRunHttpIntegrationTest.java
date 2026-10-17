@@ -15,6 +15,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -38,6 +39,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 /** Production HTTP security, tenant routing, services, and MySQL; only provider readiness is synthetic. */
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
 class AiAgentRunHttpIntegrationTest extends AbstractAiAgentPrivacyIntegrationTest {
     private static final String BASE = "/api/ai/assistant/missions";
     private static final String PASSWORD = "MissionHttpFixture9!";
@@ -64,6 +66,7 @@ class AiAgentRunHttpIntegrationTest extends AbstractAiAgentPrivacyIntegrationTes
         when(capability.requireReady()).thenReturn(new byte[32]);
         workspaceMapper.updateMemberRole(workspace.getId(), currentUser.getId(), "owner");
         authenticateAs(currentUser, workspace.getId());
+        approveForStepUp(currentUser);
         AiChatSessionCreateRequest request = new AiChatSessionCreateRequest();
         request.setTitle("HTTP record review");
         sessionId = sessions.create(request).getId();

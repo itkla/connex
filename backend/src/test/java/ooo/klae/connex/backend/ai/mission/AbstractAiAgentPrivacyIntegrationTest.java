@@ -45,6 +45,7 @@ abstract class AbstractAiAgentPrivacyIntegrationTest extends AbstractServiceTest
         workspace.setSlug("mission-privacy-" + key);
         workspaceMapper.insert(workspace);
         currentUser = newUser();
+        workspaceMapper.updateMemberRole(workspace.getId(), currentUser.getId(), "owner");
         authenticateAs(currentUser, workspace.getId());
         privacyService.initialize(workspace.getId());
     }

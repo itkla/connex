@@ -6,6 +6,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.event.TransactionPhase;
@@ -37,7 +39,8 @@ public class AiAgentPrivacyInitializer {
         return ready.get();
     }
 
-    /** Reconciles existing workspaces only after the application migration lifecycle has completed. */
+    /** Reconciles after migrations and before the one-shot seeder closes its ready context. */
+    @Order(Ordered.LOWEST_PRECEDENCE - 1)
     @EventListener(ApplicationReadyEvent.class)
     public void startup() {
         reconcile();

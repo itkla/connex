@@ -114,7 +114,8 @@ revives old content.
 
 `AiAgentPrivacyService` separates invalidation from physical cleanup.
 `AiAgentPrivacyWorker` runs even when AI/provider features are disabled or an owner has
-left. Each work item freezes cutoff generation and maximum committed IDs once. Its
+left. Its pass journal is instance-scoped outside tenant routing so cleanup cannot recreate
+workspace journal rows during teardown. Each work item freezes cutoff generation and maximum committed IDs once. Its
 revision and integer keyset cursors advance in the same transaction as deletion.
 
 The run phase permanently withholds content, invalidates execution authority, settles

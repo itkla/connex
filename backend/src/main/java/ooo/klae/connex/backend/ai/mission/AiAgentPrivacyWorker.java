@@ -28,7 +28,10 @@ public class AiAgentPrivacyWorker {
     private final JobRunRecorder jobRunRecorder;
     private final AtomicInteger workspaceCursor = new AtomicInteger();
 
-    /** Visits at most twenty workspaces and twenty batches on each pass. */
+    /**
+     * Visits at most twenty workspaces and twenty batches on each pass. The pass journal is
+     * instance-scoped because lifecycle cleanup must not recreate tenant residuals during teardown.
+     */
     @Scheduled(fixedDelayString = "${connex.ai.mission-privacy-work-delay:1s}", initialDelay = 10000)
     public void sweep() {
         List<Integer> workspaces = tenantWorkScope.unroutedRead(
@@ -37,30 +40,28 @@ public class AiAgentPrivacyWorker {
             workspaceCursor.set(0);
             return;
         }
+        JobRunDetail started = JobRunDetail.startedUtc();
+        boolean failed = false;
         for (int workspaceId : workspaces) {
             try {
                 tenantWorkScope.inLifecycleWorkspace(workspaceId, () -> {
-                    JobRunDetail started = JobRunDetail.startedUtc();
-                    JobRunStatus outcome = JobRunStatus.SUCCEEDED;
-                    try {
-                        departures.reconcile(workspaceId);
-                        privacyService.reconcileErasedOwners(workspaceId);
-                        List<AiAgentPrivacyWork> work = privacyMapper.dueWork(workspaceId, 1);
-                        if (!work.isEmpty()) {
-                            privacyService.batch(workspaceId, work.getFirst().getOperationKey());
-                        }
-                    } catch (RuntimeException failure) {
-                        outcome = JobRunStatus.FAILED;
-                    } finally {
-                        jobRunRecorder.record(JobRunRecorder.AI_AGENT_PRIVACY_CLEANUP, workspaceId,
-                                outcome, new JobRunDetail(started.startedAt(), Map.of("phase", "cleanup")));
+                    departures.reconcile(workspaceId);
+                    privacyService.reconcileErasedOwners(workspaceId);
+                    List<AiAgentPrivacyWork> work = privacyMapper.dueWork(workspaceId, 1);
+                    if (!work.isEmpty()) {
+                        privacyService.batch(workspaceId, work.getFirst().getOperationKey());
                     }
                 });
             } catch (RuntimeException unavailablePlacement) {
-                workspaceCursor.set(workspaceId);
-                continue;
+                failed = true;
             }
             workspaceCursor.set(workspaceId);
         }
+        JobRunStatus outcome = failed ? JobRunStatus.FAILED : JobRunStatus.SUCCEEDED;
+        tenantWorkScope.unrouted(() -> {
+            jobRunRecorder.record(JobRunRecorder.AI_AGENT_PRIVACY_CLEANUP, null,
+                    outcome, new JobRunDetail(started.startedAt(), Map.of("phase", "cleanup")));
+            return null;
+        });
     }
 }

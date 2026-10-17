@@ -47,6 +47,7 @@ import ooo.klae.connex.backend.mappers.AiOutputCacheMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.storage.UploadSource;
+import ooo.klae.connex.backend.support.TestEntityFixtures;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -962,6 +963,7 @@ class PersonServiceTest extends AbstractServiceTest {
         other.setName("Other Workspace");
         other.setSlug("other-" + unique());
         workspaceMapper.insert(other);
+        TestEntityFixtures.initializeChatPrivacy(jdbcTemplate, other.getId());
         return other;
     }
 
@@ -971,6 +973,7 @@ class PersonServiceTest extends AbstractServiceTest {
         other.setSlug("other-" + unique());
         other.setOrgId(workspaceMapper.getOrgId(workspace.getId()));
         workspaceMapper.insert(other);
+        TestEntityFixtures.initializeChatPrivacy(jdbcTemplate, other.getId());
         return other;
     }
 
