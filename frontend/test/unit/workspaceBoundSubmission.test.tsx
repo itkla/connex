@@ -12,19 +12,32 @@ import {
     ApiError,
     clientRecoveryContext,
     createNote,
+    decideCaptureReview,
+    downloadCsv,
+    exportReportCsv,
     getNotesPage,
     isWorkspaceUnavailableError,
+    updateMyLocale,
+    updateMyTimezone,
+    updateNotificationPreferences,
+    updateOrganizationIdentity,
+    uploadAiChatAttachment,
     uploadAttachmentImage,
+    uploadCurrentUserProfilePicture,
     WORKSPACE_UNAVAILABLE_CODE,
 } from "@/app/lib/api";
 import { userMessageFor, type MessageTranslator } from "@/app/lib/errorMessages";
 import { draftKey, listFreshDrafts, readDraft, writeDraft } from "@/app/lib/formDrafts";
 import {
     bindRenderedWorkspace,
+    matchesRoutePattern,
+    pinsToRenderedWorkspace,
     releaseRenderedWorkspace,
     rememberedWorkspaceName,
     rememberWorkspaceNames,
     renderedWorkspaceId,
+    UNPINNED_WRITE_ROUTES,
+    workspacePinnedRequest,
 } from "@/app/lib/renderedWorkspace";
 import { useWorkspace, WorkspaceProvider } from "@/app/hooks/useWorkspace";
 import DuplicatePreflightWarning from "@/app/components/records/DuplicatePreflightWarning";
@@ -376,6 +389,243 @@ describe("a duplicate check its workspace refused", () => {
     });
 });
 
+function backendSource(relativePath: string): string {
+    return readFileSync(path.resolve(process.cwd(), "..", relativePath), "utf8");
+}
+
+/** The string literals passed to one Java call, joined where the source concatenates them. */
+function javaStringArguments(source: string, call: string): string[] {
+    const start = source.indexOf(call);
+    if (start < 0) throw new Error(`${call} not found`);
+    const end = source.indexOf(");", start);
+    const literals = source.slice(start + call.length, end).match(/"(?:[^"\\]|\\.)*"(?:\s*\+\s*"(?:[^"\\]|\\.)*")*/g) ?? [];
+    return literals.map((literal) => [...literal.matchAll(/"((?:[^"\\]|\\.)*)"/g)]
+        .map((part) => part[1].replaceAll("\\\\", "\\"))
+        .join(""));
+}
+
+/**
+ * Expands the interceptor's route regexes, which use only alternation, one level of `(?:a|b)` groups
+ * and `\d+` segments, into the frontend's `{id}` route patterns.
+ */
+function expandRouteRegex(regex: string): string[] {
+    const alternatives: string[] = [];
+    let depth = 0;
+    let current = "";
+    for (const character of regex) {
+        if (character === "(") depth += 1;
+        if (character === ")") depth -= 1;
+        if (character === "|" && depth === 0) {
+            alternatives.push(current);
+            current = "";
+        } else {
+            current += character;
+        }
+    }
+    alternatives.push(current);
+    return alternatives.flatMap((alternative) => {
+        const group = /\(\?:([^)]*)\)/.exec(alternative);
+        const expanded = group
+            ? group[1].split("|").map((option) => alternative.replace(group[0], option))
+            : [alternative];
+        return expanded.map((route) => route.replaceAll("\\d+", "{id}"));
+    });
+}
+
+const INTERCEPTOR = "backend/src/main/java/ooo/klae/connex/backend/tenant/TenantResolutionInterceptor.java";
+
+describe("the routes that keep their previous selection behaviour", () => {
+    it("excludes exactly the routes WebConfig keeps away from the tenant interceptor", () => {
+        const webConfig = backendSource("backend/src/main/java/ooo/klae/connex/backend/config/WebConfig.java");
+
+        expect([...UNPINNED_WRITE_ROUTES.interceptorExcluded]).toEqual(
+            javaStringArguments(webConfig, ".excludePathPatterns("),
+        );
+    });
+
+    it("excludes exactly the routes the interceptor resolves or exempts on its own", () => {
+        const interceptor = backendSource(INTERCEPTOR);
+        const derived = [
+            ...javaStringArguments(interceptor, "SELECTION_PATH = Pattern.compile("),
+            "/api/ownership-offers/\\d+/(?:accept|decline)",
+            ...javaStringArguments(interceptor, "ORGANIZATION_LIFECYCLE_PATH = Pattern.compile("),
+            ...javaStringArguments(interceptor, "WORKSPACE_LIFECYCLE_PATH = Pattern.compile("),
+        ].flatMap(expandRouteRegex);
+
+        expect(interceptor).toContain('selfPath.matches("/api/ownership-offers/\\\\d+/(?:accept|decline)")');
+        expect([...UNPINNED_WRITE_ROUTES.interceptorSelfResolved].sort()).toEqual(derived.sort());
+    });
+
+    it("excludes account and organization writes only where the ledger shows no workspace permission", () => {
+        const ledger = readFileSync(path.resolve(process.cwd(), "..", "docs/backend/api-surface.tsv"), "utf8")
+            .trim()
+            .split("\n")
+            .slice(1)
+            .map((line) => line.split("\t"));
+        const covered = ledger
+            .filter(([method]) => method !== "GET" && method !== "HEAD" && method !== "OPTIONS")
+            .map(([method, route, , , , authorization]) => ({
+                method,
+                route,
+                concrete: route.replace(/\{[^}]+\}/g, "12"),
+                authorization,
+            }))
+            .filter(({ concrete }) => UNPINNED_WRITE_ROUTES.accountAndOrganization
+                .some((pattern) => matchesRoutePattern(pattern, concrete)));
+
+        for (const pattern of UNPINNED_WRITE_ROUTES.accountAndOrganization) {
+            expect(covered.some(({ concrete }) => matchesRoutePattern(pattern, concrete)), pattern).toBe(true);
+        }
+        expect(covered.map(({ concrete }) => concrete)).toEqual(
+            expect.arrayContaining(["/api/users/me", "/api/users/me/locale", "/api/users/me/profile-picture", "/api/orgs/12"]),
+        );
+        expect(covered.filter(({ authorization }) => /\b[A-Z]+(?:_[A-Z]+)+\b/.test(authorization))).toEqual([]);
+    });
+
+    it.each([
+        ["/api/notes", true],
+        ["/api/persons/12", true],
+        ["/api/comment-threads", true],
+        ["/api/account/connections/google/reviews/3", true],
+        ["/api/dashboard-layout", true],
+        ["/api/workspaces/12/members", true],
+        ["/api/users/me?view=full", false],
+        ["/api/users/me/locale", false],
+        ["/api/orgs/12", false],
+        ["/api/orgs/12/data-subject-requests", false],
+        ["/api/notification-preferences/quiet-hours", false],
+        ["/api/workspaces/12/switch", false],
+        ["/api/auth/logout", false],
+    ])("treats a write to %s as workspace-bound: %s", (route, pinned) => {
+        expect(pinsToRenderedWorkspace(route)).toBe(pinned);
+    });
+});
+
+describe("with the shell rendering a revoked workspace and the cookie healed", () => {
+    beforeEach(() => {
+        bindRenderedWorkspace(owner(), RENDERED);
+    });
+
+    it("leaves account and organization writes on the cookie, as before", async () => {
+        const requests = stubBackend((url) => url.endsWith("/profile-picture")
+            ? json({ id: 7, profilePictureUrl: "/api/attachments/3" })
+            : null);
+
+        await updateMyTimezone("Asia/Tokyo");
+        await updateMyLocale("ja");
+        await uploadCurrentUserProfilePicture(new File(["image"], "me.png", { type: "image/png" }));
+        await updateOrganizationIdentity(12, "Northwind", "Northwind Old", 3);
+        await updateNotificationPreferences([]);
+
+        expect(requests.map(({ url, workspace }) => [url, workspace])).toEqual([
+            ["/api/users/me", String(HEALED)],
+            ["/api/users/me/locale", String(HEALED)],
+            ["/api/users/me/profile-picture", String(HEALED)],
+            ["/api/orgs/12", String(HEALED)],
+            ["/api/notification-preferences", String(HEALED)],
+        ]);
+    });
+
+    it("pins a content write and reports its refusal, but never re-codes an account refusal", async () => {
+        const requests = stubBackend((url, method) => {
+            if (method === "GET") return null;
+            const pinned = url.endsWith("/reviews/3") ? RENDERED : HEALED;
+            return json({ code: "FORBIDDEN", message: `Not a member of workspace ${pinned}` }, 403);
+        });
+
+        const review = await decideCaptureReview("google", 3, { action: "ignore", rememberExact: false, version: 1 }).then(
+            () => null,
+            (error: unknown) => error,
+        );
+        const timezone = await updateMyTimezone("Asia/Tokyo").then(() => null, (error: unknown) => error);
+
+        expect(requests.map(({ workspace }) => workspace)).toEqual([String(RENDERED), String(HEALED)]);
+        expect(isWorkspaceUnavailableError(review)).toBe(true);
+        expect(timezone).toMatchObject({ status: 403, code: "FORBIDDEN" });
+    });
+});
+
+class RefusingUpload {
+    static sent: Array<{ workspace: string | null }> = [];
+    status = 0;
+    statusText = "";
+    responseText = "";
+    readonly upload = { addEventListener: () => undefined };
+    private readonly headers = new Headers();
+    private readonly listeners = new Map<string, () => void>();
+
+    open(): void {}
+
+    setRequestHeader(name: string, value: string): void {
+        this.headers.set(name, value);
+    }
+
+    addEventListener(type: string, listener: () => void): void {
+        this.listeners.set(type, listener);
+    }
+
+    abort(): void {}
+
+    send(): void {
+        RefusingUpload.sent.push({ workspace: this.headers.get("X-Workspace-Id") });
+        this.status = 403;
+        this.statusText = "Forbidden";
+        this.responseText = JSON.stringify({ code: "FORBIDDEN", message: REFUSAL_MESSAGE });
+        queueMicrotask(() => this.listeners.get("load")?.());
+    }
+}
+
+describe("transports outside the JSON pipeline", () => {
+    beforeEach(() => {
+        bindRenderedWorkspace(owner(), RENDERED);
+        rememberWorkspaceNames([workspace(RENDERED, REVOKED_NAME)]);
+    });
+
+    it("re-codes a refused CSV export from the workspace it carried", async () => {
+        const requests = stubBackend((url, method) => method === "POST" ? refusal() : null);
+
+        const error = await downloadCsv("/api/exports/deals/segment", "deals.csv", {
+            method: "POST",
+            body: JSON.stringify({ segmentId: 4 }),
+        }).then(() => null, (failure: unknown) => failure);
+
+        expect(requests.map(({ workspace }) => workspace)).toEqual([String(RENDERED)]);
+        expect(error).toMatchObject({ code: WORKSPACE_UNAVAILABLE_CODE, workspaceName: REVOKED_NAME });
+    });
+
+    it("re-codes a refused report export from the workspace it carried", async () => {
+        const requests = stubBackend((url, method) => method === "POST" ? refusal() : null);
+
+        const error = await exportReportCsv(14, {}).then(() => null, (failure: unknown) => failure);
+
+        expect(requests.map(({ workspace }) => workspace)).toEqual([String(RENDERED)]);
+        expect(error).toMatchObject({ code: WORKSPACE_UNAVAILABLE_CODE, workspaceId: RENDERED });
+    });
+
+    it("re-codes a refused assistant attachment upload from the workspace it carried", async () => {
+        stubBackend();
+        RefusingUpload.sent = [];
+        vi.stubGlobal("XMLHttpRequest", RefusingUpload);
+
+        const error = await uploadAiChatAttachment(
+            8,
+            new File(["notes"], "brief.txt", { type: "text/plain" }),
+            () => undefined,
+        ).then(() => null, (failure: unknown) => failure);
+
+        expect(RefusingUpload.sent).toEqual([{ workspace: String(RENDERED) }]);
+        expect(error).toMatchObject({ code: WORKSPACE_UNAVAILABLE_CODE, workspaceId: RENDERED });
+    });
+
+    it("pins a later save to the workspace its content was composed in", () => {
+        const pinned = workspacePinnedRequest(RENDERED, { signal: new AbortController().signal });
+
+        expect(new Headers(pinned.headers).get("X-Workspace-Id")).toBe(String(RENDERED));
+        expect(pinned.signal).toBeDefined();
+        expect(workspacePinnedRequest(null)).toEqual({});
+    });
+});
+
 /**
  * Every surface that submits composed content, with the token proving how it reports a refused
  * pinned write. The pin itself lives in `app/lib/api.ts`, so each surface must reach the backend only
@@ -444,9 +694,14 @@ describe("every composer path submits through the pinned pipeline", () => {
         const readers = sourceFiles(path.resolve(process.cwd(), "app"))
             .map((file) => path.relative(process.cwd(), file))
             .filter((file) => file !== path.join("app", "lib", "api.ts"))
-            .filter((file) => /document\.cookie[\s\S]{0,40}connex_workspace|connex_workspace=[\s\S]{0,40}document\.cookie/.test(source(file)))
+            .filter((file) => {
+                const contents = source(file);
+                return contents.includes("document.cookie")
+                    && contents.includes("connex_workspace")
+                    && /document\.cookie[\s\S]{0,40}connex_workspace|connex_workspace=[\s\S]{0,40}document\.cookie/.test(contents);
+            })
             .sort();
 
         expect(readers).toEqual([...READ_ONLY_COOKIE_READERS].sort());
-    });
+    }, 120_000);
 });
