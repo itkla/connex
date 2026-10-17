@@ -25,6 +25,90 @@ class ReferenceContentReaderTest {
     private static final List<String> TYPES =
             List.of("user", "person", "deal", "company", "note", "file", "task", "activity");
 
+    static Stream<String> ordinaryProse() {
+        return ReferenceProseReadings.all().stream();
+    }
+
+    @ParameterizedTest
+    @MethodSource("ordinaryProse")
+    void ordinaryProseDoesNotInventDestinationsAfterNormalization(String content) {
+        var reading = ReferenceContentReader.read(content);
+        assertTrue(reading.complete());
+        assertTrue(reading.targets().isEmpty());
+        assertTrue(reading.unexplainedTargets().isEmpty());
+        assertTrue(reading.unparseableTypes().isEmpty());
+        assertTrue(ReferenceService.memberReferenceReading(content).complete());
+        assertEquals(content, ReferenceService.toPlainText(content));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"same-origin", "Follow up with the team. ", "打ち合わせの資料を作成します。"})
+    void plainContentFastPathSkipsCensusAndMemberExtraction(String unit) {
+        for (int length : List.of(436, 4_400, 39_000)) {
+            String content = unit.repeat((length + unit.length() - 1) / unit.length()).substring(0, length);
+            var reading = ReferenceContentReader.read(content);
+            assertTrue(reading.complete());
+            assertTrue(reading.isEmpty());
+            assertFalse(reading.censusScanned());
+            assertFalse(reading.memberLabelsComputed());
+            assertEquals(content, ReferenceService.toPlainText(content));
+        }
+    }
+
+    @Test
+    void memberLabelsAndReferencesAreComputedOnlyWhenRequested() {
+        var reading = ReferenceContentReader.read("[Former `]` Member](user:42)");
+        assertTrue(reading.complete());
+        assertTrue(reading.censusScanned());
+        assertFalse(reading.memberLabelsComputed());
+        assertEquals(List.of(new ReferenceContentReader.ReferenceTarget("user", 42)), reading.targets());
+        assertFalse(reading.memberLabelsComputed());
+        assertTrue(reading.maskingReferences().stream().anyMatch(reference -> reference.label().equals("Former ] Member")));
+        assertTrue(reading.memberLabelsComputed());
+        assertSame(reading.maskingReferences(), reading.maskingReferences());
+    }
+
+    @Test
+    void lazyMemberExtractionRetainsDifferentRenderedLabelsFromBothTableContexts() {
+        String content = "h|i\n--|--|--\n[Former `A\\|B` Member](user:42)";
+        var reading = ReferenceContentReader.read(content);
+        assertFalse(reading.memberLabelsComputed());
+        assertTrue(reading.maskingReferences().containsAll(List.of(
+                new ReferenceService.MemberReference("Former A|B Member", Set.of(42)),
+                new ReferenceService.MemberReference("Former A\\|B Member", Set.of(42)))));
+        assertTrue(reading.memberTargetsComplete());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"See [^f].\n\n> [^f]: harmless body", "- See [^f].\n\n  [^f]: harmless body",
+            "See [^a\\]b].\n\n[^a\\]b]: harmless body"})
+    void unsupportedFootnotesWithoutInternalDestinationsRemainComplete(String content) {
+        var reading = ReferenceContentReader.read(content);
+        assertTrue(reading.complete());
+        assertTrue(reading.isEmpty());
+        assertEquals(content, ReferenceService.toPlainText(content));
+        assertTrue(ReferenceService.memberReferenceReading(content).complete());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"input", "table", "nesting"})
+    void harmlessUnsupportedFootnotesDoNotOverrideResourceFailures(String kind) {
+        String prefix = switch (kind) {
+            case "input" -> "x".repeat(ReferenceContentReader.MAX_INPUT_LENGTH + 1);
+            case "table" -> "| x ".repeat(258);
+            case "nesting" -> "> ".repeat(101) + "plain";
+            default -> throw new IllegalArgumentException(kind);
+        };
+        var reading = ReferenceContentReader.read(prefix + "\n\n> [^f]: harmless body");
+        assertFalse(reading.complete());
+        assertEquals(switch (kind) {
+            case "input" -> ReferenceContentReader.Status.INPUT_LIMIT;
+            case "table" -> ReferenceContentReader.Status.TABLE_LIMIT;
+            case "nesting" -> ReferenceContentReader.Status.NESTING_LIMIT;
+            default -> throw new IllegalArgumentException(kind);
+        }, reading.status());
+    }
+
     static Stream<Arguments> referenceLayouts() {
         return TYPES.stream().flatMap(type -> List.of(
                 "[Former](%s:42)",
@@ -132,12 +216,12 @@ class ReferenceContentReaderTest {
 
     @ParameterizedTest
     @ValueSource(strings = {" ", "\t", "\n", "\r", "\r\n", "\u00a0", "\u2003", "\u2028", "\u2029"})
-    void externalUrlsEndAtGfmWhitespaceBeforeLiteralDestinations(String whitespace) {
+    void literalAutolinksAfterWhitespaceRemainProtected(String whitespace) {
         for (String type : TYPES) {
             var target = new ReferenceContentReader.ReferenceTarget(type, 42);
-            var reading = ReferenceContentReader.read("https://example.com/" + whitespace + type + ":42");
+            var reading = ReferenceContentReader.read("https://example.com/" + whitespace + "<" + type + ":42>");
             assertTrue(reading.targets().contains(target), type);
-            assertTrue(reading.unexplainedTargets().contains(target), type);
+            assertTrue(reading.unexplainedTargets().isEmpty(), type);
         }
     }
 
@@ -173,17 +257,17 @@ class ReferenceContentReaderTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"", " ", "(", "<", "[", "]", ":", "\"", "'", "`", "|"})
-    void censusAcceptsDestinationBoundariesAndStopsExcludingAtTheExternalUrlEnd(String prefix) {
+    @ValueSource(strings = {"](", "]( ", "](\n> ", "<", "[m]: ", "[m]:\r\n> - ", "[m]:\n  1. <"})
+    void censusAcceptsOnlyLiteralDestinationAnchors(String prefix) {
         var target = new ReferenceContentReader.ReferenceTarget("user", 42);
         assertTrue(ReferenceContentReader.read(prefix + "user:42").targets().contains(target));
-        assertEquals(Set.of(target), ReferenceContentReader.read(
-                "https://example.com/:user:7]" + prefix + "user:42").unexplainedTargets());
+        assertEquals(List.of(target), ReferenceContentReader.read(
+                "https://example.com/:user:7]" + prefix + "user:42").targets());
     }
 
     @Test
-    void normalizedCensusAndExternalUrlScanningStayBoundedNearTheInputCap() {
-        String content = "a".repeat(131_000) + " https://example.com/" + "a".repeat(130_000) + ":user:7] user:４２";
+    void anchoredCensusStaysBoundedNearTheInputCap() {
+        String content = "a".repeat(131_000) + " https://example.com/" + "a".repeat(130_000) + ":user:7] `[Former](user:４２)`";
         assertTimeoutPreemptively(Duration.ofSeconds(20), () -> {
             var reading = ReferenceContentReader.read(content);
             assertTrue(reading.complete());
@@ -200,7 +284,7 @@ class ReferenceContentReaderTest {
             assertTrue(reading.unexplainedTargets().isEmpty(), resolved);
             assertTrue(ReferenceService.memberReferenceReading(resolved).complete(), resolved);
             assertFalse(ReferenceService.memberReferenceReading(
-                    "`" + destination + "`\n\n[unused]: user:42").complete(), destination);
+                    "`[Former](" + destination + ")`\n\n[unused]: user:42").complete(), destination);
         }
     }
 
@@ -238,8 +322,9 @@ class ReferenceContentReaderTest {
     void censusCoversAllTypesAndAcceptedSeparatorsInLiteralAndCodeContexts(String separator) {
         for (String type : TYPES) {
             String token = type.toUpperCase(java.util.Locale.ROOT) + separator + "42";
-            for (String content : List.of(token, "<" + token + ">", "`" + token + "`",
-                    "```\n" + token + "\n```", "    " + token, "| " + token + " |")) {
+            for (String content : List.of("[Former](" + token + ")", "<" + token + ">",
+                    "`[Former](" + token + ")`", "```\n[Former](" + token + ")\n```",
+                    "    [Former](" + token + ")", "| [Former](" + token + ") |")) {
                 var reading = ReferenceContentReader.read(content);
                 var target = new ReferenceContentReader.ReferenceTarget(type, 42);
                 assertTrue(reading.targets().contains(target), content);
@@ -257,7 +342,7 @@ class ReferenceContentReaderTest {
 
     @Test
     void censusRunsBeyondTheParserCapAndRequiresSourceCoverageForEachOccurrence() {
-        String content = "[Former](user:42) bare user:43";
+        String content = "[Former](user:42) `[Other](user:43)`";
         var reading = ReferenceContentReader.read(content);
         assertEquals(Set.of(new ReferenceContentReader.ReferenceTarget("user", 43)), reading.unexplainedTargets());
         assertFalse(ReferenceService.memberReferenceReading(content).complete());
@@ -267,7 +352,7 @@ class ReferenceContentReaderTest {
         assertFalse(ReferenceService.memberReferenceReading(content + "\n\n[unused]: user:43").complete());
         assertTrue(ReferenceContentReader.read("[unused]: user:43").unexplainedTargets().isEmpty());
 
-        var oversized = ReferenceContentReader.read("x".repeat(ReferenceContentReader.MAX_INPUT_LENGTH + 1) + " note:42");
+        var oversized = ReferenceContentReader.read("x".repeat(ReferenceContentReader.MAX_INPUT_LENGTH + 1) + " <note:42>");
         assertEquals(ReferenceContentReader.Status.INPUT_LIMIT, oversized.status());
         assertTrue(oversized.targets().contains(new ReferenceContentReader.ReferenceTarget("note", 42)));
     }
@@ -295,10 +380,10 @@ class ReferenceContentReaderTest {
             "[literal user:42](user:42)", "[Former](user:42 \"literal user:42\")",
             "[user:42]: user:42", "[Former][user:42]\n\n[user:42]: user:42"
     })
-    void labelsTitlesAndKeysDoNotExplainTheirOwnLiteralTokens(String content) {
+    void proseTokensInLabelsTitlesAndKeysDoNotInventDestinations(String content) {
         var reading = ReferenceContentReader.read(content);
-        assertTrue(reading.unexplainedTargets().contains(new ReferenceContentReader.ReferenceTarget("user", 42)));
-        assertFalse(ReferenceService.memberReferenceReading(content).complete());
+        assertTrue(reading.unexplainedTargets().isEmpty());
+        assertTrue(ReferenceService.memberReferenceReading(content).complete());
     }
 
     @ParameterizedTest
@@ -384,7 +469,7 @@ class ReferenceContentReaderTest {
     @ValueSource(strings = {"0", "2147483648", "999999999999999999999999999999999999"})
     void unrepresentableCensusIdsRemainUnsafeForVisibilityMembersAndSnippets(String id) {
         for (String type : TYPES) {
-            String content = "literal " + type + ":" + id;
+            String content = "literal <" + type + ":" + id + ">";
             var reading = ReferenceContentReader.read(content);
             assertTrue(reading.unparseableTypes().contains(type), content);
             assertEquals(type.equals("note") ? "a note" : "(unavailable reference)",
@@ -397,8 +482,8 @@ class ReferenceContentReaderTest {
 
     @Test
     void censusRetainsItsTypeForAdversariallyPaddedNumericTypeEntities() {
-        String content = TYPES.stream().map(type -> "&#" + "0".repeat(30_000)
-                + (int) type.charAt(0) + ";" + type.substring(1) + ":42")
+        String content = TYPES.stream().map(type -> "<&#" + "0".repeat(30_000)
+                + (int) type.charAt(0) + ";" + type.substring(1) + ":42>")
                 .collect(java.util.stream.Collectors.joining(" "));
         assertTimeoutPreemptively(Duration.ofSeconds(20), () -> {
             var reading = ReferenceContentReader.read(content);
@@ -709,13 +794,13 @@ class ReferenceContentReaderTest {
         String separator = String.join(" | ", java.util.Collections.nCopies(columns, "---"));
         for (String table : List.of(header + "\n" + separator, "| " + header + " |\n| " + separator + " |")) {
             assertEquals(columns <= ReferenceContentReader.MAX_TABLE_COLUMNS,
-                    ReferenceContentReader.read(table).complete());
+                    ReferenceContentReader.read(table + "\n\n[Former](user:42)").complete());
         }
     }
 
     @Test
     void prospectiveTableCellsAreBoundedBeforePaddedCellAllocation() {
-        String content = "| " + "x | ".repeat(256) + "\n| " + "--- | ".repeat(256) + "\n" + "| x |\n".repeat(40);
+        String content = "| " + "x | ".repeat(256) + "\n| " + "--- | ".repeat(256) + "\n" + "| x |\n".repeat(40) + "\n[Former](user:42)";
         assertEquals(ReferenceContentReader.Status.TABLE_LIMIT, ReferenceContentReader.read(content).status());
     }
 
@@ -745,6 +830,25 @@ class ReferenceContentReaderTest {
             ReferenceContentReader.read("x".repeat(ReferenceContentReader.MAX_INPUT_LENGTH + 1));
             assertEquals(before + 1, registry.counter(
                     "connex.reference.content.incomplete", "reason", "input_limit").count());
+        } finally {
+            Metrics.removeRegistry(registry);
+            registry.close();
+        }
+    }
+
+    @Test
+    void memberProvenanceMetricCountsOnlyLazyAnalysisOncePerReading() {
+        var registry = new SimpleMeterRegistry();
+        Metrics.addRegistry(registry);
+        try {
+            double before = registry.counter("connex.reference.content.incomplete", "reason", "member_provenance").count();
+            var reading = ReferenceContentReader.read("`[Unknown Alias](user:42)`");
+            assertEquals(before, registry.counter("connex.reference.content.incomplete", "reason", "member_provenance").count());
+            assertFalse(reading.memberTargetsComplete());
+            assertFalse(reading.memberTargetsComplete());
+            assertEquals(before + 1, registry.counter("connex.reference.content.incomplete", "reason", "member_provenance").count());
+            ReferenceService.memberReferenceReading("`[Unknown Alias](user:42)`");
+            assertEquals(before + 2, registry.counter("connex.reference.content.incomplete", "reason", "member_provenance").count());
         } finally {
             Metrics.removeRegistry(registry);
             registry.close();

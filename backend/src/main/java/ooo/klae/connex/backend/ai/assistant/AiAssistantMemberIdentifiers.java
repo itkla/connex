@@ -5,7 +5,6 @@ import java.util.List;
 import java.util.Objects;
 
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
-import ooo.klae.connex.backend.ai.masking.MaskingLeakException;
 import ooo.klae.connex.backend.beans.EntityReference;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.services.ReferenceService;
@@ -48,9 +47,11 @@ public final class AiAssistantMemberIdentifiers {
                     .forEach(context::registerMemberCandidate);
         }
     }
-    /** Registers all authored occurrences after the existing reader-visibility boundary. */
-    public static void seedReferenceText(String readerVisibleContent, MaskingContext context) {
-        readerVisibleLabels(readerVisibleContent).forEach(context::registerMemberCandidate);
+    /** Registers complete provenance and returns the safe per-item prose for the AI projection. */
+    public static String seedReferenceText(String readerVisibleContent, MaskingContext context) {
+        var prose = readerVisibleProse(readerVisibleContent);
+        prose.labels().forEach(context::registerMemberCandidate);
+        return prose.content();
     }
 
     /** Captures bounded raw provenance from all textual values in a durable write request. */
@@ -159,17 +160,26 @@ public final class AiAssistantMemberIdentifiers {
 
     /** Declares authored labels from a stored reader-authorized prose snapshot as candidates. */
     public static List<AiAssistantToolResult.Identifier> referenceIdentifiers(String readerVisibleContent) {
-        return readerVisibleLabels(readerVisibleContent).stream()
+        return readerVisibleProse(readerVisibleContent).labels().stream()
                 .map(label -> new AiAssistantToolResult.Identifier("member", label))
                 .toList();
     }
 
-    private static List<String> readerVisibleLabels(String content) {
+    /** Replaces only unreadable item prose, including when a durable write outcome is replayed. */
+    public static String readerVisibleContent(String content) {
+        return readerVisibleProse(content).content();
+    }
+
+    private record Prose(String content, List<String> labels) {
+    }
+
+    private static Prose readerVisibleProse(String content) {
         var reading = ReferenceService.memberReferenceReading(content);
         if (!reading.complete()) {
-            throw new MaskingLeakException("Assistant member reference content is incomplete");
+            return new Prose("(unavailable reference)", List.of());
         }
-        return reading.references().stream().map(ReferenceService.MemberReference::label).distinct().toList();
+        return new Prose(content, reading.references().stream()
+                .map(ReferenceService.MemberReference::label).distinct().toList());
     }
 
 }

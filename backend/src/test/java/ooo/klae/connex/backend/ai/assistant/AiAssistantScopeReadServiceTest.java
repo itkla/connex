@@ -66,6 +66,36 @@ class AiAssistantScopeReadServiceTest {
     private WorkspaceService workspaceService;
     private AiAssistantScopeReadService service;
 
+    @Test
+    void incompleteActivityProseDoesNotDiscardOtherRows() throws Exception {
+        Person person = new Person();
+        person.setId(1);
+        person.setName("Routine Contact");
+        when(personMapper.getAssistantProcessablePersonIds(WORKSPACE_ID)).thenReturn(List.of(1));
+        when(personMapper.getByIds(eq(WORKSPACE_ID), anyList())).thenReturn(List.of(person));
+        when(activityMapper.countAiAssistantScopeActivities(
+                anyInt(), anyList(), anyString(), anyList(), any(), any(), anyList(), anyBoolean())).thenReturn(2L);
+        when(activityMapper.getAiAssistantScopeActivities(
+                anyInt(), anyList(), anyString(), anyList(), any(), any(), anyList(), anyBoolean(), anyInt(), anyInt()))
+                .thenReturn(List.of(
+                        new AiAssistantScopeActivity(1, 1, "meeting", "Keep this subject",
+                                "`[Unknown Former Alias](user:42)`", "2026-08-22 10:00:00", 1, null),
+                        new AiAssistantScopeActivity(2, 1, "meeting", "Other subject", "Keep this activity",
+                                "2026-08-22 11:00:00", 1, null)));
+        var context = new MaskingContext();
+
+        var result = service.scopeActivities(AiChatQueryScope.none(), "person", null, List.of(), 30, 50, 5,
+                new AiChatResourceRegistry(context));
+
+        var data = JsonMapper.builder().build().valueToTree(result.data());
+        assertEquals(2, result.data().get("returnedActivities"));
+        assertEquals("(unavailable reference)", data.path("activities").path(0).path("notes").asString());
+        assertEquals("Keep this subject", data.path("activities").path(0).path("subject").asString());
+        assertEquals("Keep this activity", data.path("activities").path(1).path("notes").asString());
+        assertFalse(data.toString().contains("Unknown Former Alias"));
+        assertFalse(context.identifierDictionary().contains("Unknown Former Alias"));
+    }
+
     @BeforeEach
     void setUp() {
         activityMapper = mock(ActivityMapper.class);

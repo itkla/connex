@@ -210,8 +210,9 @@ the authored spelling. Table-cell offsets are mapped back across escaped pipes b
 extension removes those backslashes before inline parsing. The collector covers the following
 constructs. Examples show stored source; `\n`, `\r` and `\t` denote line breaks or tabs.
 
-The existing label APIs retain their source-spelling and entity-decoding contract, including
-ordering. The completeness-aware AI reading additionally includes rendered labels with code,
+The package-private compatibility label APIs preserve legacy source-spelling/entity-decoding
+readings and their ordering, and add parser-resolved source labels. Their results are a conservative
+superset, not an AI admission decision. The completeness-aware AI reading additionally includes rendered labels with code,
 emphasis and escape syntax removed, sharing the same authorization target groups.
 Legacy definition-key suppression applies only to the source-label view: when the AST instead
 resolves that bracket as a shortcut, its label remains in the AI masking view with the same
@@ -272,8 +273,8 @@ footnotes have separate inline/container contexts; differential fixtures cover b
 and frontend rendering.
 The pinned table extension disagrees with GFM on lone-pipe body rows and unequal header/delimiter
 column counts. The reader therefore unions links and definitions from a second bounded parse
-with footnotes but without tables. A destination census independently covers the **full original
-body**, including source rejected by parser admission. Only the census uses backend HTML-entity
+with footnotes but without tables. A destination census independently locates literal syntax throughout the **full original
+body**, including source rejected by parser admission. Only census destinations use backend HTML-entity
 decoding followed by the AI screen's shared `CanonicalText` literal projection; both AST parses
 still receive unchanged original source. Composed UTF-16 source maps retain each hit's original
 occurrence through entity decoding, NFKC, case folding and default-ignorable/delimiter removal.
@@ -281,36 +282,34 @@ The census recognizes all eight internal types, backend Unicode decimal digits, 
 colons and named/decimal/hex entity spellings. Thus `user:４２`, `user:٤٢`, `tasK:42`, full-width
 type/colon spellings, `user\&colon;42`, `user&#92;:42` and `u&#115;er:42` cannot hide missed links.
 
-A census token must start at the beginning of text, after whitespace, or after one of
-`(`, `<`, `[`, `]`, `:`, `"`, `'`, backtick or `|`. The first seven delimit Markdown destinations,
-autolinks, keys and quoted values; backticks and pipes retain conservative literal-code and
-table-cell coverage. Word-embedded and slash-prefixed substrings therefore do not become internal
-targets. External URL spans beginning with `scheme://`, `mailto:` or `www.` end at whitespace,
-`<`, `>`, `]`, backtick, table pipe or an unmatched closing `)`. The `<` boundary follows
-[GFM autolink termination](https://github.github.com/gfm/#autolinks-extension-) and always applies,
-including inside quoted query text: `https://example.com/<note:42>` and `a://<user:42>` retain
-their adjacent internal destinations even when both ASTs miss them. All GFM whitespace terminates
-the span too. A forward-only counter keeps balanced parentheses inside the URL, and interior
-quotes/apostrophes remain URL characters. Thus `https://example.com/(docs)/:user:42`,
-`[Help](https://example.com/(docs)/:user:42)` and query/path apostrophes no longer invent member
-provenance or trigger whole-body redaction. URL discovery and census matching do not rescan scheme
-runs or punctuation tails. An internal destination after a URL's closing delimiter still counts.
-Ordinary URL paths such as `https://example.com/user:42` and `/superuser:42` remain external or
-word-embedded text.
+The census visits only literal ASCII destination anchors in the original source: `](` for an
+inline link/image, `<` immediately before an autolink destination, and `]:` for a definition.
+After `](` or `]:`, it accepts spaces/tabs, at most one LF/CR/CRLF continuation with literal
+blockquote/list prefixes or indentation, and an optional `<`. Entity decoding and normalization
+apply only to the following destination; they cannot create syntax anchors. Cached forward
+`indexOf` cursors locate anchors, and disjoint candidate runs keep normalization off ordinary
+prose. Thus `Note:2026/10/16`, `Note：2026年10月16日`, `(note:7)`, `Deal:3件`, `Task：①資料作成`
+and `activity:12 logged` remain prose. External URL substrings also remain prose, including
+`https://example.com/(docs)/:user:42` and `[Help](https://example.com/path]user:42)`; the reader
+no longer attempts a separate URL-exclusion grammar. Literal `<` anchors still protect
+`https://example.com/<note:42>` and `a://<user:42>`, even inside the table disagreement.
 Only an actual link, image or definition destination from either parse explains a census hit, by the
 same type, integer ID and original source occurrence; compatibility scans cannot explain one.
 An unrelated definition with the same ID cannot establish coverage for a missed table link.
-Literal tokens in labels, titles and reference keys also remain unexplained. Every unexplained hit
+Bare type/ID text in labels, titles and reference keys is not a census hit; literal destination
+anchors inside such text remain conservative candidates. Every unexplained hit
 joins the visibility inventory, so invisible destinations are still redacted when both parses miss
 them. A visible destination retains the existing scoped authorization checks.
 
-Any unexplained `user:` census hit makes member/AI admission incomplete and refuses before
-provider dispatch. Nonpositive or overflowing census IDs retain an unsafe signal. Context-free
-snippets replace unexplained or unrepresentable references with the existing unavailable placeholder,
-or `a note` when a note target is present. Code spans, fenced/indented code, literal examples, HTML and table
-cells all count: this deliberately redacts or refuses some non-rendered references. A malformed
+Any unexplained `user:` census hit makes the member reading incomplete. Original queued text
+is refused at identifier admission; stored AI prose degrades per item as described below. Nonpositive or overflowing census IDs retain an unsafe signal. Context-free
+snippets replace the **whole snippet** with the existing unavailable placeholder for unexplained,
+unrepresentable or incomplete readings, or `a note` when a complete reading contains a note target.
+Canonical tokens in otherwise complete content still flatten individually. Literal destination
+syntax in code spans, fenced/indented code, examples, HTML and table cells also counts: this
+deliberately redacts some non-rendered references. A malformed
 `user:7)` definition followed by a valid `user:42` definition retains its conservative user-42
-alias but refuses AI admission because user 7 remains unexplained. `user:(7` is not a destination
+alias but makes its member reading incomplete because user 7 remains unexplained. `user:(7` is not a destination
 token; its valid fallback shortcut remains maskable. The differential fixtures cover both table
 disagreements across all eight types, including blockquote/list containers.
 Autolink-literal and strikethrough artifacts are deliberately absent: literal autolinks use
@@ -349,10 +348,11 @@ The pinned footnotes extension has two known renderer differences: its label sca
 handle escaped closing brackets, and its continuation indentation is absolute inside containers.
 Until upstream supports those layouts, all container footnotes, footnote labels containing a
 backslash or opening bracket, and ordinary-definition fallbacks whose key starts with `^` are
-explicitly incomplete (`unsupported_footnote`). This conservatively refuses some valid Markdown
-instead of accepting a partial AST. Escaped footnote definition markers are checked in a linear
+explicitly incomplete (`unsupported_footnote`). When this is the only incomplete status and the syntax census finds no internal destination
+(including no unrepresentable ID), the reading remains complete and preserves harmless prose.
+Bodies with internal destinations keep the whole-body fail-closed behavior. Escaped footnote definition markers are checked in a linear
 source pass, independently of the AST: a missed footnote can merge paragraphs into a code span
-and leave no definition node to diagnose. Literal source examples may therefore be refused too.
+and leave no definition node to diagnose. Literal destination syntax in source examples may therefore fail closed too.
 The escaped-label, paragraph-interruption and nested-blockquote reproductions are
 also exercised against the frontend renderer. Normal root footnotes remain supported; the
 compatibility inventory still retains targets and member candidates from refused bodies.
@@ -365,31 +365,42 @@ independent of the label bound; genuinely empty labels remain admitted.
 Every incomplete visibility reading replaces the whole body with `(unavailable reference)`, also
 on reader-authorized AI projections and context-free snippets. No unchecked prefix or suffix is
 returned. Structured references retain their independent existing visibility checks. The
-Micrometer counter `connex.reference.content.incomplete`, tagged only with the bounded `reason`
-vocabulary, makes these decisions visible without recording content, labels, IDs or workspace data.
-The additional fixed `member_provenance` reason records incomplete member admission when parsing
-itself completed but member destinations remain unsafe or unexplained.
+Micrometer counter `connex.reference.content.incomplete` uses the global registry of this static
+reader and counts **reads**, not requests, users, items or AI admission decisions. Parser reasons
+increment once per incomplete `read()`, including visibility, audit and snippet reads/re-reads.
+The bounded `member_provenance` reason increments once when an otherwise complete reading's lazy
+member analysis first detects unsafe/unexplained member provenance; visibility/snippet paths do
+not compute it. Separate readings of the same content can increment again. Tags contain only the
+fixed reason vocabulary, never content, labels, IDs or workspace data. This diagnostic is not a
+count of refused provider requests; retaining the static reader avoids constructor changes solely
+for metrics.
 Queue identifier admission parses the original complete text and refuses incomplete readings with
-the existing `identifier_text_unsafe` error before identifier queries or provider dispatch. Direct
-AI member projections also refuse via `MaskingLeakException`, so retained partial compatibility
-candidates are never treated as permission to send unread content. An unrepresentable `user:`
-destination also refuses at both AI admission paths: its authored label cannot be associated
-with an authorizable integer ID.
+the existing `identifier_text_unsafe` error before identifier queries or provider dispatch.
+For stored reader-authorized prose, incomplete member readings instead replace only that item's
+AI prose with `(unavailable reference)` and register no partial labels. Record/list tools, scope
+activities, work commitments and complete/reschedule task outcomes apply this projection before
+screening/truncation. Other items and non-prose fields continue normally. Fresh write results and
+stored-outcome replays use the same pure projection and do not throw because one description is
+incomplete; durable source/outcome text remains unchanged. An unrepresentable `user:` destination
+follows these same queue-refusal and per-item-degradation paths.
 An invalid non-member destination does not suppress valid member provenance from original queue text.
 There is no cross-request content, AST or authorization cache. Per-group member visibility,
 500-ID batches and combined identifier limits remain unchanged; persisted references and mention
 recipients still use only
 the existing canonical write grammar and its 100-reference cap.
 
-Residuals are intentional conservative over-inclusion, the explicit footnote refusals above,
-the census refusing or redacting literal code examples (including normalized spellings the renderer
-itself leaves literal), bounded/unrepresentable inputs refusing
-instead of rendering, and future parser/renderer version drift. Renew the differential fixtures
-when either dependency changes; census over-inclusion remains intentional even where neither
-parser renders a link.
-URL exclusion deliberately stops at every unmatched closing parenthesis and at `]`, backtick or
-table pipe, rather than reproducing every GFM trailing-punctuation/context rule. Those remaining
-conservative boundaries can still redact/refuse otherwise external URL text.
+Within the input cap, content with none of `[`, `<`, `&`, `\`, `:` or `：` returns an empty
+complete reading without census or AST parsing. Member compatibility scans, authored/logical/
+rendered label extraction and reference grouping are invocation-local and lazy: only member/AI
+APIs request them, never reader redaction or context-free snippets. No cross-request cache is added.
+
+Residuals are the retained compatibility supplement's conservative over-inclusion, literal
+Markdown destination syntax in code/HTML, unsupported footnote bodies containing internal
+destinations, bounded/unrepresentable inputs failing closed, and future parser/renderer drift.
+Bare prose type/ID text is outside the census. The original conservative supplement can still
+protect entity-encoded syntax that the renderer leaves literal; it does not create census anchors.
+Renew the differential fixtures when either dependency changes. Further normalization or Markdown
+exotica outside the tested syntax layouts require a separately scoped review.
 Current active members are masked everywhere through directory candidates. Prose mentions of
 former members outside reference syntax remain outside #1822's guarantee. Full assistant note reads
 bypass display previews so a label cannot be cut before this boundary. Shared sessions exclude private notes in SQL before the result limit, including company

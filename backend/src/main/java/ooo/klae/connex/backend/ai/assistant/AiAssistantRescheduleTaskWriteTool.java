@@ -146,6 +146,9 @@ public class AiAssistantRescheduleTaskWriteTool implements AiAssistantWriteTool 
         Map<String, Object> result = new LinkedHashMap<>();
         AiAssistantWriteTool.copyText(storedOutcome, result, "recordType");
         AiAssistantWriteTool.copyText(storedOutcome, result, "description");
+        if (result.get("description") instanceof String description) {
+            result.put("description", AiAssistantMemberIdentifiers.readerVisibleContent(description));
+        }
         AiAssistantWriteTool.copyText(storedOutcome, result, "dueDate");
         return result;
     }

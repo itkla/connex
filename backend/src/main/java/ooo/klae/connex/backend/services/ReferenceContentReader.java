@@ -17,12 +17,15 @@ import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -128,24 +131,62 @@ final class ReferenceContentReader {
 
     /** Source spans refer to the unchanged UTF-16 input, including escaped pipes in table cells. */
     record LinkOccurrence(String type, Optional<ReferenceTarget> target, List<SourceSpan> sourceSpans,
-            List<SourceSpan> labelSpans, String authoredLabel, String logicalLabel, String decodedLabel) {
+            List<SourceSpan> labelSpans, LabelReadings labels) {
         LinkOccurrence {
             sourceSpans = List.copyOf(sourceSpans);
             labelSpans = List.copyOf(labelSpans);
+        }
+
+        String authoredLabel() {
+            return labels.first().authored();
+        }
+
+        String logicalLabel() {
+            return labels.first().logical();
+        }
+
+        String decodedLabel() {
+            return labels.first().decoded();
+        }
+
+        /** Both parses deduplicate by original syntax without evaluating lazy member labels. */
+        @Override
+        public boolean equals(Object other) {
+            return other instanceof LinkOccurrence link && type.equals(link.type()) && target.equals(link.target())
+                    && sourceSpans.equals(link.sourceSpans()) && labelSpans.equals(link.labelSpans());
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(type, target, sourceSpans, labelSpans);
         }
     }
 
     /** Compatibility and census candidates are additive; only AST destinations explain census hits. */
     record Reading(List<LinkOccurrence> links, List<ReferenceTarget> targets, Set<String> unparseableTypes,
-            List<MemberReference> memberReferences, List<MemberReference> maskingReferences,
-            Set<ReferenceTarget> unexplainedTargets, boolean memberTargetsComplete, Status status) {
+            Lazy<MemberAnalysis> members, Set<ReferenceTarget> unexplainedTargets, Status status,
+            boolean censusScanned) {
         Reading {
             links = List.copyOf(links);
             targets = List.copyOf(targets);
             unparseableTypes = Set.copyOf(unparseableTypes);
-            memberReferences = List.copyOf(memberReferences);
-            maskingReferences = List.copyOf(maskingReferences);
             unexplainedTargets = Set.copyOf(unexplainedTargets);
+        }
+
+        List<MemberReference> memberReferences() {
+            return members.get().references().source();
+        }
+
+        List<MemberReference> maskingReferences() {
+            return members.get().references().masking();
+        }
+
+        boolean memberTargetsComplete() {
+            return members.get().complete();
+        }
+
+        boolean memberLabelsComputed() {
+            return members.computed() || links.stream().anyMatch(link -> link.labels().computed());
         }
 
         boolean complete() {
@@ -170,7 +211,56 @@ final class ReferenceContentReader {
     private record DestinationCensus(List<CensusHit> hits, Set<ReferenceTarget> targets, Set<String> unparseableTypes) {
     }
 
-    private record ExternalUrlSpan(int start, int end) {
+    private record MemberAnalysis(MemberReadings references, boolean complete) {
+    }
+
+    private record LabelText(String authored, String logical, String decoded) {
+    }
+
+    /** Same source spans can render differently across table contexts; retain both lazy readings. */
+    private static final class LabelReadings {
+        private final List<Lazy<LabelText>> readings = new ArrayList<>();
+
+        private LabelReadings(Supplier<LabelText> supplier) {
+            readings.add(new Lazy<>(supplier));
+        }
+
+        private void add(LabelReadings additional) {
+            readings.addAll(additional.readings);
+        }
+
+        private LabelText first() {
+            return readings.getFirst().get();
+        }
+
+        private List<String> decoded() {
+            return readings.stream().map(reading -> reading.get().decoded()).distinct().toList();
+        }
+
+        private boolean computed() {
+            return readings.stream().anyMatch(Lazy::computed);
+        }
+    }
+
+    /** Invocation-local memoization keeps member extraction off visibility and snippet paths. */
+    private static final class Lazy<T> {
+        private final Supplier<T> supplier;
+        private T value;
+
+        private Lazy(Supplier<T> supplier) {
+            this.supplier = supplier;
+        }
+
+        private synchronized T get() {
+            if (value == null) {
+                value = supplier.get();
+            }
+            return value;
+        }
+
+        private synchronized boolean computed() {
+            return value != null;
+        }
     }
 
     /**
@@ -179,11 +269,12 @@ final class ReferenceContentReader {
      * when parser admission fails. Shared target groups avoid label/id Cartesian expansion.
      */
     static Reading read(String content) {
-        if (content == null || content.isEmpty()) {
-            return new Reading(List.of(), List.of(), Set.of(), List.of(), List.of(), Set.of(), true, Status.COMPLETE);
+        if (content == null || content.isEmpty() || content.length() <= MAX_INPUT_LENGTH && plainContent(content)) {
+            return new Reading(List.of(), List.of(), Set.of(),
+                    new Lazy<>(() -> new MemberAnalysis(new MemberReadings(List.of(), List.of()), true)),
+                    Set.of(), Status.COMPLETE, false);
         }
-        MemberLabels labels = memberLabels(content);
-        Set<LinkOccurrence> links = new LinkedHashSet<>();
+        Map<LinkOccurrence, LinkOccurrence> links = new LinkedHashMap<>();
         DestinationCensus census = destinationCensus(content);
         MarkdownTargets compatibility = content.length() <= MAX_INPUT_LENGTH
                 ? compatibilityTargets(content) : new MarkdownTargets(List.of(), Set.of(), false);
@@ -194,72 +285,103 @@ final class ReferenceContentReader {
         if (status == Status.COMPLETE) {
             status = bracketBudgetStatus(content);
         }
-        if (status == Status.COMPLETE) {
-            status = footnoteSourceStatus(content);
-        }
+        Status sourceFootnotes = footnoteSourceStatus(content);
         CensusCoverage coverage = new CensusCoverage(census.hits(), status == Status.COMPLETE ? content.length() : 0);
         if (status == Status.COMPLETE) {
             try {
                 status = collectParsed(PARSER.parse(content), content, links, parsedTargets, unparseable, coverage);
                 Status withoutTables = collectParsed(PARSER_WITHOUT_TABLES.parse(content), content, links,
                         parsedTargets, unparseable, coverage);
-                if (status == Status.COMPLETE) {
-                    status = withoutTables;
-                }
+                status = mergeStatus(status, withoutTables);
             } catch (IllegalArgumentException | IndexOutOfBoundsException exception) {
                 status = Status.PARSE_FAILURE;
             }
+        }
+        status = mergeStatus(status, sourceFootnotes);
+        if (status == Status.UNSUPPORTED_FOOTNOTE && census.targets().isEmpty() && census.unparseableTypes().isEmpty()) {
+            status = Status.COMPLETE;
         }
         targets.addAll(parsedTargets);
         targets.addAll(census.targets());
         unparseable.addAll(census.unparseableTypes());
         Set<ReferenceTarget> unexplained = coverage.unexplained();
-        var references = memberReferences(content, labels, links);
-        boolean memberTargetsComplete = !compatibility.unparseableMemberLinks()
-                && !census.unparseableTypes().contains(TYPE_USER)
-                && unexplained.stream().noneMatch(target -> TYPE_USER.equals(target.type()))
-                && links.stream().noneMatch(link -> TYPE_USER.equals(link.type()) && (link.target().isEmpty()
-                        || !link.labelSpans().isEmpty() && link.authoredLabel().isEmpty()));
-        if (status != Status.COMPLETE || !memberTargetsComplete) {
-            String reason = status == Status.COMPLETE ? "member_provenance" : status.name().toLowerCase(Locale.ROOT);
-            Metrics.counter("connex.reference.content.incomplete", "reason", reason).increment();
+        if (status != Status.COMPLETE) {
+            Metrics.counter("connex.reference.content.incomplete", "reason", status.name().toLowerCase(Locale.ROOT)).increment();
         }
-        return new Reading(new ArrayList<>(links), new ArrayList<>(targets), unparseable,
-                references.source(), references.masking(), unexplained, memberTargetsComplete, status);
+        boolean parsedCompletely = status == Status.COMPLETE;
+        var members = new Lazy<>(() -> {
+            var references = memberReferences(content, memberLabels(content), links.values());
+            boolean complete = !compatibility.unparseableMemberLinks()
+                    && !census.unparseableTypes().contains(TYPE_USER)
+                    && unexplained.stream().noneMatch(target -> TYPE_USER.equals(target.type()))
+                    && links.values().stream().noneMatch(link -> TYPE_USER.equals(link.type()) && (link.target().isEmpty()
+                            || !link.labelSpans().isEmpty() && link.authoredLabel().isEmpty()));
+            if (parsedCompletely && !complete) {
+                Metrics.counter("connex.reference.content.incomplete", "reason", "member_provenance").increment();
+            }
+            return new MemberAnalysis(references, complete);
+        });
+        return new Reading(new ArrayList<>(links.values()), new ArrayList<>(targets), unparseable,
+                members, unexplained, status, true);
+    }
+
+    private static boolean plainContent(String content) {
+        return content.indexOf('[') < 0 && content.indexOf('<') < 0 && content.indexOf('&') < 0
+                && content.indexOf('\\') < 0 && content.indexOf(':') < 0 && content.indexOf('：') < 0;
+    }
+
+    private static Status mergeStatus(Status current, Status additional) {
+        return current == Status.COMPLETE || current == Status.UNSUPPORTED_FOOTNOTE && additional != Status.COMPLETE
+                ? additional : current;
     }
 
     /**
-     * Inventories destinations in the AI screen's literal projection, retaining original offsets
-     * across backend entity decoding. Destination boundaries exclude embedded words; external
-     * URL spans exclude path/query fragments. Code and malformed tables remain conservative.
-     * Fixed alternatives and disjoint possessive runs keep scanning linear. Only an AST destination
-     * at the same original offset can explain a hit and admit its member label to AI masking.
+     * Visits only literal Markdown destination anchors in the original source. Normalization
+     * applies to each following destination, never to syntax; encoded brackets cannot create an
+     * anchor. Candidate runs stop before another anchor, so work remains linear even in code.
      */
     private static DestinationCensus destinationCensus(String content) {
         List<CensusHit> hits = new ArrayList<>();
         Set<ReferenceTarget> targets = new LinkedHashSet<>();
         Set<String> unparseable = new HashSet<>();
-        CanonicalText.Projection projection = censusProjection(content);
-        List<ExternalUrlSpan> externalUrls = externalUrlSpans(projection.value());
-        Matcher destinations = DESTINATION_CENSUS.matcher(projection.value());
-        int externalIndex = 0;
-        while (destinations.find()) {
-            while (externalIndex < externalUrls.size()
-                    && externalUrls.get(externalIndex).end() <= destinations.start()) {
-                externalIndex++;
+        int bracket = content.indexOf(']');
+        int angle = content.indexOf('<');
+        int previousStart = -1;
+        while (bracket >= 0 || angle >= 0) {
+            int start = -1;
+            if (angle >= 0 && (bracket < 0 || angle < bracket)) {
+                start = angle + 1;
+                angle = content.indexOf('<', angle + 1);
+            } else {
+                if (bracket + 1 < content.length()
+                        && (content.charAt(bracket + 1) == '(' || content.charAt(bracket + 1) == ':')) {
+                    start = censusDestinationStart(content, bracket + 2);
+                }
+                bracket = content.indexOf(']', bracket + 1);
             }
-            if (!destinationStart(projection.value(), destinations.start())
-                    || externalIndex < externalUrls.size()
-                    && externalUrls.get(externalIndex).start() <= destinations.start()) {
+            if (start < 0 || start == previousStart || start == content.length()) {
+                continue;
+            }
+            previousStart = start;
+            int end = start;
+            while (end < content.length() && !censusDestinationEnd(content.charAt(end))) {
+                end++;
+            }
+            if (end == start) {
+                continue;
+            }
+            CanonicalText.Projection projection = censusProjection(content.substring(start, end));
+            Matcher destination = DESTINATION_CENSUS.matcher(projection.value());
+            if (!destination.lookingAt()) {
                 continue;
             }
             for (String type : CENSUS_TYPES) {
-                if (destinations.start(type) >= 0) {
-                    var target = parseReferenceTarget(type, normalizeReferenceSyntax(destinations.group("id")));
+                if (destination.start(type) >= 0) {
+                    var target = parseReferenceTarget(type, normalizeReferenceSyntax(destination.group("id")));
                     if (target.isPresent()) {
                         targets.add(target.get());
-                        hits.add(new CensusHit(target.get(), projection.sourceStart(destinations.start()),
-                                projection.sourceEnd(destinations.end())));
+                        hits.add(new CensusHit(target.get(), start + projection.sourceStart(destination.start()),
+                                start + projection.sourceEnd(destination.end())));
                     } else {
                         unparseable.add(type);
                     }
@@ -268,6 +390,53 @@ final class ReferenceContentReader {
             }
         }
         return new DestinationCensus(hits, targets, unparseable);
+    }
+
+    /** Allows one physical continuation line, retaining literal list/blockquote prefixes. */
+    private static int censusDestinationStart(String content, int start) {
+        int offset = skipHorizontalSpace(content, start);
+        if (offset < content.length() && (content.charAt(offset) == '\r' || content.charAt(offset) == '\n')) {
+            offset = afterDefinitionLineEnd(content, offset);
+            offset = skipHorizontalSpace(content, offset);
+            boolean container = true;
+            while (container && offset < content.length()) {
+                char marker = content.charAt(offset);
+                if (marker == '>') {
+                    offset = skipHorizontalSpace(content, offset + 1);
+                } else if ((marker == '-' || marker == '+' || marker == '*') && offset + 1 < content.length()
+                        && (content.charAt(offset + 1) == ' ' || content.charAt(offset + 1) == '\t')) {
+                    offset = skipHorizontalSpace(content, offset + 1);
+                } else if (marker >= '0' && marker <= '9') {
+                    int digits = offset;
+                    while (digits < content.length() && digits - offset < 9
+                            && content.charAt(digits) >= '0' && content.charAt(digits) <= '9') {
+                        digits++;
+                    }
+                    if (digits + 1 < content.length() && (content.charAt(digits) == '.' || content.charAt(digits) == ')')
+                            && (content.charAt(digits + 1) == ' ' || content.charAt(digits + 1) == '\t')) {
+                        offset = skipHorizontalSpace(content, digits + 1);
+                    } else {
+                        container = false;
+                    }
+                } else {
+                    container = false;
+                }
+            }
+        }
+        return offset < content.length() && content.charAt(offset) == '<' ? offset + 1 : offset;
+    }
+
+    private static int skipHorizontalSpace(String content, int start) {
+        int offset = start;
+        while (offset < content.length() && (content.charAt(offset) == ' ' || content.charAt(offset) == '\t')) {
+            offset++;
+        }
+        return offset;
+    }
+
+    private static boolean censusDestinationEnd(char character) {
+        return Character.isWhitespace(character) || Character.isSpaceChar(character)
+                || "<>[]()\"'`|".indexOf(character) >= 0;
     }
 
     /** Backend entity decoding composes with the exact source-mapped fold used by AI screening. */
@@ -307,74 +476,6 @@ final class ReferenceContentReader {
             projectedEnds[offset] = ends[normalized.sourceEnd(offset + 1) - 1];
         }
         return new CanonicalText.Projection(normalized.value(), projectedStarts, projectedEnds);
-    }
-
-    /** Markdown delimiters plus code/table boundaries admit conservative literal examples. */
-    private static boolean destinationStart(String content, int start) {
-        if (start == 0) {
-            return true;
-        }
-        char previous = content.charAt(start - 1);
-        return Character.isWhitespace(previous) || Character.isSpaceChar(previous)
-                || "(<[]:\"'`|".indexOf(previous) >= 0;
-    }
-
-    /**
-     * Tracks scheme runs and balanced parentheses once. Interior quotes remain URL characters;
-     * GFM's hard less-than/whitespace boundaries always win, including inside quoted queries.
-     */
-    private static List<ExternalUrlSpan> externalUrlSpans(String content) {
-        List<ExternalUrlSpan> spans = new ArrayList<>();
-        int schemeStart = -1;
-        for (int offset = 0; offset < content.length();) {
-            char current = content.charAt(offset);
-            int start = -1;
-            int prefixLength = 0;
-            if (content.startsWith("mailto:", offset)) {
-                start = offset;
-                prefixLength = 7;
-            } else if (content.startsWith("www.", offset)) {
-                start = offset;
-                prefixLength = 4;
-            } else if (current == ':' && schemeStart >= 0 && content.startsWith("://", offset)) {
-                start = schemeStart;
-                prefixLength = 3;
-            }
-            if (start >= 0) {
-                int end = offset + prefixLength;
-                int parentheses = 0;
-                while (end < content.length() && !externalUrlEnd(content.charAt(end))) {
-                    char character = content.charAt(end);
-                    if (character == '(') {
-                        parentheses++;
-                    } else if (character == ')') {
-                        if (parentheses == 0) {
-                            break;
-                        }
-                        parentheses--;
-                    }
-                    end++;
-                }
-                spans.add(new ExternalUrlSpan(start, end));
-                offset = end;
-                schemeStart = -1;
-            } else {
-                if (current >= 'a' && current <= 'z') {
-                    if (schemeStart < 0) {
-                        schemeStart = offset;
-                    }
-                } else if (!(current >= '0' && current <= '9' || current == '+' || current == '.' || current == '-')) {
-                    schemeStart = -1;
-                }
-                offset++;
-            }
-        }
-        return spans;
-    }
-
-    private static boolean externalUrlEnd(char character) {
-        return Character.isWhitespace(character) || Character.isSpaceChar(character)
-                || "<>]`|".indexOf(character) >= 0;
     }
 
     /** Entity-encoded type letters must not hide renderer-recognized destinations from the census. */
@@ -645,7 +746,7 @@ final class ReferenceContentReader {
     }
 
     /** Saturation is incomplete even if the resulting bounded AST still contains some links. */
-    private static Status collectParsed(Node document, String content, Collection<LinkOccurrence> links,
+    private static Status collectParsed(Node document, String content, Map<LinkOccurrence, LinkOccurrence> links,
             Set<ReferenceTarget> targets, Set<String> unparseable, CensusCoverage coverage) {
         Status status = Status.COMPLETE;
         Deque<WalkEntry> pending = new ArrayDeque<>();
@@ -658,7 +759,7 @@ final class ReferenceContentReader {
                     + (node instanceof Link || node instanceof Image || node instanceof FootnoteReference
                             || node.getFirstChild() != null ? 1 : 0);
             if (inlines >= MAX_NESTING || blocks >= MAX_NESTING) {
-                status = Status.NESTING_LIMIT;
+                status = mergeStatus(status, Status.NESTING_LIMIT);
             }
             TableSource tableSource = node instanceof TableCell
                     ? TableSource.from(content, node.getSourceSpans()) : entry.tableSource();
@@ -668,7 +769,7 @@ final class ReferenceContentReader {
                     columns++;
                 }
                 if (columns > MAX_TABLE_COLUMNS) {
-                    status = Status.TABLE_LIMIT;
+                    status = mergeStatus(status, Status.TABLE_LIMIT);
                 }
             }
             if (node instanceof LinkReferenceDefinition definition) {
@@ -679,19 +780,22 @@ final class ReferenceContentReader {
                             .ifPresent(target -> coverage.explain(node, target, content, tableSource));
                 }
                 if (definition.getLabel().startsWith("^")) {
-                    status = Status.UNSUPPORTED_FOOTNOTE;
+                    status = mergeStatus(status, Status.UNSUPPORTED_FOOTNOTE);
                 }
             } else if (node instanceof FootnoteDefinition definition) {
                 if (!(node.getParent() instanceof Document) || definition.getLabel().indexOf('\\') >= 0
                         || definition.getLabel().indexOf('[') >= 0) {
-                    status = Status.UNSUPPORTED_FOOTNOTE;
+                    status = mergeStatus(status, Status.UNSUPPORTED_FOOTNOTE);
                 }
             } else if (node instanceof Link || node instanceof Image) {
                 String destination = node instanceof Link link ? link.getDestination() : ((Image) node).getDestination();
                 String type = collectDestination(destination, targets, unparseable);
                 if (type != null) {
                     LinkOccurrence occurrence = linkOccurrence(node, type, destination, content, tableSource);
-                    links.add(occurrence);
+                    links.merge(occurrence, occurrence, (original, variant) -> {
+                        original.labels().add(variant.labels());
+                        return original;
+                    });
                     occurrence.target().ifPresent(target -> coverage.explain(node, target, content, tableSource));
                 }
             }
@@ -735,14 +839,19 @@ final class ReferenceContentReader {
         }
         int colon = destination.indexOf(':');
         Optional<ReferenceTarget> target = parseReferenceTarget(type, destination.substring(colon + 1));
+        return new LinkOccurrence(type, target, source, label,
+                new LabelReadings(() -> labelText(node, content, label)));
+    }
+
+    private static LabelText labelText(Node node, String content, List<SourceSpan> label) {
         if (label.isEmpty()) {
-            return new LinkOccurrence(type, target, source, label, "", "", "");
+            return new LabelText("", "", "");
         }
         int start = label.getFirst().getInputIndex();
         SourceSpan last = label.getLast();
         int end = last.getInputIndex() + last.getLength();
         if (!memberLabelWithinLimit(content, start, end)) {
-            return new LinkOccurrence(type, target, source, label, "", "", "");
+            return new LabelText("", "", "");
         }
         var logical = new StringBuilder();
         int line = -1;
@@ -753,8 +862,7 @@ final class ReferenceContentReader {
             logical.append(content, span.getInputIndex(), span.getInputIndex() + span.getLength());
             line = span.getLineIndex();
         }
-        return new LinkOccurrence(type, target, source, label, content.substring(start, end),
-                logical.toString(), decodedLabel(node));
+        return new LabelText(content.substring(start, end), logical.toString(), decodedLabel(node));
     }
 
     private static String decodedLabel(Node link) {
@@ -869,7 +977,9 @@ final class ReferenceContentReader {
                     }
                 }
             }
-            additional.add(new MaskingMemberLabel(link.decodedLabel(), group));
+            for (String decoded : link.labels().decoded()) {
+                additional.add(new MaskingMemberLabel(decoded, group));
+            }
         }
         List<MemberReference> source = List.copyOf(references);
         for (MaskingMemberLabel label : additional) {

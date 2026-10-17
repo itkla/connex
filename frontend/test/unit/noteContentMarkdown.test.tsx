@@ -27,6 +27,20 @@ function render(content: string, references: NoteReference[] = [], block = true)
 }
 
 describe("NoteContent Markdown rendering", () => {
+    it.each([
+        "Note:2026/10/16 meeting with client", "Note：2026年10月16日 打ち合わせ",
+        "Deal:3件 closed this week", "Task：①資料作成", "(note:7)", "Call at 3pm - activity:12 logged",
+        "user:４２", "user:٤٢", "ｕｓｅｒ：４２",
+        "Visit https://example.com/path]user:42 today.", "[Help](https://example.com/path]user:42)",
+        "Visit https://example.com/path`user:42 today.", "[Help](https://example.com/path`user:42)",
+        "Visit https://example.com/path|user:42 today.", "[Help](https://example.com/path|user:42)",
+    ])("preserves prose without literal internal-destination syntax: %s", (content) => {
+        const html = render(content);
+        expect(html).not.toContain("Unavailable reference");
+        expect(html).not.toContain("(private note)");
+        expect(html).toContain(content.startsWith("[Help]") ? "Help" : content.startsWith("Visit") ? "user:42" : content);
+    });
+
     it("renders GFM structure without raw HTML", () => {
         const html = render([
             "## Status",

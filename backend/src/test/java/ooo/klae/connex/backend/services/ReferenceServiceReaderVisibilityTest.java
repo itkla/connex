@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -42,6 +44,45 @@ class ReferenceServiceReaderVisibilityTest {
     private final EntityReferenceMapper stored = mock(EntityReferenceMapper.class);
     private final ReferenceService service = new ReferenceService(stored, workspace, people, deals, companies,
             notes, files, tasks, activities, members);
+
+    static Stream<String> ordinaryProse() {
+        return ReferenceContentReaderTest.ordinaryProse();
+    }
+
+    @ParameterizedTest
+    @MethodSource("ordinaryProse")
+    void ordinaryEnglishAndJapaneseProseRemainsVisibleWithoutTargetLookups(String content) {
+        assertEquals(content, service.redactInvisibleTargets(7,
+                List.of(new ReferenceService.ReaderVisibleContent(content, List.of()))).getFirst().content());
+        verifyNoInteractions(members, people, deals, companies, notes, files, tasks, activities, stored);
+    }
+
+    @Test
+    void readerRedactionAndSnippetsNeverComputeMemberLabels() {
+        var readings = new java.util.ArrayList<ReferenceContentReader.Reading>();
+        try (var reader = mockStatic(ReferenceContentReader.class, CALLS_REAL_METHODS)) {
+            reader.when(() -> ReferenceContentReader.read(org.mockito.ArgumentMatchers.anyString())).thenAnswer(call -> {
+                var reading = (ReferenceContentReader.Reading) call.callRealMethod();
+                readings.add(reading);
+                return reading;
+            });
+            String content = "[Former Member](user:42)";
+            assertEquals("(unavailable reference)", service.redactInvisibleTargets(7,
+                    List.of(new ReferenceService.ReaderVisibleContent(content, List.of()))).getFirst().content());
+            assertEquals("@Former Member", ReferenceService.toPlainText(content));
+            assertTrue(readings.size() >= 2);
+            readings.forEach(reading -> org.junit.jupiter.api.Assertions.assertFalse(reading.memberLabelsComputed()));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"See [^f].\n\n> [^f]: harmless body", "- See [^f].\n\n  [^f]: harmless body",
+            "See [^a\\]b].\n\n[^a\\]b]: harmless body"})
+    void unsupportedFootnotesWithoutInternalDestinationsPreserveTheReaderBody(String content) {
+        assertEquals(content, service.redactInvisibleTargets(7,
+                List.of(new ReferenceService.ReaderVisibleContent(content, List.of()))).getFirst().content());
+        verifyNoInteractions(members, people, deals, companies, notes, files, tasks, activities, stored);
+    }
 
     static Stream<Arguments> referenceLayouts() {
         return ReferenceContentReaderTest.referenceLayouts();
@@ -171,9 +212,9 @@ class ReferenceServiceReaderVisibilityTest {
         String content = switch (kind) {
             case "overflow" -> "[Secret][n]\n\n> [n]: note:2147483648";
             case "input" -> "x".repeat(ReferenceContentReader.MAX_INPUT_LENGTH + 1);
-            case "blocks" -> "> ".repeat(100) + "plain text";
-            case "inlines" -> "**".repeat(100) + "plain text" + "**".repeat(100);
-            case "table" -> "| x ".repeat(258);
+            case "blocks" -> "> ".repeat(100) + "[Former](user:42)";
+            case "inlines" -> "**".repeat(100) + "[Former](user:42)" + "**".repeat(100);
+            case "table" -> "| x ".repeat(258) + "[Former](user:42)";
             case "brackets" -> "[".repeat(131_000) + "[](u)".repeat(26_000);
             default -> throw new IllegalArgumentException(kind);
         };

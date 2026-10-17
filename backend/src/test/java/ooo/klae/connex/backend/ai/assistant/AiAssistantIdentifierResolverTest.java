@@ -82,11 +82,11 @@ class AiAssistantIdentifierResolverTest {
         String text = switch (kind) {
             case "input" -> "x".repeat(262_145) + "[Late](user:42)";
             case "blocks" -> "> ".repeat(100) + "[Former](user:42)";
-            case "inlines" -> "**".repeat(100) + "Former" + "**".repeat(100);
-            case "table" -> "| x ".repeat(258);
+            case "inlines" -> "**".repeat(100) + "[Former](user:42)" + "**".repeat(100);
+            case "table" -> "| x ".repeat(258) + "[Former](user:42)";
             case "footnote" -> "See [^a\\]b].\n\nprefix `\n[^a\\]b]: [Former](user:42 \"title\")\n    `";
             case "brackets" -> "[".repeat(131_000) + "[](u)".repeat(26_000);
-            case "raw" -> "literal user:42";
+            case "raw" -> "literal <user:42";
             case "code" -> "```\n[Former](user:42)\n```";
             case "disagreement" -> "| h |\n| - |\n|\nprefix `\n[Former `]` Member](user:42 \"title\")\nsuffix `";
             case "same-id" -> "| h |\n| - |\n|\nprefix `\n[Former `]` Member](user:42 \"title\")\nsuffix `\n\n[unused]: user:42";
@@ -107,17 +107,15 @@ class AiAssistantIdentifierResolverTest {
     }
 
     @Test
-    void incompleteReaderAuthorizedProjectionsAlsoRefuseAndRetainCompatibilityCandidates() {
+    void incompleteReaderAuthorizedProjectionsDegradeAndRetainCompatibilityCandidates() {
         String text = "x".repeat(262_145) + "[Late](user:42)";
         var reading = ReferenceService.memberReferenceReading(text);
         assertFalse(reading.complete());
         assertEquals(List.of(new ReferenceService.MemberReference("Late", Set.of(42))), reading.references());
         var context = new MaskingContext();
 
-        assertThrows(ooo.klae.connex.backend.ai.masking.MaskingLeakException.class,
-                () -> AiAssistantMemberIdentifiers.seedReferenceText(text, context));
-        assertThrows(ooo.klae.connex.backend.ai.masking.MaskingLeakException.class,
-                () -> AiAssistantMemberIdentifiers.referenceIdentifiers(text));
+        assertEquals("(unavailable reference)", AiAssistantMemberIdentifiers.seedReferenceText(text, context));
+        assertTrue(AiAssistantMemberIdentifiers.referenceIdentifiers(text).isEmpty());
         assertTrue(context.identifierDictionary().isEmpty());
     }
 
@@ -134,10 +132,8 @@ class AiAssistantIdentifierResolverTest {
 
         assertEquals("identifier_text_unsafe", assertThrows(AiAssistantLoopException.class,
                 () -> resolver.resolve(text)).detailReason());
-        assertThrows(ooo.klae.connex.backend.ai.masking.MaskingLeakException.class,
-                () -> AiAssistantMemberIdentifiers.seedReferenceText(text, context));
-        assertThrows(ooo.klae.connex.backend.ai.masking.MaskingLeakException.class,
-                () -> AiAssistantMemberIdentifiers.referenceIdentifiers(text));
+        assertEquals("(unavailable reference)", AiAssistantMemberIdentifiers.seedReferenceText(text, context));
+        assertTrue(AiAssistantMemberIdentifiers.referenceIdentifiers(text).isEmpty());
         assertTrue(context.identifierDictionary().isEmpty());
         verifyNoInteractions(mapper, workspace, scope, references);
     }

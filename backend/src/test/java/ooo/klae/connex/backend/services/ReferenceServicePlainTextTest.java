@@ -143,10 +143,10 @@ class ReferenceServicePlainTextTest {
     }
 
     @Test
-    void toPlainText_redactsUnexplainedNoteTokensEvenOutsideMarkdownDestinations() {
+    void toPlainText_preservesNoteLikeProseOutsideMarkdownDestinations() {
         String content = "Ship release-note:123 after reviewing note:456 in plain prose";
 
-        assertEquals("a note", ReferenceService.toPlainText(content));
+        assertEquals(content, ReferenceService.toPlainText(content));
     }
 
     @org.junit.jupiter.params.ParameterizedTest
@@ -186,10 +186,10 @@ class ReferenceServicePlainTextTest {
     }
 
     @Test
-    void toPlainText_redactsUnexplainedNoteTokensBesideCodeSpanBrackets() {
+    void toPlainText_preservesCodeSpanBracketsNearNoteLikeProse() {
         String content = "Use `]` in prose before reviewing note:123";
 
-        assertEquals("a note", ReferenceService.toPlainText(content));
+        assertEquals(content, ReferenceService.toPlainText(content));
     }
 
     @Test

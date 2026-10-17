@@ -226,6 +226,22 @@ class AuditServiceTest {
         assertTrue(entry.getChanges().contains("See a note"));
     }
 
+    static java.util.stream.Stream<String> ordinaryReferenceLikeProse() {
+        return ReferenceProseReadings.all().stream();
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("ordinaryReferenceLikeProse")
+    void recordPreservesReferenceLikeEnglishAndJapaneseProse(String content) throws Exception {
+        service.record("deal.update", "deal", 12, content, content,
+                Map.of("closedReason", Map.of("old", "", "new", content)));
+        var captor = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).append(captor.capture());
+        assertEquals(content, captor.getValue().getTargetLabel());
+        assertEquals(content, captor.getValue().getSummary());
+        assertEquals(content, objectMapper.readTree(captor.getValue().getChanges()).at("/closedReason/new").asString());
+    }
+
     @Test
     void strictIndependentScopedRecordUsesExactScopeAndIndependentAppend() {
         service.recordStrictIndependentScoped(

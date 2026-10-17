@@ -531,7 +531,7 @@ public class ReferenceService {
      * view does not establish AI admission; use {@link #memberReferenceReading} for completeness
      * and additional rendered spellings before projecting prose to a provider.
      */
-    public static List<String> memberLabelsFromReaderVisibleContent(String readerVisibleContent) {
+    static List<String> memberLabelsFromReaderVisibleContent(String readerVisibleContent) {
         return memberReferencesInContent(readerVisibleContent).stream()
                 .map(MemberReference::label).distinct().toList();
     }
@@ -540,7 +540,7 @@ public class ReferenceService {
      * Reads member labels from original prose without authorization. Callers must authorize each
      * shared target group and use {@link #memberReferenceReading} when completeness is required.
      */
-    public static List<MemberReference> memberReferencesInContent(String content) {
+    static List<MemberReference> memberReferencesInContent(String content) {
         return ReferenceContentReader.read(content).memberReferences();
     }
 

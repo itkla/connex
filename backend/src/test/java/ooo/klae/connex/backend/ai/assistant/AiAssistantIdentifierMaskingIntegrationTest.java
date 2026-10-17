@@ -1244,27 +1244,25 @@ class AiAssistantIdentifierMaskingIntegrationTest {
             var context = new MaskingContext();
             var resources = new AiChatResourceRegistry(context);
             resources.register("person", fixture.person().getId());
+            var result = realToolExecutor.execute("get_record", mapper.readTree("{\"handle\":\"r1\"}"), resources, true);
             if (refused) {
-                var exception = assertThrows(ooo.klae.connex.backend.ai.masking.MaskingLeakException.class,
-                        () -> realToolExecutor.execute("get_record", mapper.readTree("{\"handle\":\"r1\"}"), resources, true));
-                assertEquals("Assistant member reference content is incomplete", exception.getMessage());
+                assertEquals("(unavailable reference)", mapper.valueToTree(result.data()).at("/notes/0/content").asString());
                 assertFalse(context.identifierDictionary().contains(label));
             } else {
-                var result = realToolExecutor.execute("get_record", mapper.readTree("{\"handle\":\"r1\"}"), resources, true);
                 assertTrue(context.identifierDictionary().contains(label));
-                assertFalse(mapper.writeValueAsString(result.data()).contains("Stored"));
-                var budget = new AiAssistantPromptBudget(64, 4_096, 16_000, 16_000, 16_000, 64_000);
-                var prompt = nativeProtocol
-                        ? assembler.assembleNative(List.of(), result, List.of(), context, resources, List.of(), budget,
-                                AiAssistantToolCatalog.ALL)
-                        : assembler.assemble(List.of(), result, List.of(), context, resources, AiAssistantToolCatalog.ALL);
-                var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, List.of(),
-                        AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null);
-                String payload = mapper.writeValueAsString(capture.request().messages());
-                assertFalse(payload.contains("Stored"));
-                assertTrue(payload.contains(MaskingEngine.REDACTED));
-                assertEquals(0, capture.warnings());
             }
+            assertFalse(mapper.writeValueAsString(result.data()).contains("Stored"));
+            var budget = new AiAssistantPromptBudget(64, 4_096, 16_000, 16_000, 16_000, 64_000);
+            var prompt = nativeProtocol
+                    ? assembler.assembleNative(List.of(), result, List.of(), context, resources, List.of(), budget,
+                            AiAssistantToolCatalog.ALL)
+                    : assembler.assemble(List.of(), result, List.of(), context, resources, AiAssistantToolCatalog.ALL);
+            var capture = support.captureAssistantPayload(prompt, context, mapper, nativeProtocol, List.of(),
+                    AiAssistantMaskingTestSupport.finalOutput(nativeProtocol, "Ready"), false, null);
+            String payload = mapper.writeValueAsString(capture.request().messages());
+            assertFalse(payload.contains("Stored"));
+            assertTrue(payload.contains(refused ? "(unavailable reference)" : MaskingEngine.REDACTED));
+            assertEquals(0, capture.warnings());
         }
     }
 
@@ -1288,10 +1286,10 @@ class AiAssistantIdentifierMaskingIntegrationTest {
             var context = new MaskingContext();
             var resources = new AiChatResourceRegistry(context);
             resources.register("person", fixture.person().getId());
-            var exception = assertThrows(ooo.klae.connex.backend.ai.masking.MaskingLeakException.class,
-                    () -> realToolExecutor.execute("get_record", mapper.readTree("{\"handle\":\"r1\"}"), resources, true),
+            var result = realToolExecutor.execute("get_record", mapper.readTree("{\"handle\":\"r1\"}"), resources, true);
+            assertEquals("(unavailable reference)", mapper.valueToTree(result.data()).at("/notes/0/content").asString(),
                     destination);
-            assertEquals("Assistant member reference content is incomplete", exception.getMessage());
+            assertFalse(mapper.writeValueAsString(result.data()).contains("Stored"), destination);
             assertFalse(context.identifierDictionary().contains("Stored `]` Member"));
             assertEquals(java.util.Set.of(fixture.person().getName(), fixture.person().getCompany().getName()),
                     context.tokenBindings().stream().map(java.util.Map.Entry::getValue)
