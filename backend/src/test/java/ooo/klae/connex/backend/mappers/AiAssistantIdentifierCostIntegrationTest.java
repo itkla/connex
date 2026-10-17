@@ -49,6 +49,7 @@ import ooo.klae.connex.backend.notifications.AiChatRealtimeDispatcher;
 import ooo.klae.connex.backend.services.AiWorkspaceGovernanceService;
 import ooo.klae.connex.backend.services.ReferenceService;
 import ooo.klae.connex.backend.services.WorkspaceService;
+import ooo.klae.connex.backend.support.TestEntityFixtures;
 import tools.jackson.databind.json.JsonMapper;
 
 /** Reports real scan cost without shared-host wall-clock thresholds or candidate caps. */
@@ -73,6 +74,7 @@ class AiAssistantIdentifierCostIntegrationTest extends AbstractMapperTest {
         created.setName("identifier-cost-" + unique());
         created.setSlug("identifier-cost-" + unique());
         workspaceMapper.insert(created);
+        TestEntityFixtures.initializeChatPrivacy(jdbc, created.getId());
         workspace = created;
         ownsWorkspace = true;
         user = newUser();
@@ -91,6 +93,7 @@ class AiAssistantIdentifierCostIntegrationTest extends AbstractMapperTest {
         jdbc.update("DELETE FROM ai_chat_session WHERE workspace_id = ?", workspace.getId());
         jdbc.update("DELETE FROM person WHERE workspace_id = ?", workspace.getId());
         jdbc.update("DELETE FROM workspace_member WHERE workspace_id = ?", workspace.getId());
+        TestEntityFixtures.deleteChatPrivacy(jdbc, workspace.getId());
         jdbc.update("DELETE FROM workspace WHERE id = ?", workspace.getId());
         if (user != null) {
             jdbc.update("DELETE FROM app_user WHERE id = ?", user.getId());

@@ -174,9 +174,50 @@ public interface AiChatMapper {
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId);
 
-    int nextMessageSequence(
-        @Param("workspaceId") int workspaceId,
-        @Param("sessionId") int sessionId);
+    /** Allocates under the session mutex; deletion never makes a committed sequence reusable. */
+    default int nextMessageSequence(int workspaceId, int sessionId) {
+        if (!org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()) {
+            throw new IllegalStateException("Message allocation requires a content transaction");
+        }
+        Integer previous = lockMessageSequence(workspaceId, sessionId);
+        if (previous == null || previous < 0 || previous == Integer.MAX_VALUE) {
+            throw new ooo.klae.connex.backend.exceptions.ConflictException("Assistant message sequence exhausted");
+        }
+        if (advanceMessageSequence(workspaceId, sessionId, previous) != 1) {
+            throw new IllegalStateException("Assistant message allocation lost its session mutex");
+        }
+        return previous + 1;
+    }
+
+    /** Counts active mission capabilities while the caller holds the session root. */
+    int countNonterminalMissions(@Param("workspaceId") int workspaceId, @Param("sessionId") int sessionId);
+
+    Integer lockMessageSequence(@Param("workspaceId") int workspaceId, @Param("sessionId") int sessionId);
+
+    int advanceMessageSequence(@Param("workspaceId") int workspaceId,
+            @Param("sessionId") int sessionId, @Param("previous") int previous);
+
+    ooo.klae.connex.backend.beans.AiAgentPrivacyBarrier getPrivacyBarrier(@Param("workspaceId") int workspaceId);
+
+    ooo.klae.connex.backend.beans.AiAgentPrivacyBarrier lockPrivacyBarrierForShare(@Param("workspaceId") int workspaceId);
+
+    AiChatSession getPrivacySession(@Param("workspaceId") int workspaceId, @Param("sessionId") int sessionId);
+
+    int clearTurnContent(@Param("workspaceId") int workspaceId, @Param("sessionId") int sessionId,
+            @Param("turnId") int turnId);
+
+    AiChatMessage getMissionMessage(@Param("workspaceId") int workspaceId,
+            @Param("runId") int runId, @Param("kind") String kind);
+
+    int linkMissionTurn(@Param("workspaceId") int workspaceId, @Param("sessionId") int sessionId,
+            @Param("turnId") int turnId, @Param("runId") int runId, @Param("segmentId") int segmentId);
+
+    int taintSession(@Param("workspaceId") int workspaceId, @Param("sessionId") int sessionId,
+            @Param("generation") long generation, @Param("seq") int seq);
+
+    int stampGeneratedTitle(@Param("workspaceId") int workspaceId, @Param("sessionId") int sessionId,
+            @Param("generation") long generation);
+
 
     int insertMessage(AiChatMessage message);
 
@@ -436,6 +477,12 @@ public interface AiChatMapper {
         @Param("idempotencyKey") String idempotencyKey);
 
     AiChatToolCall getToolCallBySession(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId,
+        @Param("id") int id);
+
+    /** Discovers immutable origin before entering legacy decision lock order without reading payloads. */
+    String getToolArtifactOrigin(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,
         @Param("id") int id);

@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -123,6 +124,10 @@ class AiChatAgentLoopParallelReadStepTest {
         AiChatAttachmentContextService attachmentContextService =
                 mock(AiChatAttachmentContextService.class);
         persistenceService = mock(AiChatTurnPersistenceService.class);
+        when(persistenceService.withPrivacyToken(any(), any())).thenAnswer(invocation -> {
+            Supplier<?> work = invocation.getArgument(1);
+            return work.get();
+        });
         runLeaseHeartbeat = mock(AiRunLeaseHeartbeat.class);
         AiRunLeaseService runLeaseService = mock(AiRunLeaseService.class);
         AiChatProgressService progressService = mock(AiChatProgressService.class);

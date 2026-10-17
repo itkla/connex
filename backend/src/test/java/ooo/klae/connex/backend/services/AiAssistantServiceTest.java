@@ -56,6 +56,7 @@ import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.AuditLogMapper;
 import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.notifications.AiChatRealtimeDispatcher;
+import ooo.klae.connex.backend.support.TestEntityFixtures;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 
@@ -1139,6 +1140,7 @@ class AiAssistantServiceTest extends AbstractServiceTest {
         created.setName("AI chat " + unique());
         created.setSlug("ai-chat-" + unique());
         workspaceMapper.insert(created);
+        TestEntityFixtures.initializeChatPrivacy(jdbcTemplate, created.getId());
         return created;
     }
 

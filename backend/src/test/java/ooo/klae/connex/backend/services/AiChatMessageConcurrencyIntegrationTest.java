@@ -42,6 +42,7 @@ import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.support.TestEntityFixtures;
 import ooo.klae.connex.backend.tenant.TenantContext;
 
 /** Proves concurrent appends serialize on the session root and allocate gap-free sequences. */
@@ -79,6 +80,7 @@ class AiChatMessageConcurrencyIntegrationTest {
         workspace.setName("AI chat concurrency " + unique);
         workspace.setSlug("ai-chat-concurrency-" + unique);
         workspaceMapper.insert(workspace);
+        TestEntityFixtures.initializeChatPrivacy(jdbcTemplate, workspace.getId());
 
         actors = IntStream.range(0, APPEND_COUNT)
             .mapToObj(index -> user("ai-chat-" + index + "-" + unique))
@@ -110,6 +112,7 @@ class AiChatMessageConcurrencyIntegrationTest {
             jdbcTemplate.update(
                 "DELETE FROM workspace_member WHERE workspace_id = ?",
                 workspace.getId());
+            TestEntityFixtures.deleteChatPrivacy(jdbcTemplate, workspace.getId());
             jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", workspace.getId());
         }
         if (actors != null) {

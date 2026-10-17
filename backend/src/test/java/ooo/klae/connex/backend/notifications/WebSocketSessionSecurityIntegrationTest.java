@@ -37,6 +37,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.MessageHandler;
@@ -55,23 +56,29 @@ import org.springframework.session.SessionRepository;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import ooo.klae.connex.backend.beans.AiChatSession;
+import ooo.klae.connex.backend.beans.AiChatTurn;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.PasswordResetToken;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.beans.WorkspaceRole;
 import ooo.klae.connex.backend.config.SessionSecurityProperties;
 import ooo.klae.connex.backend.dto.AiChatStepFrameDto;
 import ooo.klae.connex.backend.dto.CsrfBootstrapDto;
 import ooo.klae.connex.backend.dto.NotificationDto;
 import ooo.klae.connex.backend.dto.UserDto;
+import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.PasswordResetTokenMapper;
+import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.PasswordResetEmailService;
 import ooo.klae.connex.backend.services.PasswordResetService;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.session.AccountSessionIndex;
+import ooo.klae.connex.backend.support.TestEntityFixtures;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 import tools.jackson.databind.ObjectMapper;
@@ -95,6 +102,9 @@ class WebSocketSessionSecurityIntegrationTest {
     @MockitoBean private PasswordResetEmailService passwordResetEmailService;
     @Autowired private SimpNotificationRealtimePublisher notificationPublisher;
     @Autowired private SimpAiChatRealtimePublisher aiChatPublisher;
+    @Autowired private AiChatMapper chats;
+    @Autowired private RoleMapper roles;
+    @Autowired private JdbcTemplate jdbc;
     @Autowired private RealtimeRoutingIdentityResolver routingIdentities;
     @Autowired private SessionRegistry securitySessionRegistry;
     @Autowired private FindByIndexNameSessionRepository<? extends Session> indexedSessions;
@@ -330,7 +340,29 @@ class WebSocketSessionSecurityIntegrationTest {
         user.setPasswordHash(passwordEncoder.encode(PASSWORD));
         userMapper.insert(user);
         workspaceMapper.addMember(workspace.getId(), user.getId(), "member");
-        return new Account(user, workspace);
+        TestEntityFixtures.initializeChatPrivacy(jdbc, workspace.getId());
+        WorkspaceRole role = new WorkspaceRole();
+        role.setWorkspaceId(workspace.getId());
+        role.setName("Assistant reader");
+        roles.insertRole(role);
+        roles.insertPermissions(workspace.getId(), role.getId(), List.of("AI_USE"));
+        jdbc.update("UPDATE workspace_member SET role_id = ? WHERE workspace_id = ? AND user_id = ?",
+                role.getId(), workspace.getId(), user.getId());
+        AiChatSession chat = new AiChatSession();
+        chat.setWorkspaceId(workspace.getId());
+        chat.setCreatedByUserId(user.getId());
+        chat.setTitle("WebSocket fixture");
+        chat.setVisibility("private");
+        chat.setStatus("active");
+        chats.insertSession(chat);
+        AiChatTurn turn = new AiChatTurn();
+        turn.setWorkspaceId(workspace.getId());
+        turn.setSessionId(chat.getId());
+        turn.setRequestedByUserId(user.getId());
+        turn.setStatus("running");
+        turn.setPrivacyGeneration(1L);
+        chats.insertTurn(turn);
+        return new Account(user, workspace, chat.getId(), turn.getId());
     }
 
     private Browser login(Account account) throws Exception {
@@ -426,7 +458,7 @@ class WebSocketSessionSecurityIntegrationTest {
         notificationPublisher.send(account.user().getId(),
             RealtimeNotificationPayload.created(notification, text, stateVersion));
         aiChatPublisher.sendUser(account.user().getId(),
-            AiChatStepFrameDto.delta(account.workspace().getId(), 1, 1, 1, text));
+            AiChatStepFrameDto.delta(account.workspace().getId(), account.chatSessionId(), account.turnId(), 1, text));
     }
 
     private static void assertDelivery(SocketClient socket, String text, long stateVersion)
@@ -473,7 +505,7 @@ class WebSocketSessionSecurityIntegrationTest {
         repository.save(session);
     }
 
-    private record Account(User user, Workspace workspace) {
+    private record Account(User user, Workspace workspace, int chatSessionId, int turnId) {
     }
 
     private record Browser(Account account, HttpClient client, CsrfBootstrapDto csrf, String sessionId) {

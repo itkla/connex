@@ -39,8 +39,10 @@ import org.mockito.InOrder;
 
 import jakarta.validation.Validation;
 import jakarta.validation.ValidatorFactory;
+import ooo.klae.connex.backend.ai.AiPrivacyMode;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.beans.Activity;
+import ooo.klae.connex.backend.beans.AiAgentPrivacyBarrier;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.AiChatTurn;
@@ -85,7 +87,9 @@ class AiAssistantWriteToolServiceTest {
     private static final Clock CLOCK = Clock.fixed(
             Instant.parse("2026-03-06T15:00:00Z"), ZoneOffset.UTC);
     private static final AiChatQueuedTurn TURN = new AiChatQueuedTurn(
-            7, 11, 13, 17, 19, 1, 23L, true, List.of(), List.of());
+            7, 11, 13, 17, 19, 1, 23L, true, List.of(), List.of(),
+            AiPrivacyMode.MASKED, false, AiChatQueryScope.none(),
+            new AiChatPrivacyToken(7, 13, 1, null));
 
     private final ObjectMapper objectMapper = JsonMapper.builder().build();
     private AiChatMapper chatMapper;
@@ -105,6 +109,8 @@ class AiAssistantWriteToolServiceTest {
     private AiAssistantWriteToolService service;
     private AiAssistantAddTagWriteTool addTagTool;
     private AiChatToolCall storedToolCall;
+    private AiChatSession session;
+    private AiAgentPrivacyBarrier barrier;
 
     @AfterAll
     static void closeValidatorFactory() {
@@ -146,6 +152,7 @@ class AiAssistantWriteToolServiceTest {
         when(workspaceService.lockAndRequirePermissionsSnapshot(anyInt(), any()))
                 .thenReturn(authority);
         when(governanceService.isEnabled(TURN.workspaceId())).thenReturn(true);
+        when(restrictionEpoch.current(TURN.workspaceId())).thenReturn(TURN.restrictionEpoch());
         when(restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
                 TURN.workspaceId(), TURN.restrictionEpoch())).thenReturn(true);
         AiAssistantDateResolver dateResolver = new AiAssistantDateResolver(authService, CLOCK);
@@ -209,13 +216,24 @@ class AiAssistantWriteToolServiceTest {
                 objectMapper,
                 VALIDATORS.getValidator(),
                 CLOCK, tagService);
-        AiChatSession session = new AiChatSession();
+        session = new AiChatSession();
         session.setId(TURN.sessionId());
+        session.setWorkspaceId(TURN.workspaceId());
         session.setCreatedByUserId(TURN.userId());
         session.setVisibility("private");
         session.setStatus("active");
+        barrier = new AiAgentPrivacyBarrier();
+        barrier.setWorkspaceId(TURN.workspaceId());
+        barrier.setGeneration(1);
+        when(chatMapper.getPrivacyBarrier(TURN.workspaceId())).thenReturn(barrier);
+        when(chatMapper.lockPrivacyBarrierForShare(TURN.workspaceId())).thenReturn(barrier);
+        when(chatMapper.getPrivacySession(TURN.workspaceId(), TURN.sessionId()))
+                .thenReturn(session);
         AiChatTurn turn = new AiChatTurn();
         turn.setId(TURN.turnId());
+        turn.setWorkspaceId(TURN.workspaceId());
+        turn.setSessionId(TURN.sessionId());
+        turn.setPrivacyGeneration(1L);
         turn.setRequestedByUserId(TURN.userId());
         turn.setStatus("running");
         when(chatMapper.getSessionByIdForUpdate(
@@ -230,6 +248,7 @@ class AiAssistantWriteToolServiceTest {
         storedToolCall.setMessageId(TURN.userMessageId());
         storedToolCall.setSessionId(TURN.sessionId());
         storedToolCall.setRequestedByUserId(TURN.userId());
+        storedToolCall.setPrivacyGeneration(1L);
         storedToolCall.setStatus("proposed");
         storedToolCall.setCreatedAt("2026-03-06 14:59:00.000000");
         when(chatMapper.getToolCallBySessionForUpdate(
@@ -917,7 +936,8 @@ class AiAssistantWriteToolServiceTest {
 
         AiChatQueuedTurn secondTurn = new AiChatQueuedTurn(
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId(), 18, 20, 2,
-                TURN.restrictionEpoch(), TURN.includePrivateNotes(), List.of(), List.of());
+                TURN.restrictionEpoch(), TURN.includePrivateNotes(), List.of(), List.of(),
+                AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), TURN.privacyToken());
         AiChatTurn secondStoredTurn = new AiChatTurn();
         secondStoredTurn.setId(secondTurn.turnId());
         secondStoredTurn.setRequestedByUserId(secondTurn.userId());
@@ -1028,6 +1048,53 @@ class AiAssistantWriteToolServiceTest {
 
         verify(chatMapper, never()).getToolCallBySessionForUpdate(
                 TURN.workspaceId(), TURN.sessionId(), 29);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"reject", "undo"})
+    void missionOriginCannotEnterLegacyDecisionLocks(String decision) {
+        when(chatMapper.getToolArtifactOrigin(TURN.workspaceId(), TURN.sessionId(), 29))
+                .thenReturn("mission");
+
+        ConflictException failure = assertThrows(ConflictException.class, () -> {
+            if ("reject".equals(decision)) {
+                service.reject(TURN.sessionId(), 29);
+            } else {
+                service.undo(TURN.sessionId(), 29);
+            }
+        });
+
+        assertEquals("mission_control_required", failure.getMessage());
+        verify(workspaceService, never()).lockAndRequirePermissionsSnapshot(anyInt(), any());
+        verify(chatMapper, never()).getSessionByIdForUpdate(anyInt(), anyInt(), anyInt());
+        verify(chatMapper, never()).getToolCallBySessionForUpdate(anyInt(), anyInt(), anyInt());
+        verify(chatMapper, never()).updateToolCall(
+                anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
+        verify(chatMapper, never()).updateExecutedToolResult(anyInt(), anyInt(), any(), anyInt());
+        verify(taskService, never()).deleteIf(anyInt(), any());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"reject", "undo"})
+    void oldGenerationDecisionStaysClosedAfterPurgeUnblocks(String decision) {
+        session.setMissionTaintSeq(4);
+        session.setMissionTaintGeneration(1L);
+        barrier.setGeneration(2);
+        barrier.setBlocked(false);
+
+        AiAssistantLoopException failure = assertThrows(AiAssistantLoopException.class, () -> {
+            if ("reject".equals(decision)) {
+                service.reject(TURN.sessionId(), 29);
+            } else {
+                service.undo(TURN.sessionId(), 29);
+            }
+        });
+
+        assertEquals("restrictions_changed", failure.getMessage());
+        verify(chatMapper, never()).updateToolCall(
+                anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
+        verify(chatMapper, never()).updateExecutedToolResult(anyInt(), anyInt(), any(), anyInt());
+        verify(taskService, never()).deleteIf(anyInt(), any());
     }
 
     @Test

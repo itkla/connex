@@ -1,8 +1,10 @@
 import { Client, type IMessage } from "@stomp/stompjs";
 
 import { csrfHeader } from "@/app/lib/api";
+import { parseAskConnexMissionFrame } from "@/app/lib/askConnexMissions";
 import { isAskConnexProgressSource } from "@/app/lib/askConnex";
 import {
+    type AiAgentRealtimeFrame,
     type AiChatDeltaFrame,
     type AiChatNarrationFrame,
     type AiChatTodo,
@@ -55,6 +57,7 @@ export type NotificationSocket = {
 export type AiChatSocketHandlers = {
     onFrame: (frame: AiChatRealtimeFrame) => void;
     onDelta?: (frame: AiChatDeltaFrame) => void;
+    onMissionFrame?: (frame: AiAgentRealtimeFrame) => void;
     onStatusChange?: (status: RealtimeStatus) => void;
 };
 
@@ -295,6 +298,11 @@ export function createNotificationSocket(handlers: NotificationSocketHandlers): 
 export function createAiChatSocket(handlers: AiChatSocketHandlers): NotificationSocket {
     return createUserQueueSocket(AI_CHAT_QUEUE, (message) => {
         const parsed = parseJsonBody(message);
+        const mission = parseAskConnexMissionFrame(parsed);
+        if (mission) {
+            handlers.onMissionFrame?.(mission);
+            return;
+        }
         const delta = parseAiChatDeltaFrame(parsed);
         if (delta) {
             handlers.onDelta?.(delta);

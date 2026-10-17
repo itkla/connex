@@ -74,7 +74,8 @@ class TenantTeardownLateResidualTest {
             deletionRetryQueue,
             auditService,
             properties,
-            clock);
+            clock,
+            org.mockito.Mockito.mock(ooo.klae.connex.backend.ai.mission.AiAgentPrivacyService.class));
         when(tenantWorkScope.unrouted(any())).thenAnswer(invocation ->
             invocation.<Supplier<?>>getArgument(0).get());
         when(tenantWorkScope.unroutedRead(any())).thenAnswer(invocation ->

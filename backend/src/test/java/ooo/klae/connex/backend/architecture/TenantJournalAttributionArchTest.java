@@ -27,11 +27,14 @@ import ooo.klae.connex.backend.tenant.TenantJournalClientDriven;
 
 /**
  * Keeps support-journal attribution on the reviewed current-tenant controller surface.
+ * Mission mutations retain attribution; owner-only mission reads participate in reconnect and
+ * progress polling, so their automatic retries follow the existing assistant-read omission policy.
  */
 class TenantJournalAttributionArchTest {
     private static final String BACKEND_PACKAGE = "ooo.klae.connex.backend";
     private static final List<String> ATTRIBUTABLE_CONTROLLERS = List.of(
         "ooo.klae.connex.backend.controllers.ActivityController",
+        "ooo.klae.connex.backend.controllers.AiAgentRunController",
         "ooo.klae.connex.backend.controllers.AiAssistantController",
         "ooo.klae.connex.backend.controllers.AiAssistantProactiveController",
         "ooo.klae.connex.backend.controllers.AiAssistantSkillController",
@@ -48,10 +51,14 @@ class TenantJournalAttributionArchTest {
         "(?:^|/)(?:org|orgs|organization|organizations|workspace|workspaces)/\\{[^/]+}",
         Pattern.CASE_INSENSITIVE);
     private static final List<Class<?>> ASSISTANT_CONTROLLERS = List.of(
+        ooo.klae.connex.backend.controllers.AiAgentRunController.class,
         ooo.klae.connex.backend.controllers.AiAssistantController.class,
         ooo.klae.connex.backend.controllers.AiAssistantProactiveController.class,
         ooo.klae.connex.backend.controllers.AiAssistantSkillController.class);
     private static final List<String> CLIENT_DRIVEN_HANDLERS = List.of(
+        "ooo.klae.connex.backend.controllers.AiAgentRunController#get",
+        "ooo.klae.connex.backend.controllers.AiAgentRunController#list",
+        "ooo.klae.connex.backend.controllers.AiAgentRunController#output",
         "ooo.klae.connex.backend.controllers.AiAssistantController#get",
         "ooo.klae.connex.backend.controllers.AiAssistantController#getToolCall",
         "ooo.klae.connex.backend.controllers.AiAssistantController#getTurn",
@@ -68,6 +75,9 @@ class TenantJournalAttributionArchTest {
         "ooo.klae.connex.backend.controllers.AiAssistantProactiveController#watches",
         "ooo.klae.connex.backend.controllers.AiAssistantSkillController#list");
     private static final List<String> FULLY_SILENT_HANDLERS = List.of(
+        "ooo.klae.connex.backend.controllers.AiAgentRunController#get",
+        "ooo.klae.connex.backend.controllers.AiAgentRunController#list",
+        "ooo.klae.connex.backend.controllers.AiAgentRunController#output",
         "ooo.klae.connex.backend.controllers.AiAssistantController#get",
         "ooo.klae.connex.backend.controllers.AiAssistantController#invitations",
         "ooo.klae.connex.backend.controllers.AiAssistantController#listAttachments",

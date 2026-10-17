@@ -8,6 +8,10 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class AiChatTurn {
     private int id;
+    private Integer missionRunId;
+    private Integer missionSegmentId;
+    private Long privacyGeneration;
+    private Integer privacyTaintSeq;
     private int workspaceId;
     private int sessionId;
     private Integer requestedByUserId;

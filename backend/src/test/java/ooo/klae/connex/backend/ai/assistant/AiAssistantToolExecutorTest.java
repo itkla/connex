@@ -468,6 +468,56 @@ class AiAssistantToolExecutorTest {
     }
 
     @Test
+    void missionPrimaryContextDoesNotRetrieveLinkedRecords() {
+        Person primary = new Person();
+        primary.setId(17);
+        primary.setName("Primary");
+        when(personService.getAssistantPrimaryPersonById(17)).thenReturn(primary);
+        AiChatResourceRegistry resources = new AiChatResourceRegistry();
+        var scope = new ooo.klae.connex.backend.ai.mission.AiAgentScopePolicy("person", 17);
+
+        AiAssistantToolResult result = scope.evaluate(() -> executor.pageContext(
+                List.of(new AiChatPageContextDto("person", 17)), resources));
+
+        assertEquals(1, assertInstanceOf(List.class, result.data().get("records")).size());
+        verify(personService).getAssistantPrimaryPersonById(17);
+        verify(personService, never()).getPersonById(17);
+        verifyNoInteractions(personMapper, companyMapper, dealMapper, companyService, dealService, historyService);
+    }
+
+    @Test
+    void missionRejectsOutsideContextBeforeRetrieval() {
+        var scope = new ooo.klae.connex.backend.ai.mission.AiAgentScopePolicy("person", 17);
+
+        assertThrows(AiAssistantLoopException.class, () -> scope.evaluate(() -> executor.pageContext(
+                List.of(new AiChatPageContextDto("person", 18)), new AiChatResourceRegistry())));
+
+        verifyNoInteractions(personMapper, companyMapper, dealMapper, personService, companyService, dealService);
+    }
+
+    @Test
+    void missionDealReadDoesNotHydrateLinkedCompany() throws Exception {
+        Deal primary = new Deal();
+        primary.setId(17);
+        primary.setName("Primary");
+        primary.setCompanyId(99);
+        primary.setValue(java.math.BigDecimal.ONE);
+        when(dealService.getAssistantPrimaryDealById(17)).thenReturn(primary);
+        when(historyService.notesForDeal(17, 10, false)).thenReturn(List.of());
+        AiChatResourceRegistry resources = new AiChatResourceRegistry();
+        resources.register("deal", 17);
+        var args = objectMapper.readTree("{\"handle\":\"r1\"}");
+        var scope = new ooo.klae.connex.backend.ai.mission.AiAgentScopePolicy("deal", 17);
+
+        AiAssistantToolResult result = scope.evaluate(() -> executor.execute("get_record", args, resources, false));
+
+        assertFalse(result.data().containsKey("company"));
+        verify(dealService).getAssistantPrimaryDealById(17);
+        verify(dealService, never()).getDealById(17);
+        verifyNoInteractions(companyMapper, companyService);
+    }
+
+    @Test
     void replayContextUsesOneBoundedBatchInsteadOfHydratingEachPerson() {
         List<Integer> ids = IntStream.rangeClosed(1, 50).boxed().toList();
         List<AiChatPageContextDto> context = ids.stream()

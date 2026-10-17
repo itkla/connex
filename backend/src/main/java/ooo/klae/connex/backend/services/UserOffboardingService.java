@@ -125,6 +125,9 @@ public class UserOffboardingService {
     private final ApiCredentialLifecycleService apiCredentialLifecycleService;
     private final OwnershipOfferWriter ownershipOfferWriter;
     private final OrganizationMapper ownershipOfferOrganizationMapper;
+    private final ooo.klae.connex.backend.ai.mission.AiAgentPrivacyService missionPrivacy;
+    private final ooo.klae.connex.backend.ai.mission.AiAgentDepartureMaintenanceService missionDeparture;
+    private final org.springframework.context.ApplicationEventPublisher missionEvents;
 
     /**
      * Refuses deletion while the user still owns authored content, mirroring
@@ -238,6 +241,7 @@ public class UserOffboardingService {
             throw new ResourceNotFoundException("Workspace not found");
         }
         if (workspaceMapper.lockAuthorizationMembership(workspaceId, userId) == null) {
+            missionDeparture.requireSettledBeforeFreshMembership(workspaceId, userId);
             ownershipOfferOrganizationMapper.lockByIdForShare(orgId);
             ownershipOfferWriter.invalidateDepartingMembershipLocked(orgId, workspaceId, userId);
             ownershipOfferWriter.detachDestinationLocked(orgId, workspaceId, userId);
@@ -355,6 +359,8 @@ public class UserOffboardingService {
         teamMapper.deleteMembershipsForUser(workspaceId, userId);
         teamMapper.clearManagerForUser(workspaceId, userId);
         apiCredentialLifecycleService.deleteForMembership(workspaceId, userId);
+        missionEvents.publishEvent(new ooo.klae.connex.backend.ai.mission.AiAgentDepartureMaintenanceService.Departure(
+                workspaceId, userId));
     }
 
     /**
@@ -467,6 +473,7 @@ public class UserOffboardingService {
         documentApprovalMapper.findDepartureReferencesAnywhere(userId).forEach(approver ->
             documentApprovalMapper.deleteDepartingApproverAnywhere(
                 approver.getWorkspaceId(), approver.getId(), userId));
+        missionPrivacy.invalidateOwner(userId);
     }
 
     private void lockTeamReferences(List<Team> teams) {

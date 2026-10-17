@@ -47,6 +47,7 @@ import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.observability.JobRunRecorder;
+import ooo.klae.connex.backend.support.TestEntityFixtures;
 import ooo.klae.connex.backend.tenant.TenantContext;
 
 /**
@@ -114,6 +115,7 @@ class AiChatTurnOrphanSettlementIntegrationTest {
         workspace.setName("Orphan settlement " + unique);
         workspace.setSlug("orphan-settlement-" + unique);
         workspaceMapper.insert(workspace);
+        TestEntityFixtures.initializeChatPrivacy(jdbcTemplate, workspace.getId());
 
         member = new User();
         member.setUsername("orphan-settlement-" + unique);
@@ -141,6 +143,7 @@ class AiChatTurnOrphanSettlementIntegrationTest {
                     "DELETE FROM ai_chat_session WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update(
                     "DELETE FROM workspace_member WHERE workspace_id = ?", workspace.getId());
+            TestEntityFixtures.deleteChatPrivacy(jdbcTemplate, workspace.getId());
             jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", workspace.getId());
         }
     }
@@ -191,7 +194,7 @@ class AiChatTurnOrphanSettlementIntegrationTest {
     }
 
     @Test
-    void aSettlementThatFailsAfterTheTakeoverLeavesTheLeaseExactlyAsItFoundIt() {
+    void aSettlementWhoseContentWriteFailsLeavesTheLeaseExactlyAsItFoundIt() {
         int turnId = insertUnsettleableStreamedTurn();
         insertDeadOwnerLease(turnId, 3L);
         AiRunLeaseKey key = key(turnId);
@@ -441,6 +444,7 @@ class AiChatTurnOrphanSettlementIntegrationTest {
         turn.setRequestedByUserId(member.getId());
         turn.setStatus(status);
         turn.setPrivacyMode("masked");
+        turn.setPrivacyGeneration(1L);
         turn.setStreamed(false);
         chatMapper.insertTurn(turn);
         return turn.getId();
@@ -450,9 +454,9 @@ class AiChatTurnOrphanSettlementIntegrationTest {
      * Creates a running streamed turn whose special-care partial answer cannot be purged.
      *
      * <p>The terminal screen must reset a partial it may not retain, and {@code cancel_requested_at}
-     * makes that reset match no row, so the settlement fails after it has taken the lease over —
-     * the one moment the atomicity of the takeover and the terminal write is observable. Every
-     * predicate here is a production one; nothing is stubbed.
+     * makes that reset match no row, so settlement fails before its leaf lease takeover. Content
+     * refusal must leave the predecessor's lease and terminal state unchanged. Every predicate
+     * here is a production one; nothing is stubbed.
      *
      * @return the turn id
      */

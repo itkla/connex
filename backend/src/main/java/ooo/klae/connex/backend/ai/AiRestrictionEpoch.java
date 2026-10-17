@@ -85,6 +85,31 @@ public class AiRestrictionEpoch {
         orderedWorkspaceIds.forEach(this::bump);
     }
 
+    /** Holds all ordered write fences without invalidating an already accepted operation replay. */
+    public void retainWriteFencesUntilTransactionCompletion(List<Integer> workspaceIds) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()
+                || !TransactionSynchronizationManager.isSynchronizationActive()) {
+            throw new IllegalStateException("AI restriction write fence requires an active transaction");
+        }
+        List<Integer> ordered = Objects.requireNonNull(workspaceIds, "workspaceIds").stream()
+                .map(workspaceId -> Objects.requireNonNull(workspaceId, "workspaceId"))
+                .distinct()
+                .sorted(Comparator.comparingInt(this::stripe).thenComparingInt(Integer::intValue))
+                .toList();
+        for (int workspaceId : ordered) {
+            ReentrantReadWriteLock lock = workspaceLocks[stripe(workspaceId)];
+            lock.writeLock().lock();
+            boolean retained = false;
+            try {
+                retained = retainWriteFenceUntilTransactionCompletion(lock);
+            } finally {
+                if (!retained) {
+                    lock.writeLock().unlock();
+                }
+            }
+        }
+    }
+
     /**
      * Advances the restriction epoch for one workspace. When invoked inside a transaction, the
      * workspace-stripe write fence remains held until transaction completion so no newly assembled
@@ -106,7 +131,7 @@ public class AiRestrictionEpoch {
         }
     }
 
-    boolean runIfCurrent(int workspaceId, long expectedEpoch, Runnable action) {
+    public boolean runIfCurrent(int workspaceId, long expectedEpoch, Runnable action) {
         Objects.requireNonNull(action, "action");
         int stripe = stripe(workspaceId);
         ReentrantReadWriteLock lock = workspaceLocks[stripe];
@@ -156,7 +181,7 @@ public class AiRestrictionEpoch {
         }
     }
 
-    void runWithExpectedEgressEpoch(
+    public void runWithExpectedEgressEpoch(
             int workspaceId, long expectedEpoch, Runnable action) {
         Objects.requireNonNull(action, "action");
         requireWorkspace(workspaceId);
@@ -181,6 +206,7 @@ public class AiRestrictionEpoch {
         Objects.requireNonNull(invocation, "invocation");
         RestrictionExpectation expected = expectedEgressEpoch.get();
         if (expected == null) {
+            ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard.requireEgressCurrent();
             return invocation.get();
         }
         if (expected.workspaceId() != workspaceId) {
@@ -188,7 +214,10 @@ public class AiRestrictionEpoch {
         }
         AtomicReference<T> result = new AtomicReference<>();
         boolean invoked = runIfCurrent(
-                workspaceId, expected.epoch(), () -> result.set(invocation.get()));
+                workspaceId, expected.epoch(), () -> {
+                    ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard.requireEgressCurrent();
+                    result.set(invocation.get());
+                });
         if (!invoked) {
             throw new EgressRejectedException("AI restrictions changed before provider egress");
         }

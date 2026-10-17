@@ -593,7 +593,7 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         AiChatMessage message = new AiChatMessage();
         message.setWorkspaceId(session.getWorkspaceId());
         message.setSessionId(session.getId());
-        message.setSeq(1);
+        message.setSeq(aiChatMapper.nextMessageSequence(session.getWorkspaceId(), session.getId()));
         message.setAuthorKind("user");
         message.setAuthorUserId(author.getId());
         message.setContent(content);

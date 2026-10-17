@@ -20,7 +20,10 @@ import AskConnexDrawer, {
     type AskConnexJobOffer,
     type AskConnexScopeSurface,
 } from '@/app/components/ask-connex/AskConnexDrawer';
+import AskConnexMissionCreate from '@/app/components/ask-connex/AskConnexMissionCreate';
+import AskConnexMissionProgress from '@/app/components/ask-connex/AskConnexMissionProgress';
 import { useActions, useRegisterActions } from '@/app/hooks/useActions';
+import { useAskConnexMissions } from '@/app/hooks/useAskConnexMissions';
 import { useAskConnexSkills } from '@/app/hooks/useAskConnexSkills';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useIsMobile } from '@/app/hooks/useIsMobile';
@@ -116,6 +119,7 @@ import {
     type AskConnexToolCardFailure,
     type StoredAskConnexTurn,
 } from '@/app/lib/askConnex';
+import { reconcileAskConnexDurableMessages } from '@/app/lib/askConnexMissions';
 import { askConnexJobContext, askConnexJobs } from '@/app/lib/askConnexEntryPoints';
 import {
     ASK_CONNEX_SCOPE_PREVIEW_DEBOUNCE_MS,
@@ -140,6 +144,7 @@ import {
     askConnexTerminalKind,
     askConnexTimedOutMessage,
     askConnexWidthStorageKey,
+    isAskConnexAuthorizationWithdrawal,
     parseStoredAskConnexWidth,
     type AskConnexActiveState,
     type AskConnexFailureMessage,
@@ -522,6 +527,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const [submissionBlocked, setSubmissionBlocked] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [reloadVersion, setReloadVersion] = useState(0);
+    const [missionRefreshVersion, setMissionRefreshVersion] = useState(0);
+    const [missionContentVersion, setMissionContentVersion] = useState(0);
     const [promptRequest, setPromptRequest] = useState(0);
     const [scopeDraft, setScopeDraft] = useState<AskConnexScopeDraft>(EMPTY_ASK_CONNEX_SCOPE_DRAFT);
     const [scopeEditorOpen, setScopeEditorOpen] = useState(false);
@@ -549,6 +556,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const scopeRequestRef = useRef<AiChatQueryScopeRequest | null>(null);
     const identityControllerRef = useRef<AbortController | null>(null);
     const sessionControllerRef = useRef<AbortController | null>(null);
+    const sessionContentControllerRef = useRef(new AbortController());
     const tempMessageIdRef = useRef(-1);
     const sessionCreationRef = useRef<Promise<AiChatSession> | null>(null);
     const sessionEpochRef = useRef(0);
@@ -827,6 +835,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         const stream = streamRef.current;
         if (stream === null || stream.text.length === 0) {
             streamStore.publish(null);
+            if (streamingRef.current) {
+                streamingRef.current = false;
+                setStreaming(false);
+            }
             return;
         }
         streamStore.publish({ turnId: stream.turnId, text: stream.text });
@@ -856,9 +868,59 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         streamStore.publish(null);
     }, [streamStore]);
 
+    /** Withdraws every local content projection before reloading a privacy-invalidated session. */
+    const invalidateSessionContent = useCallback((sessionId: number) => {
+        if (activeSessionRef.current?.id !== sessionId) return;
+        sessionContentControllerRef.current.abort();
+        sessionContentControllerRef.current = new AbortController();
+        transcriptRefreshVersionRef.current += 1;
+        activeTurnRef.current = null;
+        activeSessionRef.current = null;
+        setActiveSession(null);
+        setSessions((current) => current.filter((session) => session.id !== sessionId));
+        setInvitations((current) => current.filter((session) => session.id !== sessionId));
+        safeStorageRemove(turnKey);
+        resetStream();
+        messagesRef.current = [];
+        setMessages([]);
+        setFreshMessageIds(new Set());
+        setThinking(null);
+        setNarration(null);
+        setTodos(null);
+        setComposer('');
+        dispatchTurn({ type: 'reset' });
+        dispatchToolCalls({ type: 'reset' });
+        setMissionContentVersion((version) => version + 1);
+        setReloadVersion((version) => version + 1);
+    }, [resetStream, turnKey]);
+
+    /** A removed followed turn withdraws its buffered content even when cleanup frames were missed. */
+    const loadFollowedTurn = useCallback(async (
+        sessionId: number,
+        turnId: number,
+        signal: AbortSignal,
+    ): Promise<AiChatTurn> => {
+        try {
+            const durable = await getAiChatTurn(sessionId, turnId, { signal });
+            signal.throwIfAborted();
+            if (durable.terminalReason === 'privacy_invalidated') {
+                invalidateSessionContent(sessionId);
+                throw new DOMException('Session content invalidated', 'AbortError');
+            }
+            return durable;
+        } catch (error) {
+            if (!signal.aborted && error instanceof ApiError && (error.status === 403 || error.status === 404)) {
+                invalidateSessionContent(sessionId);
+                throw new DOMException('Session content invalidated', 'AbortError');
+            }
+            throw error;
+        }
+    }, [invalidateSessionContent]);
+
     const hydrateStream = useCallback(async (sessionId: number, turnId: number): Promise<void> => {
-        const signal = identityControllerRef.current?.signal;
-        if (!signal || signal.aborted) return;
+        const identitySignal = identityControllerRef.current?.signal;
+        if (!identitySignal || identitySignal.aborted) return;
+        const signal = AbortSignal.any([identitySignal, sessionContentControllerRef.current.signal]);
         const streamEpoch = streamEpochRef.current;
         for (let attempt = 0; ; attempt++) {
             if (attempt > 0) {
@@ -869,13 +931,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 }
                 if (streamEpoch !== streamEpochRef.current) return;
             }
-            let partial: string;
-            let settledTurn: boolean;
+            let durable: AiChatTurn;
             try {
-                const durable = await getAiChatTurn(sessionId, turnId, { signal });
-                partial = durable.partialContent ?? '';
-                settledTurn = adoptsSettledAskConnexPartial(
-                    durable.status, durable.terminalReason, isActiveTurnStatus(durable.status));
+                durable = await loadFollowedTurn(sessionId, turnId, signal);
             } catch {
                 const current = streamRef.current;
                 if (!signal.aborted
@@ -888,6 +946,14 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             if (signal.aborted || streamEpoch !== streamEpochRef.current) return;
             const current = streamRef.current;
             if (current?.turnId !== turnId) return;
+            if (isAskConnexAuthorizationWithdrawal(durable.terminalReason)) {
+                activeTurnRef.current = null;
+                resetStream();
+                return;
+            }
+            const partial = durable.partialContent ?? '';
+            const settledTurn = adoptsSettledAskConnexPartial(
+                durable.status, durable.terminalReason, isActiveTurnStatus(durable.status));
             if (settledTurn) {
                 streamRef.current = adoptSettledAskConnexStreamPartial(current, partial);
                 invalidateStream();
@@ -898,7 +964,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             invalidateStream();
             if (!settled.hydrate) return;
         }
-    }, [invalidateStream]);
+    }, [invalidateStream, loadFollowedTurn, resetStream]);
 
     const handleStreamDelta = useCallback((frame: AiChatDeltaFrame) => {
         const active = activeTurnRef.current;
@@ -1252,16 +1318,11 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             },
         );
         if (signal.aborted || refreshVersion !== transcriptRefreshVersionRef.current) return null;
-        const known = new Set(messagesRef.current.map(
-            (message) => `${message.seq}:${message.authorKind}:${message.content}`,
-        ));
-        messagesRef.current = nextMessages;
-        setMessages(nextMessages);
-        setFreshMessageIds(animateNew
-            ? new Set(nextMessages
-                .filter((message) => !known.has(`${message.seq}:${message.authorKind}:${message.content}`))
-                .map((message) => message.id))
-            : new Set());
+        const reconciled = reconcileAskConnexDurableMessages(messagesRef.current, nextMessages, animateNew);
+        messagesRef.current = reconciled.messages;
+        setMessages(reconciled.messages);
+        setFreshMessageIds(reconciled.freshMessageIds);
+        setMissionRefreshVersion((version) => version + 1);
         dispatchToolCalls({
             type: 'replace',
             toolCalls: mergeAskConnexToolCalls(historicalToolCalls, pendingToolCalls),
@@ -1317,8 +1378,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         initial?: { durable: AiChatTurn; streamEpoch: number },
     ): Promise<AiChatTurn> => {
         let streamEpoch = initial?.streamEpoch ?? streamEpochRef.current;
-        let current = initial?.durable ?? await getAiChatTurn(sessionId, turnId, { signal });
+        let current = initial?.durable ?? await loadFollowedTurn(sessionId, turnId, signal);
         while (isActiveTurnStatus(current.status)) {
+            signal.throwIfAborted();
             dispatchTurn({
                 type: 'status',
                 status: current.status,
@@ -1328,18 +1390,19 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             absorbTurnPartial(current, streamEpoch);
             await delay(1_000, signal);
             streamEpoch = streamEpochRef.current;
-            current = await getAiChatTurn(sessionId, turnId, { signal });
+            current = await loadFollowedTurn(sessionId, turnId, signal);
         }
         return current;
-    }, [absorbTurnPartial]);
+    }, [absorbTurnPartial, loadFollowedTurn]);
 
     const followTurn = useCallback(async (
         stored: StoredAskConnexTurn,
-        signal: AbortSignal,
+        parentSignal: AbortSignal,
     ): Promise<void> => {
+        const signal = AbortSignal.any([parentSignal, sessionContentControllerRef.current.signal]);
         try {
             let durableStreamEpoch = streamEpochRef.current;
-            let durable = await getAiChatTurn(stored.sessionId, stored.turnId, { signal });
+            let durable = await loadFollowedTurn(stored.sessionId, stored.turnId, signal);
             if (signal.aborted) return;
             dispatchTurn({
                 type: 'status',
@@ -1366,7 +1429,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 if (error instanceof ApiError && error.status === 403) throw error;
                 if (!(error instanceof AiGenerationError)) {
                     durableStreamEpoch = streamEpochRef.current;
-                    durable = await getAiChatTurn(stored.sessionId, stored.turnId, { signal });
+                    durable = await loadFollowedTurn(stored.sessionId, stored.turnId, signal);
                 }
             }
 
@@ -1411,12 +1474,13 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             dispatchTurn({ type: 'status', status: 'failed', reason: 'reconciliation_failed' });
             deferApiError(error, 'toast.requestFailed');
         }
-    }, [absorbTurnPartial, clearActiveSession, deferApiError, pollDurableTurn, refreshSessions, refreshTranscript, resetStream, terminalMessages, terminalToast, turnKey]);
+    }, [absorbTurnPartial, clearActiveSession, deferApiError, loadFollowedTurn, pollDurableTurn, refreshSessions, refreshTranscript, resetStream, terminalMessages, terminalToast, turnKey]);
 
     const followDurableTurn = useCallback(async (
         initial: AiChatTurn,
-        signal: AbortSignal,
+        parentSignal: AbortSignal,
     ): Promise<void> => {
+        const signal = AbortSignal.any([parentSignal, sessionContentControllerRef.current.signal]);
         if (durableFollowerRef.current === initial.turnId) return;
         durableFollowerRef.current = initial.turnId;
         dispatchTurn({
@@ -1687,7 +1751,15 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 await refreshSessions(signal);
                 const session = activeSessionRef.current;
                 if (session?.id === sessionId) {
+                    const followedTurnId = streamRef.current?.turnId ?? activeTurnRef.current?.turnId;
+                    const streamEpoch = streamEpochRef.current;
                     const detail = await refreshTranscript(session.id, signal, true);
+                    if (signal.aborted) return;
+                    if (followedTurnId !== undefined && detail?.activeTurn?.turnId !== followedTurnId) {
+                        const durable = await loadFollowedTurn(session.id, followedTurnId, signal);
+                        if (signal.aborted) return;
+                        absorbTurnPartial(durable, streamEpoch);
+                    }
                     if (detail?.activeTurn
                             && activeTurnRef.current?.turnId !== detail.activeTurn.turnId) {
                         void followDurableTurn(detail.activeTurn, signal);
@@ -1700,7 +1772,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 }
             }
         });
-    }, [clearActiveSession, followDurableTurn, refreshSessions, refreshTranscript]);
+    }, [absorbTurnPartial, clearActiveSession, followDurableTurn, loadFollowedTurn, refreshSessions, refreshTranscript]);
 
     useEffect(() => {
         if (userId === null || activeWorkspaceId === null || switching) return;
@@ -1722,6 +1794,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 }
                 const signal = identityControllerRef.current?.signal;
                 if (!signal || signal.aborted) return;
+                if (frame.reason === 'privacy_invalidated') invalidateSessionContent(frame.sessionId);
                 if (activeSessionRef.current?.id === frame.sessionId
                         && shouldResetAskConnexStream(streamRef.current, frame)) {
                     resetStream();
@@ -1738,6 +1811,13 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                         clearActiveSession();
                     }
                 }
+                enqueueRealtimeRefresh(frame.sessionId, signal);
+            },
+            onMissionFrame: (frame) => {
+                if (frame.workspaceId !== activeWorkspaceId || frame.sessionId !== activeSessionRef.current?.id) return;
+                const signal = identityControllerRef.current?.signal;
+                if (!signal || signal.aborted) return;
+                setMissionRefreshVersion((version) => version + 1);
                 enqueueRealtimeRefresh(frame.sessionId, signal);
             },
             onDelta: handleStreamDelta,
@@ -1759,7 +1839,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         });
         socket.activate();
         return () => socket.deactivate();
-    }, [activeWorkspaceId, clearActiveSession, enqueueRealtimeRefresh, handleNarrationFrame, handleStreamDelta, handleThinkingFrame, handleTodosFrame, refreshSessions, resetStream, switching, userId]);
+    }, [activeWorkspaceId, clearActiveSession, enqueueRealtimeRefresh, handleNarrationFrame, handleStreamDelta, handleThinkingFrame, handleTodosFrame, invalidateSessionContent, refreshSessions, resetStream, switching, userId]);
 
     useEffect(() => {
         if (!surfaceVisible || presenceSessionId === null || loadState !== 'ready') {
@@ -2954,6 +3034,28 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         [scopeBlocked, scopeChips, scopeDraft, scopeEditorOpen, scopePreviewState, scopeProblem, settleScopeRouting, skills, t],
     );
 
+    const missionChanged = useCallback((sessionId: number) => {
+        const signal = identityControllerRef.current?.signal;
+        if (!signal || signal.aborted) return;
+        setMissionRefreshVersion((version) => version + 1);
+        enqueueRealtimeRefresh(sessionId, signal);
+    }, [enqueueRealtimeRefresh]);
+    const missions = useAskConnexMissions({
+        identity,
+        sessionId: scoped ? activeSession?.id ?? null : null,
+        enabled: scoped && permission === 'granted',
+        visible: surfaceVisible,
+        refreshVersion: missionRefreshVersion,
+        contentVersion: missionContentVersion,
+        onChanged: missionChanged,
+        onContentInvalidated: invalidateSessionContent,
+    });
+    const missionRecord = contextResult.pageContext.length === 1 ? contextResult.pageContext[0] : undefined;
+    const missionRecordLabel = missionRecord
+        ? contextResult.attachments.find((item) => item.kind === missionRecord.kind && item.id === missionRecord.id)?.label
+            ?? implicitContext?.label ?? t('missions.selectedRecord')
+        : null;
+
     return (
         <AskConnexContext.Provider value={value}>
             <AskConnexMountContext.Provider value={mountValue}>
@@ -2979,6 +3081,33 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 loadState={scoped ? loadState : 'loading'}
                 loadError={scoped ? loadError : null}
                 composer={scoped ? composer : ''}
+                missionProgress={scoped ? (
+                    <AskConnexMissionProgress runs={missions.runs} loading={missions.loading}
+                        problem={missions.problem} pendingId={missions.pendingId} output={missions.output}
+                        hasMore={missions.hasMore} onControl={(run, action) => void missions.control(run, action)}
+                        onOutput={(run) => void missions.viewOutput(run)} onCloseOutput={missions.closeOutput}
+                        onRetry={missions.retry} onMore={() => void missions.loadMore()} />
+                ) : null}
+                missionComposerAction={scoped && missionRecord && missionRecordLabel !== null
+                    && fileAttachments.length === 0 && selectionContext === null ? (
+                    <AskConnexMissionCreate key={`${identity}:${missionRecord.kind}:${missionRecord.id}`}
+                        recordLabel={missionRecordLabel} initialGoal={askConnexMessageContent(composer)}
+                        disabled={working || loadState !== 'ready' || unavailable !== null || missions.pendingId !== null}
+                        problem={missions.problem} onCreate={async (goal) => {
+                            const signal = identityControllerRef.current?.signal;
+                            if (!signal || signal.aborted) return false;
+                            try {
+                                const session = await ensureSession(signal);
+                                if (signal.aborted) return false;
+                                return await missions.create(session.id, goal, {
+                                    kind: 'record', recordKind: missionRecord.kind, recordId: missionRecord.id,
+                                }, signal);
+                            } catch (error) {
+                                if (!signal.aborted) showApiError(error, 'missions.problems.failed');
+                                return false;
+                            }
+                        }} />
+                ) : null}
                 implicitContext={implicitContext}
                 selectionContext={selectionContext}
                 unsupportedPageContext={unsupportedPageContext}

@@ -880,6 +880,13 @@ public class DealService {
         return hydrateReferences(workspaceId, deal);
     }
 
+    /** Returns only the workspace-scoped primary deal without hydrating linked references. */
+    public Deal getAssistantPrimaryDealById(int id) {
+        Deal deal = dealMapper.getDealById(workspaceService.getCurrentWorkspaceId(), id);
+        if (deal == null) throw new ResourceNotFoundException("Deal not found");
+        return deal;
+    }
+
     /** Locks one writable deal for a mutation that retains a later commit fence. */
     @Transactional(propagation = Propagation.MANDATORY)
     public Deal lockDealForUpdate(int id) {

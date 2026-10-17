@@ -88,6 +88,7 @@ public class WorkspaceService {
     private final RegistrationVerificationService registrationVerificationService;
     private final OwnershipOfferWriter ownershipOfferWriter;
     private final PrivilegedMfaLockedAuthorization privilegedMfaLockedAuthorization;
+    private final org.springframework.context.ApplicationEventPublisher applicationEvents;
 
     private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final int WORKSPACE_NAME_MAX = 128;
@@ -397,6 +398,8 @@ public class WorkspaceService {
         membership.setOrgName(organization.getName());
         membership.setOrgIdentityVersion(organization.getIdentityVersion());
         membership.setOrgRole(orgMemberService.orgRoleOf(orgId, ownerUserId));
+        applicationEvents.publishEvent(
+                new ooo.klae.connex.backend.ai.mission.AiAgentPrivacyInitializer.WorkspaceProvisioned(workspace.getId()));
         return membership;
     }
 

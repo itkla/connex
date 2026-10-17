@@ -122,6 +122,9 @@ class UserOffboardingOrderTest {
 
     @Mock private OwnershipOfferWriter ownershipOfferWriter;
     @Mock private OrganizationMapper ownershipOfferOrganizationMapper;
+    @Mock private ooo.klae.connex.backend.ai.mission.AiAgentPrivacyService missionPrivacy;
+    @Mock private ooo.klae.connex.backend.ai.mission.AiAgentDepartureMaintenanceService missionDeparture;
+    @Mock private org.springframework.context.ApplicationEventPublisher missionEvents;
     @InjectMocks private UserOffboardingService service;
 
     @org.junit.jupiter.api.BeforeEach

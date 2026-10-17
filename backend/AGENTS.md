@@ -84,6 +84,7 @@ Read the relevant contract before editing that subsystem:
 | API mappings, anonymous access, deprecation or retirement | `../docs/backend/API_SURFACE.md` |
 | Security/auth/provider/upload boundary | `../docs/backend/SECURITY_BOUNDARIES.md` |
 | AI, masking, assistant, model-provider egress | `../docs/backend/AI_SECURITY.md` |
+| Durable missions, enrolled chat privacy, DSR cleanup | `../docs/backend/AI_MISSIONS.md` |
 | Business-card upload/OCR/fallback/import | `../docs/backend/BUSINESS_CARD_SCANNING.md`, `../ocr/AGENTS.md` |
 | Automation, segments, rules, workflows | `../docs/backend/AUTOMATION.md` |
 | Duplicate review, CSV, interaction-history import | `../docs/backend/IMPORTS_AND_DUPLICATE_REVIEW.md` |

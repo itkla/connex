@@ -91,7 +91,8 @@ class ApiCredentialManagementLockOrderTest {
             mock(AccountDeletionReservationRead.class),
             mock(RegistrationVerificationService.class),
             mock(ooo.klae.connex.backend.services.OwnershipOfferWriter.class),
-            mock(ooo.klae.connex.backend.services.PrivilegedMfaLockedAuthorization.class));
+            mock(ooo.klae.connex.backend.services.PrivilegedMfaLockedAuthorization.class),
+            mock(org.springframework.context.ApplicationEventPublisher.class));
         service = new ApiCredentialService(
             apiCredentialMapper,
             userMapper,

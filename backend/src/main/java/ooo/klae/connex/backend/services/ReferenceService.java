@@ -547,6 +547,14 @@ public class ReferenceService {
         }
     }
 
+    /** Redacts internal links outside an already authorized primary without fetching linked records. */
+    public static String redactMissionReferences(String content, String kind, int id) {
+        if (kind == null || !Set.of("person", "company", "deal").contains(kind) || id <= 0) {
+            throw new IllegalArgumentException("Invalid mission reference scope");
+        }
+        return redactTokens(content, Set.of(new ReferenceTarget(kind, id)));
+    }
+
     private static String redactTokens(String content, Set<ReferenceTarget> visibleTargets) {
         if (content == null) {
             return null;
