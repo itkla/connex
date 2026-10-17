@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import WorkspaceSelectionUnavailable from "@/app/components/WorkspaceSelectionUnavailable";
@@ -22,6 +22,11 @@ import {
     type PublishedOrganizationIdentity,
     type PublishedWorkspaceIdentity,
 } from "@/app/lib/workspaceSnapshot";
+import {
+    bindRenderedWorkspace,
+    releaseRenderedWorkspace,
+    rememberWorkspaceNames,
+} from "@/app/lib/renderedWorkspace";
 
 type PublishActiveWorkspace = (id: number | null) => void;
 type PublishWorkspace = (workspace: Workspace) => void;
@@ -163,6 +168,14 @@ const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
  * An explicit recovery snapshot replaces the held membership list without marking itself as the
  * last consumed RSC payload, so the props already mounted cannot immediately overwrite it.
  *
+ * The active workspace is also published to the shared request pipeline, which pins every
+ * state-changing request to it rather than to the `connex_workspace` cookie (#1732). A safe read can
+ * heal that cookie to another membership after the rendered workspace is revoked; what the user
+ * composed on this page still belongs to the rendered workspace, so its submission must be refused
+ * there instead of following the cookie into another organization. Publication happens in the same
+ * step that records the selection, so an operation run right after a switch is pinned to the new
+ * workspace before React has re-rendered.
+ *
  * @param initialWorkspaces - the viewer's workspaces as of the current server render
  * @param initialActiveId - the workspace the session cookie selects, or null when none is
  * @param children - the tree that reads them
@@ -189,6 +202,7 @@ export function WorkspaceProvider({
     const activeWorkspaceIdRef = useRef(initialActiveId);
     const switchingRef = useRef(false);
     const selectionUnavailableRef = useRef(false);
+    const [renderedWorkspaceOwner] = useState(() => ({}));
 
     if (workspaceSnapshot.consumedWorkspaces !== initialWorkspaces) {
         const adopted = adoptWorkspaces(
@@ -213,10 +227,20 @@ export function WorkspaceProvider({
     }
     const workspaces = workspaceSnapshot.workspaces;
 
+    useLayoutEffect(() => {
+        bindRenderedWorkspace(renderedWorkspaceOwner, activeWorkspaceIdRef.current);
+        return () => releaseRenderedWorkspace(renderedWorkspaceOwner);
+    }, [renderedWorkspaceOwner]);
+
+    useLayoutEffect(() => {
+        rememberWorkspaceNames(workspaces);
+    }, [workspaces]);
+
     const publishActiveWorkspace = useCallback((id: number | null) => {
         activeWorkspaceIdRef.current = id;
+        bindRenderedWorkspace(renderedWorkspaceOwner, id);
         setActiveWorkspaceId(id);
-    }, []);
+    }, [renderedWorkspaceOwner]);
 
     const publishWorkspace = useCallback((workspace: Workspace) => {
         setWorkspaceSnapshot((previous) => ({
