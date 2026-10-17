@@ -4,11 +4,11 @@
 <mapper namespace="ooo.klae.connex.backend.mappers.AiChatMapper">
 
   <resultMap id="sessionResult" type="AiChatSession">
+    <id property="id" column="id"/>
     <result property="messageSeqHighWater" column="message_seq_high_water"/>
     <result property="missionTaintGeneration" column="mission_taint_generation"/>
     <result property="missionTaintSeq" column="mission_taint_seq"/>
     <result property="titlePrivacyGeneration" column="title_privacy_generation"/>
-    <id property="id" column="id"/>
     <result property="workspaceId" column="workspace_id"/>
     <result property="createdByUserId" column="created_by_user_id"/>
     <result property="title" column="title"/>
@@ -36,10 +36,10 @@
   </resultMap>
 
   <resultMap id="messageResult" type="AiChatMessage">
+    <id property="id" column="id"/>
     <result property="missionRunId" column="mission_run_id"/>
     <result property="missionMessageKind" column="mission_message_kind"/>
     <result property="privacyGeneration" column="privacy_generation"/>
-    <id property="id" column="id"/>
     <result property="workspaceId" column="workspace_id"/>
     <result property="sessionId" column="session_id"/>
     <result property="seq" column="seq"/>
@@ -53,11 +53,11 @@
   </resultMap>
 
   <resultMap id="turnResult" type="AiChatTurn">
+    <id property="id" column="id"/>
     <result property="missionRunId" column="mission_run_id"/>
     <result property="missionSegmentId" column="mission_segment_id"/>
     <result property="privacyGeneration" column="privacy_generation"/>
     <result property="privacyTaintSeq" column="privacy_taint_seq"/>
-    <id property="id" column="id"/>
     <result property="workspaceId" column="workspace_id"/>
     <result property="sessionId" column="session_id"/>
     <result property="requestedByUserId" column="requested_by_user_id"/>
@@ -76,10 +76,10 @@
   </resultMap>
 
   <resultMap id="toolCallResult" type="AiChatToolCall">
+    <id property="id" column="id"/>
     <result property="missionRunId" column="mission_run_id"/>
     <result property="artifactOrigin" column="artifact_origin"/>
     <result property="privacyGeneration" column="privacy_generation"/>
-    <id property="id" column="id"/>
     <result property="workspaceId" column="workspace_id"/>
     <result property="messageId" column="message_id"/>
     <result property="sessionId" column="session_id"/>
