@@ -115,6 +115,15 @@ async function workspaceCookie(context: BrowserContext): Promise<string | undefi
     return (await context.cookies()).find((cookie) => cookie.name === "connex_workspace")?.value;
 }
 
+/** Chooses a workspace in the sidebar switcher, the explicit reselection a member makes. */
+async function switchWorkspace(page: Page, name: string): Promise<void> {
+    const switcher = page.getByRole("button", { name: "Switch workspace" });
+    await switcher.click();
+    await page.getByRole("menuitem").filter({ hasText: name }).click();
+    await expect(page).toHaveURL(/\/dashboard$/);
+    await expect(switcher).toContainText(name);
+}
+
 async function openNewNote(page: Page) {
     await page.getByRole("main").getByRole("button", { name: notesCopy("ActivityNotes.new"), exact: true }).first().click();
     const dialog = page.getByRole("dialog", { name: notesCopy("ActivityNotesDialog.titleCreate") });
@@ -124,8 +133,11 @@ async function openNewNote(page: Page) {
 
 /**
  * #1732: a draft composed while a workspace was selected must never be written into another
- * workspace. Revoking the membership server-side and letting a safe read heal the selection cookie
- * to the member's other workspace is the exact two-step path the backend cannot close on its own.
+ * workspace. The first half switches workspaces explicitly, without a reload, while the full-page
+ * note editor still holds text: whichever save carries that text (autosave or the flush on unmount)
+ * must land in the workspace it was written in. The unit lifecycle test pins the unmount ordering
+ * itself. The second half revokes the membership server-side and lets a safe read heal the selection
+ * cookie to the member's other workspace, the exact two-step path the backend cannot close on its own.
  */
 test.describe("drafts stay in the workspace they were started in", () => {
     test("a draft from a revoked workspace is refused after the heal, and a new draft lands where it was reselected", async ({ browser }, testInfo) => {
@@ -171,8 +183,17 @@ test.describe("drafts stay in the workspace they were started in", () => {
             expect(await workspaceCookie(memberContext)).toBe(String(revokedWorkspaceId));
 
             const page = await memberContext.newPage();
-            await page.goto("/activity/notes");
             const switcher = page.getByRole("button", { name: "Switch workspace" });
+            const flushedBody = `Switch flush ${runId}`;
+            await page.goto("/activity/notes/new");
+            await expect(switcher).toContainText(revokedName);
+            await page.locator('.tiptap[contenteditable="true"]').fill(flushedBody);
+            await switchWorkspace(page, homeName);
+            await expect.poll(() => notesMatching(memberContext.request, revokedWorkspaceId, flushedBody)).toBe(1);
+            expect(await notesMatching(memberContext.request, homeWorkspaceId, flushedBody)).toBe(0);
+
+            await switchWorkspace(page, revokedName);
+            await page.goto("/activity/notes");
             await expect(switcher).toContainText(revokedName);
 
             const draftTitle = `Revoked draft ${runId}`;
