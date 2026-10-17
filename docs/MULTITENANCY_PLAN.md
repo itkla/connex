@@ -623,12 +623,15 @@ becomes the migration-only backfill target.
 through one `requestJson` (`api.ts:17-43`) → inject the active workspace **once** there.
 
 - **Client components** → `X-Workspace-Id` header from a non-`HttpOnly` `connex_workspace` cookie for
-  reads. State-changing requests carry the workspace the app shell *renders* instead
+  reads and for the account, organization and selection writes listed in `UNPINNED_WRITE_ROUTES`.
+  Workspace-bound state-changing requests carry the workspace the app shell *renders* instead
   (`WorkspaceProvider` publishes it through `app/lib/renderedWorkspace.ts`), because a safe read heals
   the cookie to another membership after a revocation while the page, and any draft on it, still
   belongs to the revoked workspace. The pinned write gets the interceptor's 403 instead of following
   the heal; `api.ts` re-codes that refusal as `WORKSPACE_UNAVAILABLE` and the shared error copy names
-  the workspace and keeps the draft on screen (#1732, closing the bound #1649 left).
+  the workspace and keeps the draft on screen. Surfaces that save after a delay (the note editor's
+  autosave and unmount flush, dashboard layout saves) pin the workspace the content was composed in
+  via `workspacePinnedRequest` (#1732, closing the bound #1649 left).
 - **SSR pages** (`records/deals/page.tsx`, `me`, `notes`, `search`) → already forward
   `headers: { cookie }` via `safeWithCookie` (`api.ts:80-90`); the `connex_workspace` cookie rides along.
   Resolver precedence: header > cookie > user's default membership.

@@ -82,8 +82,11 @@ import ooo.klae.connex.backend.services.WorkspaceService;
  * and the healed cookie is what the client reads back to render the active workspace on its next
  * load. Requiring an explicit reselection for the next unsafe request would need per-client state
  * the interceptor does not have, so the browser app shell supplies it instead (#1732): its shared
- * request pipeline sends every state-changing request with an explicit {@code X-Workspace-Id} naming
- * the workspace the page renders rather than the cookie's. A page still rendering a revoked
+ * request pipeline sends every workspace-bound state-changing request with an explicit
+ * {@code X-Workspace-Id} naming the workspace the page renders rather than the cookie's, and surfaces
+ * that save after a delay name the workspace the content was composed in. The routes this
+ * interceptor exempts, those {@code WebConfig} excludes, and account and organization routes that
+ * authorize their own target keep sending the cookie's selection. A page still rendering a revoked
  * workspace therefore arrives here as a matching stale pair before the heal, or as an explicit pin
  * that disagrees with the healed cookie after it, and both get the 403 above instead of following
  * the heal into another organization. The client recognizes that refusal by its exact message,

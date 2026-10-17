@@ -169,7 +169,7 @@ const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
  * last consumed RSC payload, so the props already mounted cannot immediately overwrite it.
  *
  * The active workspace is also published to the shared request pipeline, which pins every
- * state-changing request to it rather than to the `connex_workspace` cookie (#1732). A safe read can
+ * workspace-bound write to it rather than to the `connex_workspace` cookie (#1732). A safe read can
  * heal that cookie to another membership after the rendered workspace is revoked; what the user
  * composed on this page still belongs to the rendered workspace, so its submission must be refused
  * there instead of following the cookie into another organization. Publication happens in the same
