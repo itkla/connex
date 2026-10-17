@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.mappers;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -15,6 +16,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 
 import ooo.klae.connex.backend.beans.Product;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.ProductFacetFilter;
 import ooo.klae.connex.backend.util.LikePattern;
 
 class ProductMapperTest extends AbstractMapperTest {
@@ -117,7 +119,7 @@ class ProductMapperTest extends AbstractMapperTest {
         newProduct(foreign.getId(), "Foreign Needle");
 
         List<Product> products = productMapper.getFiltered(
-            workspace.getId(), LikePattern.containing("needle"));
+            workspace.getId(), LikePattern.containing("needle"), ProductFacetFilter.none());
 
         assertEquals(
             List.of(byName.getId(), bySku.getId(), byDescription.getId(), inactive.getId()),
@@ -125,7 +127,68 @@ class ProductMapperTest extends AbstractMapperTest {
         assertFalse(products.getLast().isActive());
         assertEquals(
             List.of(byName.getId(), bySku.getId(), byDescription.getId(), inactive.getId(), unrelated.getId()),
-            productMapper.getFiltered(workspace.getId(), null).stream().map(Product::getId).toList());
+            productMapper.getFiltered(workspace.getId(), null, ProductFacetFilter.none())
+                .stream().map(Product::getId).toList());
+    }
+
+    @Test
+    void getFilteredAppliesTheBrowserFacetsWithinTheSearchAndWorkspace() {
+        String tag = unique();
+        Product oneTimeActive = newProduct(workspace.getId(), "Facet " + tag + " a");
+        Product recurringActive = newProduct(workspace.getId(), "Facet " + tag + " b");
+        recurringActive.setBillingFrequency("recurring");
+        productMapper.update(recurringActive);
+        Product recurringInactiveStarting = newProduct(workspace.getId(), "Facet " + tag + " c");
+        recurringInactiveStarting.setBillingFrequency("recurring");
+        recurringInactiveStarting.setActive(false);
+        recurringInactiveStarting.setEffectiveStart(LocalDate.of(2026, 1, 1));
+        productMapper.update(recurringInactiveStarting);
+        Product oneTimeEnding = newProduct(workspace.getId(), "Facet " + tag + " d");
+        oneTimeEnding.setEffectiveEnd(LocalDate.of(2026, 12, 31));
+        productMapper.update(oneTimeEnding);
+        Product outsideSearch = newProduct(workspace.getId(), "Elsewhere " + tag);
+        outsideSearch.setBillingFrequency("recurring");
+        productMapper.update(outsideSearch);
+        Workspace foreign = new Workspace();
+        foreign.setName("Foreign " + unique());
+        foreign.setSlug("foreign-" + unique());
+        workspaceMapper.insert(foreign);
+        Product foreignRecurring = newProduct(foreign.getId(), "Facet " + tag + " foreign");
+        foreignRecurring.setBillingFrequency("recurring");
+        productMapper.update(foreignRecurring);
+        String search = LikePattern.containing("Facet " + tag);
+
+        assertEquals(
+            List.of(recurringActive.getId(), recurringInactiveStarting.getId()),
+            facetIds(search, List.of("recurring"), null, null));
+        assertEquals(
+            List.of(recurringActive.getId()),
+            facetIds(search, List.of("recurring"), List.of("true"), null));
+        assertEquals(
+            List.of(oneTimeActive.getId(), recurringActive.getId(), recurringInactiveStarting.getId(),
+                oneTimeEnding.getId()),
+            facetIds(search, List.of("one_time", "recurring"), List.of("true", "false"), null));
+        assertEquals(
+            List.of(recurringInactiveStarting.getId(), oneTimeEnding.getId()),
+            facetIds(search, null, null, List.of("bounded")));
+        assertEquals(
+            List.of(oneTimeActive.getId(), recurringActive.getId()),
+            facetIds(search, null, null, List.of("none")));
+        assertEquals(
+            List.of(oneTimeActive.getId(), recurringActive.getId(), recurringInactiveStarting.getId(),
+                oneTimeEnding.getId()),
+            facetIds(search, null, null, List.of("bounded", "none")));
+        assertEquals(
+            List.of(oneTimeEnding.getId()),
+            facetIds(search, List.of("one_time"), List.of("true"), List.of("bounded")));
+        assertTrue(facetIds(search, List.of("recurring"), List.of("false"), List.of("none")).isEmpty());
+    }
+
+    private List<Integer> facetIds(
+            String search, List<String> billing, List<String> active, List<String> effectiveDates) {
+        return productMapper.getFiltered(
+                workspace.getId(), search, ProductFacetFilter.fromRequest(billing, active, effectiveDates))
+            .stream().map(Product::getId).toList();
     }
 
     @Test
@@ -133,11 +196,12 @@ class ProductMapperTest extends AbstractMapperTest {
         Product accented = newProduct(workspace.getId(), "Café plan");
 
         assertTrue(productMapper.getFiltered(
-            workspace.getId(), LikePattern.containing("cafe")).isEmpty());
+            workspace.getId(), LikePattern.containing("cafe"), ProductFacetFilter.none()).isEmpty());
         assertEquals(
             List.of(accented.getId()),
             productMapper.getFiltered(
-                workspace.getId(), LikePattern.containing("CAFÉ")).stream().map(Product::getId).toList());
+                workspace.getId(), LikePattern.containing("CAFÉ"), ProductFacetFilter.none())
+                .stream().map(Product::getId).toList());
     }
 
     @Test

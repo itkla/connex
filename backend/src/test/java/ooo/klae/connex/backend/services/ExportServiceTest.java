@@ -33,6 +33,7 @@ import ooo.klae.connex.backend.beans.Product;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.config.SessionSecurityProperties;
+import ooo.klae.connex.backend.dto.ProductFacetFilter;
 import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.CustomFieldDefinitionMapper;
@@ -77,14 +78,14 @@ class ExportServiceTest {
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(new MockHttpServletRequest()));
         try {
             if (enforced) {
-                assertThrows(RecentAuthenticationRequiredException.class, () -> service.exportProducts(null));
+                assertThrows(RecentAuthenticationRequiredException.class, () -> service.exportProducts(null, ProductFacetFilter.none()));
                 verifyNoInteractions(workspaceService, productMapper);
                 verify(auditService).recordExportStepUpRefused();
             } else {
                 when(workspaceService.getCurrentWorkspaceId()).thenReturn(9);
-                when(productMapper.getFiltered(9, null)).thenReturn(List.of());
-                assertTrue(service.exportProducts(null).startsWith("id,sku,name"));
-                verify(productMapper).getFiltered(9, null);
+                when(productMapper.getFiltered(9, null, ProductFacetFilter.none())).thenReturn(List.of());
+                assertTrue(service.exportProducts(null, ProductFacetFilter.none()).startsWith("id,sku,name"));
+                verify(productMapper).getFiltered(9, null, ProductFacetFilter.none());
             }
         } finally {
             SecurityContextHolder.clearContext();
@@ -103,7 +104,7 @@ class ExportServiceTest {
                         case "persons" -> exportService.exportPersons(null, List.of(), List.of(), false,
                                 null, List.of(), false, List.of(), false, List.of(), false, null);
                         case "companies" -> exportService.exportCompanies(null, List.of(), false, List.of(), null, null);
-                        case "products" -> exportService.exportProducts(null);
+                        case "products" -> exportService.exportProducts(null, ProductFacetFilter.none());
                         case "deals" -> exportService.exportDeals(null, null, List.of(), List.of(), List.of(),
                                 List.of(), false, List.of(), List.of(), null);
                         case "segmentDeals" -> exportService.exportSegmentDeals(null, null, null, List.of(),
@@ -159,15 +160,17 @@ class ExportServiceTest {
         product.setBillingFrequency("＝recurring");
         product.setEffectiveStart(LocalDate.of(2027, 1, 2));
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(42);
-        when(productMapper.getFiltered(42, "%Widget%"))
+        ProductFacetFilter facets = ProductFacetFilter.fromRequest(
+            List.of("recurring"), List.of("false"), List.of("bounded"));
+        when(productMapper.getFiltered(42, "%Widget%", facets))
             .thenReturn(List.of(product));
 
-        String csv = exportService.exportProducts("%Widget%");
+        String csv = exportService.exportProducts("%Widget%", facets);
 
         assertEquals(
             "id,sku,name,description,active,unit,unitPrice,currency,taxRate,billingFrequency,effectiveStart,effectiveEnd\r\n"
                 + "7,'=SKU,\"'\nWidget, \"\"Pro\"\"\",'＋cmd,false,'－seat,1000,'＠JPY,10.5000,'＝recurring,2027-01-02,\r\n",
             csv);
-        verify(productMapper).getFiltered(42, "%Widget%");
+        verify(productMapper).getFiltered(42, "%Widget%", facets);
     }
 }
