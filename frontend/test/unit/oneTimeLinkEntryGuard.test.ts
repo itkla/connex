@@ -256,12 +256,25 @@ function conditionalRefresherBindings(file: string): Map<string, string> {
 
 /**
  * Router-state triggers in one module that would re-publish a stripped bearer. Next's app router
- * seeds `canonicalUrl` from `location.href` before `takeOneTimeLinkToken()` strips the fragment;
- * `useOneTimeLinkEntry` hands it the stripped URL on the commit after mount, but only a mounted
- * entry reaches that commit. An entry that strips and then throws keeps the pre-strip canonical
- * URL, and any router action that reuses it (a refresh, a server action, or a retry control that
- * falls back to a refresh) makes `HistoryUpdater` write it, bearer included, back into the address
- * bar and the current history entry. The rule stays as the belt to that brace.
+ * seeds `canonicalUrl` from `location.href`, bearer included, before `takeOneTimeLinkToken()` strips
+ * the fragment, and any router action that reuses that URL — a refresh, a server action, or a retry
+ * control that falls back to a refresh — makes `HistoryUpdater` write it back into the address bar
+ * and the current history entry.
+ *
+ * `syncStrippedUrlWithRouter` (#1781), run from a task `useOneTimeLinkEntry` schedules on mount and
+ * deliberately leaves scheduled across an unmount, hands the router the stripped URL. That closes the
+ * common path, not every one, so this rule and the retry rule below were kept, not relaxed, when the
+ * app-shell boundaries moved to Next's `retry`. The router still holds the bearer when:
+ *
+ * - a router action is dispatched inside the strip's own task, before the scheduled sync runs;
+ * - the sync stands down because a second bearer sits in the fragment, and the entry has already
+ *   unmounted, so no `hashchange` reload follows and the correction stays owed for the document's life;
+ * - the browser refuses the sync's `replaceState` (its history rate limit), which leaves it owed too;
+ * - a strip effect throws after stripping, ahead of the entry hook's effect: React abandons the rest
+ *   of a component's mount effects once one throws, so the sync is never scheduled at all.
+ *
+ * In each of those, only the absence of a router-refreshing trigger on the entry and the boundaries
+ * around it keeps the bearer out of the address bar.
  */
 function routerTriggers(file: string): string[] {
     const violations: string[] = [];
@@ -298,9 +311,13 @@ function routerTriggers(file: string): string[] {
 }
 
 /**
- * Reads of Next's `retry` error-boundary prop. Next 16.3 passes `retry` (not `unstable_retry`) and
- * its implementation calls `router.refresh()` before resetting, which re-publishes a stripped bearer
- * on any entry page that throws during render.
+ * Reads of Next's `retry` error-boundary prop. Next 16.3 passes `retry` (renamed from
+ * `unstable_retry`) and its implementation refreshes the router before resetting, so a boundary above
+ * an entry route that offered it would re-publish the bearer in any of the residual cases
+ * {@link routerTriggers} lists. The app-shell boundaries under `app/(app)` read `retry` since #1781;
+ * no entry route sits beneath any of them, which is why this rule holds with them in place, and
+ * `test/unit/errorBoundaryRetry.test.tsx` keeps the root `app/error.tsx` and `app/global-error.tsx`,
+ * which do sit above every entry route, on `reset`.
  */
 function routerRetries(file: string): string[] {
     const violations: string[] = [];

@@ -7,14 +7,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import ooo.klae.connex.backend.exceptions.UnsupportedUploadMediaTypeException;
 import ooo.klae.connex.backend.storage.UploadPolicy.UploadFormat;
@@ -632,6 +637,381 @@ class UploadMaliciousFixtureCorpusTest {
     void acceptsDigitallySignedOoxmlPackages(UploadFormat format) throws Exception {
         assertEquals(format, accepted(format, PackageFixtures.signedOoxml(
             format, PackageFixtures.officeSignatureXml(format, false, false, ""))));
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = UploadFormat.class, names = {"DOCX", "XLSX", "PPTX"})
+    void acceptsSignedOoxmlWithDerCertificateParts(UploadFormat format) throws Exception {
+        assertEquals(format, accepted(format, PackageFixtures.signedOoxmlWithCertificate(
+            format, PackageFixtures.signerCertificate())));
+    }
+
+    @Test
+    void acceptsCertificateOverrideWithNestedMixedCaseCerName() throws Exception {
+        String part = "_xmlsignatures/certificates/SIGNER.CeR";
+        assertEquals(UploadFormat.DOCX, accepted(UploadFormat.DOCX, certificatePackage(
+            PackageFixtures.defaultType("cer", "application/octet-stream")
+                + PackageFixtures.override("/" + part,
+                    "  " + PackageFixtures.SIGNATURE_CERTIFICATE_CONTENT_TYPE.toUpperCase(
+                        java.util.Locale.ROOT) + "  "),
+            PackageFixtures.signatureCertificateParts(
+                UploadFormat.DOCX, part, PackageFixtures.signerCertificate()))));
+    }
+
+    @Test
+    void acceptsMultipleSignaturesSharingCertificateWithNestedCompanion() throws Exception {
+        Map<String, byte[]> parts = certificateParts();
+        parts.put("_xmlsignatures/nested/sig2.xml", PackageFixtures.ascii(
+            PackageFixtures.officeSignatureXml(UploadFormat.DOCX, false, true, "")));
+        parts.put("_xmlsignatures/_rels/origin.sigs.rels", PackageFixtures.ascii(
+            PackageFixtures.relationships(
+                PackageFixtures.relationship("rIdSig1", PackageFixtures.SIGNATURE_RELATIONSHIP,
+                    "sig1.xml")
+                + PackageFixtures.relationship("rIdSig2", PackageFixtures.SIGNATURE_RELATIONSHIP,
+                    "nested/sig2.xml"))));
+        parts.put("_xmlsignatures/nested/_rels/sig2.xml.rels", PackageFixtures.ascii(
+            PackageFixtures.relationships(certificateRelationship("../cert1.cer")
+                .replace("/>", " TargetMode=\"Internal\"/>"))));
+
+        assertEquals(UploadFormat.DOCX, accepted(UploadFormat.DOCX, certificatePackage(
+            certificateDefaultType() + PackageFixtures.override(
+                "/_xmlsignatures/nested/sig2.xml", PackageFixtures.SIGNATURE_CONTENT_TYPE), parts)));
+    }
+
+    @Test
+    void acceptsCertificateAtSizeCeiling() throws Exception {
+        byte[] certificate = PackageFixtures.signerCertificate(64 * 1024);
+        assertEquals(64 * 1024, certificate.length);
+        assertEquals(UploadFormat.DOCX, accepted(UploadFormat.DOCX,
+            PackageFixtures.signedOoxmlWithCertificate(UploadFormat.DOCX, certificate)));
+    }
+
+    @Test
+    void rejectsCertificateAboveSizeCeiling() throws Exception {
+        byte[] certificate = PackageFixtures.signerCertificate(64 * 1024 + 1);
+        assertEquals(64 * 1024 + 1, certificate.length);
+        refused(UploadFormat.DOCX,
+            PackageFixtures.signedOoxmlWithCertificate(UploadFormat.DOCX, certificate));
+    }
+
+    @Test
+    void rejectsCertificateWithNonMinimalInnerLength() throws Exception {
+        refused(UploadFormat.DOCX, PackageFixtures.signedOoxmlWithCertificate(
+            UploadFormat.DOCX, PackageFixtures.signerCertificateWithBerValidity(false)));
+    }
+
+    @Test
+    void rejectsCertificateWithIndefiniteInnerLength() throws Exception {
+        refused(UploadFormat.DOCX, PackageFixtures.signedOoxmlWithCertificate(
+            UploadFormat.DOCX, PackageFixtures.signerCertificateWithBerValidity(true)));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("nonCertificatePayloads")
+    void rejectsNonCertificatePayloadsInCertificateParts(String name, byte[] payload) throws Exception {
+        refused(UploadFormat.DOCX,
+            PackageFixtures.signedOoxmlWithCertificate(UploadFormat.DOCX, payload));
+    }
+
+    private static Stream<Arguments> nonCertificatePayloads() throws Exception {
+        Map<String, byte[]> payloads = PackageFixtures.members(
+            "empty", new byte[0],
+            "executable", PackageFixtures.ascii("MZ executable payload"),
+            "archive", PackageFixtures.signedOoxml(
+                UploadFormat.DOCX, PackageFixtures.officeSignatureXml(
+                    UploadFormat.DOCX, false, false, "")),
+            "compound-file", new byte[] {(byte) 0xd0, (byte) 0xcf, 0x11, (byte) 0xe0,
+                (byte) 0xa1, (byte) 0xb1, 0x1a, (byte) 0xe1},
+            "markup", PackageFixtures.ascii(SVG_PAYLOAD),
+            "image", PackageFixtures.png(),
+            "empty-sequence", new byte[] {0x30, 0});
+        payloads.putAll(PackageFixtures.nonCertificateDerObjects());
+        return payloads.entrySet().stream()
+            .map(entry -> Arguments.of(entry.getKey(), entry.getValue()));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("malformedCertificateEncodings")
+    void rejectsMalformedCertificateEncodings(String name, byte[] payload) throws Exception {
+        refused(UploadFormat.DOCX,
+            PackageFixtures.signedOoxmlWithCertificate(UploadFormat.DOCX, payload));
+    }
+
+    private static Stream<Arguments> malformedCertificateEncodings() throws Exception {
+        byte[] certificate = PackageFixtures.signerCertificate();
+        byte[] nonminimalLength = new byte[certificate.length + 1];
+        nonminimalLength[0] = 0x30;
+        nonminimalLength[1] = (byte) (certificate[1] + 1);
+        System.arraycopy(certificate, 2, nonminimalLength, 3, certificate.length - 2);
+        int header = 2 + (certificate[1] & 0x7f);
+        byte[] indefiniteLength = PackageFixtures.concatenate(
+            PackageFixtures.concatenate(new byte[] {0x30, (byte) 0x80},
+                Arrays.copyOfRange(certificate, header, certificate.length)), new byte[] {0, 0});
+        byte[] malformedBody = certificate.clone();
+        malformedBody[header] = 0x05;
+        String pem = "-----BEGIN CERTIFICATE-----\n"
+            + Base64.getMimeEncoder(64, new byte[] {'\n'}).encodeToString(certificate)
+            + "\n-----END CERTIFICATE-----\n";
+        return Stream.of(
+            Arguments.of("truncated", Arrays.copyOf(certificate, certificate.length - 1)),
+            Arguments.of("prefix", PackageFixtures.concatenate(new byte[] {' '}, certificate)),
+            Arguments.of("nonminimal-length", nonminimalLength),
+            Arguments.of("indefinite-length", indefiniteLength),
+            Arguments.of("long-length-for-short-body", new byte[] {0x30, (byte) 0x81, 0}),
+            Arguments.of("oversized-length", new byte[] {0x30, (byte) 0x84,
+                (byte) 0xff, (byte) 0xff, (byte) 0xff, (byte) 0xff}),
+            Arguments.of("malformed-certificate-body", malformedBody),
+            Arguments.of("pem-certificate", PackageFixtures.ascii(pem)),
+            Arguments.of("pem-other-label", PackageFixtures.ascii(
+                pem.replace("CERTIFICATE", "PRIVATE KEY"))),
+            Arguments.of("truncated-pem", PackageFixtures.ascii(
+                pem.substring(0, pem.indexOf("-----END")))));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("certificateSuffixes")
+    void rejectsCertificateSuffixesAndBundles(String name, byte[] suffix) throws Exception {
+        refused(UploadFormat.DOCX, PackageFixtures.signedOoxmlWithCertificate(
+            UploadFormat.DOCX, PackageFixtures.concatenate(
+                PackageFixtures.signerCertificate(), suffix)));
+    }
+
+    private static Stream<Arguments> certificateSuffixes() throws Exception {
+        return Stream.of(
+            Arguments.of("executable-suffix", PackageFixtures.ascii("MZ appended executable")),
+            Arguments.of("whitespace-suffix", new byte[] {'\n'}),
+            Arguments.of("null-suffix", new byte[] {0}),
+            Arguments.of("second-certificate", PackageFixtures.signerCertificate()));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("certificateTypeMismatches")
+    void rejectsCertificateTypeMismatches(String name, String declarations) throws Exception {
+        refused(UploadFormat.DOCX, certificatePackage(declarations, certificateParts()));
+    }
+
+    private static Stream<Arguments> certificateTypeMismatches() {
+        return Stream.of(
+            Arguments.of("missing", ""),
+            Arguments.of("generic-binary", PackageFixtures.defaultType("cer", "application/octet-stream")),
+            Arguments.of("wrong-override", certificateDefaultType() + PackageFixtures.override(
+                "/_xmlsignatures/cert1.cer", "application/xml")),
+            Arguments.of("parameterized", PackageFixtures.defaultType("cer",
+                PackageFixtures.SIGNATURE_CERTIFICATE_CONTENT_TYPE + "; charset=binary")));
+    }
+
+    @Test
+    void rejectsCertificateDeclarationsOnOtherOrAbsentMembers() throws Exception {
+        Map<String, byte[]> parts = certificateParts();
+        parts.put("word/metadata.xml", PackageFixtures.ascii("<metadata/>"));
+        for (String part : new String[] {"word/metadata.xml", "_xmlsignatures/absent.cer",
+                "_xmlsignatures/_rels/sig1.xml.rels"}) {
+            refused(UploadFormat.DOCX, certificatePackage(certificateDefaultType()
+                + PackageFixtures.override("/" + part,
+                    PackageFixtures.SIGNATURE_CERTIFICATE_CONTENT_TYPE), parts));
+        }
+    }
+
+    @Test
+    void rejectsCertificateDefaultTypeOnXmlMember() throws Exception {
+        Map<String, byte[]> parts = PackageFixtures.members(
+            "word/metadata.xml", PackageFixtures.ascii("<metadata/>"));
+        assertEquals(UploadFormat.DOCX, accepted(UploadFormat.DOCX, PackageFixtures.ooxml(
+            UploadFormat.DOCX, PackageFixtures.defaultMainXml(UploadFormat.DOCX), "", "", parts,
+            true, "application/xml")));
+
+        refused(UploadFormat.DOCX, PackageFixtures.ooxml(
+            UploadFormat.DOCX, PackageFixtures.defaultMainXml(UploadFormat.DOCX), "", "", parts,
+            true, PackageFixtures.SIGNATURE_CERTIFICATE_CONTENT_TYPE));
+    }
+
+    @ParameterizedTest
+    @MethodSource("refusedCertificatePaths")
+    void rejectsCertificatePathsOutsideNarrowAdmission(String path) throws Exception {
+        refused(UploadFormat.DOCX, certificatePackage(
+            PackageFixtures.override("/" + path, PackageFixtures.SIGNATURE_CERTIFICATE_CONTENT_TYPE),
+            PackageFixtures.signatureCertificateParts(
+                UploadFormat.DOCX, path, PackageFixtures.signerCertificate())));
+    }
+
+    private static Stream<String> refusedCertificatePaths() {
+        return Stream.of("_xmlsignatures/cert.crt", "_xmlsignatures/cert.der",
+            "_xmlsignatures/cert.pem", "_xmlsignatures/cert.p7b", "_xmlsignatures/cert",
+            "_xmlsignatures/.cer", "_xmlsignatures/_rels/cert.cer",
+            "_xmlsignatures/nested/_ReLs/cert.cer", "word/cert.cer", "cert.cer",
+            "_XMLSIGNATURES/cert.cer", "package/services/digital-signature/certificate/cert.cer");
+    }
+
+    @Test
+    void rejectsCertificateWithoutQualifyingReference() throws Exception {
+        Map<String, byte[]> parts = certificateParts();
+        parts.remove("_xmlsignatures/_rels/sig1.xml.rels");
+        refused(UploadFormat.DOCX, certificatePackage(certificateDefaultType(), parts));
+    }
+
+    @Test
+    void rejectsCertificateInUnsignedPackage() throws Exception {
+        Map<String, byte[]> parts = PackageFixtures.members(
+            "_xmlsignatures/cert1.cer", PackageFixtures.signerCertificate());
+        refused(UploadFormat.DOCX,
+            PackageFixtures.ooxml(UploadFormat.DOCX, certificateDefaultType(), "", parts));
+
+        parts.put("_xmlsignatures/_rels/sig1.xml.rels", PackageFixtures.ascii(
+            PackageFixtures.relationships(certificateRelationship("cert1.cer"))));
+        refused(UploadFormat.DOCX,
+            PackageFixtures.ooxml(UploadFormat.DOCX, certificateDefaultType(), "", parts));
+
+        parts.clear();
+        parts.put("_xmlsignatures/_rels/sig1.xml.rels", PackageFixtures.ascii(
+            PackageFixtures.relationships("")));
+        refused(UploadFormat.DOCX, PackageFixtures.ooxml(UploadFormat.DOCX, "", "", parts));
+    }
+
+    @Test
+    void rejectsGenericRelationshipOrXmlReferenceAsCertificateProvenance() throws Exception {
+        Map<String, byte[]> parts = certificateParts();
+        parts.remove("_xmlsignatures/_rels/sig1.xml.rels");
+        parts.put("word/_rels/document.xml.rels", PackageFixtures.ascii(
+            PackageFixtures.relationships(PackageFixtures.relationship(
+                "rIdGeneric", "urn:generic", "../_xmlsignatures/cert1.cer"))));
+        parts.put("_xmlsignatures/sig1.xml", PackageFixtures.ascii(
+            PackageFixtures.officeSignatureXml(UploadFormat.DOCX, false, false,
+                "<KeyInfo><RetrievalMethod URI=\"/_xmlsignatures/cert1.cer?ContentType="
+                    + PackageFixtures.SIGNATURE_CERTIFICATE_CONTENT_TYPE + "\"/></KeyInfo>")));
+        refused(UploadFormat.DOCX, certificatePackage(certificateDefaultType(), parts));
+    }
+
+    @Test
+    void rejectsCertificateRelationshipsFromOtherParts() throws Exception {
+        for (String relationshipPart : new String[] {"_rels/.rels",
+                "_xmlsignatures/_rels/origin.sigs.rels", "word/_rels/document.xml.rels"}) {
+            Map<String, byte[]> parts = certificateParts();
+            parts.remove("_xmlsignatures/_rels/sig1.xml.rels");
+            String target = relationshipPart.startsWith("_rels/")
+                ? "_xmlsignatures/cert1.cer"
+                : relationshipPart.startsWith("word/") ? "../_xmlsignatures/cert1.cer" : "cert1.cer";
+            if (relationshipPart.equals("_rels/.rels")) {
+                refused(UploadFormat.DOCX, PackageFixtures.ooxml(UploadFormat.DOCX,
+                    PackageFixtures.signatureContentTypes() + certificateDefaultType(),
+                    PackageFixtures.signatureOriginRelationship() + certificateRelationship(target), parts));
+            } else {
+                String original = parts.containsKey(relationshipPart)
+                    ? new String(parts.get(relationshipPart), StandardCharsets.UTF_8)
+                    : PackageFixtures.relationships("");
+                parts.put(relationshipPart, PackageFixtures.ascii(original.replace(
+                    "</Relationships>", certificateRelationship(target) + "</Relationships>")));
+                refused(UploadFormat.DOCX, certificatePackage(certificateDefaultType(), parts));
+            }
+        }
+    }
+
+    @Test
+    void rejectsMissingOrNonCertificateRelationshipTarget() throws Exception {
+        for (String target : new String[] {"missing.cer", "sig1.xml", "../word/document.xml"}) {
+            Map<String, byte[]> parts = certificateParts();
+            parts.put("_xmlsignatures/_rels/sig1.xml.rels", PackageFixtures.ascii(
+                PackageFixtures.relationships(certificateRelationship(target))));
+            refused(UploadFormat.DOCX, certificatePackage(certificateDefaultType(), parts));
+        }
+    }
+
+    @Test
+    void rejectsOrphanSignatureRelationshipsEvenWhenCertificateHasValidReference() throws Exception {
+        Map<String, byte[]> parts = certificateParts();
+        for (byte[] relationships : new byte[][] {
+                PackageFixtures.ascii(PackageFixtures.relationships("")),
+                parts.get("_xmlsignatures/_rels/sig1.xml.rels")}) {
+            parts.put("_xmlsignatures/_rels/missing.xml.rels", relationships);
+            refused(UploadFormat.DOCX, certificatePackage(certificateDefaultType(), parts));
+        }
+    }
+
+    @Test
+    void rejectsCertificatePackageWithoutOriginOrSignatureBinding() throws Exception {
+        Map<String, byte[]> parts = certificateParts();
+        refused(UploadFormat.DOCX, PackageFixtures.ooxml(UploadFormat.DOCX,
+            PackageFixtures.signatureContentTypes() + certificateDefaultType(), "", parts));
+
+        parts.put("_xmlsignatures/_rels/origin.sigs.rels",
+            PackageFixtures.ascii(PackageFixtures.relationships("")));
+        refused(UploadFormat.DOCX, certificatePackage(certificateDefaultType(), parts));
+    }
+
+    @Test
+    void rejectsCertificatePackageWithSignatureNotBoundFromOrigin() throws Exception {
+        Map<String, byte[]> parts = certificateParts();
+        parts.put("_xmlsignatures/sig2.xml", parts.get("_xmlsignatures/sig1.xml"));
+        parts.put("_xmlsignatures/_rels/sig2.xml.rels",
+            parts.remove("_xmlsignatures/_rels/sig1.xml.rels"));
+        refused(UploadFormat.DOCX, certificatePackage(certificateDefaultType()
+            + PackageFixtures.override("/_xmlsignatures/sig2.xml",
+                PackageFixtures.SIGNATURE_CONTENT_TYPE), parts));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("invalidCertificateRelationshipDocuments")
+    void rejectsInvalidCertificateRelationshipDocuments(String name, String xml) throws Exception {
+        Map<String, byte[]> parts = certificateParts();
+        parts.put("_xmlsignatures/_rels/sig1.xml.rels", PackageFixtures.ascii(xml));
+        refused(UploadFormat.DOCX, certificatePackage(certificateDefaultType(), parts));
+    }
+
+    private static Stream<Arguments> invalidCertificateRelationshipDocuments() {
+        String relationship = certificateRelationship("cert1.cer");
+        String valid = PackageFixtures.relationships(relationship);
+        return Stream.of(
+            Arguments.of("foreign-root-namespace", valid.replace(
+                PackageFixtures.RELATIONSHIPS_NAMESPACE, "urn:foreign")),
+            Arguments.of("foreign-child", valid.replace("<Relationship Id", "<Other Id")),
+            Arguments.of("nested-relationship", PackageFixtures.relationships(
+                "<Relationships>" + relationship + "</Relationships>")),
+            Arguments.of("unknown-root-attribute", valid.replace("<Relationships ", "<Relationships extra=\"1\" ")),
+            Arguments.of("unknown-child-attribute", valid.replace("/>", " extra=\"1\"/>")),
+            Arguments.of("namespaced-id", valid.replace(" Id=", " xmlns:x=\"urn:foreign\" x:Id=")),
+            Arguments.of("text", valid.replace("</Relationships>", "payload</Relationships>")),
+            Arguments.of("duplicate-id", PackageFixtures.relationships(relationship + relationship)),
+            Arguments.of("generic-kind", valid.replace(
+                PackageFixtures.SIGNATURE_CERTIFICATE_RELATIONSHIP, "urn:generic")),
+            Arguments.of("wrong-kind-case", valid.replace("/certificate\"", "/Certificate\"")),
+            Arguments.of("external-mode", valid.replace("/>", " TargetMode=\"External\"/>")),
+            Arguments.of("invalid-mode", valid.replace("/>", " TargetMode=\"Other\"/>")),
+            Arguments.of("external-target", valid.replace("cert1.cer", "https://example.invalid/cert.cer")),
+            Arguments.of("absolute-target", valid.replace("cert1.cer", "/_xmlsignatures/cert1.cer")),
+            Arguments.of("escaped-target", valid.replace("cert1.cer", "../../cert1.cer")),
+            Arguments.of("encoded-target", valid.replace("cert1.cer", "%63ert1.cer")),
+            Arguments.of("query-target", valid.replace("cert1.cer", "cert1.cer?type=certificate")),
+            Arguments.of("fragment-target", valid.replace("cert1.cer", "cert1.cer#certificate")),
+            Arguments.of("doctype", "<!DOCTYPE Relationships [<!ENTITY x 'payload'>]>" + valid),
+            Arguments.of("processing-instruction", "<?instruction payload?>" + valid));
+    }
+
+    @Test
+    void rejectsSignatureCompanionWithWrongOrParameterizedType() throws Exception {
+        for (String type : new String[] {"application/xml",
+                "application/vnd.openxmlformats-package.relationships+xml; charset=UTF-8"}) {
+            refused(UploadFormat.DOCX, certificatePackage(certificateDefaultType()
+                + PackageFixtures.override("/_xmlsignatures/_rels/sig1.xml.rels", type), certificateParts()));
+        }
+    }
+
+    private static String certificateDefaultType() {
+        return PackageFixtures.defaultType("cer", PackageFixtures.SIGNATURE_CERTIFICATE_CONTENT_TYPE);
+    }
+
+    private static String certificateRelationship(String target) {
+        return PackageFixtures.relationship("rIdCert", PackageFixtures.SIGNATURE_CERTIFICATE_RELATIONSHIP, target);
+    }
+
+    private static Map<String, byte[]> certificateParts() throws Exception {
+        return PackageFixtures.signatureCertificateParts(
+            UploadFormat.DOCX, "_xmlsignatures/cert1.cer", PackageFixtures.signerCertificate());
+    }
+
+    private static byte[] certificatePackage(String declarations, Map<String, byte[]> parts)
+            throws IOException {
+        return PackageFixtures.ooxml(UploadFormat.DOCX, PackageFixtures.defaultMainXml(UploadFormat.DOCX),
+            PackageFixtures.signatureContentTypes() + declarations,
+            PackageFixtures.signatureOriginRelationship(), parts, true);
     }
 
     @Test

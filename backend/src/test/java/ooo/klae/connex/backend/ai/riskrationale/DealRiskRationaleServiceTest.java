@@ -175,14 +175,14 @@ class DealRiskRationaleServiceTest {
     }
 
     @Test
-    void generate_happyPath_returnsDemaskedNarrativeActionsPersistsAndWarnings() {
+    void generate_happyPath_returnsDemaskedNarrativeActionsPersistsWithoutWarnings() {
         arrangeMiss(assembly());
         when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class), eq(admission)))
                 .thenReturn(new AiStructuredOutcome.Parsed<>(
                         content(
                                 "The deal is overdue and quiet.",
                                 List.of("Contact Mina Patel today.", "Confirm the budget.")),
-                        2, 120, 45, "end_turn"));
+                        0, 120, 45, "end_turn"));
 
         DealRationaleDto result = service.generate(DEAL_ID);
 
@@ -195,10 +195,28 @@ class DealRiskRationaleServiceTest {
                 "The deal is overdue and quiet.\n• Contact Mina Patel today.\n• Confirm the budget.",
                 result.getRationale());
         assertEquals(NOW.toString(), result.getGeneratedAt());
-        assertEquals(2, result.getWarnings());
+        assertEquals(0, result.getWarnings());
         verify(aiOutputCacheStore).saveForPersons(eq(WORKSPACE_ID), eq(CACHE_FEATURE), eq(DEAL_ID),
-                eq(AiOutputCacheStore.NO_SUBJECT), eq(HASH), any(DealRiskRationaleContent.class), eq(2),
+                eq(AiOutputCacheStore.NO_SUBJECT), eq(HASH), any(DealRiskRationaleContent.class), eq(0),
                 eq(NOW.toString()), eq(List.of(73)));
+    }
+
+    @Test
+    void generate_warnedOutputIsNeitherServedNorCached() {
+        arrangeMiss(assembly());
+        when(aiInvocationService.completeStructured(any(AiInvocation.class), eq(DealRiskRationaleContent.class), eq(admission)))
+                .thenReturn(new AiStructuredOutcome.Parsed<>(
+                        content(
+                                "The deal is overdue and quiet.",
+                                List.of("Contact Mina Patel today.", "Confirm the budget.")),
+                        2, 120, 45, "end_turn"));
+
+        DealRationaleDto result = service.generate(DEAL_ID);
+
+
+        assertUnavailable(result, "provider_error");
+        verify(aiOutputCacheStore, never()).saveForPersons(
+                anyInt(), anyString(), anyInt(), anyInt(), anyString(), any(), anyInt(), anyString(), any());
     }
 
     @Test

@@ -52,6 +52,119 @@ Features do not build raw prompts.
 
 Any new feature must preserve the same masking and leak-scan boundary for every provider/protocol path.
 
+### Ask Connex record-identifier prefilter (tenant V230)
+
+`AiIdentifierLookupKeys.fromName` derives literal and conversation-label aliases from
+`CanonicalText` and the existing dictionary eligibility rules. Every person/company/deal name
+writer binds both aliases through explicit MyBatis parameter handlers receiving the same raw name
+parameter as `name`, alongside its exact source snapshot and format version. Ineligible aliases
+are empty strings; a missing bundle remains null. Canonical text and snapshots are sensitive
+CRM data: they stay in the owning parent row, its tenant export and physical erasure, never logs,
+provider metadata or a new authority source.
+
+A bundle is processed only when its version equals `AiIdentifierLookupKeys.VERSION` (version 3),
+both keys are non-null, and the snapshot equals the current name byte-for-byte (`CAST(... AS BINARY)`).
+Each alias is capped at 512 Unicode code points. Before canonicalization, any unpaired UTF-16
+surrogate marks both aliases `UNKEYED`; brace deletion must never join malformed surrogate halves
+into a key that differs from the UTF-8-persisted name. Version 3 invalidates all earlier bundles,
+including ones derived from malformed source strings. If either alias exceeds the cap, both also
+store the explicit NUL `UNKEYED` marker: controls cannot survive as a canonical alias. Such rows use
+legacy SQL fallback; aliases are never truncated and coverage is never omitted. Processed markers
+are excluded from pending-backfill counts; retries do not reinterpret malformed input or truncate
+oversized aliases.
+
+Current keyed rows use binary `LOCATE` against separately bound Java literal/label turn projections.
+Authoritative names, snapshots, canonical keys, turn projections and CAS-name operands use explicit UTF-8 byte parameter handlers
+and `CONVERT(... USING utf8mb4)` before any binary cast. This avoids both connection-byte mismatch
+and lossy client conversion of Japanese/supplementary projections on a Cp1252 JDBC connection.
+The Cp1252 regression asserts admission and absence of the raw name in the first provider payload,
+including UTF-8-written Japanese/supplementary rows and a representable name whose fold is Greek.
+There is no
+per-row SQL normalization or blanket Unicode admission in that branch. Every Java-admitted
+mention contains its corresponding stored alias, so SQL remains a superset. The existing Java
+ASCII-word and original-source boundary checks remain the admission authority. SQL substring
+matches such as `Li` in `client` can over-include and are rejected by Java. Many such canonical
+substring matches can still require multiple pages even when Java admits none.
+
+Missing bundles, older versions and old-binary renames take the existing SQL normalization and
+non-ASCII/bracket fallback. No trigger is needed, and rollback-compatible writers keep working.
+The 200-row keyset page is a materialization bound, never a corpus/admission cap: full pages
+continue until exhaustion or the existing combined 20 admitted-identifier limit is exceeded.
+Visibility stays owned-or-shared within the control-derived organization ceiling; archived and
+processing-restricted people and archived companies remain excluded.
+
+`AiIdentifierKeyBackfillRunner` is a fixed-delay background worker, never an application runner or
+readiness dependency. A dedicated single-thread scheduler waits 30 seconds initially and between
+invocations, then resumes at most four 100-row windows across active workspaces. Each window uses
+the owning-workspace/id index and applies its limit before evaluating freshness or processing
+eligibility. Every examined row advances the cursor, including current, archived, restricted and
+nameless rows. A mostly-current corpus therefore cannot turn one window into a full-table scan.
+Workspace discovery is keyset-paged, and the dedicated thread installs each workspace's real
+placement before opening its transaction. It rejects placement changes before reusing a cursor.
+CAS statements have a five-second query timeout, and each transaction has a ten-second deadline;
+contention rolls back the page and retries on a later traversal without delaying other scheduled
+maintenance. There are no session-wide timeout changes, domain events or timestamp changes.
+
+Per-page logs report examined, written, skipped and observed pending rows. Workspace completion
+logs accumulate those bounded observations; they are not a point-in-time pending count under
+concurrent writes. No page performs a full pending count. The optional exact `pendingCount`
+diagnostic remains a separate full-corpus query. Failures log only workspace id and exception
+class. Restarts safely begin from zero; traversal wraps to revisit races while fallback keeps
+coverage. Drain old writers, allow reconciliation to complete and check an exact pending=0
+before claiming steady-state retrieval cost. A canonicalization, eligibility or JDK Unicode change
+requires a version bump and reconciliation; do not silently reinterpret current stored keys.
+
+The real-MySQL mostly-current regression (2026-10-16) populated 50,200 people with only the last
+bundle stale. Two consecutive invocations each examined 400 owned ids in four windows, with 1,204
+handler reads and no CAS or full pending-count calls. `EXPLAIN ANALYZE` used the existing
+`idx_person_workspace` range before `LIMIT 100`, followed by at most 100 primary-key lookups per
+window. The cursor advanced to 400 then 800. These are deterministic row/call bounds; full-sweep
+duration still grows with the owned population.
+
+Name-writing CSV inserts and seeder flushes retain their enclosing transactions and generated-id
+ordering while using at most 100 rows and a conservative 1 MiB estimated payload per chunk.
+`RecordInsertBatches` covers every variable-width insert binding, both capped aliases and the source
+snapshot, with UTF-8/escaping/statement headroom. The bulk regression previews and commits 5,000
+255-character U+FDFA-heavy names; the long keys use fallback instead of expanding a single packet.
+
+This design bounds rows **returned** and identifier SQL round trips by canonical matches, not
+rows examined: containment still scans the visible corpus. Stale and explicitly unkeyed rows retain the legacy
+pagination cost (the 50,200-row unbackfilled regression requires 252 mapper calls). The cost
+integration fixture exercises 200, 5,000 and 50,200 Japanese names, ASCII/Japanese and maximum-size
+turns, real NFKC mentions, production `EXPLAIN ANALYZE`, and resolver plus durable queue duration
+inside the established membership/session lock order. A second connection proves contention and release. Timing is
+reported, never asserted against shared-host thresholds; deterministic page/row counts are asserted.
+Membership and session acquire/hold intervals are reported separately through commit, alongside the
+complete queue transaction (real authorization, message/turn writes and scope reads; audit and
+realtime delivery use fixture mocks). Acquire timings include lock-query/round-trip latency; queue
+and hold timings include the two-connection contention probes.
+
+Measured locally on 2026-10-16 UTC with MySQL 8.4, Java 26 and format 2 on the shared four-CPU,
+approximately 9 GB development host. Every observation used one identifier SQL call. Unrelated
+turns returned zero rows; one real NFKC mention returned one row, and two records sharing a
+canonical name returned two rows. These are fixture observations, not latency targets.
+
+| Japanese-name population | ASCII unrelated resolver ms | Japanese unrelated resolver ms | 16,000-UTF-16-unit Japanese turn resolver ms |
+| --- | ---: | ---: | ---: |
+| 200 | 10.501 | 6.102 | 24.197 |
+| 5,000 | 10.685 | 10.623 | 259.125 |
+| 50,200 | 67.280 | 64.655 | 2,511.569 |
+
+At 50,200 names the complete queue transaction and membership/session hold intervals were:
+
+| Unrelated turn | Membership acquire ms | Session acquire ms | Membership hold ms | Session hold ms | Queue ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| ASCII | 0.492 | 0.651 | 195.713 | 192.794 | 199.482 |
+| Japanese | 0.370 | 0.593 | 764.525 | 761.902 | 766.992 |
+| 16,000 UTF-16 units | 0.514 | 0.578 | 3,324.382 | 3,321.911 | 3,327.455 |
+
+After adding two canonical-equivalent names (50,202 rows), `EXPLAIN ANALYZE` examined all 50,202
+person rows in one scan loop and materialized zero unrelated candidates or two mention candidates.
+The complete explain executions took 110 ms and 62.6 ms respectively. The two-row resolver took
+62.987 ms; queue time was 254.795 ms, with membership/session holds of 252.036/249.547 ms. This
+confirms bounded retrieval for this corpus while exposing the remaining linear scan and long-turn
+cost. Other distributions, especially many substring matches or unkeyed names, can still paginate.
+
 ### Ask Connex member identifiers
 
 The masked assistant namespace includes `MEMBER` (`{{M1}}`) alongside person, company, deal,
@@ -160,7 +273,8 @@ messages retain ordinary short-label word boundaries. Tool-result containment an
 operate per tenant-bearing textual value; fixed tool, tier, status and record-type fields retain
 their ordinary matching rules.
 
-Allocation alone never authorizes MEMBER demasking. Provider adapters derive immutable token evidence
+Allocation alone never authorizes demasking for any reversible kind: PERSON, COMPANY, DEAL, EMAIL,
+PHONE and MEMBER. A binding must remain valid and its exact token must have recorded exposure. Provider adapters derive immutable token evidence
 from the decoded tenant-data and tool-result text positions in their final serialized bodies, after
 screening, budgeting and truncation. `AiMessage` retains each message's positional origin segments;
 native result and repair segments retain theirs. Every serialized string value must match its
@@ -177,30 +291,56 @@ nothing. A rebuilt fallback body carries fresh evidence; retries reusing identic
 their existing transport behavior. Scripted transport failures follow the same rule, while a
 scripted HTTP rejection counts as a response. Only tokens
 exposed in an actual dispatch during the current run can demask; earlier dispatches in the run remain
-valid, and history inside a dispatched payload counts. A guessed unissued or unexposed member token
+valid, and history inside a dispatched payload counts. A guessed unissued or unexposed token
 in a final answer, stream or tool argument follows invented-placeholder refusal and cannot reveal
 the name or create an owner proposal. This includes dropped tool rows, oversized attachments,
 redaction-only matches and omitted replay messages. Candidate and bound values both participate in
 the outbound scan, including short Unicode names, with the replacer's matching rules. These rules
-apply to JSON-ReAct and native tools. Exposure gating for the existing token kinds remains a
-separate pre-existing issue. Registered identifiers containing placeholder syntax are irreversible:
+apply atomically to every AI caller, in JSON-ReAct and native tools, with or without streaming. Registered identifiers containing placeholder syntax are irreversible:
 they receive `[redacted]`, never reversible bindings. Their placeholder spellings are reserved even
 if another identifier already holds that binding, so a literal member label cannot authorize it.
 
 Provider-authored output, including raw and decoded native tool arguments, is checked for unexposed
-MEMBER tokens before envelope/schema validation or repair retention. Complete provider text and
+reversible tokens before envelope/schema validation or repair retention. Complete provider text and
 native argument strings receive a conservative, linear Unicode/backslash escape projection before
 parsing, repair or replay admission, even when a valid object prefix precedes an offending suffix.
 Native call ids, names and thought signatures use the same complete-text check. Encoded unexposed
-MEMBER tokens cannot earn a repair dispatch; the projection is used only for refusal and never changes
+tokens cannot earn a repair dispatch; the projection is used only for refusal and never changes
 retained text. Plain-text completions used for attachment descriptions also refuse escaped unexposed
-MEMBER tokens with a warning and empty output, before the description can be replayed. Noncanonical lowercase or
-NFKC-equivalent member placeholders are refused with warnings; only the demasker's literal ASCII
-syntax (including its optional whitespace) can re-identify a name. Streaming callbacks stop publishing
-on such a refusal and defer the malformed-output exception until completion, preserving partial-frame
-reset through the transport. Incomplete lowercase and NFKC-equivalent token prefixes use the same
+tokens with a warning and empty output, before the description can be replayed. Noncanonical lowercase or
+NFKC-equivalent placeholders are refused with warnings; only the demasker's literal ASCII
+syntax (including its optional whitespace) can re-identify a value. Structured answers and native calls
+refuse invented references before repair or execution. Internally the demasker returns
+`[unknown reference]` and warnings; callers discard warned results. Streaming callbacks immediately
+withdraw durable partial content and send a reset on detection. They defer the malformed-output
+exception until completion so a
+subsequent timeout or disconnect retains its provider classification with no partial to reconnect to.
+Terminal persistence also purges partials for `malformed_output`. Provider stream adapters deliver
+new native-call field and separate/flagged reasoning fragments through a screening-only callback
+with stable per-field identities; public content is delivered only once through its content callback.
+Incremental screening continues for public, reasoning and native fields after publication reaches
+its 16,000-character bound. Only an already detected reference, whose partial has been withdrawn,
+stops screening. Parser checkpoints retain semantic state instead of field history: an open record
+label advances an alternate downstream checkpoint, and completed links restore that checkpoint
+without replaying the label. Equal checkpoints are shared; the 16 projection passes and convergence
+probe bound the parser depth. Unicode reduction retains only incomplete escape prefixes. Ordinary
+field length never consumes a screening budget.
+A single open placeholder candidate exceeding 16,384 projected characters, or an incomplete nested
+Unicode escape suffix exceeding 16,384 reduced characters, fails closed and withdraws immediately. This
+bound measures projected UTF-16 units and unresolved reduced escape units, rather than cumulative
+encoding bytes. It exceeds the durable publication limit and accommodates long whitespace/escape forms while
+bounding unresolved candidate state. It never discards a candidate to resume publication.
+Refusal is sampled after each complete callback, matching the complete-text screen when a completed
+link removes a speculative target match; the overlong-candidate refusal is permanent.
+Malformed-attempt reset creates fresh screening state and permits repaired output from offset zero.
+After truncation the answer projector retains subsequent content for final validation; invocation
+also screens the complete provider result, including hidden fields and text beyond the publication
+bound, before parsing or settlement. A later timeout/disconnect retains its provider classification,
+with no durable partial if any callback detected a reference. Final validation remains independent.
+Hidden fields never enter the answer projection. Both raw and decoded content receive the same
+check, including JSON whitespace escapes within a placeholder. Incomplete lowercase and NFKC-equivalent token prefixes use the same
 normalization and source offsets as token validation, and are withheld across streaming flushes.
-Context-free bare-placeholder checks require braces for MEMBER, so
+Context-free invented-reference checks require braces for all kinds, so
 ordinary vocabulary such as “Apple M1” and “BMW M1” remains valid. Such output cannot earn a repair payload or exposure through replay. Static server
 text is excluded only in its own fields; a collision never exempts a member label in tenant text.
 Native call ids, names and thought signatures receive the same unexposed-token check as arguments
@@ -451,6 +591,33 @@ Native assistant tools are capability-declared transport choices, not a second a
 - Realtime fanout resolves current joined recipients after commit; cached/caller-supplied recipient sets are not authorization.
 - Presence/typing signals are bounded ephemeral hints and never authorization evidence.
 
+### Cross-site admission of audited assistant reads
+
+The GET handlers under `/api/ai/assistant/` that write `ai.assistant.session.read` (an administrator reading another member's session) would write that row under the victim's actor id if a foreign page could reach them. `AiAssistantNavigationAdmissionFilter`, which `SecurityConfig` registers unconditionally (no AI switch gates it), therefore admits only the shapes the SPA makes. It answers `403`, `text/plain`, `Assistant API request shape is not allowed` to a `Sec-Fetch-Dest` other than `empty`, to `Sec-Fetch-Mode: no-cors`, and to a `Sec-Fetch-Site` outside `same-origin`/`none` whose `Origin` is not in `connex.cors.allowed-origins`. A request with no Fetch Metadata is admitted on purpose; that residual and its bound are in the filter's Javadoc and in the [accepted-residual record](../SAST_TRIAGE_LOG.md#accepted-residual--audited-administrative-assistant-session-reads-111-114-151-152).
+
+That fail-open path means a hop that dropped the headers would switch the control off without a sound, so the closed path is proven in a real browser rather than with MockMvc alone (#1520):
+
+- **In CI, through the Next.js rewrite.** `frontend/test/e2e/assistant-admission-filter.spec.ts` runs in the `Frontend — unit & e2e` stack: Chromium, then `next start` and the `/api/:path*` rewrite in `next.config.ts`, then the backend. That job runs on every push to `main`, every merge-group run and every dispatched run, and on a pull request only when its changes set the `cross_stack` category in `.github/scripts/classify-ci-changes.py`: a change under `frontend/` or `backend/`, or to CI policy. A pull request that touches only `docs/` or `deploy/`, `deploy/Caddyfile` included, does not run the spec, so an edge or Caddy change needs the probe below. A page on `http://attacker.example` reads a chat's `/attachments` route as an `<img>`, as an opaque `no-cors` fetch, as a credentialed `cors` fetch and as a top-level link navigation. The `<img>`, the opaque fetch and the navigation each get the filter's `403` and body. The navigation carries the default `SameSite=Lax` session cookie, which is the forgery a Lax deployment is actually exposed to. A second context re-issues the session cookies as `SameSite=None; Secure`, the SAML posture the filter was written for. Its `<img>` and opaque fetch then carry the live session cross-site and are still refused with the filter's body. A request on the same session with no Fetch Metadata reads the route `200`, so the refusals turn on the browser's metadata alone.
+- **The credentialed `cors` fetch is refused one filter earlier.** `SecurityConfig` puts the `CorsFilter` before `CsrfFilter` and the admission filter after it, so an `Origin` outside the allowlist gets Spring's `DefaultCorsProcessor` refusal, `403` `Invalid CORS request`, before the admission filter runs. The spec asserts that body. For this shape the filter's `Origin` condition is the second refusal, not the first, and a change in which layer answers has to be recorded here.
+- **Each of the destination and mode checks refuses on its own.** Every cross-site probe above fails more than one check, so it would still be refused with either the destination or the mode check deleted. A third context therefore loads the same probe markup from a page under the app origin, which stands in for an app document carrying injected markup. Its requests are `Sec-Fetch-Site: same-origin`, carry the live session and pass the site check. Its link navigation (`Sec-Fetch-Dest: document`, `Sec-Fetch-Mode: navigate`) can be refused only by the destination check. Its opaque fetch (`empty`, `no-cors`) can be refused only by the mode check. Both get the filter's `403` and body, and so does its `<img>`, the shape model-authored Ask Connex markdown could produce. Its `cors` fetch, the shape the SPA makes, reads the route `200` from the same page and session. The site check cannot be isolated in a browser. The one shape it alone refuses, a `cors` fetch from a foreign origin, is refused first by the CORS layer. `AiAssistantControllerTest` covers that branch with MockMvc, with the admission filter as the only filter in front of the controller.
+- **The SPA is unaffected.** The same spec opens a chat at `/ask-connex/{id}`. The workspace's session, attachments and tool-call reads go out with `Sec-Fetch-Site: same-origin`, `Sec-Fetch-Mode: cors` and `Sec-Fetch-Dest: empty` and answer `200`, as does an in-page same-origin `fetch` of the attachments route. They are admitted by the allowlist, not by the fail-open path.
+- **Why the body is the proof.** The filter admits absent metadata, so a `403` with its body is only possible when Fetch Metadata reached the backend. Without the headers, the Lax-cookie cross-site subresources, which carry no session, would get `401`, and every request carrying the session would get `200`. A cross-site refusal shows that at least one `Sec-Fetch-*` header arrived. The same-origin navigation and opaque fetch show that `Sec-Fetch-Dest` and `Sec-Fetch-Mode` each arrived, since each is the only header that can refuse its probe. The spec has no probe that `Sec-Fetch-Site` alone refuses, so that header's passage rests on the proxy code below. The Next.js 16 rewrite proxy (`next/dist/server/lib/router-utils/proxy-request.js`) sets `changeOrigin`, which replaces `Host`, adds `X-Forwarded-Host`, and forwards the remaining request headers, `Sec-Fetch-*`, `Origin` and `Cookie` among them, as the browser sent them.
+- **Public staging.** `preview.connexcrm.jp` (Cloudflare, its tunnel and the staging proxy in front of the backend) was checked the same way for #1520. `GET /api/ai/assistant/sessions` with `Sec-Fetch-Dest: image`, `Sec-Fetch-Mode: no-cors` and `Sec-Fetch-Site: cross-site` returned `403` with the filter's body, and the same request without Fetch Metadata returned `401`.
+- **Production compose.** `deploy/Caddyfile` sends `/api/*` straight to `backend:8080` with `reverse_proxy`, which forwards request headers unchanged apart from its declared `header_up` lines (`X-Forwarded-For` set, `CF-Connecting-IP` removed). Next.js is not on that path.
+
+Any new hop in front of `/api/`, whether an edge rule, a header allowlist or a CDN transform, must forward `Sec-Fetch-Dest`, `Sec-Fetch-Mode`, `Sec-Fetch-Site` and `Origin`. The browser spec covers only the Next.js hop, so probe the new topology from outside:
+
+```bash
+ORIGIN=https://preview.connexcrm.jp
+curl -s -w '\n%{http_code}\n' -H 'Sec-Fetch-Dest: image' -H 'Sec-Fetch-Mode: no-cors' \
+  -H 'Sec-Fetch-Site: cross-site' "$ORIGIN/api/ai/assistant/sessions"   # the filter's body, then 403
+curl -s -o /dev/null -w '%{http_code}\n' "$ORIGIN/api/ai/assistant/sessions"   # 401: no metadata, no session
+```
+
+A `401` from the first command means the hop strips the headers and the control is inert behind it.
+
+The spec reads every probe response through a forward proxy in the test, `frontend/test/e2e/support/wire-tap.ts`, because Chromium's Opaque Response Blocking discards a non-image `no-cors` or `<img>` body before Playwright or DevTools can read it. That proxy also serves the probe pages itself. A page fulfilled through Playwright's `route` was observed never to send its requests to a loopback app, while the same page served through the proxy did send them. Chromium's Local Network Access checks are the likely cause, but that is inferred from the behaviour and not confirmed in Chromium's source.
+
 ### Task handles and proposals
 
 `list_tasks` issues per-turn `t1`, `t2`, … handles and `assignedToMe`, never task ids. Task handles
@@ -592,8 +759,8 @@ One model step carries one tool call unless an operator has declared, for one ex
 - **The bound travels on the request, and is re-checked against the target every call is sent to.** `AiProvider.parallelToolCallLimit` defaults to 1 for every adapter — Azure, Bedrock and Vertex declare no native tools at all, so the default is defence in depth rather than an enablement — and `OpenAiCompatibleAdapter` answers it from the catalog. Every reader of an adapter's answer (`AiProviderCapabilities.parallelToolCallsOrSingle`) maps a value outside 1..`MAX_PARALLEL_TOOL_CALLS` to 1, so an adapter's arithmetic mistake cannot enable a batch. The turn records the answer in `AiChatMemory.parallelToolCalls` before its first step, but that is only an upper bound: the input that really moves at runtime is the organization's provider configuration, which an admin may switch mid-turn to another model or endpoint, and every invocation re-resolves it. `AiInvocationService.invokeAdmitted` therefore refuses, as a `provider_capability` block and before any egress, a request whose `AiNativeToolRequest.maxParallelCalls` exceeds what the *currently resolved* target's adapter answers, and the egress checkpoint repeats the check, exactly as it does for streaming and native function capability. The adapter that serializes the request field and the parser that bounds the response then read one value that the current target has declared.
 - **The loop asks for no more than it can execute, and no more than the endpoint declared.** `AiChatAgentLoopService.MAX_EXECUTABLE_CALLS_PER_STEP` equals `MAX_PARALLEL_TOOL_CALLS`, and every native request is bounded by the smaller of it and the turn's declared bound. A declared endpoint is therefore sent `parallel_tool_calls: true` and its batches are executed; an undeclared endpoint declares one, so it is sent `false` as it always was, and a batch it sends anyway is refused at the parse boundary under `native_multiple_calls` and audited as malformed — unless one of its calls invented a placeholder, which ends the turn instead (see below). The goldens `aBatchedStepIsRefusedWholeAndExecutesNeitherOfItsCalls` and `aBatchInventingAPlaceholderEndsTheTurnWithoutARepair` pin that undeclared behaviour against the real loop.
 - **The wire difference is exactly one field, plus the wording of a repair.** `parallel_tool_calls` has always been sent as the literal `false`; it is sent as the literal `true` only when the request's bound is above one. A native tool-call repair on a request bounded to one still says, byte for byte, "Return exactly one valid native tool call or one valid JSON final answer."; on a request that invites a batch it says "Return up to N valid native tool calls …" with the request's bound, so repairing a batch envelope does not steer the model back to one call per step. `AiInvocationService.parseNativeToolCall` refuses a response above the bound under the existing `native_multiple_calls` repair rule, so an over-delivering provider is still corrected rather than crashing its turn — unless the response invented a placeholder, which ends the turn (see below).
-- **A response is validated whole or not at all.** Within the bound, every call's arguments are parsed, passed through the raw step guard and demasked individually, in provider order; a single rejected call makes the whole response malformed and repairable, because the guard is the server's statement about one model decision and keeping the calls that happened to be valid would execute part of a decision it refused. Demask warnings are summed across the calls (saturating rather than wrapping), and a non-zero total fails the turn as `malformed_output` — `nativeStepAttempt` settles a batch carrying any warning that way before admission, so a sibling of an inventing call is never executed. A single call keeps its old order: its own guard rejection is its refusal and is repaired whatever placeholders it named, because it has no sibling whose placeholder the rejection could hide. A batch does not: see the next point. Identifiers must be distinct **within** the response as well as against replayed exchanges, under `native_duplicate_call_id`, because the replayed `tool` messages correlate on exactly that identifier. One response is one model call, so it emits one `ai.llm.call` audit row whatever its cardinality.
-- **An invented placeholder anywhere in a batch is never laundered into a repair.** Every envelope refusal is repairable and an invented placeholder is not, so for a response carrying several calls the warnings are counted before the response is refused, whichever refusal it gets: above the bound (`native_multiple_calls`), and within it for reasoning content (`native_call_content`), a shared identifier (`native_duplicate_call_id`), unparsable arguments (`native_arguments_not_object`) or a sibling the raw step guard rejected (`native_unknown_tool`, `native_invalid_arguments`). `parseNativeToolCall` demasks every call whose arguments parse as a JSON object — on a fresh parse, exactly as an admitted call is demasked — before it decides; it does not consult the raw step guard, and a call whose arguments do not parse or are not an object is left uncounted, as the admitted path refuses such arguments before demasking them. A non-zero total is carried on the refusal as `AiNativeToolCompletion.Malformed.demaskWarnings` and recorded as `demaskWarnings` on its malformed `native_tool_call` audit row, and the loop settles that refusal as `malformed_output` with no repair after the one provider call, whatever repair rule the envelope broke. A batch within a declared bound that no envelope rule refuses is admitted with its summed count and audited as parsed with that count, and `nativeStepAttempt` ends the turn the same way before any of its calls is admitted. The golden `aBatchInventingAPlaceholderEndsTheTurnWithoutARepair` pins the over-bound path on an undeclared endpoint, and `aDeclaredBatchInventingAPlaceholderRunsNoCallAndEndsTheTurn` pins the admitted path on a declared one: one provider request, no durable row, no repair and no next step. Before this ordering existed, a guard-rejected sibling earned a whole batch the repair while another call in it had invented a placeholder that call alone would never have been forgiven. Only a warning-free batch gets a repairable refusal.
+- **A response is validated whole or not at all.** Within the bound, every call's arguments are parsed, passed through the raw step guard and demasked individually, in provider order; a single rejected call makes the whole response malformed and repairable, because the guard is the server's statement about one model decision and keeping the calls that happened to be valid would execute part of a decision it refused. Demask warnings are summed across the calls (saturating rather than wrapping), and a non-zero total fails the turn as `malformed_output` — `nativeStepAttempt` settles a batch carrying any warning that way before admission, so a sibling of an inventing call is never executed. Every call first receives complete-text invented-reference validation; a guessed token refuses before any repairable guard or envelope error. Identifiers must be distinct **within** the response as well as against replayed exchanges, under `native_duplicate_call_id`, because the replayed `tool` messages correlate on exactly that identifier. One response is one model call, so it emits one `ai.llm.call` audit row whatever its cardinality.
+- **An invented placeholder anywhere in provider output is never laundered into a repair.** Complete text, separate reasoning, native call ids/names/signatures, raw argument strings and decoded trees receive all-kind validation before envelope/schema checks, retention or execution. This includes malformed/non-object arguments and valid JSON followed by an offending suffix. A refusal is `invented_placeholder` with warnings and no repair, even for a single guard-rejected call. Native responses accumulate refusal warnings across calls; any warning refuses the whole response before any sibling can execute. Raw-member leak checks remain independent. Warning-free envelope failures retain their repair behavior.
 - **Step admission is whole-step, ordered, and runs behind skill authority.** For a batch the loop runs, before dispatching anything: `requireSkillAuthority` for **every** call, so an unauthorized write paired with a read still ends the turn as the non-recoverable `tool_outside_skill_authority` rather than being laundered into a recoverable refusal; the closing check, so any call on a closing step ends the turn; then a known-but-unloaded name anywhere refuses the whole step as `tool_not_loaded`; then `mixed_tier_step` (any write in a batch), `find_tools_alone` (`find_tools` beside anything) and `duplicate_parallel_call` (one name with the same canonicalized arguments twice), in that precedence. `tool_not_loaded` is **not replayed** — every call gets its durable failed row and failed frame, and the step contributes no assistant message, because a replayed name the next request's definitions exclude would fail `AiNativeToolRequest`'s membership check — which is byte-for-byte what a single unloaded call has always produced. The other three **are replayed**: every call is recorded, settles as a failed row carrying `{"reason": …}` and a failed frame, and is answered with that reason, so the model learns the rule and the cursor advances by K. The unauthorized-write precedence, both refusal shapes and the order are pinned by `AiChatAgentLoopParallelReadStepTest` and goldens 12 and 14.
 - **A write is always the only call in its step.** `mixed_tier_step` refuses a batch carrying any AUTO or CONFIRM tool before anything is prepared, proposed or executed. The review a write gets *is* its step — `writeToolService.prepare`, the proposal-freshness fence, a durable proposal row under a caller-retained unsuffixed key, the requester's own `proposed` frame, and for CONFIRM a turn that ends waiting for a human — so a write the model wants must be emitted alone, and golden 12 proves the same write then lands exactly once. The write path, proposal replay and approval code are untouched by batching.
 - **`find_tools` is always alone.** The step's native definitions, the raw step guard and the loaded-set check are computed once per step, so a widening committed mid-batch would run the rest of the step under a vocabulary the guard never admitted. Keeping it alone also keeps every *executed* `find_tools` row the sole, unsuffixed row of its step, which is what lets the loaded set be reconstructed from `ai_chat_tool_call` rows — the reconstruction reads executed `find_tools` rows only — and keeps its verbatim-replay carve-out a statement about one step.
@@ -642,6 +809,33 @@ Workspace governance and organization budgets are independent gates.
 - Deal briefs, deal-risk rationales, and introduction rationales call `AiInvocationAdmissionService.precheck` before assembling and masking context whenever the request can only end in a provider attempt: a forced refresh, or a request with no stored output row. Deal briefs run it before any CRM load. Deal-risk rationales run it after the deterministic risk assessment (the deal, its stakeholders, their latest touches, and their warmth), because that assessment decides `not_at_risk` and the rationale panel on every deal page hides on `not_at_risk` rather than reporting rate limiting; a refused rationale therefore still pays for the assessment, the same read the deal page's risk panel already performs. Introduction rationales run it before the workspace-wide suggestion ranking, so under an exhausted quota a pair with no stored row reports rate limiting rather than whether it is still suggested. The precheck applies `acquire`'s leader rejection rules without reserving quota, recording a refresh, or registering a flight, and never refuses an identity that has an active flight it may join. A request with a stored row always assembles, because only a fresh assembly can validate the row's content hash, so a valid cache hit is never refused for quota. A non-forced request that found no row and is refused probes the row again before returning the refusal and assembles when one now exists, because a concurrent caller can publish a row and release its flight between the first probe and the precheck, and that caller's completed attempt may be what filled the quota. Generation runs outside any transaction, so each probe reads committed rows in its own MyBatis session rather than a session-cached empty result. `acquire` remains the binding, reserving decision.
 - The precheck mirrors only the JVM-local admission quota, refresh throttle, and registry capacity. Refusals decided after assembly (organization budget exhaustion, the outbound leak scan, and the context-window check) release the admission reservation without filling the quota window, so a request that always ends in one of them still pays for its assembly each time; see #1703.
 - A generation timeout interrupts its worker. Context assembly calls `AiCancellation.throwIfInterrupted()` immediately after each CRM load on a generation path, so an interrupt during one load stops the next from starting: each deal, summary, stage-history, stakeholder, activity, note, and task load, each person-lookup batch, the company-profile and account-history loads, each stakeholder's employment and connection loads, the warmth rescore, the deal-risk assessment, each introduction-suggestion load, the suggestion ranking, and each introduction endpoint lookup. It also checks per digest item, and masking checks per dictionary identifier while screening free text, so a timed-out generation releases its fixed-pool worker. Only introduction rationales rank suggestions through `IntroductionService.computeCancellableSuggestions`; the request and scheduled-sweep callers of the same ranking never check for cancellation. A single-flight follower's wait for its leader is interruptible too: an interrupted follower stops waiting and leaves the leader's flight untouched. The interrupt status stays set, so a best-effort helper that swallows the exception and reports degraded context is still stopped at the next checkpoint. A single load or rescore is not interruptible once started. Raw text is never truncated before masking to save time; the replacer must keep parity with the outbound leak scan.
+
+### Exposure enforcement across callers and upgrades
+
+- Assistant turns share one ephemeral context across skills, tool rounds, repair, retries and closing.
+  Actual exposures survive later eviction. A fresh turn starts empty. Scheduled briefs publish only
+  resolved turns; an invented-reference failure cannot notify a member.
+- History compaction and attachment image descriptions discard warned results before persistence or
+  replay. Ordinary stored answers and summaries are already demasked, and history is remasked before
+  dispatch. Persisted provenance supplies matching candidates, never exposure.
+- Deal briefs, deal-risk rationales, introduction rationales, report narratives and the report composer
+  reject warned structured results before caching or disclosure. Report period/fingerprint bindings
+  stay unexposed when their tokens are absent from the dispatched registry. Business-card extraction
+  discards warned results before producing review fields.
+- A legacy masked artifact needing demasking without current-run dispatch evidence fails closed.
+  Regenerate disposable artifacts. No token map, exposure backfill or inferred historical exposure
+  is persisted; historical transcript display does not claim retroactive validation.
+
+Output-cache hash version `v4-dispatched-exposure` invalidates all older generated-output rows.
+Regeneration is lazy on the next request and remains subject to current provider admission and quota.
+There is no stale fallback: users may temporarily see an unavailable or rate-limited brief/rationale,
+report narrative or composer preview until regeneration is admitted. Existing rows bypass the deal
+brief's early admission precheck because validation needs a fresh assembly; invalid old rows therefore
+still incur CRM loading, masking and hashing under exhausted admission. Expect a temporary increase in
+assembly load and provider demand after deployment. Same-identity/hash requests share the existing
+single flight within one JVM; every non-refresh leader rechecks the cache after admission so a just
+completed regeneration is reused. Admission's documented replica-local scope remains unchanged.
+See [UPGRADING.md](../UPGRADING.md) for the deployment implications.
 
 ## Failure behavior
 

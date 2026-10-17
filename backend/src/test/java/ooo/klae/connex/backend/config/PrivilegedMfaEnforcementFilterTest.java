@@ -132,6 +132,56 @@ class PrivilegedMfaEnforcementFilterTest {
                 eq("enrollment_required"), any(HttpServletRequest.class), any());
     }
 
+    @ParameterizedTest
+    @MethodSource("fetchMetadataDenials")
+    void differentUserAgentsAtOneAddressAreAuditedSeparatelyAndEveryRequestIsRefused(
+            PrivilegedMfaStanding standing, String path, String action, String summary, String reason,
+            String code) throws Exception {
+        when(privilegedAccountService.enforcedStanding(7)).thenReturn(standing);
+        for (String agent : List.of("Browser A", "Browser B", "Browser A", "Browser B")) {
+            MockHttpServletRequest request = request("GET", path);
+            request.setRemoteAddr("203.0.113.5");
+            request.addHeader("User-Agent", agent);
+            MockHttpServletResponse response = new MockHttpServletResponse();
+
+            filter.doFilter(request, response, filterChain);
+
+            assertEquals(403, response.getStatus());
+            assertTrue(response.getContentAsString().contains(code));
+        }
+
+        verify(auditService, times(2)).recordStrictFailureIndependentScoped(
+                eq(action), eq("user"), eq(7), isNull(), isNull(), eq("Admin"), eq(summary),
+                eq(reason), any(HttpServletRequest.class), eq("203.0.113.5"));
+        verify(filterChain, never()).doFilter(any(), any());
+    }
+
+    @ParameterizedTest
+    @MethodSource("fetchMetadataDenials")
+    void rejectedUserAgentsShareAbsentAdmissionAndNeverPreventTheRefusal(
+            PrivilegedMfaStanding standing, String path, String action, String summary, String reason,
+            String code) throws Exception {
+        when(privilegedAccountService.enforcedStanding(7)).thenReturn(standing);
+        for (String agent : List.of("Browser A\u0085", "Browser B\u0085", "Browser A")) {
+            MockHttpServletRequest request = request("GET", path);
+            request.setRemoteAddr("203.0.113.5");
+            request.addHeader("User-Agent", agent);
+            MockHttpServletResponse response = new MockHttpServletResponse();
+
+            filter.doFilter(new StrictHttpFirewall().getFirewalledRequest(request), response, filterChain);
+
+            assertEquals(403, response.getStatus());
+            assertTrue(response.getContentAsString().contains(code));
+        }
+        MockHttpServletResponse absent = execute("GET", path, "203.0.113.5");
+        assertEquals(403, absent.getStatus());
+        assertTrue(absent.getContentAsString().contains(code));
+        verify(auditService, times(2)).recordStrictFailureIndependentScoped(
+                eq(action), eq("user"), eq(7), isNull(), isNull(), eq("Admin"), eq(summary),
+                eq(reason), any(HttpServletRequest.class), eq("203.0.113.5"));
+        verify(filterChain, never()).doFilter(any(), any());
+    }
+
     @Test
     void repeatedStepUpDenialsFromOneAddressAreAuditedOnce() throws Exception {
         for (int attempt = 0; attempt < 3; attempt++) {
@@ -263,8 +313,10 @@ class PrivilegedMfaEnforcementFilterTest {
                     PrivilegedMfaEnforcementFilter.ENROLLMENT_REQUIRED_CODE));
         }
 
-        verify(limiter, times(2)).acquire(7, "auth.mfa.policy.denied", "enrollment_required", "10.0.0.2");
-        verify(limiter).acquire(7, "auth.mfa.policy.denied", "enrollment_required", "10.0.0.3");
+        verify(limiter, times(2)).acquire(eq(7), eq("auth.mfa.policy.denied"), eq("enrollment_required"),
+                eq("10.0.0.2"), any(HttpServletRequest.class));
+        verify(limiter).acquire(eq(7), eq("auth.mfa.policy.denied"), eq("enrollment_required"),
+                eq("10.0.0.3"), any(HttpServletRequest.class));
         verify(auditService, times(2)).recordStrictFailureIndependentScoped(
                 eq("auth.mfa.policy.denied"), eq("user"), eq(7), isNull(), isNull(),
                 eq("Admin"), eq("Privileged account confined pending MFA enrollment"),

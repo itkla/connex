@@ -6,6 +6,7 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.AiAssistantIdentifierMention;
+import ooo.klae.connex.backend.beans.AiIdentifierKeyBackfillRow;
 
 /** Visibility-scoped bounded identifier lookup used by Ask Connex masking. */
 @Mapper
@@ -15,17 +16,10 @@ public interface AiAssistantIdentifierMapper {
      * <em>superset</em> of the mentions the masking gate will accept. The resolver alone decides
      * which candidates the turn mentions.
      *
-     * <p>A row is returned when its SQL-normalized name occurs literally in the canonical text, and
-     * also whenever that SQL-normalized name leaves printable ASCII or contains a label bracket.
-     * The bracket fallback lets Java apply the shared source-mapped record-link label projection without
-     * trusting a link target as a resource identity. The non-ASCII condition is the escape
-     * hatch: MySQL has no NFKC operation, cannot delete Java's default-ignorable set, and its
-     * {@code LOWER} does not unify dotless I or final sigma with their simple-fold equivalents.
-     * These differences leave non-ASCII in the SQL name, so the stored-name fallback retains it.
-     * A non-ASCII stored name may canonicalize differently in SQL than in Java, and dropping it here
-     * would leave a real mention unseeded. The text operand must arrive already canonicalized by
-     * the caller. A fallback on that operand would return the whole corpus for any non-ASCII turn,
-     * so only the stored name has this escape condition.
+     * <p>Current bundles use binary containment of shared Java literal and label keys. A bundle
+     * is current only at the running format version with a byte-exact source-name snapshot and
+     * both keys present and neither alias marked unkeyed. Other rows retain the legacy SQL normalization and conservative
+     * non-ASCII/bracket fallback, preserving coverage during rollout and old-binary renames.
      *
      * <p>Because the page is a superset, its size is not evidence about the turn: callers must not
      * turn a full page into a refusal on its own. {@code limit} bounds a single page, and the caller
@@ -33,7 +27,8 @@ public interface AiAssistantIdentifierMapper {
      *
      * @param workspaceId current tenant workspace
      * @param orgWorkspaceIdsJson control-derived organization workspace scope
-     * @param text canonical literal and label lookup forms produced by the masking engine
+     * @param literalText canonical literal turn projection from the masking engine
+     * @param labelText canonical label turn projection from the masking engine
      * @param limit maximum rows to materialize per page
      * @param afterKind last visited kind, or the empty string for the first page
      * @param afterId last visited id within that kind, or zero for the first page
@@ -42,8 +37,54 @@ public interface AiAssistantIdentifierMapper {
     List<AiAssistantIdentifierMention> findMentionedRecords(
             @Param("workspaceId") int workspaceId,
             @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
-            @Param("text") String text,
+            @Param("literalText") String literalText,
+            @Param("labelText") String labelText,
             @Param("limit") int limit,
             @Param("afterKind") String afterKind,
             @Param("afterId") int afterId);
+
+    /** Examines a bounded owned-id window, marking processable stale rows after the limit. */
+    List<AiIdentifierKeyBackfillRow> findPersonKeyBackfillWindow(
+            @Param("workspaceId") int workspaceId,
+            @Param("afterId") int afterId,
+            @Param("limit") int limit,
+            @Param("keyVersion") int keyVersion);
+
+    /** Repairs only derived fields when the authoritative name still matches byte-for-byte. */
+    int updatePersonKeysIfNameCurrent(
+            @Param("workspaceId") int workspaceId,
+            @Param("id") int id,
+            @Param("name") String name,
+            @Param("keyVersion") int keyVersion);
+
+    /** Examines a bounded owned-id window, marking processable stale rows after the limit. */
+    List<AiIdentifierKeyBackfillRow> findCompanyKeyBackfillWindow(
+            @Param("workspaceId") int workspaceId,
+            @Param("afterId") int afterId,
+            @Param("limit") int limit,
+            @Param("keyVersion") int keyVersion);
+
+    /** Repairs only derived fields when the authoritative name still matches byte-for-byte. */
+    int updateCompanyKeysIfNameCurrent(
+            @Param("workspaceId") int workspaceId,
+            @Param("id") int id,
+            @Param("name") String name,
+            @Param("keyVersion") int keyVersion);
+
+    /** Examines a bounded owned-id window, marking processable stale rows after the limit. */
+    List<AiIdentifierKeyBackfillRow> findDealKeyBackfillWindow(
+            @Param("workspaceId") int workspaceId,
+            @Param("afterId") int afterId,
+            @Param("limit") int limit,
+            @Param("keyVersion") int keyVersion);
+
+    /** Repairs only derived fields when the authoritative name still matches byte-for-byte. */
+    int updateDealKeysIfNameCurrent(
+            @Param("workspaceId") int workspaceId,
+            @Param("id") int id,
+            @Param("name") String name,
+            @Param("keyVersion") int keyVersion);
+
+    /** Counts processable, non-archived owned rows still requiring reconciliation. */
+    long countPendingKeys(@Param("workspaceId") int workspaceId, @Param("keyVersion") int keyVersion);
 }

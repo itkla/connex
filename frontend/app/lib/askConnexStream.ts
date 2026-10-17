@@ -17,6 +17,8 @@ export type AskConnexStreamState = {
     pending: readonly AiChatDeltaFrame[];
     hydrating: boolean;
     hydrations: number;
+    /** Whether the settled turn's final durable partial has been adopted; nothing may grow it after. */
+    settled: boolean;
 };
 
 /** Result of advancing a stream: the next state plus whether a REST re-hydration must start. */
@@ -27,7 +29,7 @@ export type AskConnexStreamTransition = {
 
 /** Creates the empty reassembly state for one turn's live answer stream. */
 export function createAskConnexStream(turnId: number): AskConnexStreamState {
-    return { turnId, text: '', pending: [], hydrating: false, hydrations: 0 };
+    return { turnId, text: '', pending: [], hydrating: false, hydrations: 0, settled: false };
 }
 
 function appendDelta(text: string, frame: AiChatDeltaFrame): string | null {
@@ -63,6 +65,7 @@ function mergePartial(
     state: AskConnexStreamState,
     partial: string,
 ): AskConnexStreamState {
+    if (state.settled) return state;
     return drainPending({
         ...state,
         text: partial.length > state.text.length ? partial : state.text,
@@ -141,7 +144,7 @@ export function applyAskConnexStreamDelta(
     state: AskConnexStreamState,
     frame: AiChatDeltaFrame,
 ): AskConnexStreamTransition {
-    if (frame.turnId !== state.turnId) return { state, hydrate: false };
+    if (frame.turnId !== state.turnId || state.settled) return { state, hydrate: false };
     if (state.hydrating) {
         return { state: { ...state, pending: withPendingFrame(state.pending, frame) }, hydrate: false };
     }
@@ -183,6 +186,36 @@ export function settleAskConnexStreamHydration(
         state: { ...merged, hydrating: true, hydrations: merged.hydrations + 1 },
         hydrate: true,
     };
+}
+
+/**
+ * Whether a durable turn's partial is the final word on its streamed answer, to be adopted exactly
+ * by {@link adoptSettledAskConnexStreamPartial}: the turn has settled, and its tail is not owned by
+ * transcript reconciliation. A resolved answer's partial is withheld by the server because its text
+ * arrives as the transcript message, and an authorization withdrawal is dropped by that same
+ * reconciliation, so adopting either here would blank or keep the wrong text.
+ *
+ * @param status the durable turn's status
+ * @param reason the durable turn's terminal reason
+ * @param active whether that status is still active
+ */
+export function adoptsSettledAskConnexPartial(status: string, reason: string | null, active: boolean): boolean {
+    return !active && !shouldDropAskConnexStream(status, reason);
+}
+
+/**
+ * Adopts a settled turn's durable partial as the whole streamed answer, even when it is shorter or
+ * empty. The server publishes every delta only after its durable append commits, and a settled
+ * turn's partial is read in the same row as its status, so it is final: text this client holds
+ * beyond it, or any text when it is empty, was withdrawn on the server — an answer refused for an
+ * invented reference, say, whose reset frame was missed during a disconnect. The adopted state is
+ * settled, so a late frame or a stale hydration response cannot grow it again.
+ */
+export function adoptSettledAskConnexStreamPartial(
+    state: AskConnexStreamState,
+    partial: string,
+): AskConnexStreamState {
+    return { ...state, text: partial, pending: [], hydrating: false, settled: true };
 }
 
 /**

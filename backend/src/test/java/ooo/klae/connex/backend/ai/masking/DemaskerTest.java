@@ -35,6 +35,8 @@ class DemaskerTest {
         String person = MaskingEngine.maskField(EntityKind.PERSON, "Mina Patel", ctx);
         String company = MaskingEngine.maskField(EntityKind.COMPANY, "Northwind Labs", ctx);
 
+        ctx.exposeDispatchedPayload("{{P1}} {{C1}}");
+
         Demasker.DemaskResult result = Demasker.demask(person + " works with " + company + ".", ctx);
 
         assertEquals("Mina Patel works with Northwind Labs.", result.text());
@@ -48,6 +50,8 @@ class DemaskerTest {
         MaskingEngine.maskField(EntityKind.COMPANY, "Northwind Labs", ctx);
         MaskingEngine.maskField(EntityKind.EMAIL, "mina@example.com", ctx);
 
+        ctx.exposeDispatchedPayload("{{P1}} {{C1}}");
+
         Demasker.DemaskResult result = Demasker.demask("{{ C1 }} before {{ P1 }} then {{P9}} and P1.", ctx);
 
         assertEquals("Northwind Labs before Mina Patel then [unknown reference] and P1.", result.text());
@@ -58,6 +62,8 @@ class DemaskerTest {
     void bareTokenTextIsNotSubstituted() {
         MaskingContext ctx = new MaskingContext();
         MaskingEngine.maskField(EntityKind.PERSON, "Mina Patel", ctx);
+
+        ctx.exposeDispatchedPayload("{{P1}} {{C1}}");
 
         Demasker.DemaskResult result = Demasker.demask("P1 should remain bare, but {{P1}} should resolve.", ctx);
 
@@ -81,6 +87,8 @@ class DemaskerTest {
         meta.put("owner", person);
         root.set("meta", meta);
 
+        ctx.exposeDispatchedPayload("{{P1}} {{C1}}");
+
         int warnings = Demasker.demaskTree(root, ctx);
 
         assertEquals(1, warnings);
@@ -98,21 +106,27 @@ class DemaskerTest {
         ObjectNode root = mapper.createObjectNode();
         root.put(person, "owned by " + person);
 
+        ctx.exposeDispatchedPayload("{{P1}} {{C1}}");
+
         int warnings = Demasker.demaskTree(root, ctx);
 
         assertEquals(0, warnings);
         assertEquals("owned by Mina Patel", root.get(person).asString());
     }
-    @org.junit.jupiter.api.Test
-    void boundMembersRequireExposureAndRetainEarlierDispatchedExposure() {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(EntityKind.class)
+    void boundReferencesRequireExposureAndRetainEarlierDispatchedExposure(EntityKind kind) {
         MaskingContext context = new MaskingContext();
-        String token = context.tokenFor(EntityKind.MEMBER, "Alice Member");
+        String token = context.tokenFor(kind, "Alice Member");
         assertEquals(1, Demasker.demask(token, context).warnings());
         context.exposeDispatchedPayload("{\"content\":\"No member here\"}");
         assertEquals(1, Demasker.demask(token, context).warnings());
         context.exposeDispatchedPayload("{\"content\":\"" + token + "\"}");
         context.exposeDispatchedPayload("{\"content\":\"Later step\"}");
         assertEquals("Alice Member", Demasker.demask(token, context).text());
+        var fresh = new MaskingContext();
+        assertEquals(token, fresh.tokenFor(kind, "Fresh Record"));
+        assertEquals(1, Demasker.demask(token, fresh).warnings());
         assertEquals(1, Demasker.demask("{{M99}}", context).warnings());
         assertEquals("M1", Demasker.demask("M1", context).text());
     }
@@ -132,14 +146,34 @@ class DemaskerTest {
     }
 
     @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.ValueSource(strings = {"{{m1}}", "｛｛Ｍ１｝｝", "{{Ｍ1}}", "{{M１}}"})
-    void noncanonicalMemberSyntaxWarnsEvenForAnExposedToken(String token) {
+    @org.junit.jupiter.params.provider.EnumSource(EntityKind.class)
+    void noncanonicalSyntaxWarnsEvenForAnExposedToken(EntityKind kind) {
         var context = new MaskingContext();
-        context.tokenFor(EntityKind.MEMBER, "Bob");
-        context.exposeDispatchedPayload("{{M1}}");
-        assertEquals(new Demasker.DemaskResult("[unknown reference]", 1), Demasker.demask(token, context));
-        org.junit.jupiter.api.Assertions.assertTrue(context.containsUnexposedMemberToken(token));
-        assertEquals(new Demasker.DemaskResult("Bob", 0), Demasker.demask("{{ M1 }}", context));
+        String token = context.tokenFor(kind, "Bob");
+        context.exposeDispatchedPayload(token);
+        String wide = token.chars().collect(StringBuilder::new,
+                (builder, value) -> builder.append((char) (value + 0xfee0)), StringBuilder::append).toString();
+        for (String spelling : java.util.List.of(token.toLowerCase(java.util.Locale.ROOT), wide,
+                "{{" + kind.tokenPrefix() + "１}}")) {
+            assertEquals(new Demasker.DemaskResult("[unknown reference]", 1), Demasker.demask(spelling, context));
+            org.junit.jupiter.api.Assertions.assertTrue(context.containsUnexposedToken(spelling));
+        }
+        assertEquals(new Demasker.DemaskResult("Bob", 0), Demasker.demask("{{ " + kind.tokenPrefix() + "1 }}", context));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(EntityKind.class)
+    void crossKindDeduplicationRequiresTheActualSharedTokensExposure(EntityKind first) {
+        var context = new MaskingContext();
+        String token = context.tokenFor(first, "Shared label");
+        for (EntityKind kind : EntityKind.values()) {
+            assertEquals(token, context.tokenFor(kind, "Shared label"));
+        }
+        String otherPrefix = first == EntityKind.PERSON ? "C" : "P";
+        context.exposeDispatchedPayload("{{" + otherPrefix + "1}}");
+        assertEquals(1, Demasker.demask(token, context).warnings());
+        context.exposeDispatchedPayload(token);
+        assertEquals(new Demasker.DemaskResult("Shared label", 0), Demasker.demask(token, context));
     }
 
 }

@@ -415,6 +415,140 @@ case_complete_pair_integrity_and_tamper_refusal() (
     assert_status frontend_tamper_refused 1 "$?" || return 1
 )
 
+# The sealed launcher keeps the bundle as the server's working directory, and Next.js 16.3 writes
+# route, fetch, and image caches beneath its dist directory while it serves. Those writes must not
+# invalidate the live release, but every other path in the runtime stays hashed.
+case_runtime_cache_writes_keep_bundle_verified() (
+    local root="$SANDBOX/runtime-cache" dist sha jar runtime frontend
+    load_deploy "$root"
+    for dist in .next .next-new; do
+        if [ "$dist" = .next ]; then
+            sha=e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1
+        else
+            sha=e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2
+        fi
+        jar="$root/$sha.jar"
+        runtime="$root/$sha-runtime"
+        make_jar "$jar" "$sha" || return 1
+        make_runtime "$runtime" "$sha" "$dist" || return 1
+        seal_release_bundle "$sha" "$jar" "$runtime" built-from-target
+        assert_status "sealed$dist" 0 "$?" || return 1
+        frontend="$RELEASES_DIR/$sha/frontend"
+
+        mkdir -p "$frontend/$dist/server/route-cache/APP_ROUTE/key/\$" \
+            "$frontend/$dist/cache/images/key" "$frontend/$dist/cache/fetch-cache"
+        printf 'icon\n' > "$frontend/$dist/server/route-cache/APP_ROUTE/key/\$/favicon.ico.body"
+        printf '{}\n' > "$frontend/$dist/server/route-cache/APP_ROUTE/key/\$/favicon.ico.meta"
+        printf 'image\n' > "$frontend/$dist/cache/images/key/image.webp"
+        printf '{}\n' > "$frontend/$dist/cache/fetch-cache/entry"
+        verify_release_bundle "$sha"
+        assert_status "runtime_cache_ignored$dist" 0 "$?" || return 1
+
+        mkdir -p "$frontend/$dist/server/app/route-cache"
+        printf 'unhashed\n' > "$frontend/$dist/server/app/route-cache/page.html"
+        verify_release_bundle "$sha" >/dev/null 2>&1
+        assert_status "nested_cache_name_still_hashed$dist" 1 "$?" || return 1
+        rm -rf "${frontend:?}/$dist/server/app"
+
+        printf 'extra\n' > "$frontend/$dist/server/extra.js"
+        verify_release_bundle "$sha" >/dev/null 2>&1
+        assert_status "added_server_file_refused$dist" 1 "$?" || return 1
+        rm -f "$frontend/$dist/server/extra.js"
+
+        verify_release_bundle "$sha"
+        assert_status "restored$dist" 0 "$?" || return 1
+        printf 'tampered\n' >> "$frontend/$dist/server/app.js"
+        verify_release_bundle "$sha" >/dev/null 2>&1
+        assert_status "hashed_server_file_tamper_refused$dist" 1 "$?" || return 1
+    done
+)
+
+# A manifest sealed before the runtime-cache exclusion covered every file. If such a bundle held
+# content in one of those roots, the narrower digest cannot reproduce it, and the bundle must fail
+# closed rather than verify.
+case_historical_manifest_over_runtime_cache_fails_closed() (
+    local root="$SANDBOX/historical-manifest" sha jar runtime frontend manifest full_hash pruned_hash
+    sha=e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5
+    load_deploy "$root"
+    jar="$root/$sha.jar"
+    runtime="$root/$sha-runtime"
+    make_jar "$jar" "$sha" || return 1
+    make_runtime "$runtime" "$sha" .next-new || return 1
+    seal_release_bundle "$sha" "$jar" "$runtime" built-from-target || return 1
+    frontend="$RELEASES_DIR/$sha/frontend"
+    manifest="$RELEASES_DIR/$sha/manifest.tsv"
+    mkdir -p "$frontend/.next-new/cache"
+    printf 'hashed by an older verifier\n' > "$frontend/.next-new/cache/entry"
+    full_hash="$(FRONTEND_RUNTIME_CACHE_PATHS=(.no-runtime-cache); frontend_tree_sha256 "$frontend")" || return 1
+    pruned_hash="$(frontend_tree_sha256 "$frontend")" || return 1
+    if [ "$full_hash" = "$pruned_hash" ]; then
+        printf 'full-tree digest unexpectedly ignored runtime cache content\n'
+        return 1
+    fi
+    awk -F '\t' -v OFS='\t' -v hash="$full_hash" '$1 == "frontend_sha256" { $2 = hash } { print }' \
+        "$manifest" > "$manifest.next" && mv "$manifest.next" "$manifest" || return 1
+
+    verify_release_bundle "$sha" >/dev/null 2>&1
+    assert_status historical_full_tree_manifest_refused 1 "$?" || return 1
+)
+
+case_seal_refuses_runtime_with_runtime_cache() (
+    local root="$SANDBOX/seal-runtime-cache" sha jar runtime cache_path label output="$SANDBOX/seal-runtime-cache.log"
+    sha=e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3e3
+    load_deploy "$root"
+    jar="$root/$sha.jar"
+    runtime="$root/runtime"
+    make_jar "$jar" "$sha" || return 1
+    for cache_path in "${FRONTEND_RUNTIME_CACHE_PATHS[@]}"; do
+        label="${cache_path//\//_}"
+        rm -rf "$runtime"
+        make_runtime "$runtime" "$sha" "${cache_path%%/*}" || return 1
+        mkdir -p "$runtime/$cache_path"
+        printf 'seed\n' > "$runtime/$cache_path/entry"
+        seal_release_bundle "$sha" "$jar" "$runtime" built-from-target > "$output" 2>&1
+        assert_status "seal_refused$label" 1 "$?" || return 1
+        assert_contains "refusal_logged$label" "already contains a Next.js runtime cache path" "$output" || return 1
+        assert_file_missing "no_bundle$label" "$RELEASES_DIR/$sha" || return 1
+
+        rm -rf "${runtime:?}/$cache_path"
+        ln -s "$root" "$runtime/$cache_path"
+        seal_release_bundle "$sha" "$jar" "$runtime" built-from-target > "$output" 2>&1
+        assert_status "symlink_seal_refused$label" 1 "$?" || return 1
+        assert_file_missing "no_symlink_bundle$label" "$RELEASES_DIR/$sha" || return 1
+    done
+    if find "$RELEASES_DIR" -mindepth 1 -maxdepth 1 -name '.release-*' -print -quit | grep -q .; then
+        printf 'refused seals left pending directories behind\n'
+        return 1
+    fi
+
+    rm -rf "$runtime"
+    make_runtime "$runtime" "$sha" .next-new || return 1
+    seal_release_bundle "$sha" "$jar" "$runtime" built-from-target
+    assert_status clean_runtime_sealed 0 "$?" || return 1
+)
+
+case_previous_release_reused_after_live_route_cache_write() (
+    local root="$SANDBOX/previous-route-cache" sha jar runtime frontend rebuilds="$SANDBOX/previous-route-cache.rebuilds"
+    sha=e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4
+    load_deploy "$root"
+    jar="$root/$sha.jar"
+    runtime="$root/$sha-runtime"
+    make_jar "$jar" "$sha" || return 1
+    make_runtime "$runtime" "$sha" .next-new || return 1
+    seal_release_bundle "$sha" "$jar" "$runtime" built-from-target || return 1
+    frontend="$RELEASES_DIR/$sha/frontend"
+    mkdir -p "$frontend/.next-new/server/route-cache/APP_ROUTE/key/\$"
+    printf 'icon\n' > "$frontend/.next-new/server/route-cache/APP_ROUTE/key/\$/icon.svg.body"
+    printf '{}\n' > "$frontend/.next-new/server/route-cache/APP_ROUTE/key/\$/icon.svg.meta"
+    rebuild_previous_frontend_runtime() { printf 'rebuilt %s\n' "$1" >> "$rebuilds"; return 1; }
+
+    ensure_previous_release "$sha"
+    assert_status live_previous_release_reused 0 "$?" || return 1
+    assert_file_missing previous_release_not_rebuilt "$rebuilds" || return 1
+    assert_file_exists live_route_cache_left_in_place \
+        "$frontend/.next-new/server/route-cache/APP_ROUTE/key/\$/icon.svg.body" || return 1
+)
+
 case_no_change_requires_valid_retained_pair() (
     local root="$SANDBOX/no-change-retained" deployed retained
     deployed=3434343434343434343434343434343434343434
@@ -3018,6 +3152,10 @@ run_case case_failed_identity_probe_output_is_rejected
 run_case case_frontend_attestation_requires_current_unit_lineage
 run_case case_frontend_attestation_rejects_wrong_cgroup
 run_case case_complete_pair_integrity_and_tamper_refusal
+run_case case_runtime_cache_writes_keep_bundle_verified
+run_case case_seal_refuses_runtime_with_runtime_cache
+run_case case_historical_manifest_over_runtime_cache_fails_closed
+run_case case_previous_release_reused_after_live_route_cache_write
 run_case case_no_change_requires_valid_retained_pair
 run_case case_prune_aborts_when_protected_marker_read_fails
 run_case case_consecutive_prunes_preserve_recorded_serving_release

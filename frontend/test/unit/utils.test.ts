@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
     ensureUrlScheme,
     fixedOffsetSeconds,
+    formatCompactCurrency,
     formatCurrency,
     formatFileSize,
     formatRelativeTime,
@@ -184,6 +185,19 @@ describe("formatFileSize", () => {
 describe("formatCurrency", () => {
     it("falls back to localized numeric formatting for non-ISO product currencies", () => {
         expect(formatCurrency(1234.5, "USDT", "en-US")).toBe("1,234.5");
+    });
+});
+
+describe("formatCompactCurrency renders the same text on every engine", () => {
+    it("drops a whole amount's fraction digits rather than starting from the currency's own", () => {
+        expect(formatCompactCurrency(0, "USD", "en-US")).toBe("$0");
+        expect(formatCompactCurrency(173_000, "USD", "en-US")).toBe("$173K");
+        expect(formatCompactCurrency(10_000_000, "JPY", "en-US")).toBe("¥10M");
+    });
+
+    it("keeps one fraction digit where the compact amount has one", () => {
+        expect(formatCompactCurrency(1_500, "USD", "en-US")).toBe("$1.5K");
+        expect(formatCompactCurrency(1_234_567, "USD", "en-US")).toBe("$1.2M");
     });
 });
 

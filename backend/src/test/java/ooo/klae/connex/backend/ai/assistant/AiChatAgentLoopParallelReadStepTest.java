@@ -877,7 +877,8 @@ class AiChatAgentLoopParallelReadStepTest {
             bindingsSeen.addAll(resources.maskingContext().tokenBindings());
             String query = arguments.path("query").asString();
             return new AiAssistantToolResult(
-                    Map.of("records", List.of(resources.register("deal", SEARCH_DEALS.get(query)))),
+                    Map.of("records", List.of(resources.register("deal", SEARCH_DEALS.get(query))),
+                            "contact", SEARCH_CONTACTS.get(query)),
                     List.of(new AiAssistantToolResult.Identifier(
                             "person", SEARCH_CONTACTS.get(query))));
         }).when(toolExecutor).execute(
@@ -974,7 +975,15 @@ class AiChatAgentLoopParallelReadStepTest {
                         any(AiResponseSchema.class), any(AiNativeToolRequest.class),
                         eq(directAdmission), any(Runnable.class)));
         for (AiNativeToolCompletion<AiAssistantStep.FinalAnswer> response : responses) {
-            stubbing = stubbing.thenReturn(response);
+            stubbing = stubbing.thenAnswer(call -> {
+                AiInvocation invocation = call.getArgument(0);
+                invocation.prompt().getMessages().forEach(message ->
+                        invocation.context().exposeDispatchedPayload(message.getContent()));
+                AiNativeToolRequest request = call.getArgument(5);
+                request.exchanges().forEach(exchange ->
+                        invocation.context().exposeDispatchedPayload(exchange.maskedResult()));
+                return response;
+            });
         }
     }
 

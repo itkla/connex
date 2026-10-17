@@ -296,8 +296,8 @@ public final class MaskingEngine {
     }
 
     /**
-     * Masks untrusted model output while retaining only placeholders already issued in the current
-     * request. This is used when masked output is returned to a provider for schema repair.
+     * Masks untrusted model output while retaining incoming placeholders only when their valid
+     * bindings have recorded dispatch exposure in the current run. This is used when masked output is returned to a provider for schema repair.
      * @param text untrusted, already-masked model output
      * @param ctx request-local masking context populated before the original provider call
      * @return safely masked text with issued placeholders preserved in canonical form
@@ -309,8 +309,8 @@ public final class MaskingEngine {
     /** Masks a provider field while retaining only the exact replacement spans this engine wrote. */
     public static MaskedText maskFreeTextPreservingIssuedPlaceholdersWithInsertions(String text, MaskingContext ctx) {
         Objects.requireNonNull(ctx, "ctx");
-        if (text != null && ctx.containsUnexposedMemberToken(text)) {
-            throw new MaskingLeakException(java.util.Set.of(EntityKind.MEMBER), 1);
+        if (text != null && ctx.containsUnexposedTokenInProviderText(text)) {
+            throw new MaskingLeakException("Provider replay contains an invented placeholder");
         }
         return maskPreservingIssuedPlaceholders(text, ctx, false);
     }
@@ -930,6 +930,16 @@ public final class MaskingEngine {
             prepared = text;
             projection = CanonicalText.project(prepared);
             labels = CanonicalText.projectLabels(projection);
+        }
+
+        /** Returns the literal canonical projection for a binary SQL containment prefilter. */
+        public String literalText() {
+            return projection.value();
+        }
+
+        /** Returns the label canonical projection for a binary SQL containment prefilter. */
+        public String labelText() {
+            return labels.value();
         }
 
         /** Returns both source-derived forms as a SQL superset; Java gates each projection separately. */

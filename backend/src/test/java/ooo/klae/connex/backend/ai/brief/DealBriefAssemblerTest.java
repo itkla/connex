@@ -485,6 +485,7 @@ class DealBriefAssemblerTest {
             assertFalse(prompt.contains(second));
             assertEquals(new DealBriefSource("person", PERSON_ID), assembly.sourceRegistry().get("person.0"));
             assertEquals(new DealBriefSource("person", PERSON_ID + 1), assembly.sourceRegistry().get("person.1"));
+            assembly.context().exposeDispatchedPayload(prompt);
             Demasker.DemaskResult demasked = Demasker.demask(prompt, assembly.context());
             assertEquals(0, demasked.warnings());
             assertTrue(demasked.text().contains("- Name: " + names.getFirst() + "; Role: Champion; Source: person.0"));

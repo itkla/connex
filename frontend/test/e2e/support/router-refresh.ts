@@ -3,12 +3,29 @@ import { expect, type Page } from "@playwright/test";
 /**
  * Next publishes its app-router instance for debugging. Reaching it lets a test perform the refresh
  * that sits behind an error boundary's retry: it supplies no URL, so it re-publishes whatever
- * canonical URL the router still holds.
+ * canonical URL the router still holds. Its `push` is the same soft navigation a `<Link>` performs,
+ * which lets a test leave a page whose modal drawer would otherwise cover the link it would click.
  */
 declare global {
     interface Window {
-        next?: { router?: { refresh: () => void } };
+        next?: { router?: { refresh: () => void; push: (href: string) => void } };
     }
+}
+
+/**
+ * Soft-navigates through the app router, as a `<Link>` click would, and waits for the address bar to
+ * reach the target path.
+ *
+ * @param page the page to navigate
+ * @param href the in-app destination, a path below the origin
+ */
+export async function navigateThroughRouter(page: Page, href: string) {
+    expect(await page.evaluate(() => typeof window.next?.router?.push === "function")).toBe(true);
+    await page.evaluate((target) => {
+        window.next?.router?.push(target);
+    }, href);
+    const target = new URL(href, "http://router.invalid").pathname;
+    await expect(page).toHaveURL((url) => url.pathname === target);
 }
 
 /**

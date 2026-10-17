@@ -31,6 +31,26 @@ class AiReportAssemblerTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final AiReportAssembler assembler = new AiReportAssembler(CLOCK);
 
+    @Test
+    void periodFingerprintBindingsRemainUnexposedAfterRegistryDispatch() {
+        var assembly = assembler.assemble(new AiReportContext("Pipeline report",
+                LocalDate.of(2026, 8, 1), LocalDate.of(2026, 8, 13),
+                List.of(new ReportAppendixRowDto("metric.0.0", "w1", "count · Total",
+                        BigDecimal.ONE, null, "count"))));
+        var context = assembly.context();
+        context.exposeDispatchedPayload(assembly.prompt().getMessages().getFirst().getContent());
+
+        for (var binding : context.tokenBindings()) {
+            var result = ooo.klae.connex.backend.ai.masking.Demasker.demask(binding.getKey(), context);
+            if (binding.getValue().matches("2026-08-(01|13)")) {
+                assertEquals(1, result.warnings());
+                assertEquals("[unknown reference]", result.text());
+            } else {
+                assertEquals(0, result.warnings());
+            }
+        }
+    }
+
     @AfterEach
     void resetLocale() {
         LocaleContextHolder.resetLocaleContext();

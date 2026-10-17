@@ -1122,8 +1122,16 @@ class AiAssistantScriptedTrajectoryActionSurfaceTest extends AbstractScriptedTra
                 List.of(new AiChatPageContextDto("company", target.getId()),
                         new AiChatPageContextDto("company", source.getId())));
 
-        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
-        assertFieldRefused(trajectory, "identifier_from_another_record");
+        if (selector.endsWith("fullwidth_token")) {
+            assertEquals("failed", trajectory.status());
+            assertEquals("malformed_output", trajectory.terminalReason());
+            assertEquals(2, journal().dispatched().size());
+            assertFalse(trajectory.toolCalls().stream()
+                    .anyMatch(call -> "update_record_fields".equals(call.getToolName())));
+        } else {
+            assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+            assertFieldRefused(trajectory, "identifier_from_another_record");
+        }
         assertNull(jdbcTemplate.queryForObject("SELECT website FROM company WHERE id = ?", String.class, target.getId()));
         assertEquals(0, fieldAuditRows("company", "company.update", target.getId()));
     }

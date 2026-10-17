@@ -28,7 +28,7 @@ class AiConversationPreprocessingArchTest {
     void resolverAndEveryConversationAssemblerPathUseTheSamePreprocessingEntryPoint() throws IOException {
         String resolver = compact(source("assistant/AiAssistantIdentifierResolver"));
         assertTrue(resolver.contains("MaskingEngine.mentionScanText(message)"));
-        assertTrue(resolver.contains("orgWorkspaceIdsJson, scanText.lookupText(), CANDIDATE_PAGE_SIZE"));
+        assertTrue(resolver.contains("orgWorkspaceIdsJson, scanText.literalText(), scanText.labelText(), CANDIDATE_PAGE_SIZE"));
         assertTrue(resolver.contains("MaskingEngine.containsIdentifierMention(scanText, identifierValue(candidate))"));
 
         String assembler = code(source("assistant/AiAssistantPromptAssembler"));

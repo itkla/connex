@@ -600,7 +600,7 @@ class AiInvocationServiceTest {
     }
 
     /**
-     * A response above the requested bound is demasked before it is refused for its size.
+     * A response above the requested bound is checked for invented references before its size.
      *
      * <p>The cardinality refusal is repairable and an invented placeholder is not. While the loop
      * bounds every request to one call, this refusal is the only path an over-delivered batch
@@ -619,7 +619,7 @@ class AiInvocationServiceTest {
                                 searchCall("call_2", "{{P99}}"))));
 
         assertEquals(1, malformed.demaskWarnings());
-        assertEquals("native_multiple_calls", malformed.repairRule());
+        assertEquals("invented_placeholder", malformed.repairRule());
         Map<?, ?> terminal = auditMetadata().get(1);
         assertEquals("native_tool_call", terminal.get("schemaRule"));
         assertEquals("malformed_output", terminal.get("parseOutcome"));
@@ -651,11 +651,10 @@ class AiInvocationServiceTest {
     /**
      * A warning-free response above the bound keeps the cardinality repair, whatever else it holds.
      *
-     * <p>Demasking first must not turn the size refusal into a validation pass: a call the guard
+     * <p>Reference validation must not turn the size refusal into a validation pass: a call the guard
      * would refuse, arguments that do not parse, and arguments that are not an object all leave the
-     * refusal exactly the repairable {@code native_multiple_calls} it has always been. A placeholder
-     * inside non-object arguments is not counted, because the admitted path refuses such arguments
-     * before demasking them.
+     * refusal exactly the repairable {@code native_multiple_calls} it has always been. Invented
+     * references in non-object arguments are refused before cardinality admission.
      */
     @Test
     void aWarningFreeResponseAboveTheBoundKeepsTheCardinalityRepairWhateverElseItCarries() {
@@ -669,7 +668,7 @@ class AiInvocationServiceTest {
                                         "call_2", "not_a_tool", "{\"query\":\"x\"}"),
                                 new AiToolCall("call_3", "search_records", "not json"),
                                 new AiToolCall(
-                                        "call_4", "search_records", "[\"{{P99}}\"]"))));
+                                        "call_4", "search_records", "[\"ordinary query\"]"))));
 
         assertEquals("native_multiple_calls", malformed.repairRule());
         assertEquals(0, malformed.demaskWarnings());
@@ -789,8 +788,8 @@ class AiInvocationServiceTest {
      */
     @Test
     void demaskWarningsAreSummedAcrossEveryCallOfABatch() {
-        AiNativeToolCompletion.Tool<?> secondOnly = assertInstanceOf(
-                AiNativeToolCompletion.Tool.class,
+        AiNativeToolCompletion.Malformed<?> secondOnly = assertInstanceOf(
+                AiNativeToolCompletion.Malformed.class,
                 completeNativeTools(
                         4,
                         List.of(
@@ -803,8 +802,8 @@ class AiInvocationServiceTest {
     /** Warnings from calls on both sides of a batch add up rather than overwrite each other. */
     @Test
     void demaskWarningsFromEveryCallOfABatchAddUp() {
-        AiNativeToolCompletion.Tool<?> both = assertInstanceOf(
-                AiNativeToolCompletion.Tool.class,
+        AiNativeToolCompletion.Malformed<?> both = assertInstanceOf(
+                AiNativeToolCompletion.Malformed.class,
                 completeNativeTools(
                         4,
                         List.of(
@@ -873,7 +872,7 @@ class AiInvocationServiceTest {
                                 searchCall("call_1", "{{P1}}"),
                                 new AiToolCall("call_2", "search_records", "{\"query\":7}"),
                                 searchCall("call_3", "{{P99}}"))));
-        assertEquals("native_invalid_arguments", after.repairRule());
+        assertEquals("invented_placeholder", after.repairRule());
         assertEquals(1, after.demaskWarnings());
         assertEquals(1, auditMetadata().get(1).get("demaskWarnings"));
 
@@ -885,7 +884,7 @@ class AiInvocationServiceTest {
                                 searchCall("call_1", "{{P99}}"),
                                 new AiToolCall(
                                         "call_2", "not_a_tool", "{\"query\":\"x\"}"))));
-        assertEquals("native_unknown_tool", before.repairRule());
+        assertEquals("invented_placeholder", before.repairRule());
         assertEquals(1, before.demaskWarnings());
     }
 
@@ -905,7 +904,7 @@ class AiInvocationServiceTest {
                         List.of(
                                 searchCall("call_1", "{{P99}}"),
                                 searchCall("call_1", "Bellweather"))));
-        assertEquals("native_duplicate_call_id", sharedId.repairRule());
+        assertEquals("invented_placeholder", sharedId.repairRule());
         assertEquals(1, sharedId.demaskWarnings());
 
         AiNativeToolCompletion.Malformed<?> unparsable = assertInstanceOf(
@@ -915,7 +914,7 @@ class AiInvocationServiceTest {
                         List.of(
                                 new AiToolCall("call_1", "search_records", "not json"),
                                 searchCall("call_2", "{{P99}}"))));
-        assertEquals("native_arguments_not_object", unparsable.repairRule());
+        assertEquals("invented_placeholder", unparsable.repairRule());
         assertEquals(1, unparsable.demaskWarnings());
 
         when(aiProvider.parallelToolCallLimit(resolved.target())).thenReturn(4);
@@ -927,19 +926,15 @@ class AiInvocationServiceTest {
                         List.of(
                                 searchCall("call_1", "Bellweather"),
                                 searchCall("call_2", "{{P99}}"))));
-        assertEquals("native_call_content", content.repairRule());
+        assertEquals("invented_placeholder", content.repairRule());
         assertEquals(1, content.demaskWarnings());
     }
 
     /**
-     * A single call keeps the order it always had: its own guard rejection is its refusal.
-     *
-     * <p>The batch rule exists because a sibling's rejection must not hide another call's
-     * invented placeholder. One call has no sibling, so the response every undeclared endpoint can
-     * produce is refused and repaired exactly as before, with no demask count on the refusal.
+     * An invented reference takes precedence over even a single call's repairable guard rejection.
      */
     @Test
-    void aSingleCallTheGuardRejectsStaysRepairableWhateverPlaceholderItNames() {
+    void aSingleGuardRejectedCallCannotEarnRepairWithAnInventedPlaceholder() {
         AiNativeToolCompletion.Malformed<?> malformed = assertInstanceOf(
                 AiNativeToolCompletion.Malformed.class,
                 completeNativeTools(
@@ -948,9 +943,9 @@ class AiInvocationServiceTest {
                                 "call_1", "search_records",
                                 "{\"query\":\"{{P99}}\",\"kinds\":[\"planet\"]}"))));
 
-        assertEquals("native_invalid_arguments", malformed.repairRule());
-        assertEquals(0, malformed.demaskWarnings());
-        assertFalse(auditMetadata().get(1).containsKey("demaskWarnings"));
+        assertEquals("invented_placeholder", malformed.repairRule());
+        assertEquals(1, malformed.demaskWarnings());
+        assertEquals(1, auditMetadata().get(1).get("demaskWarnings"));
     }
 
     private static AiToolCall searchCall(String id, String query) {
@@ -1429,6 +1424,7 @@ class AiInvocationServiceTest {
         AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
         AiAssistantStepGuard guard = new AiAssistantStepGuard(catalog);
         AiAssistantStepSchema schema = new AiAssistantStepSchema(new ObjectMapper(), catalog);
+        context.exposeDispatchedPayload(placeholder);
         AiNativeToolRequest nativeTools = new AiNativeToolRequest(
                 catalog.nativeDefinitions(new ObjectMapper(), AiAssistantToolCatalog.ALL),
                 List.of(new AiToolExchange(
@@ -2441,21 +2437,46 @@ class AiInvocationServiceTest {
     }
 
     @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.ValueSource(strings = {"connection", "timeout"})
-    void failedAttemptCannotExposeMemberOmittedFromRebuiltBody(String failure) {
+    @org.junit.jupiter.params.provider.EnumSource(EntityKind.class)
+    void plainTextReasoningCannotHideInventedReferencesBeforeDiscard(EntityKind kind) {
+        for (boolean separate : List.of(false, true)) {
+            var context = new MaskingContext();
+            String token = context.tokenFor(kind, "Undispatched label");
+            var invocation = new AiInvocation(FEATURE, context, PromptAssembly.builder(context)
+                    .system("Use concise analysis").userTurn("Describe the attachment").build(), 64, 0.1);
+            providerReturns(new AiCompletionResult(separate ? "Ready" : "<think>" + token + "</think>Ready",
+                    1, 1, "stop", AiStructuredOutputEnforcement.PROMPT_ONLY,
+                    separate ? token : "", AiReasoningMode.TAGGED));
+
+            var completion = service.complete(invocation);
+
+            assertEquals("", completion.text());
+            assertEquals(1, completion.demaskWarnings());
+        }
+    }
+
+    static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> failedDispatchKinds() {
+        return java.util.stream.Stream.of("connection", "timeout").flatMap(failure ->
+                java.util.stream.Stream.of(EntityKind.values()).map(kind ->
+                        org.junit.jupiter.params.provider.Arguments.of(failure, kind)));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("failedDispatchKinds")
+    void failedAttemptCannotExposeTokensOmittedFromRebuiltBody(String failure, EntityKind kind) {
         var context = new MaskingContext();
-        context.tokenFor(EntityKind.MEMBER, "Hidden Member");
-        context.tokenFor(EntityKind.COMPANY, "Existing Company");
+        String token = context.tokenFor(kind, "Hidden reference");
+        String other = context.tokenFor(EntityKind.COMPANY, "Existing Company");
         when(aiInvocationAdmissionService.acquireDirect()).thenReturn(fallbackAdmission);
         when(aiProvider.complete(any(AiCompletionRequest.class))).thenAnswer(call -> {
             AiCompletionRequest request = call.getArgument(0);
             var first = ooo.klae.connex.backend.ai.provider.openai.OpenAiRequestBody.prepare(
                     request, AiStructuredOutputEnforcement.PROMPT_ONLY, false, new ObjectMapper());
-            assertTrue(first.dispatchedTokens().contains("{{M1}}"));
+            assertTrue(first.dispatchedTokens().contains(token));
             try {
                 request.providerAttemptExecutor().execute(() -> {
                     first.run();
-                    assertEquals(1, ooo.klae.connex.backend.ai.masking.Demasker.demask("{{M1}}", context).warnings());
+                    assertEquals(1, ooo.klae.connex.backend.ai.masking.Demasker.demask(token, context).warnings());
                     throw new AiProviderException(failure);
                 });
             } catch (AiProviderException expected) {
@@ -2467,23 +2488,23 @@ class AiInvocationServiceTest {
                     request.providerAttemptExecutor(), request.maxTokens(), request.temperature());
             var second = ooo.klae.connex.backend.ai.provider.openai.OpenAiRequestBody.prepare(
                     rebuilt, AiStructuredOutputEnforcement.PROMPT_ONLY, false, new ObjectMapper());
-            assertFalse(second.dispatchedTokens().contains("{{M1}}"));
+            assertFalse(second.dispatchedTokens().contains(token));
             request.providerAttemptExecutor().execute(() -> {
                 second.run();
                 ooo.klae.connex.backend.ai.provider.AiProviderDispatch.responded(second);
                 return "response";
             });
-            return new AiCompletionResult("{{M1}}", 1, 1, "stop");
+            return new AiCompletionResult(token, 1, 1, "stop");
         });
         var invocation = new AiInvocation(FEATURE, context, PromptAssembly.builder(context)
-                .system("Use concise analysis").userTurn("Discuss {{M1}}").build(), 64, 0.1);
+                .system("Use concise analysis").userTurn("Discuss " + token).build(), 64, 0.1);
 
         var result = service.complete(invocation);
 
         assertEquals("[unknown reference]", result.text());
         assertEquals(1, result.demaskWarnings());
-        assertEquals(1, ooo.klae.connex.backend.ai.masking.Demasker.demask("{{M1}}", context).warnings());
-        assertEquals("Existing Company", ooo.klae.connex.backend.ai.masking.Demasker.demask("{{C1}}", context).text());
+        assertEquals(1, ooo.klae.connex.backend.ai.masking.Demasker.demask(token, context).warnings());
+        assertEquals(1, ooo.klae.connex.backend.ai.masking.Demasker.demask(other, context).warnings());
         verify(budgetLease).markDispatched();
         verify(fallbackBudgetLease).markDispatched();
     }
@@ -2645,6 +2666,7 @@ class AiInvocationServiceTest {
         AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
         AiAssistantStepGuard guard = new AiAssistantStepGuard(catalog);
         AiAssistantStepSchema schema = new AiAssistantStepSchema(new ObjectMapper(), catalog);
+        context.exposeDispatchedPayload(placeholder);
         AiNativeToolRequest nativeTools = new AiNativeToolRequest(
                 catalog.nativeDefinitions(new ObjectMapper(), AiAssistantToolCatalog.ALL),
                 List.of(new AiToolExchange(
@@ -3093,7 +3115,7 @@ class AiInvocationServiceTest {
                 field.equals("arguments") ? "{\"query\":\"Return {{P99}}\"}" : "{\"query\":\"{{P99}}\"}");
         var malformed = assertInstanceOf(AiNativeToolCompletion.Malformed.class,
                 completeMemberNative(invocation, List.of(), call));
-        assertEquals("native_member_leak", malformed.repairRule());
+        assertEquals("invented_placeholder", malformed.repairRule());
         assertEquals(1, malformed.demaskWarnings(), "Admission refusal must retain the no-repair demask warning");
         verify(aiProvider, times(1)).complete(any());
     }
@@ -3154,24 +3176,21 @@ class AiInvocationServiceTest {
                     schema.finalResponseSchema(), new AiNativeToolRequest(catalog.nativeDefinitions(mapper, AiAssistantToolCatalog.ALL), List.of()),
                     directAdmission, providerAttemptGuard);
             if (tool) {
-                var parsed = assertInstanceOf(AiNativeToolCompletion.Tool.class, result);
-                assertEquals(1, parsed.demaskWarnings());
-                assertEquals("[unknown reference]", parsed.arguments().path("description").asString());
+                var refused = assertInstanceOf(AiNativeToolCompletion.Malformed.class, result);
+                assertEquals("invented_placeholder", refused.repairRule());
+                assertEquals(1, refused.demaskWarnings());
             } else {
                 var content = assertInstanceOf(AiNativeToolCompletion.Content.class, result);
-                var parsed = assertInstanceOf(AiStructuredOutcome.Parsed.class, content.attempt().outcome());
-                assertEquals(1, parsed.demaskWarnings());
-                assertEquals("[unknown reference]", ((AiAssistantStep.FinalAnswer) parsed.value()).text());
+                var refused = assertInstanceOf(AiStructuredOutcome.Malformed.class, content.attempt().outcome());
+                assertEquals("invented_placeholder", refused.reason());
                 assertTrue(content.attempt().repair().isEmpty());
             }
         } else {
             var result = service.completeStructuredRepairable(invocation, AiAssistantStep.class,
                     guard.forStep(AiAssistantToolCatalog.ALL, Set.of()), schema.responseSchema(AiAssistantToolCatalog.ALL),
                     directAdmission, providerAttemptGuard);
-            var parsed = assertInstanceOf(AiStructuredOutcome.Parsed.class, result.outcome());
-            assertEquals(1, parsed.demaskWarnings());
-            var step = (AiAssistantStep) parsed.value();
-            assertEquals("[unknown reference]", tool ? step.tool().args().path("description").asString() : step.finalAnswer().text());
+            var refused = assertInstanceOf(AiStructuredOutcome.Malformed.class, result.outcome());
+            assertEquals("invented_placeholder", refused.reason());
             assertTrue(result.repair().isEmpty());
         }
         verify(aiProvider, times(1)).complete(any());

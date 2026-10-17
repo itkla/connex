@@ -84,6 +84,7 @@ class MaskingContextTest {
         assertEquals(1, Demasker.demask(token, context).warnings());
         assertEquals(MaskingEngine.REDACTED, context.tokenFor(EntityKind.MEMBER, "😀"));
         context.restore(checkpoint);
+        context.exposeDispatchedPayload(token);
         assertEquals("😀", Demasker.demask(token, context).text());
     }
 
@@ -101,6 +102,7 @@ class MaskingContextTest {
     void aRestoreWithdrawsExactlyTheBindingsIssuedAfterItsCheckpoint() {
         MaskingContext context = new MaskingContext();
         String kept = MaskingEngine.maskField(EntityKind.PERSON, "Mina Patel", context);
+        context.exposeDispatchedPayload(kept);
         List<Map.Entry<String, String>> bindings = context.tokenBindings();
         Set<String> dictionary = Set.copyOf(context.identifierDictionary());
         MaskingContext.Checkpoint checkpoint = context.checkpoint();
@@ -258,28 +260,28 @@ class MaskingContextTest {
     void rawMemberRoleRequiresExposureEvenWhenAnotherKindOwnsTheToken(EntityKind kind) {
         var context = new MaskingContext();
         String token = context.tokenFor(kind, "Shared Member");
-        assertEquals("Shared Member", Demasker.demask(token, context).text());
+        assertEquals(1, Demasker.demask(token, context).warnings());
         context.registerMemberCandidate("Shared Member");
         assertEquals(1, Demasker.demask(token, context).warnings());
         assertEquals("[unknown reference]", Demasker.demask(token, context).text());
-        assertTrue(context.containsUnexposedMemberToken(token));
-        assertTrue(context.containsUnexposedMemberToken(token.toLowerCase(java.util.Locale.ROOT)));
+        assertTrue(context.containsUnexposedToken(token));
+        assertTrue(context.containsUnexposedToken(token.toLowerCase(java.util.Locale.ROOT)));
         context.exposeDispatchedPayload(token);
-        assertFalse(context.containsUnexposedMemberToken(token));
+        assertFalse(context.containsUnexposedToken(token));
         assertEquals("Shared Member", Demasker.demask(token, context).text());
-        assertTrue(context.containsUnexposedMemberToken(token.toLowerCase(java.util.Locale.ROOT)));
+        assertTrue(context.containsUnexposedToken(token.toLowerCase(java.util.Locale.ROOT)));
         var exposedFirst = new MaskingContext();
         String earlier = exposedFirst.tokenFor(kind, "Earlier Member");
         exposedFirst.exposeDispatchedPayload(earlier);
         exposedFirst.registerMemberCandidate("Earlier Member");
         assertEquals("Earlier Member", Demasker.demask(earlier, exposedFirst).text());
         String unrelated = context.tokenFor(kind, "Unrelated Record");
-        assertEquals("Unrelated Record", Demasker.demask(unrelated, context).text());
+        assertEquals(1, Demasker.demask(unrelated, context).warnings());
         context.registerMemberCandidate(token);
-        assertTrue(context.containsUnexposedMemberToken(token));
-        assertTrue(context.containsUnexposedMemberToken(token.toLowerCase(java.util.Locale.ROOT)));
+        assertTrue(context.containsUnexposedToken(token));
+        assertTrue(context.containsUnexposedToken(token.toLowerCase(java.util.Locale.ROOT)));
         assertEquals(1, Demasker.demask(token, context).warnings());
-        assertEquals("Unrelated Record", Demasker.demask(unrelated, context).text());
+        assertEquals(1, Demasker.demask(unrelated, context).warnings());
     }
 
 }

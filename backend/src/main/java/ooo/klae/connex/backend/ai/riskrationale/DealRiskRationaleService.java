@@ -150,7 +150,8 @@ public class DealRiskRationaleService {
                                     DealRiskRationaleContent.class,
                                     admission);
                     if (!(outcome
-                            instanceof AiStructuredOutcome.Parsed<DealRiskRationaleContent> parsed)) {
+                            instanceof AiStructuredOutcome.Parsed<DealRiskRationaleContent> parsed)
+                            || parsed.demaskWarnings() != 0) {
                         return DealRationaleDto.unavailable(dealId, PROVIDER_ERROR);
                     }
                     Optional<DealRiskRationaleContent> validated = DealRiskRationaleValidator.validate(

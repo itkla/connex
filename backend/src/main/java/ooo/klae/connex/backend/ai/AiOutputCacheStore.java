@@ -48,7 +48,7 @@ public class AiOutputCacheStore {
      * a purely prompt-derived hash would not otherwise reflect — invalidate previously stored rows on
      * deploy. Bump this when output-shaping logic changes without a corresponding prompt change.
      */
-    static final String HASH_VERSION = "v3-provider-profile-grounding";
+    static final String HASH_VERSION = "v4-dispatched-exposure";
 
     private final AiOutputCacheMapper aiOutputCacheMapper;
     private final PersonMapper personMapper;
