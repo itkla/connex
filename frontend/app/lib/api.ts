@@ -13,6 +13,7 @@ import {
 import { resolveAiGeneration } from '@/app/lib/aiGeneration';
 import { isProtectedPath } from "@/app/lib/protectedRoutes";
 import { isProtectedMediaPath } from "@/app/lib/protectedMedia";
+import { observeProposalReviewClock } from "@/app/lib/proposalReviewClock";
 import { settingsDestination } from "@/app/lib/settingsEntryPoints";
 
 import type {
@@ -794,6 +795,10 @@ async function requestJson<T>(
             await performPasskeyStepUp();
         }
         res = await sendWithCsrfRetry();
+    }
+
+    if (typeof window !== 'undefined' && path.startsWith('/api/ai/assistant/')) {
+        observeProposalReviewClock(res.headers);
     }
 
     if (!res.ok) {

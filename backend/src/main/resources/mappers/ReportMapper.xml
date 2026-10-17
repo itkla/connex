@@ -44,7 +44,7 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </select>
 
-  <select id="lockDefinitions" resultType="int">
+  <select id="lockDefinitions" resultType="int" flushCache="true">
     SELECT id FROM report_definition
     WHERE workspace_id = #{workspaceId}
     ORDER BY id

@@ -122,7 +122,7 @@ public class AiAssistantSetResponseDueWriteTool implements AiAssistantWriteTool 
         }
         Target target = execution.row().target();
         boolean changed = leadResponseSlaService.startFirstResponseClock(
-                target.id(), request.dueInHours());
+                target.id(), request.dueInHours(), execution.admission());
         Map<String, Object> outcome = new LinkedHashMap<>();
         outcome.put("status", "executed");
         outcome.put("recordType", target.kind());

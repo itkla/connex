@@ -187,6 +187,13 @@ public class NoteService {
     @Transactional
     @RequirePermission(Permission.NOTE_CREATE)
     public Note create(Note note) {
+        return create(note, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @Transactional
+    @RequirePermission(Permission.NOTE_CREATE)
+    public Note create(Note note, MutationAdmission admission) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         User actor = authService.getCurrentUser();
         note.setWorkspaceId(workspaceId);
@@ -195,6 +202,7 @@ public class NoteService {
             note.getPerson() == null && note.getDeal() == null ? PRIVATE : "workspace"));
         requireLinkedRecordsVisible(workspaceId, note);
         note.setCreatedAt(null);
+        admission.beforeMutation();
         noteMapper.insert(note);
         auditService.record("note.create", "note", note.getId(), auditLabel(note),
             "Created note",

@@ -140,9 +140,13 @@ class AiAssistantWriteTargetScopeTest extends AbstractAiAssistantWriteToolTest {
     }
 
     @Test
-    void anImmediateTagOnACompanyOutsideTheActorsScopeIsNeverResolvedOrAdded() throws Exception {
+    void anImmediateTagOnACompanyOutsideTheActorsScopeIsNeverAdded() throws Exception {
         when(companyService.getCompanyById(52))
                 .thenThrow(new ResourceNotFoundException("Company not found"));
+        Tag tag = new Tag();
+        tag.setId(9);
+        tag.setName("Priority");
+        when(tagService.getAllTags()).thenReturn(List.of(tag));
         AiAssistantWriteToolService service = service();
         propose(service, "add_tag", "{\"handle\":\"r1\",\"tag\":\"Priority\"}",
                 "company", 52);
@@ -153,7 +157,7 @@ class AiAssistantWriteTargetScopeTest extends AbstractAiAssistantWriteToolTest {
 
         assertEquals("Company not found", refused.getMessage());
         verify(companyService).lockOwnedCompanyForUpdate(52);
-        verify(tagService, never()).getAllTags();
+        verify(tagService).lockDefinitionForShare(9);
         verify(companyService, never()).addTag(anyInt(), anyInt());
         verify(chatMapper, never()).updateToolCall(
                 anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
