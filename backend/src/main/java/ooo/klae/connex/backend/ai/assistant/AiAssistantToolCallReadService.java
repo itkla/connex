@@ -100,7 +100,7 @@ public class AiAssistantToolCallReadService {
     private final ReferenceService referenceService;
     private final ReportMapper reportMapper;
 
-    /** Returns up to 100 safe write-tool cards in one authorized session. */
+    /** Returns up to 100 pending cards, or 100 history rows plus 100 newer undecided cards. */
     @Transactional
     public List<AiAssistantToolCallReadDto> list(int sessionId, boolean pendingOnly) {
         Viewer viewer = currentViewer();
@@ -108,7 +108,7 @@ public class AiAssistantToolCallReadService {
         return list(viewer, session, pendingOnly, true);
     }
 
-    /** Returns up to 100 safe write-tool cards for one retained administrative read. */
+    /** Applies the same bounded history and undecided discovery to an audited retained read. */
     @Transactional
     @RequirePermission(Permission.AI_SESSION_ADMIN)
     public List<AiAssistantToolCallReadDto> listRetained(
@@ -146,9 +146,16 @@ public class AiAssistantToolCallReadService {
             boolean pendingOnly,
             boolean mutationsAvailable) {
         Instant now = clock.instant();
-        List<StoredToolCall> stored = chatMapper.listToolCallsBySession(
+        List<AiChatToolCall> rows = new ArrayList<>(chatMapper.listToolCallsBySession(
                 viewer.workspaceId(), session.getId(), pendingOnly, MAX_TOOL_CALLS,
-                pendingOnly ? AiAssistantProposalExpiry.pendingCreatedAfter(now) : null).stream()
+                pendingOnly ? AiAssistantProposalExpiry.pendingCreatedAfter(now) : null));
+        if (!pendingOnly && rows.size() == MAX_TOOL_CALLS) {
+            AiChatToolCall boundary = rows.getLast();
+            rows.addAll(chatMapper.listUndecidedToolCallsAfterHistory(
+                    viewer.workspaceId(), session.getId(), boundary.getMessageId(), boundary.getId(),
+                    MAX_TOOL_CALLS).reversed());
+        }
+        List<StoredToolCall> stored = rows.stream()
                 .map(this::readStored)
                 .filter(Objects::nonNull)
                 .filter(call -> !pendingOnly || call.tier() == ToolTier.CONFIRM)

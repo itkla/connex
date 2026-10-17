@@ -6,10 +6,12 @@ import AskConnexToolCard from "@/app/components/ask-connex/AskConnexToolCard";
 import { NowProvider } from "@/app/hooks/useNow";
 import {
     askConnexProposalGroups,
+    askConnexToolCardAffordances,
     toggleAskConnexProposalExclusion,
     type AskConnexToolAction,
     type AskConnexToolCardState,
 } from "@/app/lib/askConnex";
+import { observeProposalReviewClock, proposalReviewNow } from "@/app/lib/proposalReviewClock";
 import {
     askConnexCard,
     askConnexCardLabels,
@@ -66,13 +68,12 @@ vi.mock("@/components/ui/checkbox", async () => {
 });
 
 /**
- * The clock both the render and the card's own timer read.
+ * The server response and render timestamp, rounded to HTTP Date precision.
  *
- * The undo deadline has to sit in the real future, because the card schedules its retirement from
- * the wall clock while the rendered sentence comes from the shared render clock. Pinning both to
- * the same moment is what makes the two agree the way they do in a browser.
+ * Proposal tests advance monotonic elapsed time independently of the device clock. Undo retains
+ * its wall-clock timer, so its deadline must also sit in the real future.
  */
-const NOW = Date.now();
+const NOW = Math.floor(Date.now() / 1_000) * 1_000;
 const UNDO_DEADLINE = new Date(NOW + 600_000).toISOString();
 
 type Interactive = ReturnType<typeof installInteractiveDocument>;
@@ -123,6 +124,7 @@ async function mount(node: React.ReactNode): Promise<{
     resume: (type: 'focus' | 'visibilitychange') => void;
 }> {
     const interactive = installInteractiveDocument();
+    observeProposalReviewClock(new Headers({ Date: new Date(NOW).toUTCString() }));
     const documentEvents = vi.spyOn(document, 'addEventListener');
     const scheduled: Array<{ handler: () => void; delay: number | undefined }> = [];
     Object.assign(window, {
@@ -460,11 +462,13 @@ describe("proposal review deadline", () => {
         vi.unstubAllGlobals();
     });
 
-    it.each(['timer', 'focus', 'visibilitychange'] as const)(
-        "clientDisarmsAtDeadlineWithoutNetwork: %s",
-        async (trigger) => {
+    it.each([-3_600_000, 3_600_000].flatMap((skew) =>
+        (['timer', 'focus', 'visibilitychange'] as const).map((trigger) => ({ skew, trigger }))))(
+        "clientDisarmsAtServerDeadlineWithoutNetwork: $trigger with device skew $skew",
+        async ({ skew, trigger }) => {
             const deadline = NOW + 1_000;
-            const clock = vi.spyOn(Date, 'now').mockReturnValue(NOW);
+            vi.spyOn(Date, 'now').mockReturnValue(NOW + skew);
+            const elapsed = vi.spyOn(performance, 'now').mockReturnValue(0);
             const action = vi.fn();
             const proposal = askConnexCard({
                 change: askConnexChange(),
@@ -477,8 +481,11 @@ describe("proposal review deadline", () => {
             const timer = scheduled[0];
             if (!timer) throw new Error('Missing proposal deadline timer');
             expect(timer.delay).toBe(deadline - NOW);
+            expect(askConnexToolCardAffordances(proposal, proposalReviewNow())).toEqual(['reject', 'approve']);
 
-            clock.mockReturnValue(deadline);
+            elapsed.mockReturnValue(999);
+            expect(askConnexToolCardAffordances(proposal, proposalReviewNow())).toEqual(['reject', 'approve']);
+            elapsed.mockReturnValue(1_000);
             await act(async () => {
                 if (trigger === 'timer') {
                     timer.handler();
@@ -492,7 +499,29 @@ describe("proposal review deadline", () => {
             expect(present(interactive.elements, 'Proposal expired')).toBe(true);
             expect(present(interactive.elements, askConnexCardLabels.proposalExpired)).toBe(true);
             expect(action).not.toHaveBeenCalled();
+            expect(askConnexToolCardAffordances(proposal, proposalReviewNow())).toEqual([]);
             await act(async () => root.unmount());
         },
     );
+
+    it('reschedules a mounted deadline when a later response recalibrates server time', async () => {
+        vi.spyOn(performance, 'now').mockReturnValue(0);
+        const proposal = askConnexCard({
+            change: askConnexChange(), reviewExpiresAt: new Date(NOW + 10_000).toISOString(),
+        });
+        const { interactive, root, scheduled } = await mount(renderedCard(proposal, () => {}));
+        expect(scheduled.at(-1)?.delay).toBe(10_000);
+
+        await act(async () => {
+            observeProposalReviewClock(new Headers({ Date: new Date(NOW + 8_000).toUTCString() }));
+        });
+        expect(scheduled.at(-1)?.delay).toBe(2_000);
+        expect(control(interactive, "Apply the proposed change to Acme renewal")).toBeDefined();
+
+        await act(async () => {
+            observeProposalReviewClock(new Headers({ Date: new Date(NOW + 10_000).toUTCString() }));
+        });
+        expect(present(interactive.elements, 'Proposal expired')).toBe(true);
+        await act(async () => root.unmount());
+    });
 });

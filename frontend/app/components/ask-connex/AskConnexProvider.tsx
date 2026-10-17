@@ -166,6 +166,7 @@ import {
 import type { AppAction } from '@/app/lib/actions/types';
 import { AiGenerationError } from '@/app/lib/aiGeneration';
 import { LEAD_SOURCES } from '@/app/lib/contactProvenance';
+import { proposalReviewNow } from '@/app/lib/proposalReviewClock';
 import { createAiChatSocket } from '@/app/lib/realtime';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { formatDate, formatRelativeTime, formatUtcDateTime } from '@/app/lib/utils';
@@ -2076,7 +2077,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             || signal.aborted
             || !card
             || !actionableToolCallIds.has(toolCallId)
-            || !askConnexToolCardAffordances(card, Date.now()).includes(action)
+            || !askConnexToolCardAffordances(card, action === 'undo' ? Date.now() : proposalReviewNow()).includes(action)
             || toolActionsRef.current.has(toolCallId)) {
             return false;
         }

@@ -246,6 +246,42 @@ class AiAssistantToolCallReadServiceTest {
     }
 
     @Test
+    void cappedRawHistoryMergesNewerOpenAndExpiredCardsThroughOrdinaryAndRetainedProjection() {
+        List<AiChatToolCall> history = new ArrayList<>();
+        for (int id = 1; id <= 100; id++) {
+            AiChatToolCall raw = new AiChatToolCall();
+            raw.setId(id);
+            raw.setMessageId(10);
+            history.add(raw);
+        }
+        AiChatToolCall expired = ownerProposal(101, 31, "unassigned");
+        expired.setCreatedAt("2026-08-09 12:00:00.000000");
+        AiChatToolCall open = ownerProposal(102, 31, "unassigned");
+        open.setCreatedAt(LocalDateTime.ofInstant(CLOCK.instant(), ZoneOffset.UTC).toString());
+        when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100, null))
+                .thenReturn(history);
+        when(chatMapper.listUndecidedToolCallsAfterHistory(WORKSPACE_ID, SESSION_ID, 10, 100, 100))
+                .thenReturn(List.of(open, expired));
+        when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, true, 100,
+                AiAssistantProposalExpiry.pendingCreatedAfter(CLOCK.instant())))
+                .thenReturn(List.of(open));
+        when(chatMapper.getRetainedSessionById(WORKSPACE_ID, USER_ID, SESSION_ID, List.of(USER_ID)))
+                .thenReturn(retainedSession(44, "active"));
+
+        for (List<AiAssistantToolCallReadDto> cards : List.of(
+                service.list(SESSION_ID, false), service.listRetained(SESSION_ID, false))) {
+            assertEquals(List.of(101, 102), cards.stream().map(AiAssistantToolCallReadDto::id).toList());
+            assertEquals(List.of("expired", "open"), cards.stream()
+                    .map(AiAssistantToolCallReadDto::reviewState).toList());
+        }
+        assertEquals(List.of(102), service.list(SESSION_ID, true).stream()
+                .map(AiAssistantToolCallReadDto::id).toList());
+        verify(chatMapper, times(2)).listUndecidedToolCallsAfterHistory(
+                WORKSPACE_ID, SESSION_ID, 10, 100, 100);
+        verify(sessionReadAudit).record(SESSION_ID, "retained");
+    }
+
+    @Test
     void terminalOutcomesSurviveReviewDeadline() {
         Map<String, String> states = Map.of("executed", "applied", "rejected", "discarded", "failed", "failed");
         for (Map.Entry<String, String> state : states.entrySet()) {

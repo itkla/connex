@@ -131,9 +131,24 @@ class AiProposalExpiryHttpIntegrationTest extends AbstractAiProposalExpiryIntegr
         assertEquals(fresh.id(), pending.get(0).path("id").asInt());
         assertEquals("open", pending.get(0).path("reviewState").asString());
         JsonNode history = body(request(browser, "GET", sessionPath(first) + "/tool-calls"), 200);
-        assertEquals(historyCap, history.size());
+        assertEquals(historyCap + 2, history.size());
         assertEquals("expired", history.get(0).path("reviewState").asString());
+        assertEquals(fresh.id(), history.get(historyCap + 1).path("id").asInt());
+        assertEquals("open", history.get(historyCap + 1).path("reviewState").asString());
         assertEquals("expired", body(request(browser, "GET", path(first)), 200).path("reviewState").asString());
+
+        now.set(deadline);
+        Proposal later = proposal("assign_owner", "person", first.sessionId(), historyCap + 3);
+        jdbc.update("UPDATE ai_chat_tool_call SET created_at = ? WHERE workspace_id = ? AND id = ?",
+                dbTime(deadline), workspace.getId(), later.id());
+        JsonNode reloaded = body(request(browser, "GET", sessionPath(first) + "/tool-calls"), 200);
+        assertEquals(historyCap + 3, reloaded.size());
+        assertEquals(fresh.id(), reloaded.get(historyCap + 1).path("id").asInt());
+        assertEquals("expired", reloaded.get(historyCap + 1).path("reviewState").asString());
+        JsonNode stillPending = body(request(browser, "GET", sessionPath(first) + "/tool-calls?pendingOnly=true"), 200);
+        assertEquals(1, stillPending.size());
+        assertEquals(later.id(), stillPending.get(0).path("id").asInt());
+        assertEquals("open", stillPending.get(0).path("reviewState").asString());
     }
 
     @Test
