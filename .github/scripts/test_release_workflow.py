@@ -563,6 +563,26 @@ class ReleaseWorkflowTest(unittest.TestCase):
         self.assertNotEqual(publish_group, dry_run_group)
         self.assertIs(False, self.workflow["concurrency"]["cancel-in-progress"])
 
+    def test_sla_writers_share_a_job_lock_across_reconcile_and_release(self) -> None:
+        reconcile = yaml.safe_load(WORKFLOW_PATH.with_name("vulnerability-sla.yml").read_text())
+        self.assertNotIn("concurrency", reconcile)
+        lock = {"group": "vulnerability-sla", "cancel-in-progress": False}
+        self.assertEqual(reconcile["jobs"]["reconcile"]["concurrency"], lock)
+        self.assertNotEqual(self.workflow["concurrency"]["group"], lock["group"])
+        for job in ("metadata", "promote", "release"):
+            with self.subTest(job=job):
+                self.assertEqual(self.workflow["jobs"][job]["concurrency"], lock)
+
+    def test_cancelled_pending_sla_writer_cannot_enable_publication(self) -> None:
+        jobs = self.workflow["jobs"]
+        for dependency in ("metadata", "promote"):
+            self.assertIn(f"needs.{dependency}.result == 'success'", jobs["release"]["if"])
+            self.assertIn(dependency, jobs["release"]["needs"])
+        # promote has always(), so its explicit metadata-success predicate is load-bearing.
+        self.assertIn("always()", jobs["promote"]["if"])
+        self.assertIn("needs.metadata.result == 'success'", jobs["promote"]["if"])
+        self.assertNotIn("always()", jobs["candidate-images"]["if"] if "if" in jobs["candidate-images"] else "")
+
 
     def test_dispatch_requires_version_and_job_output_derives_mode_from_event(self) -> None:
         events = self.workflow_events()
