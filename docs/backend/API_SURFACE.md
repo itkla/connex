@@ -173,14 +173,32 @@ The additive `X-Disclosure-Note-Count`, `X-Disclosure-Notes-SHA256`, `X-Disclosu
 `X-Disclosure-SHA256` headers describe pass one's complete representation. Hashes use exact compact
 UTF-8 JSON before HTTP content coding; the notes hash covers the array including its delimiters.
 Both passes use one explicitly REPEATABLE READ tenant snapshot, bounded note ID/body pages, and a
-fixed non-note envelope. One disclosure per instance is admitted before opening a snapshot;
-overload and a configured pool smaller than two connections use the existing 503 shape.
+fixed non-note envelope. Admission permits two concurrent disclosures per instance and one per
+organization, with no waiting queue; overload and a configured pool smaller than two connections
+use the existing 503 shape before any snapshot. Placement discovery completes in a separate
+control transaction first, keeping the per-disclosure connection peak at two (snapshot plus audit),
+including cross-workspace and unresolved caller contexts. Provision four connections for both
+admission slots, plus ordinary traffic. Pools of two or three admit only one disclosure to retain
+audit capacity; the second request is refused before a snapshot.
+
+The absolute pass-two delivery deadline is
+`connex.data-subject-disclosure.delivery-timeout-ms` (environment
+`CONNEX_DSR_DISCLOSURE_DELIVERY_TIMEOUT_MS`, default `120000`). It is checked before each note
+page read/write and every 8 KiB of output; expiry closes the specific request socket, rolls back
+the snapshot, invalidates the source and releases context/admission. The deployed Tomcat HTTP/1.1
+NIO connector sets `server.tomcat.connection-timeout` (`CONNEX_TOMCAT_CONNECTION_TIMEOUT`, default
+`30s`), which initializes its blocking write timeout. A blocked write can take one such timeout to
+unwind after socket closure: the delivery bound is deadline plus one connector write timeout
+(150 seconds by default). Preparation/preflight time is separate. A live server without the
+cancellable transport hook refuses disclosure before opening the response.
 
 Pass-two failures before commitment clear buffered disclosure bytes and use the existing 503
 shape. After commitment the response stays truncated; no error suffix or automatic closing JSON
 is appended. The writer withholds the final document byte until both passes' counts, digests and
 byte lengths match. Clients must reject incomplete framing, invalid JSON or integrity-header
-mismatches and retry explicitly. Retain raw response bytes for hash verification: the SPA reformats
+mismatches and retry explicitly. Wait for an active same-organization download to end after a 503;
+after deadline expiry, discard the partial download and retry on a connection able to finish within
+the limit. Each retry assembles and audits anew; there is no continuation. Retain raw response bytes for hash verification: the SPA reformats
 its download. See [APPI_DATA_SUBJECT_REQUEST_PROCEDURE.md](../APPI_DATA_SUBJECT_REQUEST_PROCEDURE.md)
 for operator handling.
 

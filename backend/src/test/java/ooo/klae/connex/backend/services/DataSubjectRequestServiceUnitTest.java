@@ -22,6 +22,7 @@ import java.util.function.Supplier;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
@@ -45,6 +46,14 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 @ExtendWith(MockitoExtension.class)
 class DataSubjectRequestServiceUnitTest {
+    private final DataSubjectDisclosureDelivery delivery = new DataSubjectDisclosureDelivery(120_000,
+        org.mockito.Mockito.mock(javax.sql.DataSource.class));
+
+    @AfterEach
+    void closeDelivery() {
+        delivery.close();
+    }
+
     @Mock private DataSubjectRequestControlOperations controlOperations;
     @Mock private DataSubjectDisclosureAccess disclosureAccess;
     @Mock private TenantWorkScope tenantWorkScope;
@@ -85,7 +94,7 @@ class DataSubjectRequestServiceUnitTest {
                 return work.get();
             });
         service = new DataSubjectRequestService(controlOperations, disclosureAccess, tenantWorkScope,
-            disclosureAuditAccess, new DataSubjectDisclosureJsonWriter(new tools.jackson.databind.ObjectMapper()));
+            disclosureAuditAccess, new DataSubjectDisclosureJsonWriter(new tools.jackson.databind.ObjectMapper(), delivery));
     }
 
     @Test
@@ -380,6 +389,51 @@ class DataSubjectRequestServiceUnitTest {
             () -> service.disclosure(3, 9, 7, fingerprint -> java.io.OutputStream.nullOutputStream()));
         verify(disclosureAccess, never()).withSnapshot(anyInt(), anyInt(), anyInt(), anyInt(), any(), any());
         verify(disclosureAuditAccess, never()).record(anyInt(), any(Long.class), anyInt(), anyInt(), any());
+    }
+
+    @Test
+    void anotherOrganizationCanUseTheSecondSlotButTheGlobalAndOrganizationCapsRemainBounded() {
+        prepareDisclosure();
+        var control = controlOperations.prepareDisclosure(3, 9, 7);
+        when(controlOperations.prepareDisclosure(6, 9, 7)).thenReturn(control);
+        when(controlOperations.prepareDisclosure(8, 9, 7)).thenReturn(control);
+        when(disclosureAccess.withSnapshot(org.mockito.ArgumentMatchers.eq(6), anyInt(), anyInt(), anyInt(), any(), any()))
+            .thenAnswer(invocation -> {
+                Function<DataSubjectDisclosureDto, ?> work = invocation.getArgument(5);
+                DataSubjectDisclosureDto disclosure = new DataSubjectDisclosureDto();
+                disclosure.setThirdPartyProvisions(List.of());
+                disclosure.setNotes(new DataSubjectDisclosureNotes(consumer -> {}));
+                return work.apply(disclosure);
+            });
+        service.disclosure(3, 9, 7, fingerprint -> {
+            service.disclosure(6, 9, 7, second -> {
+                assertThrows(ServiceUnavailableException.class,
+                    () -> service.disclosure(3, 9, 7, unused -> java.io.OutputStream.nullOutputStream()));
+                assertThrows(ServiceUnavailableException.class,
+                    () -> service.disclosure(8, 9, 7, unused -> java.io.OutputStream.nullOutputStream()));
+                return java.io.OutputStream.nullOutputStream();
+            });
+            return java.io.OutputStream.nullOutputStream();
+        });
+        verify(disclosureAccess, never()).withSnapshot(org.mockito.ArgumentMatchers.eq(8),
+            anyInt(), anyInt(), anyInt(), any(), any());
+        assertEquals(Map.of(), org.springframework.test.util.ReflectionTestUtils.getField(service, "disclosureOrganizations"));
+    }
+
+    @Test
+    void poolOfTwoRetainsOneAuditConnectionInsteadOfAdmittingTwoSnapshots() {
+        prepareDisclosure();
+        var control = controlOperations.prepareDisclosure(3, 9, 7);
+        when(controlOperations.prepareDisclosure(6, 9, 7)).thenReturn(control);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "maximumPoolSize", 2);
+        service.disclosure(3, 9, 7, fingerprint -> {
+            assertThrows(ServiceUnavailableException.class,
+                () -> service.disclosure(6, 9, 7, unused -> java.io.OutputStream.nullOutputStream()));
+            return java.io.OutputStream.nullOutputStream();
+        });
+        verify(disclosureAccess, never()).withSnapshot(org.mockito.ArgumentMatchers.eq(6),
+            anyInt(), anyInt(), anyInt(), any(), any());
+        assertEquals(Map.of(), org.springframework.test.util.ReflectionTestUtils.getField(service, "disclosureOrganizations"));
     }
 
     private DataSubjectDisclosureDto prepareDisclosure() {

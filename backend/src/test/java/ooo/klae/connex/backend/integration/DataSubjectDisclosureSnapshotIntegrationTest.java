@@ -5,28 +5,42 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertTimeout;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 
 import java.io.ByteArrayOutputStream;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.time.LocalDateTime;
+import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.sql.DataSource;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.mybatis.spring.SqlSessionTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceUtils;
+import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
+
+import com.zaxxer.hikari.HikariDataSource;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -34,17 +48,22 @@ import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.mappers.AuditLogMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.DataSubjectDisclosureAuditAccess;
 import ooo.klae.connex.backend.services.DataSubjectDisclosureJsonWriter;
 import ooo.klae.connex.backend.services.DataSubjectDisclosureReadTransaction;
+import ooo.klae.connex.backend.services.DataSubjectRequestService;
 import ooo.klae.connex.backend.support.AuthenticatedSessions;
+import ooo.klae.connex.backend.support.OwnershipOfferTestFixtures;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /** Proves physical connection and snapshot continuity across an independently committed audit. */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE,
+    properties = {"spring.datasource.hikari.maximum-pool-size=2", "spring.datasource.hikari.minimum-idle=2",
+        "spring.datasource.hikari.connection-timeout=30000"})
 class DataSubjectDisclosureSnapshotIntegrationTest {
     @Autowired private DataSource dataSource;
     @Autowired private JdbcTemplate jdbc;
@@ -57,6 +76,9 @@ class DataSubjectDisclosureSnapshotIntegrationTest {
     @Autowired private DataSubjectDisclosureAuditAccess audit;
     @Autowired private DataSubjectDisclosureJsonWriter writer;
     @Autowired private ObjectMapper mapper;
+    @Autowired private DataSubjectRequestService service;
+    @Autowired private SqlSessionTemplate sqlSession;
+    @MockitoSpyBean private AuditLogMapper auditLogs;
     private Organization org;
     private Workspace workspace;
     private User actor;
@@ -89,11 +111,74 @@ class DataSubjectDisclosureSnapshotIntegrationTest {
     void cleanup() {
         context.clear();
         SecurityContextHolder.clearContext();
+        RequestContextHolder.resetRequestAttributes();
+        jdbc.update("DELETE FROM data_subject_request WHERE org_id = ?", org.getId());
         jdbc.update("DELETE FROM note WHERE workspace_id = ?", workspace.getId());
         jdbc.update("DELETE FROM person WHERE workspace_id = ?", workspace.getId());
         jdbc.update("DELETE FROM workspace WHERE id = ?", workspace.getId());
         jdbc.update("DELETE FROM organization WHERE id = ?", org.getId());
         jdbc.update("DELETE FROM app_user WHERE id = ?", actor.getId());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void actualServiceReleasesPlacementConnectionBeforeSnapshotAndAuditWithAPoolOfTwo(boolean unresolved) throws Exception {
+        HikariDataSource pool = dataSource.unwrap(HikariDataSource.class);
+        assertEquals(2, pool.getMaximumPoolSize());
+        Workspace active = new Workspace();
+        active.setOrgId(org.getId());
+        active.setName("Different active workspace");
+        active.setSlug("dsr-active-" + UUID.randomUUID());
+        workspaces.insert(active);
+        workspaces.addMember(active.getId(), actor.getId(), "owner");
+        jdbc.update("INSERT INTO org_member (org_id, user_id, org_role) VALUES (?, ?, 'owner')", org.getId(), actor.getId());
+        jdbc.update("""
+            INSERT INTO data_subject_request
+              (org_id, request_type, status, requester_name, subject_name, subject_workspace_id,
+               subject_person_id, received_at, identity_verified_at)
+            VALUES (?, 'disclosure', 'received', 'Pool requester', 'Pool subject', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """, org.getId(), workspace.getId(), personId);
+        long requestId = jdbc.queryForObject("SELECT id FROM data_subject_request WHERE org_id = ?", Long.class, org.getId());
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        OwnershipOfferTestFixtures.stepUpApprovedCurrent(jdbc, actor);
+        String catalog = jdbc.queryForObject("SELECT DATABASE()", String.class);
+        if (unresolved) {
+            context.clear();
+        } else {
+            context.set(active.getId(), org.getId(), actor.getId(), "owner", catalog);
+        }
+        AtomicInteger peak = new AtomicInteger();
+        AuditLogMapper realAudit = sqlSession.getMapper(AuditLogMapper.class);
+        doAnswer(invocation -> {
+            peak.accumulateAndGet(pool.getHikariPoolMXBean().getActiveConnections(), Math::max);
+            return realAudit.insert(invocation.getArgument(0));
+        }).when(auditLogs).insert(any());
+        try {
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            assertTimeout(Duration.ofSeconds(20), () -> service.disclosure(org.getId(), requestId, actor.getId(), fingerprint -> {
+                assertEquals(1, pool.getHikariPoolMXBean().getActiveConnections(), "Only the snapshot remains during delivery");
+                try (Connection independent = dataSource.getConnection()) {
+                    assertTrue(auditVisibleOn(independent), "Audit committed before release");
+                } catch (java.sql.SQLException exception) {
+                    throw new IllegalStateException(exception);
+                }
+                return output;
+            }));
+            assertEquals(2, peak.get(), "Snapshot plus audit is the complete per-disclosure connection budget");
+            assertEquals(2, mapper.readTree(output.toByteArray()).path("notes").size());
+            assertEquals(!unresolved, context.isResolved());
+            if (!unresolved) {
+                assertEquals(active.getId(), context.getWorkspaceId());
+                assertEquals("owner", context.getRole());
+                assertEquals(catalog, context.getCatalog());
+            }
+            assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
+            assertEquals(0, pool.getHikariPoolMXBean().getActiveConnections());
+        } finally {
+            context.clear();
+            jdbc.update("DELETE FROM workspace WHERE id = ?", active.getId());
+        }
     }
 
     @Test

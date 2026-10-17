@@ -23,19 +23,23 @@ import ooo.klae.connex.backend.exceptions.DataSubjectDisclosureStreamException;
 @Component
 @RequiredArgsConstructor
 public class DataSubjectDisclosureJsonWriter {
+    /** Bounds the gap between deadline checks even when a single note is large. */
+    static final int DELIVERY_CHECK_BYTES = 8_192;
     private final ObjectMapper objectMapper;
+    private final DataSubjectDisclosureDelivery delivery;
 
     /** Counts and fingerprints a complete representation while discarding every payload byte. */
     public Fingerprint measure(DataSubjectDisclosureDto disclosure) {
-        MeasuringOutput output = new MeasuringOutput(OutputStream.nullOutputStream());
+        MeasuringOutput output = new MeasuringOutput(OutputStream.nullOutputStream(), () -> {});
         serialize(disclosure, output);
         return output.fingerprint();
     }
 
     /** Releases only after the independently committed audit, withholding final JSON completion. */
     public void write(DataSubjectDisclosureDto disclosure, Fingerprint expected, Output target) {
-        try {
-            MeasuringOutput output = new MeasuringOutput(target.open(expected));
+        try (var deadline = delivery.start()) {
+            deadline.check();
+            MeasuringOutput output = new MeasuringOutput(target.open(expected), deadline::check);
             serialize(disclosure, output);
             if (!expected.equals(output.fingerprint())) {
                 throw new IllegalStateException("Disclosure serialization changed between snapshot passes");
@@ -72,6 +76,7 @@ public class DataSubjectDisclosureJsonWriter {
      */
     private static final class MeasuringOutput extends OutputStream implements Observer {
         private final OutputStream target;
+        private final Runnable checkDeadline;
         private final MessageDigest payloadDigest = sha256();
         private final MessageDigest notesDigest = sha256();
         private long byteLength;
@@ -80,8 +85,9 @@ public class DataSubjectDisclosureJsonWriter {
         private boolean inNotes;
         private boolean notesComplete;
 
-        private MeasuringOutput(OutputStream target) {
+        private MeasuringOutput(OutputStream target, Runnable checkDeadline) {
             this.target = target;
+            this.checkDeadline = checkDeadline;
         }
 
         @Override
@@ -92,6 +98,7 @@ public class DataSubjectDisclosureJsonWriter {
 
         @Override
         public void write(byte[] bytes, int offset, int length) throws IOException {
+            checkDeadline.run();
             if (length == 0) {
                 return;
             }
@@ -102,14 +109,30 @@ public class DataSubjectDisclosureJsonWriter {
             byteLength = Math.addExact(byteLength, length);
             if (tail != -1) {
                 target.write(tail);
+                checkDeadline.run();
             }
-            target.write(bytes, offset, length - 1);
-            tail = bytes[offset + length - 1] & 0xff;
+            int remaining = length - 1;
+            while (remaining > 0) {
+                checkDeadline.run();
+                int chunk = Math.min(remaining, DELIVERY_CHECK_BYTES);
+                target.write(bytes, offset, chunk);
+                checkDeadline.run();
+                offset += chunk;
+                remaining -= chunk;
+            }
+            tail = bytes[offset] & 0xff;
         }
 
         @Override
         public void flush() throws IOException {
+            checkDeadline.run();
             target.flush();
+            checkDeadline.run();
+        }
+
+        @Override
+        public void beforePage() {
+            checkDeadline.run();
         }
 
         @Override
@@ -141,9 +164,12 @@ public class DataSubjectDisclosureJsonWriter {
         }
 
         private void complete() throws IOException {
+            checkDeadline.run();
             target.write(tail);
+            checkDeadline.run();
             tail = -1;
             target.flush();
+            checkDeadline.run();
         }
 
         private static MessageDigest sha256() {

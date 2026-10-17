@@ -28,6 +28,7 @@ import org.apache.ibatis.session.SqlSession;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
 import org.mockito.Mock;
@@ -49,6 +50,14 @@ import ooo.klae.connex.backend.mappers.DataSubjectDisclosureMapper;
 
 @ExtendWith(MockitoExtension.class)
 class DataSubjectDisclosureReadTransactionTest {
+    private final DataSubjectDisclosureDelivery delivery = new DataSubjectDisclosureDelivery(120_000,
+        org.mockito.Mockito.mock(javax.sql.DataSource.class));
+
+    @AfterEach
+    void closeDelivery() {
+        delivery.close();
+    }
+
     @Mock private DataSubjectDisclosureMapper dataSubjectDisclosureMapper;
     @Mock private DataSubjectDisclosureMapper lockedMapper;
     @Mock private SqlSessionFactory sqlSessionFactory;
@@ -198,7 +207,7 @@ class DataSubjectDisclosureReadTransactionTest {
         }
 
         JsonNode notes = readTransaction.withSnapshot(4, 5, List.of(4), disclosure -> {
-            var writer = new DataSubjectDisclosureJsonWriter(objectMapper);
+            var writer = new DataSubjectDisclosureJsonWriter(objectMapper, delivery);
             var fingerprint = writer.measure(disclosure);
             var output = new java.io.ByteArrayOutputStream();
             writer.write(disclosure, fingerprint, measured -> output);
@@ -244,7 +253,7 @@ class DataSubjectDisclosureReadTransactionTest {
             });
 
         readTransaction.withSnapshot(4, 5, List.of(4), disclosure -> {
-            var writer = new DataSubjectDisclosureJsonWriter(objectMapper);
+            var writer = new DataSubjectDisclosureJsonWriter(objectMapper, delivery);
             var fingerprint = writer.measure(disclosure);
             writer.write(disclosure, fingerprint, measured -> java.io.OutputStream.nullOutputStream());
             return null;
@@ -278,7 +287,7 @@ class DataSubjectDisclosureReadTransactionTest {
             .thenReturn(List.of(full));
 
         assertThrows(ResourceNotFoundException.class, () -> readTransaction.withSnapshot(4, 5, List.of(4), value -> {
-                new DataSubjectDisclosureJsonWriter(objectMapper).measure(value);
+                new DataSubjectDisclosureJsonWriter(objectMapper, delivery).measure(value);
                 return null;
             }));
     }
@@ -367,7 +376,7 @@ class DataSubjectDisclosureReadTransactionTest {
                     }).toList());
         }
         readTransaction.withSnapshot(4, 5, List.of(4), disclosure -> {
-            var writer = new DataSubjectDisclosureJsonWriter(objectMapper);
+            var writer = new DataSubjectDisclosureJsonWriter(objectMapper, delivery);
             var fingerprint = writer.measure(disclosure);
             assertEquals(count, fingerprint.noteCount());
             writer.write(disclosure, fingerprint, measured -> java.io.OutputStream.nullOutputStream());
@@ -402,7 +411,7 @@ class DataSubjectDisclosureReadTransactionTest {
         };
         when(dataSubjectDisclosureMapper.findNoteIds(4, 5, List.of(4), null)).thenReturn(ids);
         assertThrows(IllegalStateException.class, () -> readTransaction.withSnapshot(4, 5, List.of(4), value -> {
-            new DataSubjectDisclosureJsonWriter(objectMapper).measure(value);
+            new DataSubjectDisclosureJsonWriter(objectMapper, delivery).measure(value);
             return null;
         }));
         verify(dataSubjectDisclosureMapper, never()).findNotePage(anyInt(), anyInt(), anyList(), anyList());
@@ -434,7 +443,7 @@ class DataSubjectDisclosureReadTransactionTest {
             return note;
         }).toList());
         readTransaction.withSnapshot(4, 5, List.of(4), value -> {
-            var writer = new DataSubjectDisclosureJsonWriter(objectMapper);
+            var writer = new DataSubjectDisclosureJsonWriter(objectMapper, delivery);
             var measured = writer.measure(value);
             assertEquals(3, measured.noteCount());
             writer.write(value, measured, fingerprint -> java.io.OutputStream.nullOutputStream());

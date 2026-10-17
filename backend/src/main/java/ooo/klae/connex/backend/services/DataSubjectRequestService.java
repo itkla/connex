@@ -2,11 +2,12 @@ package ooo.klae.connex.backend.services;
 
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
-import java.util.concurrent.Semaphore;
 import java.util.function.Supplier;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -31,8 +32,10 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
 @RequiredArgsConstructor
 public class DataSubjectRequestService {
     static final int DISCLOSURE_AUDIT_LIMIT = 1_000;
-    /** One retained snapshot may borrow a second connection for its independent audit. */
-    static final int MAX_CONCURRENT_DISCLOSURES = 1;
+    /** Bounds retained snapshots; each disclosure may borrow a second connection for its audit. */
+    static final int MAX_CONCURRENT_DISCLOSURES = 2;
+    /** Reserves capacity for another organization even while one client downloads slowly. */
+    static final int MAX_CONCURRENT_DISCLOSURES_PER_ORGANIZATION = 1;
     private static final int MIN_DISCLOSURE_POOL_SIZE = 2;
     private static final Set<String> REQUEST_TYPES = Set.of(
         "disclosure", "correction", "cease_use", "cease_provision");
@@ -44,7 +47,7 @@ public class DataSubjectRequestService {
     private final TenantWorkScope tenantWorkScope;
     private final DataSubjectDisclosureAuditAccess disclosureAuditAccess;
     private final DataSubjectDisclosureJsonWriter disclosureJsonWriter;
-    private final Semaphore disclosureAdmission = new Semaphore(MAX_CONCURRENT_DISCLOSURES);
+    private final Map<Integer, Integer> disclosureOrganizations = new HashMap<>();
     @Value("${spring.datasource.hikari.maximum-pool-size:10}")
     private int maximumPoolSize = 10;
 
@@ -125,7 +128,7 @@ public class DataSubjectRequestService {
             DataSubjectDisclosureJsonWriter.Output output) {
         DisclosureControlData control = tenantWorkScope.unroutedRead(
             () -> controlOperations.prepareDisclosure(orgId, requestId, actorId));
-        if (maximumPoolSize < MIN_DISCLOSURE_POOL_SIZE || !disclosureAdmission.tryAcquire()) {
+        if (maximumPoolSize < MIN_DISCLOSURE_POOL_SIZE || !acquireDisclosure(orgId)) {
             throw new ServiceUnavailableException("Disclosure capacity is unavailable");
         }
         try {
@@ -145,8 +148,24 @@ public class DataSubjectRequestService {
                     return null;
                 });
         } finally {
-            disclosureAdmission.release();
+            releaseDisclosure(orgId);
         }
+    }
+
+    /** Tracks only admitted organizations, so the key map cannot exceed the global capacity. */
+    private synchronized boolean acquireDisclosure(int orgId) {
+        int organizationCount = disclosureOrganizations.getOrDefault(orgId, 0);
+        int capacity = Math.min(MAX_CONCURRENT_DISCLOSURES, maximumPoolSize / MIN_DISCLOSURE_POOL_SIZE);
+        if (organizationCount >= MAX_CONCURRENT_DISCLOSURES_PER_ORGANIZATION
+                || disclosureOrganizations.size() >= capacity) {
+            return false;
+        }
+        disclosureOrganizations.put(orgId, organizationCount + 1);
+        return true;
+    }
+
+    private synchronized void releaseDisclosure(int orgId) {
+        disclosureOrganizations.remove(orgId);
     }
 
     private void enrichDisclosure(DataSubjectDisclosureDto disclosure, DisclosureControlData control,

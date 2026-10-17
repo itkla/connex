@@ -135,7 +135,7 @@ public class DataSubjectDisclosureReadTransaction {
     public <T> T withSnapshot(int workspaceId, int personId, List<Integer> workspaceIds,
             Function<DataSubjectDisclosureDto, T> work) {
         try (DataSubjectDisclosureNotes notes = new DataSubjectDisclosureNotes(
-                consumer -> forEachNote(workspaceId, personId, workspaceIds, consumer))) {
+                (consumer, beforePage) -> forEachNote(workspaceId, personId, workspaceIds, consumer, beforePage))) {
             DataSubjectDisclosureDto disclosure = assemble(workspaceId, personId, workspaceIds);
             disclosure.setNotes(notes);
             return work.apply(disclosure);
@@ -143,16 +143,17 @@ public class DataSubjectDisclosureReadTransaction {
     }
 
     private void forEachNote(int workspaceId, int personId, List<Integer> workspaceIds,
-            Consumer<NoteDto> consumer) {
+            Consumer<NoteDto> consumer, Runnable beforePage) {
         Integer afterId = null;
         do {
-            afterId = appendNextNotePage(workspaceId, personId, workspaceIds, afterId, consumer);
+            beforePage.run();
+            afterId = appendNextNotePage(workspaceId, personId, workspaceIds, afterId, consumer, beforePage);
         } while (afterId != null);
     }
 
     /** Each helper returns before the next ID or body page can be allocated. */
     private Integer appendNextNotePage(int workspaceId, int personId, List<Integer> workspaceIds,
-            Integer afterId, Consumer<NoteDto> consumer) {
+            Integer afterId, Consumer<NoteDto> consumer, Runnable beforePage) {
         List<Integer> noteIds = dataSubjectDisclosureMapper.findNoteIds(
             workspaceId, personId, workspaceIds, afterId);
         if (noteIds.isEmpty()) {
@@ -168,11 +169,13 @@ public class DataSubjectDisclosureReadTransaction {
             }
             previous = noteId;
         }
+        beforePage.run();
         List<NoteDto> notes = dataSubjectDisclosureMapper.findNotePage(
             workspaceId, personId, workspaceIds, noteIds);
         if (!notes.stream().map(NoteDto::getId).toList().equals(noteIds)) {
             throw new ResourceNotFoundException("Disclosure note no longer available");
         }
+        beforePage.run();
         notes.forEach(consumer);
         return noteIds.getLast();
     }

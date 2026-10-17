@@ -21,6 +21,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonRawValue;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterEach;
 import org.springframework.beans.BeanUtils;
 
 import tools.jackson.core.JsonGenerator;
@@ -38,6 +39,14 @@ import ooo.klae.connex.backend.exceptions.DataSubjectDisclosureStreamException;
 
 /** Pins legacy bytes and failure framing independently of the HTTP and database layers. */
 class DataSubjectDisclosureJsonWriterTest {
+    private final DataSubjectDisclosureDelivery delivery = new DataSubjectDisclosureDelivery(120_000,
+        org.mockito.Mockito.mock(javax.sql.DataSource.class));
+
+    @AfterEach
+    void closeDelivery() {
+        delivery.close();
+    }
+
     @Test
     void bothPassesMatchLegacyBytesIncludingPropertyOrderUnicodeEscapesDatesAndNulls() throws Exception {
         for (ObjectMapper mapper : List.of(new ObjectMapper(), JsonMapper.builder()
@@ -55,7 +64,7 @@ class DataSubjectDisclosureJsonWriterTest {
             BeanUtils.copyProperties(disclosure, legacy, "notes");
             legacy.setNotes(mapper.writeValueAsString(List.of(note)));
             byte[] expected = mapper.writeValueAsBytes(legacy);
-            var writer = new DataSubjectDisclosureJsonWriter(mapper);
+            var writer = new DataSubjectDisclosureJsonWriter(mapper, delivery);
             var measured = writer.measure(disclosure);
             ByteArrayOutputStream output = new ByteArrayOutputStream();
             writer.write(disclosure, measured, fingerprint -> output);
@@ -72,7 +81,7 @@ class DataSubjectDisclosureJsonWriterTest {
 
     @Test
     void emptyArrayHasTheOrdinaryArrayFingerprint() throws Exception {
-        var writer = new DataSubjectDisclosureJsonWriter(new ObjectMapper());
+        var writer = new DataSubjectDisclosureJsonWriter(new ObjectMapper(), delivery);
         var measured = writer.measure(fixture());
         assertEquals(0, measured.noteCount());
         assertEquals(hash("[]".getBytes(StandardCharsets.UTF_8)), measured.notesSha256());
@@ -102,7 +111,7 @@ class DataSubjectDisclosureJsonWriterTest {
                 }
             }
         });
-        var writer = new DataSubjectDisclosureJsonWriter(JsonMapper.builder().addModule(module).build());
+        var writer = new DataSubjectDisclosureJsonWriter(JsonMapper.builder().addModule(module).build(), delivery);
         DataSubjectDisclosureDto disclosure = fixture();
         disclosure.setNotes(new DataSubjectDisclosureNotes(consumer -> {
             for (int page = 0; page < 5; page++) {
@@ -132,7 +141,7 @@ class DataSubjectDisclosureJsonWriterTest {
     @Test
     void mismatchedSecondPassWithholdsTheFinalDelimiterAndDoesNotCloseTarget() {
         var mapper = new ObjectMapper();
-        var writer = new DataSubjectDisclosureJsonWriter(mapper);
+        var writer = new DataSubjectDisclosureJsonWriter(mapper, delivery);
         DataSubjectDisclosureDto disclosure = fixture();
         AtomicInteger pass = new AtomicInteger();
         disclosure.setNotes(new DataSubjectDisclosureNotes(consumer -> consumer.accept(note(pass.incrementAndGet()))));
@@ -151,7 +160,7 @@ class DataSubjectDisclosureJsonWriterTest {
     @Test
     void serializationFailureNeverAutoCompletesContentOrAppendsAnError() {
         var mapper = new ObjectMapper();
-        var writer = new DataSubjectDisclosureJsonWriter(mapper);
+        var writer = new DataSubjectDisclosureJsonWriter(mapper, delivery);
         DataSubjectDisclosureDto disclosure = fixture();
         AtomicInteger passes = new AtomicInteger();
         disclosure.setNotes(new DataSubjectDisclosureNotes(consumer -> {
@@ -173,7 +182,7 @@ class DataSubjectDisclosureJsonWriterTest {
 
     @Test
     void targetFailurePropagatesWithoutClosingTheTarget() {
-        var writer = new DataSubjectDisclosureJsonWriter(new ObjectMapper());
+        var writer = new DataSubjectDisclosureJsonWriter(new ObjectMapper(), delivery);
         DataSubjectDisclosureDto disclosure = fixture();
         var measured = writer.measure(disclosure);
         AtomicInteger closes = new AtomicInteger();

@@ -14,9 +14,21 @@ import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.NoteDto;
 @JsonSerialize(using = DataSubjectDisclosureNotes.Serializer.class)
 public final class DataSubjectDisclosureNotes implements AutoCloseable {
     private final Thread owner = Thread.currentThread();
-    private Consumer<Consumer<NoteDto>> source;
+    private PageSource source;
 
     public DataSubjectDisclosureNotes(Consumer<Consumer<NoteDto>> source) {
+        this(pageSource(source));
+    }
+
+    private static PageSource pageSource(Consumer<Consumer<NoteDto>> source) {
+        Objects.requireNonNull(source);
+        return (consumer, beforePage) -> {
+            beforePage.run();
+            source.accept(consumer);
+        };
+    }
+
+    public DataSubjectDisclosureNotes(PageSource source) {
         this.source = Objects.requireNonNull(source);
     }
 
@@ -27,9 +39,16 @@ public final class DataSubjectDisclosureNotes implements AutoCloseable {
 
     /** Observes the exact UTF-8 array boundaries after the generator has flushed its prefix. */
     public interface Observer {
+        void beforePage();
         void beginNotes();
         void noteWritten();
         void endNotes();
+    }
+
+    /** Invokes the boundary before reading and before writing each bounded page. */
+    @FunctionalInterface
+    public interface PageSource {
+        void accept(Consumer<NoteDto> consumer, Runnable beforePage);
     }
 
     /** Serializes the ordinary notes array without retaining notes or serialized payloads. */
@@ -50,6 +69,10 @@ public final class DataSubjectDisclosureNotes implements AutoCloseable {
                 context.writeValue(generator, note);
                 if (observer != null) {
                     observer.noteWritten();
+                }
+            }, () -> {
+                if (observer != null) {
+                    observer.beforePage();
                 }
             });
             generator.writeEndArray();

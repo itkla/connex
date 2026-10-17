@@ -21,6 +21,8 @@ class DataSubjectDisclosureStreamingArchTest {
                 + "|readAllBytes|StreamingResponseBody|CompletableFuture|Executor|@Async|supplyAsync|parallelStream");
         for (String file : List.of("controllers/DataSubjectRequestController.java",
                 "services/DataSubjectRequestService.java", "services/DataSubjectDisclosureAccess.java",
+                "services/DataSubjectDisclosurePlacementRead.java", "services/DataSubjectDisclosureAuditAccess.java",
+                "config/DataSubjectDisclosureTransportConfiguration.java",
                 "services/DataSubjectDisclosureReadTransaction.java", "services/DataSubjectDisclosureJsonWriter.java",
                 "dto/DataSubjectDisclosureDto.java", "dto/DataSubjectDisclosureNotes.java")) {
             String source = Files.readString(JAVA.resolve(file));
@@ -31,11 +33,24 @@ class DataSubjectDisclosureStreamingArchTest {
         assertTrue(read.contains("isolation = Isolation.REPEATABLE_READ"));
         assertTrue(read.contains("try (DataSubjectDisclosureNotes notes"));
         String service = Files.readString(JAVA.resolve("services/DataSubjectRequestService.java"));
-        assertTrue(service.contains("MAX_CONCURRENT_DISCLOSURES = 1"));
-        assertTrue(service.contains("disclosureAdmission.tryAcquire()"));
-        assertTrue(service.indexOf("disclosureAdmission.tryAcquire()") < service.indexOf("disclosureAccess.withSnapshot"));
+        assertTrue(service.contains("MAX_CONCURRENT_DISCLOSURES = 2"));
+        assertTrue(service.contains("MAX_CONCURRENT_DISCLOSURES_PER_ORGANIZATION = 1"));
+        assertTrue(service.contains("!acquireDisclosure(orgId)"));
+        assertTrue(service.indexOf("!acquireDisclosure(orgId)") < service.indexOf("disclosureAccess.withSnapshot"));
+        String access = Files.readString(JAVA.resolve("services/DataSubjectDisclosureAccess.java"));
+        assertTrue(access.indexOf("placementRead.resolve(") < access.indexOf("readTransaction.withSnapshot("));
+        String delivery = Files.readString(JAVA.resolve("services/DataSubjectDisclosureDelivery.java"));
+        assertFalse(Pattern.compile("StringWriter|ByteArrayOutputStream|StringBuilder|StringBuffer|writeValueAs(?:String|Bytes)"
+            + "|readAllBytes|StreamingResponseBody|CompletableFuture|@Async|supplyAsync|parallelStream")
+            .matcher(delivery).find());
+        assertTrue(delivery.contains("timer.schedule(this::expire,"));
+        assertTrue(delivery.contains("timer.setRemoveOnCancelPolicy(true)"));
+        assertTrue(delivery.contains("Math.min(timeoutMillis, connection.getTimeToLiveInMillis())"));
+        assertTrue(delivery.contains("connection.setTimeoutInMillis(remainingMillis)"));
         String writer = Files.readString(JAVA.resolve("services/DataSubjectDisclosureJsonWriter.java"));
         assertTrue(writer.contains("without(StreamWriteFeature.AUTO_CLOSE_CONTENT)"));
         assertTrue(writer.contains("without(StreamWriteFeature.AUTO_CLOSE_TARGET)"));
+        assertTrue(writer.contains("DELIVERY_CHECK_BYTES = 8_192"));
+        assertTrue(writer.contains("try (var deadline = delivery.start())"));
     }
 }

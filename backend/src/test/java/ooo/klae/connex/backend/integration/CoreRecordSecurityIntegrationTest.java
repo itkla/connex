@@ -148,6 +148,7 @@ class CoreRecordSecurityIntegrationTest {
     @Autowired private ScoringService scoringService;
     @Autowired private StatementProbe statementProbe;
     @Autowired private DataSubjectDisclosureReadTransaction disclosureReadTransaction;
+    @Autowired private ooo.klae.connex.backend.services.DataSubjectDisclosureJsonWriter disclosureJsonWriter;
     @Autowired private DataSubjectDisclosureMapper disclosureMapper;
     @Autowired private PipelineMapper pipelineMapper;
     @MockitoSpyBean private TaskMapper taskMapper;
@@ -226,7 +227,7 @@ class CoreRecordSecurityIntegrationTest {
 
         JsonNode notes = disclosureReadTransaction.withSnapshot(
             workspace.getId(), subject.getId(), workspaceIds, disclosure -> {
-                var writer = new ooo.klae.connex.backend.services.DataSubjectDisclosureJsonWriter(objectMapper);
+                var writer = disclosureJsonWriter;
                 var fingerprint = writer.measure(disclosure);
                 var output = new java.io.ByteArrayOutputStream();
                 writer.write(disclosure, fingerprint, measured -> output);

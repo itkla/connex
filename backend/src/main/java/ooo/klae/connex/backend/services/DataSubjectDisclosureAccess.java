@@ -21,6 +21,7 @@ public class DataSubjectDisclosureAccess {
     private final TenantWorkScope tenantWorkScope;
     private final TenantContext tenantContext;
     private final DataSubjectDisclosureReadTransaction readTransaction;
+    private final DataSubjectDisclosurePlacementRead placementRead;
 
     public boolean subjectPersonExists(int orgId, int actorId, int workspaceId, int personId) {
         try {
@@ -68,8 +69,10 @@ public class DataSubjectDisclosureAccess {
 
     public <T> T withSnapshot(int orgId, int actorId, int workspaceId, int personId,
             List<Integer> workspaceIds, Function<DataSubjectDisclosureDto, T> work) {
-        return inSubjectWorkspace(orgId, actorId, workspaceId,
-            () -> readTransaction.withSnapshot(workspaceId, personId, workspaceIds, work));
+        var placement = tenantWorkScope.unroutedRead(() -> placementRead.resolve(orgId, workspaceId));
+        return tenantWorkScope.withCatalog(placement.catalog(),
+            () -> withTenantContext(workspaceId, placement.orgId(), actorId, placement.catalog(),
+                () -> readTransaction.withSnapshot(workspaceId, personId, workspaceIds, work)));
     }
 
     private <T> T inSubjectWorkspace(int expectedOrgId, int actorId, int workspaceId, Supplier<T> work) {

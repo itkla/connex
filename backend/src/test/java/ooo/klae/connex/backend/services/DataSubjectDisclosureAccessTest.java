@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.function.BiFunction;
+import java.util.function.Supplier;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.AfterEach;
@@ -22,6 +23,7 @@ import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.tenant.ControlPlaneRead;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
@@ -29,6 +31,7 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
 class DataSubjectDisclosureAccessTest {
     @Mock private TenantWorkScope tenantWorkScope;
     @Mock private DataSubjectDisclosureReadTransaction readTransaction;
+    @Mock private DataSubjectDisclosurePlacementRead placementRead;
 
     private final TenantContext tenantContext = new TenantContext();
     private DataSubjectDisclosureAccess access;
@@ -39,7 +42,7 @@ class DataSubjectDisclosureAccessTest {
         access = new DataSubjectDisclosureAccess(
             tenantWorkScope,
             tenantContext,
-            readTransaction);
+            readTransaction, placementRead);
     }
 
     @AfterEach
@@ -71,7 +74,11 @@ class DataSubjectDisclosureAccessTest {
 
     @Test
     void rejectsAPlacementWhoseOrganizationDoesNotMatchTheControlLink() {
-        routeWorkspace(4, 8, "cnx_foreign");
+        when(tenantWorkScope.unroutedRead(any())).thenAnswer(invocation -> {
+            ControlPlaneRead<?> read = invocation.getArgument(0);
+            return read.read();
+        });
+        when(placementRead.resolve(7, 4)).thenThrow(new ResourceNotFoundException("Foreign workspace"));
 
         assertThrows(ResourceNotFoundException.class,
             () -> access.withSnapshot(7, 9, 4, 5, List.of(4), value -> null));
@@ -80,7 +87,7 @@ class DataSubjectDisclosureAccessTest {
 
     @Test
     void restoresAnUnresolvedCallerWhenTenantAssemblyThrows() {
-        routeWorkspace(4, 7, "cnx_subject");
+        routeSnapshot();
         when(readTransaction.withSnapshot(org.mockito.ArgumentMatchers.eq(4),
                 org.mockito.ArgumentMatchers.eq(5), org.mockito.ArgumentMatchers.eq(List.of(4)), any()))
             .thenThrow(new IllegalArgumentException("broken tenant row"));
@@ -157,7 +164,7 @@ class DataSubjectDisclosureAccessTest {
     @Test
     void snapshotCallbackKeepsSubjectContextUntilSynchronousWorkFinishes() {
         tenantContext.set(1, 2, 3, "member", "cnx_previous");
-        routeWorkspace(4, 7, "cnx_subject");
+        routeSnapshot();
         when(readTransaction.withSnapshot(org.mockito.ArgumentMatchers.eq(4),
                 org.mockito.ArgumentMatchers.eq(5), org.mockito.ArgumentMatchers.eq(List.of(4)), any()))
             .thenAnswer(invocation -> {
@@ -178,6 +185,19 @@ class DataSubjectDisclosureAccessTest {
         assertEquals(3, tenantContext.getUserId());
         assertEquals("member", tenantContext.getRole());
         assertEquals("cnx_previous", tenantContext.getCatalog());
+    }
+
+    private void routeSnapshot() {
+        when(tenantWorkScope.unroutedRead(any())).thenAnswer(invocation -> {
+            ControlPlaneRead<?> read = invocation.getArgument(0);
+            return read.read();
+        });
+        when(placementRead.resolve(7, 4)).thenReturn(new DataSubjectDisclosurePlacementRead.Placement(7, "cnx_subject"));
+        when(tenantWorkScope.withCatalog(org.mockito.ArgumentMatchers.eq("cnx_subject"), any()))
+            .thenAnswer(invocation -> {
+                Supplier<?> work = invocation.getArgument(1);
+                return work.get();
+            });
     }
 
     private void routeWorkspace(int workspaceId, int orgId, String catalog) {

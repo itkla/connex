@@ -75,9 +75,24 @@ independently before the second pass writes the same JSON directly to the respon
 sections remain materialized, and an individual note/page can still be large. Large exports may be
 slow. There is no continuation or page parameter, and exports are never silently shortened.
 
-One disclosure per serving instance is admitted at a time; excess requests receive the existing
-503 response before opening a snapshot. The connection pool must support at least two connections,
-because the snapshot retains its connection while the independent audit borrows another.
+Each serving instance admits at most two concurrent disclosures, with at most one per organization.
+Admission does not queue; excess requests receive the existing 503 response before opening a
+snapshot. Placement discovery finishes in a separate short control read first. One disclosure
+uses at most two connections (snapshot plus independent audit); provision four for both slots,
+plus capacity for ordinary traffic. Pools of two or three admit only one disclosure, retaining
+audit capacity; a pool smaller than two is refused before the snapshot.
+
+Pass-two delivery has an absolute 120-second deadline, configured by
+`connex.data-subject-disclosure.delivery-timeout-ms`
+(`CONNEX_DSR_DISCLOSURE_DELIVERY_TIMEOUT_MS`, default `120000`). Page boundaries and every 8 KiB
+of output check it; a deadline task closes the request's socket even when the client trickles
+bytes. The deployed Tomcat NIO connector explicitly sets `server.tomcat.connection-timeout`
+(`CONNEX_TOMCAT_CONNECTION_TIMEOUT`, default `30s`), which also initializes its blocking write
+timeout. The delivery bound is the deadline plus one connector blocking-write timeout: 150 seconds
+with defaults, before normal cleanup completes. On expiry the read transaction rolls back, the
+note source is invalidated, context is restored and admission is released. This is a delivery
+bound; preparation and preflight precede it. The supported deployment uses HTTP/1.1 from Caddy
+to Tomcat; disclosure fails closed on a live server without its cancellation hook.
 
 Retain the raw response and the `X-Disclosure-Note-Count`, `X-Disclosure-Notes-SHA256`,
 `X-Disclosure-Byte-Length`, and `X-Disclosure-SHA256` headers when checking completeness. Version-one
@@ -90,7 +105,10 @@ Reject incomplete HTTP framing, invalid JSON, byte-length mismatch, or digest/co
 committed interrupted response is left truncated: writer cleanup does not append closing delimiters
 or an error suffix. A durable audit records assembly and an authorized release attempt, not confirmed
 client receipt. Discard an incomplete download and retry explicitly; each retry assembles and audits
-again. There is no automatic network/503 retry.
+again. For overload, wait for the organization's active download to finish or expire before
+retrying. For deadline expiry, use a connection that can finish within the configured limit; an
+operator may adjust the limit with its resource budget in mind. There is no automatic network/503
+retry or continuation token.
 
 Audience-export evidence includes exports by other workspaces in the request's organization that
 held a shared subject, even after the standing share is revoked. Audience-export member lists are
