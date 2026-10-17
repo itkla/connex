@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
@@ -37,6 +39,7 @@ import tools.jackson.databind.ObjectMapper;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.PersonDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.NoteDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.LifecycleTransitionDto;
@@ -59,8 +62,7 @@ class DataSubjectDisclosureReadTransactionTest {
     void setUp() {
         readTransaction = new DataSubjectDisclosureReadTransaction(
             dataSubjectDisclosureMapper,
-            sqlSessionFactory,
-            objectMapper);
+            sqlSessionFactory);
         lenient().when(sqlSessionFactory.openSession(false)).thenReturn(sqlSession);
         lenient().when(sqlSession.getConnection()).thenReturn(connection);
         lenient().when(sqlSession.getMapper(DataSubjectDisclosureMapper.class))
@@ -179,7 +181,11 @@ class DataSubjectDisclosureReadTransactionTest {
     void disclosureSerializesEveryNoteAcrossBoundedPages() {
         when(dataSubjectDisclosureMapper.findPerson(4, 5, List.of(4))).thenReturn(new PersonDto());
         List<Integer> noteIds = IntStream.rangeClosed(1, 250).boxed().toList();
-        when(dataSubjectDisclosureMapper.findNoteIds(4, 5, List.of(4))).thenReturn(noteIds);
+        when(dataSubjectDisclosureMapper.findNoteIds(eq(4), eq(5), eq(List.of(4)), any()))
+            .thenAnswer(invocation -> {
+                Integer afterId = invocation.getArgument(3);
+                return noteIds.stream().filter(id -> afterId == null || id > afterId).limit(100).toList();
+            });
         for (int start = 0; start < noteIds.size(); start += 100) {
             List<Integer> pageIds = noteIds.subList(start, Math.min(start + 100, noteIds.size()));
             List<NoteDto> page = pageIds.stream().map(id -> {
@@ -191,8 +197,13 @@ class DataSubjectDisclosureReadTransactionTest {
             when(dataSubjectDisclosureMapper.findNotePage(4, 5, List.of(4), pageIds)).thenReturn(page);
         }
 
-        JsonNode notes = objectMapper.readTree(objectMapper.writeValueAsString(
-            readTransaction.assemble(4, 5, List.of(4)))).path("notes");
+        JsonNode notes = readTransaction.withSnapshot(4, 5, List.of(4), disclosure -> {
+            var writer = new DataSubjectDisclosureJsonWriter(objectMapper);
+            var fingerprint = writer.measure(disclosure);
+            var output = new java.io.ByteArrayOutputStream();
+            writer.write(disclosure, fingerprint, measured -> output);
+            return objectMapper.readTree(output.toByteArray()).path("notes");
+        });
 
         assertEquals(250, notes.size());
         for (int index = 0; index < 250; index++) {
@@ -200,19 +211,25 @@ class DataSubjectDisclosureReadTransactionTest {
             assertEquals("Complete \"disclosure\"\n内容 " + (index + 1) + "x".repeat(600),
                 notes.get(index).path("content").asString());
         }
-        verify(dataSubjectDisclosureMapper).findNoteIds(4, 5, List.of(4));
-        verify(dataSubjectDisclosureMapper, times(3)).findNotePage(eq(4), eq(5), eq(List.of(4)), anyList());
+        verify(dataSubjectDisclosureMapper, times(2)).findNoteIds(4, 5, List.of(4), null);
+        verify(dataSubjectDisclosureMapper, times(6)).findNotePage(eq(4), eq(5), eq(List.of(4)), anyList());
     }
 
     @Test
     void disclosureRetainsAtMostOnePageOfNoteBodies() {
         when(dataSubjectDisclosureMapper.findPerson(4, 5, List.of(4))).thenReturn(new PersonDto());
         List<Integer> noteIds = IntStream.rangeClosed(1, 250).boxed().toList();
-        when(dataSubjectDisclosureMapper.findNoteIds(4, 5, List.of(4))).thenReturn(noteIds);
+        when(dataSubjectDisclosureMapper.findNoteIds(eq(4), eq(5), eq(List.of(4)), any()))
+            .thenAnswer(invocation -> {
+                Integer afterId = invocation.getArgument(3);
+                return noteIds.stream().filter(id -> afterId == null || id > afterId).limit(100).toList();
+            });
         List<WeakReference<List<NoteDto>>> issuedPages = new ArrayList<>();
+        List<WeakReference<NoteDto>> issuedNotes = new ArrayList<>();
         when(dataSubjectDisclosureMapper.findNotePage(eq(4), eq(5), eq(List.of(4)), anyList()))
             .thenAnswer(invocation -> {
                 issuedPages.forEach(DataSubjectDisclosureReadTransactionTest::assertPageWasReleased);
+                issuedNotes.forEach(DataSubjectDisclosureReadTransactionTest::assertPageWasReleased);
                 List<Integer> pageIds = invocation.getArgument(3);
                 List<NoteDto> page = new ArrayList<>();
                 for (int noteId : pageIds) {
@@ -220,14 +237,22 @@ class DataSubjectDisclosureReadTransactionTest {
                     note.setId(noteId);
                     note.setContent("Subject note body ".repeat(512));
                     page.add(note);
+                    issuedNotes.add(new WeakReference<>(note));
                 }
                 issuedPages.add(new WeakReference<>(page));
                 return page;
             });
 
-        readTransaction.assemble(4, 5, List.of(4));
+        readTransaction.withSnapshot(4, 5, List.of(4), disclosure -> {
+            var writer = new DataSubjectDisclosureJsonWriter(objectMapper);
+            var fingerprint = writer.measure(disclosure);
+            writer.write(disclosure, fingerprint, measured -> java.io.OutputStream.nullOutputStream());
+            return null;
+        });
 
-        assertEquals(3, issuedPages.size());
+        assertEquals(6, issuedPages.size());
+        assertEquals(500, issuedNotes.size());
+        issuedNotes.forEach(DataSubjectDisclosureReadTransactionTest::assertPageWasReleased);
         issuedPages.forEach(DataSubjectDisclosureReadTransactionTest::assertPageWasReleased);
     }
 
@@ -235,11 +260,11 @@ class DataSubjectDisclosureReadTransactionTest {
      * Fails unless the supplied note page has become unreachable, so peak retention stays at one
      * page of note objects rather than the whole corpus.
      */
-    private static void assertPageWasReleased(WeakReference<List<NoteDto>> page) {
+    private static void assertPageWasReleased(WeakReference<?> page) {
         for (int attempt = 0; attempt < 20 && page.get() != null; attempt++) {
             System.gc();
         }
-        assertNull(page.get(), "A note page must not outlive its own write into the payload");
+        assertNull(page.get(), "A note page or note must not outlive its write in the current pass");
     }
 
     @Test
@@ -248,18 +273,23 @@ class DataSubjectDisclosureReadTransactionTest {
         NoteDto full = new NoteDto();
         full.setId(7);
         full.setContent("Complete disclosure content");
-        when(dataSubjectDisclosureMapper.findNoteIds(4, 5, List.of(4))).thenReturn(List.of(7, 8));
+        when(dataSubjectDisclosureMapper.findNoteIds(4, 5, List.of(4), null)).thenReturn(List.of(7, 8));
         when(dataSubjectDisclosureMapper.findNotePage(4, 5, List.of(4), List.of(7, 8)))
             .thenReturn(List.of(full));
 
-        assertThrows(ResourceNotFoundException.class, () -> readTransaction.assemble(4, 5, List.of(4)));
+        assertThrows(ResourceNotFoundException.class, () -> readTransaction.withSnapshot(4, 5, List.of(4), value -> {
+                new DataSubjectDisclosureJsonWriter(objectMapper).measure(value);
+                return null;
+            }));
     }
 
     @Test
     void disclosureWithoutNotesSkipsBodyQueries() {
         when(dataSubjectDisclosureMapper.findPerson(4, 5, List.of(4))).thenReturn(new PersonDto());
 
-        assertEquals("[]", readTransaction.assemble(4, 5, List.of(4)).getNotes());
+        int count = readTransaction.withSnapshot(4, 5, List.of(4), value ->
+            objectMapper.readTree(objectMapper.writeValueAsString(value)).path("notes").size());
+        assertEquals(0, count);
         verify(dataSubjectDisclosureMapper, never()).findNotePage(anyInt(), anyInt(), anyList(), anyList());
     }
 
@@ -286,7 +316,7 @@ class DataSubjectDisclosureReadTransactionTest {
         when(dataSubjectDisclosureMapper.findLifecycleHistory(4, 5, List.of(4, 6)))
             .thenReturn(List.of());
 
-        var disclosure = readTransaction.assemble(4, 5, List.of(4, 6));
+        var disclosure = readTransaction.withSnapshot(4, 5, List.of(4, 6), value -> value);
 
         assertEquals(1, disclosure.getRecordCommentThreads().size());
         assertEquals(List.of(21L, 22L), disclosure.getRecordCommentThreads().getFirst()
@@ -312,9 +342,105 @@ class DataSubjectDisclosureReadTransactionTest {
         when(dataSubjectDisclosureMapper.findLifecycleHistory(4, 5, List.of(4)))
             .thenReturn(List.of(transition));
 
-        var disclosure = readTransaction.assemble(4, 5, List.of(4));
+        var disclosure = readTransaction.withSnapshot(4, 5, List.of(4), value -> value);
 
         assertEquals("other", disclosure.getPerson().getDisqualifiedReasonLabel());
         assertEquals("ÖTHER", disclosure.getLifecycleHistory().getFirst().getReasonLabel());
     }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {0, 100, 101})
+    void bothPassesTraverseEmptyExactAndPartialPages(int count) {
+        when(dataSubjectDisclosureMapper.findPerson(4, 5, List.of(4))).thenReturn(new PersonDto());
+        when(dataSubjectDisclosureMapper.findNoteIds(eq(4), eq(5), eq(List.of(4)), any()))
+            .thenAnswer(invocation -> {
+                Integer cursor = invocation.getArgument(3);
+                return IntStream.rangeClosed(1, count).boxed()
+                    .filter(id -> cursor == null || id > cursor).limit(100).toList();
+            });
+        if (count > 0) {
+            when(dataSubjectDisclosureMapper.findNotePage(eq(4), eq(5), eq(List.of(4)), anyList()))
+                .thenAnswer(invocation -> invocation.<List<Integer>>getArgument(3)
+                    .stream().map(id -> {
+                        NoteDto note = new NoteDto();
+                        note.setId(id);
+                        return note;
+                    }).toList());
+        }
+        readTransaction.withSnapshot(4, 5, List.of(4), disclosure -> {
+            var writer = new DataSubjectDisclosureJsonWriter(objectMapper);
+            var fingerprint = writer.measure(disclosure);
+            assertEquals(count, fingerprint.noteCount());
+            writer.write(disclosure, fingerprint, measured -> java.io.OutputStream.nullOutputStream());
+            return null;
+        });
+        verify(dataSubjectDisclosureMapper, times(2 * ((count + 99) / 100)))
+            .findNotePage(eq(4), eq(5), eq(List.of(4)), anyList());
+    }
+
+    @Test
+    void noteSourceIsInvalidatedAfterSuccessAndFailure() {
+        when(dataSubjectDisclosureMapper.findPerson(4, 5, List.of(4))).thenReturn(new PersonDto());
+        DataSubjectDisclosureDto escaped = readTransaction.withSnapshot(4, 5, List.of(4), value -> value);
+        assertThrows(RuntimeException.class, () -> objectMapper.writeValueAsString(escaped));
+        DataSubjectDisclosureDto[] failed = new DataSubjectDisclosureDto[1];
+        assertThrows(IllegalStateException.class, () -> readTransaction.withSnapshot(4, 5, List.of(4), value -> {
+            failed[0] = value;
+            throw new IllegalStateException("callback failure");
+        }));
+        assertThrows(RuntimeException.class, () -> objectMapper.writeValueAsString(failed[0]));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"oversized", "nonadvancing", "unordered"})
+    void malformedIdPagesFailBeforeAnyBodyRead(String shape) {
+        when(dataSubjectDisclosureMapper.findPerson(4, 5, List.of(4))).thenReturn(new PersonDto());
+        List<Integer> ids = switch (shape) {
+            case "oversized" -> IntStream.rangeClosed(1, 101).boxed().toList();
+            case "nonadvancing" -> List.of(1, 1);
+            case "unordered" -> List.of(2, 1);
+            default -> throw new IllegalArgumentException(shape);
+        };
+        when(dataSubjectDisclosureMapper.findNoteIds(4, 5, List.of(4), null)).thenReturn(ids);
+        assertThrows(IllegalStateException.class, () -> readTransaction.withSnapshot(4, 5, List.of(4), value -> {
+            new DataSubjectDisclosureJsonWriter(objectMapper).measure(value);
+            return null;
+        }));
+        verify(dataSubjectDisclosureMapper, never()).findNotePage(anyInt(), anyInt(), anyList(), anyList());
+    }
+
+    @Test
+    void noteSourceRefusesAnotherThreadWhileItsSnapshotIsStillActive() {
+        when(dataSubjectDisclosureMapper.findPerson(4, 5, List.of(4))).thenReturn(new PersonDto());
+        readTransaction.withSnapshot(4, 5, List.of(4), value -> {
+            try (var executor = java.util.concurrent.Executors.newSingleThreadExecutor()) {
+                executor.submit(() -> assertThrows(RuntimeException.class,
+                    () -> objectMapper.writeValueAsString(value))).get(10, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (Exception exception) {
+                throw new IllegalStateException(exception);
+            }
+            return null;
+        });
+        verify(dataSubjectDisclosureMapper, never()).findNoteIds(anyInt(), anyInt(), anyList(), any());
+    }
+
+    @Test
+    void nullableCursorPreservesTheFullSignedIdRange() {
+        when(dataSubjectDisclosureMapper.findPerson(4, 5, List.of(4))).thenReturn(new PersonDto());
+        List<Integer> ids = List.of(Integer.MIN_VALUE, 0, Integer.MAX_VALUE);
+        when(dataSubjectDisclosureMapper.findNoteIds(4, 5, List.of(4), null)).thenReturn(ids);
+        when(dataSubjectDisclosureMapper.findNotePage(4, 5, List.of(4), ids)).thenReturn(ids.stream().map(id -> {
+            NoteDto note = new NoteDto();
+            note.setId(id);
+            return note;
+        }).toList());
+        readTransaction.withSnapshot(4, 5, List.of(4), value -> {
+            var writer = new DataSubjectDisclosureJsonWriter(objectMapper);
+            var measured = writer.measure(value);
+            assertEquals(3, measured.noteCount());
+            writer.write(value, measured, fingerprint -> java.io.OutputStream.nullOutputStream());
+            return null;
+        });
+        verify(dataSubjectDisclosureMapper, times(2)).findNoteIds(4, 5, List.of(4), Integer.MAX_VALUE);
+    }
+
 }

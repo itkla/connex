@@ -145,7 +145,9 @@ The Security Owner's 2026-10-12 decision replaces
 `POST` on the same path. There is no GET/HEAD alias or redirect. The POST requires an authenticated
 session, a valid CSRF header, organization admin/owner authority, and fresh account-bound WebAuthn
 step-up. The body is optional; the SPA sends `{}` as JSON. Success remains HTTP 200 with the existing
-`DataSubjectDisclosureDto`, after the strict disclosure-access audit commits. Request type, identity
+JSON properties, order, null omission and ordinary `notes` array, after the strict disclosure-access
+audit commits. The servlet response is written synchronously on the request thread inside the
+retained tenant snapshot. Request type, identity
 verification, and linked-subject checks are unchanged.
 
 Authorized retired GET/HEAD requests receive 405 (method denied); anonymous requests receive 401
@@ -165,7 +167,22 @@ no disclosure payload, and the audit INSERT and integrity-head advance roll back
 committed audit remains recorded if the response or download later fails. An explicit retry
 assembles again and adds another access event; there is no automatic network/503 retry. The SPA's
 bounded CSRF-refresh and step-up refusal retries remain unchanged. See [LOCKING.md](LOCKING.md)
-for the three transaction phases and retained race windows.
+for the retained snapshot, suspend/audit/resume sequence and retained race windows.
+
+The additive `X-Disclosure-Note-Count`, `X-Disclosure-Notes-SHA256`, `X-Disclosure-Byte-Length` and
+`X-Disclosure-SHA256` headers describe pass one's complete representation. Hashes use exact compact
+UTF-8 JSON before HTTP content coding; the notes hash covers the array including its delimiters.
+Both passes use one explicitly REPEATABLE READ tenant snapshot, bounded note ID/body pages, and a
+fixed non-note envelope. One disclosure per instance is admitted before opening a snapshot;
+overload and a configured pool smaller than two connections use the existing 503 shape.
+
+Pass-two failures before commitment clear buffered disclosure bytes and use the existing 503
+shape. After commitment the response stays truncated; no error suffix or automatic closing JSON
+is appended. The writer withholds the final document byte until both passes' counts, digests and
+byte lengths match. Clients must reject incomplete framing, invalid JSON or integrity-header
+mismatches and retry explicitly. Retain raw response bytes for hash verification: the SPA reformats
+its download. See [APPI_DATA_SUBJECT_REQUEST_PROCEDURE.md](../APPI_DATA_SUBJECT_REQUEST_PROCEDURE.md)
+for operator handling.
 
 ## Current source audit (2026-09-08)
 

@@ -67,12 +67,30 @@ against the response DTO; changes to disclosure sections must update both.
 
 The `notes` section is complete and is never filtered by note visibility class: private notes are
 disclosed to the handling operator as raw assembly material and must be reviewed for statutory
-redaction (Art. 33(2)) like every other section. It carries no row cap and holds the largest
-free-text material in the response. Note bodies are read in pages, but the assembled response is
-held in memory in full, so a subject with a very large note corpus produces a correspondingly large
-response and a matching peak heap on the serving instance. Run such an export off-peak and expect
-a slow response; there is no operator-facing continuation or page parameter, and the export is
-never silently truncated.
+redaction (Art. 33(2)) like every other section. It carries no row or aggregate-byte cap. Note IDs
+and bodies are read in ascending pages of at most 100, with only one page retained at a time.
+Two synchronous serialization passes share one explicit REPEATABLE READ tenant snapshot: the first
+counts and fingerprints the complete JSON while discarding bytes; a strict control audit commits
+independently before the second pass writes the same JSON directly to the response. Other disclosure
+sections remain materialized, and an individual note/page can still be large. Large exports may be
+slow. There is no continuation or page parameter, and exports are never silently shortened.
+
+One disclosure per serving instance is admitted at a time; excess requests receive the existing
+503 response before opening a snapshot. The connection pool must support at least two connections,
+because the snapshot retains its connection while the independent audit borrows another.
+
+Retain the raw response and the `X-Disclosure-Note-Count`, `X-Disclosure-Notes-SHA256`,
+`X-Disclosure-Byte-Length`, and `X-Disclosure-SHA256` headers when checking completeness. Version-one
+SHA-256 values cover exact compact UTF-8 JSON before HTTP content coding; the notes hash covers the
+ordinary array from `[` through `]`. Check the received byte length and complete-document hash,
+then parse JSON and check note count (and the notes hash using the original array bytes). The SPA
+reformats downloaded JSON, so its reformatted copy cannot verify these raw-byte hashes.
+
+Reject incomplete HTTP framing, invalid JSON, byte-length mismatch, or digest/count mismatch. A
+committed interrupted response is left truncated: writer cleanup does not append closing delimiters
+or an error suffix. A durable audit records assembly and an authorized release attempt, not confirmed
+client receipt. Discard an incomplete download and retry explicitly; each retry assembles and audits
+again. There is no automatic network/503 retry.
 
 Audience-export evidence includes exports by other workspaces in the request's organization that
 held a shared subject, even after the standing share is revoked. Audience-export member lists are
