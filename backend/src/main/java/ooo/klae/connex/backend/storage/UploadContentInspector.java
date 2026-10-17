@@ -1326,12 +1326,20 @@ public class UploadContentInspector implements AutoCloseable {
      * than stored uninspected, because an unclassified member would otherwise reach storage with
      * only its CRC and size checked.
      *
+     * <p>OOXML signature paths require the canonical directory casing before even empty directory
+     * entries are admitted, so classification and signature parsing use the same exact prefix.
+     *
      * @param name exact archive entry name
      * @param odfPackage whether the enclosing package is ODF rather than OOXML
      * @return the inspection class that governs this member
      */
     private static PackageMemberClass classifyMember(String name, boolean odfPackage) {
         String normalized = name.toLowerCase(Locale.ROOT);
+        if (!odfPackage
+                && normalized.startsWith(OOXML_SIGNATURE_DIRECTORY)
+                && !name.startsWith(OOXML_SIGNATURE_DIRECTORY)) {
+            return PackageMemberClass.REFUSED;
+        }
         if (normalized.endsWith("/")) {
             return PackageMemberClass.DIRECTORY;
         }
