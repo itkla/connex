@@ -30,6 +30,9 @@ import ooo.klae.connex.backend.publicapi.ApiCredentialService.AuthenticatedCrede
 import ooo.klae.connex.backend.publicapi.ApiCredentialService.RoutingBinding;
 import ooo.klae.connex.backend.config.PrivilegedMfaEnforcementFilter;
 import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
+import ooo.klae.connex.backend.config.PrivilegedMfaRequestPolicy;
+import ooo.klae.connex.backend.exceptions.PrivilegedMfaAttestationRequiredException;
+import ooo.klae.connex.backend.exceptions.PrivilegedMfaEnrollmentRequiredException;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.DenialAuditRateLimiter;
 import ooo.klae.connex.backend.services.PrivilegedAccountService;
@@ -197,6 +200,9 @@ public class ApiCredentialAuthenticationFilter extends OncePerRequestFilter {
             recordDenial(request, exception);
             PublicApiErrorAdvice.write(objectMapper, request, response, HttpStatus.UNAUTHORIZED,
                 exception.code, exception.getMessage());
+        } catch (PrivilegedMfaEnrollmentRequiredException | PrivilegedMfaAttestationRequiredException exception) {
+            PublicApiErrorAdvice.write(objectMapper, request, response, HttpStatus.UNAUTHORIZED,
+                exception.getCode(), exception.getMessage());
         } catch (RequestRejectedException exception) {
             throw exception;
         } catch (RuntimeException exception) {
@@ -303,10 +309,19 @@ public class ApiCredentialAuthenticationFilter extends OncePerRequestFilter {
         SecurityContext apiContext = SecurityContextHolder.createEmptyContext();
         apiContext.setAuthentication(authentication);
         SecurityContextHolder.setContext(apiContext);
+        PrivilegedMfaRequestPolicy.bindPublicApi(request, authenticated.user().getId());
         try {
             chain.doFilter(request, response);
             return authenticated.credential().credentialId();
-        } catch (IOException | ServletException exception) {
+        } catch (ServletException exception) {
+            if (exception.getRootCause() instanceof PrivilegedMfaEnrollmentRequiredException refusal) {
+                throw refusal;
+            }
+            if (exception.getRootCause() instanceof PrivilegedMfaAttestationRequiredException refusal) {
+                throw refusal;
+            }
+            throw new FilterExecutionException(exception);
+        } catch (IOException exception) {
             throw new FilterExecutionException(exception);
         } finally {
             SecurityContextHolder.setContext(previous);

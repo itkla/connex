@@ -356,7 +356,8 @@ class PrivilegedGateConcurrencyIntegrationTest {
             bothHoldMemberships.countDown();
             assertTrue(bothHoldMemberships.await(10, TimeUnit.SECONDS));
             return result;
-        }).when(workspaceService).isLockedBuiltInAdministrator(anyInt(), eq(user.getId()));
+        }).when(workspaceService).isLockedBuiltInAdministratorWithAssignedRoles(
+                anyInt(), eq(user.getId()), eq(user.getId()));
 
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
