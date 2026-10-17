@@ -734,12 +734,12 @@ The pins protect only the proposals that carry them, on a build that reads them:
 - A proposal stored before pinning carries neither sibling and is approved exactly as before.
   It keeps resolving its names at approval while its original seventy-two-hour review window
   remains open; the #1865 drift remains possible for that row only within that window.
-- Earlier binaries ignore the pins and do not enforce the review deadline. V230 therefore raises
-  the semantic rollback floor: after the expiry cutover, only a binary carrying V230 and the
+- Earlier binaries ignore the pins and do not enforce the review deadline. V231 therefore raises
+  the semantic rollback floor: after the expiry cutover, only a binary carrying V231 and the
   complete expiry implementation may serve. Staging checks the pinned target's floor before
   automatic rollback and interrupted-deployment recovery; an incompatible previous JAR forces
   forward recovery. Drain older instances before the cutover, as documented in
-  [UPGRADING.md](../UPGRADING.md#v230-assistant-proposal-review-expiry).
+  [UPGRADING.md](../UPGRADING.md#v231-assistant-proposal-review-expiry).
 
 The framework acquires its locks in exactly this order:
 

@@ -2096,7 +2096,7 @@ case_rollback_floor_allows_compatible_previous_jar() (
 repository_expiry_floor() {
     local floor
     floor="$(sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d' "$STAGING_DEPLOY_DIR/rollback-floor")" || return 1
-    assert_equals shipped_expiry_floor tenant/V230__ai_proposal_review_expiry_cutover.sql "$floor" >&2 || return 1
+    assert_equals shipped_expiry_floor tenant/V231__ai_proposal_review_expiry_cutover.sql "$floor" >&2 || return 1
     assert_file_exists shipped_expiry_migration "$STAGING_DEPLOY_DIR/../../backend/src/main/resources/db/migration/$floor" >&2 || return 1
     printf '%s\n' "$floor"
 }

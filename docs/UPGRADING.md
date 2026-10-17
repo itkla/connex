@@ -122,7 +122,7 @@ contract is in [AI_SECURITY.md](backend/AI_SECURITY.md#exposure-enforcement-acro
   [`deploy/staging/rollback-floor`](../deploy/staging/rollback-floor) in the **same PR** as any
   migration that earlier binaries cannot survive. Keep the highest such migration as one path
   relative to `backend/src/main/resources/db/migration/`, such as
-  `tenant/V230__ai_proposal_review_expiry_cutover.sql`; blank lines and `#` comment lines
+  `tenant/V231__ai_proposal_review_expiry_cutover.sql`; blank lines and `#` comment lines
   are allowed. Staging records `backend_starting` before copying the target JAR into the live path.
   The floor has one exception: a matching transaction still in `prepared` or `frontend_stopped`,
   with **both** the live JAR and serving backend identified as the prior release, proves the target
@@ -185,9 +185,9 @@ not run old and new backend versions concurrently across this migration. The sta
 runbook below already quiesces all writers and starts one backend with ingress closed; custom
 multi-replica deployments must enforce the same all-replicas-down boundary before migration.
 
-### V230 assistant proposal review expiry
+### V231 assistant proposal review expiry
 
-`tenant/V230__ai_proposal_review_expiry_cutover.sql` is an executable compatibility marker (`DO 0`).
+`tenant/V231__ai_proposal_review_expiry_cutover.sql` is an executable compatibility marker (`DO 0`).
 It changes no application table, stored timestamp, trust marker, or durable status. Ship it together
 with the seventy-two-hour guards on legacy approval, discard and AUTO execution, all delegate
 admission checkpoints, read projections, pending discovery and frontend disarming. A marker-only
@@ -199,11 +199,11 @@ hours old immediately become non-actionable. Their history remains readable unde
 authorization and retention rules. Completed outcomes and the independent ten-minute undo window
 are unchanged. Expiry is not deletion, archival, or a retained-chat privacy repair.
 
-**Rollback floor:** only a release carrying V230 and the complete expiry contract may serve after
+**Rollback floor:** only a release carrying V231 and the complete expiry contract may serve after
 this cutover. Older binaries can execute known expired proposal IDs despite the unchanged schema.
 Staging automatic rollback and interrupted-deployment recovery therefore refuse a prior JAR lacking
-V230 and use the existing forward-recovery procedure. Do not remove the marker or relabel timestamps
-to permit rollback. A compatible V230 release remains eligible for ordinary paired rollback.
+V231 and use the existing forward-recovery procedure. Do not remove the marker or relabel timestamps
+to permit rollback. A compatible V231 release remains eligible for ordinary paired rollback.
 
 V231 is reserved for Phase 2 slice 1. This cutover introduces no proposal-set storage or producer.
 

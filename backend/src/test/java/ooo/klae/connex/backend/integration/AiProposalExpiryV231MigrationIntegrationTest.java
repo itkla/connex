@@ -21,7 +21,7 @@ import org.junit.jupiter.api.Test;
 import ooo.klae.connex.backend.config.AuditLogV126MigrationCallback;
 
 /** Exercises the expiry compatibility marker against populated pre-cutover storage. */
-class AiProposalExpiryV230MigrationIntegrationTest {
+class AiProposalExpiryV231MigrationIntegrationTest {
     private static MySqlScratchCatalog catalog;
     private static String url;
     private static String username;
@@ -32,13 +32,13 @@ class AiProposalExpiryV230MigrationIntegrationTest {
         username = System.getenv("CONNEX_DB_USERNAME");
         password = System.getenv("CONNEX_DB_PASSWORD");
         assumeTrue(username != null && password != null,
-                "CONNEX_DB_USERNAME/CONNEX_DB_PASSWORD required for V230 migration test");
+                "CONNEX_DB_USERNAME/CONNEX_DB_PASSWORD required for V231 migration test");
         String configured = System.getenv().getOrDefault("CONNEX_DB_URL",
                 "jdbc:mysql://localhost:3306/connexdb?createDatabaseIfNotExist=true&sslMode=DISABLED");
         catalog = MySqlScratchCatalog.create(configured, username, password,
                 "connex_proposal_expiry_v230_it_", "utf8mb4", "utf8mb4_0900_ai_ci");
         url = catalog.url();
-        assertEquals(MigrationVersion.fromVersion("229"), migrate("229").info().current().getVersion());
+        assertEquals(MigrationVersion.fromVersion("230"), migrate("230").info().current().getVersion());
     }
 
     @AfterAll
@@ -84,15 +84,15 @@ class AiProposalExpiryV230MigrationIntegrationTest {
             callsBefore = calls(connection);
         }
 
-        assertEquals(MigrationVersion.fromVersion("230"), migrate("230").info().current().getVersion());
+        assertEquals(MigrationVersion.fromVersion("231"), migrate("231").info().current().getVersion());
 
         try (Connection connection = connection()) {
-            assertEquals(schemaBefore, schema(connection), "V230 must change no application schema");
-            assertEquals(callsBefore, calls(connection), "V230 must preserve trust, status and timestamps");
+            assertEquals(schemaBefore, schema(connection), "V231 must change no application schema");
+            assertEquals(callsBefore, calls(connection), "V231 must preserve trust, status and timestamps");
             try (var statement = connection.prepareStatement("""
                     SELECT COUNT(*) FROM flyway_schema_history
-                    WHERE version = '230' AND success = TRUE
-                      AND script LIKE '%V230__ai_proposal_review_expiry_cutover.sql'
+                    WHERE version = '231' AND success = TRUE
+                      AND script LIKE '%V231__ai_proposal_review_expiry_cutover.sql'
                     """); ResultSet rows = statement.executeQuery()) {
                 assertTrue(rows.next());
                 assertEquals(1, rows.getInt(1));

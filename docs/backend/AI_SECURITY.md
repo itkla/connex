@@ -681,9 +681,9 @@ local timer, focus and visibility resume disarm them without a network frame; th
 error clears the action and settles the individual row without retry. EN/JA expiry copy and
 historical/pending reload merging preserve the existing surfaces. This deadline is decision
 expiry, not erasure: deletion cascades, export ownership, retention and account-erasure handling
-are unchanged. V230 is marker-only, raises the rollback floor, and does not repair retained-chat
+are unchanged. V231 is marker-only, raises the rollback floor, and does not repair retained-chat
 privacy. Ship the full contract together and drain older instances as described in
-[UPGRADING.md](../UPGRADING.md#v230-assistant-proposal-review-expiry).
+[UPGRADING.md](../UPGRADING.md#v231-assistant-proposal-review-expiry).
 
 ### Adding an assistant write tool
 
