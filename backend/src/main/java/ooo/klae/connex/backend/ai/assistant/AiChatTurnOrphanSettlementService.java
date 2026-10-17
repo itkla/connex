@@ -62,7 +62,7 @@ public class AiChatTurnOrphanSettlementService {
      * genuinely dead owners. Retiring it is safe without a token because this transaction holds
      * the turn's row lock, so no other settler can be mid-settlement on it.
      *
-     * <p>V231 retains partial content only when the stored immutable privacy token still matches
+     * <p>V232 retains partial content only when the stored immutable privacy token still matches
      * the current unblocked generation and taint identity. The barrier share lock remains held
      * through commit; stale or legacy null-token content is cleared before lease takeover.
      *

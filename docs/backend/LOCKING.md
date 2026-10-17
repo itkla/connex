@@ -635,9 +635,9 @@ Ordinary turn/join/leave/sharing/presence-authorizing mutations:
 
 Invitation/participant-removal paths lock caller/target active memberships ascending by user id before the session root; never acquire another membership after the session root.
 
-The session row is the per-session mutex. V231 allocates every ordinary or mission message from its durable `message_seq_high_water`: lock the session, reject overflow, advance the counter, insert, and commit together. Never recompute from surviving messages; privacy deletion retains the counter and immutable first-mission taint boundary. Summary updates and request replays do not allocate a sequence.
+The session row is the per-session mutex. V232 allocates every ordinary or mission message from its durable `message_seq_high_water`: lock the session, reject overflow, advance the counter, insert, and commit together. Never recompute from surviving messages; privacy deletion retains the counter and immutable first-mission taint boundary. Summary updates and request replays do not allocate a sequence.
 
-### Durable record-review missions (V231)
+### Durable record-review missions (V232)
 
 The complete privacy and rollout contract is [AI_MISSIONS.md](AI_MISSIONS.md). Mission claim, resume and publication use `READ_COMMITTED`: authorization roots in existing order, session X, run X, existing tool X if any, turn X, segment X, domain roots if applicable, local restriction read fence, privacy barrier S, lease last. Slice 1 admits read tools only. Root re-reads after locks flush MyBatis's transaction cache. Every execution write compares the exact active attempt and execution generation; a stale callback cannot settle or release its successor.
 

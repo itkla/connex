@@ -16,8 +16,8 @@ import ooo.klae.connex.backend.tenant.TenantScopeInterceptor;
 
 class AiAgentPersistenceContractTest {
     @Test
-    void v231ConstraintsAndLifecycleMatchContract() throws Exception {
-        String migration = Files.readString(Path.of("src/main/resources/db/migration/tenant/V231__ai_agent_runs.sql"));
+    void v232ConstraintsAndLifecycleMatchContract() throws Exception {
+        String migration = Files.readString(Path.of("src/main/resources/db/migration/tenant/V232__ai_agent_runs.sql"));
         assertTrue(migration.contains("message_seq_high_water INT NOT NULL DEFAULT 0"));
         assertTrue(migration.contains("m.workspace_id = s.workspace_id AND m.session_id = s.id"));
         assertTrue(migration.contains("SET s.message_seq_high_water = COALESCE(m.maximum_seq, 0)"));

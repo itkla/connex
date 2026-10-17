@@ -40,7 +40,7 @@ public class AiProperties {
      */
     private boolean enabled = false;
 
-    /** Disabled until the complete V231 writer/read/privacy rollout has finished. */
+    /** Disabled until the complete V232 writer/read/privacy rollout has finished. */
     private boolean missionsEnabled = false;
 
     /** Operator acknowledgment that all serving readers and writers run on one drained JVM. */

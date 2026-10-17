@@ -32,7 +32,7 @@ import zipfile
 root, releases = map(pathlib.Path, sys.argv[1:])
 floor = [line.strip() for line in (root / "deploy/staging/rollback-floor").read_text().splitlines()
          if line.strip() and not line.lstrip().startswith("#")]
-assert floor == ["tenant/V231__ai_agent_runs.sql"]
+assert floor == ["tenant/V232__ai_agent_runs.sql"]
 for name, migration in (("compatible", floor[0]), ("pre-contract", "tenant/V228__drop_campaign_delivery_unsubscribe_tokens.sql")):
     directory = releases / name
     directory.mkdir(parents=True)
@@ -41,7 +41,7 @@ for name, migration in (("compatible", floor[0]), ("pre-contract", "tenant/V228_
 PY
 
 if rollback_floor_allows_release pre-contract; then
-    printf '%s\n' 'FAIL: pre-contract binary passed the V231 rollback floor' >&2
+    printf '%s\n' 'FAIL: pre-contract binary passed the V232 rollback floor' >&2
     exit 1
 fi
 rollback_floor_allows_release compatible

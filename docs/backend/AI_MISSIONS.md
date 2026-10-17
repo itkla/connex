@@ -2,8 +2,8 @@
 
 Phase 2 slice 1 introduces `record_review_v1`, a single-record mission with one logical
 segment and at most three attempts. The schema and privacy cutover are tenant migration
-V231. V230 belongs to the independently integrated proposal-expiry lane; V231 does not
-introduce a placeholder V230 or depend on proposal-set internals.
+V232. V231 belongs to the independently integrated proposal-expiry lane; V232 does not
+depend on proposal-set internals.
 
 ## Execution and scope
 
@@ -180,7 +180,7 @@ workspace teardown; audit retention must preserve these records if introduced la
 Startup and periodic reconciliation enumerate control-plane workspace IDs, resolve each
 placement, and initialize only an empty workspace. Existing barriers are preserved.
 Missing barriers with run/segment/work/taint evidence fail readiness. An incomplete work
-record under an unblocked barrier also fails readiness. Pre-V231 active ordinary turns
+record under an unblocked barrier also fails readiness. Pre-V232 active ordinary turns
 without durable tokens are settled without content before mission admission.
 
 Self-service and bootstrap provisioning publish the same post-control-commit event.
@@ -204,8 +204,8 @@ before work rows and barriers. Tenant registry residual verification remains man
 Missions remain disabled by default. Initial activation requires one serving application
 JVM, initialized barriers, completed active-attempt reconciliation, and the full compatible
 reader/writer rollout. Drain all older serving binaries and background message writers
-before V231's one-time sequence backfill; keep writes stopped until the allocator cutover.
-V231 is the rollback floor. Multi-instance activation requires the separately reviewed
+before V232's one-time sequence backfill; keep writes stopped until the allocator cutover.
+V232 is the rollback floor. Multi-instance activation requires the separately reviewed
 #941 distributed fencing contract.
 
 Focused privacy selectors are `AiAgentPrivacyIntegrationTest`,
