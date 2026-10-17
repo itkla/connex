@@ -2,7 +2,9 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
@@ -62,6 +64,7 @@ class WorkspaceIdentityLockOrderTest {
     @Mock private AuditService auditService;
     @Mock private SystemActor systemActor;
     @Mock private SessionSecurityService sessionSecurityService;
+    @Mock private PrivilegedMfaLockedAuthorization privilegedMfaLockedAuthorization;
 
     @Mock private OwnershipOfferWriter ownershipOfferWriter;
     @InjectMocks private WorkspaceService service;
@@ -69,6 +72,69 @@ class WorkspaceIdentityLockOrderTest {
     @AfterEach
     void clearSecurityContext() {
         SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    void reportAuthorizationRetainsAssignedRolesBeforeConfinement() {
+        WorkspaceMember membership = membership("admin", null, "active");
+        when(userMapper.isAccountDeletionReservedForShare(ACTOR_ID)).thenReturn(false);
+        when(workspaceMapper.lockActiveWorkspaceForShare(WORKSPACE_ID)).thenReturn(ORG_ID);
+        when(workspaceMapper.lockAuthorizationMembership(WORKSPACE_ID, ACTOR_ID)).thenReturn(membership);
+        when(privilegedMfaLockedAuthorization.requestActor(Set.of(ACTOR_ID))).thenReturn(ACTOR_ID);
+
+        assertTrue(service.isLockedBuiltInAdministratorWithAssignedRoles(WORKSPACE_ID, ACTOR_ID, ACTOR_ID));
+
+        InOrder order = inOrder(userMapper, workspaceMapper, privilegedMfaLockedAuthorization);
+        order.verify(userMapper).isAccountDeletionReservedForShare(ACTOR_ID);
+        order.verify(workspaceMapper).lockActiveWorkspaceForShare(WORKSPACE_ID);
+        order.verify(workspaceMapper).lockAuthorizationMembership(WORKSPACE_ID, ACTOR_ID);
+        order.verify(userMapper).lockAssignedCustomRoleRowsForShare(ACTOR_ID);
+        order.verify(privilegedMfaLockedAuthorization).requestActor(Set.of(ACTOR_ID));
+        order.verify(privilegedMfaLockedAuthorization).requireAllowed(ACTOR_ID, WORKSPACE_ID, membership, Set.of());
+    }
+
+    @Test
+    void ordinaryAdministratorConfinementRetainsExclusiveRoleAuthority() {
+        WorkspaceMember membership = membership("member", 5, "active");
+        when(userMapper.isAccountDeletionReservedForShare(ACTOR_ID)).thenReturn(false);
+        when(workspaceMapper.lockActiveWorkspaceForShare(WORKSPACE_ID)).thenReturn(ORG_ID);
+        when(workspaceMapper.lockAuthorizationMembership(WORKSPACE_ID, ACTOR_ID)).thenReturn(membership);
+        when(privilegedMfaLockedAuthorization.requestActor(Set.of(ACTOR_ID))).thenReturn(ACTOR_ID);
+        when(roleMapper.lockRole(WORKSPACE_ID, 5)).thenReturn(5);
+        when(roleMapper.lockPermissions(WORKSPACE_ID, 5)).thenReturn(List.of(Permission.RULE_MANAGE.name()));
+
+        assertFalse(service.isLockedBuiltInAdministrator(WORKSPACE_ID, ACTOR_ID));
+
+        InOrder order = inOrder(userMapper, workspaceMapper, roleMapper, privilegedMfaLockedAuthorization);
+        order.verify(userMapper).isAccountDeletionReservedForShare(ACTOR_ID);
+        order.verify(workspaceMapper).lockActiveWorkspaceForShare(WORKSPACE_ID);
+        order.verify(workspaceMapper).lockAuthorizationMembership(WORKSPACE_ID, ACTOR_ID);
+        order.verify(roleMapper).lockRole(WORKSPACE_ID, 5);
+        order.verify(roleMapper).lockPermissions(WORKSPACE_ID, 5);
+        order.verify(privilegedMfaLockedAuthorization).requireAllowed(
+            ACTOR_ID, WORKSPACE_ID, membership, Set.of(Permission.RULE_MANAGE));
+        verify(roleMapper, never()).lockPermissionsForShare(WORKSPACE_ID, 5);
+        verify(userMapper, never()).lockAssignedCustomRoleRowsForShare(ACTOR_ID);
+    }
+
+    @Test
+    void reportOverlayConfinementKeepsAssignedRolesSharedBeforeLocalPermissions() {
+        WorkspaceMember membership = membership("admin", 5, "active");
+        when(userMapper.isAccountDeletionReservedForShare(ACTOR_ID)).thenReturn(false);
+        when(workspaceMapper.lockActiveWorkspaceForShare(WORKSPACE_ID)).thenReturn(ORG_ID);
+        when(workspaceMapper.lockAuthorizationMembership(WORKSPACE_ID, ACTOR_ID)).thenReturn(membership);
+        when(privilegedMfaLockedAuthorization.requestActor(Set.of(ACTOR_ID))).thenReturn(ACTOR_ID);
+        when(roleMapper.lockPermissionsForShare(WORKSPACE_ID, 5)).thenReturn(List.of(Permission.TEAM_MANAGE.name()));
+
+        assertFalse(service.isLockedBuiltInAdministratorWithAssignedRoles(WORKSPACE_ID, ACTOR_ID, ACTOR_ID));
+
+        InOrder order = inOrder(userMapper, roleMapper, privilegedMfaLockedAuthorization);
+        order.verify(userMapper).lockAssignedCustomRoleRowsForShare(ACTOR_ID);
+        order.verify(roleMapper).lockPermissionsForShare(WORKSPACE_ID, 5);
+        order.verify(privilegedMfaLockedAuthorization).requireAllowed(
+            ACTOR_ID, WORKSPACE_ID, membership, Set.of(Permission.TEAM_MANAGE));
+        verify(roleMapper, never()).lockRole(WORKSPACE_ID, 5);
+        verify(roleMapper, never()).lockPermissions(WORKSPACE_ID, 5);
     }
 
     @Test

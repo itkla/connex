@@ -15,6 +15,12 @@ This document is the entry point for backend work that crosses authentication, a
 
 All authentication methods continue through `AuthService.establishAuthenticatedSession` so the servlet session is rotated and the client receives the non-authorizing opaque request identity exposed by `/api/auth/csrf`.
 
+[Privileged MFA](../PRIVILEGED_MFA.md#confinement-recheck-during-locked-workspace-authorization)
+defines account-wide filter confinement, the workspace-local recheck at locked authorization,
+shared exemptions, browser/PAT refusal contracts, deferred audit evidence and the precise
+in-flight residuals. Preserve the same-connection, root-first order in
+[LOCKING.md](LOCKING.md#servlet-filter-confinement-recheck-g1g5).
+
 - Never expose a principal id or servlet session id for client request correlation.
 - Preserve CSRF and secure-cookie posture outside the documented local-development profile.
 - Editing organization security/provider configuration remains organization-admin and recent-authentication/step-up gated where the existing domain requires it.
