@@ -36,7 +36,7 @@ import { InputGroupAddon } from '@/components/ui/input-group';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { cn } from '@/lib/utils';
 
-import { createTask, isFieldError } from '@/app/lib/api';
+import { createTask, isFieldError, isWorkspaceUnavailableError } from '@/app/lib/api';
 import { isSubmitShortcut } from '@/app/lib/submitShortcut';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
@@ -404,7 +404,7 @@ export function TaskDialogForm({
                 }
                 return;
             }
-            if (failureMessage && !isSessionExpired(err)) toastError(failureMessage);
+            if (failureMessage && !isSessionExpired(err) && !isWorkspaceUnavailableError(err)) toastError(failureMessage);
             else showApiError(err, 'toastFailedCreate');
         } finally {
             if (!requestInit?.signal?.aborted) {

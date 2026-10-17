@@ -237,6 +237,7 @@ function NewDealFields({
                     acknowledged={duplicatePreflight.acknowledged}
                     onAcknowledgedChange={duplicatePreflight.setAcknowledged}
                     onRetry={duplicatePreflight.retry}
+                    workspaceRefusal={duplicatePreflight.workspaceRefusal}
                 />
             </div>
 

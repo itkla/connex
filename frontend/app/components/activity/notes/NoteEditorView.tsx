@@ -15,7 +15,8 @@ import {
 } from "@heroicons/react/24/outline";
 import type { Contact, Deal, Note, NoteVisibility, User } from "@/app/lib/types";
 import { SegmentedControl } from "@/components/ui/segmented-control";
-import { createNote, updateNote } from "@/app/lib/api";
+import { createNote, isWorkspaceUnavailableError, updateNote } from "@/app/lib/api";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { toastError } from "@/app/lib/toast";
 import { deriveNoteTitle } from "@/app/lib/noteText";
 import { CrumbLabel } from "@/app/hooks/useNavTrail";
@@ -45,9 +46,12 @@ type Props = {
 /**
  * Full-page rich note editor. Handles both an existing note and a new draft,
  * persisting via debounced autosave (creating on the first non-empty change).
+ * Autosave stops for good once the note's workspace refuses a save because the viewer is no longer
+ * a member: retrying could only fail again, and the text stays in the editor for the viewer to copy.
  */
 export default function NoteEditorView({ note, currentUserId, persons, deals, users, returnPath }: Props) {
     const t = useTranslations("ActivityNotesEditor");
+    const showApiError = useApiErrorToast("ActivityNotesEditor");
 
     const [noteId, setNoteId] = useState<number | null>(note?.id ?? null);
     const [title, setTitle] = useState(note?.title ?? "");
@@ -58,6 +62,7 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
     const [status, setStatus] = useState<SaveStatus>("idle");
     const [titleError, setTitleError] = useState<string | null>(null);
     const dirtyRef = useRef(false);
+    const workspaceRefusedRef = useRef(false);
     const savingRef = useRef(false);
     const saveRef = useRef<() => void>(() => {});
     const stateRef = useRef({ noteId, title, content, visibility });
@@ -71,7 +76,7 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
     const author = users.find((item) => item.id === (note?.author ?? currentUserId)) ?? null;
 
     const save = useCallback(() => {
-        if (savingRef.current) return;
+        if (savingRef.current || workspaceRefusedRef.current) return;
         const snapshot = stateRef.current;
         const body = snapshot.content;
         const nextTitle = snapshot.title.trim() ? snapshot.title.trim() : null;
@@ -102,16 +107,21 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
                 }
                 setStatus("saved");
             })
-            .catch(() => {
-                dirtyRef.current = true;
+            .catch((error: unknown) => {
                 setStatus("error");
+                if (isWorkspaceUnavailableError(error)) {
+                    workspaceRefusedRef.current = true;
+                    showApiError(error, "saveError");
+                    return;
+                }
+                dirtyRef.current = true;
                 toastError(t("saveError"));
             })
             .finally(() => {
                 savingRef.current = false;
                 if (dirtyRef.current) saveRef.current();
             });
-    }, [currentUserId, t]);
+    }, [currentUserId, showApiError, t]);
 
     const ensureNoteId = useCallback(async (): Promise<number> => {
         const existing = stateRef.current.noteId;
