@@ -89,13 +89,16 @@ export function rememberedWorkspaceName(workspaceId: number): string | null {
  * - `interceptorSelfResolved` expands the interceptor's own early exits: its `SELECTION_PATH`
  *   selection and link-bootstrap routes, the ownership-offer decisions and the organization and
  *   workspace lifecycle deletes. Each authorizes the target it names itself.
- * - `accountAndOrganization` is the account and organization families. Their target is the
- *   signed-in user or the organization named in the path, and the API surface ledger shows them
- *   authorized by user and organization services rather than by a workspace permission, so a
- *   revoked rendered workspace must not refuse them before that authorization runs.
+ * - `accountAndOrganization` is the account and organization families, and the personal provider
+ *   connection controls (connect, pause, resume, disconnect). Their target is the signed-in user or
+ *   the organization named in the path, and the API surface ledger shows them authorized by user,
+ *   organization and `ProviderConnectionService` code rather than by a workspace permission, so a
+ *   revoked rendered workspace must not refuse them before that authorization runs. The other
+ *   connection routes (capture review, approval, sync, capture purges and policies) write workspace
+ *   content and stay pinned.
  *
- * Patterns use the backend's path syntax: `{id}` is one decimal segment and a trailing `/**`
- * matches the path itself and anything beneath it.
+ * Patterns use the backend's path syntax: `{id}` is one decimal segment, any other `{name}` is one
+ * non-empty segment, and a trailing `/**` matches the path itself and anything beneath it.
  */
 export const UNPINNED_WRITE_ROUTES = {
     interceptorExcluded: [
@@ -130,6 +133,10 @@ export const UNPINNED_WRITE_ROUTES = {
         "/api/users/me/**",
         "/api/notification-preferences/**",
         "/api/orgs/{id}/**",
+        "/api/account/connections/{provider}",
+        "/api/account/connections/{provider}/authorize",
+        "/api/account/connections/{provider}/pause",
+        "/api/account/connections/{provider}/resume",
     ],
 } as const satisfies Record<string, readonly string[]>;
 
@@ -148,8 +155,12 @@ export function matchesRoutePattern(pattern: string, path: string): boolean {
     if (wildcardTail ? pathSegments.length < fixed.length : pathSegments.length !== fixed.length) {
         return false;
     }
-    return fixed.every((segment, index) =>
-        segment === "{id}" ? /^\d+$/.test(pathSegments[index]) : segment === pathSegments[index]);
+    return fixed.every((segment, index) => {
+        const actual = pathSegments[index];
+        if (segment === "{id}") return /^\d+$/.test(actual);
+        if (/^\{[a-zA-Z]+\}$/.test(segment)) return actual.length > 0;
+        return segment === actual;
+    });
 }
 
 /**
