@@ -167,6 +167,7 @@ import { AiGenerationError } from '@/app/lib/aiGeneration';
 import { LEAD_SOURCES } from '@/app/lib/contactProvenance';
 import { createAiChatSocket } from '@/app/lib/realtime';
 import { workspaceUnavailableDescription } from '@/app/lib/errorMessages';
+import { workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { formatDate, formatRelativeTime, formatUtcDateTime } from '@/app/lib/utils';
 import type {
@@ -1904,7 +1905,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         const creation = createAiChatSession(
             t('newChatTitle'),
             true,
-            { signal },
+            workspacePinnedRequest(activeWorkspaceId, { signal }),
         ).then((createdSession) => {
             if (signal.aborted) throw signal.reason;
             setActiveSession(createdSession);
@@ -1922,7 +1923,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         });
         sessionCreationRef.current = creation;
         return creation;
-    }, [canPersist, activeSession, router, sessionKey, t, workspaceMode]);
+    }, [canPersist, activeSession, activeWorkspaceId, router, sessionKey, t, workspaceMode]);
 
     const uploadErrorMessage = useCallback((error: unknown): string => {
         const workspaceMessage = workspaceUnavailableDescription(error, tRoot);
@@ -1943,6 +1944,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             || permission !== 'granted'
             || attachmentCreatePermission !== 'granted'
         ) return;
+        const originWorkspaceId = activeWorkspaceId;
         for (const file of files) {
             const operationEpoch = sessionEpochRef.current;
             const clientId = crypto.randomUUID();
@@ -1967,7 +1969,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                         attachment.clientId === clientId
                             ? { ...attachment, progress }
                             : attachment)),
-                    { signal },
+                    workspacePinnedRequest(originWorkspaceId, { signal }),
                 );
                 if (signal.aborted || operationEpoch !== sessionEpochRef.current) continue;
                 setFileAttachments((current) => completeAskConnexFileUpload(
@@ -1988,7 +1990,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                         : attachment));
             }
         }
-    }, [attachmentCreatePermission, ensureSession, permission, uploadErrorMessage, working]);
+    }, [activeWorkspaceId, attachmentCreatePermission, ensureSession, permission, uploadErrorMessage, working]);
 
     const removeFileAttachment = useCallback(async (attachment: AskConnexFileAttachment) => {
         if (fileOperationPending) return;
@@ -2217,6 +2219,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         submittingRef.current = true;
         setSubmitting(true);
         resetStream();
+        const originWorkspaceId = activeWorkspaceId;
         let session = activeSession;
         try {
             if (session === null) {
@@ -2224,7 +2227,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                     const createdSession = await createAiChatSession(
                         t('newChatTitle'),
                         true,
-                        { signal: activeSignal },
+                        workspacePinnedRequest(originWorkspaceId, { signal: activeSignal }),
                     );
                     if (activeSignal.aborted) return;
                     session = createdSession;
@@ -2249,7 +2252,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 content,
                 pageContext: requestContext.pageContext,
                 ...(scopeRequest === null ? {} : { scope: scopeRequest }),
-            });
+            }, workspacePinnedRequest(originWorkspaceId));
             if (activeSignal.aborted) return;
             const acceptedScope = accepted.scope;
             if (acceptedScope != null && scopePreviewKey !== null) {
@@ -2320,7 +2323,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             submittingRef.current = false;
             setSubmitting(false);
         }
-    }, [canPersist, activeSession, composer, corrections, featureUnavailable, fileContextCount, fileOperationPending, followTurn, permission, refreshTranscript, resetStream, router, scopeBlocked, scopePreviewKey, scopeRequest, sessionKey, showApiError, sourceRecord, sourceSelection, submissionBlocked, t, turn.phase, turnKey, userDisplayName, userId, workspaceMode]);
+    }, [canPersist, activeSession, activeWorkspaceId, composer, corrections, featureUnavailable, fileContextCount, fileOperationPending, followTurn, permission, refreshTranscript, resetStream, router, scopeBlocked, scopePreviewKey, scopeRequest, sessionKey, showApiError, sourceRecord, sourceSelection, submissionBlocked, t, turn.phase, turnKey, userDisplayName, userId, workspaceMode]);
 
     const retryPrompt = useMemo(() => askConnexRetryPrompt(messages), [messages]);
     const retryTurn = useCallback(() => {

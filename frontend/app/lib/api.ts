@@ -100,6 +100,28 @@ function outgoingWorkspaceId(init: RequestInit, chosen: string | null): string |
 }
 
 /**
+ * Fixes the workspace a write will carry at the moment it is requested. `requestJson` reads the pin
+ * synchronously, but a helper that first awaits something (an identity, a CSRF token) would reach it
+ * only after the wait, when a workspace switch may already have published another workspace. Such
+ * helpers call this before their first await (#1732). Account, organization and selection writes, an
+ * explicit caller header, and a page with no app shell are left as they are.
+ * @param path the request path
+ * @param init the caller's request options
+ * @returns the options with the rendered workspace's `X-Workspace-Id` added where it applies
+ */
+function pinWriteNow(path: string, init: RequestInit = {}): RequestInit {
+    const rendered = renderedWorkspaceId();
+    if (rendered === null
+            || !isWorkspaceBoundWrite(path, true)
+            || new Headers(init.headers).has("X-Workspace-Id")) {
+        return init;
+    }
+    const headers = new Headers(init.headers);
+    headers.set("X-Workspace-Id", String(rendered));
+    return { ...init, headers };
+}
+
+/**
  * Re-codes a failed workspace-bound write as {@link WORKSPACE_UNAVAILABLE_CODE} when the workspace
  * it carried refused it, and returns every other failure unchanged.
  * @param error the failure the response produced
@@ -132,13 +154,18 @@ function workspaceRefusal(error: ApiError, pinnedWorkspace: string | null): ApiE
             || error.message !== `Not a member of workspace ${workspaceId}`) {
         return error;
     }
-    const refusal = new ApiError(
-        error.message,
-        error.status,
-        WORKSPACE_UNAVAILABLE_CODE,
-        undefined,
-        error.correlationId,
-    );
+    return workspaceUnavailableError(workspaceId, error.message, error.correlationId);
+}
+
+/**
+ * Builds the {@link WORKSPACE_UNAVAILABLE_CODE} refusal for a workspace, naming it as the viewer last
+ * saw it.
+ * @param workspaceId the workspace that is no longer available
+ * @param message the diagnostic message, never shown to the viewer
+ * @param correlationId the server correlation id, when a response carried one
+ */
+function workspaceUnavailableError(workspaceId: number, message: string, correlationId?: string): ApiError {
+    const refusal = new ApiError(message, 403, WORKSPACE_UNAVAILABLE_CODE, undefined, correlationId);
     refusal.workspaceId = workspaceId;
     refusal.workspaceName = rememberedWorkspaceName(workspaceId) ?? undefined;
     return refusal;
@@ -189,6 +216,17 @@ const inFlightAssistantTurns = new Map<string, {
     request: Promise<Types.AiChatTurnAccepted>;
 }>();
 const clientRequestIdentityInvalidationListeners = new Set<() => void>();
+const pendingPinnedWriteIdentities = new Set<AbortController>();
+
+/**
+ * Abandons every pinned write still waiting for its request identity, because a workspace or
+ * account transition has begun or landed (#1732). A write prepared under the previous selection must
+ * not be sent once the shell may already render another workspace.
+ */
+function abandonPendingPinnedWrites() {
+    for (const waiting of pendingPinnedWriteIdentities) waiting.abort();
+    pendingPinnedWriteIdentities.clear();
+}
 
 if (typeof window !== "undefined") {
     window.addEventListener("storage", (event) => {
@@ -198,6 +236,7 @@ if (typeof window !== "undefined") {
         else if (action === "account") invalidateAccountStorage();
         else if (action === "refresh") reconcileBrowserAccount();
         if (action === "logout" || action === "account") resetPrivilegedMfaState();
+        abandonPendingPinnedWrites();
         invalidateClientRequestIdentity();
         if (action === "logout") {
             clearAllDrafts();
@@ -328,6 +367,7 @@ function signalClientRequestIdentityTransition(action: ClientIdentityTransition)
     if (action === "account") invalidateAccountStorage();
     if (action === "logout") resetBrowserAccount();
     if (action === "account" || action === "logout") resetPrivilegedMfaState();
+    abandonPendingPinnedWrites();
     invalidateClientRequestIdentity();
     broadcastClientRequestIdentityTransition(action);
 }
@@ -341,6 +381,7 @@ export function synchronizeBrowserAccount(userId: number): void {
     if (adoptBrowserAccount(userId) !== "replaced") return;
     clearAllDrafts();
     resetPrivilegedMfaState();
+    abandonPendingPinnedWrites();
     invalidateClientRequestIdentity();
     broadcastClientRequestIdentityTransition("refresh");
 }
@@ -379,6 +420,28 @@ async function resolveClientRequestIdentity(): Promise<ResolvedClientRequestIden
 
 async function currentClientRequestIdentity(): Promise<string | null> {
     return (await resolveClientRequestIdentity())?.request ?? null;
+}
+
+/**
+ * Resolves the request identity for a write that has already fixed its workspace with
+ * {@link pinWriteNow}. The wait is registered before it starts, so a workspace or account transition
+ * that begins while it is pending abandons the write rather than sending it after the shell may
+ * have moved to another workspace (#1732).
+ * @returns the identity, or null when none can be proven
+ * @throws Error when a transition abandoned the write while it waited
+ */
+async function identityBeforePinnedWrite(): Promise<string | null> {
+    const waiting = new AbortController();
+    pendingPinnedWriteIdentities.add(waiting);
+    try {
+        const identity = await currentClientRequestIdentity();
+        if (waiting.signal.aborted) {
+            throw new Error("The workspace changed before this request was sent");
+        }
+        return identity;
+    } finally {
+        pendingPinnedWriteIdentities.delete(waiting);
+    }
 }
 
 /** Returns a non-reversible browser-storage context for the active user and workspace. */
@@ -1123,8 +1186,10 @@ async function postWorkspaceSelectionJson<T>(
     path: string,
     body: unknown = {},
     bodyRequired = true,
+    init: RequestInit = {},
 ): Promise<T> {
     return requestJson<T>(path, {
+        ...init,
         method: "POST",
         body: JSON.stringify(body),
     }, bodyRequired ? "required" : "optional");
@@ -1168,13 +1233,14 @@ async function pollAiGeneration<T>(
  * generation, active workspace, and locale. Requests without a provable identity bypass de-duplication.
  */
 async function dedupedAiPost<T>(path: string, init: RequestInit = {}): Promise<T> {
+    const pinned = pinWriteNow(path, init);
     if (typeof window === "undefined" || Object.keys(init).length > 0) {
-        const accepted = await postJson<Types.AiGenerationStatus<T>>(path, {}, init);
+        const accepted = await postJson<Types.AiGenerationStatus<T>>(path, {}, pinned);
         return pollAiGeneration(accepted, init);
     }
-    const identity = await currentClientRequestIdentity();
+    const identity = await identityBeforePinnedWrite();
     if (identity == null) {
-        const accepted = await postJson<Types.AiGenerationStatus<T>>(path, {}, init);
+        const accepted = await postJson<Types.AiGenerationStatus<T>>(path, {}, pinned);
         return pollAiGeneration(accepted, init);
     }
     const key = `${identity}\u0000${path}`;
@@ -1187,7 +1253,7 @@ async function dedupedAiPost<T>(path: string, init: RequestInit = {}): Promise<T
         const accepted = await postJson<Types.AiGenerationStatus<T>>(
             path,
             {},
-            { signal: controller.signal },
+            { ...pinned, signal: controller.signal },
         );
         const response = await pollAiGeneration<T>(accepted, { signal: controller.signal });
         if (await currentClientRequestIdentity() !== identity) {
@@ -5420,10 +5486,32 @@ export async function getMyWorkspacesResultFromCookie(
     return { ok: true, data: workspaceSnapshotForForwardedCookie(result.data, cookie) };
 }
 
-export function createWorkspace(name: string) {
+/**
+ * The options that create a workspace from the organization of the workspace on screen (#1732).
+ * The backend takes a new workspace's organization from the resolved workspace, so a creation that
+ * followed a healed cookie could place a name typed under one organization inside another. When the
+ * shell renders a workspace the cookie no longer names, the viewer's memberships are read again: a
+ * workspace they still belong to is pinned explicitly, and a revoked one refuses the creation as
+ * {@link WORKSPACE_UNAVAILABLE_CODE} before anything is sent, so the form keeps the typed name. A
+ * page with no app shell, such as onboarding, keeps the cookie's selection.
+ * @returns the options to send the creation with
+ * @throws ApiError coded {@link WORKSPACE_UNAVAILABLE_CODE} when the rendered workspace is gone
+ */
+async function workspaceCreationOrigin(): Promise<RequestInit> {
+    const rendered = renderedWorkspaceId();
+    if (rendered === null || typeof document === "undefined") return {};
+    const pinned: RequestInit = { headers: { "X-Workspace-Id": String(rendered) } };
+    if (workspaceIdFromCookieHeader(document.cookie) === rendered) return pinned;
+    const snapshot = await getMyWorkspaces();
+    if (snapshot.workspaces.some((workspace) => workspace.id === rendered)) return pinned;
+    throw workspaceUnavailableError(rendered, `Not a member of workspace ${rendered}`);
+}
+
+export async function createWorkspace(name: string) {
+    const origin = await workspaceCreationOrigin();
     return withClientRequestIdentityReset(
         () => recoverWorkspaceSelectionResponse(
-            () => postWorkspaceSelectionJson<Types.Workspace>(`/api/workspaces`, { name }),
+            () => postWorkspaceSelectionJson<Types.Workspace>(`/api/workspaces`, { name }, true, origin),
             activeWorkspaceFromSelection,
         ),
         "workspace",
@@ -6521,17 +6609,27 @@ export function previewAiChatScope(
     );
 }
 
+/**
+ * Starts one assistant turn. The workspace the turn is sent to is fixed when this is called, before
+ * the request identity is resolved, and a workspace transition during that wait abandons the turn,
+ * so a question asked in one workspace is never sent into another (#1732).
+ * @param sessionId the chat the turn belongs to
+ * @param payload the question and its context
+ * @param init request options; a caller that captured the workspace earlier pins it here
+ */
 export async function startAiChatTurn(
     sessionId: number,
     payload: Types.AiChatTurnCreateRequest,
+    init: RequestInit = {},
 ): Promise<Types.AiChatTurnAccepted> {
     const path = `/api/ai/assistant/sessions/${sessionId}/turns`;
+    const pinned = pinWriteNow(path, init);
     if (typeof window === 'undefined') {
-        return postJson<Types.AiChatTurnAccepted>(path, payload);
+        return postJson<Types.AiChatTurnAccepted>(path, payload, pinned);
     }
-    const identity = await currentClientRequestIdentity();
+    const identity = await identityBeforePinnedWrite();
     if (identity == null) {
-        return postJson<Types.AiChatTurnAccepted>(path, payload);
+        return postJson<Types.AiChatTurnAccepted>(path, payload, pinned);
     }
     const key = `${identity}\u0000${path}\u0000${JSON.stringify(payload)}`;
     const existing = inFlightAssistantTurns.get(key);
@@ -6539,7 +6637,8 @@ export async function startAiChatTurn(
     const controller = new AbortController();
     const request = (async () => {
         const response = await postJson<Types.AiChatTurnAccepted>(path, payload, {
-            signal: controller.signal,
+            ...pinned,
+            signal: init.signal ? AbortSignal.any([controller.signal, init.signal]) : controller.signal,
         });
         if (await currentClientRequestIdentity() !== identity) {
             throw new Error('AI request identity changed before turn acceptance');
@@ -6704,8 +6803,11 @@ export function getReportComposerAvailabilityResultFromCookie(cookie: string | n
 }
 
 export function previewReportComposer(prompt: string) {
-    return withReportRequestIdentity((signal) =>
-        postJson<Types.ReportComposerPreview>(`/api/reports/composer/preview`, { prompt }, { signal }));
+    const path = `/api/reports/composer/preview`;
+    return withReportRequestIdentity(
+        (init) => postJson<Types.ReportComposerPreview>(path, { prompt }, init),
+        pinWriteNow(path),
+    );
 }
 
 export function createReport(payload: Types.ReportDefinitionInput) {
@@ -6743,7 +6845,7 @@ export function getReportSchedule(
     init: RequestInit = {},
 ): Promise<Types.ReportSchedule | null> {
     if (Object.keys(init).length > 0) return requestReportSchedule(reportId, init);
-    return withReportRequestIdentity((signal) => requestReportSchedule(reportId, { signal }));
+    return withReportRequestIdentity((requestInit) => requestReportSchedule(reportId, requestInit));
 }
 
 export function getReportScheduleFromCookie(reportId: number, cookie: string | null) {
@@ -6756,17 +6858,18 @@ export function saveReportSchedule(
     body: Types.ReportScheduleRequest,
     scheduleExists: boolean,
 ) {
-    return withReportRequestIdentity((signal) => {
-        const path = `/api/reports/${reportId}/schedule`;
-        return scheduleExists
-            ? putJson<Types.ReportSchedule>(path, body, { signal })
-            : postJson<Types.ReportSchedule>(path, body, { signal });
-    });
+    const path = `/api/reports/${reportId}/schedule`;
+    return withReportRequestIdentity(
+        (init) => scheduleExists
+            ? putJson<Types.ReportSchedule>(path, body, init)
+            : postJson<Types.ReportSchedule>(path, body, init),
+        pinWriteNow(path),
+    );
 }
 
 export function deleteReportSchedule(reportId: number) {
-    return withReportRequestIdentity((signal) =>
-        deleteJson<void>(`/api/reports/${reportId}/schedule`, { signal }));
+    const path = `/api/reports/${reportId}/schedule`;
+    return withReportRequestIdentity((init) => deleteJson<void>(path, init), pinWriteNow(path));
 }
 
 export function getGoals(init: RequestInit = {}) {
@@ -6798,14 +6901,15 @@ export async function generateReport(
     payload: Types.ReportGenerateInput = {},
     mode: Types.ReportNarrativeMode = "cached",
 ) {
+    const path = `/api/reports/${id}/generate?narrative=${mode}`;
+    const pinned = pinWriteNow(path);
     if (typeof window === "undefined") {
-        return postJson<Types.ReportDocument>(`/api/reports/${id}/generate?narrative=${mode}`, payload);
+        return postJson<Types.ReportDocument>(path, payload, pinned);
     }
-    const identity = await currentClientRequestIdentity();
+    const identity = await identityBeforePinnedWrite();
     if (identity == null) {
         throw new Error("Unable to establish the authenticated report request identity");
     }
-    const path = `/api/reports/${id}/generate?narrative=${mode}`;
     const key = `${identity}\u0000${path}\u0000${JSON.stringify(payload)}`;
     const existing = inFlightReportGenerations.get(key);
     if (existing) {
@@ -6813,7 +6917,7 @@ export async function generateReport(
     }
     const controller = new AbortController();
     const request = (async () => {
-        const response = await postJson<Types.ReportDocument>(path, payload, { signal: controller.signal });
+        const response = await postJson<Types.ReportDocument>(path, payload, { ...pinned, signal: controller.signal });
         if (await currentClientRequestIdentity() !== identity) {
             throw new Error("AI request identity changed before completion");
         }
@@ -6832,8 +6936,11 @@ export function getReportSnapshots(id: number, init: RequestInit = {}) {
 }
 
 export function createReportSnapshot(id: number, payload: Types.ReportGenerateInput = {}) {
-    return withReportRequestIdentity((signal) =>
-        postJson<Types.ReportSnapshot>(`/api/reports/${id}/snapshots`, payload, { signal }));
+    const path = `/api/reports/${id}/snapshots`;
+    return withReportRequestIdentity(
+        (init) => postJson<Types.ReportSnapshot>(path, payload, init),
+        pinWriteNow(path),
+    );
 }
 
 export function getReportSnapshot(id: number, snapshotId: number, init: RequestInit = {}) {
@@ -6843,30 +6950,40 @@ export function getReportSnapshot(id: number, snapshotId: number, init: RequestI
             ...init,
         });
     }
-    return withReportRequestIdentity((signal) =>
+    return withReportRequestIdentity((requestInit) =>
         getJson<Types.ReportSnapshot>(`/api/reports/${id}/snapshots/${snapshotId}`, {
             cache: "no-store",
-            signal,
+            ...requestInit,
         }));
 }
 
 export function deleteReportSnapshot(id: number, snapshotId: number) {
-    return withReportRequestIdentity((signal) =>
-        deleteJson<void>(`/api/reports/${id}/snapshots/${snapshotId}`, { signal }));
+    const path = `/api/reports/${id}/snapshots/${snapshotId}`;
+    return withReportRequestIdentity((init) => deleteJson<void>(path, init), pinWriteNow(path));
 }
 
-async function withReportRequestIdentity<T>(request: (signal?: AbortSignal) => Promise<T>): Promise<T> {
+/**
+ * Runs a report request under a proven request identity and aborts it on an identity change. A
+ * write passes the options {@link pinWriteNow} fixed before this was called, because the identity is
+ * resolved first and a workspace switch during that wait must not move the write (#1732).
+ * @param request the request, given the options to send with
+ * @param pinned options fixed when the request was made, such as its workspace pin
+ */
+async function withReportRequestIdentity<T>(
+    request: (init: RequestInit) => Promise<T>,
+    pinned: RequestInit = {},
+): Promise<T> {
     if (typeof window === "undefined") {
-        return request();
+        return request(pinned);
     }
-    const identity = await currentClientRequestIdentity();
+    const identity = await identityBeforePinnedWrite();
     if (identity == null) {
         throw new Error("Unable to establish the authenticated report request identity");
     }
     const controller = new AbortController();
     inFlightReportRequests.add(controller);
     try {
-        const result = await request(controller.signal);
+        const result = await request({ ...pinned, signal: controller.signal });
         if (await currentClientRequestIdentity() !== identity) {
             throw new Error("Report request identity changed before completion");
         }
@@ -6888,21 +7005,21 @@ function downloadBlob(blob: Blob, filename: string): void {
 }
 
 async function fetchReportCsv(path: string, init: RequestInit): Promise<Blob> {
-    return withReportRequestIdentity(async (signal) => {
+    const mutating = isMutating(init.method);
+    const pinnedInit = mutating ? pinWriteNow(path, init) : init;
+    return withReportRequestIdentity(async (requestInit) => {
         const locale = localeFromCookieHeader(document.cookie);
-        const mutating = isMutating(init.method);
         const workspaceId = requestWorkspaceId(path, mutating);
-        const pinnedWorkspace = outgoingWorkspaceId(init, workspaceId);
+        const pinnedWorkspace = outgoingWorkspaceId(requestInit, workspaceId);
         const send = (csrf: Record<string, string>) => {
             const headers = new Headers({
                 "Accept-Language": locale,
                 ...(workspaceId ? { "X-Workspace-Id": workspaceId } : {}),
                 ...csrf,
             });
-            new Headers(init.headers).forEach((value, key) => headers.set(key, value));
+            new Headers(requestInit.headers).forEach((value, key) => headers.set(key, value));
             return fetch(`${API_BASE}${path}`, {
-                ...init,
-                signal,
+                ...requestInit,
                 credentials: "include",
                 headers,
             });
@@ -6919,7 +7036,7 @@ async function fetchReportCsv(path: string, init: RequestInit): Promise<Blob> {
             throw refusalFor(await getAuthenticatedApiError(res), path, mutating, pinnedWorkspace);
         }
         return res.blob();
-    });
+    }, pinnedInit);
 }
 
 export async function exportReportCsv(
