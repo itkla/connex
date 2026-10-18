@@ -55,6 +55,37 @@ class ReferenceContentReaderTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"2026-10-16T10:30:00Z", "::1", "{\"at\":\"2026-10-16T10:30:00Z\",\"path\":\"C:\\\\audit\"}",
+            "Task：①資料作成", "\\literal backslash"})
+    void colonAndBackslashProseUsesTheFastPath(String content) {
+        var reading = ReferenceContentReader.read(content);
+        assertTrue(reading.complete());
+        assertTrue(reading.isEmpty());
+        assertFalse(reading.censusScanned());
+        assertFalse(reading.memberLabelsComputed());
+        assertEquals(content, ReferenceService.toPlainText(content));
+    }
+
+    @Test
+    void linkFreePathologicalTablesWithTimestampsUseTheFastPath() {
+        String content = "| x ".repeat(258) + "\n10:30";
+        var reading = ReferenceContentReader.read(content);
+        assertTrue(reading.complete());
+        assertFalse(reading.censusScanned());
+        assertTrue(reading.isEmpty());
+        assertEquals(content, ReferenceService.toPlainText(content));
+    }
+
+    @Test
+    void plainFastPathStillEnforcesTheInputCap() {
+        var admitted = ReferenceContentReader.read("x".repeat(ReferenceContentReader.MAX_INPUT_LENGTH));
+        assertTrue(admitted.complete());
+        assertFalse(admitted.censusScanned());
+        var oversized = ReferenceContentReader.read("x".repeat(ReferenceContentReader.MAX_INPUT_LENGTH + 1));
+        assertEquals(ReferenceContentReader.Status.INPUT_LIMIT, oversized.status());
+    }
+
     @Test
     void memberLabelsAndReferencesAreComputedOnlyWhenRequested() {
         var reading = ReferenceContentReader.read("[Former `]` Member](user:42)");
@@ -172,6 +203,83 @@ class ReferenceContentReaderTest {
                     "prefix `\n\nh|i\n--|--|--\n[Former|Member](%s \"title\")\n`")
                     .map(layout -> Arguments.of(type, layout.formatted(destination))));
         });
+    }
+
+    static Stream<Arguments> normalizedDefinitionsImmediatelyAfterTables() {
+        return normalizedTableDestinations().map(arguments -> {
+            String type = (String) arguments.get()[0];
+            String content = (String) arguments.get()[1];
+            int start = content.lastIndexOf("](") + 2;
+            int end = content.indexOf(" \"title\")", start);
+            String destination = content.substring(start, end);
+            String reference = content.replace("](" + destination + " \"title\")", "][m]");
+            return Arguments.of(type, reference + "\n[m]: " + destination);
+        });
+    }
+
+    @ParameterizedTest
+    @MethodSource("normalizedDefinitionsImmediatelyAfterTables")
+    void definitionsImmediatelyAfterBothTableLayoutsKeepEverySpelling(String type, String content) {
+        var target = new ReferenceContentReader.ReferenceTarget(type, 42);
+        for (String source : List.of(content, "```\n" + content + "\n```")) {
+            var reading = ReferenceContentReader.read(source);
+            assertTrue(reading.complete(), source);
+            assertTrue(reading.targets().contains(target), source);
+            if (source.startsWith("```")) {
+                assertTrue(reading.links().isEmpty(), source);
+                assertTrue(reading.unexplainedTargets().contains(target), source);
+            } else {
+                assertTrue(reading.links().stream().anyMatch(link -> link.target().filter(target::equals).isPresent())
+                        || reading.unexplainedTargets().contains(target), source);
+            }
+            if (type.equals("user") && reading.unexplainedTargets().contains(target)) {
+                assertFalse(ReferenceService.memberReferenceReading(source).complete(), source);
+            }
+            if (type.equals("note")) {
+                assertEquals("a note", ReferenceService.toPlainText(source), source);
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", " ", "   ", "> ", "> > ", "- ", "* ", "+ ", "1. ", "2) ", "> - "})
+    void definitionCensusAcceptsContainerPrefixesWithoutRequiringParagraphInterruption(String prefix) {
+        for (String newline : List.of("\n", "\r", "\r\n")) {
+            for (String type : TYPES) {
+                String content = "paragraph" + newline + prefix + "[m]: " + type + ":42";
+                assertTrue(ReferenceContentReader.read(content).targets()
+                        .contains(new ReferenceContentReader.ReferenceTarget(type, 42)), content);
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"Status ", "状態 ", "    ", "> Status ", "- Status "})
+    void definitionCensusKeepsDigitDestinationsRegardlessOfKeyPosition(String prefix) {
+        for (String type : TYPES) {
+            String content = prefix + "[m]: " + type + ":42 closed";
+            var reading = ReferenceContentReader.read(content);
+            var target = new ReferenceContentReader.ReferenceTarget(type, 42);
+            assertTrue(reading.complete(), content);
+            assertTrue(reading.targets().contains(target), content);
+            assertTrue(reading.unexplainedTargets().contains(target), content);
+            assertTrue(reading.unparseableTypes().isEmpty(), content);
+            if (type.equals("user")) {
+                assertFalse(ReferenceService.memberReferenceReading(content).complete(), content);
+            }
+            if (type.equals("note")) {
+                assertEquals("a note", ReferenceService.toPlainText(content));
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"0", "2147483648", "42x", "&#x34;2x"})
+    void digitStartingCompatibilityDefinitionsRetainTheirUnsafeSignal(String id) {
+        for (String type : TYPES) {
+            String content = "> [m]: " + type + ":" + id + " pending";
+            assertTrue(ReferenceContentReader.read(content).unparseableTypes().contains(type), content);
+        }
     }
 
     static Stream<Arguments> externalAndEmbeddedDestinations() {

@@ -96,6 +96,40 @@ class ReferenceServiceReaderVisibilityTest {
         return ReferenceContentReaderTest.normalizedTableDestinations();
     }
 
+    static Stream<Arguments> normalizedDefinitionsImmediatelyAfterTables() {
+        return ReferenceContentReaderTest.normalizedDefinitionsImmediatelyAfterTables();
+    }
+
+    @ParameterizedTest
+    @MethodSource("normalizedDefinitionsImmediatelyAfterTables")
+    void normalizedDefinitionsAfterBothTableLayoutsStillRequireScopedVisibility(String type, String content) {
+        tableDisagreementsStillRequireScopedVisibility(type, content);
+    }
+
+    @Test
+    void linkFreePathologicalTablesWithTimestampsRemainVisibleWithoutTargetLookups() {
+        String content = "| x ".repeat(258) + "\n10:30";
+        assertEquals(content, service.redactInvisibleTargets(7,
+                List.of(new ReferenceService.ReaderVisibleContent(content, List.of()))).getFirst().content());
+        verifyNoInteractions(members, people, deals, companies, notes, files, tasks, activities, stored);
+    }
+
+    @Test
+    void inlineDefinitionLikeProseKeepsConservativeVisibilityChecks() {
+        String content = "Status [Q3]: deal:5 closed";
+        when(workspace.getCurrentUserId()).thenReturn(13);
+
+        assertEquals("(unavailable reference)", service.redactInvisibleTargets(7,
+                List.of(new ReferenceService.ReaderVisibleContent(content, List.of()))).getFirst().content());
+        assertEquals("(unavailable reference)", ReferenceService.toPlainText(content));
+        verify(deals).getVisibleIdsIn(7, List.of(5));
+
+        when(deals.getVisibleIdsIn(7, List.of(5))).thenReturn(List.of(5));
+        assertEquals(content, service.redactInvisibleTargets(7,
+                List.of(new ReferenceService.ReaderVisibleContent(content, List.of()))).getFirst().content());
+        verifyNoInteractions(stored);
+    }
+
     static Stream<Arguments> externalAndEmbeddedDestinations() {
         return ReferenceContentReaderTest.externalAndEmbeddedDestinations();
     }

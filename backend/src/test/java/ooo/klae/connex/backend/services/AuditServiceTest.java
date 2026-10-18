@@ -227,7 +227,8 @@ class AuditServiceTest {
     }
 
     static java.util.stream.Stream<String> ordinaryReferenceLikeProse() {
-        return ReferenceProseReadings.all().stream();
+        return java.util.stream.Stream.concat(ReferenceProseReadings.all().stream(), java.util.stream.Stream.of(
+                "2026-10-16T10:30:00Z", "::1", "{\"at\":\"2026-10-16T10:30:00Z\",\"path\":\"C:\\\\audit\"}"));
     }
 
     @ParameterizedTest

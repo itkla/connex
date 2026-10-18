@@ -284,6 +284,9 @@ type/colon spellings, `user\&colon;42`, `user&#92;:42` and `u&#115;er:42` cannot
 
 The census visits only literal ASCII destination anchors in the original source: `](` for an
 inline link/image, `<` immediately before an autolink destination, and `]:` for a definition.
+The `]:` anchor has no physical-line or key-opening requirement. Indented definitions inside
+footnotes and other container layouts must still contribute conservative hits when both parses
+miss them.
 After `](` or `]:`, it accepts spaces/tabs, at most one LF/CR/CRLF continuation with literal
 blockquote/list prefixes or indentation, and an optional `<`. Entity decoding and normalization
 apply only to the following destination; they cannot create syntax anchors. Cached forward
@@ -326,6 +329,10 @@ or masking; they do not grant authorization. The fixed-number supplement runs ov
 even when parser admission fails, and shared target sets avoid label/id Cartesian expansion.
 The same bounded definition/destination supplement inventories all eight target types, including
 indented or container definitions that parser/renderer extension differences could otherwise hide.
+Its added definition readings require a digit immediately after the destination separator,
+including entity-decoded digits, without a physical-line requirement. Thus `[Owner]: User: Hanako`
+and `[メモ]: Note: 来週確認` remain prose; a digit-starting invalid or overflowing ID retains an
+unsafe signal. The original definition inventory remains the compatibility floor.
 Malformed angle destinations stop at impossible internal-reference syntax rather than repeatedly
 searching the remaining body for a closing angle.
 
@@ -389,16 +396,24 @@ There is no cross-request content, AST or authorization cache. Per-group member 
 recipients still use only
 the existing canonical write grammar and its 100-reference cap.
 
-Within the input cap, content with none of `[`, `<`, `&`, `\`, `:` or `：` returns an empty
+Within the input cap, content with none of `[`, `]`, `<` or `&` returns an empty
 complete reading without census or AST parsing. Member compatibility scans, authored/logical/
 rendered label extraction and reference grouping are invocation-local and lazy: only member/AI
 APIs request them, never reader redaction or context-free snippets. No cross-request cache is added.
+Colons, full-width colons and backslashes alone need no Markdown parsing, so timestamps, IPv6,
+JSON audit strings and link-free tables with time text retain their original prose. The `]` guard
+keeps a literal inline destination anchor detectable even when its opening `[` is absent.
 
 Residuals are the retained compatibility supplement's conservative over-inclusion, literal
 Markdown destination syntax in code/HTML, unsupported footnote bodies containing internal
 destinations, bounded/unrepresentable inputs failing closed, and future parser/renderer drift.
 Bare prose type/ID text is outside the census. The original conservative supplement can still
 protect entity-encoded syntax that the renderer leaves literal; it does not create census anchors.
+Literal `]:` followed by a digit-starting internal destination remains a conservative candidate
+inside ordinary sentences, for example `Status [Q3]: deal:5 closed`. An invisible ID can therefore
+redact that whole body, and a user destination can refuse AI admission. This residual requires
+digits immediately after the destination colon; `Status [Q3]: deal: signed` and the English
+and Japanese heading examples without IDs above remain prose.
 Renew the differential fixtures when either dependency changes. Further normalization or Markdown
 exotica outside the tested syntax layouts require a separately scoped review.
 Current active members are masked everywhere through directory candidates. Prose mentions of

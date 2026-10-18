@@ -326,8 +326,8 @@ final class ReferenceContentReader {
     }
 
     private static boolean plainContent(String content) {
-        return content.indexOf('[') < 0 && content.indexOf('<') < 0 && content.indexOf('&') < 0
-                && content.indexOf('\\') < 0 && content.indexOf(':') < 0 && content.indexOf('：') < 0;
+        return content.indexOf('[') < 0 && content.indexOf(']') < 0
+                && content.indexOf('<') < 0 && content.indexOf('&') < 0;
     }
 
     private static Status mergeStatus(Status current, Status additional) {
@@ -1010,7 +1010,11 @@ final class ReferenceContentReader {
                 if (destination.startsWith("<") && destination.endsWith(">")) {
                     destination = destination.substring(1, destination.length() - 1);
                 }
-                collectDestination(destination, targets, unparseableTypes);
+                int separator = destination.indexOf(':');
+                if (separator >= 0 && separator + 1 < destination.length()
+                        && Character.isDigit(destination.charAt(separator + 1))) {
+                    collectDestination(destination, targets, unparseableTypes);
+                }
             }
         }
         return new MarkdownTargets(targets, unparseableTypes, unparseableMemberLinks);
