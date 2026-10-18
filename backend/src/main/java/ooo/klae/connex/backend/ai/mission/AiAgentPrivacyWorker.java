@@ -32,7 +32,8 @@ public class AiAgentPrivacyWorker {
      * Visits at most twenty workspaces and twenty batches on each pass. The pass journal is
      * instance-scoped because lifecycle cleanup must not recreate tenant residuals during teardown.
      */
-    @Scheduled(fixedDelayString = "${connex.ai.mission-privacy-work-delay:1s}", initialDelay = 10000)
+    @Scheduled(fixedDelayString = "${connex.ai.mission-privacy-work-delay:1s}",
+            initialDelayString = "${connex.ai.mission-privacy-work-initial-delay:10s}")
     public void sweep() {
         List<Integer> workspaces = tenantWorkScope.unroutedRead(
                 () -> workspaceMapper.findWorkspaceIdsLifecyclePage(workspaceCursor.get(), 20));

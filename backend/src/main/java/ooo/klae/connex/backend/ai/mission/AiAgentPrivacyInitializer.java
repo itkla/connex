@@ -47,7 +47,8 @@ public class AiAgentPrivacyInitializer {
     }
 
     /** Recovers provisioning crashes and initialization failures without depending on AI enablement. */
-    @Scheduled(fixedDelayString = "${connex.ai.mission-privacy-reconcile-delay:60s}", initialDelay = 60000)
+    @Scheduled(fixedDelayString = "${connex.ai.mission-privacy-reconcile-delay:60s}",
+            initialDelayString = "${connex.ai.mission-privacy-reconcile-initial-delay:60s}")
     public synchronized void reconcile() {
         int after = 0;
         boolean successful = true;

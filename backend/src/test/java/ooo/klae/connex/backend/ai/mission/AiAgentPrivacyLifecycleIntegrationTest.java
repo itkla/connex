@@ -118,7 +118,7 @@ class AiAgentPrivacyLifecycleIntegrationTest extends AbstractAiAgentPrivacyInteg
         transaction().executeWithoutResult(status -> {
             workspaceMapper.lockAuthorizationMembership(workspace.getId(), currentUser.getId());
             departures.requireSettledBeforeFreshMembership(workspace.getId(), currentUser.getId());
-            workspaceMapper.addMember(workspace.getId(), currentUser.getId(), "member");
+            workspaceMapper.addMember(workspace.getId(), currentUser.getId(), "owner");
         });
         AiAgentRun cancelled = runs.getRun(workspace.getId(), run.getId());
         assertThrows(ConflictException.class, () -> persistence.control(cancelled, cancelled.getStateVersion(), "resume"));
@@ -132,7 +132,7 @@ class AiAgentPrivacyLifecycleIntegrationTest extends AbstractAiAgentPrivacyInteg
         transaction().executeWithoutResult(status -> {
             workspaceMapper.lockAuthorizationMembership(workspace.getId(), currentUser.getId());
             departures.requireSettledBeforeFreshMembership(workspace.getId(), currentUser.getId());
-            workspaceMapper.addMember(workspace.getId(), currentUser.getId(), "member");
+            workspaceMapper.addMember(workspace.getId(), currentUser.getId(), "owner");
         });
         AiAgentRun current = create();
 

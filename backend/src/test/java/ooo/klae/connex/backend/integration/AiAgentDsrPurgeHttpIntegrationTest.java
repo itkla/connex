@@ -11,6 +11,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 import jakarta.servlet.Filter;
 
@@ -28,6 +29,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
+import org.springframework.web.context.request.RequestContextHolder;
 
 import ooo.klae.connex.backend.ai.mission.AiAgentPrivacyService;
 import ooo.klae.connex.backend.ai.mission.AiAgentPurgeAcceptance;
@@ -103,7 +105,10 @@ class AiAgentDsrPurgeHttpIntegrationTest {
                 organization.getId(), workspace.getId(), personId);
         requestId = Objects.requireNonNull(jdbc.queryForObject(
                 "SELECT id FROM data_subject_request WHERE org_id=?", Long.class, organization.getId()));
-        workScope.inWorkspace(workspace.getId(), () -> privacy.initialize(workspace.getId()));
+        privacyMaintenance(() -> {
+            privacy.initialize(workspace.getId());
+            return null;
+        });
         MockHttpSession authenticated = (MockHttpSession) mvc.perform(post("/api/auth/login")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json.writeValueAsString(Map.of("username", actor.getUsername(), "password", PASSWORD))))
@@ -174,7 +179,7 @@ class AiAgentDsrPurgeHttpIntegrationTest {
         mvc.perform(get(progressPath(operation)).session(session.http()).header("X-Workspace-Id", workspace.getId()))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.operationId").value(operation));
         assertEquals(1, acceptedCount());
-        assertTrue(workScope.inWorkspace(workspace.getId(), () -> {
+        assertTrue(privacyMaintenance(() -> {
             for (int batch = 0; batch < 10; batch++) {
                 if (privacy.batch(workspace.getId(), operation)) {
                     return true;
@@ -217,6 +222,16 @@ class AiAgentDsrPurgeHttpIntegrationTest {
                 "snapshotToken", DataSubjectRequestSnapshot.token(requests.findById(organization.getId(), requestId)),
                 "scopeAcknowledgement", AiAgentPurgeAcceptance.SCOPE,
                 "cutoffPolicyAcknowledgement", AiAgentPurgeAcceptance.CUTOFF_POLICY));
+    }
+
+    private <T> T privacyMaintenance(Supplier<T> work) {
+        var requestAttributes = RequestContextHolder.getRequestAttributes();
+        RequestContextHolder.resetRequestAttributes();
+        try {
+            return workScope.inWorkspace(workspace.getId(), work);
+        } finally {
+            RequestContextHolder.setRequestAttributes(requestAttributes);
+        }
     }
 
     private String initiatePath() {

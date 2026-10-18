@@ -413,7 +413,7 @@
                 "complete": "Erasure completed and verified."
             },
             "stale": "This data-subject request changed. Close this dialog and review the updated request before trying again.",
-            "failed": "Couldn’t retrieve the erasure status. Refresh to try again."
+            "failed": "Couldn't retrieve the erasure status"
         }
     }
 }

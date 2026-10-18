@@ -18,6 +18,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.junit.jupiter.api.Test;
+import org.mybatis.spring.SqlSessionTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
@@ -47,6 +48,7 @@ class AiAgentRunConcurrencyIntegrationTest extends AbstractAiAgentPrivacyIntegra
     @Autowired private ObjectMapper json;
     @Autowired private AiChatTurnPersistenceService turns;
     @Autowired private TenantWorkScope tenantWorkScope;
+    @Autowired private SqlSessionTemplate sqlSessions;
     @MockitoSpyBean private AiAgentRunMapper runs;
     @MockitoSpyBean private AiChatMapper chat;
     @MockitoSpyBean private WorkspaceService workspaces;
@@ -69,8 +71,9 @@ class AiAgentRunConcurrencyIntegrationTest extends AbstractAiAgentPrivacyIntegra
         CountDownLatch secondAtAuthority = new CountDownLatch(1);
         AtomicBoolean paused = new AtomicBoolean();
         AtomicLong waitingConnection = new AtomicLong();
+        AiAgentRunMapper realRuns = sqlSessions.getMapper(AiAgentRunMapper.class);
         doAnswer(invocation -> {
-            Object result = invocation.callRealMethod();
+            AiAgentRun result = realRuns.lockRun(invocation.getArgument(0), invocation.getArgument(1));
             if (Thread.currentThread().getName().equals("mission-claim-first") && paused.compareAndSet(false, true)) {
                 firstHasRoots.countDown();
                 assertTrue(releaseFirst.await(30, TimeUnit.SECONDS));
@@ -125,8 +128,10 @@ class AiAgentRunConcurrencyIntegrationTest extends AbstractAiAgentPrivacyIntegra
         CountDownLatch maintenanceAtSession = new CountDownLatch(1);
         AtomicBoolean paused = new AtomicBoolean();
         AtomicLong waitingConnection = new AtomicLong();
+        AiAgentRunMapper realRuns = sqlSessions.getMapper(AiAgentRunMapper.class);
+        AiChatMapper realChat = sqlSessions.getMapper(AiChatMapper.class);
         doAnswer(invocation -> {
-            Object result = invocation.callRealMethod();
+            AiAgentRun result = realRuns.lockRun(invocation.getArgument(0), invocation.getArgument(1));
             if (Thread.currentThread().getName().equals("mission-claim-holder")
                     && paused.compareAndSet(false, true)) {
                 claimHasRoots.countDown();
@@ -141,7 +146,7 @@ class AiAgentRunConcurrencyIntegrationTest extends AbstractAiAgentPrivacyIntegra
                 waitingConnection.set(connection);
                 maintenanceAtSession.countDown();
             }
-            return invocation.callRealMethod();
+            return realChat.getSessionByIdForMaintenanceUpdate(invocation.getArgument(0), invocation.getArgument(1));
         }).when(chat).getSessionByIdForMaintenanceUpdate(workspace.getId(), session.getId());
         try (var workers = Executors.newFixedThreadPool(2)) {
             var claim = workers.submit(() -> claimAs("mission-claim-holder", discovered));
@@ -198,8 +203,10 @@ class AiAgentRunConcurrencyIntegrationTest extends AbstractAiAgentPrivacyIntegra
         CountDownLatch releaseFirst = new CountDownLatch(1);
         CountDownLatch secondAtAuthority = new CountDownLatch(1);
         AtomicLong waitingConnection = new AtomicLong();
+        AiChatMapper realChat = sqlSessions.getMapper(AiChatMapper.class);
         doAnswer(invocation -> {
-            Object result = invocation.callRealMethod();
+            AiChatSession result = realChat.getSessionByIdForUpdate(
+                    invocation.getArgument(0), invocation.getArgument(1), invocation.getArgument(2));
             if (Thread.currentThread().getName().equals("admission-first")) {
                 firstHasSession.countDown();
                 assertTrue(releaseFirst.await(30, TimeUnit.SECONDS));

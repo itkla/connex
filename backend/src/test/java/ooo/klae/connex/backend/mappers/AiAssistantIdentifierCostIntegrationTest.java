@@ -156,7 +156,7 @@ class AiAssistantIdentifierCostIntegrationTest extends AbstractMapperTest {
         var governance = mock(AiWorkspaceGovernanceService.class);
         when(governance.isEnabled(workspace.getId())).thenReturn(true);
         var queue = new AiChatTurnPersistenceService(timedChat, attachments, currentWorkspace,
-                mock(AiRestrictionEpoch.class), governance, timedResolver, mock(AiAssistantToolExecutor.class),
+                new AiRestrictionEpoch(), governance, timedResolver, mock(AiAssistantToolExecutor.class),
                 mock(AiAssistantSessionReadAudit.class), Clock.systemUTC(), mock(AiChatRealtimeDispatcher.class),
                 JsonMapper.builder().build(), mock(AiRunLeaseService.class));
         var transaction = new TransactionTemplate(transactionManager);

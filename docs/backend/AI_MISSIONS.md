@@ -216,3 +216,10 @@ Focused privacy selectors are `AiAgentPrivacyIntegrationTest`,
 `AiAgentDsrPurgeHttpIntegrationTest`, and `DataSubjectRequestSnapshotTest`. Real database,
 HTTP, suspended-writer, locking, and scripted trajectory evidence is required before
 activation. Source inspection or compilation alone does not establish those guarantees.
+
+Committed integration fixtures drive maintenance passes explicitly. The shared test configuration
+defers the timers with `connex.ai.mission-privacy-work-initial-delay`,
+`connex.ai.mission-privacy-reconcile-initial-delay`, and `connex.ai.mission-sweep-initial-delay`
+so cached application contexts cannot advance another test's privacy cursors or settle its attempts.
+Their production defaults remain 10, 60, and 30 seconds respectively; startup reconciliation and
+direct maintenance calls still run normally.

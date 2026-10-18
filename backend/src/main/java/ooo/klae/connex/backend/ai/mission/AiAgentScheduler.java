@@ -38,7 +38,8 @@ public class AiAgentScheduler {
     private int workspaceCursor;
 
     /** Starts at most one bounded page without holding the shared maintenance scheduler during egress. */
-    @Scheduled(fixedDelayString = "${connex.ai.mission-sweep-delay:5s}", initialDelay = 30000)
+    @Scheduled(fixedDelayString = "${connex.ai.mission-sweep-delay:5s}",
+            initialDelayString = "${connex.ai.mission-sweep-initial-delay:30s}")
     public void sweep() {
         if (!initializer.isReady()) {
             return;

@@ -1354,7 +1354,7 @@
         "withheld": "This review’s content is no longer available.",
         "unavailable": "Record reviews are unavailable right now. Try again later.",
         "forbidden": "You don’t have permission to view or control this review.",
-        "failed": "Couldn’t load the review. Try again."
+        "failed": "Couldn't load the review"
       }
     }
   },
