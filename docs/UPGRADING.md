@@ -7,6 +7,20 @@ migration-discipline part of #87 §9 / #102).
 > The specific support window below is a **proposed** policy; confirm it before it is published to
 > customers.
 
+## Dormant assistant proposal-set storage (tenant V233)
+
+V233 adds the chat-owned proposal-set parent, nullable membership/preparation columns on tool
+calls, and tenant-local ancestry constraints. Existing calls retain their trust, statuses and
+timestamps; no proposal sets are backfilled or produced by the running application. The new
+storage participates in chat deletion, account-erasure attribution cleanup, tenant export and
+residual verification. Index and FK creation needs metadata locks on the existing chat tables.
+
+The rollback floor stays `tenant/V231__ai_proposal_review_expiry_cutover.sql`: this storage is
+dormant and earlier expiry-compatible binaries continue writing null-set calls. V232 is reserved
+for missions. Privacy enforcement and production set activation require their later semantic
+cutovers and rollback floors; V233 alone authorizes neither. See the
+[storage contract](backend/AI_SECURITY.md#dormant-chat-proposal-set-storage-tenant-v233).
+
 ## AI identifier lookup keys (tenant V230)
 
 V230 adds four nullable derived columns to each of person, company and deal. Each ALTER explicitly

@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.AiAssistantProposalSetMapper">
+
+  <resultMap id="proposalSetResult" type="AiAssistantProposalSet">
+    <id property="workspaceId" column="workspace_id"/>
+    <id property="proposalKey" column="proposal_key"/>
+    <result property="sessionId" column="session_id"/>
+    <result property="originTurnId" column="origin_turn_id"/>
+    <result property="messageId" column="message_id"/>
+    <result property="requestedByUserId" column="requested_by_user_id"/>
+    <result property="stepNumber" column="step_number"/>
+    <result property="callOrdinal" column="call_ordinal"/>
+    <result property="toolName" column="tool_name"/>
+    <result property="invocationMode" column="invocation_mode"/>
+    <result property="bulkTurnSlot" column="bulk_turn_slot"/>
+    <result property="rowCount" column="row_count"/>
+    <result property="intentFingerprint" column="intent_fingerprint"/>
+    <result property="scopeRevision" column="scope_revision"/>
+    <result property="publicationState" column="publication_state"/>
+    <result property="failureReason" column="failure_reason"/>
+    <result property="privacyGeneration" column="privacy_generation"/>
+    <result property="createdAt" column="created_at"/>
+  </resultMap>
+
+  <resultMap id="memberResult" type="AiChatToolCall"
+             extends="ooo.klae.connex.backend.mappers.AiChatMapper.toolCallResult">
+    <result property="proposalKey" column="proposal_key"/>
+    <result property="proposalOrdinal" column="proposal_ordinal"/>
+    <result property="proposalPreparedAt" column="proposal_prepared_at"/>
+    <result property="invocationMode" column="invocation_mode"/>
+    <result property="publicationState" column="publication_state"/>
+  </resultMap>
+
+  <insert id="insert">
+    INSERT INTO ai_assistant_proposal_set
+      (workspace_id, proposal_key, session_id, origin_turn_id, message_id, requested_by_user_id,
+       step_number, call_ordinal, tool_name, invocation_mode, row_count, intent_fingerprint,
+       scope_revision, privacy_generation)
+    SELECT #{workspaceId}, #{proposalKey}, #{sessionId}, #{originTurnId}, #{messageId},
+           #{requestedByUserId}, #{stepNumber}, #{callOrdinal}, #{toolName}, #{invocationMode},
+           #{rowCount}, #{intentFingerprint}, #{scopeRevision}, #{privacyGeneration}
+    FROM ai_chat_message m
+    JOIN ai_chat_turn t ON t.workspace_id = m.workspace_id AND t.session_id = m.session_id
+    WHERE m.workspace_id = #{workspaceId}
+      AND m.session_id = #{sessionId}
+      AND m.id = #{messageId}
+      AND m.author_kind = 'user'
+      AND m.author_user_id = #{requestedByUserId}
+      AND t.id = #{originTurnId}
+      AND t.requested_by_user_id = #{requestedByUserId}
+  </insert>
+
+  <insert id="insertMember" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO ai_chat_tool_call
+      (workspace_id, message_id, tool_name, status, arguments_json, thought_signature,
+       idempotency_key, server_proposal, proposal_key, proposal_ordinal, proposal_prepared_at,
+       created_at, updated_at)
+    SELECT p.workspace_id, p.message_id, p.tool_name, 'proposed', #{argumentsJson,jdbcType=VARCHAR},
+           #{thoughtSignature,jdbcType=LONGVARCHAR}, #{idempotencyKey}, TRUE, p.proposal_key,
+           #{proposalOrdinal}, #{proposalPreparedAt}, p.created_at, p.created_at
+    FROM ai_assistant_proposal_set p
+    WHERE p.workspace_id = #{workspaceId}
+      AND p.session_id = #{sessionId}
+      AND p.proposal_key = #{proposalKey}
+      AND p.message_id = #{messageId}
+      AND p.requested_by_user_id = #{requestedByUserId}
+      AND CAST(p.tool_name AS BINARY) = CAST(#{toolName} AS BINARY)
+      AND p.publication_state = 'staged'
+      AND #{proposalOrdinal} BETWEEN 1 AND p.row_count
+      AND #{proposalPreparedAt} IS NOT NULL
+      AND #{proposalPreparedAt} &lt;= p.created_at
+      AND #{idempotencyKey} IS NOT NULL
+      AND #{serverProposal} = TRUE
+  </insert>
+
+  <select id="findByKey" resultMap="proposalSetResult">
+    SELECT p.* FROM ai_assistant_proposal_set p
+    WHERE p.workspace_id = #{workspaceId} AND p.session_id = #{sessionId}
+      AND p.proposal_key = #{proposalKey}
+  </select>
+
+  <select id="findByCallIdentity" resultMap="proposalSetResult">
+    SELECT p.* FROM ai_assistant_proposal_set p
+    WHERE p.workspace_id = #{workspaceId} AND p.session_id = #{sessionId}
+      AND p.origin_turn_id = #{originTurnId} AND p.step_number = #{stepNumber}
+      AND p.call_ordinal = #{callOrdinal}
+  </select>
+
+  <select id="listMembers" resultMap="memberResult">
+    SELECT tc.*, p.session_id, p.requested_by_user_id, p.invocation_mode, p.publication_state
+    FROM ai_chat_tool_call tc
+    JOIN ai_assistant_proposal_set p
+      ON p.workspace_id = tc.workspace_id AND p.proposal_key = tc.proposal_key
+    WHERE tc.workspace_id = #{workspaceId} AND p.session_id = #{sessionId}
+      AND tc.proposal_key = #{proposalKey}
+    ORDER BY tc.proposal_ordinal
+  </select>
+
+  <select id="hasCompleteMembership" resultType="boolean">
+    SELECT EXISTS (
+      SELECT 1 FROM ai_assistant_proposal_set p
+      JOIN ai_chat_message m
+        ON m.workspace_id = p.workspace_id AND m.session_id = p.session_id AND m.id = p.message_id
+      JOIN ai_chat_turn t
+        ON t.workspace_id = p.workspace_id AND t.session_id = p.session_id AND t.id = p.origin_turn_id
+      WHERE p.workspace_id = #{workspaceId} AND p.session_id = #{sessionId}
+        AND p.proposal_key = #{proposalKey}
+        AND m.author_kind = 'user'
+        AND m.author_user_id &lt;=> p.requested_by_user_id
+        AND t.requested_by_user_id &lt;=> p.requested_by_user_id
+        AND (SELECT COUNT(*) FROM ai_chat_tool_call tc
+             WHERE tc.workspace_id = p.workspace_id AND tc.proposal_key = p.proposal_key) = p.row_count
+        AND NOT EXISTS (
+          SELECT 1 FROM ai_chat_tool_call tc
+          WHERE tc.workspace_id = p.workspace_id AND tc.proposal_key = p.proposal_key
+            AND (tc.proposal_ordinal NOT BETWEEN 1 AND p.row_count
+              OR tc.message_id != p.message_id
+              OR CAST(tc.tool_name AS BINARY) != CAST(p.tool_name AS BINARY)
+              OR tc.server_proposal != TRUE OR tc.created_at != p.created_at
+              OR tc.proposal_prepared_at IS NULL OR tc.proposal_prepared_at > p.created_at)
+        )
+    )
+  </select>
+</mapper>

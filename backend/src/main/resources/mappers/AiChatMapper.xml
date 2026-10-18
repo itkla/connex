@@ -410,6 +410,12 @@
     WHERE requested_by_user_id = #{userId}
   </update>
 
+  <update id="clearProposalSetRequestersAnywhere">
+    UPDATE ai_assistant_proposal_set
+    SET requested_by_user_id = NULL
+    WHERE requested_by_user_id = #{userId}
+  </update>
+
   <select id="isParticipant" resultType="boolean">
     SELECT EXISTS(
       SELECT 1

@@ -435,6 +435,7 @@ public class UserOffboardingService {
         aiChatMapper.clearMessageAuthorsAnywhere(userId);
         aiChatMapper.clearToolCallExecutorsAnywhere(userId);
         aiChatMapper.clearTurnRequestersAnywhere(userId);
+        aiChatMapper.clearProposalSetRequestersAnywhere(userId);
         recordCommentMapper.clearAuthorsAnywhere(userId);
         recordCommentMapper.clearDeletersAnywhere(userId);
         recordCommentMapper.clearThreadCreatorsAnywhere(userId);

@@ -21,6 +21,11 @@ public class AiChatToolCall {
     private String executedAt;
     private String idempotencyKey;
     private boolean serverProposal;
+    private String proposalKey;
+    private Integer proposalOrdinal;
+    private String proposalPreparedAt;
+    private String invocationMode;
+    private String publicationState;
     private String createdAt;
     private String updatedAt;
 }
