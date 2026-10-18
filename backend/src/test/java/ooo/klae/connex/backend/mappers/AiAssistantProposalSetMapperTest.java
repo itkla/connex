@@ -157,6 +157,66 @@ class AiAssistantProposalSetMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void completeMembershipRequiresMatchingMessageAuthor() {
+        AiAssistantProposalSet set = proposalSet(workspace, newUser(), "scalar", 1);
+        insert(set);
+        assertEquals(1, mapper.insertMember(member(set, 1)));
+        assertTrue(complete(set));
+        assertEquals(1, jdbc.update(
+                "UPDATE ai_chat_message SET author_user_id = ? WHERE workspace_id = ? AND id = ?",
+                newUser().getId(), set.getWorkspaceId(), set.getMessageId()));
+        sqlSession.clearCache();
+        assertFalse(complete(set));
+    }
+
+    @Test
+    void completeMembershipRequiresMatchingTurnRequester() {
+        AiAssistantProposalSet set = proposalSet(workspace, newUser(), "scalar", 1);
+        insert(set);
+        assertEquals(1, mapper.insertMember(member(set, 1)));
+        assertTrue(complete(set));
+        assertEquals(1, jdbc.update(
+                "UPDATE ai_chat_turn SET requested_by_user_id = ? WHERE workspace_id = ? AND id = ?",
+                newUser().getId(), set.getWorkspaceId(), set.getOriginTurnId()));
+        sqlSession.clearCache();
+        assertFalse(complete(set));
+    }
+
+    @Test
+    void completeMembershipRejectsPreparationAfterParentTimestamp() {
+        AiAssistantProposalSet set = proposalSet(workspace, newUser(), "scalar", 1);
+        insert(set);
+        assertEquals(1, mapper.insertMember(member(set, 1)));
+        assertTrue(complete(set));
+        assertEquals(1, jdbc.update("""
+                UPDATE ai_chat_tool_call
+                SET proposal_prepared_at = DATE_ADD(created_at, INTERVAL 1 MICROSECOND)
+                WHERE workspace_id = ? AND proposal_key = ?
+                """, set.getWorkspaceId(), set.getProposalKey()));
+        sqlSession.clearCache();
+        assertFalse(complete(set));
+    }
+
+    @Test
+    void completeMembershipRetainsConsistentNullAttributionAfterAccountErasure() {
+        AiAssistantProposalSet set = proposalSet(workspace, newUser(), "scalar", 1);
+        insert(set);
+        assertEquals(1, mapper.insertMember(member(set, 1)));
+        assertTrue(complete(set));
+        assertEquals(1, jdbc.update(
+                "UPDATE ai_chat_message SET author_user_id = NULL WHERE workspace_id = ? AND id = ?",
+                set.getWorkspaceId(), set.getMessageId()));
+        assertEquals(1, jdbc.update(
+                "UPDATE ai_chat_turn SET requested_by_user_id = NULL WHERE workspace_id = ? AND id = ?",
+                set.getWorkspaceId(), set.getOriginTurnId()));
+        assertEquals(1, jdbc.update(
+                "UPDATE ai_assistant_proposal_set SET requested_by_user_id = NULL WHERE workspace_id = ? AND proposal_key = ?",
+                set.getWorkspaceId(), set.getProposalKey()));
+        sqlSession.clearCache();
+        assertTrue(complete(set));
+    }
+
+    @Test
     void aGapWithTheRightCountAndDifferentCreationTimeAreIncomplete() {
         AiAssistantProposalSet set = proposalSet(workspace, newUser(), "bulk", 2);
         insert(set);
@@ -267,6 +327,32 @@ class AiAssistantProposalSetMapperTest extends AbstractMapperTest {
         jdbc.update("UPDATE ai_chat_message SET author_kind = 'assistant' WHERE workspace_id = ? AND id = ?",
                 set.getWorkspaceId(), set.getMessageId());
         assertEquals(0, mapper.insert(set));
+    }
+
+    @Test
+    void parentInsertRejectsOnlyMessageAuthorMismatchInTheSameSession() {
+        AiAssistantProposalSet set = proposalSet(workspace, newUser(), "scalar", 1);
+        assertEquals(1, jdbc.update(
+                "UPDATE ai_chat_message SET author_user_id = ? WHERE workspace_id = ? AND id = ?",
+                newUser().getId(), set.getWorkspaceId(), set.getMessageId()));
+        assertEquals(0, mapper.insert(set));
+        assertEquals(1, jdbc.update(
+                "UPDATE ai_chat_message SET author_user_id = ? WHERE workspace_id = ? AND id = ?",
+                set.getRequestedByUserId(), set.getWorkspaceId(), set.getMessageId()));
+        insert(set);
+    }
+
+    @Test
+    void parentInsertRejectsOnlyTurnRequesterMismatchInTheSameSession() {
+        AiAssistantProposalSet set = proposalSet(workspace, newUser(), "scalar", 1);
+        assertEquals(1, jdbc.update(
+                "UPDATE ai_chat_turn SET requested_by_user_id = ? WHERE workspace_id = ? AND id = ?",
+                newUser().getId(), set.getWorkspaceId(), set.getOriginTurnId()));
+        assertEquals(0, mapper.insert(set));
+        assertEquals(1, jdbc.update(
+                "UPDATE ai_chat_turn SET requested_by_user_id = ? WHERE workspace_id = ? AND id = ?",
+                set.getRequestedByUserId(), set.getWorkspaceId(), set.getOriginTurnId()));
+        insert(set);
     }
 
     @Test

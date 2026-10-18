@@ -707,7 +707,11 @@ closed reason (`call_failed`, `cancelled`, `timed_out`, `execution_lost`), never
 Composite cascading FKs bind parents to messages and turns in the same workspace and session,
 and children to their parent's exact message. Children keep `message_id NOT NULL`, the existing
 status vocabulary and trust marker. Set-owned children add a unique ordinal and preparation
-anchor; legacy rows retain null membership columns. Their creation timestamp is copied from the
+anchor; legacy rows retain null membership columns. BEFORE INSERT/UPDATE triggers enforce complete
+membership metadata, ordinal bounds and server trust without adding a COPY-requiring CHECK to the
+retained tool-call table; parent constraints remain CHECKs. The guarded online DDL and migration-only
+FK installation procedure are documented in [UPGRADING](../UPGRADING.md#dormant-assistant-proposal-set-storage-tenant-v233).
+Their creation timestamp is copied from the
 parent, separately from the earlier preparation anchor. Proposal-key FK columns explicitly use
 the same ASCII binary collation. Account erasure clears the parent's requester beside message
 authors and turn requesters; membership departure retains attribution and never transfers it.

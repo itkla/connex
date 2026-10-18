@@ -1,10 +1,12 @@
 -- Dormant storage only. Production proposal writers require a later semantic cutover.
 -- User identifiers are service-validated control-plane references, never cross-plane FKs.
 ALTER TABLE ai_chat_message
-    ADD UNIQUE KEY uq_ai_chat_message_session_id (workspace_id, session_id, id);
+    ADD UNIQUE KEY uq_ai_chat_message_session_id (workspace_id, session_id, id),
+    ALGORITHM=INPLACE, LOCK=NONE;
 
 ALTER TABLE ai_chat_turn
-    ADD UNIQUE KEY uq_ai_chat_turn_session_id (workspace_id, session_id, id);
+    ADD UNIQUE KEY uq_ai_chat_turn_session_id (workspace_id, session_id, id),
+    ALGORITHM=INPLACE, LOCK=NONE;
 
 CREATE TABLE ai_assistant_proposal_set (
     workspace_id         INT NOT NULL,
@@ -60,13 +62,51 @@ ALTER TABLE ai_chat_tool_call
     ADD COLUMN proposal_key VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL,
     ADD COLUMN proposal_ordinal INT NULL,
     ADD COLUMN proposal_prepared_at DATETIME(6) NULL,
+    ALGORITHM=INSTANT, LOCK=DEFAULT;
+
+ALTER TABLE ai_chat_tool_call
     ADD UNIQUE KEY uq_ai_chat_tool_call_proposal (workspace_id, proposal_key, proposal_ordinal),
-    ADD CONSTRAINT chk_ai_chat_tool_call_proposal
-        CHECK ((proposal_key IS NULL AND proposal_ordinal IS NULL AND proposal_prepared_at IS NULL)
-            OR (proposal_key IS NOT NULL AND proposal_ordinal IS NOT NULL
-                AND proposal_prepared_at IS NOT NULL AND proposal_ordinal BETWEEN 1 AND 20
-                AND server_proposal = TRUE)),
+    ADD INDEX idx_ai_chat_tool_call_proposal_message (workspace_id, proposal_key, message_id),
+    ALGORITHM=INPLACE, LOCK=NONE;
+
+-- MySQL requires COPY to add an enforced CHECK to a retained table. Triggers preserve
+-- the same invariant for future writes without scanning or rebuilding legacy rows.
+DELIMITER $$
+CREATE TRIGGER trg_ai_chat_tool_call_proposal_insert
+BEFORE INSERT ON ai_chat_tool_call
+FOR EACH ROW
+BEGIN
+    IF NOT ((NEW.proposal_key IS NULL AND NEW.proposal_ordinal IS NULL AND NEW.proposal_prepared_at IS NULL)
+        OR (NEW.proposal_key IS NOT NULL AND NEW.proposal_ordinal IS NOT NULL
+            AND NEW.proposal_prepared_at IS NOT NULL AND NEW.proposal_ordinal BETWEEN 1 AND 20
+            AND NEW.server_proposal = TRUE)) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Invalid proposal membership metadata';
+    END IF;
+END$$
+
+CREATE TRIGGER trg_ai_chat_tool_call_proposal_update
+BEFORE UPDATE ON ai_chat_tool_call
+FOR EACH ROW
+BEGIN
+    IF NOT ((NEW.proposal_key IS NULL AND NEW.proposal_ordinal IS NULL AND NEW.proposal_prepared_at IS NULL)
+        OR (NEW.proposal_key IS NOT NULL AND NEW.proposal_ordinal IS NOT NULL
+            AND NEW.proposal_prepared_at IS NOT NULL AND NEW.proposal_ordinal BETWEEN 1 AND 20
+            AND NEW.server_proposal = TRUE)) THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Invalid proposal membership metadata';
+    END IF;
+END$$
+DELIMITER ;
+
+-- Only this migration connection suspends FK validation, and it performs no DML.
+-- Existing rows and concurrent legacy writers have null proposal keys; no set producer
+-- may run before the later semantic cutover. There are no existing references to validate.
+SET @connex_v233_foreign_key_checks = @@SESSION.foreign_key_checks;
+SET SESSION foreign_key_checks = 0;
+ALTER TABLE ai_chat_tool_call
     ADD CONSTRAINT fk_ai_chat_tool_call_proposal
         FOREIGN KEY (workspace_id, proposal_key, message_id)
         REFERENCES ai_assistant_proposal_set(workspace_id, proposal_key, message_id)
-        ON DELETE CASCADE;
+        ON DELETE CASCADE,
+    ALGORITHM=INPLACE, LOCK=NONE;
+SET SESSION foreign_key_checks = @connex_v233_foreign_key_checks;
+SET @connex_v233_foreign_key_checks = NULL;

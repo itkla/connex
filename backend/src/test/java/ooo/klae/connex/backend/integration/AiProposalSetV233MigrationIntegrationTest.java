@@ -1,21 +1,28 @@
 package ooo.klae.connex.backend.integration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationVersion;
+import org.flywaydb.core.api.callback.BaseCallback;
+import org.flywaydb.core.api.callback.Context;
+import org.flywaydb.core.api.callback.Event;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -30,6 +37,7 @@ class AiProposalSetV233MigrationIntegrationTest {
     private static String password = "";
     private static List<String> legacyColumns = List.of();
     private static List<String> legacyCalls = List.of();
+    private static List<String> legacyTableIdentity = List.of();
 
     @BeforeAll
     static void migratePopulatedLegacyCatalog() throws SQLException {
@@ -71,6 +79,8 @@ class AiProposalSetV233MigrationIntegrationTest {
             }
             legacyColumns = legacyColumns(connection);
             legacyCalls = legacyCalls(connection);
+            legacyTableIdentity = toolCallTableIdentity(connection);
+            assertEquals(1, legacyTableIdentity.size());
         }
         assertEquals(MigrationVersion.fromVersion("233"),
                 Objects.requireNonNull(migrate("233").info().current()).getVersion());
@@ -80,6 +90,28 @@ class AiProposalSetV233MigrationIntegrationTest {
     static void removeCatalog() throws SQLException {
         if (catalog != null) {
             catalog.close();
+        }
+    }
+
+    @Test
+    void migrationRequiresOnlineAlterationsWithoutRebuildingTheRetainedTable() throws Exception {
+        String migration = Files.readString(Path.of(
+                "src/main/resources/db/migration/tenant/V233__ai_assistant_proposal_set_storage.sql"))
+                .replaceAll("(?m)--[^\\r\\n]*", "");
+        List<String> alterations = Arrays.stream(migration.split(";"))
+                .map(String::strip).filter(sql -> sql.startsWith("ALTER TABLE ")).toList();
+        assertEquals(5, alterations.size());
+        for (String sql : alterations) {
+            if (sql.contains("ADD COLUMN")) {
+                assertTrue(sql.contains("ALGORITHM=INSTANT, LOCK=DEFAULT"), sql);
+                assertFalse(sql.contains("ADD CONSTRAINT"), sql);
+                assertFalse(sql.contains("ADD UNIQUE KEY"), sql);
+            } else {
+                assertTrue(sql.contains("ALGORITHM=INPLACE, LOCK=NONE"), sql);
+            }
+        }
+        try (Connection connection = connection()) {
+            assertEquals(legacyTableIdentity, toolCallTableIdentity(connection));
         }
     }
 
@@ -208,16 +240,30 @@ class AiProposalSetV233MigrationIntegrationTest {
     }
 
     @Test
-    void childChecksRequireTrustedCompleteMembershipMetadataAndUniqueOrdinals() throws SQLException {
+    void childTriggersRequireTrustedCompleteMembershipMetadataAndUniqueOrdinals() throws SQLException {
         try (Connection connection = connection(); Statement statement = connection.createStatement()) {
             connection.setAutoCommit(false);
             Ancestry ancestry = insertAncestry(connection, 233003);
             insertParent(connection, ancestry, "children", "bulk", 20, 1, 0);
+            for (String values : List.of(
+                    "NULL, 1, '2026-10-01', TRUE",
+                    "'children', NULL, '2026-10-01', TRUE",
+                    "'children', 1, NULL, TRUE",
+                    "'children', 0, '2026-10-01', TRUE",
+                    "'children', 21, '2026-10-01', TRUE",
+                    "'children', 1, '2026-10-01', FALSE")) {
+                assertRejected(connection, 1644, """
+                        INSERT INTO ai_chat_tool_call
+                            (workspace_id, message_id, tool_name, proposal_key, proposal_ordinal,
+                             proposal_prepared_at, server_proposal)
+                        VALUES (233003, 233003, 'add_tag',
+                        """ + values + ")");
+            }
             insertChild(connection, ancestry, "children", 1);
             for (String assignment : List.of("proposal_key = NULL", "proposal_ordinal = NULL",
                     "proposal_prepared_at = NULL", "proposal_ordinal = 0", "proposal_ordinal = 21",
                     "server_proposal = FALSE")) {
-                assertRejected(connection, 3819,
+                assertRejected(connection, 1644,
                         "UPDATE ai_chat_tool_call SET " + assignment + " WHERE workspace_id = 233003");
             }
             SQLException duplicate = assertThrows(SQLException.class,
@@ -229,10 +275,10 @@ class AiProposalSetV233MigrationIntegrationTest {
                     SET proposal_key = NULL, proposal_ordinal = NULL, proposal_prepared_at = NULL
                     WHERE workspace_id = 233003
                     """));
-            assertRejected(connection, 3819, """
+            assertRejected(connection, 1644, """
                     UPDATE ai_chat_tool_call SET proposal_ordinal = 1 WHERE workspace_id = 233003
                     """);
-            assertRejected(connection, 3819, """
+            assertRejected(connection, 1644, """
                     UPDATE ai_chat_tool_call SET proposal_prepared_at = CURRENT_TIMESTAMP(6) WHERE workspace_id = 233003
                     """);
             connection.rollback();
@@ -416,6 +462,13 @@ class AiProposalSetV233MigrationIntegrationTest {
                 """);
     }
 
+    private static List<String> toolCallTableIdentity(Connection connection) throws SQLException {
+        return rows(connection, """
+                SELECT TABLE_ID FROM information_schema.INNODB_TABLES
+                WHERE NAME = CONCAT(DATABASE(), '/ai_chat_tool_call')
+                """);
+    }
+
     private static List<String> legacyCalls(Connection connection) throws SQLException {
         return rows(connection, """
                 SELECT workspace_id, id, message_id, tool_name, status, arguments_json, thought_signature,
@@ -449,7 +502,8 @@ class AiProposalSetV233MigrationIntegrationTest {
 
     private static Flyway migrate(String version) {
         Flyway flyway = Flyway.configure().dataSource(url, username, password)
-                .locations("classpath:db/migration").callbacks(new AuditLogV126MigrationCallback())
+                .locations("classpath:db/migration").callbacks(
+                        new AuditLogV126MigrationCallback(), new ForeignKeyChecksProbe())
                 .baselineOnMigrate(true).baselineVersion(MigrationVersion.fromVersion("0"))
                 .target(MigrationVersion.fromVersion(version)).load();
         flyway.migrate();
@@ -458,6 +512,28 @@ class AiProposalSetV233MigrationIntegrationTest {
 
     private static Connection connection() throws SQLException {
         return DriverManager.getConnection(url, username, password);
+    }
+
+    private static final class ForeignKeyChecksProbe extends BaseCallback {
+        @Override
+        public boolean supports(Event event, Context context) {
+            return (event == Event.BEFORE_EACH_MIGRATE || event == Event.AFTER_EACH_MIGRATE)
+                    && context.getMigrationInfo() != null
+                    && MigrationVersion.fromVersion("233").equals(context.getMigrationInfo().getVersion());
+        }
+
+        @Override
+        public void handle(Event event, Context context) {
+            try {
+                assertEquals(1, count(context.getConnection(), "SELECT @@SESSION.foreign_key_checks"));
+                if (event == Event.AFTER_EACH_MIGRATE) {
+                    assertEquals(1, count(context.getConnection(),
+                            "SELECT @connex_v233_foreign_key_checks IS NULL"));
+                }
+            } catch (SQLException exception) {
+                throw new IllegalStateException("Could not verify migration-session FK checks", exception);
+            }
+        }
     }
 
     private record Ancestry(int workspaceId, int sessionId, int messageId, int turnId) {}
