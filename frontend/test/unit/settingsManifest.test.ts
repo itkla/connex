@@ -18,6 +18,11 @@ import {
     settingsRouteServed,
 } from "@/app/lib/settingsEntryPoints";
 import { SHIPPED_APP_ROUTES } from "@/app/lib/routeManifest";
+import {
+    PAGE_RESOLVED_FORWARDS,
+    isConfigForwarded,
+    settingsConfigRedirects,
+} from "@/app/lib/settingsRedirects";
 
 /**
  * Gate over the committed settings/navigation manifest (#1340). The manifest is the single source of
@@ -233,9 +238,11 @@ function scannedSubtrees(): string[] {
 /** The routed pages on disk under the subtrees the manifest claims to cover. */
 function routedSettingsPages(): string[] {
     const routes = new Set(
-        scannedSubtrees().flatMap((root) =>
-            appRouterRoutes(path.join(APP_DIRECTORY, root), root.split("/").filter(Boolean)),
-        ),
+        scannedSubtrees()
+            .filter((root) => existsSync(path.join(APP_DIRECTORY, root)))
+            .flatMap((root) =>
+                appRouterRoutes(path.join(APP_DIRECTORY, root), root.split("/").filter(Boolean)),
+            ),
     );
     return [...routes].sort();
 }
@@ -362,17 +369,18 @@ describe("settings manifest covers the routed settings surface", () => {
     });
 
     it("scans a settings surface large enough to be meaningful", () => {
-        expect(diskRoutes.length).toBeGreaterThan(30);
+        expect(diskRoutes.length).toBeGreaterThan(15);
     });
 
     it("registers no current route the app does not serve", () => {
         const missing = entries.filter(
-            (entry) => !existsSync(path.join(APP_DIRECTORY, entry.currentRoute, "page.tsx")),
+            (entry) => !isConfigForwarded(entry)
+                && !existsSync(path.join(APP_DIRECTORY, entry.currentRoute, "page.tsx")),
         );
 
         expect(
             missing.map((entry) => `${entry.id} -> ${entry.currentRoute}`),
-            "a manifest entry names a route with no page.tsx; move the entry or delete it in the same commit as the route",
+            "a manifest entry names a route that neither a page.tsx nor next.config.ts serves; move the entry or delete it in the same commit as the route",
         ).toEqual([]);
     });
 });
@@ -824,80 +832,69 @@ describe("the redirect gates refuse a matrix that has drifted from the manifest"
     });
 });
 
-describe("every retired address forwards from the manifest rather than from a route in a stub", () => {
-    /**
-     * The forwards whose target is a fixed address the manifest can hand over.
-     *
-     * Two are not, and both are excluded here and enumerated below: one resolves a legacy
-     * automation id into a workflow id, and one resolves which provider's review queue the reader
-     * actually has. A target computed from a lookup cannot be read from a static field, so those
-     * stubs compose their own and are checked by their own suites instead.
-     */
-    const computed = new Set(["account.capture-reviews", "legacy.settings-workflow"]);
-    const stubs = entries.filter(
-        (entry) =>
-            entry.redirectsTo !== null
-            && !entry.currentRoute.includes("[")
-            && !computed.has(entry.id),
-    );
+describe("every retired address forwards from the manifest before routing", () => {
+    const configForwarded = entries.filter(isConfigForwarded);
+    const generated = settingsConfigRedirects();
 
-    function stubSource(entry: SettingsEntry): string {
-        return readSource(path.join("app", "(app)", entry.currentRoute, "page.tsx"));
+    function hasPage(entry: SettingsEntry): boolean {
+        return existsSync(path.join(APP_DIRECTORY, entry.currentRoute, "page.tsx"));
     }
 
     it("covers every retired address the manifest declares", () => {
-        expect(stubs.length).toBeGreaterThan(20);
+        expect(configForwarded.length).toBeGreaterThan(20);
+        expect(generated).toHaveLength(configForwarded.length);
     });
 
-    it("names its manifest entry and redirects permanently", () => {
-        const wrong = stubs
-            .filter(
-                (entry) =>
-                    !stubSource(entry).includes(`settingsRedirectTarget("${entry.id}"`)
-                    || !stubSource(entry).includes("permanentRedirect("),
-            )
-            .map((entry) => entry.currentRoute);
-
-        expect(
-            wrong,
-            "a redirect stub resolves its target by naming its manifest entry, so a destination that moves takes its redirects with it; and it forwards permanently, because the address is retired rather than busy",
-        ).toEqual([]);
+    it("forwards each fixed-target address permanently to the manifest's own target", () => {
+        expect(generated).toEqual(
+            configForwarded.map((entry) => ({
+                source: entry.currentRoute,
+                destination: entry.redirectsTo,
+                permanent: true,
+            })),
+        );
     });
 
-    it("spells no destination route of its own", () => {
-        const literal = stubs
-            .filter((entry) => stubSource(entry).includes(targetRoute(entry.redirectsTo ?? "")))
-            .map((entry) => entry.currentRoute);
+    it("forwards no dynamic address from config, because its target has to be looked up", () => {
+        expect(generated.filter((redirect) => redirect.source.includes("["))).toEqual([]);
+    });
 
-        expect(
-            literal,
-            "a stub that spells its target is a second redirect matrix; the manifest is the only one",
-        ).toEqual([]);
+    it("is what next.config.ts redirects, ahead of any segment that could stream a 200", () => {
+        expect(readSource("next.config.ts")).toContain("...settingsConfigRedirects()");
     });
 
     /**
-     * Read out of the stubs rather than restated, so the exemption cannot be widened by editing the
-     * list. A stub that stops resolving its address from the manifest appears here whether or not
-     * anyone remembered to declare it, and the assertion fails until the exemption is argued.
+     * A config redirect wins over the filesystem, so a page left at a config-forwarded address can
+     * never render: it would be a second, dead redirect matrix.
      */
-    it("exempts only the forwards whose target has to be looked up first", () => {
-        const notManifestDriven = entries
-            .filter((entry) => entry.redirectsTo !== null)
-            .filter((entry) => !stubSource(entry).includes("settingsRedirectTarget("))
+    it("leaves no stub page behind an address next.config.ts already forwards", () => {
+        const deadStubs = configForwarded.filter(hasPage).map((entry) => entry.currentRoute);
+
+        expect(deadStubs).toEqual([]);
+    });
+
+    /**
+     * Read off the disk rather than restated, so the exemption cannot be widened by editing the set:
+     * a forward keeps a page only when its target needs a lookup, and every such page must exist.
+     */
+    it("keeps a page only for the forwards whose target has to be looked up first", () => {
+        const pageServed = entries
+            .filter((entry) => entry.redirectsTo !== null && hasPage(entry))
             .map((entry) => entry.id)
             .sort();
 
         expect(
-            notManifestDriven,
-            "a forward whose target depends on a lookup cannot read a fixed address from the manifest; every other one must, so that a destination which moves takes its redirects with it",
-        ).toEqual([...computed].sort());
+            pageServed,
+            "a forward with a fixed target belongs in next.config.ts; only a lookup justifies a page",
+        ).toEqual([...PAGE_RESOLVED_FORWARDS].sort());
     });
 
-    it("holds each exempted forward to redirecting anyway", () => {
-        const notRedirecting = [...computed]
-            .map((id) => entries.find((entry) => entry.id === id))
-            .filter((entry): entry is SettingsEntry => entry !== undefined)
-            .filter((entry) => !/\b(?:permanentRedirect|redirect)\(/.test(stubSource(entry)))
+    it("holds each page-resolved forward to redirecting anyway", () => {
+        const notRedirecting = entries
+            .filter((entry) => PAGE_RESOLVED_FORWARDS.has(entry.id))
+            .filter((entry) => !/\b(?:permanentRedirect|redirect)\(/.test(
+                readSource(path.join("app", "(app)", entry.currentRoute, "page.tsx")),
+            ))
             .map((entry) => entry.currentRoute);
 
         expect(notRedirecting).toEqual([]);

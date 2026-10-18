@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 import createNextIntlPlugin from "next-intl/plugin";
 
+import { settingsConfigRedirects } from "./app/lib/settingsRedirects";
 import {
   DOCUMENT_ACCEPTANCE_SECURITY_HEADERS,
   FRAME_ANCESTORS_DIRECTIVE,
@@ -54,7 +55,10 @@ const nextConfig: NextConfig = {
     ? { experimental: { proxyClientMaxBodySize: BACKEND_IMPORT_MAX_BODY_BYTES } }
     : {}),
   async redirects() {
-    return DOCS_SLUG_REDIRECTS.map((redirect) => ({ ...redirect, permanent: true }));
+    return [
+      ...DOCS_SLUG_REDIRECTS.map((redirect) => ({ ...redirect, permanent: true })),
+      ...settingsConfigRedirects(),
+    ];
   },
   async rewrites() {
     return [

@@ -1,81 +1,67 @@
-import { SETTINGS_ENTRIES, type SettingsEntry } from "@/app/lib/settingsManifest";
+import { SETTINGS_ENTRIES, type SettingsEntry } from "./settingsManifest";
 
-/**
- * The search parameters a Next.js page receives, before they are resolved.
- *
- * Mirrors the App Router's own shape rather than narrowing it: a key repeated in the query string
- * arrives as an array, and a redirect that flattened it would quietly drop every value but one.
- */
-export type RouteSearchParams = Record<string, string | string[] | undefined>;
+/** One permanent redirect in the shape `next.config.ts`'s `redirects()` returns. */
+export type SettingsConfigRedirect = {
+    source: string;
+    destination: string;
+    permanent: true;
+};
+
+/** A manifest entry whose address `next.config.ts` forwards, with its fixed target. */
+export type ConfigForwardedEntry = SettingsEntry & { redirectsTo: string };
 
 /** The manifest's entries at their declared type, for the reads that do not need their literals. */
 const MANIFEST_ENTRIES: readonly SettingsEntry[] = SETTINGS_ENTRIES;
 
-/**
- * A manifest entry that forwards rather than renders.
- *
- * Derived from the manifest so a retired id, or an entry that goes back to rendering, is a compile
- * error at the stub that names it rather than a redirect to `undefined` at request time.
- */
-type ForwardingEntry = Extract<
+/** The id of a manifest entry that forwards rather than renders. */
+type ForwardingId = Extract<
     (typeof SETTINGS_ENTRIES)[number],
     { kind: "redirect" | "external-redirect" }
->;
-
-/** The manifest entry ids a redirect stub may name. */
-export type SettingsRedirectId = ForwardingEntry["id"];
-
-const FORWARDS: ReadonlyMap<string, string> = new Map(
-    MANIFEST_ENTRIES.filter((entry) => entry.redirectsTo !== null).map((entry) => [
-        entry.id,
-        entry.redirectsTo ?? "",
-    ]),
-);
+>["id"];
 
 /**
- * Serializes resolved search parameters back into a query string.
+ * The forwards whose target a page has to look up at request time, so `next.config.ts` cannot
+ * forward them and their stub pages stay.
  *
- * Every parameter survives, including ones no route declares. The manifest's `redirectQuery` names
- * what a forward is known to depend on, but a reader's link may carry anything — a campaign tag, a
- * parameter a later release will read — and a permanent redirect that edits the query is rewriting
- * what someone else shared.
- *
- * @param searchParams - the resolved search parameters, as the App Router hands them over
- * @returns the query string including its leading `?`, or the empty string when there is none
+ * `account.capture-reviews` picks the provider with the most pending reviews among the reader's own
+ * connections, and `legacy.settings-workflow` resolves a legacy rule id to the workflow that replaced
+ * it. Every other forward has a fixed target the manifest hands over directly.
  */
-function queryString(searchParams: RouteSearchParams): string {
-    const query = new URLSearchParams();
-    for (const [key, value] of Object.entries(searchParams)) {
-        if (value === undefined) continue;
-        if (Array.isArray(value)) for (const item of value) query.append(key, item);
-        else query.append(key, value);
-    }
-    const serialized = query.toString();
-    return serialized.length === 0 ? "" : `?${serialized}`;
+export const PAGE_RESOLVED_FORWARDS: ReadonlySet<string> = new Set<ForwardingId>([
+    "account.capture-reviews",
+    "legacy.settings-workflow",
+]);
+
+/**
+ * Whether a manifest entry is forwarded by `next.config.ts` rather than by a page.
+ *
+ * @param entry - a settings manifest entry
+ * @returns true when the entry forwards to a fixed target that no lookup decides
+ */
+export function isConfigForwarded(entry: SettingsEntry): entry is ConfigForwardedEntry {
+    return entry.kind !== "destination"
+        && entry.redirectsTo !== null
+        && !PAGE_RESOLVED_FORWARDS.has(entry.id);
 }
 
 /**
- * The permanent-redirect target for one retired settings address, query state included.
+ * The permanent redirects for every retired settings address, generated from the settings manifest.
  *
- * The address itself is the manifest's — a stub names its entry id and nothing else, so a
- * destination that moves again takes its redirects with it and no page has to be found and edited.
- * The query string is the reader's and is carried through whole. The fragment is the manifest's
- * too, and is appended last because that is where a URL puts it: `/route?query#section`.
+ * Next.js applies config redirects before the proxy and before any segment renders. A retired
+ * address therefore answers with a real `308`, even one that sits under a streaming `loading.tsx`
+ * boundary, where a `permanentRedirect()` thrown by a page ships as a `200` with the redirect in the
+ * streamed payload (#1440). The destination is the manifest's, fragment included. Next.js carries
+ * the reader's query string through and places it before the fragment.
  *
- * @param id - the manifest entry id of the address being retired
- * @param searchParams - the resolved search parameters of the incoming request
- * @returns the absolute app-relative target to forward to
- * @throws when the id names no forwarding entry, which {@link SettingsRedirectId} already prevents
+ * `next.config.ts` imports this module, and Next loads that file without the app's `@/` path alias,
+ * so this module imports the manifest relatively and the manifest's own imports are type-only.
+ *
+ * @returns one permanent redirect per config-forwarded manifest entry, in manifest order
  */
-export function settingsRedirectTarget(
-    id: SettingsRedirectId,
-    searchParams: RouteSearchParams,
-): string {
-    const target = FORWARDS.get(id);
-    if (target === undefined) {
-        throw new Error(`settingsRedirectTarget: ${id} names no forwarding entry in SETTINGS_ENTRIES`);
-    }
-    const [route, fragment] = target.split("#");
-    const query = queryString(searchParams);
-    return fragment === undefined ? `${route}${query}` : `${route}${query}#${fragment}`;
+export function settingsConfigRedirects(): readonly SettingsConfigRedirect[] {
+    return MANIFEST_ENTRIES.filter(isConfigForwarded).map((entry) => ({
+        source: entry.currentRoute,
+        destination: entry.redirectsTo,
+        permanent: true,
+    }));
 }

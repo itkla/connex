@@ -123,7 +123,6 @@ const STATIC_WORKSPACE_ROUTES: Readonly<Record<string, StaticWorkspaceRoute>> = 
     "/records/deals": { key: "deals" },
     "/records/pipelines": { key: "pipelines" },
     "/records/products": { key: "products" },
-    "/records/approval-policies": { key: "approvalPolicies" },
     "/marketing/campaigns": { key: "campaigns", access: "campaigns" },
     "/activity/all": { key: "activities" },
     "/activity/tasks": { key: "tasks" },
@@ -134,19 +133,7 @@ const STATIC_WORKSPACE_ROUTES: Readonly<Record<string, StaticWorkspaceRoute>> = 
     "/notifications": { key: "notifications" },
     "/search": { key: "search" },
     "/me": { key: "myWork" },
-    "/users": { key: "users" },
     "/workflows": { key: "workflows", access: "workflows" },
-    "/admin/logs": { key: "auditLog", access: "auditLog" },
-};
-
-const SETTINGS_ROUTES: Readonly<Record<string, StaticWorkspaceRoute>> = {
-    "/settings/members": { key: "members" },
-    "/settings/roles": { key: "roles" },
-    "/settings/custom-fields": { key: "customFields" },
-    "/settings/qualification": { key: "qualification" },
-    "/settings/email": { key: "email" },
-    "/settings/delivery": { key: "delivery" },
-    "/settings/diagnostics": { key: "diagnostics", access: "diagnostics" },
 };
 
 /**
@@ -155,11 +142,8 @@ const SETTINGS_ROUTES: Readonly<Record<string, StaticWorkspaceRoute>> = {
  * Their trails are derived rather than tabulated: the group is the unit of canonical ownership, so
  * the crumb a reader lands on is the group's own name from the manifest, and its scope decides
  * whether the trail is rooted in the workspace or in the organization. A group whose route no page
- * serves is skipped, which leaves the legacy tables below to answer for the addresses that still
- * do — the same served-or-not fact the settings navigation and the entry points already read.
- *
- * The legacy `/settings/*` and `/organization/*` rows keep their shipped trails until their
- * redirects land; nothing about them moves here.
+ * serves is skipped — the same served-or-not fact the settings navigation and the entry points
+ * already read.
  */
 const CANONICAL_SETTINGS_GROUPS: ReadonlyMap<string, SettingsGroup> = new Map(
     MANIFEST_GROUPS
@@ -167,22 +151,10 @@ const CANONICAL_SETTINGS_GROUPS: ReadonlyMap<string, SettingsGroup> = new Map(
         .map((group) => [group.route, group]),
 );
 
-const ORGANIZATION_ROUTES: Readonly<Record<string, BreadcrumbMessageKey>> = {
-    "/organization/members": "members",
-    "/organization/allowed-domains": "allowedDomains",
-    "/organization/sso": "singleSignOn",
-    "/organization/ai": "aiProvider",
-    "/organization/audit": "auditLog",
-    "/organization/data-requests": "dataRequests",
-    "/organization/diagnostics": "diagnostics",
-};
-
 /** Literal authenticated routes referenced by the breadcrumb registry. */
 export const BREADCRUMB_STATIC_ROUTE_PATHS = [...new Set([
     ...Object.keys(STATIC_WORKSPACE_ROUTES),
-    ...Object.keys(SETTINGS_ROUTES),
     ...CANONICAL_SETTINGS_GROUPS.keys(),
-    ...Object.keys(ORGANIZATION_ROUTES),
     "/account/connections/reviews",
     "/insights/reports/goals",
     "/insights/reports/new",
@@ -451,30 +423,12 @@ export function resolveBreadcrumbRoute(
         return empty("denied");
     }
 
-    const settingsRoute = SETTINGS_ROUTES[pathname];
-    if (settingsRoute) {
-        if (settingsRoute.access && !context.navAccess[settingsRoute.access]) return empty("denied");
-        return shell(withWorkspace(context, [
-            translatedCrumb("/settings", "settings", context),
-            translatedCrumb(pathname, settingsRoute.key, context, true),
-        ]));
-    }
-
     if (pathname === "/account/connections/reviews") {
         if (context.navAccess.captureReviews === "disabled") return empty("denied");
         return shell([
             translatedCrumb(SETTINGS_HOME_ROUTE, "settings", context),
             connectedAccountsCrumb(context),
             translatedCrumb(pathname, "captureReviews", context, true),
-        ]);
-    }
-
-    const organizationRoute = ORGANIZATION_ROUTES[pathname];
-    if (organizationRoute) {
-        if (!context.organizationAccessible) return empty("denied");
-        return shell([
-            organizationRoot(context),
-            translatedCrumb(pathname, organizationRoute, context, true),
         ]);
     }
 
