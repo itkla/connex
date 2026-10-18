@@ -64,6 +64,20 @@ require_heading() {
     fi
 }
 
+# A heading alone is not evidence of rendering: jq accepts an empty file, so a zero-byte
+# entry with a matching length and digest would print its heading and nothing else.
+require_content() {
+    if ! awk -v heading="== $1 ==" '
+        $0 == heading { inside = 1; next }
+        inside && /^== .* ==$/ { exit }
+        inside && NF { found = 1; exit }
+        END { exit found ? 0 : 1 }
+    ' <<< "$rendered"; then
+        printf 'FAIL the "%s" section rendered no content\n' "$1"
+        failures=$((failures + 1))
+    fi
+}
+
 require_heading "Manifest"
 require_heading "Inventory (verified)"
 while IFS= read -r path; do
@@ -75,6 +89,7 @@ while IFS= read -r path; do
         continue
     fi
     require_heading "$heading"
+    require_content "$heading"
 done <<< "$inventory"
 
 if [ "$failures" -ne 0 ]; then
