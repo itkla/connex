@@ -5,13 +5,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import NoteEditorView from "@/app/components/activity/notes/NoteEditorView";
 import DashboardGrid from "@/app/components/dashboard/customize/DashboardGrid";
+import NewWorkspaceDialog from "@/app/components/NewWorkspaceDialog";
 import { useWorkspace, WorkspaceProvider } from "@/app/hooks/useWorkspace";
-import { draftKey, listFreshDrafts, readDraft } from "@/app/lib/formDrafts";
+import { draftKey, listFreshDrafts, readDraft, writeDraft } from "@/app/lib/formDrafts";
 import { renderedWorkspaceId } from "@/app/lib/renderedWorkspace";
-import { toastError } from "@/app/lib/toast";
+import { toastError, toastInfo } from "@/app/lib/toast";
 import type { DashboardWidgetType, Workspace } from "@/app/lib/types";
 
-const editor = vi.hoisted<{ onChange: ((value: string) => void) | null }>(() => ({ onChange: null }));
+const editor = vi.hoisted<{ onChange: ((value: string) => void) | null; value: string | null }>(() => ({
+    onChange: null,
+    value: null,
+}));
+const translate = vi.hoisted(() => Object.assign((key: string) => key, { has: () => false }));
 
 vi.mock("next/navigation", () => ({
     useRouter: () => ({ refresh: vi.fn(), replace: vi.fn(), push: vi.fn() }),
@@ -19,12 +24,13 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("next-intl", () => ({
     useLocale: () => "en",
-    useTranslations: () => Object.assign((key: string) => key, { has: () => false }),
+    useTranslations: () => translate,
 }));
 
 vi.mock("next/dynamic", () => ({
-    default: () => function RichNoteEditor({ onChange }: { onChange: (value: string) => void }) {
+    default: () => function RichNoteEditor({ value, onChange }: { value: string; onChange: (value: string) => void }) {
         editor.onChange = onChange;
+        editor.value = value;
         return null;
     },
 }));
@@ -44,6 +50,7 @@ vi.mock("@/app/lib/toast", () => ({
     toastSuccess: vi.fn(),
     toastWarn: vi.fn(),
     toastInfo: vi.fn(),
+    toastDismiss: vi.fn(),
 }));
 
 vi.mock("@/app/components/PageShell", () => ({
@@ -64,10 +71,13 @@ vi.mock("@/app/components/layout/SortableGrid", () => ({ default: () => null }))
 
 vi.mock("@/app/components/dashboard/customize/WidgetShell", () => ({ default: () => null }));
 
+vi.mock("@/components/PixelCard", () => ({ default: () => null }));
+
 const HEALED = 5;
 const ORIGIN = 9;
 const USER = 7;
 const DRAFT = "Board pricing plan for the renewal";
+const COMPOSER_DRAFT = "Call notes from the quick composer";
 
 type Recorded = { method: string; path: string; workspace: string | null; body: string };
 
@@ -135,6 +145,12 @@ function stubBackend(originRevoked: boolean): Recorded[] {
             document.cookie = `connex_workspace=${HEALED}; path=/`;
             return new Response("", { status: 200 });
         }
+        if (url.pathname === "/api/workspaces" && method === "GET") {
+            const memberships = originRevoked
+                ? [workspace(HEALED, "Head Office")]
+                : [workspace(HEALED, "Head Office"), workspace(ORIGIN, "Northwind Field Team")];
+            return json({ workspaces: memberships, activeWorkspaceId: HEALED });
+        }
         if (originRevoked && workspaceHeader === String(ORIGIN)) {
             return json({ code: "FORBIDDEN", message: `Not a member of workspace ${ORIGIN}` }, 403);
         }
@@ -199,6 +215,7 @@ async function healAndSwitch(): Promise<void> {
 beforeEach(() => {
     document.cookie = `connex_workspace=${ORIGIN}; path=/`;
     editor.onChange = null;
+    editor.value = null;
     captured = null;
 });
 
@@ -239,8 +256,15 @@ describe("a note composed in one workspace and flushed after a switch to another
         expect(listFreshDrafts({ userId: USER, workspaceId: HEALED })).toEqual([]);
     });
 
-    it("keeps refused text as the origin workspace's draft and reports the refusal", async () => {
+    it("keeps refused text as the editor's own draft beside a composer draft, and offers it back", async () => {
         stubBackend(true);
+        const composerKey = draftKey({ userId: USER, workspaceId: ORIGIN, formType: "note", scope: "global" });
+        writeDraft(composerKey, {
+            version: 1,
+            scope: "global",
+            formType: "note",
+            data: { content: COMPOSER_DRAFT, personId: null, dealId: null },
+        });
         await renderInShell(
             <NoteEditorView note={null} currentUserId={USER} persons={[]} deals={[]} users={[]} returnPath="/activity/notes" />,
         );
@@ -253,14 +277,70 @@ describe("a note composed in one workspace and flushed after a switch to another
         await act(async () => {
             root?.render(shell(null));
         });
+        await settle(600);
+
+        const editorParts = { userId: USER, workspaceId: ORIGIN, formType: "noteEditor", scope: "new" };
+        expect(readDraft({ userId: USER, workspaceId: ORIGIN, formType: "note", scope: "global" }, { version: 1 })?.data)
+            .toMatchObject({ content: COMPOSER_DRAFT });
+        expect(readDraft(editorParts, { version: 1 })?.data).toMatchObject({ content: DRAFT });
+        expect(listFreshDrafts({ userId: USER, workspaceId: ORIGIN }).map(({ key }) => key).sort()).toEqual(
+            [composerKey, draftKey(editorParts)].sort(),
+        );
+        expect(vi.mocked(toastError)).toHaveBeenCalledWith(
+            "ApiErrors.title",
+            { description: "ApiErrors.workspaceUnavailableNamed" },
+        );
+
+        await act(async () => root?.unmount());
+        editor.value = null;
+        await renderInShell(
+            <NoteEditorView note={null} currentUserId={USER} persons={[]} deals={[]} users={[]} returnPath="/activity/notes" />,
+        );
+        const offer = vi.mocked(toastInfo).mock.calls.find(([, options]) => options?.id === draftKey(editorParts));
+        await act(async () => {
+            const action = offer?.[1]?.action;
+            if (typeof action !== "object" || action === null || !("onClick" in action)) {
+                throw new Error("The kept editor draft was not offered");
+            }
+            Reflect.apply(action.onClick, undefined, []);
+        });
+
+        expect(editor.value).toBe(DRAFT);
+        expect(readDraft({ userId: USER, workspaceId: ORIGIN, formType: "note", scope: "global" }, { version: 1 })?.data)
+            .toMatchObject({ content: COMPOSER_DRAFT });
+    });
+});
+
+describe("creating a workspace while the workspace on screen has been revoked", () => {
+    it("keeps the typed name and names the workspace that is gone", async () => {
+        const requests = stubBackend(true);
+        vi.stubGlobal("matchMedia", (query: string) => ({
+            matches: false,
+            media: query,
+            onchange: null,
+            addEventListener: () => undefined,
+            removeEventListener: () => undefined,
+            addListener: () => undefined,
+            removeListener: () => undefined,
+            dispatchEvent: () => false,
+        }));
+        document.cookie = `connex_workspace=${HEALED}; path=/`;
+        await renderInShell(<NewWorkspaceDialog open onOpenChange={() => undefined} />);
+        const input = document.getElementById("workspace-name");
+        if (!(input instanceof HTMLInputElement)) throw new Error("No workspace name field");
+        const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+
+        await act(async () => {
+            setValue?.call(input, "Field team");
+            input.dispatchEvent(new Event("input", { bubbles: true }));
+        });
+        await act(async () => {
+            input.form?.requestSubmit();
+        });
         await settle(100);
 
-        const kept = readDraft(
-            { userId: USER, workspaceId: ORIGIN, formType: "note", scope: "global" },
-            { version: 1 },
-        );
-        expect(kept?.key).toBe(draftKey({ userId: USER, workspaceId: ORIGIN, formType: "note", scope: "global" }));
-        expect(kept?.data).toMatchObject({ content: DRAFT });
+        expect(input.value).toBe("Field team");
+        expect(writesTo(requests, "/api/workspaces")).toEqual([]);
         expect(vi.mocked(toastError)).toHaveBeenCalledWith(
             "ApiErrors.title",
             { description: "ApiErrors.workspaceUnavailableNamed" },

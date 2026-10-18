@@ -10,13 +10,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
     ApiError,
+    beginProviderConnection,
     clientRecoveryContext,
     createNote,
+    createReportSnapshot,
+    createWorkspace,
     decideCaptureReview,
+    disconnectProviderConnection,
     downloadCsv,
     exportReportCsv,
     getNotesPage,
     isWorkspaceUnavailableError,
+    pauseProviderConnection,
+    resumeProviderConnection,
+    startAiChatTurn,
+    switchWorkspace,
     updateMyLocale,
     updateMyTimezone,
     updateNotificationPreferences,
@@ -476,10 +484,26 @@ describe("the routes that keep their previous selection behaviour", () => {
         for (const pattern of UNPINNED_WRITE_ROUTES.accountAndOrganization) {
             expect(covered.some(({ concrete }) => matchesRoutePattern(pattern, concrete)), pattern).toBe(true);
         }
-        expect(covered.map(({ concrete }) => concrete)).toEqual(
-            expect.arrayContaining(["/api/users/me", "/api/users/me/locale", "/api/users/me/profile-picture", "/api/orgs/12"]),
-        );
+        expect(covered.map(({ method, concrete }) => `${method} ${concrete}`)).toEqual(expect.arrayContaining([
+            "PATCH /api/users/me",
+            "PATCH /api/users/me/locale",
+            "PUT /api/users/me/profile-picture",
+            "PATCH /api/orgs/12",
+            "POST /api/account/connections/12/authorize",
+            "POST /api/account/connections/12/pause",
+            "POST /api/account/connections/12/resume",
+            "DELETE /api/account/connections/12",
+        ]));
         expect(covered.filter(({ authorization }) => /\b[A-Z]+(?:_[A-Z]+)+\b/.test(authorization))).toEqual([]);
+        const connectionControls = covered.filter(({ route }) => route.startsWith("/api/account/connections/"));
+        expect(connectionControls.map(({ route }) => route).sort()).toEqual([
+            "/api/account/connections/{provider}",
+            "/api/account/connections/{provider}/authorize",
+            "/api/account/connections/{provider}/pause",
+            "/api/account/connections/{provider}/resume",
+        ]);
+        expect(connectionControls.every(({ authorization }) => /^ProviderConnectionService#[a-zA-Z]+:domain authorization$/
+            .test(authorization))).toBe(true);
     });
 
     it.each([
@@ -494,6 +518,11 @@ describe("the routes that keep their previous selection behaviour", () => {
         ["/api/orgs/12", false],
         ["/api/orgs/12/data-subject-requests", false],
         ["/api/notification-preferences/quiet-hours", false],
+        ["/api/account/connections/google/pause", false],
+        ["/api/account/connections/google", false],
+        ["/api/account/connections/google/sync", true],
+        ["/api/account/connections/google/captured/3/approve", true],
+        ["/api/account/connections/google/capture-policy", true],
         ["/api/workspaces/12/switch", false],
         ["/api/auth/logout", false],
     ])("treats a write to %s as workspace-bound: %s", (route, pinned) => {
@@ -516,13 +545,21 @@ describe("with the shell rendering a revoked workspace and the cookie healed", (
         await uploadCurrentUserProfilePicture(new File(["image"], "me.png", { type: "image/png" }));
         await updateOrganizationIdentity(12, "Northwind", "Northwind Old", 3);
         await updateNotificationPreferences([]);
+        await beginProviderConnection("google");
+        await pauseProviderConnection("google");
+        await resumeProviderConnection("google");
+        await disconnectProviderConnection("microsoft");
 
-        expect(requests.map(({ url, workspace }) => [url, workspace])).toEqual([
-            ["/api/users/me", String(HEALED)],
-            ["/api/users/me/locale", String(HEALED)],
-            ["/api/users/me/profile-picture", String(HEALED)],
-            ["/api/orgs/12", String(HEALED)],
-            ["/api/notification-preferences", String(HEALED)],
+        expect(requests.map(({ url, method, workspace }) => [method, url, workspace])).toEqual([
+            ["PATCH", "/api/users/me", String(HEALED)],
+            ["PATCH", "/api/users/me/locale", String(HEALED)],
+            ["PUT", "/api/users/me/profile-picture", String(HEALED)],
+            ["PATCH", "/api/orgs/12", String(HEALED)],
+            ["PUT", "/api/notification-preferences", String(HEALED)],
+            ["POST", "/api/account/connections/google/authorize", String(HEALED)],
+            ["POST", "/api/account/connections/google/pause", String(HEALED)],
+            ["POST", "/api/account/connections/google/resume", String(HEALED)],
+            ["DELETE", "/api/account/connections/microsoft", String(HEALED)],
         ]);
     });
 
@@ -542,6 +579,143 @@ describe("with the shell rendering a revoked workspace and the cookie healed", (
         expect(requests.map(({ workspace }) => workspace)).toEqual([String(RENDERED), String(HEALED)]);
         expect(isWorkspaceUnavailableError(review)).toBe(true);
         expect(timezone).toMatchObject({ status: 403, code: "FORBIDDEN" });
+    });
+});
+
+describe("a write that waits on its request identity before sending", () => {
+    function stubHeldCsrf(): { requests: Recorded[]; release: () => void } {
+        const requests: Recorded[] = [];
+        const held: { release: () => void } = { release: () => undefined };
+        let firstCsrf = true;
+        const csrf = () => json({ token: "csrf-token", headerName: "X-XSRF-TOKEN", requestIdentity: "identity" });
+        vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+            const url = input instanceof Request ? input.url : String(input);
+            if (url.endsWith("/api/auth/csrf")) {
+                if (!firstCsrf) return csrf();
+                firstCsrf = false;
+                return new Promise<Response>((resolve) => {
+                    held.release = () => resolve(csrf());
+                });
+            }
+            const method = init?.method ?? "GET";
+            requests.push({ url, method, workspace: new Headers(init?.headers).get("X-Workspace-Id") });
+            if (url.endsWith(`/api/workspaces/${HEALED}/switch`)) {
+                setWorkspaceCookie(HEALED);
+                return new Response("", { status: 200 });
+            }
+            return json({ turnId: 3, sessionId: 4, generationHandle: "handle", status: "accepted", id: 41 });
+        }));
+        return { requests, release: () => held.release() };
+    }
+
+    beforeEach(() => {
+        setWorkspaceCookie(RENDERED);
+    });
+
+    it("is abandoned when a workspace switch begins while it waits", async () => {
+        const shell = owner();
+        bindRenderedWorkspace(shell, RENDERED);
+        const backend = stubHeldCsrf();
+
+        const turn = startAiChatTurn(4, { content: "Pricing question for the board", pageContext: [] }).then(
+            () => null,
+            (error: unknown) => error,
+        );
+        await switchWorkspace(HEALED);
+        bindRenderedWorkspace(shell, HEALED);
+        backend.release();
+
+        expect(await turn).toBeInstanceOf(Error);
+        expect(backend.requests.filter(({ url }) => url.endsWith("/turns"))).toEqual([]);
+    });
+
+    it("carries the workspace it was started in even if the selection moves before it sends", async () => {
+        const shell = owner();
+        bindRenderedWorkspace(shell, RENDERED);
+        const backend = stubHeldCsrf();
+
+        const turn = startAiChatTurn(4, { content: "Pricing question for the board", pageContext: [] }).then(
+            () => null,
+            (error: unknown) => error,
+        );
+        bindRenderedWorkspace(shell, HEALED);
+        setWorkspaceCookie(HEALED);
+        backend.release();
+        await turn;
+
+        expect(backend.requests.filter(({ url }) => url.endsWith("/turns"))).toEqual([
+            { url: "/api/ai/assistant/sessions/4/turns", method: "POST", workspace: String(RENDERED) },
+        ]);
+    });
+
+    it("pins a report write before its identity wait", async () => {
+        const shell = owner();
+        bindRenderedWorkspace(shell, RENDERED);
+        const backend = stubHeldCsrf();
+
+        const snapshot = createReportSnapshot(14, {});
+        bindRenderedWorkspace(shell, HEALED);
+        backend.release();
+        await snapshot;
+
+        expect(backend.requests.filter(({ url }) => url.endsWith("/snapshots"))).toEqual([
+            { url: "/api/reports/14/snapshots", method: "POST", workspace: String(RENDERED) },
+        ]);
+    });
+});
+
+describe("creating a workspace from the shell", () => {
+    function stubWorkspaces(memberships: number[]): Recorded[] {
+        return stubBackend((url, method) => {
+            if (url !== "/api/workspaces") return null;
+            return method === "GET"
+                ? json({
+                    workspaces: memberships.map((id) => workspace(id, id === RENDERED ? REVOKED_NAME : "Head Office")),
+                    activeWorkspaceId: HEALED,
+                })
+                : json(workspace(77, "Field team"));
+        });
+    }
+
+    it("refuses before sending when the workspace on screen is gone, naming it", async () => {
+        bindRenderedWorkspace(owner(), RENDERED);
+        rememberWorkspaceNames([workspace(RENDERED, REVOKED_NAME)]);
+        const requests = stubWorkspaces([HEALED]);
+
+        const error = await createWorkspace("Field team").then(() => null, (failure: unknown) => failure);
+
+        expect(error).toMatchObject({ code: WORKSPACE_UNAVAILABLE_CODE, workspaceId: RENDERED, workspaceName: REVOKED_NAME });
+        expect(requests.filter(({ method }) => method === "POST")).toEqual([]);
+    });
+
+    it("creates from the workspace on screen when the viewer still belongs to it", async () => {
+        bindRenderedWorkspace(owner(), RENDERED);
+        const requests = stubWorkspaces([HEALED, RENDERED]);
+
+        await createWorkspace("Field team");
+
+        expect(requests.filter(({ method }) => method === "POST")).toEqual([
+            { url: "/api/workspaces", method: "POST", workspace: String(RENDERED) },
+        ]);
+    });
+
+    it("does not re-read memberships when the cookie already names the workspace on screen", async () => {
+        setWorkspaceCookie(RENDERED);
+        bindRenderedWorkspace(owner(), RENDERED);
+        const requests = stubWorkspaces([RENDERED]);
+
+        await createWorkspace("Field team");
+
+        expect(requests).toEqual([{ url: "/api/workspaces", method: "POST", workspace: String(RENDERED) }]);
+    });
+
+    it("keeps onboarding creation on the cookie when no shell renders a workspace", async () => {
+        setWorkspaceCookie(null);
+        const requests = stubWorkspaces([]);
+
+        await createWorkspace("Field team");
+
+        expect(requests).toEqual([{ url: "/api/workspaces", method: "POST", workspace: null }]);
     });
 });
 
