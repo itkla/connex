@@ -2,7 +2,7 @@ import { CONNECTED_ACCOUNTS_ROUTE } from "@/app/lib/connectedAccountsSections";
 import type { NavAccess } from "@/app/lib/navAccess";
 import type { RecordCollection } from "@/app/lib/recordReturnPath";
 import { MOVED_ROUTE_PREFIXES } from "@/app/lib/routeMoves";
-import { settingsRouteServed } from "@/app/lib/settingsEntryPoints";
+import { settingsDestination, settingsRouteServed } from "@/app/lib/settingsEntryPoints";
 import {
     SETTINGS_ENTRIES,
     SETTINGS_GROUPS,
@@ -452,7 +452,7 @@ export function resolveBreadcrumbRoute(
     if (USER_ROUTE.test(pathname)) {
         const user = dynamicCrumb(pathname, context, true);
         return shell(withWorkspace(context, [
-            translatedCrumb("/users", "users", context),
+            translatedCrumb(settingsDestination("workspace.people-directory").href, "users", context),
             ...(user ? [user] : []),
         ]));
     }

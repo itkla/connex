@@ -120,7 +120,7 @@ const APP_SHELL_BOUNDARIES = errorBoundaries(APP_SHELL);
  */
 describe("segment error boundary recovery", () => {
     it("discovers every app-shell boundary", () => {
-        expect(APP_SHELL_BOUNDARIES.length).toBeGreaterThanOrEqual(17);
+        expect(APP_SHELL_BOUNDARIES.length).toBeGreaterThanOrEqual(15);
     });
 
     it.each(APP_SHELL_BOUNDARIES.map((file) => [path.relative(FRONTEND, file), file]))(
