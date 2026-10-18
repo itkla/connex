@@ -333,7 +333,7 @@ class AiOutputCacheRestrictionConcurrencyIntegrationTest {
         workspace.setName(name);
         workspace.setSlug(slug);
         workspaceMapper.insert(workspace);
-        TestEntityFixtures.initializeChatPrivacy(jdbcTemplate, workspace.getId());
+        TestEntityFixtures.seedExistingWorkspacePrivacy(jdbcTemplate, workspace.getId());
         return workspace;
     }
 }

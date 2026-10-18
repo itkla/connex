@@ -7,6 +7,7 @@ import { askConnexMissionProblem, newerAskConnexMission, type AskConnexMissionPr
 import type { AiAgentOutput, AiAgentRecordScope, AiAgentRun, AiAgentRunControl, AiAgentRunCreateRequest } from '@/app/lib/types';
 
 const REFRESH_INTERVAL_MS = 5_000;
+const MAX_REFRESH_INTERVAL_MS = 30_000;
 
 type MissionSnapshot = {
     key: string;
@@ -18,7 +19,15 @@ type MissionSnapshot = {
     pendingId: number | null;
 };
 
-/** Owns session mission discovery and controls under an abortable account/workspace identity. */
+function activeMissionRevision(runs: readonly AiAgentRun[]): string {
+    return runs.filter((run) => !run.contentWithheld && (run.state === 'queued' || run.state === 'running'))
+        .map((run) => `${run.id}:${run.state}:${run.stateVersion}`).join(',');
+}
+
+/**
+ * Owns session mission discovery and controls under an abortable account/workspace identity.
+ * Entry and realtime invalidations reload once; only active missions poll, with bounded backoff.
+ */
 export function useAskConnexMissions({
     identity, sessionId, enabled, visible, refreshVersion, contentVersion = 0, onChanged, onContentInvalidated,
 }: {
@@ -45,6 +54,8 @@ export function useAskConnexMissions({
     const changedRef = useRef(onChanged);
     const invalidatedRef = useRef(onContentInvalidated);
     const retainedRunsRef = useRef<readonly AiAgentRun[]>([]);
+    const pollTimerRef = useRef<number | null>(null);
+    const pollStateRef = useRef<{ key: string; revision: string; delay: number } | null>(null);
     useEffect(() => { changedRef.current = onChanged; }, [onChanged]);
     useEffect(() => { invalidatedRef.current = onContentInvalidated; }, [onContentInvalidated]);
     useEffect(() => { retainedRunsRef.current = current?.runs ?? []; }, [current?.runs]);
@@ -55,6 +66,7 @@ export function useAskConnexMissions({
         controllerRef.current = controller;
         operationRef.current = false;
         loadedPagesRef.current = 1;
+        pollStateRef.current = null;
         setSnapshot({ key, runs: [], nextCursor: null, loading: sessionId !== null, problem: null, output: null, pendingId: null });
         return () => {
             controller.abort();
@@ -69,6 +81,10 @@ export function useAskConnexMissions({
     const refresh = useCallback(async () => {
         const signal = controllerRef.current?.signal;
         if (!enabled || sessionId === null || !signal || signal.aborted) return;
+        if (pollTimerRef.current !== null) {
+            window.clearTimeout(pollTimerRef.current);
+            pollTimerRef.current = null;
+        }
         const revision = ++refreshRef.current;
         try {
             let page = await getAiAgentRuns({ sessionId, limit: 20 }, { signal });
@@ -86,6 +102,11 @@ export function useAskConnexMissions({
                 return durable ? durable.contentWithheld
                     : page.nextCursor === null || (lastId !== undefined && previous.id >= lastId);
             });
+            const activeRevision = activeMissionRevision(runs);
+            const previousPoll = pollStateRef.current;
+            pollStateRef.current = { key, revision: activeRevision,
+                delay: previousPoll?.key === key && previousPoll.revision === activeRevision
+                    ? Math.min(previousPoll.delay * 2, MAX_REFRESH_INTERVAL_MS) : REFRESH_INTERVAL_MS };
             setSnapshot((previous) => ({
                 key, runs, nextCursor: page.nextCursor, loading: false, problem: null,
                 output: previous?.key === key && runs.some((run) => run.id === previous.output?.runId
@@ -102,10 +123,27 @@ export function useAskConnexMissions({
 
     useEffect(() => {
         if (!enabled || !visible || sessionId === null) return;
+        pollStateRef.current = null;
         void refresh();
-        const timer = window.setInterval(() => { void refresh(); }, REFRESH_INTERVAL_MS);
-        return () => window.clearInterval(timer);
     }, [enabled, refresh, refreshVersion, reload, sessionId, visible]);
+
+    useEffect(() => {
+        if (!enabled || !visible || !current?.runs.length) return;
+        const revision = activeMissionRevision(current.runs);
+        if (revision.length === 0) return;
+        const pollState = pollStateRef.current;
+        const delay = pollState?.key === key && pollState.revision === revision
+            ? pollState.delay : REFRESH_INTERVAL_MS;
+        const timer = window.setTimeout(() => {
+            pollTimerRef.current = null;
+            void refresh();
+        }, delay);
+        pollTimerRef.current = timer;
+        return () => {
+            window.clearTimeout(timer);
+            if (pollTimerRef.current === timer) pollTimerRef.current = null;
+        };
+    }, [current?.runs, enabled, key, refresh, visible]);
 
     const upsert = useCallback((run: AiAgentRun) => {
         const retained = retainedRunsRef.current.find((item) => item.id === run.id);

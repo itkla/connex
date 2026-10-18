@@ -122,8 +122,6 @@ public abstract class AbstractServiceTest {
     @Autowired protected TenantContext tenantContext;
     @Autowired private PlatformTransactionManager fixtureTransactionManager;
     @Autowired private JdbcTemplate approvalFixtureJdbc;
-    @Autowired private ooo.klae.connex.backend.ai.mission.AiAgentPrivacyService fixturePrivacy;
-    @Autowired private ooo.klae.connex.backend.tenant.TenantWorkScope fixtureTenantScope;
     @Autowired private ObjectDeletionQueueMapper fixtureDeletionQueueMapper;
     @Autowired private UserObjectDeletionQueueMapper fixtureUserDeletionQueueMapper;
     @Autowired private ObjectDeletionTransactionExecutor fixtureDeletionTransactionExecutor;
@@ -139,7 +137,6 @@ public abstract class AbstractServiceTest {
         currentUser = newUser();
         workspaceMapper.updateMemberRole(workspace.getId(), currentUser.getId(), "owner");
         authenticateAs(currentUser, workspace.getId());
-        fixtureTenantScope.inWorkspace(workspace.getId(), () -> fixturePrivacy.initialize(workspace.getId()));
         approveForStepUp(currentUser);
     }
 
@@ -165,6 +162,7 @@ public abstract class AbstractServiceTest {
             created.setName("Test Workspace");
             created.setSlug("default");
             workspaceMapper.insert(created);
+            TestEntityFixtures.seedExistingWorkspacePrivacy(approvalFixtureJdbc, created.getId());
             Workspace reloaded = workspaceMapper.getDefaultWorkspace();
             return reloaded == null ? created : reloaded;
         }), "default workspace");

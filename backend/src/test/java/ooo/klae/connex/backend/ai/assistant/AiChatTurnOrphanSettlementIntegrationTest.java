@@ -115,7 +115,7 @@ class AiChatTurnOrphanSettlementIntegrationTest {
         workspace.setName("Orphan settlement " + unique);
         workspace.setSlug("orphan-settlement-" + unique);
         workspaceMapper.insert(workspace);
-        TestEntityFixtures.initializeChatPrivacy(jdbcTemplate, workspace.getId());
+        TestEntityFixtures.seedExistingWorkspacePrivacy(jdbcTemplate, workspace.getId());
 
         member = new User();
         member.setUsername("orphan-settlement-" + unique);

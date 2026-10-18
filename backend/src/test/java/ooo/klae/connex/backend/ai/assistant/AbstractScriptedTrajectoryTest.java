@@ -32,7 +32,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.AiPrivacyMode;
-import ooo.klae.connex.backend.ai.mission.AiAgentPrivacyInitializer;
 import ooo.klae.connex.backend.ai.provider.scripted.ScriptedAiProviderProfile;
 import ooo.klae.connex.backend.ai.provider.scripted.ScriptedAiRequestJournal;
 import ooo.klae.connex.backend.ai.provider.scripted.ScriptedAiStepInterceptor;
@@ -52,6 +51,7 @@ import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.AiChatPageContextDto;
 import ooo.klae.connex.backend.dto.AiChatTurnAcceptedDto;
 import ooo.klae.connex.backend.dto.AiChatTurnCreateRequest;
+import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
@@ -61,6 +61,7 @@ import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -172,7 +173,7 @@ public abstract class AbstractScriptedTrajectoryTest {
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private AiRestrictionEpoch restrictionEpoch;
     @Autowired private ObjectMapper objectMapper;
-    @Autowired private AiAgentPrivacyInitializer privacyInitializer;
+    @Autowired private WorkspaceService workspaceService;
 
     private Organization organization;
     private Workspace workspace;
@@ -209,17 +210,6 @@ public abstract class AbstractScriptedTrajectoryTest {
     void prepareTenant() {
         STEP_HOOK.set(null);
         String unique = UUID.randomUUID().toString().substring(0, 8);
-        organization = new Organization();
-        organization.setName("Scripted trajectory " + unique);
-        organization.setSlug("scripted-trajectory-" + unique);
-        organizationMapper.insert(organization);
-
-        workspace = new Workspace();
-        workspace.setOrgId(organization.getId());
-        workspace.setName("Scripted trajectory " + unique);
-        workspace.setSlug("scripted-trajectory-" + unique);
-        workspaceMapper.insert(workspace);
-
         member = new User();
         member.setUsername("scripted-trajectory-" + unique);
         member.setDisplayName("Scripted Member " + unique);
@@ -227,7 +217,9 @@ public abstract class AbstractScriptedTrajectoryTest {
         member.setPasswordHash("hash-" + unique);
         member.setTimezone("UTC");
         userMapper.insert(member);
-        workspaceMapper.addMember(workspace.getId(), member.getId(), "owner");
+        var created = provisionWorkspace(workspaceService, "Scripted trajectory " + unique, member);
+        workspace = workspaceMapper.getActiveById(created.getId());
+        organization = organizationMapper.getById(created.getOrgId());
 
         jdbcTemplate.update("""
                 INSERT INTO ai_provider_config (
@@ -236,8 +228,13 @@ public abstract class AbstractScriptedTrajectoryTest {
                 VALUES (?, 'openai_compatible', NULL, 'https://scripted.invalid/v1', NULL, NULL,
                     NULL, FALSE, ?, NULL, TRUE, TRUE)
                 """, organization.getId(), SCRIPTED_MODEL_ID);
-        privacyInitializer.initialize(workspace.getId());
         journal.clear();
+    }
+
+    /** Provisions committed control and privacy state through the production service. */
+    protected WorkspaceMembershipDto provisionWorkspace(
+            WorkspaceService service, String name, User owner) {
+        return service.createWorkspace(name, owner.getId());
     }
 
     @AfterEach
@@ -812,7 +809,8 @@ public abstract class AbstractScriptedTrajectoryTest {
         return session.getId();
     }
 
-    private AiChatTurn awaitTerminal(int sessionId, int turnId) {
+    /** Waits for the durable terminal result, cancelling a runaway worker before cleanup. */
+    protected final AiChatTurn awaitTerminal(int sessionId, int turnId) {
         AiChatTurn settled = poll(sessionId, turnId, TERMINAL_DEADLINE, TERMINAL_STATUSES);
         if (settled != null) {
             return settled;

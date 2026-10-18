@@ -85,8 +85,9 @@ async function mount(active = true) {
     harness.getTurn.mockResolvedValue(running);
     const { createRoot } = await import('react-dom/client');
     const root = createRoot(interactive.container);
-    await act(async () => root.render(<AskConnexProvider>{null}</AskConnexProvider>));
-    return { unmount: () => act(async () => root.unmount()) };
+    const render = () => act(async () => root.render(<AskConnexProvider>{null}</AskConnexProvider>));
+    await render();
+    return { render, unmount: () => act(async () => root.unmount()) };
 }
 
 async function stream(text: string, seq = 0) {
@@ -103,6 +104,23 @@ describe('Ask Connex provider privacy withdrawal', () => {
         harness.getMissions.mockResolvedValue({ items: [], nextCursor: null });
     });
     afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+    it('keeps an idle session quiet through provider rerenders and resumes discovery on a mission frame', async () => {
+        const mounted = await mount(false);
+        const initialRequests = harness.getMissions.mock.calls.length;
+        expect(initialRequests).toBeGreaterThan(0);
+        for (let index = 0; index < 3; index++) await mounted.render();
+        await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+        expect(harness.getMissions).toHaveBeenCalledTimes(initialRequests);
+
+        await act(async () => socket().onMissionFrame?.({ workspaceId: 1, sessionId: 7,
+            runId: 12, stateVersion: '1', kind: 'mission_created', coarseState: 'queued' }));
+        expect(harness.getMissions.mock.calls.length).toBeGreaterThan(initialRequests);
+        const refreshedRequests = harness.getMissions.mock.calls.length;
+        await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+        expect(harness.getMissions).toHaveBeenCalledTimes(refreshedRequests);
+        await mounted.unmount();
+    });
 
     it('discards buffered and rendered text on a privacy frame before a suspended transcript refresh', async () => {
         const mounted = await mount();
@@ -183,7 +201,7 @@ describe('Ask Connex provider privacy withdrawal', () => {
         await mounted.unmount();
     });
 
-    it('withdraws an ordinary retained tail when mission polling observes physical purge', async () => {
+    it('withdraws an ordinary retained tail when reconnect refresh observes physical purge', async () => {
         harness.getMissions.mockResolvedValue({ items: [{
             schemaVersion: 1, id: 12, sessionId: 7, missionType: 'record_review_v1', definitionVersion: 1,
             state: 'done', reasonCode: null, stateVersion: '3', goal: 'Private goal',
@@ -201,7 +219,14 @@ describe('Ask Connex provider privacy withdrawal', () => {
         expect(props().streamStore.getSnapshot()?.text).toBe('Ordinary retained partial');
 
         harness.getMissions.mockResolvedValue({ items: [], nextCursor: null });
-        await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+        const requests = harness.getMissions.mock.calls.length;
+        await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+        expect(harness.getMissions).toHaveBeenCalledTimes(requests);
+        await act(async () => {
+            socket().onStatusChange?.('connected');
+            socket().onStatusChange?.('disconnected');
+            socket().onStatusChange?.('connected');
+        });
         expect(props().streamStore.getSnapshot()).toBeNull();
         expect(props().continuePrompt).toBeNull();
         await stream('Late withdrawn text');

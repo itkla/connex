@@ -5,6 +5,7 @@ import java.util.function.Supplier;
 
 import ooo.klae.connex.backend.beans.AiAgentPrivacyBarrier;
 import ooo.klae.connex.backend.beans.AiChatSession;
+import ooo.klae.connex.backend.exceptions.AiPrivacyInitializationPendingException;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 
 /** Durable generation and immutable taint checks shared by ordinary and mission executions. */
@@ -16,7 +17,10 @@ public final class AiChatPrivacyGuard {
     /** Captures provenance while the caller holds the session root, before loading input. */
     public static AiChatPrivacyToken capture(AiChatMapper mapper, AiChatSession session) {
         AiAgentPrivacyBarrier barrier = mapper.getPrivacyBarrier(session.getWorkspaceId());
-        if (barrier == null || barrier.getGeneration() <= 0
+        if (barrier == null) {
+            throw new AiPrivacyInitializationPendingException();
+        }
+        if (barrier.getGeneration() <= 0
                 || (session.getMissionTaintSeq() != null && barrier.isBlocked())) {
             throw stale();
         }

@@ -1140,7 +1140,7 @@ class AiAssistantServiceTest extends AbstractServiceTest {
         created.setName("AI chat " + unique());
         created.setSlug("ai-chat-" + unique());
         workspaceMapper.insert(created);
-        TestEntityFixtures.initializeChatPrivacy(jdbcTemplate, created.getId());
+        TestEntityFixtures.seedExistingWorkspacePrivacy(jdbcTemplate, created.getId());
         return created;
     }
 

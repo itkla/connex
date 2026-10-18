@@ -1,5 +1,5 @@
 import { act } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { installInteractiveDocument } from '@/test/unit/helpers/interactiveDocument';
 import type { AiAgentOutput, AiAgentRun, AiAgentRunCreateRequest, AiAgentRunPage } from '@/app/lib/types';
@@ -40,7 +40,10 @@ function deferred<T>() {
 
 async function mount() {
     const interactive = installInteractiveDocument();
-    Object.assign(window, { setInterval: vi.fn(() => 1), clearInterval: vi.fn() });
+    Object.assign(window, {
+        setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout,
+        setInterval: globalThis.setInterval, clearInterval: globalThis.clearInterval,
+    });
     const { createRoot } = await import('react-dom/client');
     const root = createRoot(interactive.container);
     let value: ReturnType<typeof useAskConnexMissions> | null = null;
@@ -48,7 +51,7 @@ async function mount() {
     const invalidated = vi.fn();
     function Harness({ identity, refreshVersion, contentVersion }: { identity: string; refreshVersion: number; contentVersion: number }) {
         value = useAskConnexMissions({ identity, sessionId: 7, enabled: true, visible: true, refreshVersion,
-            contentVersion, onChanged: changed, onContentInvalidated: invalidated });
+            contentVersion, onChanged: (id) => changed(id), onContentInvalidated: (id) => invalidated(id) });
         return null;
     }
     async function render(identity = 'user:workspace', refreshVersion = 0, contentVersion = 0) {
@@ -62,7 +65,89 @@ async function mount() {
 }
 
 describe('Ask Connex durable mission state', () => {
-    afterEach(() => { vi.clearAllMocks(); vi.unstubAllGlobals(); });
+    beforeEach(() => { vi.useFakeTimers(); });
+    afterEach(() => { vi.clearAllMocks(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+    it('does not poll an idle session when callbacks and parent renders change', async () => {
+        api.getAiAgentRuns.mockResolvedValue({ items: [], nextCursor: null });
+        const mounted = await mount();
+        for (let index = 0; index < 20; index++) await mounted.render();
+        await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+        expect(api.getAiAgentRuns).toHaveBeenCalledTimes(1);
+        await mounted.unmount();
+    });
+
+    it.each(['paused', 'waiting_approval', 'done', 'failed', 'cancelled'] as const)(
+        'does not poll a %s mission', async (state) => {
+            api.getAiAgentRuns.mockResolvedValue({ items: [run({ state })], nextCursor: null });
+            const mounted = await mount();
+            await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+            expect(api.getAiAgentRuns).toHaveBeenCalledTimes(1);
+            await mounted.unmount();
+        });
+
+    it('backs off unchanged active missions and resets the delay when progress changes', async () => {
+        api.getAiAgentRuns.mockResolvedValue({ items: [run()], nextCursor: null });
+        const mounted = await mount();
+        for (const [index, delay] of [5_000, 10_000, 20_000, 30_000, 30_000].entries()) {
+            await act(async () => { await vi.advanceTimersByTimeAsync(delay - 1); });
+            expect(api.getAiAgentRuns).toHaveBeenCalledTimes(index + 1);
+            await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+            expect(api.getAiAgentRuns).toHaveBeenCalledTimes(index + 2);
+        }
+        api.getAiAgentRuns.mockResolvedValue({ items: [run({ state: 'running', stateVersion: '2' })], nextCursor: null });
+        await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+        expect(api.getAiAgentRuns).toHaveBeenCalledTimes(7);
+        await act(async () => { await vi.advanceTimersByTimeAsync(4_999); });
+        expect(api.getAiAgentRuns).toHaveBeenCalledTimes(7);
+        await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+        expect(api.getAiAgentRuns).toHaveBeenCalledTimes(8);
+        await mounted.unmount();
+    });
+
+    it('waits for each poll response and stops when the mission settles', async () => {
+        const pending = deferred<AiAgentRunPage>();
+        api.getAiAgentRuns.mockResolvedValueOnce({ items: [run()], nextCursor: null })
+            .mockReturnValue(pending.promise);
+        const mounted = await mount();
+        await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+        expect(api.getAiAgentRuns).toHaveBeenCalledTimes(2);
+        await act(async () => pending.resolve({ items: [run({ state: 'done', stateVersion: '2' })], nextCursor: null }));
+        await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+        expect(api.getAiAgentRuns).toHaveBeenCalledTimes(2);
+        await mounted.unmount();
+    });
+
+    it('refreshes from realtime while idle and cancels the pending poll when realtime settles a mission', async () => {
+        api.getAiAgentRuns.mockResolvedValueOnce({ items: [], nextCursor: null })
+            .mockResolvedValueOnce({ items: [run()], nextCursor: null })
+            .mockResolvedValue({ items: [run({ state: 'done', stateVersion: '2' })], nextCursor: null });
+        const mounted = await mount();
+        await mounted.render('user:workspace', 1);
+        expect(api.getAiAgentRuns).toHaveBeenCalledTimes(2);
+        await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+        await mounted.render('user:workspace', 2);
+        expect(api.getAiAgentRuns).toHaveBeenCalledTimes(3);
+        await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+        expect(api.getAiAgentRuns).toHaveBeenCalledTimes(3);
+        expect(mounted.current().runs[0]?.state).toBe('done');
+        await mounted.unmount();
+    });
+
+    it('stops polling on a failed read and allows explicit recovery', async () => {
+        api.getAiAgentRuns.mockResolvedValueOnce({ items: [run()], nextCursor: null })
+            .mockRejectedValueOnce(new Error('Connection interrupted'))
+            .mockResolvedValue({ items: [], nextCursor: null });
+        const mounted = await mount();
+        await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+        expect(mounted.current().problem).toBe('failed');
+        await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+        expect(api.getAiAgentRuns).toHaveBeenCalledTimes(2);
+        await act(async () => mounted.current().retry());
+        expect(api.getAiAgentRuns).toHaveBeenCalledTimes(3);
+        expect(mounted.current().problem).toBeNull();
+        await mounted.unmount();
+    });
 
     it('discovers durable missions without a realtime frame or tool-call history', async () => {
         api.getAiAgentRuns.mockResolvedValue({ items: [run()], nextCursor: null });

@@ -136,7 +136,7 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
         workspace.setName("Assistant write locks " + unique);
         workspace.setSlug("assistant-write-locks-" + unique);
         workspaceMapper.insert(workspace);
-        TestEntityFixtures.initializeChatPrivacy(jdbcTemplate, workspace.getId());
+        TestEntityFixtures.seedExistingWorkspacePrivacy(jdbcTemplate, workspace.getId());
 
         firstActor = user("assistant-lock-first-" + unique, "First Actor " + displaySuffix);
         secondActor = user("assistant-lock-second-" + unique, "Second Actor " + displaySuffix);

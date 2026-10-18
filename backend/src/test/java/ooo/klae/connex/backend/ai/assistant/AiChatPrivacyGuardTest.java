@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.beans.AiAgentPrivacyBarrier;
 import ooo.klae.connex.backend.beans.AiChatSession;
+import ooo.klae.connex.backend.exceptions.AiPrivacyInitializationPendingException;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 
 class AiChatPrivacyGuardTest {
@@ -76,7 +77,8 @@ class AiChatPrivacyGuardTest {
     void missingBarrierAndLegacyExecutionTokenFailClosed() {
         when(mapper.getPrivacyBarrier(7)).thenReturn(null);
 
-        assertStale(() -> AiChatPrivacyGuard.capture(mapper, session));
+        assertThrows(AiPrivacyInitializationPendingException.class,
+                () -> AiChatPrivacyGuard.capture(mapper, session));
         assertStale(() -> AiChatPrivacyGuard.requireCurrent(mapper, new AiChatPrivacyToken(7, 13, 4, null)));
         assertStale(() -> AiChatPrivacyGuard.requireCurrent(mapper, null));
     }

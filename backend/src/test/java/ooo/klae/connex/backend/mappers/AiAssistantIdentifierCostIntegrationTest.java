@@ -74,7 +74,7 @@ class AiAssistantIdentifierCostIntegrationTest extends AbstractMapperTest {
         created.setName("identifier-cost-" + unique());
         created.setSlug("identifier-cost-" + unique());
         workspaceMapper.insert(created);
-        TestEntityFixtures.initializeChatPrivacy(jdbc, created.getId());
+        TestEntityFixtures.seedExistingWorkspacePrivacy(jdbc, created.getId());
         workspace = created;
         ownsWorkspace = true;
         user = newUser();

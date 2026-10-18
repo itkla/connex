@@ -197,7 +197,7 @@ class AiAgentDsrPurgeHttpIntegrationTest {
         String accepted = mvc.perform(postRequest().content(body())).andExpect(status().isAccepted())
                 .andReturn().getResponse().getContentAsString();
         String operation = json.readTree(accepted).path("operationId").asString();
-        jdbc.update("UPDATE org_member SET org_role='member' WHERE org_id=? AND user_id=?", organization.getId(), actor.getId());
+        jdbc.update("DELETE FROM org_member WHERE org_id=? AND user_id=?", organization.getId(), actor.getId());
         mvc.perform(postRequest().content(body())).andExpect(status().isForbidden());
         mvc.perform(get(progressPath(operation)).session(session.http()).header("X-Workspace-Id", workspace.getId()))
                 .andExpect(status().isForbidden());

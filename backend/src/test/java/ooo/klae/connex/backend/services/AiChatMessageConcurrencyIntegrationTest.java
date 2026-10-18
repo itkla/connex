@@ -80,7 +80,7 @@ class AiChatMessageConcurrencyIntegrationTest {
         workspace.setName("AI chat concurrency " + unique);
         workspace.setSlug("ai-chat-concurrency-" + unique);
         workspaceMapper.insert(workspace);
-        TestEntityFixtures.initializeChatPrivacy(jdbcTemplate, workspace.getId());
+        TestEntityFixtures.seedExistingWorkspacePrivacy(jdbcTemplate, workspace.getId());
 
         actors = IntStream.range(0, APPEND_COUNT)
             .mapToObj(index -> user("ai-chat-" + index + "-" + unique))

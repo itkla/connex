@@ -184,9 +184,19 @@ Missing barriers with run/segment/work/taint evidence fail readiness. An incompl
 record under an unblocked barrier also fails readiness. Pre-V232 active ordinary turns
 without durable tokens are settled without content before mission admission.
 
-Self-service and bootstrap provisioning publish the same post-control-commit event.
-Tenant initialization then runs separately. A crash between commits leaves mission
-admission unavailable until reconciliation completes; no cross-plane atomicity is claimed.
+Self-service, signup/bootstrap, and volume seeding publish the same workspace-provisioned
+event inside their control transaction. Its after-commit callback suspends the completed
+transaction's resources before resolving placement, then installs the system actor's tenant
+scope through `AutomationExecutor`. A catalog pin alone does not authorize scoped mapper
+calls on an unresolved signup request thread. Tenant initialization commits separately.
+A crash between commits leaves mission admission unavailable until startup/periodic
+reconciliation completes; no cross-plane atomicity is claimed.
+
+Ordinary transcript reads and new turn admission with a missing barrier return HTTP 503,
+`ai_privacy_initialization_pending`, and `Retry-After: 60`. They neither disclose content nor
+invent authority. Reconciliation initializes an empty workspace and a later retry succeeds;
+mission/work/taint evidence keeps it unavailable for operator recovery. Existing execution
+tokens still fail their original generation/taint checks and cannot adopt newly created authority.
 
 Departure publishes an after-commit identity-only cancellation event and a bounded
 maintenance sweep repairs missed events using current membership. Fresh membership
@@ -223,3 +233,8 @@ defers the timers with `connex.ai.mission-privacy-work-initial-delay`,
 so cached application contexts cannot advance another test's privacy cursors or settle its attempts.
 Their production defaults remain 10, 60, and 30 seconds respectively; startup reconciliation and
 direct maintenance calls still run normally.
+
+`AiAssistantProvisioningScriptedTrajectoryTest` provisions through the production service
+with unresolved HTTP request attributes before testing session create/read/turn completion.
+Shared scripted trajectories also use production provisioning. Direct SQL privacy fixtures
+model pre-existing workspaces only; they must not be used to verify provisioning.

@@ -10,14 +10,19 @@ import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.observability.JobRunRecorder;
 import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunDetail;
 import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunStatus;
+import ooo.klae.connex.backend.services.AutomationExecutor;
+import ooo.klae.connex.backend.services.SystemActor;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /** Placement-aware reconciliation that never invents a replacement privacy generation. */
@@ -29,6 +34,9 @@ public class AiAgentPrivacyInitializer {
     private final AiAgentPrivacyService privacyService;
     private final AiAgentStartupRecoveryService startupRecovery;
     private final JobRunRecorder jobRunRecorder;
+    private final PlatformTransactionManager transactionManager;
+    private final AutomationExecutor automationExecutor;
+    private final SystemActor systemActor;
     private final AtomicBoolean ready = new AtomicBoolean();
 
     /** Signals a committed control-plane workspace whose tenant barrier can now be initialized. */
@@ -70,9 +78,15 @@ public class AiAgentPrivacyInitializer {
         }
     }
 
-    /** Initializes one exact workspace using its freshly verified organization placement. */
+    /**
+     * Suspends provisioning resources before resolving placement and installing the system scope.
+     * AFTER_COMMIT still retains the control transaction's connection until its callback returns.
+     */
     public void initialize(int workspaceId) {
-        tenantWorkScope.inWorkspace(workspaceId, () -> {
+        TransactionTemplate detached = new TransactionTemplate(transactionManager);
+        detached.setPropagationBehavior(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
+        detached.executeWithoutResult(status -> automationExecutor.runAs(
+                workspaceId, systemActor.user(), "system", () -> {
             JobRunDetail started = JobRunDetail.startedUtc();
             JobRunStatus outcome = JobRunStatus.SUCCEEDED;
             try {
@@ -87,10 +101,10 @@ public class AiAgentPrivacyInitializer {
                 jobRunRecorder.record(JobRunRecorder.AI_AGENT_PRIVACY_INITIALIZATION, workspaceId,
                         outcome, new JobRunDetail(started.startedAt(), Map.of("phase", "initialization")));
             }
-        });
+        }));
     }
 
-    /** Runs after both self-service and bootstrap provisioning commit on the control plane. */
+    /** Runs after self-service, bootstrap, or seeder provisioning commits on the control plane. */
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void provisioned(WorkspaceProvisioned event) {
         try {

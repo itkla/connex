@@ -33,6 +33,10 @@ import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseService;
 import ooo.klae.connex.backend.beans.AiAgentPrivacyBarrier;
 import ooo.klae.connex.backend.beans.AiAgentPrivacyWatermarks;
+import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.services.AutomationExecutor;
+import ooo.klae.connex.backend.services.AutomationScope;
+import ooo.klae.connex.backend.services.SystemActor;
 import ooo.klae.connex.backend.mappers.AiAgentPrivacyMapper;
 import ooo.klae.connex.backend.mappers.AiAgentRunMapper;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
@@ -102,8 +106,7 @@ class AiAgentMaintenanceRoutingTest {
     @Test
     void privacyReadinessCompletesBeforeTheSeederClosesTheReadyContext() {
         when(workspaces.findWorkspaceIdsPage(0, 100)).thenReturn(List.of());
-        var initializer = new AiAgentPrivacyInitializer(workspaces, scope, mock(AiAgentPrivacyService.class),
-                mock(AiAgentStartupRecoveryService.class), mock(JobRunRecorder.class));
+        var initializer = initializer(mock(AiAgentPrivacyService.class), mock(JobRunRecorder.class));
         try (var application = new AnnotationConfigApplicationContext()) {
             application.addApplicationListener(new SeederExitListener(application));
             application.registerBean(AiAgentPrivacyInitializer.class, () -> initializer);
@@ -140,8 +143,7 @@ class AiAgentMaintenanceRoutingTest {
         switch (job) {
             case "initializer" -> {
                 expectedJob = JobRunRecorder.AI_AGENT_PRIVACY_INITIALIZATION;
-                new AiAgentPrivacyInitializer(workspaces, scope, privacy,
-                        mock(AiAgentStartupRecoveryService.class), recorder).reconcile();
+                initializer(privacy, recorder).reconcile();
             }
             case "cleanup" -> {
                 expectedJob = JobRunRecorder.AI_AGENT_PRIVACY_CLEANUP;
@@ -166,6 +168,16 @@ class AiAgentMaintenanceRoutingTest {
         assertEquals(new Recorded(expectedJob, "cleanup".equals(job) ? null : CATALOG, fails ? JobRunStatus.FAILED : JobRunStatus.SUCCEEDED),
                 observed.get(10, TimeUnit.SECONDS));
         assertNull(context.getCatalog());
+    }
+
+    private AiAgentPrivacyInitializer initializer(AiAgentPrivacyService privacy, JobRunRecorder recorder) {
+        var system = mock(SystemActor.class);
+        var user = new User();
+        user.setId(1);
+        when(system.user()).thenReturn(user);
+        return new AiAgentPrivacyInitializer(workspaces, scope, privacy,
+                mock(AiAgentStartupRecoveryService.class), recorder, mock(PlatformTransactionManager.class),
+                new AutomationExecutor(context, new AutomationScope(), scope), system);
     }
 
     private record Recorded(String job, String catalog, JobRunStatus status) {}

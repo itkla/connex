@@ -258,6 +258,14 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("code", "mission_unavailable", "message", "mission_unavailable"));
     }
 
+    @ExceptionHandler(AiPrivacyInitializationPendingException.class)
+    public ResponseEntity<Map<String, String>> privacyInitializationPending(
+            AiPrivacyInitializationPendingException exception) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).header("Retry-After", "60")
+                .body(Map.of("code", "ai_privacy_initialization_pending",
+                        "message", "Chat privacy initialization is pending. Retry after reconciliation."));
+    }
+
     @ExceptionHandler(ServiceUnavailableException.class)
     public ResponseEntity<String> serviceUnavailable(ServiceUnavailableException ex) {
         log.warn("Refusing request this deployment cannot serve safely: exception={} detail={}",

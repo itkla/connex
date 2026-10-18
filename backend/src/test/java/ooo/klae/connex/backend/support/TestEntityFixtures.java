@@ -31,8 +31,9 @@ public final class TestEntityFixtures {
         return UUID.randomUUID().toString().substring(0, 8);
     }
 
-    /** Seeds privacy authority for a freshly inserted fixture workspace that bypasses provisioning. */
-    public static void initializeChatPrivacy(JdbcTemplate jdbc, int workspaceId) {
+    /** Models an already initialized workspace for tests that insert pre-existing data directly.
+     * Provisioning tests must use the production service and must not call this helper. */
+    public static void seedExistingWorkspacePrivacy(JdbcTemplate jdbc, int workspaceId) {
         jdbc.update("INSERT INTO ai_agent_privacy_barrier (workspace_id) VALUES (?)"
                 + " ON DUPLICATE KEY UPDATE workspace_id = workspace_id", workspaceId);
     }

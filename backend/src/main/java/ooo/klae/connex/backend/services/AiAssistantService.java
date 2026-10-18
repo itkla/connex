@@ -35,6 +35,7 @@ import ooo.klae.connex.backend.dto.AiChatStepFrameDto;
 import ooo.klae.connex.backend.dto.AiChatTurnDto;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.UserDisplayNameDto;
+import ooo.klae.connex.backend.exceptions.AiPrivacyInitializationPendingException;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
@@ -200,7 +201,7 @@ public class AiAssistantService {
     /** Holds fresh privacy authority through projection; the lock also flushes the mapper cache. */
     private void retainTranscriptPrivacy(int workspaceId) {
         if (chatMapper.lockPrivacyBarrierForShare(workspaceId) == null) {
-            throw inaccessible();
+            throw new AiPrivacyInitializationPendingException();
         }
     }
 

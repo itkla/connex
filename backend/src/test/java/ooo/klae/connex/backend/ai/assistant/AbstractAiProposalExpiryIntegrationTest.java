@@ -142,7 +142,7 @@ abstract class AbstractAiProposalExpiryIntegrationTest {
         workspace.setName("Expiry workspace " + suffix);
         workspace.setSlug("expiry-" + suffix);
         workspaces.insert(workspace);
-        TestEntityFixtures.initializeChatPrivacy(jdbc, workspace.getId());
+        TestEntityFixtures.seedExistingWorkspacePrivacy(jdbc, workspace.getId());
         actor = member("expiry-actor-" + suffix, "Expiry Actor");
         other = member("expiry-other-" + suffix, "Expiry Owner");
         authenticate(actor);

@@ -340,7 +340,7 @@ class WebSocketSessionSecurityIntegrationTest {
         user.setPasswordHash(passwordEncoder.encode(PASSWORD));
         userMapper.insert(user);
         workspaceMapper.addMember(workspace.getId(), user.getId(), "member");
-        TestEntityFixtures.initializeChatPrivacy(jdbc, workspace.getId());
+        TestEntityFixtures.seedExistingWorkspacePrivacy(jdbc, workspace.getId());
         WorkspaceRole role = new WorkspaceRole();
         role.setWorkspaceId(workspace.getId());
         role.setName("Assistant reader");

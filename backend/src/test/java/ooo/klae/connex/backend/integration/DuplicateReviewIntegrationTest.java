@@ -110,7 +110,7 @@ class DuplicateReviewIntegrationTest {
         workspace.setName("Duplicate review " + suffix);
         workspace.setSlug("duplicate-review-" + suffix);
         workspaceMapper.insert(workspace);
-        TestEntityFixtures.initializeChatPrivacy(jdbcTemplate, workspace.getId());
+        TestEntityFixtures.seedExistingWorkspacePrivacy(jdbcTemplate, workspace.getId());
         member = newMember("member", List.of(
             "COMPANY_CREATE", "COMPANY_UPDATE", "COMPANY_DELETE",
             "PERSON_CREATE", "PERSON_UPDATE", "PERSON_DELETE", "REPORT_READ"));
@@ -961,7 +961,7 @@ class DuplicateReviewIntegrationTest {
         sibling.setName("Duplicate review sibling " + suffix);
         sibling.setSlug("duplicate-review-sibling-" + suffix);
         workspaceMapper.insert(sibling);
-        TestEntityFixtures.initializeChatPrivacy(jdbcTemplate, sibling.getId());
+        TestEntityFixtures.seedExistingWorkspacePrivacy(jdbcTemplate, sibling.getId());
         siblingWorkspaces.add(sibling);
         return sibling;
     }

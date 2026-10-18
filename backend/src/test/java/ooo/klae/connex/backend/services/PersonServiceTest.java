@@ -970,7 +970,7 @@ class PersonServiceTest extends AbstractServiceTest {
         other.setName("Other Workspace");
         other.setSlug("other-" + unique());
         workspaceMapper.insert(other);
-        TestEntityFixtures.initializeChatPrivacy(jdbcTemplate, other.getId());
+        TestEntityFixtures.seedExistingWorkspacePrivacy(jdbcTemplate, other.getId());
         return other;
     }
 
@@ -980,7 +980,7 @@ class PersonServiceTest extends AbstractServiceTest {
         other.setSlug("other-" + unique());
         other.setOrgId(workspaceMapper.getOrgId(workspace.getId()));
         workspaceMapper.insert(other);
-        TestEntityFixtures.initializeChatPrivacy(jdbcTemplate, other.getId());
+        TestEntityFixtures.seedExistingWorkspacePrivacy(jdbcTemplate, other.getId());
         return other;
     }
 
