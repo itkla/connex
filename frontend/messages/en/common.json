@@ -781,6 +781,7 @@
         "failed": "Failed",
         "failedDetail": "This action did not complete.",
         "expired": "Undo expired",
+        "proposalExpired": "Proposal expired",
         "expiredDetail": "This action completed, but its undo window is closed."
       },
       "change": {
@@ -844,6 +845,7 @@
       },
       "failures": {
         "proposalChanged": "The target changed after this proposal was shown. Reject it and ask for a new proposal.",
+        "proposalExpired": "The 72-hour review window has closed. No change was made. Ask for a new proposal.",
         "proposalPermissionLost": "You no longer have permission to approve this proposal.",
         "proposalUnavailable": "This proposal is no longer available. Its permissions or target may have changed.",
         "undoConflict": "This record changed after the assistant created it, so it can’t be undone safely.",

@@ -166,6 +166,13 @@ public class DealDocumentService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DEAL_UPDATE)
     public DealDocumentDto generate(int dealId, int templateId) {
+        return generate(dealId, templateId, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.DEAL_UPDATE)
+    public DealDocumentDto generate(int dealId, int templateId, MutationAdmission admission) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requireDeal(workspaceId, dealId);
         int actorId = workspaceService.getCurrentUserId();
@@ -234,6 +241,9 @@ public class DealDocumentService {
         document.setContent(objectMapper.writeValueAsString(content));
         document.setCurrency(currency);
         document.setCreatedBy(workspaceService.getCurrentUserId());
+        Integer maxVersion = documentMapper.maxVersion(workspaceId, dealId);
+        document.setVersion(maxVersion == null ? 1 : maxVersion + 1);
+        admission.beforeMutation();
         insertNextVersion(workspaceId, dealId, document);
 
         auditService.record("deal_document.generate", "deal", dealId, deal.getName(),
@@ -392,8 +402,10 @@ public class DealDocumentService {
      */
     private void insertNextVersion(int workspaceId, int dealId, DealDocument document) {
         for (int attempt = 0; attempt < MAX_VERSION_ATTEMPTS; attempt++) {
-            Integer max = documentMapper.maxVersion(workspaceId, dealId);
-            document.setVersion(max == null ? 1 : max + 1);
+            if (attempt > 0) {
+                Integer max = documentMapper.maxVersion(workspaceId, dealId);
+                document.setVersion(max == null ? 1 : max + 1);
+            }
             try {
                 documentMapper.insert(document);
                 return;

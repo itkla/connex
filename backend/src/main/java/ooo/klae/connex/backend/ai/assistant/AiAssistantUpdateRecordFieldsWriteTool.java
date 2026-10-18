@@ -187,7 +187,7 @@ public class AiAssistantUpdateRecordFieldsWriteTool implements AiAssistantWriteT
                 Person patch = new Person();
                 patch.setCompany(before.getCompany());
                 patch.setTitle(request.title());
-                Person after = personService.update(target.id(), patch);
+                Person after = personService.update(target.id(), patch, execution.admission());
                 put(applied, "title", after.getTitle());
                 yield after.getId();
             }
@@ -199,7 +199,7 @@ public class AiAssistantUpdateRecordFieldsWriteTool implements AiAssistantWriteT
                 overlay.setWebsite(request.website() == null ? before.getWebsite() : request.website());
                 overlay.setIndustry(request.industry() == null ? before.getIndustry() : request.industry());
                 overlay.setAddress(request.address() == null ? before.getAddress() : request.address());
-                Company after = companyService.updateCompany(target.id(), overlay);
+                Company after = companyService.updateCompany(target.id(), overlay, execution.admission());
                 put(applied, "website", after.getWebsite());
                 put(applied, "industry", after.getIndustry());
                 put(applied, "address", after.getAddress());
@@ -208,10 +208,10 @@ public class AiAssistantUpdateRecordFieldsWriteTool implements AiAssistantWriteT
             case "deal" -> {
                 Deal after = null;
                 if (request.value() != null) {
-                    after = dealService.updateValue(target.id(), new BigDecimal(request.value()));
+                    after = dealService.updateValue(target.id(), new BigDecimal(request.value()), execution.admission());
                 }
                 if (request.expectedCloseDate() != null) {
-                    after = dealService.reschedule(target.id(), request.expectedCloseDate());
+                    after = dealService.reschedule(target.id(), request.expectedCloseDate(), execution.admission());
                 }
                 if (after == null) {
                     throw new IllegalStateException("Assistant field edit has no deal fields");

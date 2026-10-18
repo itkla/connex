@@ -371,6 +371,13 @@ public class ReportService {
     @Transactional
     @RequirePermission(Permission.REPORT_CREATE)
     public ReportDefinitionDto create(ReportDefinitionRequest request) {
+        return create(request, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @Transactional
+    @RequirePermission(Permission.REPORT_CREATE)
+    public ReportDefinitionDto create(ReportDefinitionRequest request, MutationAdmission admission) {
         ValidatedDefinition validated = validate(request);
         ReportDefinition definition = new ReportDefinition();
         int workspaceId = workspaceService.getCurrentWorkspaceId();
@@ -381,6 +388,7 @@ public class ReportService {
         definition.setWorkspaceId(workspaceId);
         definition.setCreatedBy(authService.getCurrentUser().getId());
         apply(definition, request, validated);
+        admission.beforeMutation();
         reportMapper.insertDefinition(definition);
         auditService.record("report.create", "report", definition.getId(), definition.getName(),
                 "Created report " + definition.getName(), null);

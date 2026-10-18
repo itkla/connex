@@ -173,7 +173,7 @@ public class AiAssistantCreateDealWriteTool implements AiAssistantWriteTool {
                         pipelineId, stage.getId(), companyId,
                         request.expectedCloseDate() == null ? null : LocalDate.parse(request.expectedCloseDate()),
                         null),
-                AiAssistantCreationTemplatePin.use(execution.pinned(), companyId), Map.of(), List.of()), stageName);
+                AiAssistantCreationTemplatePin.use(execution.pinned(), companyId), Map.of(), List.of()), stageName, execution.admission());
         if (created == null) {
             throw new IllegalStateException("Created deal could not be read back");
         }

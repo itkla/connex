@@ -40,11 +40,10 @@ import tools.jackson.databind.JsonNode;
  * the owner-scope gate before this tool removes the association through the record's own service,
  * which records the audit row when it removed one.
  *
- * <p>The tag row itself is never locked. The pin compares ids, so a rename of the reviewed tag
- * that commits after the approval resolved it still removes exactly the association the member
- * reviewed. Its label is not trusted from that resolution: the outcome names the tag as it reads
- * after the record lock, just before the record service reads it for its audit row, so the stored
- * outcome never carries a name the tag had already lost when it was removed.
+ * <p>The framework retains the resolved tag definition {@code FOR SHARE} before the target and
+ * existing association rows. It revalidates the resolved identity under that definition lock, so
+ * a rename cannot commit between the final resolution and the removal. The delegate invokes the
+ * transaction's mutation admission after those locks, including for an absent-association no-op.
  *
  * <p>The read-back is {@link ReadBack#structural structural} and verifies nothing: the record
  * services report only whether they removed the association, never which tag they removed, and
@@ -106,7 +105,7 @@ public class AiAssistantRemoveTagWriteTool implements AiAssistantWriteTool {
 
     @Override
     public Lock lock(String targetKind) {
-        return new Lock(false, TargetLock.RECORD_UPDATE);
+        return new Lock(false, TargetLock.RECORD_UPDATE, true);
     }
 
     @Override
@@ -146,9 +145,9 @@ public class AiAssistantRemoveTagWriteTool implements AiAssistantWriteTool {
         Target target = execution.row().target();
         String label = currentName(resolution);
         boolean changed = switch (target.kind()) {
-            case "person" -> personService.removeTag(target.id(), resolution.id());
-            case "company" -> companyService.removeTag(target.id(), resolution.id());
-            case "deal" -> dealService.removeTag(target.id(), resolution.id());
+            case "person" -> personService.removeTag(target.id(), resolution.id(), execution.admission());
+            case "company" -> companyService.removeTag(target.id(), resolution.id(), execution.admission());
+            case "deal" -> dealService.removeTag(target.id(), resolution.id(), execution.admission());
             default -> throw new BadRequestException("Unsupported tag target");
         };
         Map<String, Object> outcome = new LinkedHashMap<>();

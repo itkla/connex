@@ -321,6 +321,7 @@ export type AskConnexToolAction = 'approve' | 'reject' | 'undo';
 /** Localized failure category retained on a card after an action rolls back. */
 export type AskConnexToolCardFailure =
     | 'proposalChanged'
+    | 'proposalExpired'
     | 'proposalPermissionLost'
     | 'proposalUnavailable'
     | 'undoConflict'
@@ -441,6 +442,8 @@ function sameToolCallProjection(
     const currentChanges = askConnexToolChanges(current);
     const incomingChanges = askConnexToolChanges(incoming);
     return current.status === incoming.status
+        && current.reviewState === incoming.reviewState
+        && current.reviewExpiresAt === incoming.reviewExpiresAt
         && current.updatedAt === incoming.updatedAt
         && current.undoAvailable === incoming.undoAvailable
         && current.undoExpiresAt === incoming.undoExpiresAt
@@ -530,6 +533,8 @@ export function reduceAskConnexToolCards(
             return {
                 ...card,
                 status: event.mutation.status,
+                reviewState: event.mutation.reviewState,
+                reviewExpiresAt: event.mutation.reviewExpiresAt,
                 undoAvailable: event.mutation.undoAvailable,
                 undoExpiresAt: event.mutation.undoExpiresAt,
                 pendingAction: null,
@@ -541,14 +546,23 @@ export function reduceAskConnexToolCards(
     });
 }
 
-/** Returns controls allowed by a card's tier, durable state, and live undo deadline. */
+/** Whether a pending proposal has a valid, still-open server review deadline. */
+export function askConnexProposalReviewOpen(card: AiAssistantToolCall, now: number): boolean {
+    if (card.status !== 'proposed' || card.reviewState !== 'open'
+        || typeof card.reviewExpiresAt !== 'string') return false;
+    const deadline = Date.parse(card.reviewExpiresAt);
+    return Number.isFinite(deadline) && now < deadline;
+}
+
+/** Returns controls allowed by a card's tier, durable state, and independent deadlines. */
 export function askConnexToolCardAffordances(
     card: AskConnexToolCardState,
     now: number,
 ): AskConnexToolAction[] {
     if (card.tier === 'confirm' && card.status === 'proposed') {
+        if (!askConnexProposalReviewOpen(card, now) || card.failure === 'proposalExpired') return [];
         if (card.failure === 'proposalUnavailable' || card.failure === 'undoConflict') return [];
-        return askConnexProposalAppliable(card) ? ['reject', 'approve'] : ['reject'];
+        return askConnexProposalAppliable(card, now) ? ['reject', 'approve'] : ['reject'];
     }
     if (card.tier !== 'auto'
         || card.status !== 'executed'
@@ -559,11 +573,15 @@ export function askConnexToolCardAffordances(
     return Number.isFinite(expiresAt) && now <= expiresAt ? ['undo'] : [];
 }
 
-/** Derives the visual expiry state for an executed auto-tier card. */
+/** Keeps pending proposal expiry distinct from an executed action's closed undo window. */
 export function askConnexToolCardStatus(
     card: AskConnexToolCardState,
     now: number,
-): AskConnexToolCardState['status'] | 'expired' {
+): AskConnexToolCardState['status'] | 'expired' | 'proposalExpired' {
+    if (card.status === 'proposed' && (card.reviewState === 'expired'
+        || card.failure === 'proposalExpired'
+        || (card.reviewState === 'open' && typeof card.reviewExpiresAt === 'string'
+            && now >= Date.parse(card.reviewExpiresAt)))) return 'proposalExpired';
     if (card.tier !== 'auto' || card.status !== 'executed' || card.undoExpiresAt === null) {
         return card.status;
     }
@@ -621,9 +639,10 @@ export function askConnexToolProposesRemoval(
  * permission went — is out until it is re-read; one that merely failed to reach the server stays
  * in, because retrying it is the whole point.
  */
-export function askConnexProposalAppliable(card: AskConnexToolCardState): boolean {
+export function askConnexProposalAppliable(card: AskConnexToolCardState, now: number): boolean {
     const changes = askConnexToolChanges(card);
-    return (card.failure === null || card.failure === 'actionFailed')
+    return card.tier === 'confirm' && askConnexProposalReviewOpen(card, now)
+        && (card.failure === null || card.failure === 'actionFailed')
         && changes.some(askConnexChangeApplicable)
         && changes.every((change) => change.state === 'ready' || change.state === 'unchanged');
 }
@@ -723,6 +742,7 @@ export function askConnexProposalGroups(
     cards: readonly AskConnexToolCardState[],
     actionableToolCallIds: ReadonlySet<number>,
     excludedToolCallIds: ReadonlySet<number>,
+    now: number,
 ): AskConnexProposalGroup[] {
     const byTurn = new Map<number, AskConnexToolCardState[]>();
     const decidedByTurn = new Map<number, AskConnexToolCardState[]>();
@@ -744,10 +764,10 @@ export function askConnexProposalGroups(
             turnId,
             messageId: ordered.find((card) => card.messageId !== null)?.messageId ?? null,
             cards: ordered,
-            applicable: ordered.filter(askConnexProposalAppliable).length,
+            applicable: ordered.filter((card) => askConnexProposalAppliable(card, now)).length,
             included,
             selected: ordered.filter(
-                (card) => included.has(card.id) && askConnexProposalAppliable(card),
+                (card) => included.has(card.id) && askConnexProposalAppliable(card, now),
             ).length,
             applied: decided.filter((card) => card.status === 'executed').length,
             discarded: decided.filter((card) => card.status === 'rejected').length,

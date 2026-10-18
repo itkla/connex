@@ -111,20 +111,26 @@ class AiAssistantWriteToolServiceTest {
         VALIDATORS.close();
     }
 
+    @org.junit.jupiter.api.AfterEach
+    void closeAdmissionTransaction() {
+        AiAssistantAdmissionTestSupport.endTransaction();
+    }
+
     @BeforeEach
     void setUp() {
+        AiAssistantAdmissionTestSupport.beginTransaction();
         chatMapper = mock(AiChatMapper.class);
         workspaceService = mock(WorkspaceService.class);
-        activityService = mock(ActivityService.class);
-        personService = mock(PersonService.class);
+        activityService = AiAssistantAdmissionTestSupport.admittingMock(ActivityService.class);
+        personService = AiAssistantAdmissionTestSupport.admittingMock(PersonService.class);
         when(personService.isOwnedByCurrentWorkspace(anyInt())).thenReturn(true);
-        companyService = mock(CompanyService.class);
-        dealService = mock(DealService.class);
-        taskService = mock(TaskService.class);
-        noteService = mock(NoteService.class);
-        tagService = mock(TagService.class);
+        companyService = AiAssistantAdmissionTestSupport.admittingMock(CompanyService.class);
+        dealService = AiAssistantAdmissionTestSupport.admittingMock(DealService.class);
+        taskService = AiAssistantAdmissionTestSupport.admittingMock(TaskService.class);
+        noteService = AiAssistantAdmissionTestSupport.admittingMock(NoteService.class);
+        tagService = AiAssistantAdmissionTestSupport.admittingMock(TagService.class);
         pipelineService = mock(PipelineService.class);
-        leadResponseSlaService = mock(LeadResponseSlaService.class);
+        leadResponseSlaService = AiAssistantAdmissionTestSupport.admittingMock(LeadResponseSlaService.class);
         restrictionEpoch = mock(AiRestrictionEpoch.class);
         governanceService = mock(AiWorkspaceGovernanceService.class);
         AuthService authService = mock(AuthService.class);
@@ -161,8 +167,8 @@ class AiAssistantWriteToolServiceTest {
                 new AiAssistantRemoveTagWriteTool(
                         tagService, personService, companyService, dealService),
                 new AiAssistantAssignOwnerWriteTool(personService, companyService, dealService),
-                new AiAssistantCompleteTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
-                new AiAssistantRescheduleTaskWriteTool(mock(ooo.klae.connex.backend.services.TaskService.class)),
+                new AiAssistantCompleteTaskWriteTool(AiAssistantAdmissionTestSupport.admittingMock(ooo.klae.connex.backend.services.TaskService.class)),
+                new AiAssistantRescheduleTaskWriteTool(AiAssistantAdmissionTestSupport.admittingMock(ooo.klae.connex.backend.services.TaskService.class)),
                 new AiAssistantUpdateRecordFieldsWriteTool(null, null, null),
                 new AiAssistantCreatePersonWriteTool(null, null, null),
                 new AiAssistantCreateDealWriteTool(null, null, null, null),
@@ -202,7 +208,7 @@ class AiAssistantWriteToolServiceTest {
                 governanceService,
                 objectMapper,
                 VALIDATORS.getValidator(),
-                CLOCK);
+                CLOCK, tagService);
         AiChatSession session = new AiChatSession();
         session.setId(TURN.sessionId());
         session.setCreatedByUserId(TURN.userId());
@@ -225,6 +231,7 @@ class AiAssistantWriteToolServiceTest {
         storedToolCall.setSessionId(TURN.sessionId());
         storedToolCall.setRequestedByUserId(TURN.userId());
         storedToolCall.setStatus("proposed");
+        storedToolCall.setCreatedAt("2026-03-06 14:59:00.000000");
         when(chatMapper.getToolCallBySessionForUpdate(
                 TURN.workspaceId(), TURN.sessionId(), 29)).thenReturn(storedToolCall);
         when(chatMapper.getToolCallBySession(
@@ -917,6 +924,7 @@ class AiAssistantWriteToolServiceTest {
         secondStoredTurn.setStatus("running");
         AiChatToolCall secondToolCall = new AiChatToolCall();
         secondToolCall.setServerProposal(true);
+        secondToolCall.setCreatedAt(storedToolCall.getCreatedAt());
         secondToolCall.setId(30);
         secondToolCall.setWorkspaceId(secondTurn.workspaceId());
         secondToolCall.setMessageId(secondTurn.userMessageId());
@@ -1430,38 +1438,19 @@ class AiAssistantWriteToolServiceTest {
         verify(companyService, never()).removeTag(anyInt(), anyInt());
     }
 
-    /**
-     * The tag row is never locked, so a rename can commit after the approval resolved the reviewed
-     * tag and before the record lock is held. The same association is removed, because the pin
-     * compares ids, and the stored outcome names the tag as it reads after the record lock, which
-     * is the name the record service's audit row records, not the one it had lost by then.
-     */
+    /** The definition lock revalidates the name resolved before waiting, before any target lock. */
     @Test
-    void aTagRenamedWhileItsRemovalIsApprovedIsNamedInTheOutcomeAsItReadsAfterTheRecordLock()
-            throws Exception {
-        AtomicBoolean recordLocked = new AtomicBoolean();
-        when(tagService.getAllTags()).thenAnswer(invocation -> recordLocked.get()
-                ? List.of(tag(9, "Urgent"))
-                : List.of(tag(9, "Priority")));
+    void aTagRenamedBeforeItsDefinitionLockRefusesRemoval() throws Exception {
+        when(tagService.getAllTags()).thenReturn(List.of(tag(9, "Priority")));
         stored(prepared(
                 "remove_tag", "{\"handle\":\"r1\",\"tag\":\"Priority\"}", "person", 31), 29);
-        storedToolCall.setCreatedAt("2026-03-06 14:59:00.000000");
-        Person unchanged = person(31);
-        unchanged.setUpdatedAt("2026-03-06 14:00:00.000000");
-        when(personService.lockProcessablePersonForUpdate(31)).thenAnswer(invocation -> {
-            recordLocked.set(true);
-            return unchanged;
-        });
-        when(personService.getPersonById(31)).thenReturn(unchanged);
-        when(personService.removeTag(31, 9)).thenReturn(true);
+        when(tagService.lockDefinitionForShare(9)).thenReturn(tag(9, "Urgent"));
 
-        assertEquals("executed", service.approve(TURN.sessionId(), 29).status());
+        assertThrows(ConflictException.class, () -> service.approve(TURN.sessionId(), 29));
 
-        verify(personService).removeTag(31, 9);
-        assertEquals(
-                "{\"status\":\"executed\",\"recordType\":\"person\",\"tag\":\"Urgent\","
-                        + "\"changed\":true}",
-                objectMapper.readTree(capturedResultJson()).get("outcome").toString());
+        verify(personService, never()).lockProcessablePersonForUpdate(anyInt());
+        verify(personService, never()).removeTag(anyInt(), anyInt());
+        verify(chatMapper, never()).updateToolCall(anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
     }
 
     /**

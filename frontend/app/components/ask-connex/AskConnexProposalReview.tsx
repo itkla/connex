@@ -14,8 +14,11 @@ import {
     askConnexFailureMessage,
     type AskConnexToolCardLabels,
 } from '@/app/components/ask-connex/AskConnexToolCard';
+import { useProposalReviewNow } from '@/app/hooks/useProposalReviewNow';
 import {
     askConnexProposalAppliable,
+    askConnexToolCardAffordances,
+    askConnexToolCardStatus,
     askConnexToolChanges,
     askConnexToolProposesRemoval,
     askConnexToolRequestSummary,
@@ -146,9 +149,11 @@ export default function AskConnexProposalReview({
     onAction,
     onApplySelected,
 }: AskConnexProposalReviewProps) {
+    const now = useProposalReviewNow(group.cards.map((card) => card.reviewExpiresAt));
     const applying = group.cards.some((card) => card.pendingAction === 'approve');
+    const applicable = group.cards.filter((card) => askConnexProposalAppliable(card, now)).length;
     const selectedIds = group.cards.reduce<number[]>((ids, card) => {
-        if (group.included.has(card.id) && askConnexProposalAppliable(card)) ids.push(card.id);
+        if (group.included.has(card.id) && askConnexProposalAppliable(card, now)) ids.push(card.id);
         return ids;
     }, []);
     const outcome = outcomeCounts(group, labels);
@@ -163,9 +168,9 @@ export default function AskConnexProposalReview({
                     {labels.heading(group.cards.length)}
                 </h3>
                 <p className="text-xs leading-relaxed text-muted-foreground">
-                    {group.applicable === 0
+                    {applicable === 0
                         ? labels.noneApplicable
-                        : labels.applicable(group.applicable, group.cards.length)}
+                        : labels.applicable(applicable, group.cards.length)}
                 </p>
             </header>
 
@@ -174,7 +179,9 @@ export default function AskConnexProposalReview({
                     const targetHref = askConnexToolTargetHref(card.target);
                     const targetName = card.target.label ?? cardLabels.restrictedTarget;
                     const removal = askConnexToolProposesRemoval(card);
-                    const appliable = askConnexProposalAppliable(card);
+                    const appliable = askConnexProposalAppliable(card, now);
+                    const affordances = new Set(askConnexToolCardAffordances(card, now));
+                    const expired = askConnexToolCardStatus(card, now) === 'proposalExpired';
                     const changes = askConnexToolChanges(card);
                     const included = group.included.has(card.id) && appliable;
                     const busy = card.pendingAction !== null;
@@ -235,6 +242,11 @@ export default function AskConnexProposalReview({
                                         />
                                     </Fragment>
                                 ))}
+                                {expired ? (
+                                    <p className="text-xs leading-relaxed text-muted-foreground">
+                                        {cardLabels.proposalExpired}
+                                    </p>
+                                ) : null}
                                 {card.failure !== null ? (
                                     <div
                                         role="alert"
@@ -255,7 +267,8 @@ export default function AskConnexProposalReview({
                                         variant="ghost"
                                         size="dialog"
                                         aria-label={cardLabels.discardAria(targetName)}
-                                        disabled={busy || actionsDisabled}
+                                        disabled={busy || actionsDisabled
+                                            || !affordances.has('reject')}
                                         onClick={() => onAction(card.id, 'reject')}
                                     >
                                         {card.pendingAction === 'reject'
@@ -271,7 +284,7 @@ export default function AskConnexProposalReview({
 
             <footer className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
                 <div aria-live="polite" className="space-y-0.5 text-xs text-muted-foreground">
-                    <p>{labels.selected(group.selected)}</p>
+                    <p>{labels.selected(selectedIds.length)}</p>
                     {outcome !== null ? <p>{outcome}</p> : null}
                 </div>
                 <Button
@@ -280,7 +293,7 @@ export default function AskConnexProposalReview({
                     disabled={applying || actionsDisabled || selectedIds.length === 0}
                     onClick={() => void onApplySelected(selectedIds)}
                 >
-                    {applying ? labels.applying : labels.applySelected(group.selected)}
+                    {applying ? labels.applying : labels.applySelected(selectedIds.length)}
                 </Button>
             </footer>
         </section>

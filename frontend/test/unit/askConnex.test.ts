@@ -128,6 +128,8 @@ const TOOL_CALL: AiAssistantToolCall = {
     toolName: 'create_task',
     tier: 'auto',
     status: 'executed',
+    reviewState: 'applied',
+    reviewExpiresAt: '2026-08-15T12:00:00Z',
     target: { kind: 'person', id: 7, label: 'Kenji Sato' },
     requestSummary: 'Create a task',
     outcomeSummary: 'Task created',
@@ -603,6 +605,7 @@ describe('Ask Connex tool-call cards', () => {
             ...TOOL_CALL,
             tier: 'confirm' as const,
             status: 'proposed' as const,
+            reviewState: 'open' as const,
             change: PROPOSED_CHANGE,
             undoAvailable: false,
             undoExpiresAt: null,
@@ -665,6 +668,7 @@ describe('Ask Connex tool-call cards', () => {
             ...TOOL_CALL,
             tier: 'confirm',
             status: 'proposed',
+            reviewState: 'open',
             change: PROPOSED_CHANGE,
             undoAvailable: false,
             undoExpiresAt: null,
@@ -699,6 +703,7 @@ describe('Ask Connex tool-call cards', () => {
             ...TOOL_CALL,
             tier: 'confirm',
             status: 'proposed',
+            reviewState: 'open',
             change: PROPOSED_CHANGE,
             undoAvailable: false,
             undoExpiresAt: null,
@@ -776,6 +781,7 @@ describe('Ask Connex tool-call cards', () => {
             toolName: 'draft_document',
             tier: 'confirm',
             status: 'proposed',
+            reviewState: 'open',
             change: { ...PROPOSED_CHANGE, field: 'document', currentValue: null, proposedValue: 'Quote' },
             undoAvailable: false,
             undoExpiresAt: null,
@@ -790,7 +796,8 @@ describe('Ask Connex tool-call cards', () => {
         };
         const refreshed = reduceAskConnexToolCards(loaded, refresh);
         expect(refreshed[0].change?.currentValue).toBe('1');
-        expect(askConnexToolCardAffordances(refreshed[0], Date.now())).toContain('approve');
+        expect(askConnexToolCardAffordances(refreshed[0], Date.parse(TOOL_CALL.createdAt)))
+            .toContain('approve');
         const started = reduceAskConnexToolCards(loaded, {
             type: 'actionStarted', toolCallId: proposed.id, action: 'approve',
         });
@@ -806,6 +813,7 @@ describe('Ask Connex tool-call cards', () => {
             ...TOOL_CALL,
             tier: 'confirm',
             status: 'proposed',
+            reviewState: 'open',
             change: PROPOSED_CHANGE,
             undoAvailable: false,
             undoExpiresAt: null,
@@ -833,6 +841,8 @@ describe('Ask Connex tool-call cards', () => {
                 result: {},
                 undoAvailable: false,
                 undoExpiresAt: null,
+                reviewState: 'applied',
+                reviewExpiresAt: TOOL_CALL.reviewExpiresAt,
             },
         });
         const settled = reduceAskConnexToolCards(applied, {
@@ -985,6 +995,7 @@ describe('Ask Connex tool-call cards', () => {
             turnId: 109,
             tier: 'confirm' as const,
             status: 'proposed' as const,
+            reviewState: 'open' as const,
         };
 
         const merged = mergeAskConnexToolCalls([TOOL_CALL], [updated, pending]);
