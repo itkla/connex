@@ -411,11 +411,20 @@ public class CompanyService {
             Company company,
             RecordCreationAugmentationService.PreparedAugmentation prepared,
             int workspaceId) {
+        return createCompanyAfterDuplicateDecisionLock(company, prepared, workspaceId, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    private Company createCompanyAfterDuplicateDecisionLock(
+            Company company,
+            RecordCreationAugmentationService.PreparedAugmentation prepared,
+            int workspaceId, MutationAdmission admission) {
         company.setWorkspaceId(workspaceId);
         company.setOwnerId(authService.getCurrentUser().getId());
         company.setLogoUrl(null);
         company.setCreatedAt(null);
         assertUniqueWebsite(company);
+        admission.beforeMutation();
         companyMapper.insert(company);
         identityIntakeService.recordCompany(
             company.getWorkspaceId(), company.getId(), company.getWebsite(), company.getPhone(),
@@ -458,6 +467,14 @@ public class CompanyService {
             Company company,
             String duplicateReviewToken,
             RecordCreationAugmentation augmentation) {
+        return createCompanyReviewed(company, duplicateReviewToken, augmentation, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    Company createCompanyReviewed(
+            Company company,
+            String duplicateReviewToken,
+            RecordCreationAugmentation augmentation, MutationAdmission admission) {
         duplicatePreflightService.requireReviewedCompanyCreation(
             new CompanyDuplicatePreflightRequest(
                 company.getName(),
@@ -467,7 +484,7 @@ public class CompanyService {
         RecordCreationAugmentationService.PreparedAugmentation prepared =
             recordCreationAugmentationService.prepareCompany(augmentation);
         return createCompanyAfterDuplicateDecisionLock(
-            company, prepared, workspaceService.getCurrentWorkspaceId());
+            company, prepared, workspaceService.getCurrentWorkspaceId(), admission);
     }
 
     private static Map<String, Object> withCreationMetadata(
@@ -526,6 +543,13 @@ public class CompanyService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.COMPANY_UPDATE)
     public Company updateCompany(int id, Company company) {
+        return updateCompany(id, company, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.COMPANY_UPDATE)
+    public Company updateCompany(int id, Company company, MutationAdmission admission) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         duplicateDecisionLockService.lockCurrentOrganization();
         Company before = requireOwnedCompany(workspaceId, id);
@@ -534,6 +558,7 @@ public class CompanyService {
         company.setOwnerId(before.getOwnerId());
         company.setLogoUrl(before.getLogoUrl());
         assertUniqueWebsite(company);
+        admission.beforeMutation();
         int updated = companyMapper.update(company);
         Company after = requireOwnedCompany(workspaceId, id);
         identityIntakeService.recordCompany(
@@ -565,6 +590,13 @@ public class CompanyService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.COMPANY_UPDATE)
     public Company updateOwner(int companyId, Integer ownerId) {
+        return updateOwner(companyId, ownerId, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.COMPANY_UPDATE)
+    public Company updateOwner(int companyId, Integer ownerId, MutationAdmission admission) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requireOwnedCompany(workspaceId, companyId);
         if (ownerId != null) workspaceService.lockAndRequireMember(workspaceId, ownerId);
@@ -572,6 +604,7 @@ public class CompanyService {
         if (before == null || before.getArchivedAt() != null) {
             throw new ResourceNotFoundException("Company not found");
         }
+        admission.beforeMutation();
         companyMapper.updateOwner(workspaceId, companyId, ownerId);
         auditService.record("company.updateOwner", "company", companyId, before.getName(),
             "Updated owner on " + before.getName(),
@@ -695,10 +728,17 @@ public class CompanyService {
      */
     @RequirePermission(Permission.COMPANY_UPDATE)
     public boolean addTag(int companyId, int tagId) {
+        return addTag(companyId, tagId, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @RequirePermission(Permission.COMPANY_UPDATE)
+    public boolean addTag(int companyId, int tagId, MutationAdmission admission) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Company company = requireOwnedCompany(workspaceId, companyId);
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
         if (tag == null) throw new ResourceNotFoundException("Tag not found");
+        admission.beforeMutation();
         if (companyMapper.addTag(workspaceId, companyId, tagId) != 1) {
             return false;
         }
@@ -716,9 +756,16 @@ public class CompanyService {
      */
     @RequirePermission(Permission.COMPANY_UPDATE)
     public boolean removeTag(int companyId, int tagId) {
+        return removeTag(companyId, tagId, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @RequirePermission(Permission.COMPANY_UPDATE)
+    public boolean removeTag(int companyId, int tagId, MutationAdmission admission) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Company company = requireOwnedCompany(workspaceId, companyId);
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
+        admission.beforeMutation();
         if (companyMapper.removeTag(workspaceId, companyId, tagId) != 1) {
             return false;
         }

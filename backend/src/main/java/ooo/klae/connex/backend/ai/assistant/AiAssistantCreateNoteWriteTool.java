@@ -95,7 +95,7 @@ public class AiAssistantCreateNoteWriteTool implements AiAssistantWriteTool {
         note.setTitle(request.title());
         note.setVisibility(request.visibility());
         link(note, target);
-        Note created = noteService.create(note);
+        Note created = noteService.create(note, execution.admission());
         Map<String, Object> outcome = new LinkedHashMap<>();
         outcome.put("status", EXECUTED);
         outcome.put("recordType", NOTE);

@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.mappers;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 import org.apache.ibatis.annotations.Param;
 
@@ -12,6 +13,13 @@ import ooo.klae.connex.backend.beans.PersonLifecyclePass;
  * Used by {@code PersonLifecyclePassService}.
  */
 public interface PersonLifecyclePassMapper {
+
+    /** Discovers open pass keys while the caller retains the owning person root. */
+    List<Long> listOpenPassIds(@Param("workspaceId") int workspaceId, @Param("personId") int personId);
+
+    /** Locks one exact pass after Java sorting the discovered IDs. */
+    PersonLifecyclePass getOpenPassByIdForUpdate(
+        @Param("workspaceId") int workspaceId, @Param("personId") int personId, @Param("id") long id);
 
     /** The contact's open pass, or {@code null} when it is not currently in the lifecycle. */
     PersonLifecyclePass getOpenPass(

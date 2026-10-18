@@ -164,6 +164,12 @@ The canonical behavior for each recurring moment. **This section is normative ta
 
 **AI moments.** AI proposes; the user applies: assistant-prepared changes to existing records are validated proposals that show exactly what would change and wait for explicit confirmation; small additions made while answering (an activity, task, note, or tag) apply immediately and are announced — activities, tasks, and notes with a short undo window, a tag removed the same way it was added. Every AI surface names its evidence and how fresh it is — or plainly says it can't. Transparency stays in plain register: the assistant discloses "Chats here belong to this workspace — its admins can see them, even after you leave." once per session list (not per chat); card scanning tells the truth about where reading happens and what is kept — "Cards are read on Connex's own servers when possible; otherwise the image is sent to your organization's AI provider. A copy of the card is saved with the contact — check the details before saving." Deeper guarantees live in docs and admin AI settings, not in everyday copy.
 
+Assistant proposals awaiting a decision have a seventy-two-hour review window from their original
+creation. At the deadline, Apply and Discard become unavailable and the card explains that a new
+proposal is needed. Reopening or refreshing never extends the window. Completed, discarded,
+failed and undone outcomes retain their meaning; an executed action's ten-minute undo window is
+independent. Expired proposal history remains readable under the existing access rules.
+
 ## 7. Where things live
 
 The top-level IA contract. **This section is normative target state** — the structure the product is converging on, stated as its destination; where the shipped navigation differs, it is mid-migration, and old paths redirect permanently to the new ones (browser-tab titles follow the new names). New features find their home here first; new top-level sections require amending this document.

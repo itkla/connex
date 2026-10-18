@@ -771,10 +771,10 @@ step 5, before any board or target lock — and refuses any difference with `Ass
 target changed`, so a rename or an offboarding between the proposal and the approval can never hand
 a record to a member, move a deal to a stage, or remove a tag, that the card did not name — a tag
 deleted and re-created under the reviewed name is another row, and `remove_tag` refuses it. The comparison reads
-no row and takes no lock. The resolved row itself is never locked either: a rename of the reviewed
-tag that commits after the approval resolved it still removes exactly the reviewed association,
-because the pin compares ids, and `remove_tag` names the tag in its stored outcome as it reads after
-the record lock, as the record service's audit row does, never by the name it was resolved under.
+no row and takes no lock. Tag operations additionally lock the resolved exact definition `FOR SHARE` before the target,
+revalidate its identity under that lock, and lock existing associations through association-only
+`FOR UPDATE OF` reads. `remove_tag` retains its stored identity pin; scalar `add_tag` remains AUTO
+without introducing a stored pin.
 The card resolves the stored name exactly as the approval does and names only the pinned row, so a pinned member or stage merely renamed since the proposal is unresolved on
 the card and refused at approval with the same 404 as before pinning, rather than labelled by its
 id.
@@ -782,27 +782,14 @@ id.
 The pins protect only the proposals that carry them, on a build that reads them:
 
 - A proposal stored before pinning carries neither sibling and is approved exactly as before.
-  Pending proposals never expire, so a confirm-tier proposal still pending from before this change
-  keeps resolving its names at approval — the #1865 drift stays possible for that row until it is
-  decided.
-- A build from before the pins reads only the stored `tool`, `tier`, `restrictionEpoch`, `target`
-  and `request` and ignores both siblings, so after a rollback to it a pinned proposal renders,
-  approves and rejects by name exactly as an unpinned one, without the pin's protection. That is
-  not safe equivalence: a rollback past this change must first reject (or have the member
-  re-propose) every pending proposal whose stored arguments carry `principals` —
-  `status = 'proposed'` and `JSON_CONTAINS_PATH(arguments_json, 'one', '$.principals')` on
-  `ai_chat_tool_call` — before approvals are served by the older build. Failing closed on rollback
-  instead would need a pin-aware reader shipped before this writer.
-- The staging deployment's automatic rollback does not run that rejection. When
-  `post_deploy_smoke` fails after the target backend and frontend are live, `deployment_exit` calls
-  `rollback_release`, which restarts the previous backend and frontend without reading
-  `ai_chat_tool_call`, and the interrupted-deployment recovery in `recover_transaction` can fall
-  back to the same `rollback_release`. A pinned proposal created while the target release served
-  survives that rollback, and the older build approves it by name without its pin — how every
-  confirm-tier proposal was approved before #1865, so the protection lapses for those rows rather
-  than a new exposure opening. Gating the automatic rollback is a separate Tier 3 deployment change
-  tracked in #1871; until it lands, run the rejection above by hand after any automatic rollback
-  past this change.
+  It keeps resolving its names at approval while its original seventy-two-hour review window
+  remains open; the #1865 drift remains possible for that row only within that window.
+- Earlier binaries ignore the pins and do not enforce the review deadline. V231 therefore raises
+  the semantic rollback floor: after the expiry cutover, only a binary carrying V231 and the
+  complete expiry implementation may serve. Staging checks the pinned target's floor before
+  automatic rollback and interrupted-deployment recovery; an incompatible previous JAR forces
+  forward recovery. Drain older instances before the cutover, as documented in
+  [UPGRADING.md](../UPGRADING.md#v231-assistant-proposal-review-expiry).
 
 The framework acquires its locks in exactly this order:
 
@@ -841,6 +828,40 @@ The framework acquires its locks in exactly this order:
    REPORT_CREATE/REPORT_READ assertion. Guided record creation re-enters the authority roots, then takes the
    organization duplicate mutex, identity groups and template set/reference hierarchy in the
    existing guided-create order. No path takes that mutex before an `ai_chat_*` row.
+
+Before the target lock, tag tools declare an exact tag-definition shared lock through the SPI.
+After the target lock, they declare existing association locks; locking re-reads flush MyBatis's
+local cache. Deal owner assignment retains existing collaborator rows before its first write.
+No new authority root is acquired after domain locks; revalidation uses the held permission snapshot.
+
+All sixteen write delegates carry `MutationAdmission` to their final pre-mutation boundary. The
+callback is bound to the originating decision transaction and original creation deadline. Its first
+successful call reads the injected clock after contention; at or after seventy-two hours it throws
+and rolls back. An admitted action may finish and commit afterward. Successful no-ops also admit.
+The framework verifies admission before persisting any execution receipt. Coordination upserts
+remain transactional and roll back on refusal. There is no outer batch transaction, proposal parent
+or durable privacy fence in this slice.
+
+| Delegate | Locks and final checkpoint |
+|---|---|
+| Owner assignment | Principal → target → existing deal collaborators; validate locked target, admit immediately before owner write. |
+| Add/remove tag | Exact definition shared → target exclusive → existing associations exclusive; admit before association mutation or no-op. |
+| Complete task | Board mutex → Java-sorted exact task rows; validate assignee/state, admit before completion or completed no-op. |
+| Reschedule task | Exact task only; admit after existence validation before due-date write. |
+| Response due | Owned person → open lifecycle-pass IDs, discovered under the person root and locked by exact workspace/person/ID ascending; admit after assessability validation, before clock write/no-op. Hours start from the admitted instant. |
+| Record fields | Person/company duplicate hierarchy → target → canonical validation; admit before first record write. Deal value/date writes share one admission for the atomic action. |
+| Draft document | Deal root → snapshot/template/version reads; admit before `insertNextVersion`, with no template-content pin or new lock. |
+| Stage change | Canonical ordered stage/deal board locks and `LockedStageChange` validation; admit before first stage/outcome/position write. |
+| Activity creation | Framework target → linked person exclusive and required visibility grant → permission validation; admit before insert. Failure audits defer until the decision transaction completes, so they cannot re-lock authority roots behind a writer waiting on that transaction. |
+| Task creation | Assignee membership → board → linked person shared and exact grant, or held deal → permission validation; admit before insert. |
+| Note creation | Framework target → linked-record validation; admit before insert. |
+| Guided person/company/deal creation | Canonical duplicate/identity → template set/root → sorted custom-field/tag/relationship locks (deal stage before pipeline); admit after final validation immediately before the core insert, not before augmentation preparation. |
+| Report creation | Workspace report definitions exclusive → count validation; admit before definition insert despite `TargetLock.NONE`. |
+
+Discard stops at session/tool-call locks, validates requester/trust/CONFIRM/pending state, then reads
+the clock immediately before the conditional rejection write. It never resolves a target or checks
+domain edit permission. Already-rejected retries remain idempotent. Undo retains its independent
+inverse permissions and ten-minute window, with no proposal review check.
 
 Prepare-time duplicate checks are advisory reads with no mutex and no proof issuance. They hold
 no domain lock across a model call. Person preparation includes the selected template's effective

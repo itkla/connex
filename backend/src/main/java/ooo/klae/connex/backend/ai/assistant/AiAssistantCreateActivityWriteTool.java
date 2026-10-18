@@ -118,7 +118,7 @@ public class AiAssistantCreateActivityWriteTool implements AiAssistantWriteTool 
         activity.setNotes(request.notes());
         activity.setTimestamp(start.mysqlUtc());
         link(activity, target);
-        Activity created = activityService.create(activity);
+        Activity created = activityService.create(activity, execution.admission());
         Map<String, Object> outcome = new LinkedHashMap<>();
         outcome.put("status", EXECUTED);
         outcome.put("recordType", ACTIVITY);

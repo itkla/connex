@@ -101,7 +101,7 @@ public class AiAssistantCreateTaskWriteTool implements AiAssistantWriteTool {
         assignee.setId(execution.authority().userId());
         task.setAssignedTo(assignee);
         link(task, execution.row().target());
-        Task created = taskService.create(task);
+        Task created = taskService.create(task, execution.admission());
         Map<String, Object> outcome = new LinkedHashMap<>();
         outcome.put("status", EXECUTED);
         outcome.put("recordType", TASK);

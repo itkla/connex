@@ -32,6 +32,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.ConstraintViolationException;
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantProposalExpiredException;
 import ooo.klae.connex.backend.connectedaccounts.nativeflow.NativeConnectException;
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationErrorDto;
 import ooo.klae.connex.backend.observability.CorrelationIds;
@@ -293,6 +294,12 @@ public class GlobalExceptionHandler {
                 "code", ex.getCode(),
                 "message", ex.getMessage(),
                 "affectedCount", ex.getAffectedCount()));
+    }
+
+    @ExceptionHandler(AiAssistantProposalExpiredException.class)
+    public ResponseEntity<Map<String, String>> proposalExpired(AiAssistantProposalExpiredException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                "code", "AI_PROPOSAL_EXPIRED", "message", ex.getMessage()));
     }
 
     @ExceptionHandler(ConflictException.class)
