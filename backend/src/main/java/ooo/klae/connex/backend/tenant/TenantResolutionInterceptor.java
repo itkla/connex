@@ -85,8 +85,11 @@ import ooo.klae.connex.backend.services.WorkspaceService;
  * request pipeline sends every workspace-bound state-changing request with an explicit
  * {@code X-Workspace-Id} naming the workspace the page renders rather than the cookie's, and surfaces
  * that save after a delay name the workspace the content was composed in. The routes this
- * interceptor exempts, those {@code WebConfig} excludes, and account and organization routes that
- * authorize their own target keep sending the cookie's selection. A page still rendering a revoked
+ * interceptor exempts, those {@code WebConfig} excludes, and account, organization and personal
+ * provider-connection routes that authorize their own target keep sending the cookie's selection.
+ * Workspace creation is the exception among the exempt routes: because a new workspace joins the
+ * resolved workspace's organization, the client names the workspace on screen and refuses creation
+ * itself when that workspace is no longer a membership. A page still rendering a revoked
  * workspace therefore arrives here as a matching stale pair before the heal, or as an explicit pin
  * that disagrees with the healed cookie after it, and both get the 403 above instead of following
  * the heal into another organization. The client recognizes that refusal by its exact message,
