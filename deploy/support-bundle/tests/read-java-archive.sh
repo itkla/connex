@@ -65,11 +65,13 @@ require_heading() {
 }
 
 # A heading alone is not evidence of rendering: jq accepts an empty file, so a zero-byte
-# entry with a matching length and digest would print its heading and nothing else.
+# entry with a matching length and digest would print its heading and nothing else. read.sh
+# also logs its structured summary to stdout after the last section; a log line ends a
+# section and never counts as its content.
 require_content() {
     if ! awk -v heading="== $1 ==" '
         $0 == heading { inside = 1; next }
-        inside && /^== .* ==$/ { exit }
+        inside && (/^== .* ==$/ || /^ts=[^ ]+ level=/) { exit }
         inside && NF { found = 1; exit }
         END { exit found ? 0 : 1 }
     ' <<< "$rendered"; then
