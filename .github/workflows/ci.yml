@@ -151,15 +151,30 @@ jobs:
   support-bundle:
     name: Support bundle tooling — offline regression tests
     needs: classify
-    if: needs.classify.outputs.support_bundle == 'true'
+    # The operator reader must also accept the archive the Java exporter produces, so a change on
+    # either side of that contract runs this job.
+    if: needs.classify.outputs.support_bundle == 'true' || needs.classify.outputs.backend == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Lint the support bundle shell tooling
-        run: shellcheck -x deploy/support-bundle/*.sh deploy/support-bundle/tests/run-tests.sh
+        run: shellcheck -x deploy/support-bundle/*.sh deploy/support-bundle/tests/*.sh
       - name: Integrity, redaction, and transport regression tests
         run: bash deploy/support-bundle/tests/run-tests.sh
+      - name: Set up JDK 26
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+        with:
+          distribution: temurin
+          java-version: '26'
+          cache: gradle
+      - name: Produce a support bundle with the Java exporter
+        working-directory: backend
+        run: >-
+          bash gradlew unitTest --no-daemon --stacktrace
+          --tests 'ooo.klae.connex.backend.services.SupportBundleArchiveDumpTest'
+      - name: Verify and render the Java-produced bundle with the operator reader
+        run: bash deploy/support-bundle/tests/read-java-archive.sh backend/build/support-bundle/sample-bundle.zip
 
   backend-unit:
     name: Backend — unit tests
