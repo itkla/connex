@@ -8,7 +8,7 @@ import lombok.NoArgsConstructor;
 
 /**
  * The grouped global-search payload. Each field is one result group; a group the caller may not
- * read is served empty rather than omitted, so the client contract has fixed shape.
+ * read or did not select is served empty rather than omitted, so the client contract has fixed shape.
  *
  * <p>The record groups return their full entity DTOs, as they always have. The groups added for the
  * sidebar's builder objects — products, campaigns, reports, document templates, generated

@@ -219,6 +219,41 @@ class SearchTenantIsolationTest {
                 result.andExpect(jsonPath("$." + collection + ".length()").value(0));
             }
         }
+
+        for (List<String> subset : List.of(
+                RESULT_COLLECTIONS.subList(0, 8), RESULT_COLLECTIONS.subList(8, 16))) {
+            for (Workspace active : List.of(ownerWorkspace, siblingWorkspace, foreignWorkspace)) {
+                var result = mockMvc.perform(get("/api/search")
+                                .queryParam("query", sentinel)
+                                .queryParam("types", String.join(",", subset))
+                                .header("X-Workspace-Id", active.getId())
+                                .session(session))
+                        .andExpect(status().isOk());
+                for (String collection : RESULT_COLLECTIONS) {
+                    int expected = active == ownerWorkspace && subset.contains(collection) ? 1 : 0;
+                    result.andExpect(jsonPath("$." + collection + ".length()").value(expected));
+                }
+            }
+        }
+    }
+
+    @Test
+    void selectedGroupsStillRequireAuthenticationAndWorkspaceMembership() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace(newOrganization());
+        User actor = newMember(workspace);
+        Workspace inaccessibleWorkspace = newWorkspace(newOrganization());
+        MockHttpSession session = login(actor.getUsername());
+
+        mockMvc.perform(get("/api/search").queryParam("query", "needle")
+                        .queryParam("types", "companies")
+                        .header("X-Workspace-Id", workspace.getId()))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/search").queryParam("query", "needle")
+                        .queryParam("types", "companies")
+                        .header("X-Workspace-Id", inaccessibleWorkspace.getId())
+                        .session(session))
+                .andExpect(status().isForbidden());
     }
 
     private Product newProduct(Workspace workspace, String sentinel) {
