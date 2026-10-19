@@ -1486,6 +1486,53 @@ public class WorkspaceService {
         return workspaceMapper.getMembers(workspaceId);
     }
 
+    /**
+     * Reads advisory document-approval candidates in three batch queries, independent of roster
+     * size. Unknown roles grant nothing on this path; other permission resolvers retain their
+     * existing behavior. The caller supplies the server-resolved workspace and enforces management
+     * permission before exposing the resulting identity projection.
+     */
+    List<User> documentApprovalCandidateMembers(int workspaceId) {
+        List<MemberDto> members = workspaceMapper.getMembersWithRoles(workspaceId).stream()
+            .filter(member -> "active".equals(member.getStatus())).toList();
+        if (members.isEmpty()) {
+            return List.of();
+        }
+        Map<Integer, Set<Permission>> rolePermissions = new LinkedHashMap<>();
+        for (WorkspaceRole role : roleMapper.findAuthorityRolesByWorkspace(workspaceId)) {
+            rolePermissions.put(role.getId(), parsePermissions(role.getPermissions()));
+        }
+        Set<Integer> reserved = Set.copyOf(userMapper.findAccountDeletionReservedIds(
+            members.stream().map(MemberDto::getId).toList()));
+        return members.stream()
+            .filter(member -> !reserved.contains(member.getId()))
+            .filter(member -> candidateCanApprove(member, rolePermissions))
+            .map(member -> {
+                User user = new User();
+                user.setId(member.getId());
+                user.setUsername(member.getUsername());
+                user.setDisplayName(member.getDisplayName());
+                user.setEmail(member.getEmail());
+                return user;
+            }).toList();
+    }
+
+    private boolean candidateCanApprove(MemberDto member, Map<Integer, Set<Permission>> rolePermissions) {
+        if (member.getRoleId() != null) {
+            return rolePermissions.getOrDefault(member.getRoleId(), Set.of())
+                .contains(Permission.DOCUMENT_APPROVE);
+        }
+        String builtInRole = member.getBuiltInRole();
+        if (builtInRole != null) {
+            for (Role role : Role.values()) {
+                if (role.name().equalsIgnoreCase(builtInRole.trim())) {
+                    return builtInPermissions(role).contains(Permission.DOCUMENT_APPROVE);
+                }
+            }
+        }
+        return false;
+    }
+
     /** Lists the workspace's members with their roles. Visible to any member. */
     public List<MemberDto> getMembersWithRoles(int workspaceId, int actorId) {
         requireMember(workspaceId, actorId);
