@@ -170,6 +170,11 @@ proposal is needed. Reopening or refreshing never extends the window. Completed,
 failed and undone outcomes retain their meaning; an executed action's ten-minute undo window is
 independent. Expired proposal history remains readable under the existing access rules.
 
+When an assistant answer fails, Retry is offered only after Connex confirms that the answer made no
+changes. If changes were saved, their action cards remain visible; if Connex cannot confirm what was
+saved, it says so and asks the member to check their records. Continue from here puts a follow-up in
+the composer for the member to read and edit, without sending it.
+
 ## 7. Where things live
 
 The top-level IA contract. **This section is normative target state** — the structure the product is converging on, stated as its destination; where the shipped navigation differs, it is mid-migration, and old paths redirect permanently to the new ones (browser-tab titles follow the new names). New features find their home here first; new top-level sections require amending this document.

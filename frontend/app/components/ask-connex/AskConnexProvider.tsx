@@ -137,8 +137,10 @@ import {
 import {
     ASK_CONNEX_DEFAULT_WIDTH,
     askConnexActiveState,
+    askConnexRecovery,
     askConnexTerminalKind,
     askConnexTimedOutMessage,
+    askConnexTurnWriteState,
     askConnexWidthStorageKey,
     parseStoredAskConnexWidth,
     type AskConnexActiveState,
@@ -542,6 +544,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         reduceAskConnexToolCards,
         EMPTY_ASK_CONNEX_TOOL_CARDS,
     );
+    const [reconciledToolCallsTurnId, setReconciledToolCallsTurnId] = useState<number | null>(null);
 
     const messagesRef = useRef<AiChatMessage[]>([]);
     const composerRef = useRef('');
@@ -1226,6 +1229,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         sessionId: number,
         signal: AbortSignal,
         animateNew: boolean,
+        settledTurnId?: number,
     ): Promise<{ session: AiChatSession; activeTurn: AiChatTurn | null } | null> => {
         const refreshVersion = ++transcriptRefreshVersionRef.current;
         const [firstDetail, attachments, historicalToolCalls, pendingToolCalls] = await Promise.all([
@@ -1266,6 +1270,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             type: 'replace',
             toolCalls: mergeAskConnexToolCalls(historicalToolCalls, pendingToolCalls),
         });
+        if (settledTurnId !== undefined) setReconciledToolCallsTurnId(settledTurnId);
         setFileAttachments((current) => reconcileAskConnexFileAttachments(
             current,
             attachments.map(readyFileAttachment),
@@ -1391,7 +1396,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 durable.status,
                 durable.terminalReason,
                 resetStream,
-                () => refreshTranscript(stored.sessionId, signal, true),
+                () => refreshTranscript(stored.sessionId, signal, true, durable.turnId),
             );
             await refreshSessions(signal);
             if (durable.status === 'failed') {
@@ -1451,7 +1456,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 durable.status,
                 durable.terminalReason,
                 resetStream,
-                () => refreshTranscript(durable.sessionId, signal, true),
+                () => refreshTranscript(durable.sessionId, signal, true, durable.turnId),
             );
             await refreshSessions(signal);
             if (durable.status === 'failed') {
@@ -2323,10 +2328,12 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     }, [canPersist, activeSession, composer, corrections, featureUnavailable, fileContextCount, fileOperationPending, followTurn, permission, refreshTranscript, resetStream, router, scopeBlocked, scopePreviewKey, scopeRequest, sessionKey, showApiError, sourceRecord, sourceSelection, submissionBlocked, t, turn.phase, turnKey, userDisplayName, userId, workspaceMode]);
 
     const retryPrompt = useMemo(() => askConnexRetryPrompt(messages), [messages]);
+    const turnWriteState = askConnexTurnWriteState(turn, toolCalls, reconciledToolCallsTurnId);
     const retryTurn = useCallback(() => {
-        if (retryPrompt === null) return;
+        if (retryPrompt === null
+            || !askConnexRecovery(turn.phase, turn.reason, true, false, turnWriteState).retry) return;
         void send(retryPrompt);
-    }, [retryPrompt, send]);
+    }, [retryPrompt, send, turn.phase, turn.reason, turnWriteState]);
 
     const cancelTurn = useCallback(async () => {
         const signal = identityControllerRef.current?.signal;
@@ -2693,6 +2700,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         turnAccepted: t('turnAccepted'),
         turnCancelled: t('turnCancelled'),
         turnResolved: t('turnResolved'),
+        turnWritesSaved: t('turnWritesSaved'),
+        turnWritesUncertain: t('turnWritesUncertain'),
         turnStreaming: t('turnStreaming'),
         turnWorking: t('turnWorking'),
         thinkingToggle: t('thinkingToggle'),
@@ -2995,6 +3004,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 contentTooLong={scoped && contentTooLong}
                 working={scoped && working}
                 turn={scoped ? turn : EMPTY_ASK_CONNEX_TURN}
+                turnWriteState={scoped ? turnWriteState : 'uncertain'}
                 thinking={scoped ? thinkingEntries : EMPTY_TURN_SEGMENTS}
                 narration={scoped ? narrationEntries : EMPTY_TURN_SEGMENTS}
                 todos={scoped ? todoItems : EMPTY_TODOS}

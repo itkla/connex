@@ -122,6 +122,7 @@ import {
     type AskConnexFailureMessage,
     type AskConnexRecovery,
     type AskConnexSessionGroupKey,
+    type AskConnexTurnWriteState,
     type AskConnexWidth,
 } from '@/app/lib/askConnexSurface';
 import type { AskConnexStreamStore } from '@/app/lib/askConnexStream';
@@ -235,6 +236,8 @@ export type AskConnexTurnLabels = {
     turnAccepted: string;
     turnCancelled: string;
     turnResolved: string;
+    turnWritesSaved: string;
+    turnWritesUncertain: string;
     turnStreaming: string;
     turnWorking: string;
     /** Accessible name for the disclosure that expands the reasoning panel. */
@@ -422,6 +425,7 @@ type AskConnexDrawerProps = {
     contentTooLong: boolean;
     working: boolean;
     turn: AskConnexTurnState;
+    turnWriteState: AskConnexTurnWriteState;
     /** The active turn's ephemeral reasoning steps, in step order; empty for everyone but the requester. */
     thinking: readonly AskConnexTurnSegment[];
     /** The active turn's narration so far, in step order; empty for everyone but the requester. */
@@ -1130,6 +1134,7 @@ function SettledTurnActivity({
  */
 export function TurnActivity({
     turn,
+    writeState = 'uncertain',
     streaming,
     cancelling,
     canRetry,
@@ -1142,6 +1147,8 @@ export function TurnActivity({
     onNarrowScope = noopRecovery,
 }: {
     turn: AskConnexTurnState;
+    /** Write evidence for this turn, withheld until its settled transcript is reconciled. */
+    writeState?: AskConnexTurnWriteState;
     streaming: boolean;
     cancelling: boolean;
     canRetry: boolean;
@@ -1158,7 +1165,10 @@ export function TurnActivity({
     const [openForTurn, setOpenForTurn] = useState<number | null>(null);
     const thinkingPanelId = useId();
     const thinkingOpen = turn.turnId !== null && openForTurn === turn.turnId;
-    const recovery = askConnexRecovery(turn.phase, turn.reason, canRetry, hasPartial);
+    const recovery = askConnexRecovery(turn.phase, turn.reason, canRetry, hasPartial, writeState);
+    const explainFailure = (message: string) => writeState === 'none'
+        ? message
+        : `${message} ${writeState === 'committed' ? labels.turnWritesSaved : labels.turnWritesUncertain}`;
     const toggleThinking = () => setOpenForTurn(thinkingOpen ? null : turn.turnId);
     const thinkingPanel = thinkingOpen && thinking.length > 0 ? (
         <div
@@ -1208,7 +1218,7 @@ export function TurnActivity({
             <SettledTurnActivity
                 icon={<ExclamationCircleIcon className="size-3.5" />}
                 destructive
-                message={labels.terminalMessage[askConnexTerminalKind(turn.reason).message]}
+                message={explainFailure(labels.terminalMessage[askConnexTerminalKind(turn.reason).message])}
                 labels={labels}
                 recovery={recovery}
                 thinkingToggle={settledThinkingToggle}
@@ -1223,7 +1233,7 @@ export function TurnActivity({
         return (
             <SettledTurnActivity
                 icon={<ClockIcon className="size-3.5" />}
-                message={labels.terminalMessage[askConnexTimedOutMessage(turn.reason)]}
+                message={explainFailure(labels.terminalMessage[askConnexTimedOutMessage(turn.reason)])}
                 labels={labels}
                 recovery={recovery}
                 thinkingToggle={settledThinkingToggle}
@@ -1691,6 +1701,7 @@ function ConversationSurface({
     contentTooLong,
     working,
     turn,
+    turnWriteState,
     thinking,
     narration,
     todos: liveTodos,
@@ -2215,6 +2226,7 @@ function ConversationSurface({
                                 <MessageScrollerItem messageId={`turn:${turn.turnId ?? turn.phase}`}>
                                     <TurnActivity
                                         turn={turn}
+                                        writeState={turnWriteState}
                                         streaming={streaming}
                                         cancelling={cancelling}
                                         canRetry={canRetryTurn}
@@ -2728,6 +2740,7 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
         contentTooLong: props.contentTooLong,
         working: props.working,
         turn: props.turn,
+        turnWriteState: props.turnWriteState,
         thinking: props.thinking,
         narration: props.narration,
         todos: props.todos,

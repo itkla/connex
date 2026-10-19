@@ -1,5 +1,5 @@
 import { viewPreferenceStorageKey } from '@/app/hooks/viewPreference';
-import type { AiChatParticipant, AiChatSession } from '@/app/lib/types';
+import type { AiAssistantToolCall, AiChatParticipant, AiChatProgressItem, AiChatSession } from '@/app/lib/types';
 import { parseMysqlDateTime } from '@/app/lib/utils';
 
 /**
@@ -173,11 +173,50 @@ export function askConnexActiveState({
     return null;
 }
 
+/** Whether repeating the current turn could repeat a write it already made. */
+export type AskConnexTurnWriteState = 'none' | 'committed' | 'uncertain';
+
+/**
+ * Reads current-turn write evidence from viewer-safe action cards and durable progress.
+ *
+ * An empty list proves nothing until the transcript has been refreshed after the turn settled.
+ * Undone actions still count as committed writes: replaying the request would repeat work the
+ * member already chose to undo. A proposed automatic action has no human decision holding it
+ * back, so its outcome remains uncertain. The action list is bounded across the whole session;
+ * only a settled progress trail containing exclusively read-only sources can rule out omitted
+ * writes. Tasks and activities mix reads with writes and their aggregated counts cannot tell
+ * them apart.
+ */
+export function askConnexTurnWriteState(
+    turn: { turnId: number | null; progress: readonly AiChatProgressItem[] },
+    toolCalls: readonly AiAssistantToolCall[],
+    reconciledTurnId: number | null,
+): AskConnexTurnWriteState {
+    const { turnId, progress } = turn;
+    if (turnId === null) return 'uncertain';
+    const current = toolCalls.filter((toolCall) => toolCall.turnId === turnId);
+    if (current.some((toolCall) => toolCall.status === 'executed'
+        || toolCall.status === 'undone'
+        || toolCall.executedAt !== null)) return 'committed';
+    if (reconciledTurnId !== turnId
+        || current.some((toolCall) => toolCall.status === 'proposed' && toolCall.tier === 'auto')) {
+        return 'uncertain';
+    }
+    const settledProgress = progress.some((item) => item.source === 'answer'
+        && (item.status === 'failed' || item.status === 'timed_out'
+            || item.status === 'complete' || item.status === 'cancelled'));
+    if (!settledProgress || progress.some((item) => ![
+        'scope', 'answer', 'records', 'deals', 'files', 'metrics', 'schedule',
+    ].includes(item.source))) return 'uncertain';
+    return 'none';
+}
+
 /**
  * The recovery routes a settled answer can honestly offer.
  *
- * Retry re-asks the same question and needs the question to still be readable. Continuing needs a
- * partial answer to continue from — a failure that produced no words has nothing to build on.
+ * Retry re-asks the same question and needs the question to still be readable and its writes to be
+ * ruled out. Continuing needs a partial answer to continue from — a failure that produced no words
+ * has nothing to build on.
  * Narrowing is offered only where a smaller request is genuinely the remedy.
  */
 export type AskConnexRecovery = {
@@ -357,19 +396,21 @@ const RECOVERY_BY_CLASS: Readonly<Record<AskConnexFailureClass, AskConnexRecover
  * @param reason its terminal reason, when the server gave one
  * @param canRetry whether the original question is still readable and the surface can send
  * @param hasPartial whether words were retained from the answer before it stopped
+ * @param writeState whether this turn committed writes or their outcome remains uncertain
  */
 export function askConnexRecovery(
     phase: string,
     reason: string | null,
     canRetry: boolean,
     hasPartial: boolean,
+    writeState: AskConnexTurnWriteState,
 ): AskConnexRecovery {
     if (phase !== 'failed' && phase !== 'timed_out') {
         return { retry: false, continueFromPartial: false, narrowScope: false, narrowScopeFirst: false };
     }
     const offered = RECOVERY_BY_CLASS[askConnexTerminalKind(reason).category];
     return {
-        retry: offered.retry && canRetry,
+        retry: offered.retry && canRetry && writeState === 'none',
         continueFromPartial: offered.continueFromPartial && canRetry && hasPartial,
         narrowScope: offered.narrowScope && canRetry,
         narrowScopeFirst: offered.narrowScopeFirst,
