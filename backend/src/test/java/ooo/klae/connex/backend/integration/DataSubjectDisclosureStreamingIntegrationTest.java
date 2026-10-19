@@ -322,23 +322,52 @@ class DataSubjectDisclosureStreamingIntegrationTest {
         ReflectionTestUtils.setField(service, "maximumPoolSize", poolSize);
         ReflectionTestUtils.setField(service, "disclosureTicker", (LongSupplier) now::get);
         try (OtherDisclosure other = new OtherDisclosure()) {
-            assertDeliveryDeadline(false, () -> {
-                assertCapacityRefused(other.disclose());
-                assertEquals(0, probe.peer.reads.get(), "Organization B must be refused before a snapshot");
-                assertEquals(0, probe.peer.firstWrites.get());
-            }, () -> {
-                int readsBefore = probe.reads.get();
-                assertCapacityRefused(disclose());
-                assertEquals(readsBefore, probe.reads.get(), "Organization A cannot reacquire its expired slot");
-                if (useReservation) {
-                    var second = other.disclose();
-                    assertEquals(200, second.statusCode(), new String(second.body(), StandardCharsets.UTF_8));
-                    assertEquals("Other note", json.readTree(second.body()).path("notes").get(0).path("content").asString());
-                    probe.peer.assertHealthy();
-                } else {
-                    now.addAndGet(reservation.toNanos());
+            deadlineOverride = new DataSubjectDisclosureDelivery(Duration.ofDays(1).toMillis(), dataSource);
+            probe.blockUntilReleased = true;
+            try (Socket socket = new Socket("127.0.0.1", port)) {
+                try {
+                    writeDisclosureRequest(socket);
+                    assertTrue(probe.firstWrite.await(60, TimeUnit.SECONDS), "Preflight and audit must precede response delivery");
+                    assertCapacityRefused(other.disclose());
+                    assertEquals(0, probe.peer.reads.get(), "Organization B must be refused before a snapshot");
+                    assertEquals(0, probe.peer.firstWrites.get());
+                    assertEquals(1L, probe.completed.getCount(), "Organization A must still hold its delivery");
+                    var deadline = probe.deadline.get();
+                    assertNotNull(deadline);
+                    assertEquals(false, ReflectionTestUtils.getField(deadline, "expired"));
+                    ReflectionTestUtils.invokeMethod(deadline, "expire");
+                    assertEquals(true, ReflectionTestUtils.getField(deadline, "expired"));
+                } finally {
+                    probe.release.countDown();
                 }
-            });
+                assertTrue(probe.completed.await(30, TimeUnit.SECONDS), "Explicit expiry must end delivery");
+                assertEquals(1, probe.transportAborts.get());
+                assertEquals(TransactionSynchronization.STATUS_ROLLED_BACK, probe.transactionCompletion.get());
+                assertTrue(probe.sourceInvalidated.get());
+                Observation owned = probe.ownedConnections.get();
+                assertNotNull(owned);
+                assertTrue(owned.checkouts() > 0);
+                assertEquals(owned.checkouts(), owned.returns(), "Every disclosure-owned checkout must return");
+                assertEquals(0, owned.active());
+                assertEquals(1, auditCount());
+                probe.assertHealthy();
+            }
+            int readsBefore = probe.reads.get();
+            assertCapacityRefused(disclose());
+            assertEquals(readsBefore, probe.reads.get(), "Organization A cannot reacquire its expired slot");
+            if (useReservation) {
+                var second = other.disclose();
+                assertEquals(200, second.statusCode(), new String(second.body(), StandardCharsets.UTF_8));
+                assertEquals("Other note", json.readTree(second.body()).path("notes").get(0).path("content").asString());
+                probe.peer.assertHealthy();
+            } else {
+                now.addAndGet(reservation.toNanos());
+            }
+            probe.reset(org.getId(), workspace.getId(), actor.getId());
+            probe.expectedAudits = 2;
+            assertEquals(200, disclose().statusCode(), "The organization permit must be reusable after deadline cleanup");
+            assertEquals(2, auditCount());
+            probe.assertHealthy();
         } finally {
             ReflectionTestUtils.setField(service, "maximumPoolSize", previousAdmissionMaximum);
             ReflectionTestUtils.setField(service, "disclosureTicker", previousTicker);
@@ -363,22 +392,13 @@ class DataSubjectDisclosureStreamingIntegrationTest {
     }
 
     private void assertDeliveryDeadline(boolean trickle) throws Exception {
-        assertDeliveryDeadline(trickle, () -> {}, () -> {});
-    }
-
-    private void assertDeliveryDeadline(boolean trickle, CheckedAction duringHold, CheckedAction afterCleanup)
-            throws Exception {
         deadlineOverride = new DataSubjectDisclosureDelivery(10_000, dataSource);
         jdbc.update("UPDATE note SET content = REPEAT('x', 131072) WHERE workspace_id = ?", workspace.getId());
         try (Socket socket = new Socket()) {
             socket.setReceiveBufferSize(1_024);
             socket.setSoTimeout(1_000);
             socket.connect(new java.net.InetSocketAddress("127.0.0.1", port));
-            String request = "POST " + path() + " HTTP/1.0\r\nHost: 127.0.0.1:" + port
-                + "\r\nCookie: " + cookie + "\r\nX-Workspace-Id: " + workspace.getId()
-                + "\r\n" + csrfHeader + ": " + csrfToken + "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
-            socket.getOutputStream().write(request.getBytes(StandardCharsets.US_ASCII));
-            socket.getOutputStream().flush();
+            writeDisclosureRequest(socket);
             assertTrue(probe.firstWrite.await(60, TimeUnit.SECONDS), "Preflight and audit must precede response delivery");
             socket.setSoTimeout(5_000);
             ByteArrayOutputStream headers = new ByteArrayOutputStream();
@@ -394,7 +414,6 @@ class DataSubjectDisclosureStreamingIntegrationTest {
             int firstBodyByte = socket.getInputStream().read();
             assertEquals('{', firstBodyByte);
             partial.write(firstBodyByte);
-            duringHold.run();
             try (var executor = Executors.newSingleThreadExecutor()) {
                 var reader = executor.submit(() -> {
                     if (trickle) {
@@ -470,7 +489,6 @@ class DataSubjectDisclosureStreamingIntegrationTest {
             assertFalse(partial.toString(StandardCharsets.UTF_8).contains("This deployment cannot serve the request"));
             System.out.println("DSR " + (trickle ? "trickling" : "stalled") + " delivery cleanup ms=" + elapsedMillis);
         }
-        afterCleanup.run();
         jdbc.update("UPDATE note SET content = 'Retry note' WHERE workspace_id = ?", workspace.getId());
         probe.reset(org.getId(), workspace.getId(), actor.getId());
         probe.expectedAudits = 2;
@@ -574,9 +592,12 @@ class DataSubjectDisclosureStreamingIntegrationTest {
             Integer.class, org.getId());
     }
 
-    @FunctionalInterface
-    private interface CheckedAction {
-        void run() throws Exception;
+    private void writeDisclosureRequest(Socket socket) throws IOException {
+        String request = "POST " + path() + " HTTP/1.0\r\nHost: 127.0.0.1:" + port
+            + "\r\nCookie: " + cookie + "\r\nX-Workspace-Id: " + workspace.getId()
+            + "\r\n" + csrfHeader + ": " + csrfToken + "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+        socket.getOutputStream().write(request.getBytes(StandardCharsets.US_ASCII));
+        socket.getOutputStream().flush();
     }
 
     /** Owns a second authenticated organization's servlet fixture and cleanup. */
@@ -697,6 +718,7 @@ class DataSubjectDisclosureStreamingIntegrationTest {
         private volatile int expectedAudits = 1;
         private volatile int failAfter = Integer.MAX_VALUE;
         private volatile boolean block;
+        private volatile boolean blockUntilReleased;
 
         StreamProbe(TenantContext context, DataSource dataSource, DisclosureConnectionTracker connections) {
             this.context = context;
@@ -730,6 +752,7 @@ class DataSubjectDisclosureStreamingIntegrationTest {
             expectedAudits = 1;
             failAfter = Integer.MAX_VALUE;
             block = false;
+            blockUntilReleased = false;
         }
 
         StreamProbe forOrganization(int organizationId) {
@@ -817,7 +840,9 @@ class DataSubjectDisclosureStreamingIntegrationTest {
                                         }
                                         firstWrites.incrementAndGet();
                                         firstWrite.countDown();
-                                        if (block) {
+                                        if (blockUntilReleased) {
+                                            release.await();
+                                        } else if (block) {
                                             assertTrue(release.await(30, TimeUnit.SECONDS));
                                         }
                                     }
