@@ -8,6 +8,8 @@ import {
     approveAiAssistantToolCall,
     getAiAssistantToolCall,
     getAiAssistantToolCalls,
+    getAiChatParticipants,
+    getAiChatPresence,
     getAiChatSession,
     getAiChatSessions,
     getAiChatTurn,
@@ -72,12 +74,16 @@ vi.mock('@/app/lib/api', async (importOriginal) => ({
     getAiChatSessions: vi.fn().mockResolvedValue({ items: [], total: 0 }),
     getAiChatInvitations: vi.fn().mockResolvedValue({ items: [], total: 0 }),
     getAiChatAttachments: vi.fn().mockResolvedValue([]),
+    getAiChatParticipants: vi.fn(),
+    getAiChatPresence: vi.fn(),
     getAiChatSession: vi.fn(),
     getAiChatTurn: vi.fn(),
     getAiAssistantToolCalls: vi.fn(),
     getAiAssistantToolCall: vi.fn(),
     approveAiAssistantToolCall: vi.fn(),
     getAiGenerationStatus: vi.fn().mockRejectedValue(new Error('Generation handle is no longer retained')),
+    touchAiChatPresence: vi.fn().mockResolvedValue({ sessionId: 4, present: [], typingUserIds: [] }),
+    leaveAiChatPresence: vi.fn().mockResolvedValue(undefined),
     startAiChatTurn: vi.fn(),
 }));
 
@@ -89,6 +95,7 @@ const TURN: AiChatTurn = {
     terminalReason: 'turn_deadline_exceeded',
     partialContent: 'The follow-up needs a due date.',
     requestedByCurrentUser: true,
+    toolCalls: [{ toolName: 'list_tasks', tier: 'READ', status: 'executed' }],
     progress: [
         { seq: 0, source: 'scope', status: 'complete', count: null, truncated: false },
         { seq: 1, source: 'records', status: 'complete', count: 1, truncated: false },
@@ -130,6 +137,13 @@ const DETAIL: AiChatSessionDetail = {
 function drawer(): DrawerProps {
     if (boundary.drawer.current === null) throw new Error('The provider did not render the drawer');
     return boundary.drawer.current;
+}
+
+function expectOneWorkspacePinnedRetry() {
+    expect(startAiChatTurn).toHaveBeenCalledExactlyOnceWith(4, expect.objectContaining({
+        content: QUESTION,
+    }), { headers: expect.any(Headers) });
+    expect(new Headers(vi.mocked(startAiChatTurn).mock.calls[0]?.[2]?.headers).get('X-Workspace-Id')).toBe('7');
 }
 
 async function mountProvider() {
@@ -187,6 +201,8 @@ describe('the provider guards the Retry callback', () => {
             ...DETAIL, messages: { items: [], total: 0 },
         });
         vi.mocked(getAiChatTurn).mockResolvedValue(TURN);
+        vi.mocked(getAiChatParticipants).mockResolvedValue([]);
+        vi.mocked(getAiChatPresence).mockResolvedValue({ sessionId: 4, present: [], typingUserIds: [] });
         vi.mocked(getAiAssistantToolCalls).mockResolvedValue([]);
         vi.mocked(startAiChatTurn).mockResolvedValue({
             sessionId: 4, turnId: 9, generationHandle: 'generation-9', status: 'accepted',
@@ -207,8 +223,53 @@ describe('the provider guards the Retry callback', () => {
         toolCalls: [{ toolName: 'assign_owner', tier: 'CONFIRM', status: 'executed' }],
     };
 
-    it('revalidates Retry and refuses an approval in another tab without frames or reconnect', async () => {
+    it('never offers Retry for a proposal approved remotely after the evidence read without frames', async () => {
         vi.mocked(getAiChatTurn).mockResolvedValue(proposedTurn);
+        const root = await mountFailedTurn();
+        try {
+            const retainedRetry = drawer().onRetryTurn;
+            expect(drawer().turnWriteState).toBe('uncertain');
+            vi.mocked(getAiChatTurn).mockClear().mockResolvedValue(executedTurn);
+            await act(async () => { retainedRetry(); drawer().onRetryTurn(); });
+            expect(getAiChatTurn).not.toHaveBeenCalled();
+            expect(startAiChatTurn).not.toHaveBeenCalled();
+            expect(drawer().turnWriteState).toBe('uncertain');
+        } finally {
+            await act(async () => { root.unmount(); });
+        }
+    });
+
+    it('refuses Retry if remote approval follows its projection read while collaboration stalls', async () => {
+        const root = await mountFailedTurn();
+        const participants = Promise.withResolvers<Awaited<ReturnType<typeof getAiChatParticipants>>>();
+        try {
+            expect(drawer().turnWriteState).toBe('none');
+            vi.mocked(getAiChatSession).mockResolvedValue({
+                ...DETAIL, session: { ...DETAIL.session, visibility: 'shared' },
+            });
+            vi.mocked(getAiChatParticipants).mockReturnValueOnce(participants.promise);
+            vi.mocked(getAiChatTurn).mockClear().mockResolvedValue(proposedTurn);
+            const retainedRetry = drawer().onRetryTurn;
+            await act(async () => { retainedRetry(); });
+            expect(getAiChatTurn).toHaveBeenCalledExactlyOnceWith(4, 9, expect.anything());
+            expect(getAiChatParticipants).toHaveBeenCalledOnce();
+            expect(drawer().turnWriteState).toBe('uncertain');
+            expect(startAiChatTurn).not.toHaveBeenCalled();
+
+            vi.mocked(getAiChatTurn).mockResolvedValue(executedTurn);
+            await act(async () => { retainedRetry(); participants.resolve([]); });
+            expect(startAiChatTurn).not.toHaveBeenCalled();
+            expect(drawer().turnWriteState).toBe('uncertain');
+            await act(async () => { drawer().onRetryTurn(); });
+            expect(startAiChatTurn).not.toHaveBeenCalled();
+        } finally {
+            participants.resolve([]);
+            await act(async () => { root.unmount(); });
+        }
+    });
+
+    it('revalidates Retry and refuses an approval in another tab without frames or reconnect', async () => {
+        vi.mocked(getAiChatTurn).mockResolvedValue(TURN);
         const root = await mountFailedTurn();
         try {
             expect(drawer().turnWriteState).toBe('none');
@@ -227,7 +288,7 @@ describe('the provider guards the Retry callback', () => {
     });
 
     it.each(['projection', 'history', 'pending'] as const)('refuses Retry and shows uncertain evidence when the fresh %s read fails', async (read) => {
-        vi.mocked(getAiChatTurn).mockResolvedValue(proposedTurn);
+        vi.mocked(getAiChatTurn).mockResolvedValue(TURN);
         const root = await mountFailedTurn();
         try {
             expect(drawer().turnWriteState).toBe('none');
@@ -249,7 +310,7 @@ describe('the provider guards the Retry callback', () => {
     });
 
     it('waits for fresh none evidence before submitting one Retry', async () => {
-        vi.mocked(getAiChatTurn).mockResolvedValue(proposedTurn);
+        vi.mocked(getAiChatTurn).mockResolvedValue(TURN);
         const root = await mountFailedTurn();
         const fresh = Promise.withResolvers<AiChatTurn>();
         try {
@@ -262,10 +323,10 @@ describe('the provider guards the Retry callback', () => {
             expect(startAiChatTurn).not.toHaveBeenCalled();
             expect(drawer().turnWriteState).toBe('uncertain');
 
-            await act(async () => { fresh.resolve(proposedTurn); });
-            expect(startAiChatTurn).toHaveBeenCalledExactlyOnceWith(4, expect.objectContaining({ content: QUESTION }));
+            await act(async () => { fresh.resolve(TURN); });
+            expectOneWorkspacePinnedRetry();
         } finally {
-            fresh.resolve(proposedTurn);
+            fresh.resolve(TURN);
             await act(async () => { root.unmount(); });
         }
     });
@@ -274,7 +335,7 @@ describe('the provider guards the Retry callback', () => {
         { tier: null, status: 'proposed' },
         { tier: 'CONFIRM', status: 'unknown' },
     ])('refuses Retry when a fresh proposal outcome is unknown: %j', async (call) => {
-        vi.mocked(getAiChatTurn).mockResolvedValue(proposedTurn);
+        vi.mocked(getAiChatTurn).mockResolvedValue(TURN);
         const root = await mountFailedTurn();
         try {
             vi.mocked(getAiChatTurn).mockResolvedValue({
@@ -289,7 +350,7 @@ describe('the provider guards the Retry callback', () => {
     });
 
     it('refuses a pending Retry when revalidation finds a newer question', async () => {
-        vi.mocked(getAiChatTurn).mockResolvedValue(proposedTurn);
+        vi.mocked(getAiChatTurn).mockResolvedValue(TURN);
         const root = await mountFailedTurn();
         try {
             vi.mocked(getAiChatSession).mockResolvedValue({
@@ -307,7 +368,7 @@ describe('the provider guards the Retry callback', () => {
     });
 
     it('refuses a pending Retry after switching sessions during its projection read', async () => {
-        vi.mocked(getAiChatTurn).mockResolvedValue(proposedTurn);
+        vi.mocked(getAiChatTurn).mockResolvedValue(TURN);
         const root = await mountFailedTurn();
         const fresh = Promise.withResolvers<AiChatTurn>();
         try {
@@ -318,11 +379,11 @@ describe('the provider guards the Retry callback', () => {
                 session: nextSession, messages: { items: [], total: 0 }, activeTurn: null,
             });
             await act(async () => { drawer().onSelectSession(nextSession); });
-            await act(async () => { fresh.resolve(proposedTurn); });
+            await act(async () => { fresh.resolve(TURN); });
             expect(drawer().activeSession?.id).toBe(5);
             expect(startAiChatTurn).not.toHaveBeenCalled();
         } finally {
-            fresh.resolve(proposedTurn);
+            fresh.resolve(TURN);
             await act(async () => { root.unmount(); });
         }
     });
@@ -338,7 +399,7 @@ describe('the provider guards the Retry callback', () => {
         vi.mocked(getAiChatTurn).mockImplementation(async () => approved ? executedTurn : proposedTurn);
         const root = await mountFailedTurn();
         try {
-            expect(drawer().turnWriteState).toBe('none');
+            expect(drawer().turnWriteState).toBe('uncertain');
             expect(drawer().toolCalls).toHaveLength(101);
             const retainedRetry = drawer().onRetryTurn;
             vi.mocked(getAiChatTurn).mockClear();
@@ -360,7 +421,7 @@ describe('the provider guards the Retry callback', () => {
         vi.mocked(getAiChatTurn).mockResolvedValue(proposedTurn);
         const root = await mountFailedTurn();
         try {
-            expect(drawer().turnWriteState).toBe('none');
+            expect(drawer().turnWriteState).toBe('uncertain');
             const retainedRetry = drawer().onRetryTurn;
             if (source === 'card') {
                 vi.mocked(getAiAssistantToolCalls).mockResolvedValue([askConnexToolCall({ status: 'executed' })]);
@@ -385,7 +446,7 @@ describe('the provider guards the Retry callback', () => {
         }
     });
 
-    it('refreshes the projection after this tab approves a proposal and retains the commitment', async () => {
+    it('refuses Retry before an old actionable card is approved and retains the later commitment', async () => {
         const proposal = approvableProposal();
         vi.mocked(getAiChatTurn).mockResolvedValue(proposedTurn);
         vi.mocked(getAiAssistantToolCalls).mockResolvedValue([proposal]);
@@ -396,7 +457,9 @@ describe('the provider guards the Retry callback', () => {
         });
         const root = await mountFailedTurn();
         try {
-            expect(drawer().turnWriteState).toBe('none');
+            expect(drawer().turnWriteState).toBe('uncertain');
+            await act(async () => { drawer().onRetryTurn(); });
+            expect(startAiChatTurn).not.toHaveBeenCalled();
             vi.mocked(getAiChatTurn).mockClear();
             vi.mocked(getAiAssistantToolCalls).mockResolvedValue([]);
             await act(async () => { await drawer().onToolAction(proposal.id, 'approve'); });
@@ -446,7 +509,7 @@ describe('the provider guards the Retry callback', () => {
         vi.mocked(getAiChatTurn).mockResolvedValue(proposedTurn);
         const root = await mountFailedTurn();
         try {
-            expect(drawer().turnWriteState).toBe('none');
+            expect(drawer().turnWriteState).toBe('uncertain');
             const retainedRetry = drawer().onRetryTurn;
             if (outcome === 'missing') {
                 vi.mocked(getAiChatTurn).mockResolvedValue({ ...TURN, toolCalls: null });
@@ -512,8 +575,12 @@ describe('the provider guards the Retry callback', () => {
         { toolName: 'list_tasks', tier: 'READ', status: 'executed', state: 'none', retry: true },
         { toolName: 'list_activities', tier: 'READ', status: 'failed', state: 'none', retry: true },
         { toolName: 'create_task', tier: 'AUTO', status: 'executed', state: 'committed', retry: false },
-        { toolName: 'assign_owner', tier: 'CONFIRM', status: 'proposed', state: 'none', retry: true },
-        { toolName: 'create_task', tier: 'AUTO', status: 'proposed', state: 'none', retry: true },
+        { toolName: 'assign_owner', tier: 'CONFIRM', status: 'proposed', state: 'uncertain', retry: false },
+        { toolName: 'assign_owner', tier: 'CONFIRM', status: 'pending', state: 'uncertain', retry: false },
+        { toolName: 'assign_owner', tier: 'CONFIRM', status: 'rejected', state: 'none', retry: true },
+        { toolName: 'assign_owner', tier: 'CONFIRM', status: 'expired', state: 'none', retry: true },
+        { toolName: 'assign_owner', tier: 'CONFIRM', status: 'failed', state: 'uncertain', retry: false },
+        { toolName: 'create_task', tier: 'AUTO', status: 'proposed', state: 'uncertain', retry: false },
         { toolName: 'future_tool', tier: null, status: 'executed', state: 'uncertain', retry: false },
         { toolName: 'create_task', tier: 'FUTURE', status: 'executed', state: 'uncertain', retry: false },
     ])('uses durable $toolName $tier $status evidence through the Retry callback', async ({
@@ -532,9 +599,7 @@ describe('the provider guards the Retry callback', () => {
             expect(drawer().turnWriteState).toBe(state);
             await act(async () => { drawer().onRetryTurn(); });
             if (retry) {
-                expect(startAiChatTurn).toHaveBeenCalledExactlyOnceWith(4, expect.objectContaining({
-                    content: QUESTION,
-                }));
+                expectOneWorkspacePinnedRetry();
             } else {
                 expect(startAiChatTurn).not.toHaveBeenCalled();
             }
@@ -545,6 +610,9 @@ describe('the provider guards the Retry callback', () => {
 
     it.each(['executed', 'proposed'] as const)('refuses direct retry with an %s automatic write', async (status) => {
         const card = askConnexToolCall({ toolName: 'create_task', tier: 'auto', status });
+        vi.mocked(getAiChatTurn).mockResolvedValue({
+            ...TURN, toolCalls: [{ toolName: 'create_task', tier: 'AUTO', status }],
+        });
         vi.mocked(getAiAssistantToolCalls).mockResolvedValue([card]);
         const root = await mountFailedTurn();
         try {
@@ -572,7 +640,7 @@ describe('the provider guards the Retry callback', () => {
         try {
             expect(drawer().turnWriteState).toBe('none');
             await act(async () => { drawer().onRetryTurn(); });
-            expect(startAiChatTurn).toHaveBeenCalledExactlyOnceWith(4, expect.objectContaining({ content: QUESTION }));
+            expectOneWorkspacePinnedRetry();
         } finally {
             await act(async () => { root.unmount(); });
         }
@@ -597,9 +665,10 @@ describe('the provider guards the Retry callback', () => {
         }
     });
 
-    it.each(['tasks', 'activities'] as const)('keeps read-only %s failures uncertain with the available evidence', async (source) => {
+    it.each(['tasks', 'activities'] as const)('keeps read-only %s failures uncertain without the per-call projection', async (source) => {
         const turn: AiChatTurn = {
             ...TURN,
+            toolCalls: undefined,
             progress: [...TURN.progress, {
                 seq: 2, source, status: 'complete', count: 1, truncated: false,
             }],
@@ -625,10 +694,7 @@ describe('the provider guards the Retry callback', () => {
         try {
             expect(drawer().turnWriteState).toBe('none');
             await act(async () => { drawer().onRetryTurn(); });
-            expect(startAiChatTurn).toHaveBeenCalledExactlyOnceWith(4, expect.objectContaining({
-                content: QUESTION,
-            }), { headers: expect.any(Headers) });
-            expect(new Headers(vi.mocked(startAiChatTurn).mock.calls[0]?.[2]?.headers).get('X-Workspace-Id')).toBe('7');
+            expectOneWorkspacePinnedRetry();
         } finally {
             await act(async () => { root.unmount(); });
         }

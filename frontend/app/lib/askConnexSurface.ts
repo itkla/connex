@@ -223,12 +223,12 @@ export function askConnexBoundRetryPrompt(
  * An empty list proves nothing until the transcript has been refreshed after the turn settled.
  * Undone actions still count as committed writes: replaying the request would repeat work the
  * member already chose to undo. The server resolves each projected tool's tier from its catalog;
- * an unknown tool has a null tier. A settled projection rules out writes only when every tier
- * and state is understood. Without it, the session-wide bounded action cards and aggregated
- * progress retain their conservative interpretation, including ambiguous task/activity reads
- * and unexecuted write proposals. Once execution has been observed, that evidence is retained
- * for the turn even when later bounded snapshots omit it. Reconciliation must refresh terminal
- * evidence before a cached proposal can prove that no write was committed.
+ * an unknown tool has a null tier. Retry requires a settled projection containing only reads
+ * or terminal, non-executable proposals. A proposed write could still commit after any
+ * evidence read, including when its review card has expired but its durable status has not
+ * changed. Missing projections and non-terminal or unknown write outcomes stay uncertain.
+ * Once execution has been observed, that evidence is retained for the turn even when later
+ * bounded snapshots omit it. Retry also refreshes the terminal evidence before submission.
  */
 export function askConnexTurnWriteState(
     turn: {
@@ -255,17 +255,13 @@ export function askConnexTurnWriteState(
         && (item.status === 'failed' || item.status === 'timed_out'
             || item.status === 'complete' || item.status === 'cancelled'));
     if (!settledProgress) return 'uncertain';
-    if (projectedCalls != null) {
-        return projectedCalls.every((call) => call.toolName.length > 0
-            && (call.tier === 'READ' || call.tier === 'AUTO' || call.tier === 'CONFIRM')
-            && ['executed', 'undone', 'proposed', 'rejected', 'failed'].includes(call.status))
-            ? 'none' : 'uncertain';
-    }
-    if (current.some((toolCall) => toolCall.status === 'proposed' && toolCall.tier === 'auto')
-        || progress.some((item) => ![
-        'scope', 'answer', 'records', 'deals', 'files', 'metrics', 'schedule',
-    ].includes(item.source))) return 'uncertain';
-    return 'none';
+    if (projectedCalls == null) return 'uncertain';
+    return projectedCalls.every((call) => call.toolName.length > 0
+        && ((call.tier === 'READ'
+            && ['executed', 'undone', 'proposed', 'rejected', 'failed', 'expired'].includes(call.status))
+            || ((call.tier === 'AUTO' || call.tier === 'CONFIRM')
+                && (call.status === 'rejected' || call.status === 'expired'))))
+        ? 'none' : 'uncertain';
 }
 
 /**

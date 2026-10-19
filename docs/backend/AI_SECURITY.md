@@ -764,8 +764,14 @@ Native assistant tools are capability-declared transport choices, not a second a
   bounded by `MAX_TOOL_CALL_ROWS_PER_TURN`; no arguments, results, or record identifiers enter
   the projection. `AiChatTurnDto` applies the same requester identity check as partial text and
   detailed progress, returning null for shared viewers. Retry still requires settled progress
-  and transcript reconciliation; unknown tiers or states fail closed, while absent projections
-  retain the older conservative progress-based fallback.
+  and transcript reconciliation. Every projected call must be READ-tier or a write proposal in a
+  server-guaranteed terminal non-executable state (`rejected` or `expired`). Still-`proposed`,
+  pending, failed or unknown write outcomes, unknown tiers and absent projections fail closed.
+  A review deadline or derived `reviewState: expired` is insufficient: the current server keeps
+  the durable status `proposed`, and an action admitted before expiry may still commit afterward.
+  New approvals after the deadline are refused at the final mutation boundary by
+  `AiAssistantWriteToolService.ProposalAdmission.beforeMutation`; durable rejected rows also fail
+  approval's locked `requireStatus(PROPOSED)` check. No client read can invalidate a live proposal.
 - The client re-reads a bound failed turn's projection during transcript reconciliation and after
   approval; polling stopping at the turn's terminal state does not freeze proposal outcomes.
   Observed executed writes are retained for that turn across bounded card and projection refreshes.
