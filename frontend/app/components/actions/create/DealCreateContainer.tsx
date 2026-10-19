@@ -10,7 +10,7 @@ import NewDealDialog, {
     isDealPayloadDirty,
 } from '@/app/components/records/deals/NewDealDialog';
 import { createDeal, getCompaniesByIds, getPipelines, getStagesByPipelineId, isFieldError } from '@/app/lib/api';
-import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
+import { renderedWorkspaceId, workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useFormDraft } from '@/app/hooks/useFormDraft';
 import { useWorkspace } from '@/app/hooks/useWorkspace';

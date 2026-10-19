@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { safeNotificationUrl } from "@/app/components/notifications/notificationContent";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
+import { navigateAfterWorkspaceSelection } from "@/app/lib/renderedWorkspace";
 import { type Notification } from "@/app/lib/types";
 
 function targetWorkspaceId(notification: Notification) {
@@ -34,17 +35,19 @@ export function useNotificationWorkspaceActions() {
             if (workspaceId == null) return false;
             if (workspaceId === "global") {
                 await beforeOpen();
-                router.push(url);
+                navigateAfterWorkspaceSelection(() => router.push(url));
                 return true;
             }
             return runInWorkspace(workspaceId, async (switched) => {
                 await beforeOpen();
-                if (switched) {
-                    router.replace(url);
-                    router.refresh();
-                } else {
-                    router.push(url);
-                }
+                navigateAfterWorkspaceSelection(() => {
+                    if (switched) {
+                        router.replace(url);
+                        router.refresh();
+                    } else {
+                        router.push(url);
+                    }
+                });
             });
         },
         [router, runInWorkspace],
@@ -70,8 +73,10 @@ export function useNotificationWorkspaceActions() {
                     await action();
                 } finally {
                     if (switched) {
-                        router.replace(switchedDestination);
-                        router.refresh();
+                        navigateAfterWorkspaceSelection(() => {
+                            router.replace(switchedDestination);
+                            router.refresh();
+                        });
                     }
                 }
             });

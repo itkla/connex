@@ -3319,44 +3319,64 @@ async function runBulk(
     return merged;
 }
 
-export function bulkAddTagToContacts(ids: number[], tagId: number) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/persons/bulk/tags/add`, { ids: chunk, tagId }));
+export function bulkAddTagToContacts(ids: number[], tagId: number, init: RequestInit = {}) {
+    const path = "/api/persons/bulk/tags/add";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk, tagId }, origin));
 }
 
-export function bulkRemoveTagFromContacts(ids: number[], tagId: number) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/persons/bulk/tags/remove`, { ids: chunk, tagId }));
+export function bulkRemoveTagFromContacts(ids: number[], tagId: number, init: RequestInit = {}) {
+    const path = "/api/persons/bulk/tags/remove";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk, tagId }, origin));
 }
 
-export function bulkArchiveContacts(ids: number[]) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/persons/bulk/archive`, { ids: chunk }));
+export function bulkArchiveContacts(ids: number[], init: RequestInit = {}) {
+    const path = "/api/persons/bulk/archive";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk }, origin));
 }
 
-export function bulkRestoreContacts(ids: number[]) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/persons/bulk/restore`, { ids: chunk }));
+export function bulkRestoreContacts(ids: number[], init: RequestInit = {}) {
+    const path = "/api/persons/bulk/restore";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk }, origin));
 }
 
-export function bulkAddTagToCompanies(ids: number[], tagId: number) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/companies/bulk/tags/add`, { ids: chunk, tagId }));
+export function bulkAddTagToCompanies(ids: number[], tagId: number, init: RequestInit = {}) {
+    const path = "/api/companies/bulk/tags/add";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk, tagId }, origin));
 }
 
-export function bulkRemoveTagFromCompanies(ids: number[], tagId: number) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/companies/bulk/tags/remove`, { ids: chunk, tagId }));
+export function bulkRemoveTagFromCompanies(ids: number[], tagId: number, init: RequestInit = {}) {
+    const path = "/api/companies/bulk/tags/remove";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk, tagId }, origin));
 }
 
-export function bulkArchiveCompanies(ids: number[]) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/companies/bulk/archive`, { ids: chunk }));
+export function bulkArchiveCompanies(ids: number[], init: RequestInit = {}) {
+    const path = "/api/companies/bulk/archive";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk }, origin));
 }
 
-export function bulkRestoreCompanies(ids: number[]) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/companies/bulk/restore`, { ids: chunk }));
+export function bulkRestoreCompanies(ids: number[], init: RequestInit = {}) {
+    const path = "/api/companies/bulk/restore";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk }, origin));
 }
 
-export function bulkAssignCompanyOwner(ids: number[], ownerId: number | null) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/companies/bulk/owner`, { ids: chunk, ownerId }));
+export function bulkAssignCompanyOwner(ids: number[], ownerId: number | null, init: RequestInit = {}) {
+    const path = "/api/companies/bulk/owner";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk, ownerId }, origin));
 }
 
-export function bulkAssignPersonOwner(ids: number[], ownerId: number | null) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/persons/bulk/owner`, { ids: chunk, ownerId }));
+export function bulkAssignPersonOwner(ids: number[], ownerId: number | null, init: RequestInit = {}) {
+    const path = "/api/persons/bulk/owner";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk, ownerId }, origin));
 }
 
 export function updateCompanyOwner(id: number, ownerId: number | null) {
@@ -3367,24 +3387,34 @@ export function updatePersonOwner(id: number, ownerId: number | null) {
     return putJson<Types.Contact>(`/api/persons/${id}/owner`, { ownerId });
 }
 
-export function bulkAddTagToDeals(ids: number[], tagId: number) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/deals/bulk/tags/add`, { ids: chunk, tagId }));
+export function bulkAddTagToDeals(ids: number[], tagId: number, init: RequestInit = {}) {
+    const path = "/api/deals/bulk/tags/add";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk, tagId }, origin));
 }
 
-export function bulkRemoveTagFromDeals(ids: number[], tagId: number) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/deals/bulk/tags/remove`, { ids: chunk, tagId }));
+export function bulkRemoveTagFromDeals(ids: number[], tagId: number, init: RequestInit = {}) {
+    const path = "/api/deals/bulk/tags/remove";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk, tagId }, origin));
 }
 
-export function bulkDeleteDeals(ids: number[]) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/deals/bulk/delete`, { ids: chunk }));
+export function bulkDeleteDeals(ids: number[], init: RequestInit = {}) {
+    const path = "/api/deals/bulk/delete";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk }, origin));
 }
 
-export function bulkAssignDealOwner(ids: number[], ownerId: number | null) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/deals/bulk/owner`, { ids: chunk, ownerId }));
+export function bulkAssignDealOwner(ids: number[], ownerId: number | null, init: RequestInit = {}) {
+    const path = "/api/deals/bulk/owner";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk, ownerId }, origin));
 }
 
-export function bulkChangeDealStage(ids: number[], stageId: number) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/deals/bulk/stage`, { ids: chunk, stageId }));
+export function bulkChangeDealStage(ids: number[], stageId: number, init: RequestInit = {}) {
+    const path = "/api/deals/bulk/stage";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk, stageId }, origin));
 }
 
 /** Ids of every contact matching an active filter, capped by the backend bulk-operation limit. */
@@ -4411,8 +4441,8 @@ export function moveDeal(id: number, stageId: number, position: number) {
  * other field. Unlike `updateDeal` this cannot clobber a concurrent edit or reopen a closed deal,
  * so it is used for optimistic reschedule.
  */
-export function rescheduleDeal(id: number, expectedCloseDate: string) {
-    return postJson<Types.Deal>(`/api/deals/${id}/reschedule`, { expectedCloseDate });
+export function rescheduleDeal(id: number, expectedCloseDate: string, init: RequestInit = {}) {
+    return postJson<Types.Deal>(`/api/deals/${id}/reschedule`, { expectedCloseDate }, init);
 }
 
 export function updateDealOwner(id: number, ownerId: number | null, init: RequestInit = {}) {

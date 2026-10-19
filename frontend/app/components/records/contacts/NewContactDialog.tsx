@@ -41,7 +41,7 @@ import { useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
 import { initials } from '@/app/lib/utils';
 import { isFieldError } from '@/app/lib/api';
-import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
+import { renderedWorkspaceId, workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
 import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';

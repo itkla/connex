@@ -22,7 +22,7 @@ import {
     scanBusinessCard,
 } from '@/app/lib/api';
 import { workspaceUnavailableDescription } from '@/app/lib/errorMessages';
-import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
+import { renderedWorkspaceId, workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
 import {
     BusinessCardRecoveryStorageUnavailableError,
     clearBusinessCardImportRecovery,

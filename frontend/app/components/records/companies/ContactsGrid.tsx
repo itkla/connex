@@ -11,7 +11,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { type BusinessCardImportDraft, CreateContactPayload } from "@/app/lib/types";
 import { createContact, importBusinessCard, isFieldError, uploadContactPicture } from "@/app/lib/api";
-import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
+import { renderedWorkspaceId, workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { useTranslations } from "next-intl";
 

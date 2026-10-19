@@ -19,7 +19,7 @@ import {
     replaceDealCollaborators,
     updateDealOwner,
 } from '@/app/lib/api';
-import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
+import { renderedWorkspaceId, workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
 import { pendingDealTeamWrites } from '@/app/lib/dealTeam';
 import { type User, type WorkspaceMember } from '@/app/lib/types';
 import { toastSuccess } from '@/app/lib/toast';

@@ -7,6 +7,7 @@ import { useTranslations } from 'next-intl';
 import { Checkbox } from '@/components/ui/checkbox';
 import NoteContent from '@/app/components/activity/notes/NoteContent';
 import { updateTask } from '@/app/lib/api';
+import { renderedWorkspaceId, workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
 import { noteContentToPlainText } from '@/app/lib/references';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { formatShortDate, startOfLocalDay, timeOf } from '@/app/lib/utils';
@@ -21,11 +22,12 @@ export default function UpcomingTasks({ tasks, locale }: { tasks: Task[]; locale
     const [doneIds, setDoneIds] = useState<Set<number>>(new Set());
 
     async function complete(task: Task) {
+        const origin = workspacePinnedRequest(renderedWorkspaceId());
         setDoneIds((prev) => new Set(prev).add(task.id));
         try {
-            await updateTask(task.id, { completed: true });
+            await updateTask(task.id, { completed: true }, origin);
             toastSuccess(t('taskCompleted'), {
-                action: { label: t('undo'), onClick: () => undo(task) },
+                action: { label: t('undo'), onClick: () => undo(task, origin) },
             });
             router.refresh();
         } catch {
@@ -38,14 +40,14 @@ export default function UpcomingTasks({ tasks, locale }: { tasks: Task[]; locale
         }
     }
 
-    async function undo(task: Task) {
+    async function undo(task: Task, origin: RequestInit) {
         setDoneIds((prev) => {
             const next = new Set(prev);
             next.delete(task.id);
             return next;
         });
         try {
-            await updateTask(task.id, { completed: false });
+            await updateTask(task.id, { completed: false }, origin);
             router.refresh();
         } catch {
             toastError(t('taskCompleteFailed'));

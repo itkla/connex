@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BusinessCardCapture } from '@/app/components/records/contacts/BusinessCardCapture';
 import { useBusinessCardCapture } from '@/app/components/records/contacts/useBusinessCardCapture';
 import { importBusinessCard } from '@/app/lib/api';
-import { bindRenderedWorkspace, releaseRenderedWorkspace, rememberWorkspaceNames, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
+import { bindRenderedWorkspace, releaseRenderedWorkspace, rememberWorkspaceNames, workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
 import type { BusinessCardImportDraft, CreateContactPayload, Workspace } from '@/app/lib/types';
 import contactsEn from '@/messages/en/contacts.json';
 import contactsJa from '@/messages/ja/contacts.json';

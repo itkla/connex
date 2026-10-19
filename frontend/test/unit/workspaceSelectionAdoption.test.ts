@@ -733,10 +733,10 @@ describe("authoritative workspace selection adoption", () => {
                 "\n            }",
             );
 
-            expect(successBranch).toContain('window.location.replace("/dashboard");');
+            expect(successBranch).toContain('navigateAfterWorkspaceSelection(() => window.location.replace("/dashboard"));');
             expect(successBranch).not.toContain('router.replace("/dashboard")');
             expect(successBranch).not.toContain("router.refresh");
-            expect(unavailableBranch).toContain('window.location.replace("/dashboard");');
+            expect(unavailableBranch).toContain('navigateAfterWorkspaceSelection(() => window.location.replace("/dashboard"));');
             expect(unavailableBranch).toContain("return;");
             expect(unavailableBranch).not.toContain("router.replace");
             expect(unavailableBranch).not.toContain("router.refresh");

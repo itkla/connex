@@ -5,7 +5,7 @@ import { useTranslations } from 'next-intl';
 import { ImagePlus, LoaderCircle } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
-import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
+import { renderedWorkspaceId, workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
 import { DRAFT_VERSIONS, readDraft, type DraftKeyParts } from '@/app/lib/formDrafts';
 import { useFormDraft } from '@/app/hooks/useFormDraft';
 import {

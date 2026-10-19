@@ -6,7 +6,7 @@ import { useTranslations } from 'next-intl';
 
 import NewContactDialog, { NewContactForm } from '@/app/components/records/contacts/NewContactDialog';
 import { createContact, importBusinessCard, isFieldError, uploadContactPicture } from '@/app/lib/api';
-import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
+import { renderedWorkspaceId, workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { toastSuccess } from '@/app/lib/toast';
 import type { BusinessCardImportDraft, CreateContactPayload } from '@/app/lib/types';

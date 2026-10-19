@@ -9,7 +9,7 @@ import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import QuickEditCompanySheet, { type CompanyDraft } from '@/app/components/records/companies/QuickEditCompanySheet';
 import { CustomFieldsEditSection, type CustomFieldsEditHandle } from '@/app/components/records/CustomFieldsEditSection';
 import { getCompanyById, updateCompany, uploadCompanyLogo } from '@/app/lib/api';
-import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
+import { renderedWorkspaceId, workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
 import { type Company, type UpdateCompanyPayload } from '@/app/lib/types';
 
 function toDraft(c: Company): CompanyDraft {

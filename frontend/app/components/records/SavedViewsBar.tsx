@@ -18,6 +18,7 @@ import {
     UsersIcon,
 } from "@heroicons/react/24/outline";
 
+import { navigateAfterWorkspaceSelection } from "@/app/lib/renderedWorkspace";
 import {
     Dialog,
     DialogClose,
@@ -249,11 +250,11 @@ export default function SavedViewsBar({
         const targetSv = switchPrompt.sv;
         try {
             const switched = await runInWorkspace(target, async () => {
-                writeWorkspaceSavedViewToUrl(pathname, targetSv);
+                navigateAfterWorkspaceSelection(() => writeWorkspaceSavedViewToUrl(pathname, targetSv));
             });
             if (!switched) return;
             setSwitchPrompt(null);
-            window.location.reload();
+            navigateAfterWorkspaceSelection(() => window.location.reload());
         } catch (err) {
             showApiError(err, "actionFailed");
         }

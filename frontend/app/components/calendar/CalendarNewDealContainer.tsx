@@ -6,7 +6,7 @@ import { useTranslations } from 'next-intl';
 
 import NewDealDialog, { isDealPayloadDirty } from '@/app/components/records/deals/NewDealDialog';
 import { createDeal, getPipelines, getStagesByPipelineId } from '@/app/lib/api';
-import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
+import { renderedWorkspaceId, workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { toastSuccess } from '@/app/lib/toast';
 import type { CreateDealPayload, Pipeline, Stage } from '@/app/lib/types';

@@ -18,7 +18,7 @@ import type {
     DuplicatePreflightResponse,
     PersonDuplicatePreflightRequest,
 } from '@/app/lib/types';
-import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
+import { renderedWorkspaceId, workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
 import { formatDateTime } from '@/app/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';

@@ -12,7 +12,7 @@ import QuickEditSheet, { type ContactDraft } from '@/app/components/records/cont
 import ProtectedMediaImage from '@/app/components/ProtectedMediaImage';
 import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompanyDialog';
 import { updateContact, uploadContactPicture } from '@/app/lib/api';
-import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
+import { renderedWorkspaceId, workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
 import type { Contact, UpdateContactPayload } from '@/app/lib/types';
 import type { RecordMenuModel, RecordRemoveIntent } from '@/app/components/records/types';
 import { BuildingOffice2Icon, UserCircleIcon } from '@heroicons/react/24/outline';

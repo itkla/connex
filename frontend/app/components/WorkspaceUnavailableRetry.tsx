@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useTransition, type ComponentProps } from 'react';
 
 import { Button } from '@/components/ui/button';
+import { navigateAfterWorkspaceSelection } from "@/app/lib/renderedWorkspace";
 
 /**
  * Retries workspace resolution without navigating away from the requested route. Server-rendered
@@ -34,7 +35,7 @@ export default function WorkspaceUnavailableRetry({
                 if (onRetry) {
                     await onRetry();
                 } else {
-                    router.refresh();
+                    navigateAfterWorkspaceSelection(() => router.refresh());
                 }
             })}
             disabled={isRetrying}

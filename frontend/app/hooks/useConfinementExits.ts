@@ -11,6 +11,7 @@ import {
     type PrivilegedMfaSettleOutcome,
 } from "@/app/lib/api";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
+import { navigateAfterWorkspaceSelection } from "@/app/lib/renderedWorkspace";
 import { toastError } from "@/app/lib/toast";
 
 /** What a confined account can leave to end the privilege that confines it (#1534). */
@@ -115,7 +116,7 @@ export function useConfinementExits(workspaceExit?: ConfinementWorkspaceExit): C
         try {
             if (target.kind === "organization") {
                 const outcome = await leaveOrganization(target.orgId);
-                router.refresh();
+                navigateAfterWorkspaceSelection(() => router.refresh());
                 return await settled(outcome);
             }
             if (!workspaceExit) return false;
@@ -123,7 +124,7 @@ export function useConfinementExits(workspaceExit?: ConfinementWorkspaceExit): C
         } catch (err) {
             if (target.kind === "organization" && err instanceof ApiError && err.code === "ORG_NOT_MEMBER") {
                 const outcome = await settlePrivilegedMfaStanding("exit");
-                router.refresh();
+                navigateAfterWorkspaceSelection(() => router.refresh());
                 return await settled(outcome);
             }
             if (target.kind === "workspace" && workspaceExit && err instanceof ApiError

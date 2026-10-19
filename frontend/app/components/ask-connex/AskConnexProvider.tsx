@@ -178,7 +178,7 @@ import { LEAD_SOURCES } from '@/app/lib/contactProvenance';
 import { proposalReviewNow } from '@/app/lib/proposalReviewClock';
 import { createAiChatSocket } from '@/app/lib/realtime';
 import { workspaceUnavailableDescription } from '@/app/lib/errorMessages';
-import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
+import { renderedWorkspaceId, workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { formatDate, formatRelativeTime, formatUtcDateTime } from '@/app/lib/utils';
 import type {
@@ -1994,13 +1994,13 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         }
     }, [activeSession, showApiError, t]);
 
-    const ensureSession = useCallback(async (signal: AbortSignal): Promise<AiChatSession> => {
+    const ensureSession = useCallback(async (signal: AbortSignal, origin: RequestInit): Promise<AiChatSession> => {
         if (activeSession !== null) return activeSession;
         if (sessionCreationRef.current !== null) return sessionCreationRef.current;
         const creation = createAiChatSession(
             t('newChatTitle'),
             true,
-            workspacePinnedRequest(activeWorkspaceId, { signal }),
+            origin,
         ).then((createdSession) => {
             if (signal.aborted) throw signal.reason;
             setActiveSession(createdSession);
@@ -2018,7 +2018,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         });
         sessionCreationRef.current = creation;
         return creation;
-    }, [canPersist, activeSession, activeWorkspaceId, router, sessionKey, t, workspaceMode]);
+    }, [canPersist, activeSession, router, sessionKey, t, workspaceMode]);
 
     const uploadErrorMessage = useCallback((error: unknown): string => {
         const workspaceMessage = workspaceUnavailableDescription(error, tRoot);
@@ -2039,7 +2039,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             || permission !== 'granted'
             || attachmentCreatePermission !== 'granted'
         ) return;
-        const originWorkspaceId = activeWorkspaceId;
+        const origin = workspacePinnedRequest(activeWorkspaceId, { signal });
         for (const file of files) {
             const operationEpoch = sessionEpochRef.current;
             const clientId = crypto.randomUUID();
@@ -2056,7 +2056,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             };
             setFileAttachments((current) => [...current, pending]);
             try {
-                const session = await ensureSession(signal);
+                const session = await ensureSession(signal, origin);
                 const uploaded = await uploadAiChatAttachment(
                     session.id,
                     file,
@@ -2064,7 +2064,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                         attachment.clientId === clientId
                             ? { ...attachment, progress }
                             : attachment)),
-                    workspacePinnedRequest(originWorkspaceId, { signal }),
+                    origin,
                 );
                 if (signal.aborted || operationEpoch !== sessionEpochRef.current) continue;
                 setFileAttachments((current) => completeAskConnexFileUpload(

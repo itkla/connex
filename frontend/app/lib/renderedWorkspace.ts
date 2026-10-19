@@ -57,9 +57,10 @@ export function renderedWorkspaceId(): number | null {
     return binding?.workspaceId ?? null;
 }
 
-/** Marks a shell navigation before the router is called, invalidating older editors' URL writes. */
-export function beginRenderedWorkspaceNavigation(owner: object): void {
-    if (binding?.owner === owner) navigationVersion += 1;
+/** Invalidates older editors' URL writes before navigating after a workspace selection decision. */
+export function navigateAfterWorkspaceSelection(navigate: () => void): void {
+    if (typeof window !== "undefined") navigationVersion += 1;
+    navigate();
 }
 
 /** Returns the shell navigation version to capture when an editor opens. */

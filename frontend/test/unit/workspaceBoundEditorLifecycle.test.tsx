@@ -6,12 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import NoteEditorView from "@/app/components/activity/notes/NoteEditorView";
 import DashboardGrid from "@/app/components/dashboard/customize/DashboardGrid";
 import NewWorkspaceDialog from "@/app/components/NewWorkspaceDialog";
+import { useNotificationWorkspaceActions } from "@/app/components/notifications/useNotificationWorkspaceActions";
 import { useWorkspace, WorkspaceProvider } from "@/app/hooks/useWorkspace";
 import { draftKey, listFreshDrafts, readDraft, writeDraft } from "@/app/lib/formDrafts";
 import { renderedWorkspaceId } from "@/app/lib/renderedWorkspace";
 import { toastError, toastInfo } from "@/app/lib/toast";
 import { deferred } from "./helpers/workspaceChainBackend";
-import type { DashboardWidgetType, Note, Workspace } from "@/app/lib/types";
+import type { DashboardWidgetType, Note, Notification, Workspace } from "@/app/lib/types";
 
 const editor = vi.hoisted<{
     onChange: ((value: string) => void) | null;
@@ -185,6 +186,15 @@ async function settle(milliseconds = 0): Promise<void> {
 
 let root: Root | null = null;
 let captured: ReturnType<typeof useWorkspace> | null = null;
+let notificationActions: ReturnType<typeof useNotificationWorkspaceActions> | null = null;
+
+function CaptureNotificationActions(): null {
+    const actions = useNotificationWorkspaceActions();
+    useEffect(() => {
+        notificationActions = actions;
+    }, [actions]);
+    return null;
+}
 
 function Capture({ onRender }: { onRender: (value: ReturnType<typeof useWorkspace>) => void }): null {
     const value = useWorkspace();
@@ -236,6 +246,7 @@ beforeEach(() => {
     editor.ensureNoteId = null;
     editor.value = null;
     captured = null;
+    notificationActions = null;
 });
 
 afterEach(async () => {
@@ -249,6 +260,34 @@ afterEach(async () => {
 });
 
 describe("a note composed in one workspace and flushed after a switch to another", () => {
+    it.each(["open", "action"])("does not replace a pending notification %s destination after selection", async (kind) => {
+        const held = deferred<Response>();
+        const requests = stubBackend(false, held.promise);
+        const urlWrite = vi.spyOn(window.history, "replaceState");
+        try {
+            await renderInShell(<><CaptureNotificationActions /><NoteEditorView note={null} currentUserId={USER} persons={[]} deals={[]} users={[]} returnPath="/activity/notes" /></>);
+            await act(async () => editor.onChange?.(DRAFT));
+            await act(async () => {
+                window.dispatchEvent(new Event("beforeunload"));
+                await vi.waitFor(() => expect(writesTo(requests, "/api/notes")).toHaveLength(1));
+            });
+            await act(async () => {
+                if (notificationActions === null) throw new Error("The notification actions did not render");
+                const notification: Notification = { id: 71, workspaceId: HEALED, type: "task.assigned", category: "tasks", severity: "info", templateVersion: 1, title: "Origin task", triggeredAt: "2026-10-19T00:00:00Z", createdAt: "", updatedAt: "", actionUrl: "/activity/tasks?task=41" };
+                if (kind === "open") expect(await notificationActions.openNotification(notification)).toBe(true);
+                else expect(await notificationActions.executeInNotificationWorkspace(notification, async () => {}, "/activity/tasks?task=41")).toBe(true);
+            });
+            expect(renderedWorkspaceId()).toBe(HEALED);
+            expect(replace).toHaveBeenCalledWith("/activity/tasks?task=41");
+            urlWrite.mockClear();
+            await act(async () => held.resolve(json({ id: 41 })));
+            expect(urlWrite).not.toHaveBeenCalled();
+            expect(editor.value).toBe(DRAFT);
+        } finally {
+            urlWrite.mockRestore();
+        }
+    });
+
     it.each(["autosave", "inline image"].flatMap((creation) => ["none", "other", "same"].map((navigation) => ({ creation, navigation }))))("settles a first $creation during $navigation workspace navigation", async ({ creation, navigation }) => {
         const held = deferred<Response>();
         const requests = stubBackend(false, held.promise);

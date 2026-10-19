@@ -20,7 +20,7 @@ import {
 } from '@/components/ui/dialog-status-cover';
 import { cn } from '@/lib/utils';
 import { isFieldError } from '@/app/lib/api';
-import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
+import { renderedWorkspaceId, workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
 import { isSubmitShortcut } from '@/app/lib/submitShortcut';
 import { type Company, type CreateDealPayload, type Pipeline, type Stage } from '@/app/lib/types';
 import { useCompanySearch } from '@/app/hooks/useCompanySearch';

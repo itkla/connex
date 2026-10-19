@@ -23,7 +23,7 @@ import {
     type PublishedWorkspaceIdentity,
 } from "@/app/lib/workspaceSnapshot";
 import {
-    beginRenderedWorkspaceNavigation,
+    navigateAfterWorkspaceSelection,
     bindRenderedWorkspace,
     releaseRenderedWorkspace,
     rememberWorkspaceNames,
@@ -377,7 +377,7 @@ export function WorkspaceProvider({
                 true,
             );
             publishAuthoritativeWorkspaceSelection(snapshot);
-            router.refresh();
+            navigateAfterWorkspaceSelection(() => router.refresh());
         } catch (error) {
             if (error instanceof WorkspaceSelectionInProgressError) return;
             selectionUnavailableRef.current = true;
@@ -404,12 +404,13 @@ export function WorkspaceProvider({
     const switchTo = useCallback(
         async (id: number) => {
             await runInWorkspace(id, async () => {
-                beginRenderedWorkspaceNavigation(renderedWorkspaceOwner);
-                router.replace("/dashboard");
-                router.refresh();
+                navigateAfterWorkspaceSelection(() => {
+                    router.replace("/dashboard");
+                    router.refresh();
+                });
             });
         },
-        [renderedWorkspaceOwner, router, runInWorkspace],
+        [router, runInWorkspace],
     );
 
     const create = useCallback(
@@ -417,12 +418,13 @@ export function WorkspaceProvider({
             const workspace = await createWorkspace(name);
             publishWorkspace(workspace);
             publishActiveWorkspace(workspace.id);
-            beginRenderedWorkspaceNavigation(renderedWorkspaceOwner);
-            router.replace("/dashboard");
-            router.refresh();
+            navigateAfterWorkspaceSelection(() => {
+                router.replace("/dashboard");
+                router.refresh();
+            });
             return workspace;
         }),
-        [renderedWorkspaceOwner, router, runSelectionChange],
+        [router, runSelectionChange],
     );
 
     const activeWorkspace = useMemo(

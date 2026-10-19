@@ -1,13 +1,14 @@
-import { readdirSync, readFileSync } from 'node:fs';
-import path from 'node:path';
-import ts from 'typescript';
-import { describe, expect, it } from 'vitest';
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
+import ts from "typescript";
+import { describe, expect, it } from "vitest";
 
-import { pinsToRenderedWorkspace } from '@/app/lib/renderedWorkspace';
+import { pinsToRenderedWorkspace } from "@/app/lib/renderedWorkspace";
 
 type FunctionBody = (ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction | ts.MethodDeclaration) & { body: ts.ConciseBody };
 type WriteHelper = { optionsIndex: number };
 type Bindings = Map<ts.ParameterDeclaration, { expression: ts.Expression; bindings: Bindings; at: ts.CallExpression }>;
+type Invocation = { target: FunctionBody; call: ts.CallExpression; continuation: boolean };
 type Write = {
     call: ts.CallExpression;
     options: ts.Expression | undefined;
@@ -16,13 +17,14 @@ type Write = {
     position: number;
     branches: Map<ts.Node, ts.Node>;
     repeated: boolean;
+    invocations: Invocation[];
 };
 
 function visit(node: ts.Node, action: (node: ts.Node) => void): void {
     action(node);
     ts.forEachChild(node, (child) => visit(child, action));
 }
-function parse(file: string, source = readFileSync(file, 'utf8')): ts.SourceFile {
+function parse(file: string, source = readFileSync(file, "utf8")): ts.SourceFile {
     return ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 }
 function functionBody(node: ts.Node): node is FunctionBody {
@@ -34,8 +36,8 @@ function contains(parent: ts.Node, child: ts.Node): boolean {
 function functionName(fn: FunctionBody): string | null {
     if (fn.name && ts.isIdentifier(fn.name)) return fn.name.text;
     let parent: ts.Node = fn.parent;
-    if (ts.isCallExpression(parent) && (ts.isIdentifier(parent.expression) && ['useCallback', 'useMemo'].includes(parent.expression.text)
-        || ts.isPropertyAccessExpression(parent.expression) && ['useCallback', 'useMemo'].includes(parent.expression.name.text))) parent = parent.parent;
+    if (ts.isCallExpression(parent) && (ts.isIdentifier(parent.expression) && ["useCallback", "useMemo"].includes(parent.expression.text)
+        || ts.isPropertyAccessExpression(parent.expression) && ["useCallback", "useMemo"].includes(parent.expression.name.text))) parent = parent.parent;
     return ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name) ? parent.name.text : null;
 }
 function importNames(source: ts.SourceFile, module: string): Map<string, string> {
@@ -43,7 +45,7 @@ function importNames(source: ts.SourceFile, module: string): Map<string, string>
     for (const node of source.statements) {
         if (!ts.isImportDeclaration(node) || !ts.isStringLiteral(node.moduleSpecifier) || node.moduleSpecifier.text !== module) continue;
         const bindings = node.importClause?.namedBindings;
-        if (bindings && ts.isNamespaceImport(bindings)) names.set(bindings.name.text, '*');
+        if (bindings && ts.isNamespaceImport(bindings)) names.set(bindings.name.text, "*");
         if (bindings && ts.isNamedImports(bindings)) {
             for (const specifier of bindings.elements) names.set(specifier.name.text, (specifier.propertyName ?? specifier.name).text);
         }
@@ -53,14 +55,14 @@ function importNames(source: ts.SourceFile, module: string): Map<string, string>
 function importedName(expression: ts.Expression, names: Map<string, string>): string | undefined {
     if (ts.isIdentifier(expression)) return names.get(expression.text);
     if (ts.isPropertyAccessExpression(expression) && ts.isIdentifier(expression.expression)
-        && names.get(expression.expression.text) === '*') return expression.name.text;
+        && names.get(expression.expression.text) === "*") return expression.name.text;
     return undefined;
 }
 function route(expression: ts.Expression | undefined, source: ts.SourceFile): string | null {
     if (!expression) return null;
     if (ts.isStringLiteralLike(expression)) return expression.text;
     if (ts.isTemplateExpression(expression)) {
-        return expression.head.text + expression.templateSpans.map((span) => '1' + span.literal.text).join('');
+        return expression.head.text + expression.templateSpans.map((span) => "1" + span.literal.text).join("");
     }
     if (ts.isIdentifier(expression)) {
         let result: string | null = null;
@@ -75,8 +77,8 @@ function route(expression: ts.Expression | undefined, source: ts.SourceFile): st
 }
 function mutatingOptions(expression: ts.Expression): boolean {
     return ts.isObjectLiteralExpression(expression) && expression.properties.some((property) =>
-        ts.isPropertyAssignment(property) && property.name.getText() === 'method'
-        && ts.isStringLiteralLike(property.initializer) && !['GET', 'HEAD', 'OPTIONS'].includes(property.initializer.text));
+        ts.isPropertyAssignment(property) && property.name.getText() === "method"
+        && ts.isStringLiteralLike(property.initializer) && !["GET", "HEAD", "OPTIONS"].includes(property.initializer.text));
 }
 function discoverWrites(source: ts.SourceFile): Map<string, WriteHelper> {
     const functions: FunctionBody[] = [];
@@ -99,16 +101,16 @@ function discoverWrites(source: ts.SourceFile): Map<string, WriteHelper> {
             let mutates = false;
             visit(fn.body, (node) => {
                 if (!ts.isCallExpression(node)) return;
-                if (ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === 'open'
+                if (ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "open"
                     && node.arguments[0] && ts.isStringLiteralLike(node.arguments[0])
-                    && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(node.arguments[0].text)) {
+                    && ["POST", "PUT", "PATCH", "DELETE"].includes(node.arguments[0].text)) {
                     const requestPath = route(node.arguments[1], source);
                     if (requestPath === null || pinsToRenderedWorkspace(requestPath)) mutates = true;
                 }
                 if (!ts.isIdentifier(node.expression)) return;
                 const primitive = node.expression.text;
-                const methodArgument = node.arguments.find((argument) => ts.isStringLiteralLike(argument) && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(argument.text));
-                const direct = ['requestJson', 'requestMultipart', 'requestReportJson'].includes(primitive)
+                const methodArgument = node.arguments.find((argument) => ts.isStringLiteralLike(argument) && ["POST", "PUT", "PATCH", "DELETE"].includes(argument.text));
+                const direct = ["requestJson", "requestMultipart", "requestReportJson"].includes(primitive)
                     && (node.arguments.some(mutatingOptions) || methodArgument !== undefined);
                 if (!direct && !mutators.has(primitive)) return;
                 const requestPath = route(node.arguments[0], source);
@@ -120,17 +122,17 @@ function discoverWrites(source: ts.SourceFile): Map<string, WriteHelper> {
             const declaration = ts.isVariableDeclaration(fn.parent) && ts.isVariableDeclarationList(fn.parent.parent)
                 && ts.isVariableStatement(fn.parent.parent.parent) ? fn.parent.parent.parent : fn;
             if (declaration.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)) {
-                writes.set(name, { optionsIndex: fn.parameters.findIndex((parameter) => parameter.type?.getText(source) === 'RequestInit') });
+                writes.set(name, { optionsIndex: fn.parameters.findIndex((parameter) => parameter.type?.getText(source) === "RequestInit") });
             }
         }
     }
     return writes;
 }
-const writeHelpers = discoverWrites(parse(path.join(process.cwd(), 'app/lib/api.ts')));
+const writeHelpers = discoverWrites(parse(path.join(process.cwd(), "app/lib/api.ts")));
 
 function scan(source: ts.SourceFile, helpers = writeHelpers): string[] {
-    const imported = importNames(source, '@/app/lib/api');
-    const pinImports = importNames(source, '@/app/lib/renderedWorkspace');
+    const imported = importNames(source, "@/app/lib/api");
+    const pinImports = importNames(source, "@/app/lib/renderedWorkspace");
     const functions: FunctionBody[] = [];
     const calls: ts.CallExpression[] = [];
     const variables: ts.VariableDeclaration[] = [];
@@ -155,59 +157,100 @@ function scan(source: ts.SourceFile, helpers = writeHelpers): string[] {
             scope = owner(scope);
         }
     }
-    function localFunction(call: ts.CallExpression): FunctionBody | undefined {
-        if (!ts.isIdentifier(call.expression)) return undefined;
-        const name = call.expression.text;
-        return functions.find((fn) => functionName(fn) === name && contains(owner(fn), call));
+    function localFunctionAt(expression: ts.Expression, at: ts.CallExpression): FunctionBody | undefined {
+        if (!ts.isIdentifier(expression)) return undefined;
+        const name = expression.text;
+        return functions.find((fn) => functionName(fn) === name && contains(owner(fn), at));
     }
-    function pinned(expression: ts.Expression | undefined, bindings: Bindings, seen = new Set<ts.Node>()): boolean {
+    function localFunction(call: ts.CallExpression): FunctionBody | undefined {
+        return localFunctionAt(call.expression, call);
+    }
+    function apiHelper(expression: ts.Expression, seen = new Set<ts.Node>()): WriteHelper | undefined {
+        const importedApi = importedName(expression, imported);
+        if (importedApi) return helpers.get(importedApi);
+        if (!ts.isIdentifier(expression) || seen.has(expression)) return undefined;
+        const declared = declaration(expression);
+        if (!declared || !ts.isVariableDeclaration(declared) || !declared.initializer || seen.has(declared)) return undefined;
+        return apiHelper(declared.initializer, new Set(seen).add(expression).add(declared));
+    }
+    function capturedWorkspace(expression: ts.Expression | undefined, bindings: Bindings, seen = new Set<ts.Node>()): ts.Node | undefined {
+        if (!expression || seen.has(expression)) return undefined;
+        if (ts.isParenthesizedExpression(expression)) return capturedWorkspace(expression.expression, bindings, seen);
+        if (!ts.isIdentifier(expression)) return undefined;
+        const declared = declaration(expression);
+        if (!declared || seen.has(declared)) return undefined;
+        const next = new Set(seen).add(expression).add(declared);
+        if (ts.isVariableDeclaration(declared) && ts.isVariableDeclarationList(declared.parent)
+            && (declared.parent.flags & ts.NodeFlags.Const) !== 0) return declared;
+        const supplied = ts.isParameter(declared) ? bindings.get(declared) : undefined;
+        return supplied ? capturedWorkspace(supplied.expression, supplied.bindings, next) : undefined;
+    }
+    function beforeBoundary(node: ts.Node, invocations: Invocation[]): boolean {
+        const scope = owner(node);
+        function followsBoundary(at: ts.Node, within: ts.Node): boolean {
+            let follows = repeated(at, within);
+            visit(within, (candidate) => {
+                if (ts.isAwaitExpression(candidate) && owner(candidate) === within && candidate.end <= at.getStart(source)) follows = true;
+            });
+            return follows;
+        }
+        if (followsBoundary(node, scope)) return false;
+        for (const invocation of invocations) {
+            if (invocation.continuation || followsBoundary(invocation.call, owner(invocation.call))) return false;
+            if (invocation.target === scope) break;
+        }
+        return true;
+    }
+    function pinned(expression: ts.Expression | undefined, bindings: Bindings, invocations: Invocation[], seen = new Set<ts.Node>()): boolean {
         if (!expression || seen.has(expression)) return false;
         const next = new Set(seen).add(expression);
-        if (ts.isCallExpression(expression) && importedName(expression.expression, pinImports) === 'workspacePinnedRequest') {
-            const scope = owner(expression);
-            let firstAwait = Number.POSITIVE_INFINITY;
-            visit(scope, (node) => {
-                if (ts.isAwaitExpression(node) && owner(node) === scope) firstAwait = Math.min(firstAwait, node.getStart(source));
-            });
-            const workspace = expression.arguments[0];
-            const captured = workspace && ts.isIdentifier(workspace) ? declaration(workspace) : undefined;
-            if (repeated(expression, scope) && (captured === undefined || repeated(captured, scope))) return false;
-            return expression.getStart(source) < firstAwait
-                || captured !== undefined && ts.isVariableDeclaration(captured)
-                && ts.isVariableDeclarationList(captured.parent)
-                && (captured.parent.flags & ts.NodeFlags.Const) !== 0
-                && captured.getStart(source) < firstAwait;
+        if (ts.isCallExpression(expression) && importedName(expression.expression, pinImports) === "workspacePinnedRequest") {
+            const capture = capturedWorkspace(expression.arguments[0], bindings) ?? expression;
+            const captureOwner = owner(capture);
+            const relevant = invocations.findIndex(({ target }) => target === captureOwner);
+            return beforeBoundary(capture, relevant < 0 ? [] : invocations.slice(0, relevant + 1));
         }
         if (ts.isIdentifier(expression)) {
             const declared = declaration(expression);
             if (!declared || next.has(declared)) return false;
             next.add(declared);
-            if (ts.isVariableDeclaration(declared)) return pinned(declared.initializer, bindings, next);
+            if (ts.isVariableDeclaration(declared)) return pinned(declared.initializer, bindings, invocations, next);
             const supplied = bindings.get(declared);
-            if (supplied) return pinned(supplied.expression, supplied.bindings, next);
+            if (supplied) return pinned(supplied.expression, supplied.bindings, invocations, next);
             const fn = owner(declared);
             if (!functionBody(fn)) return false;
             const index = fn.parameters.indexOf(declared);
             const callers = calls.filter((call) => localFunction(call) === fn);
-            return callers.length > 0 && callers.every((call) => pinned(call.arguments[index], bindings, next));
+            return callers.length > 0 && callers.every((call) => pinned(call.arguments[index], bindings, invocations, next));
         }
         if (ts.isBinaryExpression(expression) && expression.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken) {
+            const fallback = expression.right;
             const left = ts.isIdentifier(expression.left) ? declaration(expression.left) : undefined;
-            if (!pinned(expression.right, bindings, next)) return false;
-            if (!left || !ts.isParameter(left)) return pinned(expression.left, bindings, next);
+            if (!left || !ts.isParameter(left)) return pinned(expression.left, bindings, invocations, next)
+                && pinned(expression.right, bindings, invocations, next);
+            function suppliedPin(suppliedExpression: ts.Expression | undefined, suppliedBindings: Bindings): boolean {
+                return suppliedExpression === undefined || ts.isIdentifier(suppliedExpression) && suppliedExpression.text === "undefined"
+                    ? pinned(fallback, bindings, invocations, next)
+                    : pinned(suppliedExpression, suppliedBindings, invocations, next);
+            }
             const supplied = bindings.get(left);
-            if (supplied) return supplied.expression.kind === ts.SyntaxKind.UndefinedKeyword
-                || ts.isIdentifier(supplied.expression) && supplied.expression.text === 'undefined'
-                || pinned(supplied.expression, supplied.bindings, next);
+            if (supplied) return suppliedPin(supplied.expression, supplied.bindings);
             const fn = owner(left);
             const index = functionBody(fn) ? fn.parameters.indexOf(left) : -1;
             const callers = calls.filter((call) => localFunction(call) === fn);
-            return callers.every((call) => call.arguments[index] === undefined
-                || ts.isIdentifier(call.arguments[index]) && call.arguments[index].getText(source) === 'undefined'
-                || pinned(call.arguments[index], bindings, next));
+            return callers.length === 0 ? pinned(expression.right, bindings, invocations, next)
+                : callers.every((call) => suppliedPin(call.arguments[index], bindings));
         }
-        if (ts.isParenthesizedExpression(expression)) return pinned(expression.expression, bindings, next);
-        if (ts.isObjectLiteralExpression(expression)) return expression.properties.some((property) => ts.isSpreadAssignment(property) && pinned(property.expression, bindings, next));
+        if (ts.isParenthesizedExpression(expression)) return pinned(expression.expression, bindings, invocations, next);
+        if (ts.isObjectLiteralExpression(expression)) {
+            for (const property of [...expression.properties].reverse()) {
+                if (ts.isSpreadAssignment(property)) return pinned(property.expression, bindings, invocations, next);
+                const name = property.name;
+                if (name && (ts.isIdentifier(name) || ts.isStringLiteralLike(name)) && name.text === "headers") return false;
+                if (name && ts.isComputedPropertyName(name)
+                    && (!ts.isStringLiteralLike(name.expression) || name.expression.text === "headers")) return false;
+            }
+        }
         return false;
     }
     function branches(node: ts.Node, stop: ts.Node): Map<ts.Node, ts.Node> {
@@ -235,7 +278,7 @@ function scan(source: ts.SourceFile, helpers = writeHelpers): string[] {
         }
         return false;
     }
-    function events(fn: FunctionBody, bindings: Bindings = new Map(), stack = new Set<FunctionBody>()): Write[] {
+    function events(fn: FunctionBody, bindings: Bindings = new Map(), stack = new Set<FunctionBody>(), invocations: Invocation[] = []): Write[] {
         if (stack.has(fn)) return [];
         const next = new Set(stack).add(fn);
         const found: Write[] = [];
@@ -279,10 +322,38 @@ function scan(source: ts.SourceFile, helpers = writeHelpers): string[] {
             }
             if (node !== fn.body && functionBody(node)) return;
             if (ts.isCallExpression(node)) {
-                const apiName = importedName(node.expression, imported);
-                const helper = apiName ? helpers.get(apiName) : undefined;
+                if (ts.isPropertyAccessExpression(node.expression) && ["then", "catch", "finally"].includes(node.expression.name.text)) {
+                    function settleReceiver(receiver: ts.Expression, seen = new Set<ts.Node>()): void {
+                        if (seen.has(receiver)) return;
+                        seen.add(receiver);
+                        const declared = ts.isIdentifier(receiver) ? declaration(receiver) : undefined;
+                        if (declared && ts.isVariableDeclaration(declared) && declared.initializer) {
+                            const initializer = declared.initializer;
+                            const antecedents = found.filter((event) => event.position >= initializer.getStart(source) && event.position < initializer.end);
+                            if (antecedents.length > 0) {
+                                for (const event of antecedents) event.awaited = true;
+                            } else {
+                                settleReceiver(initializer, seen);
+                            }
+                        } else {
+                            const first = found.length;
+                            walk(receiver);
+                            for (const event of found.slice(first)) event.awaited = true;
+                        }
+                    }
+                    settleReceiver(node.expression.expression);
+                    for (const argument of node.arguments) {
+                        const callback = functionBody(argument) ? argument : localFunctionAt(argument, node);
+                        if (!callback) continue;
+                        for (const event of events(callback, bindings, next, [...invocations, { target: callback, call: node, continuation: true }])) {
+                            found.push({ ...event, position: argument.getStart(source), branches: new Map([...event.branches, ...branches(node, fn)]) });
+                        }
+                    }
+                    return;
+                }
+                const helper = apiHelper(node.expression);
                 if (helper) {
-                    found.push({ call: node, options: helper.optionsIndex < 0 ? undefined : node.arguments[helper.optionsIndex], bindings, awaited: awaited(node, fn), position: node.getStart(source), branches: branches(node, fn), repeated: repeated(node, fn) });
+                    found.push({ call: node, options: helper.optionsIndex < 0 ? undefined : node.arguments[helper.optionsIndex], bindings, awaited: awaited(node, fn), position: node.getStart(source), branches: branches(node, fn), repeated: repeated(node, fn), invocations });
                 } else {
                     const target = localFunction(node);
                     if (target) {
@@ -291,15 +362,15 @@ function scan(source: ts.SourceFile, helpers = writeHelpers): string[] {
                             const expression = node.arguments[index];
                             if (expression) supplied.set(parameter, { expression, bindings, at: node });
                         });
-                        for (const event of events(target, supplied, next)) {
-                            found.push({ ...event, position: node.getStart(source), awaited: awaited(node, fn) && event.awaited, repeated: event.repeated || repeated(node, fn), branches: new Map([...event.branches, ...branches(node, fn)]) });
+                        for (const event of events(target, supplied, next, [...invocations, { target, call: node, continuation: false }])) {
+                            found.push({ ...event, position: node.getStart(source), awaited: awaited(node, fn) || event.awaited, repeated: event.repeated || repeated(node, fn), branches: new Map([...event.branches, ...branches(node, fn)]) });
                         }
                     }
                 }
-                if (ts.isPropertyAccessExpression(node.expression) && ['map', 'forEach', 'then', 'catch', 'finally'].includes(node.expression.name.text)) {
+                if (ts.isPropertyAccessExpression(node.expression) && ["map", "forEach"].includes(node.expression.name.text)) {
                     for (const argument of node.arguments) {
                         if (functionBody(argument)) {
-                            for (const event of events(argument, bindings, next)) {
+                            for (const event of events(argument, bindings, next, [...invocations, { target: argument, call: node, continuation: false }])) {
                                 found.push({ ...event, position: node.getStart(source), branches: new Map([...event.branches, ...branches(node, fn)]) });
                             }
                         }
@@ -336,9 +407,9 @@ function scan(source: ts.SourceFile, helpers = writeHelpers): string[] {
             }
         }
         for (const write of chained) {
-            if (pinned(write.options, write.bindings)) continue;
+            if (pinned(write.options, write.bindings, write.invocations)) continue;
             const line = source.getLineAndCharacterOfPosition(write.call.getStart(source)).line + 1;
-            violations.add(source.fileName + ':' + line + ' ' + write.call.expression.getText(source));
+            violations.add(source.fileName + ":" + line + " " + write.call.expression.getText(source));
         }
     }
     return [...violations].sort();
@@ -350,57 +421,81 @@ function filesUnder(directory: string): string[] {
     });
 }
 const EXCEPTIONS: Record<string, string> = {
-    'app/components/dashboard/customize/DashboardGrid.tsx:87 resetDashboardLayout': 'The queue drains separate user actions; each SaveJob carries its composed workspaceId, rather than recapturing a live selection per iteration.',
-    'app/components/dashboard/customize/DashboardGrid.tsx:90 saveDashboardLayout': 'The queue drains separate user actions; each SaveJob carries its composed workspaceId, rather than recapturing a live selection per iteration.',
+    "app/components/dashboard/customize/DashboardGrid.tsx:87 resetDashboardLayout": "The queue drains separate user actions; each SaveJob carries its composed workspaceId, rather than recapturing a live selection per iteration.",
+    "app/components/dashboard/customize/DashboardGrid.tsx:90 saveDashboardLayout": "The queue drains separate user actions; each SaveJob carries its composed workspaceId, rather than recapturing a live selection per iteration.",
 };
-const found = [...filesUnder('app/components'), ...filesUnder('app/(app)')].flatMap((file) => scan(parse(file)));
+const found = [...filesUnder("app/components"), ...filesUnder("app/(app)")].flatMap((file) => scan(parse(file)));
 const imports = "import { createContact, createContact as makeContact, uploadContactPicture, updateContact, login } from '@/app/lib/api'; import * as api from '@/app/lib/api'; import { workspacePinnedRequest, renderedWorkspaceId } from '@/app/lib/renderedWorkspace'; import * as workspace from '@/app/lib/renderedWorkspace';";
-function probe(body: string): string[] { return scan(parse('Probe.tsx', imports + body)); }
+function probe(body: string): string[] { return scan(parse("Probe.tsx", imports + body)); }
 
-describe('workspace write-chain inventory', () => {
-    it('derives write helpers and their request-options positions from api.ts', () => {
-        expect(writeHelpers.get('createContact')).toEqual({ optionsIndex: 1 });
-        expect(writeHelpers.get('uploadContactPicture')).toEqual({ optionsIndex: 2 });
-        expect(writeHelpers.has('getContactById')).toBe(false);
-        expect(writeHelpers.has('login')).toBe(false);
-        expect(writeHelpers.has('decideCaptureReview')).toBe(true);
-        expect(writeHelpers.has('uploadAiChatAttachment')).toBe(true);
+describe("workspace write-chain inventory", () => {
+    it("derives write helpers and their request-options positions from api.ts", () => {
+        expect(writeHelpers.get("createContact")).toEqual({ optionsIndex: 1 });
+        expect(writeHelpers.get("uploadContactPicture")).toEqual({ optionsIndex: 2 });
+        expect(writeHelpers.has("getContactById")).toBe(false);
+        expect(writeHelpers.has("login")).toBe(false);
+        expect(writeHelpers.has("decideCaptureReview")).toBe(true);
+        expect(writeHelpers.has("uploadAiChatAttachment")).toBe(true);
         expect(writeHelpers.size).toBeGreaterThan(100);
-        const fresh = discoverWrites(parse('api.ts', 'function requestJson() {} function postJson(path, body, init) { return requestJson(path, { ...init, method: "POST" }); } export function freshWrite(payload, init: RequestInit = {}) { return postJson("/api/fresh", payload, init); } export const freshArrow = (payload, init: RequestInit = {}) => postJson("/api/fresh-arrow", payload, init);'));
-        expect(fresh.get('freshWrite')).toEqual({ optionsIndex: 1 });
-        expect(fresh.get('freshArrow')).toEqual({ optionsIndex: 1 });
+        const fresh = discoverWrites(parse("api.ts", 'function requestJson() {} function postJson(path, body, init) { return requestJson(path, { ...init, method: "POST" }); } export function freshWrite(payload, init: RequestInit = {}) { return postJson("/api/fresh", payload, init); } export const freshArrow = (payload, init: RequestInit = {}) => postJson("/api/fresh-arrow", payload, init);'));
+        expect(fresh.get("freshWrite")).toEqual({ optionsIndex: 1 });
+        expect(fresh.get("freshArrow")).toEqual({ optionsIndex: 1 });
     });
     it.each([
-        'async function save() { await createContact({}); await uploadContactPicture(1, file); }',
-        'async function save() { await api.createContact({}); await api.uploadContactPicture(1, file); }',
-        'async function chain(init?: RequestInit) { const origin = init ?? workspacePinnedRequest(renderedWorkspaceId()); await createContact({}, origin); await uploadContactPicture(1, file, origin); } function save() { return chain({ signal }); }',
-        'const one = useCallback(async () => { await createContact({}); }, []); const save = useCallback(async () => { for (const item of items) await one(); }, []);',
-        'async function save(){ for(const item of items){ const origin=workspacePinnedRequest(renderedWorkspaceId()); await createContact(item,origin); } }',
-        'async function save(init?: RequestInit) { await createContact({}, init); await uploadContactPicture(1, file, init); }',
-        'async function save() { await createContact({}); files.map(file => uploadContactPicture(1, file)); }',
-        'async function save() { for (const item of items) { await createContact(item); } }',
-        'async function save() { await createContact({}); const origin = workspacePinnedRequest(renderedWorkspaceId()); await uploadContactPicture(1, file, origin); }',
-        'async function follow(init?: RequestInit) { await uploadContactPicture(1, file, init); } async function save() { await createContact({}); await follow(); }',
-    ])('rejects an unpinned chain: %s', (body) => { expect(probe(body).length).toBeGreaterThan(0); });
+        "async function save() { await createContact({}); await uploadContactPicture(1, file); }",
+        "async function save() { await api.createContact({}); await api.uploadContactPicture(1, file); }",
+        "async function chain(init?: RequestInit) { const origin = init ?? workspacePinnedRequest(renderedWorkspaceId()); await createContact({}, origin); await uploadContactPicture(1, file, origin); } function save() { return chain({ signal }); }",
+        "const one = useCallback(async () => { await createContact({}); }, []); const save = useCallback(async () => { for (const item of items) await one(); }, []);",
+        "async function save(){ for(const item of items){ const origin=workspacePinnedRequest(renderedWorkspaceId()); await createContact(item,origin); } }",
+        "async function save(init?: RequestInit) { await createContact({}, init); await uploadContactPicture(1, file, init); }",
+        "async function save() { await createContact({}); files.map(file => uploadContactPicture(1, file)); }",
+        "async function save() { for (const item of items) { await createContact(item); } }",
+        "async function save() { await createContact({}); const origin = workspacePinnedRequest(renderedWorkspaceId()); await uploadContactPicture(1, file, origin); }",
+        "async function follow(init?: RequestInit) { await uploadContactPicture(1, file, init); } async function save() { await createContact({}); await follow(); }",
+        "function save() { return createContact({}).then(() => uploadContactPicture(1, file)); }",
+        "function save() { return createContact({}).catch(() => uploadContactPicture(1, file)); }",
+        "function save() { return createContact({}).finally(() => uploadContactPicture(1, file)); }",
+        "async function save() { const make = createContact; await make({}); await uploadContactPicture(1, file); }",
+        "async function save() { const origin = workspacePinnedRequest(renderedWorkspaceId()); await createContact({}, origin); await uploadContactPicture(1, file, { ...origin, headers: {} }); }",
+        'async function save() { const origin = workspacePinnedRequest(renderedWorkspaceId()); await createContact({}, origin); await uploadContactPicture(1, file, { ...origin, ["headers"]: {} }); }',
+        "async function save() { const origin = workspacePinnedRequest(renderedWorkspaceId()); await createContact({}, origin); await uploadContactPicture(1, file, { ...origin, headers }); }",
+        "async function save() { const origin = workspacePinnedRequest(renderedWorkspaceId()); await createContact({}, origin); await uploadContactPicture(1, file, { ...origin, ...init }); }",
+        "async function one() { const origin = workspacePinnedRequest(renderedWorkspaceId()); await createContact({}, origin); } async function two() { const origin = workspacePinnedRequest(renderedWorkspaceId()); await uploadContactPicture(1, file, origin); } async function save() { await one(); await two(); }",
+        "async function one() { const origin = workspacePinnedRequest(renderedWorkspaceId()); return createContact({}, origin); } async function two() { const origin = workspacePinnedRequest(renderedWorkspaceId()); return uploadContactPicture(1, file, origin); } async function save() { await one(); await two(); }",
+        "function save() { const origin = workspacePinnedRequest(renderedWorkspaceId()); return createContact({}, origin).then(() => { const later = workspacePinnedRequest(renderedWorkspaceId()); return uploadContactPicture(1, file, later); }); }",
+        "function save() { const pending = createContact({}); return pending.then(() => uploadContactPicture(1, file)); }",
+        "function save() { const pending = createContact({}); return pending.catch(() => uploadContactPicture(1, file)); }",
+        "function save() { const pending = createContact({}); return pending.finally(() => uploadContactPicture(1, file)); }",
+        "function save() { const pending = createContact({}); const forwarded = pending; return forwarded.then(() => uploadContactPicture(1, file)); }",
+    ])("rejects an unpinned chain: %s", (body) => { expect(probe(body).length).toBeGreaterThan(0); });
     it.each([
-        'async function save() { const origin = workspacePinnedRequest(renderedWorkspaceId()); await createContact({}, origin); await uploadContactPicture(1, file, origin); }',
+        "async function save() { const origin = workspacePinnedRequest(renderedWorkspaceId()); await createContact({}, origin); await uploadContactPicture(1, file, origin); }",
         'async function save() { const origin = workspacePinnedRequest(renderedWorkspaceId(), { signal }); const forwarded = origin; await createContact({}, forwarded); await uploadContactPicture(1, file, { ...forwarded, cache: "no-store" }); }',
-        'async function chain(origin: RequestInit) { await createContact({}, origin); await uploadContactPicture(1, file, origin); } function save() { const origin = workspacePinnedRequest(renderedWorkspaceId()); return chain(origin); }',
-        'async function save(init?: RequestInit) { const origin = init ?? workspacePinnedRequest(renderedWorkspaceId()); await createContact({}, origin); await uploadContactPicture(1, file, origin); }',
-        'async function save() { if (existing) await updateContact(1, {}); else await createContact({}); }',
-        'async function save() { const value = existing ? await updateContact(1, {}) : await createContact({}); }',
-        'async function save() { await login({}); await createContact({}); }',
-        'async function save() { if (existing) { await updateContact(1, {}); return; } await createContact({}); }',
-        'async function save() { const workspace = renderedWorkspaceId(); await createContact({}, workspacePinnedRequest(workspace)); await uploadContactPicture(1, file, workspacePinnedRequest(workspace)); }',
-        'async function save() { files.map(file => uploadContactPicture(1, file)); }',
-        'async function save() { const origin = workspace.workspacePinnedRequest(workspace.renderedWorkspaceId()); await api.createContact({}, origin); await api.uploadContactPicture(1, file, origin); }',
-        'async function save() { const origin = workspacePinnedRequest(renderedWorkspaceId()); await makeContact({}, origin); await uploadContactPicture(1, file, origin); }',
-    ])('accepts a pinned chain or separate writes: %s', (body) => { expect(probe(body)).toEqual([]); });
-    it('has no unpinned component/page chain outside the shrinking ledger', () => {
+        "async function chain(origin: RequestInit) { await createContact({}, origin); await uploadContactPicture(1, file, origin); } function save() { const origin = workspacePinnedRequest(renderedWorkspaceId()); return chain(origin); }",
+        "async function save(init?: RequestInit) { const origin = init ?? workspacePinnedRequest(renderedWorkspaceId()); await createContact({}, origin); await uploadContactPicture(1, file, origin); }",
+        "async function save() { if (existing) await updateContact(1, {}); else await createContact({}); }",
+        "async function save() { const value = existing ? await updateContact(1, {}) : await createContact({}); }",
+        "async function save() { await login({}); await createContact({}); }",
+        "async function save() { if (existing) { await updateContact(1, {}); return; } await createContact({}); }",
+        "async function save() { const workspace = renderedWorkspaceId(); await createContact({}, workspacePinnedRequest(workspace)); await uploadContactPicture(1, file, workspacePinnedRequest(workspace)); }",
+        "async function save() { files.map(file => uploadContactPicture(1, file)); }",
+        "async function save() { const origin = workspace.workspacePinnedRequest(workspace.renderedWorkspaceId()); await api.createContact({}, origin); await api.uploadContactPicture(1, file, origin); }",
+        "async function save() { const origin = workspacePinnedRequest(renderedWorkspaceId()); await makeContact({}, origin); await uploadContactPicture(1, file, origin); }",
+        "function save() { const origin = workspacePinnedRequest(renderedWorkspaceId()); return createContact({}, origin).then(() => uploadContactPicture(1, file, origin)); }",
+        "async function save() { const origin = workspacePinnedRequest(renderedWorkspaceId()); const make = createContact; await make({}, origin); await uploadContactPicture(1, file, origin); }",
+        "async function save() { const origin = workspacePinnedRequest(renderedWorkspaceId(), { ...init, headers }); await createContact({}, origin); await uploadContactPicture(1, file, origin); }",
+        "async function one(init?: RequestInit) { const origin = init ?? workspacePinnedRequest(renderedWorkspaceId()); await createContact({}, origin); } async function two(init?: RequestInit) { const origin = init ?? workspacePinnedRequest(renderedWorkspaceId()); await uploadContactPicture(1, file, origin); } async function save() { const origin = workspacePinnedRequest(renderedWorkspaceId()); await one(origin); await two(origin); }",
+        "function save() { const origin = workspacePinnedRequest(renderedWorkspaceId()); const pending = createContact({}, origin); const forwarded = pending; return forwarded.then(() => uploadContactPicture(1, file, origin)); }",
+    ])("accepts a pinned chain or separate writes: %s", (body) => { expect(probe(body)).toEqual([]); });
+    it("has no unpinned component/page chain outside the shrinking ledger", () => {
         expect(found.filter((entry) => !(entry in EXCEPTIONS))).toEqual([]);
     });
-    it('keeps the ledger shrinking, with no stale or unexplained exception', () => {
-        expect(Object.keys(EXCEPTIONS).filter((entry) => !found.includes(entry) || !EXCEPTIONS[entry].trim())).toEqual([]);
-        expect(Object.keys(EXCEPTIONS).length).toBeLessThanOrEqual(2);
+    it("matches the exact exception ledger with a reason for every entry", () => {
+        expect(Object.keys(EXCEPTIONS).sort()).toEqual([...found].sort());
+        expect(Object.keys(EXCEPTIONS).filter((entry) => ![
+            "app/components/dashboard/customize/DashboardGrid.tsx:87 resetDashboardLayout",
+            "app/components/dashboard/customize/DashboardGrid.tsx:90 saveDashboardLayout",
+        ].includes(entry))).toEqual([]);
+        expect(Object.values(EXCEPTIONS).every((reason) => reason.trim().length > 0)).toBe(true);
     });
 });

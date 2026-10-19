@@ -8,7 +8,7 @@ import { useTranslations } from 'next-intl';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { replacePipelineStages, updatePipeline } from '@/app/lib/api';
-import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
+import { renderedWorkspaceId, workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
 import { Pipeline, Stage, UpdatePipelinePayload } from '@/app/lib/types';
 import QuickEditPipelineSheet, { type PipelineDraft, type StageKind } from '@/app/components/records/pipelines/QuickEditPipelineSheet';
 

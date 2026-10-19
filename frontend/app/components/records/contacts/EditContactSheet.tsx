@@ -10,7 +10,7 @@ import { toastError, toastInfo, toastSuccess } from '@/app/lib/toast';
 import QuickEditSheet, { type ContactDraft } from '@/app/components/records/contacts/QuickEditSheet';
 import { CustomFieldsEditSection, type CustomFieldsEditHandle } from '@/app/components/records/CustomFieldsEditSection';
 import { getContactById, updateContact, uploadContactPicture } from '@/app/lib/api';
-import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
+import { renderedWorkspaceId, workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
 import { type Contact, type UpdateContactPayload } from '@/app/lib/types';
 
 function toDraft(c: Contact): ContactDraft {

@@ -634,14 +634,18 @@ through one `requestJson` (`api.ts:17-43`) → inject the active workspace **onc
   via `workspacePinnedRequest` (#1732, closing the bound #1649 left). Every multi-step user action
   captures its origin before awaiting anything, including duplicate/impact preflight, and carries
   the same request options through parent callbacks, custom-field saves, uploads, stage creation
-  and sequential batches (#2130). Forwarded origins retain their headers and cancellation signals;
+  and sequential batches (#2130). Undo callbacks retain their original action's options; chunked API
+  bulk helpers capture before their first chunk and retain that pin through the entire selection.
+  Forwarded origins retain their headers and cancellation signals;
   business-card preparation refuses a recovery context that differs from that origin before reserving
   an import. `test/unit/workspaceWriteChainGuard.test.ts` derives workspace-bound write helpers from
   the API client and checks component/page chains. Its shrinking exception ledger covers only the
   dashboard worker's two writes: each queued job already carries the workspace of its separate action.
   Note-image workspace refusals retain the editor content and its own draft; the toolbar reports
-  an inline creation refusal once, and quietly stops if an autosave already reported it. Shell
-  switch/create navigation increments a version before calling the router; an older editor's first
+  an inline creation refusal once, and quietly stops if an autosave already reported it. All navigation
+  after a workspace selection decision uses `navigateAfterWorkspaceSelection`: switch/create,
+  notifications, invitation acceptance, saved views, organization navigation, exits and recovery. It
+  increments a version before routing or refreshing, including a selection cleared to null; an older editor's first
   save may adopt its note id but cannot overwrite that navigation's URL, even before unmount.
   Once a new note receives an id, its kept-draft identity moves from `new` to `note:{id}` within
   the original user and workspace, so later refused edits resume from that note's editor.
