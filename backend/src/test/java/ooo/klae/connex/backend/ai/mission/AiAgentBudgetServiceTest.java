@@ -11,12 +11,36 @@ import java.time.ZoneOffset;
 
 import org.junit.jupiter.api.Test;
 
+import ooo.klae.connex.backend.ai.assistant.AiAssistantLoopException;
 import ooo.klae.connex.backend.beans.AiAgentRun;
 import ooo.klae.connex.backend.beans.AiAgentSegment;
 
 class AiAgentBudgetServiceTest {
     private final AiAgentBudgetService budget = new AiAgentBudgetService();
     private final Instant now = Instant.parse("2026-10-20T00:00:00Z");
+
+    @Test
+    void minimumCreationAllowanceFundsBothDispatchesAtTheMinimumOutputFloor() {
+        var run = run(8, AiAgentBudgetService.MIN_RUN_TOKENS);
+        int serializedGoalBytes = 283;
+        AiAgentBudgetService.requireFeasibleCreation(serializedGoalBytes, run.getMaxTokens());
+        var checkpoint = budget.reserve(run, 1, now);
+        assertTrue(checkpoint.continuationCapable());
+        int input = serializedGoalBytes + AiAgentBudgetService.FIXED_ENVELOPE_BYTES
+                + AiAgentBudgetService.CONTEXT_RESERVE_BYTES;
+        assertEquals(AiAgentBudgetService.MIN_DISPATCH_OUTPUT_TOKENS, budget.maxOutputTokens(
+                segment(checkpoint.steps(), checkpoint.tokens(), 0, 0, 0, false), input, 16384));
+        var settled = budget.settle(segment(checkpoint.steps(), checkpoint.tokens(), 1, input,
+                AiAgentBudgetService.MIN_DISPATCH_OUTPUT_TOKENS, false));
+        run.setConsumedSteps(settled.steps());
+        run.setConsumedTokens(settled.tokens());
+        var report = budget.reserve(run, 2, now);
+        assertFalse(report.continuationCapable());
+        assertEquals(AiAgentBudgetService.CLOSING_RESERVE_TOKENS, report.tokens());
+        assertEquals(AiAgentBudgetService.MIN_DISPATCH_OUTPUT_TOKENS, budget.maxOutputTokens(
+                segment(report.steps(), report.tokens(), 0, 0, 0, false), input,
+                AiAgentBudgetService.MIN_DISPATCH_OUTPUT_TOKENS));
+    }
 
     @Test
     void nonfinalReservationPreservesClosingAllowance() {
@@ -79,6 +103,32 @@ class AiAgentBudgetServiceTest {
         assertEquals(131072, reservation.tokens());
         assertFalse(reservation.continuationCapable());
         assertThrows(IllegalArgumentException.class, () -> budget.reserve(run, 2, now));
+    }
+
+    @Test
+    void outputClampUsesOnlyUnusedSegmentTokensAndPreservesTheOutputFloor() {
+        var segment = segment(4, 8192, 1, 1000, 500, false);
+        assertEquals(4692, budget.maxOutputTokens(segment, 2000, 16384));
+        assertEquals(1024, budget.maxOutputTokens(segment, 2000, 1024));
+        assertEquals(AiAgentBudgetService.MIN_DISPATCH_OUTPUT_TOKENS,
+                budget.maxOutputTokens(segment, 6436, 16384));
+        var refused = assertThrows(AiAssistantLoopException.class,
+                () -> budget.maxOutputTokens(segment, 6437, 16384));
+        assertEquals("mission_budget_exhausted", refused.terminalReason());
+        segment.setUsageUncertain(true);
+        assertThrows(AiAssistantLoopException.class, () -> budget.maxOutputTokens(segment, 2000, 16384));
+        segment.setUsageUncertain(false);
+        segment.setKnownSteps(4);
+        assertThrows(AiAssistantLoopException.class, () -> budget.maxOutputTokens(segment, 2000, 16384));
+    }
+
+    @Test
+    void outputClampDoesNotSubtractTheRootClosingReserveTwice() {
+        var reservation = budget.reserve(run(8, 73728), 1, now);
+        assertTrue(reservation.continuationCapable());
+        assertEquals(8192, reservation.tokens());
+        assertEquals(6192, budget.maxOutputTokens(
+                segment(reservation.steps(), reservation.tokens(), 0, 0, 0, false), 2000, 16384));
     }
 
     @Test

@@ -103,12 +103,49 @@ overflow refuses `mission_context_overflow` without truncation or history fallba
 
 ## Reservation, checkpoint and recovery
 
+New requests accept `maxTokens` from 81,920 through 131,072; omission still defaults to
+131,072. Creation measures the goal with the application JSON serializer, including string
+quoting/escaping, in UTF-8 bytes. Goals are bounded by both 16,000 UTF-16 code units and
+48,002 serialized bytes. The byte limit admits 16,000 Japanese characters but rejects
+escape-heavy strings that fit the character limit and would exceed the default allowance.
+Creation feasibility is not re-evaluated for same-key replays that pass current request
+validation; stored limits remain unchanged.
+
+The runtime-2 fixed envelope measured through `AiInvocationService.serializedPromptBytes`
+is 8,616 bytes for native tools (8,856 with tagged reasoning); the larger JSON fallback
+envelope with tagged reasoning is 11,749 bytes. A final-only native request retains the same
+8,856-byte tagged envelope; JSON closing measures 8,152 bytes. Admission uses the larger
+11,749-byte envelope for both dispatches plus 4,096 bytes for serialized context, scope directives and message framing, plus the
+256-token minimum output, and retains the existing 65,536 closing-report allowance:
+`required = serializedGoalBytes + 11749 + 4096 + 256 + 65536`.
+Both dispatches must fit independently. At the new minimum, a continuation-capable request
+has 16,384 tokens for a checkpoint segment and retains 65,536 for closing. Requests with
+fewer than three decisions remain terminal-only. Creation refuses an infeasible combination
+with HTTP 400 / `mission_budget_infeasible` before persistence or provider admission.
+The maximum accepted goal requires 129,639 at creation, below the unchanged 131,072 default. Its
+closing dispatch requires at most 64,103 under this admission estimate, within the 65,536
+reserve. Tests pin the fixed envelopes to the dispatch serializer so prompt/schema growth
+requires recalculating admission. These are byte-based capacity checks, with no tokenizer
+or bytes-to-token discount; the historical `maxTokens` API name remains unchanged.
+Provider-derived history capacity, live reconstructed evidence, masking expansion, repairs
+and further decisions still pass their own context and remaining-allowance checks at execution;
+admission does not promise
+that every possible trajectory fits.
+
 Under run X, with no active reservation, continuation candidates reserve
 `min(4, remainingSteps - 1)` decisions and `min(65536, remainingTokens - 65536)` tokens.
 They require at least two decisions, 8,192 tokens and another logical segment. Otherwise
 runtime 2 reserves terminal-only `min(4, remainingSteps)` and all remaining tokens. Runtime 1
 retains its full remaining reservation. Every serialized provider request must fit its
-active token allowance. The final decision exposes only final report/checkpoint in a
+active token allowance. Each mission invocation clamps its requested output to the unused
+segment tokens minus the serialized request's UTF-8 byte estimate, retaining the provider's
+lower ceiling. The 65,536 root closing tokens are already excluded from continuation
+reservations; they are not subtracted again. Output below 256 tokens refuses with
+`mission_budget_exhausted`, leaving room for a complete final-answer or checkpoint envelope
+with concise prose. Repairs recompute the clamp after prior usage and their own serialized
+prompt; definite protocol fallback retains the clamped request and rechecks the dispatch
+reservation after settling the rejected attempt's zero-token usage. Ordinary invocations
+retain their existing output limits. The final decision exposes only final report/checkpoint in a
 continuation-capable segment, or only final report in a terminal-only segment.
 
 Dispatch reservation increments a durable ordinal and sets uncertainty before egress.

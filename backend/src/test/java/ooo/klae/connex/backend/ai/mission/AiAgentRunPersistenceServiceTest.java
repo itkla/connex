@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.ai.mission;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -315,6 +316,53 @@ class AiAgentRunPersistenceServiceTest {
         assertEquals(2048, segment.getKnownInputTokens());
         assertEquals(512, segment.getKnownOutputTokens());
         assertTrue(segment.isUsageUncertain());
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2})
+    void smallSegmentDispatchesAndChargesWithinItsReservation(int runtime) {
+        run.setRuntimeContractVersion(runtime);
+        if (runtime == 2) {
+            run.setScopeFingerprint(AiAgentCapabilityGate.hash(SCOPE));
+            new AiAgentContinuationCodec().initialize(run);
+        }
+        run.setMaxTokens(8192);
+        run.setReservedTokens(8192);
+        segment.setReservedTokens(8192);
+        AiAgentExecutionPolicy prior = policy();
+        AiAgentExecutionPolicy policy = new AiAgentExecutionPolicy(prior.runId(), prior.segmentId(),
+                prior.executionGeneration(), prior.turn(), prior.goal(), prior.scope(), 4, prior.deadline(),
+                prior.lease(), prior.ownership(), prior.persistence(), prior.capability(), runtime, 1, 1,
+                new AiAgentContinuationCodec().decode(run), false, 8192);
+
+        int output = service.maxOutputTokens(policy, 2048, 16384);
+        assertEquals(6144, output);
+        var dispatch = service.reserveDispatch(policy, 2048L + output);
+        service.recordUsage(policy, dispatch, 2048, output);
+
+        assertEquals(8192, dispatch.tokenCeiling());
+        assertEquals(new AiAgentBudgetService.Settlement(1, 8192), new AiAgentBudgetService().settle(segment));
+        assertEquals(1, segment.getKnownSteps());
+        assertEquals(2048, segment.getKnownInputTokens());
+        assertEquals(6144, segment.getKnownOutputTokens());
+        assertFalse(segment.isUsageUncertain());
+        assertEquals("running", run.getStatus());
+    }
+
+    @Test
+    void outputBelowFloorRefusesWithoutReservingOrChargingADispatch() {
+        segment.setReservedTokens(8192);
+        segment.setKnownInputTokens(6000);
+        segment.setKnownOutputTokens(1937);
+
+        var refused = assertThrows(AiAssistantLoopException.class,
+                () -> service.maxOutputTokens(policy(), 0, 16384));
+
+        assertEquals("mission_budget_exhausted", refused.terminalReason());
+        assertEquals(0, segment.getKnownSteps());
+        assertFalse(segment.isUsageUncertain());
+        verify(runs, never()).reserveSegmentDispatch(anyInt(), anyInt(), anyInt(), anyLong(), anyInt(), anyLong());
+        verify(runs, never()).recordDispatchUsage(anyInt(), anyInt(), anyInt(), anyLong(), anyInt(), anyInt(), anyInt());
     }
 
     @Test

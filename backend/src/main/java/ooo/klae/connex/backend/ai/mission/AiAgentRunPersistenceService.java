@@ -251,6 +251,13 @@ public class AiAgentRunPersistenceService {
         return segment.getReservedSteps() - segment.getKnownSteps();
     }
 
+    /** Reads the active attempt's unused allowance before constructing a bounded provider request. */
+    @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
+    public int maxOutputTokens(AiAgentExecutionPolicy policy, int promptTokens, int requestedOutputTokens) {
+        lockExecution(policy);
+        return budget.maxOutputTokens(lockAttempt(policy), promptTokens, requestedOutputTokens);
+    }
+
     /** Records each attempted model call before its local dispatch fence, including fallback calls. */
     @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
     public AiAgentDispatchReservation reserveDispatch(AiAgentExecutionPolicy policy, long tokenCeiling) {

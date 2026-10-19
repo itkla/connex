@@ -76,6 +76,8 @@ public class AiAgentRunService {
             }
             return project(existing);
         }
+        AiAgentBudgetService.requireFeasibleCreation(json.writeValueAsBytes(request.goal()).length,
+                request.limits().maxTokens());
         gate.requireReady();
         requirePrivacyReady();
         if (ooo.klae.connex.backend.ai.masking.SpecialCareTextScreen.screen(request.goal()).excluded()) {

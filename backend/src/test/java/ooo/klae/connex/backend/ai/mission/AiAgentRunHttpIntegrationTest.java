@@ -97,6 +97,15 @@ class AiAgentRunHttpIntegrationTest extends AbstractAiAgentPrivacyIntegrationTes
     }
 
     @Test
+    void creationRefusesInfeasibleGoalAndAcceptsMaximumJapaneseGoalWithTheDefaultAllowance() throws Exception {
+        String maximum = body().replace("Review the selected record", "日".repeat(16000));
+        mvc.perform(write(createPath()).content(maximum.replace("\"goal\":",
+                "\"limits\":{\"maxTokens\":81920},\"goal\":")))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("mission_budget_infeasible"));
+        mvc.perform(write(createPath()).content(maximum)).andExpect(status().isAccepted());
+    }
+
+    @Test
     void sliceOneHttpContractsEnforceAuthCsrfAndBounds() throws Exception {
         mvc.perform(get(BASE)).andExpect(status().isUnauthorized());
         mvc.perform(post(createPath()).session(http).header("X-Workspace-Id", workspace.getId())

@@ -436,6 +436,21 @@ class AiAgentScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
     }
 
     @Test
+    void minimumAcceptedAllowanceExecutesOneSegmentAndPublishesOneReport() {
+        Person selected = person("Minimum Review", "minimum.review@example.invalid", null);
+        AiAgentRun run = createRuntimeTwo(selected, "mission_minimum_report", 1, true,
+                AiAgentBudgetService.MIN_RUN_TOKENS);
+
+        execute(run);
+
+        assertCompletedContinuation(run, 1);
+        assertEquals(1, runs.listSegments(workspaceId(), run.getId()).size());
+        AiAgentRun done = runs.getRun(workspaceId(), run.getId());
+        assertEquals(AiAgentBudgetService.MIN_RUN_TOKENS, done.getMaxTokens());
+        assertTrue(done.getConsumedTokens() <= done.getMaxTokens());
+    }
+
+    @Test
     void twoSegmentsRebuildFromCommittedCheckpointOnly() {
         Person selected = person("Dorothea Willowmere", "dorothea.willowmere@example.invalid", null);
         AiAgentRun run = createRuntimeTwo(selected, "mission_two_segments", 4, false);
@@ -589,13 +604,17 @@ class AiAgentScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
     }
 
     private AiAgentRun createRuntimeTwo(Person selected, String fixture, int maxSteps, boolean nativeTools) {
+        return createRuntimeTwo(selected, fixture, maxSteps, nativeTools, null);
+    }
+
+    private AiAgentRun createRuntimeTwo(Person selected, String fixture, int maxSteps, boolean nativeTools, Long maxTokens) {
         useCapabilityClass(nativeTools ? "scripted-native" : "scripted-json");
         authenticate();
         try {
             var created = service.create(session(), new AiAgentRunCreateRequest(UUID.randomUUID().toString(),
                     "record_review_v1", "connex_script_" + fixture + " Review the selected record.",
                     new AiAgentRunCreateRequest.Scope("record", "person", selected.getId()),
-                    new AiAgentRunCreateRequest.Limits(maxSteps, null, null)));
+                    new AiAgentRunCreateRequest.Limits(maxSteps, maxTokens, null)));
             return Objects.requireNonNull(runs.getRun(workspaceId(), created.id()));
         } finally {
             clearAuthentication();
