@@ -23,6 +23,7 @@ import {
     type PublishedWorkspaceIdentity,
 } from "@/app/lib/workspaceSnapshot";
 import {
+    navigateAfterWorkspaceSelection,
     bindRenderedWorkspace,
     releaseRenderedWorkspace,
     rememberWorkspaceNames,
@@ -242,6 +243,14 @@ export function WorkspaceProvider({
         setActiveWorkspaceId(id);
     }, [renderedWorkspaceOwner]);
 
+    const publishSelectionUnavailable = useCallback(() => {
+        navigateAfterWorkspaceSelection(() => {
+            selectionUnavailableRef.current = true;
+            publishActiveWorkspace(null);
+            setSelectionUnavailable(true);
+        });
+    }, [publishActiveWorkspace]);
+
     const publishWorkspace = useCallback((workspace: Workspace) => {
         setWorkspaceSnapshot((previous) => ({
             ...previous,
@@ -351,16 +360,14 @@ export function WorkspaceProvider({
             return await operation(publishActiveWorkspace, publishWorkspace);
         } catch (error) {
             if (error instanceof WorkspaceSelectionUnavailableError) {
-                selectionUnavailableRef.current = true;
-                publishActiveWorkspace(null);
-                setSelectionUnavailable(true);
+                publishSelectionUnavailable();
             }
             throw error;
         } finally {
             switchingRef.current = false;
             setSwitching(false);
         }
-    }, [publishActiveWorkspace, publishWorkspace]);
+    }, [publishActiveWorkspace, publishSelectionUnavailable, publishWorkspace]);
 
     const runSelectionChange = useCallback(<T,>(
         operation: (
@@ -376,13 +383,12 @@ export function WorkspaceProvider({
                 true,
             );
             publishAuthoritativeWorkspaceSelection(snapshot);
-            router.refresh();
+            navigateAfterWorkspaceSelection(() => router.refresh());
         } catch (error) {
             if (error instanceof WorkspaceSelectionInProgressError) return;
-            selectionUnavailableRef.current = true;
-            setSelectionUnavailable(true);
+            publishSelectionUnavailable();
         }
-    }, [executeSelectionChange, publishAuthoritativeWorkspaceSelection, router]);
+    }, [executeSelectionChange, publishAuthoritativeWorkspaceSelection, publishSelectionUnavailable, router]);
 
     const runInWorkspace = useCallback(async (
         id: number,
@@ -403,8 +409,10 @@ export function WorkspaceProvider({
     const switchTo = useCallback(
         async (id: number) => {
             await runInWorkspace(id, async () => {
-                router.replace("/dashboard");
-                router.refresh();
+                navigateAfterWorkspaceSelection(() => {
+                    router.replace("/dashboard");
+                    router.refresh();
+                });
             });
         },
         [router, runInWorkspace],
@@ -415,8 +423,10 @@ export function WorkspaceProvider({
             const workspace = await createWorkspace(name);
             publishWorkspace(workspace);
             publishActiveWorkspace(workspace.id);
-            router.replace("/dashboard");
-            router.refresh();
+            navigateAfterWorkspaceSelection(() => {
+                router.replace("/dashboard");
+                router.refresh();
+            });
             return workspace;
         }),
         [router, runSelectionChange],

@@ -183,7 +183,7 @@ import { LEAD_SOURCES } from '@/app/lib/contactProvenance';
 import { proposalReviewNow } from '@/app/lib/proposalReviewClock';
 import { createAiChatSocket } from '@/app/lib/realtime';
 import { workspaceUnavailableDescription } from '@/app/lib/errorMessages';
-import { workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { formatDate, formatRelativeTime, formatUtcDateTime } from '@/app/lib/utils';
 import type {
@@ -2082,13 +2082,13 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         }
     }, [activeSession, showApiError, t]);
 
-    const ensureSession = useCallback(async (signal: AbortSignal): Promise<AiChatSession> => {
+    const ensureSession = useCallback(async (signal: AbortSignal, origin: RequestInit): Promise<AiChatSession> => {
         if (activeSession !== null) return activeSession;
         if (sessionCreationRef.current !== null) return sessionCreationRef.current;
         const creation = createAiChatSession(
             t('newChatTitle'),
             true,
-            workspacePinnedRequest(activeWorkspaceId, { signal }),
+            origin,
         ).then((createdSession) => {
             if (signal.aborted) throw signal.reason;
             setActiveSession(createdSession);
@@ -2106,7 +2106,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         });
         sessionCreationRef.current = creation;
         return creation;
-    }, [canPersist, activeSession, activeWorkspaceId, router, sessionKey, t, workspaceMode]);
+    }, [canPersist, activeSession, router, sessionKey, t, workspaceMode]);
 
     const uploadErrorMessage = useCallback((error: unknown): string => {
         const workspaceMessage = workspaceUnavailableDescription(error, tRoot);
@@ -2127,7 +2127,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             || permission !== 'granted'
             || attachmentCreatePermission !== 'granted'
         ) return;
-        const originWorkspaceId = activeWorkspaceId;
+        const origin = workspacePinnedRequest(activeWorkspaceId, { signal });
         for (const file of files) {
             const operationEpoch = sessionEpochRef.current;
             const clientId = crypto.randomUUID();
@@ -2144,7 +2144,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             };
             setFileAttachments((current) => [...current, pending]);
             try {
-                const session = await ensureSession(signal);
+                const session = await ensureSession(signal, origin);
                 const uploaded = await uploadAiChatAttachment(
                     session.id,
                     file,
@@ -2152,7 +2152,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                         attachment.clientId === clientId
                             ? { ...attachment, progress }
                             : attachment)),
-                    workspacePinnedRequest(originWorkspaceId, { signal }),
+                    origin,
                 );
                 if (signal.aborted || operationEpoch !== sessionEpochRef.current) continue;
                 setFileAttachments((current) => completeAskConnexFileUpload(
@@ -2254,6 +2254,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         toolCallId: number,
         action: AskConnexToolAction,
         deferRefresh = false,
+        init?: RequestInit,
     ): Promise<boolean> => {
         const session = activeSessionRef.current;
         const signal = identityControllerRef.current?.signal;
@@ -2267,6 +2268,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             || toolActionsRef.current.has(toolCallId)) {
             return false;
         }
+        const origin = init ?? workspacePinnedRequest(renderedWorkspaceId(), { signal });
         const operationEpoch = sessionEpochRef.current;
         let mutated = false;
         toolActionsRef.current.add(toolCallId);
@@ -2276,10 +2278,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         }
         try {
             const mutation = action === 'approve'
-                ? await approveAiAssistantToolCall(session.id, toolCallId, { signal })
+                ? await approveAiAssistantToolCall(session.id, toolCallId, origin)
                 : action === 'reject'
-                    ? await rejectAiAssistantToolCall(session.id, toolCallId, { signal })
-                    : await undoAiAssistantToolCall(session.id, toolCallId, { signal });
+                    ? await rejectAiAssistantToolCall(session.id, toolCallId, origin)
+                    : await undoAiAssistantToolCall(session.id, toolCallId, origin);
             if (signal.aborted
                 || operationEpoch !== sessionEpochRef.current
                 || activeSessionRef.current?.id !== session.id) return mutated;
@@ -2369,9 +2371,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         toolCallIds: readonly number[],
         action: AskConnexToolAction,
     ) => {
+        const origin = workspacePinnedRequest(renderedWorkspaceId(), { signal: identityControllerRef.current?.signal });
         let mutated = false;
         for (const toolCallId of toolCallIds) {
-            if (await performToolAction(toolCallId, action, true)) mutated = true;
+            if (await performToolAction(toolCallId, action, true, origin)) mutated = true;
         }
         if (mutated) router.refresh();
     }, [performToolAction, router]);
@@ -3281,8 +3284,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                         problem={missions.problem} onCreate={async (goal) => {
                             const signal = identityControllerRef.current?.signal;
                             if (!signal || signal.aborted) return false;
+                            const origin = workspacePinnedRequest(renderedWorkspaceId(), { signal });
                             try {
-                                const session = await ensureSession(signal);
+                                const session = await ensureSession(signal, origin);
                                 if (signal.aborted) return false;
                                 return await missions.create(session.id, goal, {
                                     kind: 'record', recordKind: missionRecord.kind, recordId: missionRecord.id,

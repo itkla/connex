@@ -13,6 +13,7 @@ import {
     type DuplicatePreflightResponse,
 } from '@/app/lib/types';
 import { isFieldError, preflightPersonDuplicates } from '@/app/lib/api';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import CompanyContactsField, { type PendingContact, type PendingContactDraft } from '@/app/components/records/companies/CompanyContactsField';
 import ContactSubView from '@/app/components/records/companies/ContactSubView';
 import DuplicatePreflightWarning from '@/app/components/records/DuplicatePreflightWarning';
@@ -145,6 +146,7 @@ type Props = {
     createNewCompany: (
         duplicateReviewToken: string | null,
         reviewedContacts: PendingContact[],
+        init?: RequestInit,
     ) => void | Promise<void>;
     pendingContacts: PendingContact[];
     addPendingContact: (draft: PendingContactDraft) => void;
@@ -300,6 +302,7 @@ export default function NewCompanyDialog({
 
     const handleSubmit = async (e: FormEvent) => {
         e.preventDefault();
+        const origin = workspacePinnedRequest(renderedWorkspaceId(), requestInit);
         if (submissionPendingRef.current
                 || isCreating
                 || logoSelectionPending
@@ -308,14 +311,15 @@ export default function NewCompanyDialog({
         submissionPendingRef.current = true;
         setSubmissionPending(true);
         try {
-            const duplicateDecision = await duplicatePreflight.reviewNow();
+            const duplicateDecision = await duplicatePreflight.reviewNow(origin);
             if (!duplicateDecision.allowed) return;
-            const reviewedContacts = await reviewPendingContacts();
+            const reviewedContacts = await reviewPendingContacts(origin);
             if (!reviewedContacts) return;
             resetFieldErrors();
             await createNewCompany(
                 duplicateDecision.duplicateReviewToken,
                 reviewedContacts,
+                origin,
             );
         } catch (err) {
             captureFieldErrors(err);
@@ -348,7 +352,7 @@ export default function NewCompanyDialog({
         setView('contact');
     };
 
-    const reviewPendingContacts = async (): Promise<PendingContact[] | null> => {
+    const reviewPendingContacts = async (origin: RequestInit): Promise<PendingContact[] | null> => {
         const reviewedContacts: PendingContact[] = [];
         for (const contact of pendingContacts) {
             let response: DuplicatePreflightResponse;
@@ -357,7 +361,7 @@ export default function NewCompanyDialog({
                     name: contact.name,
                     emails: contact.email ? [contact.email] : [],
                     phones: contact.phone ? [contact.phone] : [],
-                }, requestInit);
+                }, origin);
             } catch {
                 toastError(t('contactDuplicateReviewChanged'));
                 openEditContact(contact);
@@ -785,7 +789,7 @@ type NewCompanyFormProps = {
     isCreating: boolean;
     isSuccess?: boolean;
     existingCompanies?: Company[];
-    createNewCompany: (duplicateReviewToken: string | null) => void | Promise<void>;
+    createNewCompany: (duplicateReviewToken: string | null, reviewedContacts?: PendingContact[], init?: RequestInit) => void | Promise<void>;
     requestInit?: RequestInit;
     /** Invoked by the Cancel button — closes the surface, or steps back to the selector in the morphing launcher. */
     onCancel: () => void;
@@ -892,6 +896,7 @@ export function NewCompanyForm({
 
     const handleSubmit = async (e: FormEvent) => {
         e.preventDefault();
+        const origin = workspacePinnedRequest(renderedWorkspaceId(), requestInit);
         if (submissionPendingRef.current
                 || isCreating
                 || logoSelectionPending
@@ -900,10 +905,10 @@ export function NewCompanyForm({
         submissionPendingRef.current = true;
         setSubmissionPending(true);
         try {
-            const duplicateDecision = await duplicatePreflight.reviewNow();
+            const duplicateDecision = await duplicatePreflight.reviewNow(origin);
             if (!duplicateDecision.allowed) return;
             resetFieldErrors();
-            await createNewCompany(duplicateDecision.duplicateReviewToken);
+            await createNewCompany(duplicateDecision.duplicateReviewToken, undefined, origin);
         } catch (err) {
             captureFieldErrors(err);
             if (isFieldError(err)) {

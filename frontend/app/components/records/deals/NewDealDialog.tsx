@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/dialog-status-cover';
 import { cn } from '@/lib/utils';
 import { isFieldError } from '@/app/lib/api';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { isSubmitShortcut } from '@/app/lib/submitShortcut';
 import { type Company, type CreateDealPayload, type Pipeline, type Stage } from '@/app/lib/types';
 import { useCompanySearch } from '@/app/hooks/useCompanySearch';
@@ -76,7 +77,7 @@ type Props = {
     isDirty?: boolean;
     /** Selected company record supplied by a parent that already resolved it. */
     selectedCompany?: Company | null;
-    createNewDeal: (duplicateReviewToken: string) => void | Promise<void>;
+    createNewDeal: (duplicateReviewToken: string, init?: RequestInit) => void | Promise<void>;
     requestInit?: RequestInit;
 };
 
@@ -163,7 +164,7 @@ type NewDealFormProps = {
     isSuccess?: boolean;
     /** Selected company record supplied by a parent that already resolved it. */
     selectedCompany?: Company | null;
-    createNewDeal: (duplicateReviewToken: string) => void | Promise<void>;
+    createNewDeal: (duplicateReviewToken: string, init?: RequestInit) => void | Promise<void>;
     requestInit?: RequestInit;
     /** Invoked by the Cancel button — closes the dialog, or steps back to the selector in the morphing launcher. */
     onCancel: () => void;
@@ -467,13 +468,14 @@ export function NewDealForm({
     }, [companySearch.error, t]);
 
     const handleCreate = async () => {
+        const origin = workspacePinnedRequest(renderedWorkspaceId(), requestInit);
         if (submissionPendingRef.current || duplicatePreflight.blocked) return;
         submissionPendingRef.current = true;
         resetFieldErrors();
         try {
-            const duplicateDecision = await duplicatePreflight.reviewNow();
+            const duplicateDecision = await duplicatePreflight.reviewNow(origin);
             if (!duplicateDecision.allowed || !duplicateDecision.duplicateReviewToken) return;
-            await createNewDeal(duplicateDecision.duplicateReviewToken);
+            await createNewDeal(duplicateDecision.duplicateReviewToken, origin);
         } catch (err) {
             captureFieldErrors(err);
             if (isFieldError(err)) {

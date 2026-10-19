@@ -39,7 +39,7 @@ type Props = {
         clientToken: string,
     ) => Promise<boolean>;
     onSubmitEdit: (comment: RecordComment, content: string) => Promise<boolean>;
-    onAttachImage: (file: File) => Promise<string | null>;
+    onAttachImage: (file: File, init?: RequestInit) => Promise<string | null>;
     onCopyLink: (comment: RecordComment) => void;
     onDelete: (comment: RecordComment) => void;
     onToggleReaction: (comment: RecordComment, reaction: RecordCommentReactionKey) => void;

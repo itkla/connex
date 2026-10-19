@@ -497,8 +497,9 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
     const createNewCompany = async (
         duplicateReviewToken: string | null,
         reviewedContacts: PendingContact[],
+        init?: RequestInit,
     ) => {
-        const origin = workspacePinnedRequest(renderedWorkspaceId());
+        const origin = init ?? workspacePinnedRequest(renderedWorkspaceId());
         setCreationSucceeded(false);
         setIsCreating(true);
         try {

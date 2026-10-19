@@ -19,6 +19,7 @@ import {
     replaceDealCollaborators,
     updateDealOwner,
 } from '@/app/lib/api';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { pendingDealTeamWrites } from '@/app/lib/dealTeam';
 import { type User, type WorkspaceMember } from '@/app/lib/types';
 import { toastSuccess } from '@/app/lib/toast';
@@ -124,14 +125,15 @@ export default function DealTeamDialog({
     };
 
     async function save() {
+        const origin = workspacePinnedRequest(renderedWorkspaceId());
         setSaving(true);
         try {
             const writes = pendingDealTeamWrites(
                 { ownerId: initialOwnerId ?? null, collaboratorIds: initialCollaborators.map((user) => user.id) },
                 { ownerId, collaboratorIds },
             );
-            if (writes.owner) await updateDealOwner(dealId, ownerId);
-            if (writes.collaboratorIds) await replaceDealCollaborators(dealId, writes.collaboratorIds);
+            if (writes.owner) await updateDealOwner(dealId, ownerId, origin);
+            if (writes.collaboratorIds) await replaceDealCollaborators(dealId, writes.collaboratorIds, origin);
             toastSuccess(t('dealTeamUpdated'));
             setSaving(false);
             setSuccess(true);

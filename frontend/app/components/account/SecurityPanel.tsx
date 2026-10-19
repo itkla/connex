@@ -14,6 +14,7 @@ import {
 } from "@heroicons/react/24/outline";
 import { Loader2Icon } from "lucide-react";
 
+import { navigateAfterWorkspaceSelection } from "@/app/lib/renderedWorkspace";
 import type { Passkey } from "@/app/lib/types";
 import {
     deletePasskey,
@@ -175,10 +176,12 @@ export default function SecurityPanel() {
     const workspaceExit = useMemo<ConfinementWorkspaceExit>(() => {
         const follow = (publishActiveWorkspace: (id: number | null) => void, activeWorkspaceId: number | null) => {
             publishActiveWorkspace(activeWorkspaceId);
-            if (activeWorkspaceId === null) {
-                router.replace("/onboarding");
-            }
-            router.refresh();
+            navigateAfterWorkspaceSelection(() => {
+                if (activeWorkspaceId === null) {
+                    router.replace("/onboarding");
+                }
+                router.refresh();
+            });
         };
         return {
             leave: (workspaceId) => runSelectionChange(async (publishActiveWorkspace) => {

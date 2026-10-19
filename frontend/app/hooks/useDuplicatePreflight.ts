@@ -132,7 +132,7 @@ export function useDuplicatePreflight(
         setAcknowledgedResponse(null);
     }, [requestKey]);
 
-    const runCheck = useCallback(async (dealReviewToken?: string) => {
+    const runCheck = useCallback(async (dealReviewToken?: string, init = requestInit) => {
         if (!requestEligible) return null;
         const sequence = requestSequenceRef.current + 1;
         requestSequenceRef.current = sequence;
@@ -144,19 +144,19 @@ export function useDuplicatePreflight(
                     name: values.name,
                     emails: candidateList(values.email),
                     phones: candidateList(values.phone),
-                }, requestInit);
+                }, init);
             } else if (kind === 'company') {
                 response = await preflightCompanyDuplicates({
                     name: values.name,
                     websites: candidateList(values.website),
                     phones: candidateList(values.phone),
-                }, requestInit);
+                }, init);
             } else {
                 response = await preflightDealDuplicates({
                     name: values.name,
                     companyId: values.companyId,
                     reviewToken: dealReviewToken,
-                }, requestInit);
+                }, init);
             }
             if (requestSequenceRef.current === sequence
                     && currentRequestKeyRef.current === requestKey) {
@@ -222,7 +222,7 @@ export function useDuplicatePreflight(
     const retry = useCallback(() => {
         setRetryGeneration((generation) => generation + 1);
     }, []);
-    const reviewNow = useCallback(async (): Promise<DuplicatePreflightDecision> => {
+    const reviewNow = useCallback(async (init?: RequestInit): Promise<DuplicatePreflightDecision> => {
         if (!requestEligible) {
             return {
                 allowed: true,
@@ -233,6 +233,7 @@ export function useDuplicatePreflight(
         }
         const checked = await runCheck(
             kind === 'deal' ? response?.reviewToken : undefined,
+            init,
         );
         if (!checked || checked.truncated) {
             return {

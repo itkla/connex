@@ -787,7 +787,7 @@ describe('deal draft persistence', () => {
         expect(api.createDeal).toHaveBeenCalledWith(expect.objectContaining({
             name: 'Won renewal',
             duplicateReviewToken: 'review-token',
-        }), undefined);
+        }), {});
         expect(readDealDraft()).toBeNull();
         await mounted.unmount();
     });
@@ -942,7 +942,7 @@ describe('deal draft persistence', () => {
             pipeline: PIPELINE.id,
             stage: STAGE.id,
             company: COMPANY.id,
-        }), undefined);
+        }), {});
         await mounted.unmount();
     });
 
@@ -971,7 +971,7 @@ describe('deal draft persistence', () => {
             pipeline: PIPELINE.id,
             stage: null,
             company: COMPANY.id,
-        }), undefined);
+        }), {});
         await mounted.unmount();
     });
 
@@ -992,7 +992,7 @@ describe('deal draft persistence', () => {
             pipeline: null,
             stage: null,
             company: null,
-        }), undefined);
+        }), {});
         expect(toasts.warn).toHaveBeenCalledWith('feedback.restoredDealReferenceUnavailable');
         await mounted.unmount();
     });

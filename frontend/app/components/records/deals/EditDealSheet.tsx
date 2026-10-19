@@ -11,6 +11,7 @@ import QuickEditDealSheet, { type DealDraft } from '@/app/components/records/dea
 import { CustomFieldsEditSection, type CustomFieldsEditHandle } from '@/app/components/records/CustomFieldsEditSection';
 import { actualValueForOutcome } from '@/app/components/records/deals/dealOutcome';
 import { getPipelines, getStagesByPipelineId, updateDeal } from '@/app/lib/api';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { type Deal, type Pipeline, type Stage, type UpdateDealPayload } from '@/app/lib/types';
 
 function toDraft(d: Deal): DealDraft {
@@ -30,7 +31,7 @@ function toDraft(d: Deal): DealDraft {
 }
 
 /** Persists one edit-sheet draft with outcome-canonicalized realized value. */
-export async function submitDealDraftUpdate(dealId: number, draft: DealDraft): Promise<void> {
+export async function submitDealDraftUpdate(dealId: number, draft: DealDraft, init: RequestInit = {}): Promise<void> {
     const payload: UpdateDealPayload = {
         name: draft.name.trim(),
         value: draft.value,
@@ -44,7 +45,7 @@ export async function submitDealDraftUpdate(dealId: number, draft: DealDraft): P
         closedReason: draft.closedReason || null,
         won: draft.won,
     };
-    await updateDeal(dealId, payload);
+    await updateDeal(dealId, payload, init);
 }
 
 export default function EditDealSheet({
@@ -127,6 +128,7 @@ export default function EditDealSheet({
     }, [open, draft.pipeline, stageOptionsByPipeline, stageLoadRevision, t]);
 
     const saveEdits = async () => {
+        const origin = workspacePinnedRequest(renderedWorkspaceId());
         resetFieldErrors();
         if (!draft.name.trim()) {
             setFieldErrors({ name: t('nameRequired') });
@@ -144,8 +146,8 @@ export default function EditDealSheet({
 
         setIsSaving(true);
         try {
-            await submitDealDraftUpdate(deal.id, draft);
-            await cfRef.current?.save();
+            await submitDealDraftUpdate(deal.id, draft, origin);
+            await cfRef.current?.save(origin);
             toastSuccess(t('dealUpdated'));
             onOpenChange(false);
             router.refresh();

@@ -16,6 +16,7 @@ import {
     getCompanyPeople,
     getUsers,
 } from '@/app/lib/api';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { toastWarn } from '@/app/lib/toast';
 import type {
     Contact,
@@ -194,9 +195,10 @@ export function RecordTaskComposer({
 
     const createRequest = useCallback(
         async (payload: CreateTaskPayload, init?: RequestInit) => {
-            const created = await createTask(payload, init);
+            const origin = init ?? workspacePinnedRequest(renderedWorkspaceId());
+            const created = await createTask(payload, origin);
             if (payload.dealId != null && payload.personId != null) {
-                await addDealPerson(payload.dealId, payload.personId, linkRole, init).catch(() => {
+                await addDealPerson(payload.dealId, payload.personId, linkRole, origin).catch(() => {
                     toastWarn(t('toastLinkFailed'));
                 });
             }
@@ -249,9 +251,10 @@ export function RecordActivityComposer({ anchor, currentUserId, open: openProp, 
 
     const createRequest = useCallback(
         async (payload: CreateActivityPayload, init?: RequestInit) => {
-            const created = await createActivity(payload, init);
+            const origin = init ?? workspacePinnedRequest(renderedWorkspaceId());
+            const created = await createActivity(payload, origin);
             if (payload.dealId != null && payload.personId != null) {
-                await addDealPerson(payload.dealId, payload.personId, linkRole, init).catch(() => {
+                await addDealPerson(payload.dealId, payload.personId, linkRole, origin).catch(() => {
                     toastWarn(t('toastLinkFailed'));
                 });
             }

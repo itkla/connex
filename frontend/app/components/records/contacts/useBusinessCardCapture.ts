@@ -22,6 +22,7 @@ import {
     scanBusinessCard,
 } from '@/app/lib/api';
 import { workspaceUnavailableDescription } from '@/app/lib/errorMessages';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import {
     BusinessCardRecoveryStorageUnavailableError,
     clearBusinessCardImportRecovery,
@@ -587,7 +588,11 @@ export function useBusinessCardCapture({
     const prepareImportDraft = async (
         pendingAvatar: boolean,
         personAction: BusinessCardPersonAction = { type: 'create' },
+        init?: RequestInit,
     ): Promise<BusinessCardImportDraft | undefined> => {
+        const origin = init ?? workspacePinnedRequest(renderedWorkspaceId());
+        if (origin.signal?.aborted) return undefined;
+        const expectedWorkspaceId = new Headers(origin.headers).get('X-Workspace-Id');
         setImportError(null);
         setWorkspaceRefusal(null);
         if (!file) return undefined;
@@ -597,6 +602,7 @@ export function useBusinessCardCapture({
             setImportError('recoveryStorage');
             return undefined;
         }
+        if (origin.signal?.aborted) return undefined;
 
         let companyAction: BusinessCardCompanyAction;
         const currentPayload = payloadRef.current;
@@ -617,6 +623,8 @@ export function useBusinessCardCapture({
 
         let requestId: string;
         const controller = new AbortController();
+        const abortFromCaller = () => controller.abort(origin.signal?.reason);
+        origin.signal?.addEventListener('abort', abortFromCaller, { once: true });
         importControllerRef.current?.abort();
         importControllerRef.current = controller;
         try {
@@ -624,8 +632,12 @@ export function useBusinessCardCapture({
             if (!recoveryContext) {
                 recoveryContext = await clientRecoveryContext({ signal: controller.signal });
                 if (!recoveryContext) throw new BusinessCardRecoveryStorageUnavailableError();
-                importRecoveryContextRef.current = recoveryContext;
             }
+            controller.signal.throwIfAborted();
+            if (expectedWorkspaceId !== null && recoveryContext.workspaceId !== expectedWorkspaceId) {
+                throw new ApiError('Business-card request context changed', 409, 'BUSINESS_CARD_CONTEXT_CHANGED');
+            }
+            importRecoveryContextRef.current = recoveryContext;
             if (importRequestIdRef.current) {
                 requestId = importRequestIdRef.current;
             } else {
@@ -637,12 +649,14 @@ export function useBusinessCardCapture({
                 importRevisionRef.current = 0;
             }
             importRequestIdRef.current = requestId;
+            controller.signal.throwIfAborted();
             importRevisionRef.current = await prepareBusinessCardImportRecovery(
                 requestId,
                 pendingAvatar,
                 recoveryContext,
                 controller.signal,
             );
+            controller.signal.throwIfAborted();
         } catch (error) {
             if (controller.signal.aborted) return undefined;
             if (isWorkspaceUnavailableError(error)) {
@@ -656,6 +670,7 @@ export function useBusinessCardCapture({
             );
             return undefined;
         } finally {
+            origin.signal?.removeEventListener('abort', abortFromCaller);
             if (importControllerRef.current === controller) importControllerRef.current = null;
         }
         const contact = companyAction.type === 'existing'

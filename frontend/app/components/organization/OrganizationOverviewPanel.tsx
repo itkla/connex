@@ -4,6 +4,7 @@ import { useEffect, useReducer, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 
+import { navigateAfterWorkspaceSelection } from "@/app/lib/renderedWorkspace";
 import OrganizationIdentityForm from "@/app/components/organization/OrganizationIdentityForm";
 import OrganizationLifecyclePanel from "@/app/components/organization/OrganizationLifecyclePanel";
 import OrganizationLayoutPanel from "@/app/components/organization/OrganizationLayoutPanel";
@@ -147,8 +148,10 @@ export default function OrganizationOverviewPanel({
     async function navigate(workspaceId: number, href: string) {
         try {
             const completed = await runInWorkspace(workspaceId, async () => {
-                router.push(href);
-                router.refresh();
+                navigateAfterWorkspaceSelection(() => {
+                    router.push(href);
+                    router.refresh();
+                });
             });
             if (!completed) toastError(t("switchInProgress"));
         } catch (error) {

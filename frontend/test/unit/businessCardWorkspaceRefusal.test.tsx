@@ -9,12 +9,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BusinessCardCapture } from '@/app/components/records/contacts/BusinessCardCapture';
 import { useBusinessCardCapture } from '@/app/components/records/contacts/useBusinessCardCapture';
 import { importBusinessCard } from '@/app/lib/api';
-import { bindRenderedWorkspace, releaseRenderedWorkspace, rememberWorkspaceNames } from '@/app/lib/renderedWorkspace';
+import { bindRenderedWorkspace, releaseRenderedWorkspace, rememberWorkspaceNames, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import type { BusinessCardImportDraft, CreateContactPayload, Workspace } from '@/app/lib/types';
 import contactsEn from '@/messages/en/contacts.json';
 import contactsJa from '@/messages/ja/contacts.json';
 import errorsEn from '@/messages/en/errors.json';
 import errorsJa from '@/messages/ja/errors.json';
+import { deferred } from './helpers/workspaceChainBackend';
 
 vi.mock('@/app/hooks/useWorkspace', () => ({
     useWorkspace: () => ({ activeWorkspaceId: 9 }),
@@ -116,6 +117,7 @@ function stubBackend(refusedPath: string, permissionDenied = false) {
 }
 
 beforeEach(() => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     document.cookie = 'connex_workspace=5; path=/';
     bindRenderedWorkspace(shell, WORKSPACE_ID);
     rememberWorkspaceNames([workspace]);
@@ -127,7 +129,10 @@ beforeEach(() => {
     locksDescriptor = Object.getOwnPropertyDescriptor(navigator, 'locks');
     Object.defineProperty(navigator, 'locks', {
         configurable: true,
-        value: { request: async (_name: string, _options: LockOptions, operation: () => unknown) => operation() },
+        value: { request: async (_name: string, options: LockOptions, operation: () => unknown) => {
+            options.signal?.throwIfAborted();
+            return operation();
+        } },
     });
 });
 
@@ -164,6 +169,65 @@ async function refuseOperation(path: string, file: File) {
 }
 
 describe('business-card refusals stay bound to the named workspace', () => {
+    it.each(['already aborted', 'during identity'])('cancels import preparation when the caller is %s', async (when) => {
+        const writes = stubBackend('/unused');
+        render(<NextIntlClientProvider locale="en" messages={{ ...contactsEn, ...errorsEn }}><Capture /></NextIntlClientProvider>);
+        await waitFor(() => expect(capture().recoveryStatus).toBe('ready'));
+        act(() => capture().selectFile(new File(['card'], 'card.png', { type: 'image/png' })));
+        await waitFor(() => expect(capture().status).toBe('ready'));
+        act(() => capture().selectCompanyMode('none'));
+        const backend = vi.mocked(fetch).getMockImplementation();
+        if (!backend) throw new Error('The business-card backend was not installed');
+        const held = deferred<Response>();
+        const started = deferred<void>();
+        let identitySignal: AbortSignal | null | undefined;
+        let holdIdentity = when === 'during identity';
+        vi.mocked(fetch).mockImplementation(async (input, init) => {
+            const path = input instanceof Request ? input.url : String(input);
+            if (holdIdentity && path === '/api/auth/me') {
+                holdIdentity = false;
+                identitySignal = init?.signal;
+                started.resolve();
+                return held.promise;
+            }
+            return backend(input, init);
+        });
+        const controller = new AbortController();
+        if (when === 'already aborted') controller.abort();
+        const before = writes.length;
+        let pending: Promise<BusinessCardImportDraft | undefined> | undefined;
+        await act(async () => {
+            pending = capture().prepareImportDraft(false, { type: 'create' }, workspacePinnedRequest(WORKSPACE_ID, { signal: controller.signal }));
+            if (when === 'during identity') await started.promise;
+        });
+        let draft: BusinessCardImportDraft | undefined;
+        await act(async () => {
+            controller.abort();
+            held.resolve(json({ id: 7 }));
+            draft = await pending;
+        });
+
+        expect(writes.slice(before)).toEqual([]);
+        expect(draft).toBeUndefined();
+        if (when === 'during identity') expect(identitySignal?.aborted).toBe(true);
+        expect(Object.keys(window.localStorage).filter((key) => key.startsWith('connex:business-card-import-recovery:'))).toEqual([]);
+        expect(capture().requiresExactImportRetry).toBe(false);
+    });
+
+    it('refuses a prepared recovery context that differs from the submission origin before reservation', async () => {
+        const writes = stubBackend('/unused');
+        render(<NextIntlClientProvider locale="en" messages={{ ...contactsEn, ...errorsEn }}><Capture /></NextIntlClientProvider>);
+        await waitFor(() => expect(capture().recoveryStatus).toBe('ready'));
+        act(() => capture().selectFile(new File(['card'], 'card.png', { type: 'image/png' })));
+        await waitFor(() => expect(capture().status).toBe('ready'));
+        act(() => capture().selectCompanyMode('none'));
+        const before = writes.length;
+        await act(async () => {
+            expect(await capture().prepareImportDraft(false, { type: 'create' }, workspacePinnedRequest(5))).toBeUndefined();
+        });
+        expect(writes.slice(before)).toEqual([]);
+        expect(capture().importError).toBe('conflict');
+    });
     const cases = (['en', 'ja'] as const).flatMap(locale =>
         [SCAN, RESERVATION, IMPORT].map(path => ({ locale, path })));
 

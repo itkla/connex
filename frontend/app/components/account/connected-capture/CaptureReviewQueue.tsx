@@ -63,9 +63,9 @@ export default function CaptureReviewQueue({
     onPageChange: (page: number) => void;
     onSelect: (review: CaptureReviewItem | null) => void;
     onRetry: () => void;
-    onDecide: (review: CaptureReviewItem, decision: CaptureReviewDecision) => Promise<boolean>;
+    onDecide: (review: CaptureReviewItem, decision: CaptureReviewDecision, init?: RequestInit) => Promise<boolean>;
     onApprove: (review: CaptureReviewItem) => Promise<boolean>;
-    onPreflight: (request: PersonDuplicatePreflightRequest) => Promise<DuplicatePreflightResponse>;
+    onPreflight: (request: PersonDuplicatePreflightRequest, init?: RequestInit) => Promise<DuplicatePreflightResponse>;
 }) {
     const t = useTranslations('AccountCaptureReviews');
     const tConnections = useTranslations('AccountConnections');
@@ -95,7 +95,7 @@ export default function CaptureReviewQueue({
                             busy={busy}
                             canCreatePeople={canCreatePeople}
                             onBack={() => onSelect(null)}
-                            onDecide={(decision) => onDecide(selected, decision)}
+                            onDecide={(decision, init) => onDecide(selected, decision, init)}
                             onApprove={() => onApprove(selected)}
                             onPreflight={onPreflight}
                         />

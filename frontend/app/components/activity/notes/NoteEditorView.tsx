@@ -27,7 +27,7 @@ import {
     type DraftKeyParts,
 } from "@/app/lib/formDrafts";
 import { noteContentToVisibleText } from "@/app/lib/references";
-import { workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
+import { renderedWorkspaceNavigationVersion, workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
 import { toastDismiss, toastError, toastInfo } from "@/app/lib/toast";
 import { deriveNoteTitle } from "@/app/lib/noteText";
 import { CrumbLabel } from "@/app/hooks/useNavTrail";
@@ -98,6 +98,7 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
     const { activeWorkspaceId } = useWorkspace();
     const tResume = useTranslations("DraftResume");
     const [originWorkspaceId] = useState(activeWorkspaceId);
+    const [originNavigationVersion] = useState(renderedWorkspaceNavigationVersion);
     const [noteId, setNoteId] = useState<number | null>(note?.id ?? null);
     const editorDraftScope = noteId === null ? "new" : `note:${noteId}`;
     const editorDraftParts = useMemo<DraftKeyParts>(() => ({
@@ -174,11 +175,11 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
         return () => toastDismiss(kept.key);
     }, [editorDraftParts, persistEditorDraft, tResume]);
 
-    const noteWorkspaceRefused = useCallback((error: unknown): boolean => {
+    const noteWorkspaceRefused = useCallback((error: unknown, report = true): boolean => {
         if (!isWorkspaceUnavailableError(error)) return false;
         if (!workspaceRefusedRef.current) {
             workspaceRefusedRef.current = true;
-            showApiError(error, "saveError");
+            if (report) showApiError(error, "saveError");
         }
         keepRefusedText();
         return true;
@@ -226,7 +227,9 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
                     rekeyEditorDraft(`note:${saved.id}`);
                     stateRef.current = { ...stateRef.current, noteId: saved.id };
                     setNoteId(saved.id);
-                    if (mountedRef.current) window.history.replaceState(null, "", `/activity/notes/${saved.id}`);
+                    if (mountedRef.current && renderedWorkspaceNavigationVersion() === originNavigationVersion) {
+                        window.history.replaceState(null, "", `/activity/notes/${saved.id}`);
+                    }
                 }
                 clearEditorDraft();
                 setStatus("saved");
@@ -241,9 +244,9 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
                 savingRef.current = false;
                 if (dirtyRef.current) saveRef.current();
             });
-    }, [clearEditorDraft, currentUserId, keepRefusedText, noteWorkspaceRefused, originWorkspaceId, rekeyEditorDraft, t]);
+    }, [clearEditorDraft, currentUserId, keepRefusedText, noteWorkspaceRefused, originNavigationVersion, originWorkspaceId, rekeyEditorDraft, t]);
 
-    const ensureNoteId = useCallback(async (): Promise<number> => {
+    const ensureNoteId = useCallback(async (): Promise<number | null> => {
         const existing = stateRef.current.noteId;
         if (existing != null) return existing;
 
@@ -254,7 +257,7 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
             const createdWhileWaiting = stateRef.current.noteId;
             if (createdWhileWaiting != null) return createdWhileWaiting;
         }
-        if (workspaceRefusedRef.current) throw new Error("workspace-unavailable");
+        if (workspaceRefusedRef.current) return null;
 
         const snapshot = stateRef.current;
         const nextTitle = snapshot.title.trim() ? snapshot.title.trim() : null;
@@ -279,19 +282,21 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
             rekeyEditorDraft(`note:${saved.id}`);
             stateRef.current = { ...stateRef.current, noteId: saved.id };
             setNoteId(saved.id);
-            if (mountedRef.current) window.history.replaceState(null, "", `/activity/notes/${saved.id}`);
+            if (mountedRef.current && renderedWorkspaceNavigationVersion() === originNavigationVersion) {
+                window.history.replaceState(null, "", `/activity/notes/${saved.id}`);
+            }
             dirtyRef.current = false;
             setStatus("saved");
             return saved.id;
         } catch (error) {
             setStatus("error");
-            if (!noteWorkspaceRefused(error)) dirtyRef.current = true;
+            if (!noteWorkspaceRefused(error, false)) dirtyRef.current = true;
             throw error;
         } finally {
             savingRef.current = false;
             if (dirtyRef.current) saveRef.current();
         }
-    }, [currentUserId, noteWorkspaceRefused, originWorkspaceId, rekeyEditorDraft, t]);
+    }, [currentUserId, noteWorkspaceRefused, originNavigationVersion, originWorkspaceId, rekeyEditorDraft, t]);
 
     useEffect(() => {
         saveRef.current = save;

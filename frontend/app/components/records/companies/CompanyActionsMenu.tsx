@@ -27,6 +27,7 @@ import NewContactDialog from '@/app/components/records/contacts/NewContactDialog
 import NewDealDialog from '@/app/components/records/deals/NewDealDialog';
 
 import { archiveCompany, restoreCompany, createContact, createDeal, getActiveWorkspaceMembers, getPipelines, getStagesByPipelineId, importBusinessCard, isFieldError, updateCompanyOwner, uploadContactPicture } from '@/app/lib/api';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { type BusinessCardImportDraft, CreateContactPayload, type Company, type CreateDealPayload, type Pipeline, type Stage, type WorkspaceMember } from '@/app/lib/types';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
@@ -180,7 +181,9 @@ export default function CompanyActionsMenu({
     const createNewContact = async (
         businessCard?: BusinessCardImportDraft,
         duplicateReviewToken: string | null = null,
+        init?: RequestInit,
     ) => {
+        const origin = init ?? workspacePinnedRequest(renderedWorkspaceId());
         invalidatePendingContactClose();
         const operationGeneration = contactCloseGenerationRef.current;
         const isCurrent = () => contactCloseGenerationRef.current === operationGeneration;
@@ -188,19 +191,19 @@ export default function CompanyActionsMenu({
         setIsCreatingContact(true);
         try {
             const imported = businessCard
-                ? await importBusinessCard(businessCard)
+                ? await importBusinessCard(businessCard, origin)
                 : null;
             const newContact = imported?.contact
                 ?? await createContact({
                     ...newContactPayload,
                     duplicateReviewToken: duplicateReviewToken ?? undefined,
-                });
+                }, origin);
             if (!isCurrent()) return;
             const reusedContact = imported?.disposition === 'reused';
             let avatarUploadFailed = false;
             if (imageFile && !reusedContact) {
                 try {
-                    await uploadContactPicture(newContact.id, imageFile);
+                    await uploadContactPicture(newContact.id, imageFile, origin);
                 } catch {
                     avatarUploadFailed = true;
                 }
@@ -237,7 +240,8 @@ export default function CompanyActionsMenu({
         }
     };
 
-    const createNewDeal = async (duplicateReviewToken: string) => {
+    const createNewDeal = async (duplicateReviewToken: string, init?: RequestInit) => {
+        const origin = init ?? workspacePinnedRequest(renderedWorkspaceId());
         setDealCreationSucceeded(false);
         setIsCreatingDeal(true);
         try {
@@ -252,7 +256,7 @@ export default function CompanyActionsMenu({
                 company: company.id,
                 duplicateReviewToken,
                 expectedCloseDate: newDealPayload.expectedCloseDate || undefined,
-            });
+            }, origin);
             toastSuccess(t('toastDealCreated'));
             setIsCreatingDeal(false);
             setDealCreationSucceeded(true);

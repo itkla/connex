@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 
 import NewDealDialog, { isDealPayloadDirty } from '@/app/components/records/deals/NewDealDialog';
 import { createDeal, getPipelines, getStagesByPipelineId } from '@/app/lib/api';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { toastSuccess } from '@/app/lib/toast';
 import type { CreateDealPayload, Pipeline, Stage } from '@/app/lib/types';
@@ -86,7 +87,8 @@ export default function CalendarNewDealContainer({
     const seededBaseline: CreateDealPayload = { ...EMPTY_DRAFT, expectedCloseDate: defaultExpectedCloseDate || undefined };
     const isDirty = !creating && !succeeded && isDealPayloadDirty(payload, seededBaseline);
 
-    const createNewDeal = async (duplicateReviewToken: string) => {
+    const createNewDeal = async (duplicateReviewToken: string, init?: RequestInit) => {
+        const origin = init ?? workspacePinnedRequest(renderedWorkspaceId());
         setSucceeded(false);
         setCreating(true);
         try {
@@ -100,7 +102,7 @@ export default function CalendarNewDealContainer({
                 stage: payload.stage || null,
                 duplicateReviewToken,
                 expectedCloseDate: payload.expectedCloseDate || undefined,
-            });
+            }, origin);
             toastSuccess(t('dealCreated'));
             setCreating(false);
             setSucceeded(true);

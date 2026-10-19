@@ -9,6 +9,7 @@ import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import QuickEditCompanySheet, { type CompanyDraft } from '@/app/components/records/companies/QuickEditCompanySheet';
 import { CustomFieldsEditSection, type CustomFieldsEditHandle } from '@/app/components/records/CustomFieldsEditSection';
 import { getCompanyById, updateCompany, uploadCompanyLogo } from '@/app/lib/api';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { type Company, type UpdateCompanyPayload } from '@/app/lib/types';
 
 function toDraft(c: Company): CompanyDraft {
@@ -58,6 +59,7 @@ export default function EditCompanySheet({
     };
 
     const saveEdits = async () => {
+        const origin = workspacePinnedRequest(renderedWorkspaceId());
         const original = toDraft(company);
         const textChanged = diffDraft(original, draft);
         const logoChanged = logoFile !== null;
@@ -70,7 +72,6 @@ export default function EditCompanySheet({
         }
 
         if (!draft.name.trim()) {
-            // TODO: replace this message with the validation error message from the backend
             toastError(t('toastNameRequired'));
             return;
         }
@@ -86,17 +87,17 @@ export default function EditCompanySheet({
                     phone: draft.phone.trim() || undefined,
                     address: draft.address.trim() || undefined,
                 };
-                await updateCompany(company.id, payload);
+                await updateCompany(company.id, payload, origin);
                 committedChanges = true;
             }
 
             if (customChanged) {
-                await cfRef.current?.save();
+                await cfRef.current?.save(origin);
                 committedChanges = true;
             }
 
             if (logoChanged && logoFile) {
-                await uploadCompanyLogo(company.id, logoFile);
+                await uploadCompanyLogo(company.id, logoFile, origin);
             }
 
             toastSuccess(t('toastCompanyUpdated'));
