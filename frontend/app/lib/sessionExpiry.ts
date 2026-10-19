@@ -52,6 +52,26 @@ export function sameOriginPath(candidate: string | null): string | null {
     }
 }
 
+/** A fragment that names a section anchor on a page, such as `#members`. */
+const SECTION_FRAGMENT = /^#[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+/**
+ * Re-attaches the section a reader was sent to when the sign-in redirect could not carry it.
+ *
+ * A retired settings address forwards before authentication to `/route#section`, and the proxy
+ * then sends a signed-out reader to sign in with only the path and query, because a fragment never
+ * reaches the server. The browser keeps that fragment on the sign-in page's own URL, so once the
+ * reader is in it goes back onto a return path that has none. Only a plain section slug qualifies,
+ * so nothing else that may sit in a fragment travels with it.
+ * @param returnPath a same-origin return path from {@link sameOriginPath}
+ * @param fragment the sign-in page's own `location.hash`
+ * @returns the return path, with the section re-attached when it lacked one
+ */
+export function withSectionFragment(returnPath: string, fragment: string): string {
+    if (returnPath.includes("#") || !SECTION_FRAGMENT.test(fragment)) return returnPath;
+    return `${returnPath}${fragment}`;
+}
+
 /**
  * True for the pages that sign a user in or recover an account, which must never be interrupted by
  * a redirect to sign in — that would loop.

@@ -181,6 +181,11 @@ class AiAgentPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivacyInt
         assertTrue(assistant.get(session.getId(), 1, 50).messages().items().isEmpty());
     }
 
+    /**
+     * Restriction waits for barrier X while retaining its write fence; admission pauses before
+     * requesting the conflicting read fence. Restriction must commit before admission can recheck its epoch,
+     * proving admission has not retained the downstream audit head at that checkpoint.
+     */
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void admissionAndRestrictionCannotInvertFenceAndAuditHead(boolean admissionFirst) throws Exception {
@@ -194,20 +199,21 @@ class AiAgentPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivacyInt
         session.setVisibility("shared");
         session.setStatus("active");
         chatMapper.insertSession(session);
+        chatMapper.insertParticipant(workspace.getId(), session.getId(), currentUser.getId());
         long epoch = epochs.current(workspace.getId());
-        CountDownLatch admissionAtFence = new CountDownLatch(1);
+        CountDownLatch admissionBeforeFence = new CountDownLatch(1);
         CountDownLatch releaseAdmission = new CountDownLatch(1);
-        CountDownLatch invalidating = new CountDownLatch(1);
+        CountDownLatch restrictionAtBarrier = new CountDownLatch(1);
         AtomicLong restrictionConnection = new AtomicLong();
         AiAgentPrivacyMapper realPrivacy = sqlSessions.getMapper(AiAgentPrivacyMapper.class);
         doAnswer(invocation -> {
-            admissionAtFence.countDown();
+            admissionBeforeFence.countDown();
             await(releaseAdmission);
             return invocation.callRealMethod();
         }).when(epochs).retainReadFenceUntilTransactionCompletionIfCurrent(workspace.getId(), epoch);
         doAnswer(invocation -> {
             restrictionConnection.set(connectionId());
-            invalidating.countDown();
+            restrictionAtBarrier.countDown();
             return realPrivacy.lockBarrier(invocation.getArgument(0));
         }).when(workMapper).lockBarrier(workspace.getId());
         try (var workers = Executors.newFixedThreadPool(2)) {
@@ -236,15 +242,15 @@ class AiAgentPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivacyInt
                     privacyMapper.lockBarrierForShare(workspace.getId());
                     if (admissionFirst) {
                         admitted.set(workers.submit(admission));
-                        await(admissionAtFence);
+                        await(admissionBeforeFence);
                     }
                     restricted.set(workers.submit(restriction));
-                    await(invalidating);
+                    await(restrictionAtBarrier);
                     MySqlLockWaitProbe.awaitExclusiveRecordLock(jdbc, restrictionConnection.get(),
                             "ai_agent_privacy_barrier", Integer.toString(workspace.getId()));
                     if (!admissionFirst) {
                         admitted.set(workers.submit(admission));
-                        await(admissionAtFence);
+                        await(admissionBeforeFence);
                         releaseAdmission.countDown();
                     }
                 });

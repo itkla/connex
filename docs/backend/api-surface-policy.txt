@@ -1,5 +1,5 @@
 # Generated perimeter and authorization source SHA-256 ledger
-../frontend/next.config.ts	ce3ed2cdd54bd5dc01fe3d1207b5ba1aad5c14ba373c63d5dffe2de05ee9d4b9
+../frontend/next.config.ts	e61fc77798d0202dbf4ed58555cfead278eec3fc9fb2ccb7c998a018fb8da343
 build.gradle	f3f8537d099ec7bd06bd691c3d2723c03b6f330ba21f68d480a8277b8d754a5d
 src/main/java/ooo/klae/connex/backend/ai/AiBudgetControlAccess.java	fcc5f6751f1678b33f54198095adff37b4126717ae7813093a31d067f3c6e1e7
 src/main/java/ooo/klae/connex/backend/ai/AiBudgetControlOperations.java	33f580c9fb3f51439d7359bf8d2f433f091ec91f72d35b79860f52347e1018f8
@@ -707,7 +707,7 @@ src/main/java/ooo/klae/connex/backend/services/WorkflowVersionProjection.java	50
 src/main/java/ooo/klae/connex/backend/services/WorkflowWorkClaim.java	aa805aecfee254c3bc472b906bd2298ba824998cef4908cd170cd738a159505c
 src/main/java/ooo/klae/connex/backend/services/WorkspaceMailConfigService.java	62086182e51e1821f2cbfb981fc8a3019634d80da0791b0407df3bba21a262f0
 src/main/java/ooo/klae/connex/backend/services/WorkspaceMembershipRemovalTransaction.java	ab79926dd5879bfb2729380769e519613aead506a50fb32a8a9d54d57fb58f61
-src/main/java/ooo/klae/connex/backend/services/WorkspaceService.java	5345faf33add82664059f19ee8f4303cfd7ae232f6d9ba5f304a278ace125726
+src/main/java/ooo/klae/connex/backend/services/WorkspaceService.java	2218e141c6184327d0ec83cd21ca9d9b24f7d3da9e0bc6ec40345fbc55e0bdcc
 src/main/java/ooo/klae/connex/backend/session/AccountSessionIndex.java	afe8ee5be8a5b6a19dd6223164ce32258f21ef9f2a910c48b623c1aa70c50a02
 src/main/java/ooo/klae/connex/backend/session/AccountSessionIndexResolver.java	5b9a940d1315d150c58f7ec92c7bf7b2d9c4999c8b63fc5ec65f92af1589b164
 src/main/java/ooo/klae/connex/backend/session/SessionEpochRestampGrant.java	7ec32a297ab11f2896cd15e048727f19968f5b65c4fb91d3968114d96ae72262
