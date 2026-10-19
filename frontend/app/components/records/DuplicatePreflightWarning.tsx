@@ -8,6 +8,8 @@ import type {
     DuplicateCandidate,
     DuplicatePreflightResponse,
 } from '@/app/lib/types';
+import type { ApiError } from '@/app/lib/api';
+import { workspaceUnavailableDescription } from '@/app/lib/errorMessages';
 import type {
     DuplicatePreflightKind,
     DuplicatePreflightStatus,
@@ -33,6 +35,8 @@ function context(candidate: DuplicateCandidate): string[] {
 
 /**
  * Shows canonical duplicate evidence and requires an explicit acknowledgement before a new record is created.
+ * When the check failed because the workspace the form belongs to is no longer available, it says so
+ * in place of the retry, which could only fail again (#1732).
  */
 export default function DuplicatePreflightWarning({
     id,
@@ -43,11 +47,13 @@ export default function DuplicatePreflightWarning({
     onAcknowledgedChange,
     onRetry,
     personResolution,
+    workspaceRefusal = null,
 }: {
     id?: string;
     kind: DuplicatePreflightKind;
     status: DuplicatePreflightStatus;
     response: DuplicatePreflightResponse | null;
+    workspaceRefusal?: ApiError | null;
     acknowledged?: boolean;
     onAcknowledgedChange?: (checked: boolean) => void;
     onRetry?: () => void;
@@ -58,10 +64,15 @@ export default function DuplicatePreflightWarning({
     };
 }) {
     const t = useTranslations('DuplicateWarning');
+    const tRoot = useTranslations();
 
     if (status === 'idle') return null;
     if (status === 'checking') {
         return <p id={id} className="text-xs text-muted-foreground" role="status">{t('checking')}</p>;
+    }
+    const workspaceMessage = status === 'error' ? workspaceUnavailableDescription(workspaceRefusal, tRoot) : null;
+    if (workspaceMessage !== null) {
+        return <p id={id} className="text-xs text-destructive" role="alert">{workspaceMessage}</p>;
     }
     if (status === 'error') {
         return (

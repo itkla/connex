@@ -242,7 +242,8 @@ describe('the provider guards the Retry callback', () => {
             await act(async () => { drawer().onRetryTurn(); });
             expect(startAiChatTurn).toHaveBeenCalledExactlyOnceWith(4, expect.objectContaining({
                 content: QUESTION,
-            }));
+            }), { headers: expect.any(Headers) });
+            expect(new Headers(vi.mocked(startAiChatTurn).mock.calls[0]?.[2]?.headers).get('X-Workspace-Id')).toBe('7');
         } finally {
             await act(async () => { root.unmount(); });
         }

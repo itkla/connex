@@ -26,6 +26,8 @@ import {
 import { cn } from '@/lib/utils';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { isWorkspaceUnavailableError } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 
 type Props = {
@@ -33,8 +35,14 @@ type Props = {
     onOpenChange: (open: boolean) => void;
 };
 
+/**
+ * Creates a workspace from the shell. When the workspace on screen is no longer available to the
+ * viewer, creation is refused rather than placed in another organization (#1732); the dialog says
+ * which workspace is gone and keeps the typed name.
+ */
 export default function NewWorkspaceDialog({ open, onOpenChange }: Props) {
     const t = useTranslations('WorkspaceSwitcher');
+    const showApiError = useApiErrorToast('WorkspaceSwitcher');
     const { create } = useWorkspace();
     const { fieldErrors, setFieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } =
         useFieldErrors();
@@ -83,7 +91,8 @@ export default function NewWorkspaceDialog({ open, onOpenChange }: Props) {
             setTimeout(() => onOpenChange(false), 900);
         } catch (err) {
             setIsCreating(false);
-            if (!captureFieldErrors(err)) toastError(t('createFailed'));
+            if (isWorkspaceUnavailableError(err)) showApiError(err, 'createFailed');
+            else if (!captureFieldErrors(err)) toastError(t('createFailed'));
             focusName();
         }
     };
