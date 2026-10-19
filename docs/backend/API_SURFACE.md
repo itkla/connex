@@ -77,6 +77,20 @@ non-CORS requests. This is not an end-to-end token, tenant-interceptor, provider
 SSO ceremony test. `/api/v1` and framework protocol routes retain their dedicated tests and are not
 counted by this sentinel test. No alternate port, proxy deployment, or production traffic is tested.
 
+## Global search group selection
+
+`GET /api/search?query=...` accepts optional `types` as repeated parameters, comma-separated
+values, or both. Names are case-sensitive and match the response properties: `companies`,
+`people`, `deals`, `pipelines`, `tags`, `activities`, `notes`, `tasks`, `users`, `attachments`,
+`products`, `campaigns`, `reports`, `documentTemplates`, `documents`, and `workflows`.
+Whitespace is trimmed, duplicates and blank entries are ignored, and an unknown name or a
+selection with no remaining names returns the existing HTTP 400 code/message error shape.
+
+Omitting `types` searches every group as before. The response always retains all 16 arrays;
+unselected groups are empty and perform no mapper queries or reference hydration. Selected
+groups keep their existing workspace scope and permission gates; unreadable groups remain empty.
+For example, `types=companies,people&types=products` searches those three groups only.
+
 ## Lifecycle
 
 The endpoint's domain maintainer owns compatibility and migration; Backend maintainers are the
