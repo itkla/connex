@@ -553,7 +553,6 @@ class ScoringServiceTest {
         verifyNoInteractions(activityMapper, taskMapper);
         verify(noteMapper, never()).getAllNotes(anyInt());
         verify(noteMapper, never()).getNotesByPersonIds(anyInt(), anyList());
-        verify(noteMapper, never()).getWorkspaceNotesByCompanyIds(anyInt(), anyList());
     }
 
     @Test

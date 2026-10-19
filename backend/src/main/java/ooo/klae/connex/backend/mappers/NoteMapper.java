@@ -126,8 +126,6 @@ public interface NoteMapper {
             @Param("organizationWorkspaceIds") List<Integer> organizationWorkspaceIds,
             @Param("limit") int limit, @Param("includePrivateNotes") boolean includePrivateNotes);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
-    List<Note> getWorkspaceNotesByCompanyIds(@Param("workspaceId") int workspaceId,
-            @Param("companyIds") List<Integer> companyIds);
     int countOwnPrivateNotesForPersonEvidence(
             @Param("workspaceId") int workspaceId,
             @Param("personId") int personId,
