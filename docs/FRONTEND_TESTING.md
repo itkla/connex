@@ -34,6 +34,28 @@ First run only: `node_modules/.bin/playwright install chromium` — Chromium is 
 
 Useful selections: `playwright test --project=mobile-chromium` (phone viewport only), `playwright test --grep @mobile`, `playwright test locale-ja.spec.ts`.
 
+`connected-capture.spec.ts` can run without the backend or auth bootstrap. Its test-only fixture
+starts the real Next.js app against a stub API; a per-test `e2e_capture` cookie switches the
+server-rendered capability on or off. Browser route mocks own the capture responses and validate
+mutation bodies. The fixture requires a production frontend build and fails before starting Next.js
+when `BUILD_ID` is missing.
+
+```bash
+pnpm build
+pnpm exec playwright test connected-capture.spec.ts --no-deps
+```
+
+The screenshot matrix is excluded from the default e2e configuration. Its chart-readiness regression
+spec uses browser-rendered SVG fixtures and needs no stack or seeded identities:
+
+```bash
+pnpm exec playwright test --config=playwright.matrix.config.ts chart-readiness.spec.ts --project=matrix --no-deps
+```
+
+The full matrix runs with `pnpm exec playwright test --config=playwright.matrix.config.ts` and requires
+the production frontend, seeded backend, and fault proxy described by `test/e2e/matrix/matrix.setup.ts`.
+Set `PLAYWRIGHT_BROWSERS_PATH` when Chromium is installed outside Playwright's default cache.
+
 ## How auth bootstrap works
 
 The core flow specs do not rely on pre-seeded credentials. The `setup-desktop` and `setup-mobile` projects (`frontend/test/e2e/global.setup.ts`) each provision an isolated tenant:
