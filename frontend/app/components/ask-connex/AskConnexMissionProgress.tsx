@@ -10,6 +10,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import type { AskConnexMissionProblem } from '@/app/lib/askConnexMissions';
 import type { AiAgentOutput, AiAgentRun, AiAgentRunControl } from '@/app/lib/types';
 
+const CONTROLS: readonly AiAgentRunControl[] = ['pause', 'resume', 'cancel'];
+
 /** Minimal owner-visible progress within the existing session, backed by durable mission state. */
 export default function AskConnexMissionProgress({
     runs, loading, problem, pendingId, output, hasMore, onControl, onOutput, onCloseOutput, onRetry, onMore,
@@ -28,7 +30,6 @@ export default function AskConnexMissionProgress({
 }) {
     const t = useTranslations('AskConnex.missions');
     if (!loading && runs.length === 0 && problem === null) return null;
-    const controls: AiAgentRunControl[] = ['pause', 'resume', 'cancel'];
     return (
         <section aria-label={t('title')} className="space-y-3 border-b border-border pb-4">
             {loading ? <Skeleton className="h-12 w-full rounded-lg" /> : null}
@@ -54,12 +55,12 @@ export default function AskConnexMissionProgress({
                         <p className="text-xs text-muted-foreground">{t('pausedHelp')}</p>
                     ) : null}
                     <div className="flex flex-wrap gap-2">
-                        {controls.filter((action) => run.availableActions.includes(action)).map((action) => (
+                        {CONTROLS.map((action) => run.availableActions.includes(action) ? (
                             <Button key={action} type="button" variant="outline" size="inline"
                                 disabled={pendingId !== null} onClick={() => onControl(run, action)}>
                                 {t(`controls.${action}`)}
                             </Button>
-                        ))}
+                        ) : null)}
                         {run.outputAvailable && !run.contentWithheld && run.availableActions.includes('view_output') ? (
                             <Button type="button" variant="secondary" size="inline" disabled={pendingId !== null}
                                 onClick={() => onOutput(run)}>{t('viewOutput')}</Button>

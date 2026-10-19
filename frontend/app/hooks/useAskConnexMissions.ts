@@ -20,8 +20,13 @@ type MissionSnapshot = {
 };
 
 function activeMissionRevision(runs: readonly AiAgentRun[]): string {
-    return runs.filter((run) => !run.contentWithheld && (run.state === 'queued' || run.state === 'running'))
-        .map((run) => `${run.id}:${run.state}:${run.stateVersion}`).join(',');
+    const revisions: string[] = [];
+    for (const run of runs) {
+        if (!run.contentWithheld && (run.state === 'queued' || run.state === 'running')) {
+            revisions.push(`${run.id}:${run.state}:${run.stateVersion}`);
+        }
+    }
+    return revisions.join(',');
 }
 
 /**

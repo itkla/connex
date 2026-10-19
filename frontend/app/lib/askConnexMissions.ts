@@ -55,11 +55,18 @@ export function reconcileAskConnexDurableMessages(
     durable: AiChatMessage[],
     animate: boolean,
 ): { messages: AiChatMessage[]; freshMessageIds: ReadonlySet<number> } {
-    const known = new Set(previous.filter((message) => message.id > 0)
-        .map((message) => `${message.seq}:${message.authorKind}:${message.content}`));
+    const known = new Set<string>();
+    for (const message of previous) {
+        if (message.id > 0) known.add(`${message.seq}:${message.authorKind}:${message.content}`);
+    }
+    const freshMessageIds = new Set<number>();
+    if (animate) {
+        for (const message of durable) {
+            if (!known.has(`${message.seq}:${message.authorKind}:${message.content}`)) freshMessageIds.add(message.id);
+        }
+    }
     return {
         messages: durable,
-        freshMessageIds: new Set(animate ? durable.filter((message) =>
-            !known.has(`${message.seq}:${message.authorKind}:${message.content}`)).map((message) => message.id) : []),
+        freshMessageIds,
     };
 }
