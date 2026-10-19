@@ -283,7 +283,7 @@ public class AiAssistantHistoryService {
             if (content == null || content.isBlank()) {
                 continue;
             }
-            for (ReferenceService.MemberReference member : ReferenceService.memberReferencesInContent(content)) {
+            for (ReferenceService.MemberReference member : ReferenceService.memberReferenceReading(content).references()) {
                 labels.computeIfAbsent(member.label(), label -> {
                     EntityReference candidate = new EntityReference();
                     candidate.setRefType("user");

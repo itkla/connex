@@ -23,6 +23,9 @@ concurrency:
 
 jobs:
   metadata:
+    concurrency:
+      group: vulnerability-sla
+      cancel-in-progress: false
     name: Resolve release metadata
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -875,6 +878,9 @@ jobs:
         run: docker compose down -v --remove-orphans || true
 
   promote:
+    concurrency:
+      group: vulnerability-sla
+      cancel-in-progress: false
     name: Promote immutable release tags
     needs: [metadata, candidate-images, release-set-smoke]
     if: ${{ always() && needs.metadata.outputs.release_mode == 'publish' && needs.metadata.result == 'success' && (needs.metadata.outputs.transaction_exists == 'true' || needs['release-set-smoke'].result == 'success') }}
@@ -1079,11 +1085,14 @@ jobs:
           done
 
   release:
+    concurrency:
+      group: vulnerability-sla
+      cancel-in-progress: false
     name: Publish GitHub Release
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: [metadata, promote]
-    if: ${{ needs.metadata.outputs.release_mode == 'publish' }}
+    if: ${{ needs.metadata.outputs.release_mode == 'publish' && needs.metadata.result == 'success' && needs.promote.result == 'success' }}
     permissions:
       issues: write
       contents: write
