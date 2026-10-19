@@ -92,6 +92,7 @@ class AiAssistantPrivacyLockOrderIntegrationTest extends AbstractAiAgentPrivacyI
         ToolFixture fixture = authenticated(writer, () -> proposal(approval));
         authenticateAs(currentUser, workspace.getId());
         AiChatSession admissionSession = session(writer, "shared");
+        chatMapper.insertParticipant(workspace.getId(), admissionSession.getId(), currentUser.getId());
         long epoch = epochs.current(workspace.getId());
         AiChatMapper realChat = sqlSessions.getMapper(AiChatMapper.class);
         AiAgentPrivacyMapper realPrivacy = sqlSessions.getMapper(AiAgentPrivacyMapper.class);

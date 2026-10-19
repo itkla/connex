@@ -373,7 +373,8 @@ public class UserOffboardingService {
      * record-comment authorship, creation, redaction, and resolution provenance, task assignment, uploader,
      * notification actor, report and campaign actors, rule principals,
      * consent/suppression actors, share grantors, and team managers).
-     * Statements are grouped deletes-then-nulls for readability except that affected team
+     * Chat provenance is cleared before participant and domain mutations so session, tool, and turn
+     * locks precede domain roots and the trailing mission privacy invalidation. Affected team
      * parents are locked in deterministic order before team seats are deleted and manager
      * references are cleared. Must run inside the caller's deletion transaction.
      * Surviving goal creators are cleared, while decisions and appended assignment history remain.
@@ -419,6 +420,10 @@ public class UserOffboardingService {
         dealDuplicateReviewProofMapper.deleteForActorAnywhere(userId);
         duplicateReviewMapper.clearDismissedByAnywhere(userId);
         userDashboardMapper.deleteForUserAnywhere(userId);
+        aiChatMapper.clearSessionCreatorsAnywhere(userId);
+        aiChatMapper.clearMessageAuthorsAnywhere(userId);
+        aiChatMapper.clearToolCallExecutorsAnywhere(userId);
+        aiChatMapper.clearTurnRequestersAnywhere(userId);
         aiChatMapper.deleteParticipantsForUserAnywhere(userId);
         aiChatMapper.clearParticipantInvitersAnywhere(userId);
         aiBriefScheduleMapper.deleteForUserAnywhere(userId);
@@ -437,10 +442,6 @@ public class UserOffboardingService {
         personLifecyclePassMapper.clearOwnerAnywhere(userId);
         dealMapper.clearOwnershipAnywhere(userId);
         recordCreationTemplateMapper.clearUserReferencesAnywhere(userId);
-        aiChatMapper.clearSessionCreatorsAnywhere(userId);
-        aiChatMapper.clearMessageAuthorsAnywhere(userId);
-        aiChatMapper.clearToolCallExecutorsAnywhere(userId);
-        aiChatMapper.clearTurnRequestersAnywhere(userId);
         recordCommentMapper.clearAuthorsAnywhere(userId);
         recordCommentMapper.clearDeletersAnywhere(userId);
         recordCommentMapper.clearThreadCreatorsAnywhere(userId);
