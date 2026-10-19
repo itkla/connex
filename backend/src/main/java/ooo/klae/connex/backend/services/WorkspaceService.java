@@ -436,7 +436,9 @@ public class WorkspaceService {
      * The active workspace's organization when the resolved tenant context belongs
      * to {@code creatorUserId} and their effective permissions there include
      * {@link Permission#WORKSPACE_SETTINGS}, or null when no such administrative
-     * context applies.
+     * context applies. Revalidates membership under the creator's already-held shared account
+     * lock, which membership removal acquires exclusively, so revocation after request resolution
+     * refuses provisioning instead of falling through to a fresh organization.
      */
     private Integer activeOrgIdIfAdministrator(int creatorUserId) {
         if (!tenantContext.isResolved()) {
@@ -447,8 +449,13 @@ public class WorkspaceService {
             return null;
         }
         Integer workspaceId = tenantContext.getWorkspaceId();
-        if (workspaceId == null
-                || !permissionsFor(workspaceId, creatorUserId).contains(Permission.WORKSPACE_SETTINGS)) {
+        if (workspaceId == null) {
+            return null;
+        }
+        if (getRole(workspaceId, creatorUserId) == null) {
+            throw new ForbiddenException("Not a member of workspace " + workspaceId);
+        }
+        if (!permissionsFor(workspaceId, creatorUserId).contains(Permission.WORKSPACE_SETTINGS)) {
             return null;
         }
         return tenantContext.getOrgId();
@@ -1480,6 +1487,53 @@ public class WorkspaceService {
 
     public List<User> getMembers(int workspaceId) {
         return workspaceMapper.getMembers(workspaceId);
+    }
+
+    /**
+     * Reads advisory document-approval candidates in three batch queries, independent of roster
+     * size. Unknown roles grant nothing on this path; other permission resolvers retain their
+     * existing behavior. The caller supplies the server-resolved workspace and enforces management
+     * permission before exposing the resulting identity projection.
+     */
+    List<User> documentApprovalCandidateMembers(int workspaceId) {
+        List<MemberDto> members = workspaceMapper.getMembersWithRoles(workspaceId).stream()
+            .filter(member -> "active".equals(member.getStatus())).toList();
+        if (members.isEmpty()) {
+            return List.of();
+        }
+        Map<Integer, Set<Permission>> rolePermissions = new LinkedHashMap<>();
+        for (WorkspaceRole role : roleMapper.findAuthorityRolesByWorkspace(workspaceId)) {
+            rolePermissions.put(role.getId(), parsePermissions(role.getPermissions()));
+        }
+        Set<Integer> reserved = Set.copyOf(userMapper.findAccountDeletionReservedIds(
+            members.stream().map(MemberDto::getId).toList()));
+        return members.stream()
+            .filter(member -> !reserved.contains(member.getId()))
+            .filter(member -> candidateCanApprove(member, rolePermissions))
+            .map(member -> {
+                User user = new User();
+                user.setId(member.getId());
+                user.setUsername(member.getUsername());
+                user.setDisplayName(member.getDisplayName());
+                user.setEmail(member.getEmail());
+                return user;
+            }).toList();
+    }
+
+    private boolean candidateCanApprove(MemberDto member, Map<Integer, Set<Permission>> rolePermissions) {
+        if (member.getRoleId() != null) {
+            return rolePermissions.getOrDefault(member.getRoleId(), Set.of())
+                .contains(Permission.DOCUMENT_APPROVE);
+        }
+        String builtInRole = member.getBuiltInRole();
+        if (builtInRole != null) {
+            for (Role role : Role.values()) {
+                if (role.name().equalsIgnoreCase(builtInRole.trim())) {
+                    return builtInPermissions(role).contains(Permission.DOCUMENT_APPROVE);
+                }
+            }
+        }
+        return false;
     }
 
     /** Lists the workspace's members with their roles. Visible to any member. */

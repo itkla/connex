@@ -59,6 +59,12 @@ Location. Same-key replay preserves the original run and deadline; a changed bod
 and a consumed purged key returns 410. Controls require the decimal-string state version.
 Create bodies are capped at 96 KiB; control and DSR initiation bodies at 4 KiB.
 
+Browser mission creation and controls pin `X-Workspace-Id` to the rendered workspace,
+including creation delayed by chat-session provisioning. The shared tenant interceptor
+validates that pin; a workspace refusal preserves the goal and never resubmits into a
+healed cookie selection. Organization-wide DSR initiation and progress retain the
+organization-route selection contract and authorize the organization named in the path.
+
 List/detail/output/control APIs require current requester membership, AI permission, and
 session access including an active session creator. They never grant the session creator
 control over another requester's mission. Withheld projections expose metadata and safe

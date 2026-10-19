@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.verifyNoInteractions;
 
@@ -13,12 +14,16 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import ooo.klae.connex.backend.ai.AiFeatureGate;
 import ooo.klae.connex.backend.ai.AiGenerationService;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantTurnService;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog;
+import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatSession;
+import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.AiChatTurn;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.beans.WorkspaceRole;
 import ooo.klae.connex.backend.dto.AiChatTurnCreateRequest;
+import ooo.klae.connex.backend.dto.AiChatTurnToolCallDto;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -29,6 +34,7 @@ class AiAssistantTurnAuthorizationTest extends AbstractServiceTest {
     private static final String INACCESSIBLE = "AI assistant session is not accessible";
 
     @Autowired private AiAssistantTurnService turnService;
+    @Autowired private AiAssistantService assistantService;
     @Autowired private AiChatMapper chatMapper;
     @Autowired private RoleMapper roleMapper;
     @MockitoBean private AiFeatureGate featureGate;
@@ -45,6 +51,7 @@ class AiAssistantTurnAuthorizationTest extends AbstractServiceTest {
 
         assertThrows(ForbiddenException.class, () ->
                 turnService.start(session.getId(), request("Blocked")));
+        assertThrows(ForbiddenException.class, () -> turnService.get(session.getId(), 1));
 
         assertEquals(0, chatMapper.countMessages(workspace.getId(), session.getId()));
         assertEquals(0, chatMapper.countActiveTurns(workspace.getId(), session.getId()));
@@ -67,7 +74,50 @@ class AiAssistantTurnAuthorizationTest extends AbstractServiceTest {
                 () -> turnService.start(session.getId(), request("Cross tenant")));
 
         assertEquals(INACCESSIBLE, inaccessible.getMessage());
+        assertThrows(ResourceNotFoundException.class, () -> turnService.get(session.getId(), 1));
         verifyNoInteractions(generationService);
+    }
+
+    @Test
+    void bothTurnResponsePathsExposeToolTiersOnlyToTheRequesterRatherThanTheSessionOwner() {
+        AiChatSession session = session(currentUser, workspace);
+        chatMapper.updateSession(workspace.getId(), session.getId(), null, null, "shared");
+        User requester = newUser();
+        workspaceMapper.updateMemberRole(workspace.getId(), requester.getId(), "admin");
+        chatMapper.insertParticipant(workspace.getId(), session.getId(), requester.getId());
+        AiChatTurn turn = new AiChatTurn();
+        turn.setWorkspaceId(workspace.getId());
+        turn.setSessionId(session.getId());
+        turn.setRequestedByUserId(requester.getId());
+        turn.setStatus("running");
+        chatMapper.insertTurn(turn);
+        AiChatMessage message = new AiChatMessage();
+        message.setWorkspaceId(workspace.getId());
+        message.setSessionId(session.getId());
+        message.setSeq(1);
+        message.setAuthorKind("user");
+        message.setAuthorUserId(requester.getId());
+        message.setContent("Read tasks");
+        chatMapper.insertMessage(message);
+        AiChatToolCall call = new AiChatToolCall();
+        call.setWorkspaceId(workspace.getId());
+        call.setMessageId(message.getId());
+        call.setToolName("list_tasks");
+        call.setStatus("executed");
+        call.setIdempotencyKey("turn-" + turn.getId() + "-step-1");
+        chatMapper.insertToolCall(call);
+
+        assertNull(turnService.get(session.getId(), turn.getId()).toolCalls());
+        assertNull(assistantService.get(session.getId(), 1, 50).activeTurn().toolCalls());
+
+        authenticateAs(requester, workspace.getId());
+        var expected = List.of(new AiChatTurnToolCallDto(
+                "list_tasks", AiAssistantToolCatalog.ToolTier.READ, "executed"));
+        assertEquals(expected, turnService.get(session.getId(), turn.getId()).toolCalls());
+        assertEquals(expected, assistantService.get(session.getId(), 1, 50).activeTurn().toolCalls());
+        chatMapper.updateTurnTerminal(workspace.getId(), session.getId(), turn.getId(),
+                "timed_out", "turn_deadline_exceeded", "running", null);
+        assertEquals(expected, turnService.get(session.getId(), turn.getId()).toolCalls());
     }
 
     @Test

@@ -4,17 +4,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installInteractiveDocument } from '@/test/unit/helpers/interactiveDocument';
 import type { AiAgentOutput, AiAgentRun, AiAgentRunCreateRequest, AiAgentRunPage } from '@/app/lib/types';
 import { useAskConnexMissions } from '@/app/hooks/useAskConnexMissions';
+import { ApiError } from '@/app/lib/api';
+import { bindRenderedWorkspace, releaseRenderedWorkspace } from '@/app/lib/renderedWorkspace';
 
 const api = vi.hoisted(() => ({
     getAiAgentRuns: vi.fn<(params: { sessionId?: number }, init: RequestInit) => Promise<AiAgentRunPage>>(),
     createAiAgentRun: vi.fn<(id: number, body: AiAgentRunCreateRequest, init: RequestInit) => Promise<AiAgentRun>>(),
     getAiAgentRun: vi.fn<() => Promise<AiAgentRun>>(),
     getAiAgentOutput: vi.fn<() => Promise<AiAgentOutput>>(),
-    controlAiAgentRun: vi.fn<() => Promise<AiAgentRun>>(),
+    controlAiAgentRun: vi.fn<(id: number, action: string, version: string, init: RequestInit) => Promise<AiAgentRun>>(),
+    showApiError: vi.fn(),
 }));
 
+vi.mock('@/app/hooks/useApiErrorToast', () => ({ useApiErrorToast: () => api.showApiError }));
 vi.mock('@/app/lib/api', () => ({
     ...api,
+    isWorkspaceUnavailableError: (error: unknown) => error instanceof Error && 'code' in error
+        && error.code === 'WORKSPACE_UNAVAILABLE',
     ApiError: class extends Error {
         constructor(message: string, public status: number, public code?: string) { super(message); }
     },
@@ -50,7 +56,7 @@ async function mount() {
     const changed = vi.fn();
     const invalidated = vi.fn();
     function Harness({ identity, refreshVersion, contentVersion }: { identity: string; refreshVersion: number; contentVersion: number }) {
-        value = useAskConnexMissions({ identity, sessionId: 7, enabled: true, visible: true, refreshVersion,
+        value = useAskConnexMissions({ identity, workspaceId: 9, sessionId: 7, enabled: true, visible: true, refreshVersion,
             contentVersion, onChanged: changed, onContentInvalidated: invalidated });
         return null;
     }
@@ -205,6 +211,46 @@ describe('Ask Connex durable mission state', () => {
         await act(async () => { response.resolve(run()); await retry; });
         expect(mounted.current().runs).toHaveLength(1);
         await mounted.unmount();
+    });
+
+    it('pins delayed creation and controls to their content workspace after the shell selection changes', async () => {
+        api.getAiAgentRuns.mockResolvedValue({ items: [run()], nextCursor: null });
+        api.createAiAgentRun.mockResolvedValue(run());
+        api.controlAiAgentRun.mockResolvedValue(run({ state: 'paused', stateVersion: '2' }));
+        const mounted = await mount();
+        const shell = {};
+        try {
+            const create = mounted.current().create;
+            const control = mounted.current().control;
+            bindRenderedWorkspace(shell, 5);
+            await act(async () => { await create(7, 'Review', { kind: 'record', recordKind: 'person', recordId: 4 }); });
+            await act(async () => { await control(run(), 'pause'); });
+            expect(new Headers(api.createAiAgentRun.mock.calls[0]?.[2].headers).get('X-Workspace-Id')).toBe('9');
+            expect(new Headers(api.controlAiAgentRun.mock.calls[0]?.[3].headers).get('X-Workspace-Id')).toBe('9');
+        } finally {
+            releaseRenderedWorkspace(shell);
+            await mounted.unmount();
+        }
+    });
+
+    it.each(['create', 'control'] as const)('reports a refused %s workspace without resubmitting the mutation', async (action) => {
+        api.getAiAgentRuns.mockResolvedValue({ items: [run()], nextCursor: null });
+        const error = new ApiError('Not a member of workspace 9', 403, 'WORKSPACE_UNAVAILABLE');
+        const mounted = await mount();
+        try {
+            if (action === 'create') {
+                api.createAiAgentRun.mockRejectedValueOnce(error);
+                await act(async () => { await mounted.current().create(7, 'Review', { kind: 'record', recordKind: 'person', recordId: 4 }); });
+                expect(api.createAiAgentRun).toHaveBeenCalledOnce();
+            } else {
+                api.controlAiAgentRun.mockRejectedValueOnce(error);
+                await act(async () => { await mounted.current().control(run(), 'pause'); });
+                expect(api.controlAiAgentRun).toHaveBeenCalledOnce();
+            }
+            expect(api.showApiError).toHaveBeenCalledExactlyOnceWith(error);
+        } finally {
+            await mounted.unmount();
+        }
     });
 
     it('does not restore a suspended output response after privacy withholding is refreshed', async () => {

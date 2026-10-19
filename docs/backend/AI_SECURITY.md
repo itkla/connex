@@ -766,6 +766,29 @@ Native assistant tools are capability-declared transport choices, not a second a
 - A provider without native-tool capability retains the existing ReAct protocol; do not silently change its prompt/request semantics.
 - Each tool step executes as the member who authored that turn.
 - Shared transcript access requires joined membership in the same workspace.
+- Durable turn responses include requester-only `toolCalls` execution evidence: the tool key,
+  its current authoritative `AiAssistantToolCatalog.ToolTier` (null for unknown tools), and its
+  durable status. `AiChatProgressService.projectTurn` derives this and progress from one query
+  bounded by `MAX_TOOL_CALL_ROWS_PER_TURN`; no arguments, results, or record identifiers enter
+  the projection. `AiChatTurnDto` applies the same requester identity check as partial text and
+  detailed progress, returning null for shared viewers. Retry still requires settled progress
+  and transcript reconciliation. Every projected call must be READ-tier or a write proposal in a
+  server-guaranteed terminal non-executable state (`rejected` or `expired`). Still-`proposed`,
+  pending, failed or unknown write outcomes, unknown tiers and absent projections fail closed.
+  A review deadline or derived `reviewState: expired` is insufficient: the current server keeps
+  the durable status `proposed`, and an action admitted before expiry may still commit afterward.
+  New approvals after the deadline are refused at the final mutation boundary by
+  `AiAssistantWriteToolService.ProposalAdmission.beforeMutation`; durable rejected rows also fail
+  approval's locked `requireStatus(PROPOSED)` check. No client read can invalidate a live proposal.
+- The client re-reads a bound failed turn's projection during transcript reconciliation and after
+  approval; polling stopping at the turn's terminal state does not freeze proposal outcomes.
+  Observed executed writes are retained for that turn across bounded card and projection refreshes.
+  Pending or failed execution-evidence refreshes cannot authorize Retry from a cached proposal.
+  Approval settlement invalidates outstanding transcript refreshes so a delayed pre-approval
+  projection cannot replace the execution evidence after an unknown approval response.
+  The Retry callback also revalidates the bound turn's projection and cards immediately before
+  submission, regardless of realtime notifications. Only fresh `none` evidence can submit;
+  failed reads, committed writes, and unknown proposal outcomes refuse and update client state.
 - Citations are re-authorized and filtered per viewer.
 - Realtime fanout resolves current joined recipients after commit; cached/caller-supplied recipient sets are not authorization.
 - Presence/typing signals are bounded ephemeral hints and never authorization evidence.

@@ -46,6 +46,45 @@ describe('Ask Connex mission API contracts', () => {
         expect(mutations[1]).toMatchObject({ url: '/api/ai/assistant/missions/12/pause', body: { expectedStateVersion: '9007199254740993' }, csrf: 'csrf' });
     });
 
+    it('pins mission writes to the rendered workspace while organization purge follows the cookie', async () => {
+        const requests = backend();
+        const { createAiAgentRun, controlAiAgentRun, purgeAiAgentHoldings } = await import('@/app/lib/api');
+        const { bindRenderedWorkspace, releaseRenderedWorkspace } = await import('@/app/lib/renderedWorkspace');
+        const shell = {};
+        bindRenderedWorkspace(shell, 9);
+        try {
+            await createAiAgentRun(7, { clientRequestKey: crypto.randomUUID(), missionType: 'record_review_v1',
+                goal: 'Review', scope: { kind: 'record', recordKind: 'person', recordId: 123 } });
+            for (const action of ['pause', 'resume', 'cancel'] as const) await controlAiAgentRun(12, action, '1');
+            await purgeAiAgentHoldings(3, 41, { idempotencyKey: crypto.randomUUID(), snapshotToken: 'dsr1.snapshot',
+                scopeAcknowledgement: 'organization_mission_holdings_v1',
+                cutoffPolicyAcknowledgement: 'contents_at_each_workspace_first_invalidation_v1' });
+            const mutations = requests.filter((item) => item.method === 'POST');
+            expect(mutations.map((item) => item.workspace)).toEqual(['9', '9', '9', '9', '5']);
+        } finally {
+            releaseRenderedWorkspace(shell);
+        }
+    });
+
+    it('reports mission workspace refusal without replaying against a healed cookie', async () => {
+        const requests = backend(() => json({ code: 'FORBIDDEN', message: 'Not a member of workspace 9' }, 403));
+        const { createAiAgentRun, isWorkspaceUnavailableError } = await import('@/app/lib/api');
+        const { bindRenderedWorkspace, releaseRenderedWorkspace } = await import('@/app/lib/renderedWorkspace');
+        const shell = {};
+        bindRenderedWorkspace(shell, 9);
+        try {
+            const failure: unknown = await createAiAgentRun(7, { clientRequestKey: crypto.randomUUID(),
+                missionType: 'record_review_v1', goal: 'Review',
+                scope: { kind: 'record', recordKind: 'person', recordId: 123 } }).catch((error: unknown) => error);
+            expect(isWorkspaceUnavailableError(failure)).toBe(true);
+            expect(requests.filter((item) => item.method === 'POST')).toEqual([
+                expect.objectContaining({ url: '/api/ai/assistant/sessions/7/missions', workspace: '9' }),
+            ]);
+        } finally {
+            releaseRenderedWorkspace(shell);
+        }
+    });
+
     it('loads list, detail and output independently of transcript and tool limits', async () => {
         const requests = backend();
         const { getAiAgentRuns, getAiAgentRun, getAiAgentOutput } = await import('@/app/lib/api');

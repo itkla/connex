@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { ApiError, controlAiAgentRun, createAiAgentRun, getAiAgentOutput, getAiAgentRun, getAiAgentRuns } from '@/app/lib/api';
+import { ApiError, controlAiAgentRun, createAiAgentRun, getAiAgentOutput, getAiAgentRun, getAiAgentRuns, isWorkspaceUnavailableError } from '@/app/lib/api';
 import { askConnexMissionProblem, newerAskConnexMission, type AskConnexMissionProblem } from '@/app/lib/askConnexMissions';
+import { workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import type { AiAgentOutput, AiAgentRecordScope, AiAgentRun, AiAgentRunControl, AiAgentRunCreateRequest } from '@/app/lib/types';
 
 const REFRESH_INTERVAL_MS = 5_000;
@@ -34,9 +36,10 @@ function activeMissionRevision(runs: readonly AiAgentRun[]): string {
  * Entry and realtime invalidations reload once; only active missions poll, with bounded backoff.
  */
 export function useAskConnexMissions({
-    identity, sessionId, enabled, visible, refreshVersion, contentVersion = 0, onChanged, onContentInvalidated,
+    identity, workspaceId, sessionId, enabled, visible, refreshVersion, contentVersion = 0, onChanged, onContentInvalidated,
 }: {
     identity: string;
+    workspaceId: number | null;
     sessionId: number | null;
     enabled: boolean;
     visible: boolean;
@@ -47,6 +50,7 @@ export function useAskConnexMissions({
     /** Withdraws other session projections when canonical mission state loses readable content. */
     onContentInvalidated?: (sessionId: number) => void;
 }) {
+    const showApiError = useApiErrorToast('AskConnex');
     const key = `${identity}:${sessionId ?? 'new'}:${contentVersion}`;
     const [snapshot, setSnapshot] = useState<MissionSnapshot | null>(null);
     const [reload, setReload] = useState(0);
@@ -178,7 +182,7 @@ export function useAskConnexMissions({
         operationRef.current = true;
         setSnapshot((value) => value?.key === key ? { ...value, pendingId: 0, problem: null } : value);
         try {
-            const run = await createAiAgentRun(targetSessionId, body, { signal });
+            const run = await createAiAgentRun(targetSessionId, body, workspacePinnedRequest(workspaceId, { signal }));
             if (signal.aborted) return false;
             refreshRef.current++;
             creationRef.current = null;
@@ -186,6 +190,7 @@ export function useAskConnexMissions({
             changedRef.current(targetSessionId);
             return true;
         } catch (error) {
+            if (!signal.aborted && isWorkspaceUnavailableError(error)) showApiError(error);
             if (!signal.aborted) setSnapshot((value) => value?.key === key ? { ...value,
                 problem: error instanceof ApiError ? askConnexMissionProblem(error.status, error.code) : 'failed' } : value);
             return false;
@@ -195,7 +200,7 @@ export function useAskConnexMissions({
                 setSnapshot((value) => value?.key === key ? { ...value, pendingId: null } : value);
             }
         }
-    }, [enabled, identity, key, upsert]);
+    }, [enabled, identity, key, showApiError, upsert, workspaceId]);
 
     const control = useCallback(async (run: AiAgentRun, action: AiAgentRunControl) => {
         const signal = controllerRef.current?.signal;
@@ -203,13 +208,14 @@ export function useAskConnexMissions({
         operationRef.current = true;
         setSnapshot((value) => value?.key === key ? { ...value, pendingId: run.id, problem: null, output: null } : value);
         try {
-            const updated = await controlAiAgentRun(run.id, action, run.stateVersion, { signal });
+            const updated = await controlAiAgentRun(run.id, action, run.stateVersion, workspacePinnedRequest(workspaceId, { signal }));
             if (signal.aborted) return;
             refreshRef.current++;
             upsert(updated);
             if (sessionId !== null) changedRef.current(sessionId);
         } catch (error) {
             if (signal.aborted) return;
+            if (isWorkspaceUnavailableError(error)) showApiError(error);
             const problem = error instanceof ApiError ? askConnexMissionProblem(error.status, error.code) : 'failed';
             if (error instanceof ApiError && error.status === 409) {
                 try {
@@ -224,7 +230,7 @@ export function useAskConnexMissions({
                 setSnapshot((value) => value?.key === key ? { ...value, pendingId: null } : value);
             }
         }
-    }, [enabled, key, refresh, sessionId, upsert]);
+    }, [enabled, key, refresh, sessionId, showApiError, upsert, workspaceId]);
 
     const viewOutput = useCallback(async (run: AiAgentRun) => {
         const signal = controllerRef.current?.signal;

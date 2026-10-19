@@ -138,6 +138,10 @@ async function deleteTask(api: APIRequestContext, fixture: RunFixture, taskId: n
  * `expectStateSurvivesRouterRefresh` refuses to run from the loaded address.
  */
 test.describe("owned URL params (#1781)", () => {
+    test.afterEach(async ({ page }) => {
+        await page.unrouteAll({ behavior: "ignoreErrors" });
+    });
+
     test("analytics keeps its range and grain through writes, refresh, reload and history", async ({ page }) => {
         const rsc = recordRscRequests(page);
         const uncaught = captureUncaughtErrors(page);

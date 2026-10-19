@@ -177,11 +177,19 @@ removes Retry from the older answer. If changes were saved, their action cards r
 Connex cannot confirm what was saved, it says so and asks the member to check their records.
 Continue from here puts a follow-up in the composer for the member to read and edit, without sending it.
 
-With the evidence currently available, an answer that only read tasks or activities can still be
-uncertain. The same applies when it prepared a proposal without applying it: a proposal does not
-mean a change was saved, but Connex cannot rule out other saved changes. These answers keep Retry
-hidden, ask the member to check their records, and retain Continue from here when partial text is
-available.
+The requester's per-call execution evidence lets an answer that only read records, tasks, or
+activities retain Retry. Every call must be a read or a proposal in a server-guaranteed terminal,
+non-executable state (rejected or expired). A still-proposed or pending change keeps Retry hidden:
+another tab or an older action card could apply it after any check. A card's review deadline alone
+does not establish a terminal outcome; an action admitted before expiry may still finish afterward.
+Unknown tools or execution states, and older servers without this evidence, keep the conservative
+check-records guidance.
+Reconciliation re-checks the failed answer's own execution evidence, including after a proposal is
+approved. Once this client has seen a saved change for that answer, later refreshes cannot restore
+Retry by omitting its action card. An unreadable or missing proposal outcome keeps Retry hidden.
+Each Retry click revalidates that answer's execution evidence and action cards with the server
+before sending and proceeds only when that fresh evidence still rules out executable or saved
+changes. A failed check keeps Retry hidden and shows the existing guidance to check records.
 
 ## 7. Where things live
 

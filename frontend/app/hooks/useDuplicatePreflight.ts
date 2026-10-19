@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import {
+    type ApiError,
+    isWorkspaceUnavailableError,
     preflightCompanyDuplicates,
     preflightDealDuplicates,
     preflightPersonDuplicates,
@@ -33,6 +35,7 @@ type CompletedCheck = {
     requestKey: string;
     status: 'checking' | 'ready' | 'error';
     response: DuplicatePreflightResponse | null;
+    workspaceRefusal?: ApiError;
 };
 
 const DEBOUNCE_MS = 400;
@@ -98,6 +101,9 @@ export function duplicatePreflightResponseSignature(
 
 /**
  * Debounces the canonical server duplicate check and binds acknowledgement to the exact checked values.
+ * A check its workspace refused because the viewer is no longer a member fails like any other check,
+ * keeping creation blocked, and also reports that refusal as `workspaceRefusal` so the form can say
+ * why instead of offering a retry that cannot succeed (#1732).
  */
 export function useDuplicatePreflight(
     kind: DuplicatePreflightKind,
@@ -158,10 +164,15 @@ export function useDuplicatePreflight(
                 return response;
             }
             return null;
-        } catch {
+        } catch (error) {
             if (requestSequenceRef.current === sequence
                     && currentRequestKeyRef.current === requestKey) {
-                setCompleted({ requestKey, status: 'error', response: null });
+                setCompleted({
+                    requestKey,
+                    status: 'error',
+                    response: null,
+                    workspaceRefusal: isWorkspaceUnavailableError(error) ? error : undefined,
+                });
             }
             return null;
         }
@@ -192,6 +203,7 @@ export function useDuplicatePreflight(
         ? 'idle'
         : current?.status ?? 'checking';
     const response = current?.response ?? null;
+    const workspaceRefusal = status === 'error' ? current?.workspaceRefusal ?? null : null;
     const hasCandidates = (response?.candidates.length ?? 0) > 0 || response?.truncated === true;
     const acknowledgementKey = response
         ? `${requestKey}:${duplicatePreflightResponseSignature(response)}`
@@ -262,6 +274,7 @@ export function useDuplicatePreflight(
     return {
         status,
         response,
+        workspaceRefusal,
         blocked,
         acknowledged,
         setAcknowledged,

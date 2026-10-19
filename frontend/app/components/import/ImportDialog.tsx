@@ -19,10 +19,11 @@ import {
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-import { commitImport, isFieldError, previewImport, search } from '@/app/lib/api';
+import { commitImport, isFieldError, isWorkspaceUnavailableError, previewImport, search } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { usePermission } from '@/app/hooks/usePermissions';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import {
     columnSamples,
     CREATE_CUSTOM_FIELD,
@@ -121,6 +122,11 @@ export type ImportDialogProps = {
  */
 export default function ImportDialog({ entity, open, onOpenChange, onImported, requestInit }: ImportDialogProps) {
     const t = useTranslations('importExport');
+    const showApiError = useApiErrorToast();
+    const reportFailure = (error: unknown, fallback: string) => {
+        if (isWorkspaceUnavailableError(error)) showApiError(error);
+        else toastError(firstFieldError(error, fallback));
+    };
     const reduceMotion = useReducedMotion();
     const canCreateCustomField = usePermission('CUSTOM_FIELD_MANAGE');
     const { activeWorkspaceId } = useWorkspace();
@@ -295,7 +301,7 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
             setStep('review');
         } catch (error) {
             if (scopedRequest.controller.signal.aborted || generation !== previewGenerationRef.current) return;
-            toastError(firstFieldError(error, t('errorPreview')));
+            reportFailure(error, t('errorPreview'));
         } finally {
             scopedRequest.release();
             if (previewControllerRef.current === scopedRequest.controller) {
@@ -329,7 +335,7 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
             setReviewedProof(data.duplicateReviewProof ?? null);
         } catch (error) {
             if (scopedRequest.controller.signal.aborted || generation !== previewGenerationRef.current) return;
-            toastError(firstFieldError(error, t('errorPreview')));
+            reportFailure(error, t('errorPreview'));
         } finally {
             scopedRequest.release();
             if (previewControllerRef.current === scopedRequest.controller) {
@@ -396,7 +402,7 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
             if (requestInit?.signal?.aborted) return;
             setReviewedProof(null);
             setReviewedInputKey(null);
-            toastError(firstFieldError(error, t('errorImport')));
+            reportFailure(error, t('errorImport'));
         } finally {
             if (!requestInit?.signal?.aborted) setBusy(false);
         }

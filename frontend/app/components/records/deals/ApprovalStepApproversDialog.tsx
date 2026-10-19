@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/responsive-dialog';
 import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';
 import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
-import type { DocumentApprovalStep, WorkspaceMember } from '@/app/lib/types';
+import type { ApprovalStepCandidate, ApprovalStepCandidates, DocumentApprovalStep, WorkspaceMember } from '@/app/lib/types';
 import ApprovalStepApproverPicker from './ApprovalStepApproverPicker';
 import ApprovalStepApproversDialogFooter from './ApprovalStepApproversDialogFooter';
 import ApprovalStepCommentField from './ApprovalStepCommentField';
@@ -33,19 +33,19 @@ type Props = {
     steps: DocumentApprovalStep[];
     selectedStepId: number | null;
     memberDirectoryStatus: ApprovalMemberDirectoryStatus;
-    members: WorkspaceMember[];
-    verifiedApproverIds: number[];
+    members: ApprovalStepCandidate[];
+    quorum: ApprovalStepCandidates | null;
     memberLabelStatus: ApprovalMemberDirectoryStatus;
     memberLabels: WorkspaceMember[];
     mode: ApproverMode;
-    selectedMembers: WorkspaceMember[];
+    selectedMembers: ApprovalStepCandidate[];
     comment: string;
     busy: boolean;
     onOpenChange: (open: boolean) => void;
     onStepChange: (stepId: number) => void;
     onRetryMembers: () => void;
     onModeChange: (mode: ApproverMode) => void;
-    onSelectedMembersChange: (members: WorkspaceMember[]) => void;
+    onSelectedMembersChange: (members: ApprovalStepCandidate[]) => void;
     onCommentChange: (comment: string) => void;
     onSubmit: () => void;
 };
@@ -59,7 +59,7 @@ export default function ApprovalStepApproversDialog({
     selectedStepId,
     memberDirectoryStatus,
     members,
-    verifiedApproverIds,
+    quorum,
     memberLabelStatus,
     memberLabels,
     mode,
@@ -77,21 +77,21 @@ export default function ApprovalStepApproversDialog({
     const t = useTranslations('DealsDocuments');
     const selectedStep = steps.find((step) => step.id === selectedStepId) ?? null;
     const invalidStepSelection = steps.length === 0 || (selectedStepId !== null && selectedStep === null);
-    const quorumShortfall = selectedStep === null
+    const quorumShortfall = quorum === null
         ? 0
         : approvalStepQuorumShortfall(
-            selectedStep,
+            quorum,
             action,
             mode === 'any_approver'
                 ? { mode: 'any_approver' }
                 : { mode: 'members', memberIds: selectedMembers.map((member) => member.id) },
-            verifiedApproverIds,
         );
     const canSubmit = selectedStep !== null
         && (mode === 'any_approver' || selectedMembers.length > 0)
         && selectedMembers.length <= MAX_APPROVAL_STEP_APPROVERS
         && comment.length <= 500
         && memberDirectoryStatus === 'ready'
+        && quorum !== null
         && quorumShortfall === 0
         && !busy;
     const guard = useUnsavedChangesGuard({
@@ -134,7 +134,7 @@ export default function ApprovalStepApproversDialog({
                                 {selectedStep && (
                                     <>
                                         <ApprovalStepApproverPicker
-                                            selectedStep={selectedStep}
+                                            quorum={quorum}
                                             memberDirectoryStatus={memberDirectoryStatus}
                                             members={members}
                                             mode={mode}

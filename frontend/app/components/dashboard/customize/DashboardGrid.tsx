@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/drawer';
 import { toastError } from '@/app/lib/toast';
 import { resetDashboardLayout, saveDashboardLayout } from '@/app/lib/api';
+import { workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import type { DashboardWidgetInstance, DashboardWidgetType } from '@/app/lib/types';
 
 import WidgetShell from './WidgetShell';
@@ -30,14 +31,16 @@ const PERSIST_DEBOUNCE_MS = 400;
 const EASE_OUT: [number, number, number, number] = [0.23, 1, 0.32, 1];
 
 type WidgetNodes = Record<DashboardWidgetType, ReactNode>;
-type SaveJob = { kind: 'save'; widgets: DashboardWidgetInstance[] } | { kind: 'reset' };
+type LayoutChange = { kind: 'save'; widgets: DashboardWidgetInstance[] } | { kind: 'reset' };
+type SaveJob = LayoutChange & { workspaceId: number | null };
 
 /**
  * The customizable dashboard: renders the user's widgets in a draggable 2-column grid and, in edit
  * mode, lets them reorder (drag), resize (1↔2 columns), remove, add (tray), and reset. Widget
  * bodies are rendered by the server component and passed in via `nodes`, so no data fetching lives
  * here. Layout changes persist optimistically (debounced) and roll back to the last saved state on
- * failure.
+ * failure. Each change is pinned to the workspace whose layout was on screen when it was made, so a
+ * workspace switch inside the debounce window cannot save one workspace's layout into another.
  */
 export default function DashboardGrid({
     initialWidgets,
@@ -78,12 +81,13 @@ export default function DashboardGrid({
             while (desiredRef.current) {
                 const job = desiredRef.current;
                 desiredRef.current = null;
+                const pinned = workspacePinnedRequest(job.workspaceId);
                 try {
                     if (job.kind === 'reset') {
-                        await resetDashboardLayout();
+                        await resetDashboardLayout(pinned);
                         lastSavedRef.current = defaultWidgets();
                     } else {
-                        await saveDashboardLayout({ version: 1, widgets: job.widgets });
+                        await saveDashboardLayout({ version: 1, widgets: job.widgets }, pinned);
                         lastSavedRef.current = job.widgets;
                     }
                 } catch {
@@ -99,12 +103,12 @@ export default function DashboardGrid({
     }, [t]);
 
     const schedule = useCallback(
-        (job: SaveJob) => {
-            desiredRef.current = job;
+        (change: LayoutChange) => {
+            desiredRef.current = { ...change, workspaceId: activeWorkspaceId };
             if (saveTimer.current) clearTimeout(saveTimer.current);
             saveTimer.current = setTimeout(() => void runQueue(), PERSIST_DEBOUNCE_MS);
         },
-        [runQueue],
+        [activeWorkspaceId, runQueue],
     );
 
     const mutate = useCallback(

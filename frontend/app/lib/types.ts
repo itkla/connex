@@ -1938,6 +1938,24 @@ export type ApprovalDelegate = {
     email: string;
 };
 
+/** One server-authorized candidate for managing an active approval step. */
+export type ApprovalStepCandidate = {
+    id: number;
+    username: string;
+    displayName: string | null;
+    email: string;
+};
+
+/** Advisory candidates and quorum context, resolved in the caller's active workspace. */
+export type ApprovalStepCandidates = {
+    candidates: ApprovalStepCandidate[];
+    requiredCount: number;
+    approvedCount: number;
+    remainingRequiredCount: number;
+    decidedByUserIds: number[];
+    effectiveApproverIds: number[];
+};
+
 /** One frozen step of an approval chain, with the approvals collected so far. */
 export type DocumentApprovalStep = {
     id: number;
@@ -3571,6 +3589,14 @@ export type AiChatTurnAccepted = {
     scope?: AiChatQueryScope | null;
 };
 
+/** Requester-only execution evidence classified by the server's authoritative tool catalog. */
+export type AiChatTurnToolCall = {
+    toolName: string;
+    /** Unknown tools have no tier; future tier values must remain unsafe to retry. */
+    tier: string | null;
+    status: string;
+};
+
 /** Caller-safe durable state for one assistant turn, including the persisted streamed partial. */
 export type AiChatTurn = {
     turnId: number;
@@ -3579,6 +3605,8 @@ export type AiChatTurn = {
     terminalReason: string | null;
     partialContent?: string | null;
     progress: AiChatProgressItem[];
+    /** Absent on older servers and null for readers other than the requester. */
+    toolCalls?: AiChatTurnToolCall[] | null;
     /**
      * Whether the reader asked for this turn. A shared-session participant watching another
      * member's turn is not its requester, and the cancellation endpoint rejects them, so the stop

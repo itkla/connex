@@ -48,17 +48,19 @@ type CsrfBootstrap = { token: string; headerName: string };
  * Registers a throwaway user against the dev backend. Under the dev profile the register
  * endpoint also logs the session in, creates a default workspace, and sets the
  * JSESSIONID + connex_workspace cookies on the response — one call yields a full tenant.
+ * The default workspace is named after the display name, so a spec that registers two users and
+ * must tell their workspaces apart passes distinct display names.
  */
 export async function registerUser(
     api: APIRequestContext,
-    credentials: { username: string; password: string; email: string },
+    credentials: { username: string; password: string; email: string; displayName?: string },
 ): Promise<void> {
     const response = await api.post("/api/auth/register", {
         timeout: 120_000,
         data: {
             username: credentials.username,
             password: credentials.password,
-            displayName: "E2E Harness",
+            displayName: credentials.displayName ?? "E2E Harness",
             email: credentials.email,
             timezone: "UTC",
         },

@@ -20,6 +20,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
@@ -59,6 +60,24 @@ class WorkspaceProvisioningLockOrderTest {
         assertThrows(ResourceNotFoundException.class, () -> workspaceService.provisionWorkspace("Acme", 9));
 
         verifyNoInteractions(organizationMapper, workspaceMapper, orgMemberService, auditService);
+    }
+
+    @Test
+    void provisionWorkspaceRevalidatesTheOriginUnderTheExistingOwnerRootBeforeCreatingAnything() {
+        when(userMapper.lockByIdForShare(9)).thenReturn(9);
+        when(tenantContext.isResolved()).thenReturn(true);
+        when(tenantContext.getUserId()).thenReturn(9);
+        when(tenantContext.getWorkspaceId()).thenReturn(7);
+
+        ForbiddenException failure = assertThrows(ForbiddenException.class,
+            () -> workspaceService.provisionWorkspace("Acme", 9));
+
+        assertEquals("Not a member of workspace 7", failure.getMessage());
+        InOrder order = inOrder(userMapper, workspaceMapper);
+        order.verify(userMapper).lockByIdForShare(9);
+        order.verify(workspaceMapper).getRole(7, 9);
+        order.verifyNoMoreInteractions();
+        verifyNoInteractions(organizationMapper, orgMemberService, auditService);
     }
 
     /**
