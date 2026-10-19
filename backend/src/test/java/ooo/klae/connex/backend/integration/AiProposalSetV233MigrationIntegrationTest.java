@@ -52,8 +52,8 @@ class AiProposalSetV233MigrationIntegrationTest {
         catalog = MySqlScratchCatalog.create(configured, username, password,
                 "connex_proposal_set_v233_it_", "utf8mb4", "utf8mb4_unicode_ci");
         url = catalog.url();
-        assertEquals(MigrationVersion.fromVersion("231"),
-                Objects.requireNonNull(migrate("231").info().current()).getVersion());
+        assertEquals(MigrationVersion.fromVersion("232"),
+                Objects.requireNonNull(migrate("232").info().current()).getVersion());
         try (Connection connection = connection()) {
             Ancestry ancestry = insertAncestry(connection, 233000);
             for (boolean trusted : List.of(false, true)) {
@@ -473,7 +473,7 @@ class AiProposalSetV233MigrationIntegrationTest {
         return rows(connection, """
                 SELECT workspace_id, id, message_id, tool_name, status, arguments_json, thought_signature,
                        result_json, executed_by_user_id, executed_at, idempotency_key,
-                       created_at, updated_at, server_proposal
+                       created_at, updated_at, server_proposal, mission_run_id, artifact_origin, privacy_generation
                 FROM ai_chat_tool_call WHERE workspace_id = 233000 ORDER BY id
                 """);
     }
