@@ -1,0 +1,46 @@
+{
+  "id": "mission_two_segments",
+  "selector": "connex_script_mission_two_segments",
+  "capabilityClass": "scripted-json",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "json",
+      "closing": false,
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "get_record",
+        "arguments": "{\"handle\":\"r1\"}"
+      }
+    },
+    {
+      "afterToolCalls": 0,
+      "protocol": "json",
+      "closing": true,
+      "emit": {
+        "kind": "final",
+        "text": "{\"tool\":null,\"final\":{\"text\":\"The durable review is complete.\",\"citations\":[\"r1\"],\"suggestions\":[],\"title\":null}}"
+      }
+    },
+    {
+      "afterToolCalls": 1,
+      "protocol": "json",
+      "closing": false,
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "set_todos",
+        "arguments": "{\"expectedPlanRevision\":\"1\",\"expectedCheckpointRevision\":\"1\",\"items\":[{\"key\":null,\"label\":\"Review selected record\",\"status\":\"done\",\"completion\":{\"summary\":\"Durable completed fact for {{P1}}\",\"citations\":[\"r1\"]}}]}"
+      }
+    },
+    {
+      "afterToolCalls": 2,
+      "protocol": "json",
+      "closing": false,
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "checkpoint_segment",
+        "arguments": "{\"expectedPlanRevision\":\"2\",\"expectedCheckpointRevision\":\"2\",\"nextPlanItemKey\":null,\"memory\":{\"summary\":\"Durable checkpoint for {{P1}}\",\"citations\":[\"r1\"]},\"phase\":\"reporting\"}"
+      }
+    }
+  ]
+}

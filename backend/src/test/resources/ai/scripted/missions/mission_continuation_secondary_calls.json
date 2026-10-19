@@ -1,0 +1,46 @@
+{
+  "id": "mission_continuation_secondary_calls",
+  "selector": "connex_script_mission_continuation_secondary_calls",
+  "capabilityClass": "scripted-native",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "closing": false,
+      "emit": {
+        "kind": "failure",
+        "failureKind": "rejected"
+      }
+    },
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "closing": true,
+      "emit": {
+        "kind": "final",
+        "text": "{\"text\":\"The durable review is complete.\",\"citations\":[\"r1\"],\"suggestions\":[],\"title\":null}"
+      }
+    },
+    {
+      "afterToolCalls": 0,
+      "protocol": "json",
+      "closing": false,
+      "emit": {
+        "kind": "malformed",
+        "text": "{"
+      }
+    },
+    {
+      "afterToolCalls": 0,
+      "protocol": "json",
+      "closing": false,
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "checkpoint_segment",
+        "arguments": "{\"expectedPlanRevision\":\"1\",\"expectedCheckpointRevision\":\"1\",\"nextPlanItemKey\":null,\"memory\":{\"summary\":\"Durable checkpoint for {{P1}}\",\"citations\":[\"r1\"]},\"phase\":\"reporting\"}"
+      },
+      "onRepair": true
+    }
+  ],
+  "expectsNativeDegradation": true
+}

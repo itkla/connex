@@ -1,55 +1,128 @@
 # Durable read-only missions
 
-Phase 2 slice 1 introduces `record_review_v1`, a single-record mission with one logical
-segment and at most three attempts. The schema and privacy cutover are tenant migration
-V232. V231 belongs to the independently integrated proposal-expiry lane; V232 does not
-depend on proposal-set internals.
+Phase 2 slice 2 retains `record_review_v1` definition 1 and introduces runtime contract 2
+for new requests. V234 adds continuation columns and replaces V232's single-segment
+constraint with bounded immutable attempt-number triggers. Existing runtime-1 requests
+replay unchanged and execute one logical segment with at most three attempts. Runtime 2
+allows logical segments 1–8, each with attempts 1–3. Neither version permits domain writes,
+questions, proposals, action slots, or larger root limits.
 
 ## Execution and scope
 
-Create, claim, control, provider accounting, and report settlement use READ COMMITTED
-transactions. Claims install a real linked chat turn, reserve the remaining root allowance,
-and acquire only `AGENT_RUN` after content roots and the retained privacy barrier. Every
-callback binds the exact run, segment, execution generation, turn, and privacy token.
-A stale attempt cannot publish or release a successor. Settlement writes the canonical
-report and terminal state and releases the lease atomically.
+Root limits remain eight model decisions, 131,072 tokens and 900 seconds, including repairs
+and fallback. Requested lower limits and both original root deadlines never refresh.
+Each attempt is bounded by 180 seconds and the earlier root deadline. The session mutex
+prevents overlap with an ordinary reactive turn; ordinary turns may occupy it between segments.
+The existing dedicated single worker discovers bounded workspace pages and queued continuations.
+Unavailable readiness backs off for 30 seconds without spending an attempt.
 
-The root lifetime is at most 900 seconds and each attempt at most 180 seconds. Pause,
-resume, and retry preserve the original deadline and cumulative caps; there are at most
-three attempts. Every actual provider dispatch reserves a decision before egress through
-`AiInvocationService`; known usage is monotonic, while uncertain dispatch consumes the
-remaining reservation conservatively. Organization budget accounting and per-invocation
-audit remain independent gates. The ordinary loop reserves its closing decision, and an
-exhausted allowance refuses further provider calls. Mission repairs consult the remaining durable
-dispatch allowance before assembling each request, including native repair retries, and force
-the final-answer schema for its last decision. Ordinary parsed-step budgeting is unchanged.
+Create, claim, plan, checkpoint, accounting and controls use READ COMMITTED and the
+[global mission lock order](LOCKING.md#durable-record-review-missions-v232v234).
+Claims install a fresh turn, segment, generation and AGENT_RUN lease. Every callback binds
+those identities. A stale callback refuses before any lease operation, including an old
+checkpoint arriving after its successor claims. Lease heartbeat subject reads remain nonlocking;
+AGENT_RUN tombstones remain non-reapable.
 
-Each attempt rebuilds a masked context from the bounded goal and a fresh read of the
-selected record. Session history, summaries, attachments, private notes, replay state,
-persisted token maps, and provider thought signatures do not enter it. Checkpoints,
-durable plans, questions, proposal collections, and write execution belong to later slices.
-Shared prompt serialization and envelope constants are unchanged.
+The immutable scope is one person, company or deal. Current scoped slice-1 reads retain
+RBAC, restriction predicates and closed linked expansion. Company history stays empty when
+its retrieval would require related-record expansion. There is no unrestricted retrieval,
+post-filtered search or unbounded refill. Runtime 1 retains its exact read-tool ceiling.
+Runtime 2 adds only mission-specific `set_todos` and `checkpoint_segment` bookkeeping.
 
-The allowlist is exactly one person, company, or deal. Primary reads use exact ID and
-workspace predicates; person reads also exclude archived, suspended, and provision-ceased
-rows without joining their company. Bounded person/deal notes, tasks, and activities retain
-their existing SQL privacy predicates but skip linked-record hydration. Internal references
-outside the primary are redacted before output. Original member-label provenance remains
-transient for masking. Company history currently reaches evidence through related people
-or deals, so slice 1 returns no such history. Child rows with another person/deal parent
-are also omitted, preserving masking without retrieving secondary record labels. This
-can yield fewer rows than the bounded query requested; there is no unbounded refill.
-Task evidence has no task argument handles.
+## Durable continuation and model projection
 
-Only `get_record`, `get_records`, `list_activities`, `list_tasks`, and restricted `find_tools`
-are available. Retrieval, handle registration/resolution, tool dispatch, and durable tool
-insertion independently enforce the ceiling. Known-ID ordinary decisions discover origin
-before legacy roots and reject mission artifacts. No CONFIRM or AUTO write is reachable.
+`ai_agent_run` holds compact canonical UTF-8 TEXT plan, checkpoint and memory envelopes,
+all schema 1. Creation initializes their revisions to 1 and the committed cursor to 0.
+Missing payloads are malformed state. The compatibility catalog accepts only
+`record_review_v1 / 1 / 1` with empty continuation or `/ 1 / 2` with valid bound envelopes.
+Unknown definitions, runtimes, schemas or continuation discriminators expose metadata and
+safe stop controls only. They cannot reconstruct, claim, resume, publish or export content.
+Privacy cleanup and expiry never decode payloads.
 
-The scheduler uses one dedicated worker with no pending queue and visits at most 100
-workspaces per pass, one candidate per workspace. Provider I/O never occupies the shared
-maintenance scheduler. Readiness and capability refusals precede claim and consume no
-attempt; execution expiry and privacy maintenance remain independent of the AI flag.
+The strict codec rejects unknown/duplicate properties, coercion, missing fields, trailing
+content, invalid references and malformed UTF-16. Complete serialized limits are 32,768
+UTF-8 bytes each for plan/checkpoint and 16,384 for memory. There are at most 20 lifetime
+plan keys, 64 distinct evidence references and 20 member-provenance entries per text.
+All bounds apply on reading and writing; overflow refuses atomically without truncation.
+Revisions and generations are positive signed longs and refuse overflow.
+Every continuation writer, including insert and general state update, binds UTF-8 bytes
+with explicit `CONVERT(... USING utf8mb4)`; later control, claim and settlement cannot
+corrupt previously committed Japanese or supplementary text under Cp1252 connections.
+Screened bookkeeping arguments/results use the same byte transport through a dedicated
+mission insert. Replay compares strict JSON values because MySQL JSON normalizes object
+formatting and property order.
+
+Server-issued keys `p0001`–`p0020` are allocated monotonically. Replacement may rename,
+reorder or hide items, but never deletes identities, resets the lifetime allocation or
+demotes a completed item. One append-only immutable fact belongs to each done key.
+Plan-only updates advance plan/checkpoint revisions while preserving the committed segment
+cursor. Reserved action references are preserved verbatim by the pure merger; executable
+runtime-2 state requires an empty action inventory.
+
+All labels, fact summaries, memory and original member labels pass generated-content,
+special-care, exposure-validated demasking and control/placeholder/handle refusal before
+any durable copy. Bookkeeping bypasses the ordinary cache, proposal path and forgiving
+todo parser. Result/replay size admission precedes the transaction. Screened canonical
+arguments, result, plan and facts commit together. An exact attempt-local call identity
+returns its original result after fresh authorization; changed payloads conflict.
+Bookkeeping is not new evidence and does not reset the loop's no-progress guard.
+
+Canonical member IDs, original-label provenance, fingerprints and evidence bindings stay
+server-side. Provider-facing plan/results carry only plan keys, revisions, statuses and
+freshly masked prose. Reconstructed context uses that same explicit projection, never
+serializing the canonical plan or completed-fact ledger directly into a request.
+
+## Reconstruction and evidence
+
+Every claimed segment starts fresh masking/resource registries. It reads only the stored
+goal/scope, decoded continuation, current member directory and required bounded authorized
+evidence. Goal-message lookup selects identity/sequence/privacy ancestry without old prose.
+Session history, summaries, attachments, previous answers, tool transcripts, token maps,
+provider thought signatures and native call IDs are excluded.
+
+Evidence versions hash a deterministic versioned projection of the exact privacy-shaped
+read plus identifier provenance before masking and handle serialization. `get_record` and
+single-primary `get_records` normalize to `record/0`; activities/tasks bind their actual
+bounded limit. Revalidation repeats that exact closed read. Lost authority pauses with
+`access_lost`; changed evidence pauses with `source_changed` before prompt assembly/egress.
+Stored facts remain intact. Original member-label provenance must still authorize its
+member before seeding fresh masking. Complete context is assembled through PromptAssembly;
+overflow refuses `mission_context_overflow` without truncation or history fallback.
+
+## Reservation, checkpoint and recovery
+
+Under run X, with no active reservation, continuation candidates reserve
+`min(4, remainingSteps - 1)` decisions and `min(65536, remainingTokens - 65536)` tokens.
+They require at least two decisions, 8,192 tokens and another logical segment. Otherwise
+runtime 2 reserves terminal-only `min(4, remainingSteps)` and all remaining tokens. Runtime 1
+retains its full remaining reservation. Every serialized provider request must fit its
+active token allowance. The final decision exposes only final report/checkpoint in a
+continuation-capable segment, or only final report in a terminal-only segment.
+
+Dispatch reservation increments a durable ordinal and sets uncertainty before egress.
+Usage callbacks bind that exact ordinal/generation and clear it once. Duplicates cannot
+charge twice or clear a successor. Observed overrun stops with `usage_overrun` and retains
+truthful totals. Certain settlement charges known decisions/tokens; uncertain settlement
+charges at least the full attempt allowance and any observed overrun. Proven-unused
+allowance alone is refunded. Organization accounting and invocation audits remain independent.
+
+`checkpoint_segment` must be the only call in its step. The model cannot supply canonical
+IDs, cursor, coverage, completed ledgers or action references. The server screens memory,
+resolves current observed citations, derives coverage and commits checkpoint/memory, cursor
++1, tool result, accounting, terminal turn/segment, queued state and lease release atomically.
+The loop exits without successor dispatch or recursive execution. A later scheduler claim
+rebuilds context. Only the existing final report transaction creates a report.
+
+Orphan settlement preserves continuation/cursor and original caps/deadlines, settles the
+attempt and changes the run to `paused/interrupted`, with lease takeover/release last.
+A separate freshly authorized transaction may queue only supported, unexpired runtime-2
+interrupted READ work with allowance and fewer than three attempts for the next logical
+segment. It spends no attempt and touches no lease. Member/content/schema/access/source/
+budget/provider/deadline stops never automatically retry. The runner preserves actual
+failure classification. Explicit pause over `paused/interrupted` records `reason=member`
+and increments state version under session/run locks; only an existing member pause is
+an idempotent no-op. A recovery-winning race invalidates the older control version, and
+an acknowledged current-version pause prevents automatic claim.
 
 ## Session API and presentation
 
@@ -130,7 +203,14 @@ revision and integer keyset cursors advance in the same transaction as deletion.
 
 The run phase permanently withholds content, invalidates execution authority, settles
 reserved allowance conservatively, severs report/active pointers, detaches terminal
-attempts, deletes turn/segment children, and retains a minimal consumed-key tombstone.
+attempts, deletes turn/segment children, and retains a minimal consumed-key tombstone. All nine continuation fields clear to null/zero.
+A shared run-residual predicate enrolls continuation JSON, schema versions, revisions and
+cursor both in bounded discovery and unconditional final verification. Purged rows with
+residue are repaired without decoding their content; runtime-2 inventories up to 24
+attempts remain erasable. Existing table-based lifecycle/export/DSR/account-erasure enrollment
+covers these columns; tenant teardown counts remain unconditional. Before serializing an
+unpurged mission export row, validate its versioned continuation; malformed/unsupported
+content aborts the artifact. Tombstones must match the erased shape.
 The session phase settles ordinary active turns, removes tool payloads and enrolled
 messages, removes terminal turns, resets generated titles to the static Ask Connex title,
 recomputes preview timing, and removes notification/brief projections. Deletion batches
@@ -239,8 +319,14 @@ Missions remain disabled by default. Initial activation requires one serving app
 JVM, initialized barriers, completed active-attempt reconciliation, and the full compatible
 reader/writer rollout. Drain all older serving binaries and background message writers
 before V232's one-time sequence backfill; keep writes stopped until the allocator cutover.
-V232 is the rollback floor. Multi-instance activation requires the separately reviewed
+V234 is the rollback floor, including with missions disabled. Multi-instance activation requires the separately reviewed
 #941 distributed fencing contract.
+
+Focused continuation selectors are `AiAgentContinuationCodecTest`, `AiAgentPlanServiceTest`,
+`AiAgentBudgetServiceTest`, `AiAgentContextBuilderTest`, `AiAgentContinuationIntegrationTest`,
+`AiAgentContinuationV234MigrationIntegrationTest`, and the extended HTTP, concurrency,
+privacy-lifecycle and scripted-trajectory classes. Scripted goldens prove server behavior,
+not live-model quality; this slice authorizes no live runner or egress.
 
 Focused privacy selectors are `AiAgentPrivacyIntegrationTest`,
 `AiAgentPrivacyConcurrencyIntegrationTest`, `AiAgentPrivacyInitializationIntegrationTest`,

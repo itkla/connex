@@ -1114,3 +1114,18 @@ Deterministic warmth, risk, report figures, and other non-AI behavior remain ava
 - Unmasked/streaming/collaboration behavior preserves durable authorization and screening.
 - Budgets/governance/admission are database-coordinated and checked before egress.
 - Provider, masking, leak-scan, timeout, cancellation, budget, and cross-workspace tests pass.
+
+## Durable mission continuation (V234)
+
+Runtime-2 plans and checkpoints follow [AI_MISSIONS.md](AI_MISSIONS.md). Bookkeeping has
+strict mission-only schemas and bypasses ordinary todo normalization, result caching and
+proposal persistence. Screen and admit the complete result before committing. Provider
+requests receive explicit masked plan/context projections; canonical member IDs, original
+member-label provenance and evidence bindings remain server-side. Fresh segments reauthorize
+bounded evidence and member provenance and rebuild fresh registries without chat history or
+provider replay state. Required-context overflow refuses rather than dropping facts.
+
+Every actual dispatch, including repair/fallback, carries its exact mission ordinal through
+usage settlement. Continuation never resets organization gates, root caps, deadlines or
+outbound leak/special-care screening. Slice 2 adds no write, proposal, question or live-evaluation
+surface. See the mission contract for checkpoint-only closing decisions and retry exclusions.

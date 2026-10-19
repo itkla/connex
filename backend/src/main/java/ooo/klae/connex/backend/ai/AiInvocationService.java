@@ -1473,6 +1473,8 @@ public class AiInvocationService {
         private final AiRequestDeadline providerDeadline;
         private boolean firstAttempt = true;
         private boolean failureAudited;
+        private ooo.klae.connex.backend.ai.mission.AiAgentBudgetService.AiAgentDispatchReservation
+                missionDispatch;
 
         private ProviderAttemptTracker(
                 int workspaceId,
@@ -1542,7 +1544,7 @@ public class AiInvocationService {
                 var mission = ooo.klae.connex.backend.ai.mission.AiAgentExecutionPolicy.current();
                 if (mission != null) {
                     mission.capability().requireTarget(resolved.target());
-                    mission.persistence().reserveDispatch(mission,
+                    missionDispatch = mission.persistence().reserveDispatch(mission,
                             (long) serializedPrompt.getBytes(StandardCharsets.UTF_8).length + invocation.maxTokens());
                 }
                 return aiRestrictionEpoch.invokeAtEgress(workspaceId, () -> {
@@ -1660,7 +1662,9 @@ public class AiInvocationService {
             activeLease.settle(inputTokens, outputTokens);
             var mission = ooo.klae.connex.backend.ai.mission.AiAgentExecutionPolicy.current();
             if (mission != null) {
-                mission.persistence().recordUsage(mission, inputTokens, outputTokens);
+                var dispatch = Objects.requireNonNull(missionDispatch, "missionDispatch");
+                mission.persistence().recordUsage(mission, dispatch, inputTokens, outputTokens);
+                missionDispatch = null;
             }
             budgetLease = null;
         }

@@ -1,3 +1,1 @@
-# One migration path relative to backend/src/main/resources/db/migration/.
-# Raise this in the same PR as any migration that earlier binaries cannot survive.
-tenant/V232__ai_agent_runs.sql
+tenant/V234__ai_agent_continuation.sql

@@ -11,6 +11,7 @@ import static org.mockito.Mockito.doAnswer;
 
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Supplier;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -18,6 +19,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mybatis.spring.SqlSessionTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
@@ -187,6 +190,175 @@ class AiAgentRunConcurrencyIntegrationTest extends AbstractAiAgentPrivacyIntegra
     @Test
     void firstMissionTaintWinsBeforeReactiveAdmission() throws Exception {
         assertAdmissionRace(true);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void checkpointAndCancelSerializeWithoutLateContinuation(boolean cancelFirst) throws Exception {
+        var discovered = drillRun();
+        var policy = drillClaim(discovered);
+        var checkpoint = drillCheckpoint(policy);
+        var live = runs.getRun(workspace.getId(), discovered.getId());
+        Supplier<Object> cancel = () -> persistence.control(live, live.getStateVersion(), "cancel");
+        Supplier<Object> commit = () -> persistence.commitCheckpoint(policy, 1, 0,
+                json.writeValueAsString(checkpoint.arguments()), json.writeValueAsString(checkpoint.result()), checkpoint.snapshot());
+        var outcomes = orderedDrill(discovered, cancelFirst ? cancel : commit, cancelFirst ? commit : cancel);
+        assertInstanceOf(ConflictException.class, outcomes.get(1));
+        var current = runs.getRun(workspace.getId(), discovered.getId());
+        if (!cancelFirst) {
+            current = persistence.control(current, current.getStateVersion(), "cancel");
+        }
+        assertEquals("cancelled", current.getStatus());
+        assertEquals(cancelFirst ? 0 : 1, current.getLastCommittedSegmentNo());
+        assertNull(current.getActiveSegmentId());
+        assertEquals(0, drillLeaseCount(discovered));
+        var stopped = current;
+        org.junit.jupiter.api.Assertions.assertThrows(ConflictException.class, () -> drillClaim(stopped));
+    }
+
+    @Test
+    void oldAttemptCannotWriteCheckpointOrReleaseSuccessor() throws Exception {
+        var discovered = drillRun();
+        var old = drillClaim(discovered);
+        var prepared = drillCheckpoint(old);
+        persistence.interrupt(runs.getRun(workspace.getId(), discovered.getId()), "interrupted");
+        assertTrue(persistence.requeueInterrupted(runs.getRun(workspace.getId(), discovered.getId())));
+        var queued = runs.getRun(workspace.getId(), discovered.getId());
+        var outcomes = orderedDrill(discovered, () -> drillClaim(queued), () -> persistence.commitCheckpoint(old, 1, 0,
+                json.writeValueAsString(prepared.arguments()), json.writeValueAsString(prepared.result()), prepared.snapshot()));
+        var successor = assertInstanceOf(AiAgentExecutionPolicy.class, outcomes.get(0));
+        assertInstanceOf(ConflictException.class, outcomes.get(1));
+        var current = runs.getRun(workspace.getId(), discovered.getId());
+        assertEquals("running", current.getStatus());
+        assertEquals(successor.segmentId(), current.getActiveSegmentId());
+        assertEquals(0, current.getLastCommittedSegmentNo());
+        assertEquals(1, drillLeaseCount(discovered));
+    }
+
+    @Test
+    void twoRecoveryPassesQueueOnlyOneRetry() throws Exception {
+        var discovered = drillRun();
+        drillClaim(discovered);
+        persistence.interrupt(runs.getRun(workspace.getId(), discovered.getId()), "interrupted");
+        var stopped = runs.getRun(workspace.getId(), discovered.getId());
+        var outcomes = orderedDrill(discovered, () -> persistence.requeueInterrupted(stopped),
+                () -> persistence.requeueInterrupted(stopped));
+        assertEquals(List.of(true, false), outcomes);
+        var next = drillClaim(runs.getRun(workspace.getId(), discovered.getId()));
+        assertEquals(1, next.segmentNo());
+        assertEquals(2, next.attemptNo());
+        assertEquals(2, runs.listSegments(workspace.getId(), discovered.getId()).size());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void acknowledgedMemberPauseWinsOverAutomaticRecoveryInEitherLockOrder(boolean pauseFirst) throws Exception {
+        var discovered = drillRun();
+        drillClaim(discovered);
+        persistence.interrupt(runs.getRun(workspace.getId(), discovered.getId()), "interrupted");
+        var stopped = runs.getRun(workspace.getId(), discovered.getId());
+        Supplier<Object> pause = () -> persistence.control(stopped, stopped.getStateVersion(), "pause");
+        Supplier<Object> recovery = () -> persistence.requeueInterrupted(stopped);
+        var outcomes = orderedDrill(discovered, pauseFirst ? pause : recovery, pauseFirst ? recovery : pause);
+        if (pauseFirst) {
+            assertEquals(false, outcomes.get(1));
+        } else {
+            assertEquals(true, outcomes.get(0));
+            assertInstanceOf(ConflictException.class, outcomes.get(1));
+            var queued = runs.getRun(workspace.getId(), discovered.getId());
+            persistence.control(queued, queued.getStateVersion(), "pause");
+        }
+        var acknowledged = runs.getRun(workspace.getId(), discovered.getId());
+        assertEquals("paused", acknowledged.getStatus());
+        assertEquals("member", acknowledged.getReasonCode());
+        assertEquals(false, persistence.requeueInterrupted(acknowledged));
+        assertTrue(runs.interruptedReadRuns(workspace.getId(), 25).isEmpty());
+        org.junit.jupiter.api.Assertions.assertThrows(ConflictException.class, () -> drillClaim(acknowledged));
+        assertEquals(0, drillLeaseCount(discovered));
+    }
+
+    private List<Object> orderedDrill(AiAgentRun run, Supplier<Object> winner, Supplier<Object> contender) throws Exception {
+        CountDownLatch holderAtRun = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CountDownLatch waiterAtAuthority = new CountDownLatch(1);
+        AtomicBoolean held = new AtomicBoolean();
+        AtomicLong connectionId = new AtomicLong();
+        var realRuns = sqlSessions.getMapper(AiAgentRunMapper.class);
+        doAnswer(invocation -> {
+            var locked = realRuns.lockRun(invocation.getArgument(0), invocation.getArgument(1));
+            if (Thread.currentThread().getName().equals("mission-drill-winner") && held.compareAndSet(false, true)) {
+                holderAtRun.countDown();
+                assertTrue(release.await(30, TimeUnit.SECONDS));
+            }
+            return locked;
+        }).when(runs).lockRun(workspace.getId(), run.getId());
+        doAnswer(invocation -> {
+            if (Thread.currentThread().getName().equals("mission-drill-contender")) {
+                var connection = jdbc.queryForObject("SELECT CONNECTION_ID()", Long.class);
+                assertNotNull(connection);
+                connectionId.set(connection);
+                waiterAtAuthority.countDown();
+            }
+            return invocation.callRealMethod();
+        }).when(workspaces).lockAndRequirePermissionsSnapshot(anyInt(), anyMap());
+        try (var workers = Executors.newFixedThreadPool(2)) {
+            var first = workers.submit(() -> drillAs("mission-drill-winner", winner));
+            try {
+                assertTrue(holderAtRun.await(10, TimeUnit.SECONDS));
+                var second = workers.submit(() -> drillAs("mission-drill-contender", contender));
+                assertTrue(waiterAtAuthority.await(10, TimeUnit.SECONDS));
+                MySqlLockWaitProbe.awaitExclusiveRecordLock(jdbc, connectionId.get(), "workspace_member",
+                        workspace.getId() + ", " + currentUser.getId());
+                release.countDown();
+                return List.of(first.get(10, TimeUnit.SECONDS), second.get(10, TimeUnit.SECONDS));
+            } finally {
+                release.countDown();
+            }
+        }
+    }
+
+    private Object drillAs(String thread, Supplier<Object> action) {
+        Thread.currentThread().setName(thread);
+        authenticateAs(currentUser, workspace.getId());
+        try {
+            return action.get();
+        } catch (RuntimeException refused) {
+            return refused;
+        } finally {
+            clearAuthentication();
+        }
+    }
+
+    private AiAgentRun drillRun() {
+        AiChatSession session = new AiChatSession();
+        session.setWorkspaceId(workspace.getId());
+        session.setCreatedByUserId(currentUser.getId());
+        session.setTitle("Continuation lock drill");
+        session.setVisibility("private");
+        session.setStatus("active");
+        chatMapper.insertSession(session);
+        var request = new AiAgentRunCreateRequest(UUID.randomUUID().toString(), "record_review_v1", "Review",
+                new AiAgentRunCreateRequest.Scope("record", "company", 1), null);
+        return persistence.create(session.getId(), request, "en", AiAgentCapabilityGate.hash(json.writeValueAsString(request)),
+                json.writeValueAsString(request.scope()), epoch.current(workspace.getId()));
+    }
+
+    private AiAgentExecutionPolicy drillClaim(AiAgentRun run) {
+        return persistence.claim(run, new byte[32], new AiRunLeaseGuard(properties.getRunLeaseTtl()), capability);
+    }
+
+    private AiAgentPlanService.Prepared drillCheckpoint(AiAgentExecutionPolicy policy) {
+        var snapshot = persistence.snapshot(policy);
+        var args = json.createObjectNode().put("expectedPlanRevision", snapshot.plan().revision())
+                .put("expectedCheckpointRevision", snapshot.checkpoint().revision()).putNull("nextPlanItemKey").put("phase", "reporting");
+        args.putObject("memory").put("summary", "Retained memory").putArray("citations");
+        return new AiAgentPlanService(new AiAgentContinuationCodec()).prepareCheckpoint(snapshot, args,
+                policy.segmentNo(), text -> new AiAgentMemory.DurableText(text, List.of()), ignored -> List.of());
+    }
+
+    private int drillLeaseCount(AiAgentRun run) {
+        return java.util.Objects.requireNonNull(jdbc.queryForObject("SELECT COUNT(*) FROM ai_run_lease WHERE workspace_id=? AND subject_kind='agent_run' AND subject_id=? AND released_at IS NULL",
+                Integer.class, workspace.getId(), run.getId()));
     }
 
     private void assertAdmissionRace(boolean missionFirst) throws Exception {

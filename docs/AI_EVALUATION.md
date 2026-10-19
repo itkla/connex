@@ -277,3 +277,16 @@ Nothing in this document authorizes a migration, a flag, a profile, or a line of
 - [`STAGING_DEPLOY.md`](STAGING_DEPLOY.md) — the staging instance, its declared edition, and how it is deployed.
 - [`VOLUME_SEEDER.md`](VOLUME_SEEDER.md) — the operator-invoked one-shot process this runner's shape copies.
 - [`SPECIAL_CARE_DATA_POLICY.md`](SPECIAL_CARE_DATA_POLICY.md) — the screen two goldens pin, and the reason a live corpus stays synthetic.
+
+## Runtime-2 continuation trajectories
+
+`AiAgentScriptedTrajectoryTest` adds `mission_two_segments.json`,
+`mission_plan_replacement.json`, `mission_continuation_budget.json`,
+`mission_interrupted_read_retry.json`, `mission_memory_refused.json`, and
+`mission_continuation_secondary_calls.json`. They use the existing isolated fixture selector,
+closed protocol and complete bounded journal observation. They exercise durable plan/fact
+identity, checkpoint-only fresh context, cumulative decisions/tokens, original-deadline retry,
+screened memory refusal and repair/fallback accounting. Outbound assertions cover explicit
+model projections without canonical provenance/evidence bindings. Existing leakage, special-care,
+write/question and secondary-gate-loss controls remain. No live runner, fixture protocol
+relaxation or live-model-quality claim is introduced.

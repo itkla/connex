@@ -35,6 +35,15 @@ public class AiAgentRun {
     private long reservedTokens;
     private long consumedTokens;
     private long privacyGeneration;
+    private Integer planSchemaVersion;
+    private long planRevision;
+    private String planJson;
+    private Integer checkpointSchemaVersion;
+    private long checkpointRevision;
+    private String checkpointJson;
+    private Integer memorySchemaVersion;
+    private String memoryJson;
+    private int lastCommittedSegmentNo;
     private LocalDateTime executionDeadlineAt;
     private LocalDateTime hardDeadlineAt;
     private LocalDateTime nextAttemptAt;

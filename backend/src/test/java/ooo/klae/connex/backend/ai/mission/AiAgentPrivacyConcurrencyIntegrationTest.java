@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
@@ -56,6 +57,79 @@ class AiAgentPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivacyInt
     @MockitoSpyBean private AiRestrictionEpoch epochs;
     @Autowired private AiChatTurnPersistenceService persistence;
     @Autowired private PersonService persons;
+    @Autowired private AiAgentRunPersistenceService missions;
+    @Autowired private ooo.klae.connex.backend.mappers.AiAgentRunMapper missionRuns;
+    @Autowired private AiAgentCapabilityGate missionCapability;
+    @Autowired private ooo.klae.connex.backend.ai.AiProperties missionProperties;
+    @Autowired private tools.jackson.databind.ObjectMapper missionJson;
+    @MockitoSpyBean private ooo.klae.connex.backend.services.WorkspaceService missionWorkspaces;
+
+    @Test
+    void completedPurgeRejectsDelayedPlanAndCheckpointWriters() throws Exception {
+        AiChatSession session = new AiChatSession();
+        session.setWorkspaceId(workspace.getId());
+        session.setCreatedByUserId(currentUser.getId());
+        session.setTitle("Delayed continuation fixture");
+        session.setVisibility("private");
+        session.setStatus("active");
+        chatMapper.insertSession(session);
+        var request = new ooo.klae.connex.backend.dto.AiAgentRunCreateRequest(UUID.randomUUID().toString(),
+                "record_review_v1", "Review", new ooo.klae.connex.backend.dto.AiAgentRunCreateRequest.Scope("record", "company", 1), null);
+        var run = missions.create(session.getId(), request, "en", AiAgentCapabilityGate.hash(missionJson.writeValueAsString(request)),
+                missionJson.writeValueAsString(request.scope()), epochs.current(workspace.getId()));
+        var policy = missions.claim(run, new byte[32], new ooo.klae.connex.backend.ai.lease.AiRunLeaseGuard(missionProperties.getRunLeaseTtl()), missionCapability);
+        var snapshot = missions.snapshot(policy);
+        var plans = new AiAgentPlanService(new AiAgentContinuationCodec());
+        var plan = plans.prepare(snapshot, missionJson.readTree("""
+                {"expectedPlanRevision":"1","expectedCheckpointRevision":"1","items":[]}
+                """), 1, text -> new AiAgentMemory.DurableText(text, List.of()), ignored -> List.of());
+        var checkpoint = plans.prepareCheckpoint(snapshot, missionJson.readTree("""
+                {"expectedPlanRevision":"1","expectedCheckpointRevision":"1","nextPlanItemKey":null,
+                 "memory":{"summary":"Delayed secret continuation","citations":[]},"phase":"reporting"}
+                """), 1, text -> new AiAgentMemory.DurableText(text, List.of()), ignored -> List.of());
+        CountDownLatch writersAtAuthority = new CountDownLatch(2);
+        CountDownLatch resume = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            if (Thread.currentThread().getName().startsWith("delayed-continuation-")) {
+                writersAtAuthority.countDown();
+                assertTrue(resume.await(30, TimeUnit.SECONDS));
+            }
+            return invocation.callRealMethod();
+        }).when(missionWorkspaces).lockAndRequirePermissionsSnapshot(anyInt(), anyMap());
+        try (var workers = Executors.newFixedThreadPool(2)) {
+            var latePlan = workers.submit(() -> delayedContinuation("delayed-continuation-plan", () -> missions.commitPlan(policy, 1, 0,
+                    missionJson.writeValueAsString(plan.arguments()), missionJson.writeValueAsString(plan.result()), plan.snapshot())));
+            var lateCheckpoint = workers.submit(() -> delayedContinuation("delayed-continuation-checkpoint", () -> missions.commitCheckpoint(policy, 2, 0,
+                    missionJson.writeValueAsString(checkpoint.arguments()), missionJson.writeValueAsString(checkpoint.result()), checkpoint.snapshot())));
+            try {
+                assertTrue(writersAtAuthority.await(10, TimeUnit.SECONDS));
+                finish(invalidate());
+                assertFalse(privacyMapper.getBarrier(workspace.getId()).isBlocked());
+                resume.countDown();
+                assertTrue(latePlan.get(10, TimeUnit.SECONDS));
+                assertTrue(lateCheckpoint.get(10, TimeUnit.SECONDS));
+            } finally {
+                resume.countDown();
+            }
+        }
+        assertTrue(AiAgentContinuationCodec.erased(missionRuns.getRun(workspace.getId(), run.getId())));
+        assertEquals(0, privacyMapper.residualCount(workspace.getId(), run.getPrivacyGeneration()));
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM ai_chat_tool_call WHERE workspace_id=? AND mission_run_id=?",
+                Integer.class, workspace.getId(), run.getId()));
+    }
+
+    private boolean delayedContinuation(String name, Runnable write) {
+        Thread.currentThread().setName(name);
+        authenticateAs(currentUser, workspace.getId());
+        try {
+            write.run();
+            return false;
+        } catch (RuntimeException refused) {
+            return true;
+        } finally {
+            clearAuthentication();
+        }
+    }
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})

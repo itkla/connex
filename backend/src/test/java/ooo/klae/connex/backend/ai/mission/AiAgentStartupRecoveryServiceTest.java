@@ -72,6 +72,18 @@ class AiAgentStartupRecoveryServiceTest {
         verify(runs, never()).orphanedRuns(anyInt(), anyInt());
     }
 
+    @Test
+    void malformedRunnableContinuationKeepsReadinessClosedWithoutChangingPayload() {
+        var run = running();
+        run.setMissionType("record_review_v1");
+        run.setDefinitionVersion(1);
+        run.setRuntimeContractVersion(2);
+        run.setStatus("queued");
+        when(runs.dueRuns(7, 25)).thenReturn(List.of(run));
+        assertThrows(IllegalArgumentException.class, () -> recovery.reconcile(7));
+        verifyNoInteractions(persistence);
+    }
+
     private static AiAgentRun running() {
         AiAgentRun run = new AiAgentRun();
         run.setId(31);

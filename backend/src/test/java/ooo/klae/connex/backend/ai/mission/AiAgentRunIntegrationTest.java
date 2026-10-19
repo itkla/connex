@@ -40,8 +40,8 @@ class AiAgentRunIntegrationTest extends AbstractAiAgentPrivacyIntegrationTest {
     void createsOneDurableReadOnlyMissionAndOneReport() {
         AiAgentRun run = create(session(), request());
         AiAgentExecutionPolicy policy = claim(run);
-        persistence.reserveDispatch(policy, 1000);
-        persistence.recordUsage(policy, 50, 20);
+        var dispatch = persistence.reserveDispatch(policy, 1000);
+        persistence.recordUsage(policy, dispatch, 50, 20);
         assertTrue(persistence.resolve(policy, "The selected record was reviewed.", "{\"citations\":[],\"resources\":[]}"));
         AiAgentRun done = runs.getRun(workspace.getId(), run.getId());
         assertEquals("done", done.getStatus());
@@ -106,8 +106,8 @@ class AiAgentRunIntegrationTest extends AbstractAiAgentPrivacyIntegrationTest {
         var deadline = run.getExecutionDeadlineAt();
         for (int attempt = 1; attempt <= 3; attempt++) {
             AiAgentExecutionPolicy policy = claim(run);
-            persistence.reserveDispatch(policy, 100);
-            persistence.recordUsage(policy, 1, 1);
+            var dispatch = persistence.reserveDispatch(policy, 100);
+            persistence.recordUsage(policy, dispatch, 1, 1);
             AiAgentRun live = runs.getRun(workspace.getId(), run.getId());
             run = persistence.control(live, live.getStateVersion(), "pause");
             assertEquals(deadline, run.getExecutionDeadlineAt());

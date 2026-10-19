@@ -10,6 +10,7 @@ import ooo.klae.connex.backend.ai.AiGenerationTaskResult;
 import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.assistant.AiChatAgentLoopService;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantLoopException;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseGuard;
 import ooo.klae.connex.backend.beans.AiAgentRun;
 import ooo.klae.connex.backend.dto.AiAgentRunCreateRequest;
@@ -31,12 +32,31 @@ public class AiAgentSegmentRunner {
     private final AiAgentRealtimePublisher publisher;
     private final ObjectMapper json;
 
+    /** Reauthorizes interrupted READ work before a separate stopped-to-queued transaction. */
+    public void recoverInterrupted(AiAgentRun candidate) {
+        if (candidate.getOwnerUserId() == null || candidate.getSessionId() == null) {
+            return;
+        }
+        context.run(candidate.getWorkspaceId(), candidate.getOwnerUserId(),
+                Locale.forLanguageTag(candidate.getLocale()), () -> {
+                    gate.requireReady();
+                    service.requirePrivacyReady();
+                    new AiAgentContinuationCodec().decode(candidate);
+                    service.requireScope(json.readValue(candidate.getScopeJson(), AiAgentRunCreateRequest.Scope.class));
+                    boolean queued = persistence.requeueInterrupted(candidate);
+                    if (queued) {
+                        publisher.publish(runs.getRun(candidate.getWorkspaceId(), candidate.getId()), "mission_state");
+                    }
+                });
+    }
+
     /** A preclaim refusal does not consume an attempt or any reserved allowance. */
     public void run(AiAgentRun candidate) {
         if (candidate.getOwnerUserId() == null || candidate.getSessionId() == null) {
             return;
         }
         context.run(candidate.getWorkspaceId(), candidate.getOwnerUserId(), Locale.forLanguageTag(candidate.getLocale()), () -> {
+            new AiAgentContinuationCodec().decode(candidate);
             byte[] declaration = gate.requireReady();
             service.requirePrivacyReady();
             service.requireScope(json.readValue(candidate.getScopeJson(), AiAgentRunCreateRequest.Scope.class));
@@ -50,7 +70,7 @@ public class AiAgentSegmentRunner {
                             if (result.outcome() != AiGenerationTaskResult.Outcome.RESOLVED) {
                                 AiAgentRun current = runs.getRun(candidate.getWorkspaceId(), candidate.getId());
                                 if (current != null && current.getExecutionGeneration() == policy.executionGeneration()) {
-                                    persistence.interrupt(current, "interrupted");
+                                    persistence.interrupt(current, result.reason());
                                 }
                             }
                             return result;
@@ -58,7 +78,8 @@ public class AiAgentSegmentRunner {
             } catch (RuntimeException exception) {
                 AiAgentRun current = runs.getRun(candidate.getWorkspaceId(), candidate.getId());
                 if (current != null && current.getExecutionGeneration() == policy.executionGeneration()) {
-                    persistence.interrupt(current, "interrupted");
+                    persistence.interrupt(current, exception instanceof AiAssistantLoopException refusal
+                            ? refusal.terminalReason() : Thread.currentThread().isInterrupted() ? "interrupted" : "provider_failed");
                 }
             }
             AiAgentRun current = runs.getRun(candidate.getWorkspaceId(), candidate.getId());

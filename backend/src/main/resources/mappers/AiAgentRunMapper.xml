@@ -30,6 +30,15 @@
     <result column="reserved_tokens" property="reservedTokens" />
     <result column="consumed_tokens" property="consumedTokens" />
     <result column="privacy_generation" property="privacyGeneration" />
+    <result column="plan_schema_version" property="planSchemaVersion" />
+    <result column="plan_revision" property="planRevision" />
+    <result column="plan_json" property="planJson" />
+    <result column="checkpoint_schema_version" property="checkpointSchemaVersion" />
+    <result column="checkpoint_revision" property="checkpointRevision" />
+    <result column="checkpoint_json" property="checkpointJson" />
+    <result column="memory_schema_version" property="memorySchemaVersion" />
+    <result column="memory_json" property="memoryJson" />
+    <result column="last_committed_segment_no" property="lastCommittedSegmentNo" />
     <result column="execution_deadline_at" property="executionDeadlineAt" />
     <result column="hard_deadline_at" property="hardDeadlineAt" />
     <result column="next_attempt_at" property="nextAttemptAt" />
@@ -43,9 +52,9 @@
 
   <insert id="insertRun" useGeneratedKeys="true" keyProperty="run.id">
     INSERT INTO ai_agent_run
-      (workspace_id, definition_version, runtime_contract_version, max_steps, reserved_steps, consumed_steps, session_id, owner_user_id, active_segment_id, report_message_id, client_request_key, mission_type, locale, goal, scope_json, status, reason_code, request_hash, scope_fingerprint, state_version, execution_generation, max_tokens, reserved_tokens, consumed_tokens, privacy_generation, execution_deadline_at, hard_deadline_at, next_attempt_at, withheld_at, purged_at, started_at, finished_at)
+      (workspace_id, definition_version, runtime_contract_version, max_steps, reserved_steps, consumed_steps, session_id, owner_user_id, active_segment_id, report_message_id, client_request_key, mission_type, locale, goal, scope_json, status, reason_code, request_hash, scope_fingerprint, state_version, execution_generation, max_tokens, reserved_tokens, consumed_tokens, privacy_generation, execution_deadline_at, hard_deadline_at, next_attempt_at, withheld_at, purged_at, started_at, finished_at, plan_schema_version, plan_revision, plan_json, checkpoint_schema_version, checkpoint_revision, checkpoint_json, memory_schema_version, memory_json, last_committed_segment_no)
     VALUES
-      (#{run.workspaceId}, #{run.definitionVersion}, #{run.runtimeContractVersion}, #{run.maxSteps}, #{run.reservedSteps}, #{run.consumedSteps}, #{run.sessionId,jdbcType=INTEGER}, #{run.ownerUserId,jdbcType=INTEGER}, #{run.activeSegmentId,jdbcType=INTEGER}, #{run.reportMessageId,jdbcType=INTEGER}, #{run.clientRequestKey,jdbcType=VARCHAR}, #{run.missionType,jdbcType=VARCHAR}, #{run.locale,jdbcType=VARCHAR}, #{run.goal,jdbcType=VARCHAR}, #{run.scopeJson,jdbcType=VARCHAR}, #{run.status,jdbcType=VARCHAR}, #{run.reasonCode,jdbcType=VARCHAR}, #{run.requestHash,jdbcType=VARBINARY}, #{run.scopeFingerprint,jdbcType=VARBINARY}, #{run.stateVersion}, #{run.executionGeneration}, #{run.maxTokens}, #{run.reservedTokens}, #{run.consumedTokens}, #{run.privacyGeneration}, #{run.executionDeadlineAt,jdbcType=TIMESTAMP}, #{run.hardDeadlineAt,jdbcType=TIMESTAMP}, #{run.nextAttemptAt,jdbcType=TIMESTAMP}, #{run.withheldAt,jdbcType=TIMESTAMP}, #{run.purgedAt,jdbcType=TIMESTAMP}, #{run.startedAt,jdbcType=TIMESTAMP}, #{run.finishedAt,jdbcType=TIMESTAMP})
+      (#{run.workspaceId}, #{run.definitionVersion}, #{run.runtimeContractVersion}, #{run.maxSteps}, #{run.reservedSteps}, #{run.consumedSteps}, #{run.sessionId,jdbcType=INTEGER}, #{run.ownerUserId,jdbcType=INTEGER}, #{run.activeSegmentId,jdbcType=INTEGER}, #{run.reportMessageId,jdbcType=INTEGER}, #{run.clientRequestKey,jdbcType=VARCHAR}, #{run.missionType,jdbcType=VARCHAR}, #{run.locale,jdbcType=VARCHAR}, #{run.goal,jdbcType=VARCHAR}, #{run.scopeJson,jdbcType=VARCHAR}, #{run.status,jdbcType=VARCHAR}, #{run.reasonCode,jdbcType=VARCHAR}, #{run.requestHash,jdbcType=VARBINARY}, #{run.scopeFingerprint,jdbcType=VARBINARY}, #{run.stateVersion}, #{run.executionGeneration}, #{run.maxTokens}, #{run.reservedTokens}, #{run.consumedTokens}, #{run.privacyGeneration}, #{run.executionDeadlineAt,jdbcType=TIMESTAMP}, #{run.hardDeadlineAt,jdbcType=TIMESTAMP}, #{run.nextAttemptAt,jdbcType=TIMESTAMP}, #{run.withheldAt,jdbcType=TIMESTAMP}, #{run.purgedAt,jdbcType=TIMESTAMP}, #{run.startedAt,jdbcType=TIMESTAMP}, #{run.finishedAt,jdbcType=TIMESTAMP}, #{run.planSchemaVersion,jdbcType=SMALLINT}, #{run.planRevision}, CONVERT(#{run.planJson,jdbcType=VARBINARY,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4), #{run.checkpointSchemaVersion,jdbcType=SMALLINT}, #{run.checkpointRevision}, CONVERT(#{run.checkpointJson,jdbcType=VARBINARY,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4), #{run.memorySchemaVersion,jdbcType=SMALLINT}, CONVERT(#{run.memoryJson,jdbcType=VARBINARY,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4), #{run.lastCommittedSegmentNo})
   </insert>
 
   <select id="getRun" resultMap="runResult" useCache="false" flushCache="true">
@@ -121,7 +130,7 @@
     SELECT * FROM ai_agent_run
     WHERE workspace_id = #{workspaceId} AND status = 'queued'
       AND next_attempt_at &lt;= CURRENT_TIMESTAMP(6)
-      AND execution_deadline_at &gt; CURRENT_TIMESTAMP(6)
+      AND execution_deadline_at &gt; CURRENT_TIMESTAMP(6) AND hard_deadline_at &gt; CURRENT_TIMESTAMP(6)
       AND withheld_at IS NULL AND purged_at IS NULL
     ORDER BY next_attempt_at, id LIMIT #{limit}
   </select>
@@ -186,7 +195,16 @@
         withheld_at = #{run.withheldAt,jdbcType=TIMESTAMP},
         purged_at = #{run.purgedAt,jdbcType=TIMESTAMP},
         started_at = #{run.startedAt,jdbcType=TIMESTAMP},
-        finished_at = #{run.finishedAt,jdbcType=TIMESTAMP}
+        finished_at = #{run.finishedAt,jdbcType=TIMESTAMP},
+        plan_schema_version = #{run.planSchemaVersion,jdbcType=SMALLINT},
+        plan_revision = #{run.planRevision},
+        plan_json = CONVERT(#{run.planJson,jdbcType=VARBINARY,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),
+        checkpoint_schema_version = #{run.checkpointSchemaVersion,jdbcType=SMALLINT},
+        checkpoint_revision = #{run.checkpointRevision},
+        checkpoint_json = CONVERT(#{run.checkpointJson,jdbcType=VARBINARY,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),
+        memory_schema_version = #{run.memorySchemaVersion,jdbcType=SMALLINT},
+        memory_json = CONVERT(#{run.memoryJson,jdbcType=VARBINARY,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),
+        last_committed_segment_no = #{run.lastCommittedSegmentNo}
     WHERE workspace_id = #{run.workspaceId} AND id = #{run.id}
       AND state_version = #{expectedStateVersion}
       AND execution_generation = #{expectedExecutionGeneration}
@@ -259,4 +277,76 @@
       AND status IN ('queued', 'running', 'waiting_approval', 'paused')
     ORDER BY id LIMIT #{limit}
   </select>
+  <update id="updateContinuation">
+    UPDATE ai_agent_run
+    SET plan_schema_version = #{run.planSchemaVersion,jdbcType=SMALLINT},
+        plan_revision = #{run.planRevision},
+        plan_json = CONVERT(#{run.planJson,jdbcType=VARBINARY,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),
+        checkpoint_schema_version = #{run.checkpointSchemaVersion,jdbcType=SMALLINT},
+        checkpoint_revision = #{run.checkpointRevision},
+        checkpoint_json = CONVERT(#{run.checkpointJson,jdbcType=VARBINARY,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),
+        memory_schema_version = #{run.memorySchemaVersion,jdbcType=SMALLINT},
+        memory_json = CONVERT(#{run.memoryJson,jdbcType=VARBINARY,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),
+        last_committed_segment_no = #{run.lastCommittedSegmentNo},
+        state_version = #{run.stateVersion}
+    WHERE workspace_id = #{run.workspaceId} AND id = #{run.id}
+      AND state_version = #{expectedStateVersion} AND execution_generation = #{expectedExecutionGeneration}
+      AND runtime_contract_version = 2 AND active_segment_id &lt;=&gt; #{expectedActiveSegmentId,jdbcType=INTEGER}
+      AND plan_revision = #{expectedPlanRevision} AND checkpoint_revision = #{expectedCheckpointRevision}
+  </update>
+
+  <select id="goalMessageIdentity" resultType="ooo.klae.connex.backend.beans.AiChatMessage" useCache="false" flushCache="true">
+    SELECT id, workspace_id, session_id, seq, privacy_generation, mission_run_id, mission_message_kind
+    FROM ai_chat_message WHERE workspace_id = #{workspaceId} AND mission_run_id = #{runId}
+      AND mission_message_kind = 'goal'
+  </select>
+
+  <select id="interruptedReadRuns" resultMap="runResult" useCache="false" flushCache="true">
+    SELECT * FROM ai_agent_run
+    WHERE workspace_id = #{workspaceId} AND runtime_contract_version = 2
+      AND status = 'paused' AND reason_code = 'interrupted'
+      AND next_attempt_at &lt;= CURRENT_TIMESTAMP(6)
+      AND execution_deadline_at &gt; CURRENT_TIMESTAMP(6) AND hard_deadline_at &gt; CURRENT_TIMESTAMP(6)
+      AND withheld_at IS NULL AND purged_at IS NULL
+    ORDER BY next_attempt_at, id LIMIT #{limit}
+  </select>
+
+  <update id="reserveSegmentDispatch">
+    UPDATE ai_agent_segment
+    SET known_steps = known_steps + 1, usage_uncertain = TRUE
+    WHERE workspace_id = #{workspaceId} AND run_id = #{runId} AND id = #{segmentId}
+      AND execution_generation = #{generation} AND status = 'running'
+      AND known_steps = #{expectedOrdinal} AND usage_uncertain = FALSE
+      AND known_steps &lt; reserved_steps
+      AND #{tokenCeiling} &gt; 0 AND #{tokenCeiling} &lt;= reserved_tokens - known_input_tokens - known_output_tokens
+  </update>
+
+  <update id="recordDispatchUsage">
+    UPDATE ai_agent_segment
+    SET known_input_tokens = known_input_tokens + #{input}, known_output_tokens = known_output_tokens + #{output},
+        usage_uncertain = FALSE
+    WHERE workspace_id = #{workspaceId} AND run_id = #{runId} AND id = #{segmentId}
+      AND execution_generation = #{generation} AND status = 'running'
+      AND known_steps = #{ordinal} AND usage_uncertain = TRUE
+  </update>
+
+  <insert id="insertMissionBookkeepingCall" useGeneratedKeys="true" keyProperty="call.id">
+    INSERT INTO ai_chat_tool_call
+      (workspace_id, message_id, mission_run_id, artifact_origin, privacy_generation,
+       tool_name, status, arguments_json, result_json, executed_by_user_id, executed_at, idempotency_key)
+    VALUES
+      (#{call.workspaceId}, #{call.messageId}, #{call.missionRunId}, 'mission', #{call.privacyGeneration},
+       #{call.toolName}, 'executed',
+       CONVERT(#{call.argumentsJson,jdbcType=VARBINARY,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),
+       CONVERT(#{call.resultJson,jdbcType=VARBINARY,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),
+       #{call.executedByUserId}, CURRENT_TIMESTAMP(6), #{call.idempotencyKey})
+  </insert>
+
+  <select id="findMissionBookkeepingCall" resultType="ooo.klae.connex.backend.beans.AiChatToolCall" useCache="false" flushCache="true">
+    SELECT * FROM ai_chat_tool_call
+    WHERE workspace_id = #{workspaceId} AND mission_run_id = #{runId}
+      AND artifact_origin = 'mission' AND idempotency_key = #{idempotencyKey}
+    FOR UPDATE
+  </select>
+
 </mapper>

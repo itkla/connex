@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.ai.mission;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -17,6 +18,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.AiPrivacyMode;
+import ooo.klae.connex.backend.ai.mission.AiAgentBudgetService.AiAgentDispatchReservation;
+import ooo.klae.connex.backend.ai.mission.AiAgentContinuationCodec.Snapshot;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantLoopException;
 import ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard;
@@ -58,6 +61,8 @@ public class AiAgentRunPersistenceService {
     private final ObjectMapper json;
     private final Clock clock;
     private final ObjectProvider<AiAgentRunPersistenceService> transactionalSelf;
+    private final AiAgentContinuationCodec codec = new AiAgentContinuationCodec();
+    private final AiAgentBudgetService budget = new AiAgentBudgetService();
 
     /** Creates the request, goal and first immutable taint boundary in one session transaction. */
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -103,7 +108,7 @@ public class AiAgentRunPersistenceService {
         run.setRequestHash(requestHash);
         run.setMissionType(request.missionType());
         run.setDefinitionVersion(1);
-        run.setRuntimeContractVersion(1);
+        run.setRuntimeContractVersion(2);
         run.setLocale(locale);
         run.setGoal(request.goal());
         run.setScopeJson(scopeJson);
@@ -117,6 +122,10 @@ public class AiAgentRunPersistenceService {
         run.setExecutionDeadlineAt(now().plusSeconds(request.limits().executionLifetimeSeconds()));
         run.setHardDeadlineAt(run.getExecutionDeadlineAt());
         runs.insertRun(run);
+        codec.initialize(run);
+        if (runs.updateContinuation(run, run.getStateVersion(), run.getExecutionGeneration(), null, 0, 0) != 1) {
+            throw new ConflictException("mission_version_conflict");
+        }
         AiChatMessage goal = message(run, sequence, "user", "goal", request.goal(), null);
         goal.setAuthorUserId(owner);
         chat.insertMessage(goal);
@@ -138,7 +147,7 @@ public class AiAgentRunPersistenceService {
         authorize(workspaceId, owner);
         AiChatSession session = lockSession(workspaceId, owner, sessionId);
         AiAgentRun run = requireRun(workspaceId, discovered.getId(), sessionId);
-        if (!"queued".equals(run.getStatus())) {
+        if (!"queued".equals(run.getStatus()) || (run.getNextAttemptAt() != null && run.getNextAttemptAt().isAfter(now()))) {
             throw new ConflictException("mission_state_conflict");
         }
         requireAllowance(run);
@@ -148,8 +157,13 @@ public class AiAgentRunPersistenceService {
         AiChatPrivacyToken token = new AiChatPrivacyToken(workspaceId, sessionId,
                 run.getPrivacyGeneration(), session.getMissionTaintSeq());
         AiChatPrivacyGuard.requireCurrent(chat, token);
-        int attempts = runs.listSegments(workspaceId, run.getId()).size();
-        if (attempts >= 3) {
+        Snapshot snapshot = codec.decode(run);
+        if (snapshot != null) {
+            codec.validateExecutable(run, snapshot);
+        }
+        int logicalSegment = run.getRuntimeContractVersion() == 1 ? 1 : run.getLastCommittedSegmentNo() + 1;
+        int attempts = attemptsForNextSegment(run);
+        if (attempts >= 3 || logicalSegment > AiAgentMissionCatalog.maxSegments(run)) {
             throw new ConflictException("mission_attempt_limit");
         }
         long epoch = restriction.current(workspaceId);
@@ -169,16 +183,16 @@ public class AiAgentRunPersistenceService {
         segment.setWorkspaceId(workspaceId);
         segment.setRunId(run.getId());
         segment.setTurnId(turn.getId());
-        segment.setSegmentNo(1);
+        segment.setSegmentNo(logicalSegment);
         segment.setAttemptNo(attempts + 1);
         segment.setExecutionGeneration(run.getExecutionGeneration());
         segment.setPrivacyGeneration(run.getPrivacyGeneration());
         segment.setStatus("running");
-        segment.setReservedSteps(run.getMaxSteps() - run.getConsumedSteps());
-        segment.setReservedTokens(run.getMaxTokens() - run.getConsumedTokens());
+        var reservation = budget.reserve(run, logicalSegment, clock.instant());
+        segment.setReservedSteps(reservation.steps());
+        segment.setReservedTokens(reservation.tokens());
         segment.setProviderDeclarationFingerprint(declaration);
-        segment.setDeadlineAt(now().plusSeconds(180).isBefore(run.getExecutionDeadlineAt())
-                ? now().plusSeconds(180) : run.getExecutionDeadlineAt());
+        segment.setDeadlineAt(LocalDateTime.ofInstant(reservation.deadline(), ZoneOffset.UTC));
         segment.setStartedAt(now());
         runs.insertSegment(segment);
         chat.linkMissionTurn(workspaceId, sessionId, turn.getId(), run.getId(), segment.getId());
@@ -189,10 +203,13 @@ public class AiAgentRunPersistenceService {
         run.setReservedSteps(segment.getReservedSteps());
         run.setReservedTokens(segment.getReservedTokens());
         update(run, previousVersion, previousGeneration);
-        AiChatMessage goal = chat.getMissionMessage(workspaceId, run.getId(), "goal");
+        AiChatMessage goal = run.getRuntimeContractVersion() == 2
+                ? runs.goalMessageIdentity(workspaceId, run.getId())
+                : chat.getMissionMessage(workspaceId, run.getId(), "goal");
         if (goal == null) {
             throw new IllegalStateException("Mission goal unavailable");
         }
+        goal.setContent(run.getGoal());
         AiAgentRunCreateRequest.Scope scope = json.readValue(run.getScopeJson(), AiAgentRunCreateRequest.Scope.class);
         AiChatQueuedTurn queued = new AiChatQueuedTurn(workspaceId, owner, sessionId, turn.getId(),
                 goal.getId(), goal.getSeq(), epoch, false,
@@ -203,7 +220,9 @@ public class AiAgentRunPersistenceService {
                 AiRunLeaseSubject.AGENT_RUN, run.getId()), guard);
         return new AiAgentExecutionPolicy(run.getId(), segment.getId(), run.getExecutionGeneration(),
                 queued, goal, new AiAgentScopePolicy(scope), segment.getReservedSteps(),
-                segment.getDeadlineAt().toInstant(ZoneOffset.UTC), lease, guard, transactionalSelf.getObject(), gate);
+                segment.getDeadlineAt().toInstant(ZoneOffset.UTC), lease, guard, transactionalSelf.getObject(), gate,
+                run.getRuntimeContractVersion(), logicalSegment, segment.getAttemptNo(), snapshot,
+                reservation.continuationCapable(), segment.getReservedTokens());
     }
 
     /** Current-state nonlocking execution predicate, safe inside dispatch/publication fences. */
@@ -234,38 +253,182 @@ public class AiAgentRunPersistenceService {
 
     /** Records each attempted model call before its local dispatch fence, including fallback calls. */
     @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
-    public void reserveDispatch(AiAgentExecutionPolicy policy, long tokenCeiling) {
-        AiAgentRun run = lockExecution(policy);
-        AiAgentSegment segment = lockAttempt(policy);
-        long known = segment.getKnownInputTokens() + segment.getKnownOutputTokens();
-        if (segment.isUsageUncertain() || segment.getKnownSteps() >= segment.getReservedSteps()
-                || tokenCeiling <= 0 || tokenCeiling > segment.getReservedTokens() - known) {
-            throw new AiAssistantLoopException("mission_budget_exhausted", "mission_budget_exhausted");
-        }
-        segment.setKnownSteps(segment.getKnownSteps() + 1);
-        segment.setUsageUncertain(true);
-        runs.updateSegment(segment, "running");
-        fence(policy.turn().privacyToken(), policy.turn().restrictionEpoch());
-    }
-
-    /** Settles observed provider usage without treating a missing response as unused allowance. */
-    @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
-    public void recordUsage(AiAgentExecutionPolicy policy, int input, int output) {
+    public AiAgentDispatchReservation reserveDispatch(AiAgentExecutionPolicy policy, long tokenCeiling) {
         lockExecution(policy);
         AiAgentSegment segment = lockAttempt(policy);
-        if (input < 0 || output < 0) {
+        long known = Math.addExact(segment.getKnownInputTokens(), segment.getKnownOutputTokens());
+        if (segment.isUsageUncertain() || segment.getKnownSteps() >= segment.getReservedSteps()
+                || tokenCeiling <= 0 || tokenCeiling > segment.getReservedTokens() - known
+                || runs.reserveSegmentDispatch(policy.turn().workspaceId(), policy.runId(), policy.segmentId(),
+                        policy.executionGeneration(), segment.getKnownSteps(), tokenCeiling) != 1) {
+            throw new AiAssistantLoopException("mission_budget_exhausted", "mission_budget_exhausted");
+        }
+        int ordinal = Math.incrementExact(segment.getKnownSteps());
+        segment.setKnownSteps(ordinal);
+        segment.setUsageUncertain(true);
+        fence(policy.turn().privacyToken(), policy.turn().restrictionEpoch());
+        return new AiAgentDispatchReservation(policy.runId(), policy.segmentId(), policy.executionGeneration(),
+                ordinal, tokenCeiling);
+    }
+
+    /** Settles only the exact outstanding provider dispatch; duplicates cannot charge its successor. */
+    @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
+    public void recordUsage(AiAgentExecutionPolicy policy, AiAgentDispatchReservation dispatch, int input, int output) {
+        AiAgentRun run = lockExecution(policy, false);
+        AiAgentSegment segment = lockAttempt(policy);
+        if (input < 0 || output < 0 || dispatch == null || dispatch.runId() != policy.runId()
+                || dispatch.segmentId() != policy.segmentId() || dispatch.executionGeneration() != policy.executionGeneration()) {
             throw new IllegalArgumentException("Invalid provider usage");
+        }
+        if (!segment.isUsageUncertain() || segment.getKnownSteps() != dispatch.dispatchOrdinal()) {
+            return;
+        }
+        if (runs.recordDispatchUsage(policy.turn().workspaceId(), policy.runId(), policy.segmentId(),
+                policy.executionGeneration(), dispatch.dispatchOrdinal(), input, output) != 1) {
+            throw new ConflictException("mission_dispatch_conflict");
         }
         segment.setKnownInputTokens(Math.addExact(segment.getKnownInputTokens(), input));
         segment.setKnownOutputTokens(Math.addExact(segment.getKnownOutputTokens(), output));
         segment.setUsageUncertain(false);
-        runs.updateSegment(segment, "running");
+        boolean overrun = Math.addExact((long) input, output) > dispatch.tokenCeiling()
+                || Math.addExact(segment.getKnownInputTokens(), segment.getKnownOutputTokens()) > segment.getReservedTokens();
+        if (overrun) {
+            settle(run, segment, "paused", "usage_overrun", true);
+        }
         fence(policy.turn().privacyToken(), policy.turn().restrictionEpoch());
+        if (overrun) {
+            leases.releaseHeldInCurrentTransaction(policy.lease().key());
+        }
+    }
+
+    /** Reads current durable continuation without loading any prior transcript content. */
+    public Snapshot snapshot(AiAgentExecutionPolicy policy) {
+        requireRunning(policy);
+        AiAgentRun run = runs.getRun(policy.turn().workspaceId(), policy.runId());
+        requireIdentity(run, policy);
+        Snapshot snapshot = codec.decode(run);
+        codec.validateExecutable(run, snapshot);
+        return snapshot;
+    }
+
+    /** Returns an exact screened bookkeeping replay after locking current authorization and ancestry. */
+    @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
+    public String replayBookkeeping(AiAgentExecutionPolicy policy, int step, int ordinal, String arguments) {
+        lockExecution(policy);
+        AiChatToolCall call = runs.findMissionBookkeepingCall(policy.turn().workspaceId(), policy.runId(),
+                bookkeepingKey(policy, step, ordinal));
+        lockAttempt(policy);
+        if (call == null) {
+            return null;
+        }
+        requireReplay(call, arguments);
+        fence(policy.turn().privacyToken(), policy.turn().restrictionEpoch());
+        return call.getResultJson();
+    }
+
+    /** Commits a screened plan, immutable facts, revisions and its tool replay as one ordered write. */
+    @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
+    public String commitPlan(AiAgentExecutionPolicy policy, int step, int ordinal, String arguments,
+            String result, Snapshot prepared) {
+        return commitBookkeeping(policy, step, ordinal, "set_todos", arguments, result, prepared, false);
+    }
+
+    /** Atomically commits continuation and accounting, queues the successor and releases the lease last. */
+    @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
+    public String commitCheckpoint(AiAgentExecutionPolicy policy, int step, int ordinal, String arguments,
+            String result, Snapshot prepared) {
+        return commitBookkeeping(policy, step, ordinal, "checkpoint_segment", arguments, result, prepared, true);
+    }
+
+    private String commitBookkeeping(AiAgentExecutionPolicy policy, int step, int ordinal, String name,
+            String arguments, String result, Snapshot prepared, boolean checkpoint) {
+        if (policy.runtimeContractVersion() != 2 || prepared == null || arguments == null || result == null
+                || arguments.getBytes(StandardCharsets.UTF_8).length > 65536
+                || result.getBytes(StandardCharsets.UTF_8).length > 65536) {
+            throw new AiAssistantLoopException("mission_content_refused", "mission_content_refused");
+        }
+        AiAgentRun run = lockExecution(policy);
+        AiChatToolCall replay = runs.findMissionBookkeepingCall(policy.turn().workspaceId(), policy.runId(),
+                bookkeepingKey(policy, step, ordinal));
+        AiAgentSegment segment = lockAttempt(policy);
+        if (replay != null) {
+            requireReplay(replay, arguments);
+            fence(policy.turn().privacyToken(), policy.turn().restrictionEpoch());
+            return replay.getResultJson();
+        }
+        Snapshot previous = codec.decode(run);
+        long planRevision = run.getPlanRevision();
+        long checkpointRevision = run.getCheckpointRevision();
+        long version = run.getStateVersion();
+        long generation = run.getExecutionGeneration();
+        if (Long.parseLong(prepared.checkpoint().revision()) != Math.incrementExact(checkpointRevision)
+                || Long.parseLong(prepared.plan().revision()) != (checkpoint ? planRevision : Math.incrementExact(planRevision))
+                || prepared.checkpoint().lastCommittedSegmentNo() != run.getLastCommittedSegmentNo() + (checkpoint ? 1 : 0)
+                || !prepared.checkpoint().actionSlotReferences().equals(previous.checkpoint().actionSlotReferences())
+                || !prepared.checkpoint().completedFacts().containsAll(previous.checkpoint().completedFacts())
+                || (checkpoint && !prepared.plan().equals(previous.plan()))) {
+            throw new ConflictException("mission_revision_conflict");
+        }
+        if (checkpoint && (!policy.continuationCapable() || segment.isUsageUncertain()
+                || policy.segmentNo() != run.getLastCommittedSegmentNo() + 1
+                || run.getConsumedSteps() + segment.getKnownSteps() >= run.getMaxSteps()
+                || run.getConsumedTokens() + segment.getKnownInputTokens() + segment.getKnownOutputTokens() >= run.getMaxTokens())) {
+            throw new AiAssistantLoopException("mission_budget_exhausted", "mission_budget_exhausted");
+        }
+        codec.validateTransition(previous, prepared, checkpoint);
+        codec.apply(run, prepared);
+        codec.validateExecutable(run, prepared);
+        run.setStateVersion(Math.incrementExact(version));
+        if (runs.updateContinuation(run, version, generation, policy.segmentId(), planRevision, checkpointRevision) != 1) {
+            throw new ConflictException("mission_revision_conflict");
+        }
+        AiChatToolCall call = new AiChatToolCall();
+        call.setWorkspaceId(policy.turn().workspaceId());
+        call.setMessageId(policy.turn().userMessageId());
+        call.setMissionRunId(policy.runId());
+        call.setArtifactOrigin("mission");
+        call.setPrivacyGeneration(policy.turn().privacyToken().privacyGeneration());
+        call.setToolName(name);
+        call.setStatus("executed");
+        call.setArgumentsJson(arguments);
+        call.setResultJson(result);
+        call.setExecutedByUserId(policy.turn().userId());
+        call.setIdempotencyKey(bookkeepingKey(policy, step, ordinal));
+        if (runs.insertMissionBookkeepingCall(call) != 1) {
+            throw new ConflictException("mission_bookkeeping_conflict");
+        }
+        if (checkpoint) {
+            run.setNextAttemptAt(now());
+            settle(run, segment, "queued", null, false);
+        }
+        fence(policy.turn().privacyToken(), policy.turn().restrictionEpoch());
+        if (checkpoint) {
+            leases.releaseHeldInCurrentTransaction(policy.lease().key());
+        }
+        return result;
+    }
+
+    private String bookkeepingKey(AiAgentExecutionPolicy policy, int step, int ordinal) {
+        if (step < 0 || ordinal < 0) {
+            throw new IllegalArgumentException("Invalid mission bookkeeping identity");
+        }
+        return "mission-" + policy.runId() + "-" + policy.segmentId() + "-" + step + "-" + ordinal;
+    }
+
+    private void requireReplay(AiChatToolCall call, String arguments) {
+        if (call.getArgumentsJson() == null || arguments == null
+                || !json.readTree(call.getArgumentsJson()).equals(json.readTree(arguments))
+                || !"executed".equals(call.getStatus()) || call.getResultJson() == null) {
+            throw new ConflictException("mission_bookkeeping_conflict");
+        }
     }
 
     /** Persists only allowed read-call arguments; provider-native replay state remains transient. */
     @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
     public int proposeTool(AiAgentExecutionPolicy policy, int step, int ordinal, String name, String arguments) {
+        if (!AiAgentScopePolicy.TOOLS.contains(name)) {
+            throw new AiAssistantLoopException("mission_tool_refused", "mission_tool_refused");
+        }
         policy.scope().requireTool(name);
         lockExecution(policy);
         lockAttempt(policy);
@@ -356,7 +519,7 @@ public class AiAgentRunPersistenceService {
                 throw new ConflictException("mission_state_conflict");
             }
             requireAllowance(run);
-            if (runs.listSegments(run.getWorkspaceId(), run.getId()).size() >= 3) {
+            if (attemptsForNextSegment(run) >= 3) {
                 throw new ConflictException("mission_attempt_limit");
             }
             var token = new AiChatPrivacyToken(run.getWorkspaceId(), run.getSessionId(), run.getPrivacyGeneration(),
@@ -370,7 +533,7 @@ public class AiAgentRunPersistenceService {
             fence(token, restriction.current(run.getWorkspaceId()));
             return run;
         }
-        if ("pause".equals(action) && "paused".equals(run.getStatus())) {
+        if ("pause".equals(action) && "paused".equals(run.getStatus()) && "member".equals(run.getReasonCode())) {
             return run;
         }
         String state = "pause".equals(action) ? "paused" : "cancelled";
@@ -380,6 +543,24 @@ public class AiAgentRunPersistenceService {
             leases.releaseHeldInCurrentTransaction(new AiRunLeaseKey(run.getWorkspaceId(), AiRunLeaseSubject.AGENT_RUN, run.getId()));
         }
         return run;
+    }
+
+    /** Backs off preclaim readiness for interruption recovery without reclassifying the stop. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public void deferInterrupted(AiAgentRun discovered) {
+        if (discovered.getSessionId() == null) {
+            return;
+        }
+        chat.getSessionByIdForMaintenanceUpdate(discovered.getWorkspaceId(), discovered.getSessionId());
+        AiAgentRun run = requireRun(discovered.getWorkspaceId(), discovered.getId(), discovered.getSessionId());
+        if (!"paused".equals(run.getStatus()) || !"interrupted".equals(run.getReasonCode())
+                || run.getStateVersion() != discovered.getStateVersion()) {
+            return;
+        }
+        long version = run.getStateVersion();
+        run.setNextAttemptAt(now().plusSeconds(30));
+        run.setStateVersion(Math.incrementExact(version));
+        update(run, version, run.getExecutionGeneration());
     }
 
     /** Backs off a refused claim without consuming an attempt or refreshing its lifetime. */
@@ -475,13 +656,60 @@ public class AiAgentRunPersistenceService {
         return true;
     }
 
+    /** Queues only the exact genuinely interrupted READ identity after fresh preclaim gates. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public boolean requeueInterrupted(AiAgentRun discovered) {
+        if (discovered.getOwnerUserId() == null || discovered.getSessionId() == null) {
+            return false;
+        }
+        authorize(discovered.getWorkspaceId(), discovered.getOwnerUserId());
+        AiChatSession session = lockSession(discovered.getWorkspaceId(), discovered.getOwnerUserId(), discovered.getSessionId());
+        AiAgentRun run = requireRun(discovered.getWorkspaceId(), discovered.getId(), discovered.getSessionId());
+        if (run.getStateVersion() != discovered.getStateVersion()
+                || run.getExecutionGeneration() != discovered.getExecutionGeneration()
+                || run.getRuntimeContractVersion() != 2 || !"paused".equals(run.getStatus())
+                || !AiAgentMissionCatalog.automaticRetryReason(run.getReasonCode())
+                || (run.getNextAttemptAt() != null && run.getNextAttemptAt().isAfter(now()))) {
+            return false;
+        }
+        requireAllowance(run);
+        if (attemptsForNextSegment(run) >= 3) {
+            return false;
+        }
+        var token = new AiChatPrivacyToken(run.getWorkspaceId(), run.getSessionId(), run.getPrivacyGeneration(),
+                session.getMissionTaintSeq());
+        long version = run.getStateVersion();
+        run.setStatus("queued");
+        run.setReasonCode(null);
+        run.setStateVersion(Math.incrementExact(version));
+        run.setNextAttemptAt(now());
+        update(run, version, run.getExecutionGeneration());
+        fence(token, restriction.current(run.getWorkspaceId()));
+        return true;
+    }
+
+    /** Uses the current logical segment's maximum attempt ordinal, never aggregate row count. */
+    public int attemptsForNextSegment(AiAgentRun run) {
+        int logical = run.getRuntimeContractVersion() == 1 ? 1 : run.getLastCommittedSegmentNo() + 1;
+        List<AiAgentSegment> segments = runs.listSegments(run.getWorkspaceId(), run.getId());
+        if (segments.size() > (run.getRuntimeContractVersion() == 1 ? 3 : 24)) {
+            throw new ConflictException("mission_attempt_limit");
+        }
+        return segments.stream().filter(segment -> segment.getSegmentNo() == logical)
+                .mapToInt(AiAgentSegment::getAttemptNo).max().orElse(0);
+    }
+
     private AiAgentRun lockExecution(AiAgentExecutionPolicy policy) {
+        return lockExecution(policy, true);
+    }
+
+    private AiAgentRun lockExecution(AiAgentExecutionPolicy policy, boolean requireOpenDeadline) {
         var turn = policy.turn();
         authorize(turn.workspaceId(), turn.userId());
         lockSession(turn.workspaceId(), turn.userId(), turn.sessionId());
         AiAgentRun run = requireRun(turn.workspaceId(), policy.runId(), turn.sessionId());
         requireIdentity(run, policy);
-        if (!clock.instant().isBefore(policy.deadline())) {
+        if (requireOpenDeadline && !clock.instant().isBefore(policy.deadline())) {
             throw new AiAssistantLoopException("mission_expired", "mission_expired");
         }
         AiChatPrivacyGuard.requireCurrent(chat, turn.privacyToken());
@@ -519,10 +747,9 @@ public class AiAgentRunPersistenceService {
         long version = run.getStateVersion();
         long generation = run.getExecutionGeneration();
         if (segment != null) {
-            boolean uncertain = segment.isUsageUncertain();
-            run.setConsumedSteps(Math.addExact(run.getConsumedSteps(), uncertain ? segment.getReservedSteps() : segment.getKnownSteps()));
-            run.setConsumedTokens(Math.addExact(run.getConsumedTokens(), uncertain ? segment.getReservedTokens()
-                    : segment.getKnownInputTokens() + segment.getKnownOutputTokens()));
+            var charge = budget.settle(segment);
+            run.setConsumedSteps(Math.addExact(run.getConsumedSteps(), charge.steps()));
+            run.setConsumedTokens(Math.addExact(run.getConsumedTokens(), charge.tokens()));
             segment.setStatus(interrupted ? "interrupted" : "completed");
             segment.setSettledAt(now());
             segment.setFailureReason(reason);
@@ -584,14 +811,33 @@ public class AiAgentRunPersistenceService {
                 || !Objects.equals(run.getActiveSegmentId(), policy.segmentId())) {
             throw new ConflictException("mission_state_conflict");
         }
+        try {
+            var snapshot = codec.decode(run);
+            if (snapshot != null) {
+                codec.validateExecutable(run, snapshot);
+            }
+        } catch (IllegalArgumentException | IllegalStateException exception) {
+            throw new ConflictException("mission_unavailable");
+        }
     }
 
     private void requireAllowance(AiAgentRun run) {
-        if (!now().isBefore(run.getExecutionDeadlineAt())) {
+        if (!now().isBefore(run.getExecutionDeadlineAt()) || !now().isBefore(run.getHardDeadlineAt())) {
             throw new ConflictException("mission_expired");
         }
-        if (run.getDefinitionVersion() != 1 || run.getRuntimeContractVersion() != 1 || run.getWithheldAt() != null) {
+        if (run.getWithheldAt() != null || run.getPurgedAt() != null) {
             throw new ConflictException("mission_unavailable");
+        }
+        try {
+            Snapshot snapshot = codec.decode(run);
+            if (snapshot != null) {
+                codec.validateExecutable(run, snapshot);
+            }
+        } catch (IllegalArgumentException | IllegalStateException exception) {
+            throw new ConflictException("mission_unavailable");
+        }
+        if (run.getReservedSteps() != 0 || run.getReservedTokens() != 0 || run.getActiveSegmentId() != null) {
+            throw new ConflictException("mission_state_conflict");
         }
         if (run.getConsumedSteps() >= run.getMaxSteps() || run.getConsumedTokens() >= run.getMaxTokens()) {
             throw new ConflictException("mission_budget_exhausted");

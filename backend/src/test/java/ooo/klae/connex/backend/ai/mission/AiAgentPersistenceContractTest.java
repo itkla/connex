@@ -42,6 +42,33 @@ class AiAgentPersistenceContractTest {
     }
 
     @Test
+    void v234ContinuationWritersAndResidualEnrollmentStayLosslessAndScoped() throws Exception {
+        String migration = Files.readString(Path.of("src/main/resources/db/migration/tenant/V234__ai_agent_continuation.sql"));
+        assertTrue(migration.contains("ALGORITHM=INSTANT, LOCK=DEFAULT"));
+        assertTrue(migration.contains("ALGORITHM=INPLACE, LOCK=NONE"));
+        assertFalse(migration.toLowerCase(java.util.Locale.ROOT).contains("from the"));
+        assertFalse(migration.contains("ADD CONSTRAINT"));
+        assertTrue(TenantScopeInterceptor.SCOPED_NAMESPACES.contains("ooo.klae.connex.backend.mappers.AiAgentRunMapper"));
+        var factory = javax.xml.parsers.DocumentBuilderFactory.newInstance();
+        factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+        var document = factory.newDocumentBuilder().parse(Path.of("src/main/resources/mappers/AiAgentRunMapper.xml").toFile());
+        var xpath = javax.xml.xpath.XPathFactory.newInstance().newXPath();
+        for (String statement : Set.of("insertRun", "updateRun", "updateContinuation")) {
+            String sql = xpath.evaluate("/mapper/*[@id='" + statement + "']", document);
+            for (String field : Set.of("planJson", "checkpointJson", "memoryJson")) {
+                assertTrue(sql.contains("CONVERT(#{run." + field
+                        + ",jdbcType=VARBINARY,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4)"), statement);
+            }
+        }
+        String privacy = Files.readString(Path.of("src/main/resources/mappers/AiAgentPrivacyMapper.xml"));
+        assertEquals(2, privacy.split("<include refid=\"runHasResidualPayload\" />", -1).length - 1);
+        for (String column : Set.of("plan_schema_version", "plan_revision", "plan_json", "checkpoint_schema_version",
+                "checkpoint_revision", "checkpoint_json", "memory_schema_version", "memory_json", "last_committed_segment_no")) {
+            assertTrue(privacy.contains("r." + column), column);
+        }
+    }
+
+    @Test
     void purgeAndResidualShareTheImmutableMessageBoundary() throws Exception {
         String mapper = Files.readString(Path.of("src/main/resources/mappers/AiAgentPrivacyMapper.xml"));
         String residual = mapper.substring(mapper.indexOf("<sql id=\"sessionResidual\">"));

@@ -34,6 +34,19 @@ public class AiAgentRealtimePublisher {
     public record Frame(int workspaceId, int sessionId, int runId, String stateVersion,
             String kind, String coarseState) {}
 
+    private boolean supportedContent(AiAgentRun run) {
+        try {
+            var codec = new AiAgentContinuationCodec();
+            var snapshot = codec.decode(run);
+            if (snapshot != null) {
+                codec.validateExecutable(run, snapshot);
+            }
+            return true;
+        } catch (IllegalArgumentException | IllegalStateException exception) {
+            return false;
+        }
+    }
+
     /** Invoked after durable transactions return; privacy and revocation races are fenced at send. */
     public void publish(AiAgentRun source, String kind) {
         if (!Set.of("mission_created", "mission_state", "mission_output").contains(kind)) {
@@ -49,7 +62,7 @@ public class AiAgentRealtimePublisher {
             var barrier = chat.getPrivacyBarrier(workspaceId);
             if (current == null || current.getSessionId() == null || current.getOwnerUserId() == null
                     || current.getStateVersion() != version || current.getPrivacyGeneration() != generation
-                    || current.getWithheldAt() != null || barrier == null || barrier.isBlocked()
+                    || !supportedContent(current) || current.getWithheldAt() != null || barrier == null || barrier.isBlocked()
                     || barrier.getGeneration() != generation) {
                 return;
             }

@@ -184,6 +184,7 @@ public class AiAssistantToolCatalog {
     public List<ToolSpec> tools(Set<Toolset> loadedToolsets) {
         return TOOLS.values().stream()
                 .filter(spec -> loadedToolsets.contains(spec.toolset()))
+                .filter(spec -> !"checkpoint_segment".equals(spec.name()) || AiAgentToolSchema.enabled())
                 .filter(spec -> ooo.klae.connex.backend.ai.mission.AiAgentExecutionPolicy.permits(spec.name()))
                 .toList();
     }
@@ -198,6 +199,7 @@ public class AiAssistantToolCatalog {
         return TOOLS.values().stream()
                 .filter(ToolSpec::executable)
                 .filter(spec -> loadedToolsets.contains(spec.toolset()))
+                .filter(spec -> !"checkpoint_segment".equals(spec.name()) || AiAgentToolSchema.enabled())
                 .filter(spec -> ooo.klae.connex.backend.ai.mission.AiAgentExecutionPolicy.permits(spec.name()))
                 .map(spec -> new AiToolDefinition(
                         spec.name(), description(spec.name()), parametersSchema(objectMapper, spec)))
@@ -350,13 +352,15 @@ public class AiAssistantToolCatalog {
 
     /** @return whether the key is declared, including reserved replay-stable keys */
     public boolean isKnown(String name) {
-        return name != null && TOOLS.containsKey(name);
+        return name != null && TOOLS.containsKey(name)
+                && (!"checkpoint_segment".equals(name) || AiAgentToolSchema.enabled());
     }
 
     /** @return whether the declared key is enabled for execution in this increment */
     public boolean isExecutable(String name) {
         ToolSpec spec = TOOLS.get(name);
-        return spec != null && spec.executable();
+        return spec != null && spec.executable()
+                && (!"checkpoint_segment".equals(name) || AiAgentToolSchema.enabled());
     }
 
     /** @return whether the declared key performs a mutation */
@@ -379,6 +383,9 @@ public class AiAssistantToolCatalog {
 
     /** Validates the exact raw JSON argument shape for a declared tool. */
     public boolean permitsArguments(String name, JsonNode args) {
+        if (AiAgentToolSchema.enabled() && AiAgentToolSchema.bookkeeping(name)) {
+            return AiAgentToolSchema.permits(name, args);
+        }
         ToolSpec spec = TOOLS.get(name);
         if (spec == null || args == null || !args.isObject()) {
             return false;
@@ -478,6 +485,7 @@ public class AiAssistantToolCatalog {
                 textList("items", true, 1, 12),
                 stringList("statuses", false, 1, 12,
                         Set.of("pending", "active", "done"))));
+        add(tools, executable(Toolset.CORE, "checkpoint_segment"));
         add(tools, executable(Toolset.CORE, "list_activities",
                 handle(), integer("limit", false, 1, 20)));
         add(tools, executable(Toolset.CORE, "list_tasks",
@@ -584,7 +592,10 @@ public class AiAssistantToolCatalog {
             case "get_record" -> "Load the visible details for one record handle.";
             case "get_records" -> "Load the visible details for up to twelve record handles "
                     + "in one step.";
-            case "set_todos" -> "Publish or update the plan for this turn: items lists the steps "
+            case "checkpoint_segment" -> "Save screened mission memory and end this segment; call alone.";
+            case "set_todos" -> AiAgentToolSchema.enabled()
+                    ? "Replace the displayed durable mission plan using explicit keys and exact revisions."
+                    : "Publish or update the plan for this turn: items lists the steps "
                     + "in order, statuses gives each one pending, active, or done. Call it again "
                     + "with the whole updated list as you work.";
             case "list_activities" -> "List recent visible activities for one record handle.";
@@ -617,6 +628,9 @@ public class AiAssistantToolCatalog {
     }
 
     private static ObjectNode parametersSchema(ObjectMapper objectMapper, ToolSpec tool) {
+        if (AiAgentToolSchema.enabled() && AiAgentToolSchema.bookkeeping(tool.name())) {
+            return AiAgentToolSchema.arguments(objectMapper, tool.name());
+        }
         ObjectNode args = objectMapper.createObjectNode();
         args.put("type", "object");
         ObjectNode properties = args.putObject("properties");

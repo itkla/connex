@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -228,6 +229,60 @@ class AiChatAgentLoopServiceTest {
         when(governanceService.isEnabled(TURN.workspaceId())).thenReturn(true);
         when(governanceService.assistantMaxSteps(TURN.workspaceId())).thenReturn(6);
         when(clock.instant()).thenReturn(NOW);
+    }
+
+    @Test
+    void missionPlanResultBudgetRefusalCannotCommitATruncatedCanonicalPlan() {
+        var missionPersistence = mock(ooo.klae.connex.backend.ai.mission.AiAgentRunPersistenceService.class);
+        var plans = mock(ooo.klae.connex.backend.ai.mission.AiAgentPlanService.class);
+        var content = mock(ooo.klae.connex.backend.ai.mission.AiAgentContentScreen.class);
+        var evidence = mock(ooo.klae.connex.backend.ai.mission.AiAgentEvidenceService.class);
+        var snapshot = mock(ooo.klae.connex.backend.ai.mission.AiAgentContinuationCodec.Snapshot.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "missionPlanService", plans);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "missionContentScreen", content);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "missionEvidenceService", evidence);
+        AiChatMessage goal = new AiChatMessage();
+        goal.setId(TURN.userMessageId());
+        goal.setAuthorKind("user");
+        goal.setContent("Review the selected record");
+        var policy = new ooo.klae.connex.backend.ai.mission.AiAgentExecutionPolicy(31, 37, 1,
+                TURN, goal, new ooo.klae.connex.backend.ai.mission.AiAgentScopePolicy("person", 41),
+                4, NOW.plusSeconds(180), LEASE, new AiRunLeaseGuard(java.time.Duration.ofSeconds(60)),
+                missionPersistence, null, 2, 1, 1, snapshot, true, 65536);
+        when(missionPersistence.remainingDispatches(policy)).thenReturn(4);
+        when(missionPersistence.snapshot(policy)).thenReturn(snapshot);
+        when(memoryService.prepare(eq(TURN), any(), any(Instant.class), any(), any()))
+                .thenReturn(new AiChatMemory(List.of(goal), new AiAssistantPromptBudget(
+                        64, 64000, 16000, 16000, 512, 112000), 0, 0, false, 1,
+                        new AiAssistantToolResult(Map.of("missionContext", Map.of()), List.of())));
+        var arguments = objectMapper.readTree("""
+                {"expectedPlanRevision":"1","expectedCheckpointRevision":"1","items":[
+                {"key":null,"label":"Review","status":"active","completion":null}]}
+                """);
+        var canonical = objectMapper.createObjectNode().put("screened", "request");
+        var result = objectMapper.createObjectNode().put("planRevision", "2")
+                .put("checkpointRevision", "2");
+        var items = result.putObject("plan").putArray("items");
+        for (int index = 0; index < 20; index++) {
+            items.addObject().put("key", String.format(java.util.Locale.ROOT, "p%04d", index + 1))
+                    .put("label", "A screened canonical label ".repeat(12)).put("status", "pending");
+        }
+        when(plans.canonicalArguments(eq("set_todos"), any(), any(), any())).thenReturn(canonical);
+        when(plans.prepare(eq(snapshot), any(), eq(1), any(), any()))
+                .thenReturn(new ooo.klae.connex.backend.ai.mission.AiAgentPlanService.Prepared(
+                        snapshot, canonical, result));
+        when(invocationService.completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(new AiAssistantStep(new AiAssistantStep.Tool("set_todos", arguments), null)));
+
+        var outcome = policy.execute(() -> service.run(TURN));
+
+        assertEquals(AiGenerationTaskResult.Outcome.FAILED, outcome.outcome());
+        assertEquals("tool_result_budget_exhausted", outcome.reason());
+        verify(missionPersistence, never()).commitPlan(any(), anyInt(), anyInt(), any(), any(), any());
+        verify(missionPersistence, never()).commitCheckpoint(any(), anyInt(), anyInt(), any(), any(), any());
+        verify(persistenceService, never()).proposeTool(any(), anyInt(), anyInt(), any(), any());
+        verify(toolExecutor, never()).execute(any(), any(), any(), anyBoolean(), any());
     }
 
     /** A closing attempt that still calls a tool preserves the original no-progress reason. */

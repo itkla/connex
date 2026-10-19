@@ -279,7 +279,10 @@ public class AiAgentPrivacyService {
                 throw new ConflictException("mission_privacy_cursor_conflict");
             }
             List<AiAgentSegment> segments = runMapper.listSegments(workspaceId, runId);
-            if (segments.size() > 3) {
+            int maxSegments = run.getRuntimeContractVersion() == 1 ? 1 : 8;
+            if (segments.size() > maxSegments * 3 || segments.stream().anyMatch(segment ->
+                    segment.getSegmentNo() < 1 || segment.getSegmentNo() > maxSegments
+                    || segment.getAttemptNo() < 1 || segment.getAttemptNo() > 3)) {
                 throw unavailable();
             }
             if (sessionId != null) {
@@ -308,7 +311,7 @@ public class AiAgentPrivacyService {
             if (run.getPrivacyGeneration() > work.getCutoffGeneration()) {
                 throw new ConflictException("mission_privacy_cursor_conflict");
             }
-            if (run.getPurgedAt() == null) {
+            {
                 long version = run.getStateVersion();
                 long generation = run.getExecutionGeneration();
                 if (active != null) {
@@ -339,6 +342,15 @@ public class AiAgentPrivacyService {
                 run.setScopeFingerprint(null);
                 run.setReportMessageId(null);
                 run.setActiveSegmentId(null);
+                run.setPlanSchemaVersion(null);
+                run.setPlanRevision(0);
+                run.setPlanJson(null);
+                run.setCheckpointSchemaVersion(null);
+                run.setCheckpointRevision(0);
+                run.setCheckpointJson(null);
+                run.setMemorySchemaVersion(null);
+                run.setMemoryJson(null);
+                run.setLastCommittedSegmentNo(0);
                 requireOne(runMapper.updateRun(run, version, generation));
                 runMapper.detachSegmentTurns(workspaceId, runId);
                 privacyMapper.deleteMissionTurns(workspaceId, runId);

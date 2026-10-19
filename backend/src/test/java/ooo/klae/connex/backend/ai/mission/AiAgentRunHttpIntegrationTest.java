@@ -157,6 +157,76 @@ class AiAgentRunHttpIntegrationTest extends AbstractAiAgentPrivacyIntegrationTes
         mvc.perform(write(createPath()).content(body)).andExpect(status().isGone());
     }
 
+    @Test
+    void explicitPauseOverInterruptedIsDurableMemberPauseThroughHttp() throws Exception {
+        int id = create(body()).path("id").asInt();
+        authenticateAs(currentUser, workspace.getId());
+        persistence.claim(runs.getRun(workspace.getId(), id), new byte[32],
+                new AiRunLeaseGuard(properties.getRunLeaseTtl()), capability);
+        persistence.interrupt(runs.getRun(workspace.getId(), id), "interrupted");
+        var interrupted = runs.getRun(workspace.getId(), id);
+        clearAuthentication();
+        JsonNode paused = control(id, "pause", Long.toString(interrupted.getStateVersion()));
+        org.junit.jupiter.api.Assertions.assertEquals(interrupted.getStateVersion() + 1,
+                Long.parseLong(paused.path("stateVersion").asString()));
+        mvc.perform(read(BASE + "/" + id)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.state").value("paused")).andExpect(jsonPath("$.reasonCode").value("member"));
+        authenticateAs(currentUser, workspace.getId());
+        org.junit.jupiter.api.Assertions.assertFalse(persistence.requeueInterrupted(interrupted));
+        org.junit.jupiter.api.Assertions.assertTrue(runs.interruptedReadRuns(workspace.getId(), 25).isEmpty());
+        org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class, () -> persistence.claim(
+                runs.getRun(workspace.getId(), id), new byte[32], new AiRunLeaseGuard(properties.getRunLeaseTtl()), capability));
+        clearAuthentication();
+    }
+
+    @Test
+    void resumeUsesLogicalSegmentAttemptsAndRetainsOwnerTenantGuards() throws Exception {
+        int id = create(body()).path("id").asInt();
+        authenticateAs(currentUser, workspace.getId());
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            var policy = persistence.claim(runs.getRun(workspace.getId(), id), new byte[32],
+                    new AiRunLeaseGuard(properties.getRunLeaseTtl()), capability);
+            if (attempt < 3) {
+                var live = runs.getRun(workspace.getId(), id);
+                var paused = persistence.control(live, live.getStateVersion(), "pause");
+                persistence.control(paused, paused.getStateVersion(), "resume");
+            } else {
+                var snapshot = persistence.snapshot(policy);
+                var args = json.createObjectNode().put("expectedPlanRevision", snapshot.plan().revision())
+                        .put("expectedCheckpointRevision", snapshot.checkpoint().revision()).putNull("nextPlanItemKey")
+                        .put("phase", "reporting");
+                args.putObject("memory").put("summary", "Ready for report").putArray("citations");
+                var prepared = new AiAgentPlanService(new AiAgentContinuationCodec()).prepareCheckpoint(snapshot, args,
+                        policy.segmentNo(), text -> new AiAgentMemory.DurableText(text, java.util.List.of()),
+                        ignored -> java.util.List.of());
+                persistence.commitCheckpoint(policy, 1, 0, json.writeValueAsString(prepared.arguments()),
+                        json.writeValueAsString(prepared.result()), prepared.snapshot());
+            }
+        }
+        var next = persistence.claim(runs.getRun(workspace.getId(), id), new byte[32],
+                new AiRunLeaseGuard(properties.getRunLeaseTtl()), capability);
+        org.junit.jupiter.api.Assertions.assertEquals(2, next.segmentNo());
+        persistence.interrupt(runs.getRun(workspace.getId(), id), "interrupted");
+        var stopped = runs.getRun(workspace.getId(), id);
+        org.junit.jupiter.api.Assertions.assertEquals(4, runs.listSegments(workspace.getId(), id).size());
+        clearAuthentication();
+        var resumed = control(id, "resume", Long.toString(stopped.getStateVersion()));
+        org.junit.jupiter.api.Assertions.assertEquals("queued", resumed.path("state").asString());
+        mvc.perform(post(BASE + "/" + id + "/pause").session(http).header("X-Workspace-Id", workspace.getId())
+                .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isForbidden());
+        otherWorkspace = new Workspace();
+        otherWorkspace.setOrgId(workspace.getOrgId());
+        otherWorkspace.setName("Continuation foreign workspace");
+        otherWorkspace.setSlug("continuation-foreign-" + UUID.randomUUID());
+        workspaceMapper.insert(otherWorkspace);
+        workspaceMapper.addMember(otherWorkspace.getId(), currentUser.getId(), "owner");
+        mvc.perform(post(BASE + "/" + id + "/resume").session(http).header("X-Workspace-Id", otherWorkspace.getId())
+                .header(csrfHeader, csrfToken).contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(Map.of("expectedStateVersion", resumed.path("stateVersion").asString()))))
+                .andExpect(status().isNotFound());
+    }
+
     private JsonNode create(String body) throws Exception {
         var result = mvc.perform(write(createPath()).content(body)).andExpect(status().isAccepted()).andReturn();
         assertNotNull(result.getResponse().getHeader("Location"));
