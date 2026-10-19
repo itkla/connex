@@ -5,20 +5,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import AskConnexProvider from "@/app/components/ask-connex/AskConnexProvider";
 import type AskConnexDrawer from "@/app/components/ask-connex/AskConnexDrawer";
+import type AskConnexMissionCreate from "@/app/components/ask-connex/AskConnexMissionCreate";
 import CommentsSection from "@/app/components/records/comments/CommentsSection";
+import type { ActiveRecordRef } from "@/app/lib/actions/types";
 import { isInlineManagedImageFile } from "@/app/lib/managed-image";
 import { bindRenderedWorkspace, releaseRenderedWorkspace } from "@/app/lib/renderedWorkspace";
 import { observeProposalReviewClock } from "@/app/lib/proposalReviewClock";
-import type { AiChatSession, AiChatSessionDetail } from "@/app/lib/types";
+import type { AiAgentRun, AiChatSession, AiChatSessionDetail } from "@/app/lib/types";
 import { askConnexToolCall } from "./helpers/askConnexToolCards";
 import { deferred, image, json, ORIGIN, shell, stubBackend, switchWorkspace } from "./helpers/workspaceChainBackend";
 
-const boundary = vi.hoisted<{ drawer: ComponentProps<typeof AskConnexDrawer> | null; params: { sessionId?: string }; noop: () => void; canPersist: () => boolean; search: URLSearchParams; context: { user: { id: number; displayName: string }; record: null; selection: null } }>(() => ({ drawer: null, params: { sessionId: "4" }, noop: () => undefined, canPersist: () => true, search: new URLSearchParams(), context: { user: { id: 7, displayName: "Origin member" }, record: null, selection: null } }));
+const boundary = vi.hoisted<{ drawer: ComponentProps<typeof AskConnexDrawer> | null; missionCreate: ComponentProps<typeof AskConnexMissionCreate> | null; params: { sessionId?: string }; noop: () => void; canPersist: () => boolean; search: URLSearchParams; context: { user: { id: number; displayName: string }; record: ActiveRecordRef | null; selection: null } }>(() => ({ drawer: null, missionCreate: null, params: { sessionId: "4" }, noop: () => undefined, canPersist: () => true, search: new URLSearchParams(), context: { user: { id: 7, displayName: "Origin member" }, record: null, selection: null } }));
 const translate = vi.hoisted(() => Object.assign((key: string) => key, { has: () => false }));
 vi.mock("next/navigation", () => ({ useParams: () => boundary.params, usePathname: () => boundary.params.sessionId ? "/ask-connex/4" : "/ask-connex", useSearchParams: () => boundary.search, useRouter: () => ({ push: boundary.noop, replace: boundary.noop, refresh: boundary.noop }) }));
 vi.mock("next-intl", () => ({ useLocale: () => "en", useTranslations: () => translate }));
 vi.mock("motion/react", () => ({ useReducedMotion: () => true }));
-vi.mock("@/app/components/ask-connex/AskConnexDrawer", () => ({ default: (props: ComponentProps<typeof AskConnexDrawer>) => { boundary.drawer = props; return null; } }));
+vi.mock("@/app/components/ask-connex/AskConnexDrawer", () => ({ default: (props: ComponentProps<typeof AskConnexDrawer>) => { boundary.drawer = props; return <>{props.missionComposerAction}</>; } }));
+vi.mock("@/app/components/ask-connex/AskConnexMissionCreate", () => ({ default: (props: ComponentProps<typeof AskConnexMissionCreate>) => { boundary.missionCreate = props; return null; } }));
 vi.mock("@/app/hooks/useActions", () => ({ useActions: () => ({ context: boundary.context }), useRegisterActions: boundary.noop }));
 vi.mock("@/app/hooks/useWorkspace", () => ({ useWorkspace: () => ({ activeWorkspaceId: 9, switching: false }) }));
 vi.mock("@/app/hooks/usePermissions", () => ({ usePermissionCheck: (permission: string) => ["AI_USE", "ATTACHMENT_CREATE"].includes(permission) ? "granted" : "denied" }));
@@ -37,7 +40,9 @@ beforeEach(() => {
     vi.stubGlobal("matchMedia", (query: string) => ({ media: query, matches: false, addEventListener: boundary.noop, removeEventListener: boundary.noop }));
     const container = document.createElement("div"); document.body.appendChild(container); root = createRoot(container);
     boundary.drawer = null;
+    boundary.missionCreate = null;
     boundary.params = { sessionId: "4" };
+    boundary.context.record = null;
     bindRenderedWorkspace(shell, ORIGIN);
     document.cookie = "connex_workspace=" + ORIGIN + "; path=/";
 });
@@ -92,6 +97,54 @@ describe("sequential batch origins", () => {
             { path, workspace: String(ORIGIN) },
             { path: path + "/4/attachments", workspace: String(ORIGIN) },
         ]);
+    });
+
+    it("forwards the record-review mission origin through session creation", async () => {
+        boundary.params = {};
+        boundary.context.record = { type: "person", id: 41, label: "Origin contact" };
+        const goal = "Review the origin contact";
+        const session: AiChatSession = { id: 4, workspaceId: ORIGIN, createdByUserId: 7, title: "Origin mission", visibility: "private", status: "active", archived: false, ownedByCurrentUser: true, historySummarized: false, participationStatus: null, lastMessageAt: null, archivedAt: null, createdAt: "", updatedAt: "" };
+        const run: AiAgentRun = {
+            schemaVersion: 1, id: 12, sessionId: 4, missionType: "record_review_v1", definitionVersion: 1,
+            state: "done", reasonCode: null, stateVersion: "1", goal,
+            scope: { kind: "record", recordKind: "person", recordId: 41 },
+            createdAt: "2026-10-19T12:00:00Z", executionDeadlineAt: "2026-10-19T12:15:00Z",
+            hardDeadlineAt: "2026-10-19T12:15:00Z", startedAt: "2026-10-19T12:00:00Z", finishedAt: "2026-10-19T12:01:00Z",
+            outputAvailable: false, contentWithheld: false, availableActions: [], progress: null,
+        };
+        const path = "/api/ai/assistant/sessions";
+        const backend = stubBackend(path, (requestPath, method) => {
+            if (requestPath === path) return json(method === "GET" ? { items: [], total: 0 } : session);
+            if (requestPath === path + "/4") return json({ session, messages: { items: [], total: 0 } });
+            if (requestPath === path + "/4/missions") return json(run);
+            if (requestPath === "/api/ai/assistant/missions") return json({ items: [], nextCursor: null });
+            if (requestPath.endsWith("/invitations")) return json({ items: [], total: 0 });
+            return undefined;
+        });
+        await act(async () => root.render(<AskConnexProvider>{null}</AskConnexProvider>));
+        await act(async () => drawer().onOpenWorkspace());
+        const mission = boundary.missionCreate;
+        if (mission === null) throw new Error("The record-review mission composer did not render");
+        expect(mission.disabled).toBe(false);
+        expect(mission.recordLabel).toBe("Origin contact");
+        let pending: Promise<boolean> | undefined;
+        await act(async () => { pending = mission.onCreate(goal); await backend.started.promise; });
+        switchWorkspace();
+        let created: boolean | undefined;
+        await act(async () => { backend.held.resolve(backend.response(path)); created = await pending; });
+
+        expect(created).toBe(true);
+        expect(backend.requests.map(({ path, workspace }) => ({ path, workspace }))).toEqual([
+            { path, workspace: String(ORIGIN) },
+            { path: path + "/4/missions", workspace: String(ORIGIN) },
+        ]);
+        const missionRequest = backend.requests[1];
+        expect(missionRequest?.init.signal).toBeInstanceOf(AbortSignal);
+        expect(backend.requests[0]?.init.signal).toBe(missionRequest?.init.signal);
+        const body = missionRequest?.init.body;
+        expect(typeof body === "string" ? JSON.parse(body) : null).toMatchObject({
+            missionType: "record_review_v1", goal, scope: { kind: "record", recordKind: "person", recordId: 41 },
+        });
     });
 
     it.each(["first upload", "file validation"])("comment image uploads while %s is pending", async (hold) => {
