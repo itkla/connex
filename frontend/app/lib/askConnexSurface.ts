@@ -1,5 +1,5 @@
 import { viewPreferenceStorageKey } from '@/app/hooks/viewPreference';
-import type { AiAssistantToolCall, AiChatParticipant, AiChatProgressItem, AiChatSession } from '@/app/lib/types';
+import type { AiAssistantToolCall, AiChatMessage, AiChatParticipant, AiChatProgressItem, AiChatSession } from '@/app/lib/types';
 import { parseMysqlDateTime } from '@/app/lib/utils';
 
 /**
@@ -176,6 +176,47 @@ export function askConnexActiveState({
 /** Whether repeating the current turn could repeat a write it already made. */
 export type AskConnexTurnWriteState = 'none' | 'committed' | 'uncertain';
 
+/** The exact request this tab observed being accepted as one turn. */
+export type AskConnexRetryTarget = {
+    sessionId: number;
+    turnId: number;
+    prompt: string;
+    authorUserId: number;
+    /** Expected next sequence at submission; the refreshed question must match it exactly. */
+    requestMessageSeq: number;
+};
+
+/**
+ * Resolves an accepted request only while its own question is unambiguous and still latest.
+ *
+ * A transcript refresh can advance past a retained failed turn without reporting an active turn.
+ * Matching the captured question, author and exact message sequence prevents that refresh from
+ * silently replacing the request a Retry would send. A missing, withheld or ambiguous question
+ * cannot supply a one-press repeat. Unseen messages that change the expected sequence also
+ * withhold Retry rather than rebinding it to a different request.
+ */
+export function askConnexBoundRetryPrompt(
+    target: AskConnexRetryTarget | null,
+    turn: { sessionId: number | null; turnId: number | null },
+    messages: readonly AiChatMessage[],
+    toolCalls: readonly AiAssistantToolCall[],
+): string | null {
+    if (target === null || target.sessionId !== turn.sessionId || target.turnId !== turn.turnId) return null;
+    if (toolCalls.some((toolCall) => toolCall.turnId > target.turnId)) return null;
+    const candidates = messages.filter((message) => message.sessionId === target.sessionId
+        && message.seq === target.requestMessageSeq
+        && message.authorKind === 'user'
+        && message.authorUserId === target.authorUserId
+        && message.content.trim() === target.prompt);
+    const question = candidates.length === 1 ? candidates[0] : undefined;
+    if (question === undefined || question.id <= 0 || question.contentWithheld === true
+        || target.prompt.length === 0
+        || messages.some((message) => message.sessionId === target.sessionId && message.seq > question.seq)) {
+        return null;
+    }
+    return target.prompt;
+}
+
 /**
  * Reads current-turn write evidence from viewer-safe action cards and durable progress.
  *
@@ -185,7 +226,11 @@ export type AskConnexTurnWriteState = 'none' | 'committed' | 'uncertain';
  * back, so its outcome remains uncertain. The action list is bounded across the whole session;
  * only a settled progress trail containing exclusively read-only sources can rule out omitted
  * writes. Tasks and activities mix reads with writes and their aggregated counts cannot tell
- * them apart.
+ * them apart. Even write-free `list_tasks` or `list_activities` calls therefore stay uncertain.
+ * An unexecuted CONFIRM proposal is not a committed write, but its action progress also stays
+ * uncertain because the bounded cards cannot rule out another, omitted write in that turn.
+ * These cases withhold Retry while preserving the check-records guidance and composer-only
+ * Continue route when a partial answer is available.
  */
 export function askConnexTurnWriteState(
     turn: { turnId: number | null; progress: readonly AiChatProgressItem[] },

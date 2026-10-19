@@ -171,9 +171,16 @@ failed and undone outcomes retain their meaning; an executed action's ten-minute
 independent. Expired proposal history remains readable under the existing access rules.
 
 When an assistant answer fails, Retry is offered only after Connex confirms that the answer made no
-changes. If changes were saved, their action cards remain visible; if Connex cannot confirm what was
-saved, it says so and asks the member to check their records. Continue from here puts a follow-up in
-the composer for the member to read and edit, without sending it.
+changes and can identify that answer's own question unambiguously. A newer request in the chat
+removes Retry from the older answer. If changes were saved, their action cards remain visible; if
+Connex cannot confirm what was saved, it says so and asks the member to check their records.
+Continue from here puts a follow-up in the composer for the member to read and edit, without sending it.
+
+With the evidence currently available, an answer that only read tasks or activities can still be
+uncertain. The same applies when it prepared a proposal without applying it: a proposal does not
+mean a change was saved, but Connex cannot rule out other saved changes. These answers keep Retry
+hidden, ask the member to check their records, and retain Continue from here when partial text is
+available.
 
 ## 7. Where things live
 

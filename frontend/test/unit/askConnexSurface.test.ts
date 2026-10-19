@@ -8,6 +8,7 @@ import {
     ASK_CONNEX_TERMINAL_REASONS,
     ASK_CONNEX_WIDTH_REM,
     askConnexActiveState,
+    askConnexBoundRetryPrompt,
     askConnexRecovery,
     askConnexSessionActivity,
     askConnexSessionReaders,
@@ -22,7 +23,7 @@ import {
     parseStoredAskConnexWidth,
 } from "@/app/lib/askConnexSurface";
 import { askConnexToolCall } from "@/test/unit/helpers/askConnexToolCards";
-import type { AiChatParticipant, AiChatProgressItem, AiChatSession } from "@/app/lib/types";
+import type { AiChatMessage, AiChatParticipant, AiChatProgressItem, AiChatSession } from "@/app/lib/types";
 
 const NOW = Date.parse("2026-03-10T12:00:00Z");
 
@@ -242,6 +243,50 @@ const READ_ONLY_PROGRESS: AiChatProgressItem[] = [
 
 const WRITE_FREE_TURN = { turnId: 9, progress: READ_ONLY_PROGRESS };
 
+describe("the exact failed question Retry can repeat", () => {
+    const target = {
+        sessionId: 4, turnId: 9, prompt: "Read Sato's tasks", authorUserId: 3, requestMessageSeq: 6,
+    };
+    const question: AiChatMessage = {
+        id: 22, sessionId: 4, seq: 6, authorKind: "user", authorUserId: 3,
+        authorDisplayName: "Aiko", content: target.prompt, createdAt: "2026-10-18 11:59:00",
+    };
+
+    it("uses the captured turn's own question", () => {
+        expect(askConnexBoundRetryPrompt(target, target, [question], [])).toBe(target.prompt);
+    });
+
+    it("refuses a different turn, a different session, or a question it never captured", () => {
+        expect(askConnexBoundRetryPrompt(target, { ...target, turnId: 10 }, [question], [])).toBeNull();
+        expect(askConnexBoundRetryPrompt(target, { ...target, sessionId: 5 }, [question], [])).toBeNull();
+        expect(askConnexBoundRetryPrompt(null, target, [question], [])).toBeNull();
+    });
+
+    it("refuses missing, withheld, optimistic, and ambiguous questions", () => {
+        for (const messages of [
+            [], [{ ...question, contentWithheld: true }], [{ ...question, id: -1 }],
+            [question, { ...question, id: 23, seq: 7 }], [{ ...question, authorUserId: 7 }],
+            [{ ...question, seq: 5 }],
+        ]) {
+            expect(askConnexBoundRetryPrompt(target, target, messages, [])).toBeNull();
+        }
+    });
+
+    it("refuses a newer transcript request even when it has no visible writes", () => {
+        expect(askConnexBoundRetryPrompt(target, target, [question, {
+            ...question, id: 23, seq: 7, content: "Create a follow-up task",
+        }], [])).toBeNull();
+        expect(askConnexBoundRetryPrompt(target, target, [{ ...question, id: 60, seq: 60 }], []))
+            .toBeNull();
+    });
+
+    it("refuses a newer turn's card even before its question arrives", () => {
+        expect(askConnexBoundRetryPrompt(target, target, [question], [
+            askConnexToolCall({ turnId: 10, status: "executed" }),
+        ])).toBeNull();
+    });
+});
+
 describe("current-turn write evidence", () => {
     it("treats a missing turn or an unreconciled snapshot as uncertain", () => {
         expect(askConnexTurnWriteState({ ...WRITE_FREE_TURN, turnId: null }, [], null)).toBe("uncertain");
@@ -307,8 +352,17 @@ describe("current-turn write evidence", () => {
         }, [], 9)).toBe("uncertain");
     });
 
-    it.each(["proposed", "rejected", "failed"] as const)("does not mistake a %s proposal for a write", (status) => {
-        expect(askConnexTurnWriteState(WRITE_FREE_TURN, [askConnexToolCall({ status })], 9)).toBe("none");
+    it.each([
+        { status: "proposed", progressStatus: "proposed" },
+        { status: "rejected", progressStatus: "skipped" },
+        { status: "failed", progressStatus: "failed" },
+    ] as const)("does not mistake a $status proposal for a committed write", ({ status, progressStatus }) => {
+        const progress: AiChatProgressItem[] = [
+            ...READ_ONLY_PROGRESS,
+            { seq: 2, source: "actions", status: progressStatus, count: null, truncated: false },
+        ];
+        expect(askConnexTurnWriteState({ turnId: 9, progress }, [askConnexToolCall({ status })], 9))
+            .toBe("uncertain");
     });
 });
 

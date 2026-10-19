@@ -6,6 +6,7 @@ import {
     useCallback,
     useContext,
     useEffect,
+    useLayoutEffect,
     useMemo,
     useReducer,
     useRef,
@@ -77,7 +78,6 @@ import {
     askConnexPinnedStorageKey,
     askConnexPromptContent,
     askConnexRequestScope,
-    askConnexRetryPrompt,
     askConnexScopePreview,
     askConnexSessionStorageKey,
     askConnexTemplateDefaultsText,
@@ -137,6 +137,7 @@ import {
 import {
     ASK_CONNEX_DEFAULT_WIDTH,
     askConnexActiveState,
+    askConnexBoundRetryPrompt,
     askConnexRecovery,
     askConnexTerminalKind,
     askConnexTimedOutMessage,
@@ -145,6 +146,7 @@ import {
     parseStoredAskConnexWidth,
     type AskConnexActiveState,
     type AskConnexFailureMessage,
+    type AskConnexRetryTarget,
     type AskConnexSessionGroupKey,
     type AskConnexWidth,
 } from '@/app/lib/askConnexSurface';
@@ -544,7 +546,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         reduceAskConnexToolCards,
         EMPTY_ASK_CONNEX_TOOL_CARDS,
     );
-    const [reconciledToolCallsTurnId, setReconciledToolCallsTurnId] = useState<number | null>(null);
+    const [turnRecovery, setTurnRecovery] = useState<{
+        target: AskConnexRetryTarget;
+        reconciled: boolean;
+    } | null>(null);
 
     const messagesRef = useRef<AiChatMessage[]>([]);
     const composerRef = useRef('');
@@ -1266,11 +1271,21 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 .filter((message) => !known.has(`${message.seq}:${message.authorKind}:${message.content}`))
                 .map((message) => message.id))
             : new Set());
+        const nextToolCalls = mergeAskConnexToolCalls(historicalToolCalls, pendingToolCalls);
         dispatchToolCalls({
             type: 'replace',
-            toolCalls: mergeAskConnexToolCalls(historicalToolCalls, pendingToolCalls),
+            toolCalls: nextToolCalls,
         });
-        if (settledTurnId !== undefined) setReconciledToolCallsTurnId(settledTurnId);
+        setTurnRecovery((current) => {
+            if (current === null || current.target.sessionId !== sessionId
+                || (firstDetail.activeTurn !== null && firstDetail.activeTurn.turnId !== current.target.turnId)) {
+                return null;
+            }
+            if (askConnexBoundRetryPrompt(current.target, current.target, nextMessages, nextToolCalls) === null) {
+                return { ...current, reconciled: false };
+            }
+            return settledTurnId === current.target.turnId ? { ...current, reconciled: true } : current;
+        });
         setFileAttachments((current) => reconcileAskConnexFileAttachments(
             current,
             attachments.map(readyFileAttachment),
@@ -1310,6 +1325,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         setSubmitting(false);
         resetStream();
         dispatchTurn({ type: 'reset' });
+        setTurnRecovery(null);
         dispatchToolCalls({ type: 'reset' });
         setLoadState('ready');
         setLoadError(null);
@@ -1424,6 +1440,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     ): Promise<void> => {
         if (durableFollowerRef.current === initial.turnId) return;
         durableFollowerRef.current = initial.turnId;
+        setTurnRecovery((current) => current?.target.sessionId === initial.sessionId
+            && current.target.turnId === initial.turnId ? current : null);
         dispatchTurn({
             type: 'accepted',
             sessionId: initial.sessionId,
@@ -1520,6 +1538,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             setSubmitting(false);
             resetStream();
             dispatchTurn({ type: 'reset' });
+            setTurnRecovery(null);
             dispatchToolCalls({ type: 'reset' });
             setScopeDraft(EMPTY_ASK_CONNEX_SCOPE_DRAFT);
             setScopeInterpretation(null);
@@ -1612,6 +1631,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         setSubmitting(false);
         resetStream();
         dispatchTurn({ type: 'reset' });
+        setTurnRecovery(null);
         dispatchToolCalls({ type: 'reset' });
         setLoadState('loading');
         try {
@@ -1663,6 +1683,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         setFileAttachments([]);
         resetStream();
         dispatchTurn({ type: 'reset' });
+        setTurnRecovery(null);
         dispatchToolCalls({ type: 'reset' });
         setLoadState('loading');
         const load = async () => {
@@ -2221,7 +2242,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
 
         submittingRef.current = true;
         setSubmitting(true);
+        setTurnRecovery(null);
         resetStream();
+        const precedingMessageSeq = messagesRef.current.at(-1)?.seq ?? 0;
         let session = activeSession;
         try {
             if (session === null) {
@@ -2257,6 +2280,18 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             });
             if (activeSignal.aborted) return;
             const acceptedScope = accepted.scope;
+            if (userId !== null) {
+                setTurnRecovery({
+                    target: {
+                        sessionId: accepted.sessionId,
+                        turnId: accepted.turnId,
+                        prompt: content,
+                        authorUserId: userId,
+                        requestMessageSeq: precedingMessageSeq + 1,
+                    },
+                    reconciled: false,
+                });
+            }
             if (acceptedScope != null && scopePreviewKey !== null) {
                 setScopeInterpretation((current) => current === null || current.key !== scopePreviewKey
                     ? current
@@ -2327,13 +2362,22 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         }
     }, [canPersist, activeSession, composer, corrections, featureUnavailable, fileContextCount, fileOperationPending, followTurn, permission, refreshTranscript, resetStream, router, scopeBlocked, scopePreviewKey, scopeRequest, sessionKey, showApiError, sourceRecord, sourceSelection, submissionBlocked, t, turn.phase, turnKey, userDisplayName, userId, workspaceMode]);
 
-    const retryPrompt = useMemo(() => askConnexRetryPrompt(messages), [messages]);
-    const turnWriteState = askConnexTurnWriteState(turn, toolCalls, reconciledToolCallsTurnId);
+    const retryPrompt = askConnexBoundRetryPrompt(turnRecovery?.target ?? null, turn, messages, toolCalls);
+    const turnWriteState = askConnexTurnWriteState(turn, toolCalls,
+        turnRecovery?.reconciled === true ? turnRecovery.target.turnId : null);
+    const retryTarget = turnRecovery?.target ?? null;
+    const currentRetryRef = useRef({ target: retryTarget, turn, toolCalls, turnWriteState, send });
+    useLayoutEffect(() => {
+        currentRetryRef.current = { target: retryTarget, turn, toolCalls, turnWriteState, send };
+    }, [retryTarget, send, toolCalls, turn, turnWriteState]);
     const retryTurn = useCallback(() => {
-        if (retryPrompt === null
-            || !askConnexRecovery(turn.phase, turn.reason, true, false, turnWriteState).retry) return;
-        void send(retryPrompt);
-    }, [retryPrompt, send, turn.phase, turn.reason, turnWriteState]);
+        const current = currentRetryRef.current;
+        if (retryTarget === null || current.target !== retryTarget || toolActionsRef.current.size > 0) return;
+        const prompt = askConnexBoundRetryPrompt(current.target, current.turn, messagesRef.current, current.toolCalls);
+        if (prompt === null
+            || !askConnexRecovery(current.turn.phase, current.turn.reason, true, false, current.turnWriteState).retry) return;
+        void current.send(prompt);
+    }, [retryTarget]);
 
     const cancelTurn = useCallback(async () => {
         const signal = identityControllerRef.current?.signal;
@@ -2438,9 +2482,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
      *
      * A stopped answer leaves no assistant message behind, so nothing about it reaches the next
      * request on its own: continuing is an ordinary question, composed from the one that produced
-     * the partial and handed to the member to read, edit, and send. Available only while a retry
-     * would also be — the same question has to still be readable and the surface has to be able to
-     * send it.
+     * the partial and handed to the member to read, edit, and send. The exact question must still
+     * be identifiable and the surface able to send. Committed or uncertain writes can withhold
+     * Retry while leaving this composer-only route available.
      */
     const continuePrompt = useMemo(() => {
         if (retryPrompt === null || !canRetryTurn) return null;
