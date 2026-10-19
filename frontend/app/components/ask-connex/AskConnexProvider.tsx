@@ -550,6 +550,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         target: AskConnexRetryTarget;
         reconciled: boolean;
     } | null>(null);
+    const recoveryTurnRef = useRef({ turn, target: turnRecovery?.target ?? null });
+    useLayoutEffect(() => {
+        recoveryTurnRef.current = { turn, target: turnRecovery?.target ?? null };
+    }, [turn, turnRecovery]);
 
     const messagesRef = useRef<AiChatMessage[]>([]);
     const composerRef = useRef('');
@@ -1237,6 +1241,15 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         settledTurnId?: number,
     ): Promise<{ session: AiChatSession; activeTurn: AiChatTurn | null } | null> => {
         const refreshVersion = ++transcriptRefreshVersionRef.current;
+        const recovery = recoveryTurnRef.current;
+        const terminalTurnId = settledTurnId ?? (
+            recovery.target?.sessionId === sessionId
+                && recovery.target.turnId === recovery.turn.turnId
+                && (recovery.turn.phase === 'failed' || recovery.turn.phase === 'timed_out')
+                ? recovery.target.turnId : undefined);
+        if (terminalTurnId !== undefined) {
+            dispatchTurn({ type: 'reconciling', sessionId, turnId: terminalTurnId });
+        }
         const [firstDetail, attachments, historicalToolCalls, pendingToolCalls] = await Promise.all([
             getAiChatSession(
                 sessionId,
@@ -1261,6 +1274,19 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             },
         );
         if (signal.aborted || refreshVersion !== transcriptRefreshVersionRef.current) return null;
+        const nextToolCalls = mergeAskConnexToolCalls(historicalToolCalls, pendingToolCalls);
+        dispatchTurn({ type: 'toolsObserved', sessionId, toolCalls: nextToolCalls });
+        let terminalEvidence: AiChatTurn | null = null;
+        if (terminalTurnId !== undefined) {
+            try {
+                terminalEvidence = await getAiChatTurn(sessionId, terminalTurnId, { signal });
+            } catch (error) {
+                if (signal.aborted || refreshVersion !== transcriptRefreshVersionRef.current) return null;
+                throw error;
+            }
+        }
+        if (signal.aborted || refreshVersion !== transcriptRefreshVersionRef.current) return null;
+        if (terminalEvidence !== null) dispatchTurn({ type: 'reconciled', turn: terminalEvidence });
         const known = new Set(messagesRef.current.map(
             (message) => `${message.seq}:${message.authorKind}:${message.content}`,
         ));
@@ -1271,7 +1297,6 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 .filter((message) => !known.has(`${message.seq}:${message.authorKind}:${message.content}`))
                 .map((message) => message.id))
             : new Set());
-        const nextToolCalls = mergeAskConnexToolCalls(historicalToolCalls, pendingToolCalls);
         dispatchToolCalls({
             type: 'replace',
             toolCalls: nextToolCalls,
@@ -1284,7 +1309,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             if (askConnexBoundRetryPrompt(current.target, current.target, nextMessages, nextToolCalls) === null) {
                 return { ...current, reconciled: false };
             }
-            return settledTurnId === current.target.turnId ? { ...current, reconciled: true } : current;
+            return terminalTurnId === current.target.turnId ? { ...current, reconciled: true } : current;
         });
         setFileAttachments((current) => reconcileAskConnexFileAttachments(
             current,
@@ -2116,6 +2141,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         let mutated = false;
         toolActionsRef.current.add(toolCallId);
         dispatchToolCalls({ type: 'actionStarted', toolCallId, action });
+        if (action === 'approve') {
+            dispatchTurn({ type: 'reconciling', sessionId: session.id, turnId: card.turnId });
+        }
         try {
             const mutation = action === 'approve'
                 ? await approveAiAssistantToolCall(session.id, toolCallId, { signal })
@@ -2126,6 +2154,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 || operationEpoch !== sessionEpochRef.current
                 || activeSessionRef.current?.id !== session.id) return mutated;
             dispatchToolCalls({ type: 'actionApplied', toolCallId, action, mutation });
+            dispatchTurn({
+                type: 'toolsObserved', sessionId: session.id,
+                toolCalls: [{ ...card, status: mutation.status }],
+            });
             if ((action === 'approve' && mutation.status === 'executed')
                 || (action === 'undo' && mutation.status === 'undone')) {
                 mutated = true;
@@ -2137,6 +2169,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                     || operationEpoch !== sessionEpochRef.current
                     || activeSessionRef.current?.id !== session.id) return mutated;
                 dispatchToolCalls({ type: 'actionSettled', toolCall: refreshed });
+                dispatchTurn({ type: 'toolsObserved', sessionId: session.id, toolCalls: [refreshed] });
                 if (mutated && card.toolName === 'draft_document') {
                     const pending = await getAiAssistantToolCalls(
                         session.id, { pendingOnly: true }, { signal },
@@ -2176,14 +2209,22 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                         && activeSessionRef.current?.id === session.id
                         && (failure === 'proposalExpired' || refreshed.status !== 'proposed')) {
                         dispatchToolCalls({ type: 'actionSettled', toolCall: refreshed });
+                        dispatchTurn({ type: 'toolsObserved', sessionId: session.id, toolCalls: [refreshed] });
                     }
                 } catch {}
             }
         } finally {
+            if (action === 'approve' && !signal.aborted
+                && operationEpoch === sessionEpochRef.current
+                && activeSessionRef.current?.id === session.id) {
+                transcriptRefreshVersionRef.current += 1;
+                dispatchTurn({ type: 'reconciling', sessionId: session.id, turnId: card.turnId });
+                enqueueRealtimeRefresh(session.id, signal);
+            }
             toolActionsRef.current.delete(toolCallId);
         }
         return mutated;
-    }, [actionableToolCallIds, router, t, toolCalls]);
+    }, [actionableToolCallIds, enqueueRealtimeRefresh, router, t, toolCalls]);
 
     /**
      * Applies one reviewed batch as the single decision the member made.

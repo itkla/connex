@@ -1,5 +1,6 @@
 import { viewPreferenceStorageKey } from '@/app/hooks/viewPreference';
 import type { ActiveRecordRef, ActiveSelection, RecordType } from '@/app/lib/actions/types';
+import { askConnexTurnWriteState } from '@/app/lib/askConnexSurface';
 import { AI_CHAT_PROGRESS_SOURCES } from '@/app/lib/types';
 import type {
     AiAssistantToolCall,
@@ -16,6 +17,7 @@ import type {
     AiChatProgressSource,
     AiChatThinkingFrame,
     AiChatTodo,
+    AiChatTurn,
     AiChatTurnToolCall,
     Page,
 } from '@/app/lib/types';
@@ -295,6 +297,10 @@ export type AskConnexTurnState = {
     progress: AiChatProgressItem[];
     /** Latest durable per-call evidence; absent until supplied by a supporting server. */
     toolCalls?: AiChatTurnToolCall[] | null;
+    /** Execution evidence is retained until a different turn is accepted or the session resets. */
+    writeCommitted?: boolean;
+    /** Whether the latest reconciliation obtained current terminal execution evidence. */
+    evidenceReconciled?: boolean;
     /**
      * Whether this client may stop the turn. A shared-session participant who opened the session
      * while another member's turn was running adopts that turn into the same state the requester
@@ -323,6 +329,9 @@ export type AskConnexTurnEvent =
         progress?: AiChatProgressItem[];
         toolCalls?: AiChatTurnToolCall[] | null;
     }
+    | { type: 'toolsObserved'; sessionId: number; toolCalls: readonly AiAssistantToolCall[] }
+    | { type: 'reconciling'; sessionId: number; turnId: number }
+    | { type: 'reconciled'; turn: AiChatTurn }
     | { type: 'reset' };
 
 /** User action exposed by an assistant tool-call card. */
@@ -1566,6 +1575,29 @@ export function reduceAskConnexTurn(
     event: AskConnexTurnEvent,
 ): AskConnexTurnState {
     if (event.type === 'reset') return EMPTY_ASK_CONNEX_TURN;
+    if (event.type === 'toolsObserved') {
+        if (state.sessionId !== event.sessionId) return state;
+        return {
+            ...state,
+            writeCommitted: askConnexTurnWriteState(state, event.toolCalls, null) === 'committed',
+        };
+    }
+    if (event.type === 'reconciling') {
+        return state.sessionId === event.sessionId && state.turnId === event.turnId
+            ? { ...state, evidenceReconciled: false } : state;
+    }
+    if (event.type === 'reconciled') {
+        if (state.sessionId !== event.turn.sessionId || state.turnId !== event.turn.turnId) return state;
+        const evidenceReconciled = event.turn.toolCalls != null || state.toolCalls == null;
+        return {
+            ...state,
+            progress: event.turn.progress,
+            toolCalls: event.turn.toolCalls ?? state.toolCalls,
+            evidenceReconciled,
+            writeCommitted: state.writeCommitted === true
+                || askConnexTurnWriteState(event.turn, [], null) === 'committed',
+        };
+    }
     if (event.type === 'accepted') {
         return {
             phase: event.status === 'running' ? 'running' : 'accepted',
@@ -1575,9 +1607,13 @@ export function reduceAskConnexTurn(
             reason: null,
             progress: event.progress ?? [],
             toolCalls: event.toolCalls,
+            writeCommitted: (state.sessionId === event.sessionId && state.turnId === event.turnId
+                && state.writeCommitted === true)
+                || askConnexTurnWriteState({ ...event, progress: event.progress ?? [] }, [], null) === 'committed',
             cancellable: event.cancellable ?? false,
         };
     }
+    const projectedCalls = 'toolCalls' in event ? event.toolCalls : state.toolCalls;
     const phase = event.status === 'queued' || event.status === 'accepted'
         ? 'accepted'
         : event.status === 'running'
@@ -1594,7 +1630,9 @@ export function reduceAskConnexTurn(
         phase,
         reason: event.reason ?? null,
         progress: event.progress ?? state.progress,
-        toolCalls: 'toolCalls' in event ? event.toolCalls : state.toolCalls,
+        toolCalls: projectedCalls,
+        writeCommitted: state.writeCommitted === true
+            || askConnexTurnWriteState({ ...state, toolCalls: projectedCalls }, [], null) === 'committed',
     };
 }
 

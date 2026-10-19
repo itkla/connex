@@ -226,26 +226,31 @@ export function askConnexBoundRetryPrompt(
  * an unknown tool has a null tier. A settled projection rules out writes only when every tier
  * and state is understood. Without it, the session-wide bounded action cards and aggregated
  * progress retain their conservative interpretation, including ambiguous task/activity reads
- * and unexecuted write proposals.
+ * and unexecuted write proposals. Once execution has been observed, that evidence is retained
+ * for the turn even when later bounded snapshots omit it. Reconciliation must refresh terminal
+ * evidence before a cached proposal can prove that no write was committed.
  */
 export function askConnexTurnWriteState(
     turn: {
         turnId: number | null;
         progress: readonly AiChatProgressItem[];
         toolCalls?: readonly AiChatTurnToolCall[] | null;
+        writeCommitted?: boolean;
+        evidenceReconciled?: boolean;
     },
     toolCalls: readonly AiAssistantToolCall[],
     reconciledTurnId: number | null,
 ): AskConnexTurnWriteState {
     const { turnId, progress, toolCalls: projectedCalls } = turn;
     if (turnId === null) return 'uncertain';
+    if (turn.writeCommitted === true) return 'committed';
     const current = toolCalls.filter((toolCall) => toolCall.turnId === turnId);
     if (current.some((toolCall) => toolCall.status === 'executed'
         || toolCall.status === 'undone'
         || (projectedCalls == null && toolCall.executedAt !== null))) return 'committed';
     if (projectedCalls?.some((call) => (call.tier === 'AUTO' || call.tier === 'CONFIRM')
         && (call.status === 'executed' || call.status === 'undone'))) return 'committed';
-    if (reconciledTurnId !== turnId) return 'uncertain';
+    if (reconciledTurnId !== turnId || turn.evidenceReconciled === false) return 'uncertain';
     const settledProgress = progress.some((item) => item.source === 'answer'
         && (item.status === 'failed' || item.status === 'timed_out'
             || item.status === 'complete' || item.status === 'cancelled'));

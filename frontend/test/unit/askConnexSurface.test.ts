@@ -296,6 +296,19 @@ describe("current-turn write evidence", () => {
         toolCalls,
     });
 
+    it("keeps a known commitment even when evidence is missing or reconciliation fails", () => {
+        expect(askConnexTurnWriteState({
+            turnId: 9, progress: [], toolCalls: null, writeCommitted: true, evidenceReconciled: false,
+        }, [], null)).toBe("committed");
+    });
+
+    it("does not trust a cached proposal while its execution evidence is stale", () => {
+        expect(askConnexTurnWriteState({
+            ...projectedTurn([{ toolName: "assign_owner", tier: "CONFIRM", status: "proposed" }]),
+            evidenceReconciled: false,
+        }, [], 9)).toBe("uncertain");
+    });
+
     it.each(["list_tasks", "list_activities"])("restores Retry for a read-only %s timeout", (toolName) => {
         const state = askConnexTurnWriteState(projectedTurn([
             { toolName, tier: "READ", status: "executed" },

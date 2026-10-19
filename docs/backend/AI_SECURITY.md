@@ -766,6 +766,12 @@ Native assistant tools are capability-declared transport choices, not a second a
   detailed progress, returning null for shared viewers. Retry still requires settled progress
   and transcript reconciliation; unknown tiers or states fail closed, while absent projections
   retain the older conservative progress-based fallback.
+- The client re-reads a bound failed turn's projection during transcript reconciliation and after
+  approval; polling stopping at the turn's terminal state does not freeze proposal outcomes.
+  Observed executed writes are retained for that turn across bounded card and projection refreshes.
+  Pending or failed execution-evidence refreshes cannot authorize Retry from a cached proposal.
+  Approval settlement invalidates outstanding transcript refreshes so a delayed pre-approval
+  projection cannot replace the execution evidence after an unknown approval response.
 - Citations are re-authorized and filtered per viewer.
 - Realtime fanout resolves current joined recipients after commit; cached/caller-supplied recipient sets are not authorization.
 - Presence/typing signals are bounded ephemeral hints and never authorization evidence.

@@ -180,6 +180,9 @@ The requester's per-call execution evidence lets an answer that only read record
 activities retain Retry. Preparing a proposal without applying it also permits Retry when no
 other call saved changes. Unknown tools or execution states, and older servers without this
 evidence, keep the conservative check-records guidance when Connex cannot rule out saved changes.
+Reconciliation re-checks the failed answer's own execution evidence, including after a proposal is
+approved. Once this client has seen a saved change for that answer, later refreshes cannot restore
+Retry by omitting its action card. An unreadable or missing proposal outcome keeps Retry hidden.
 
 ## 7. Where things live
 

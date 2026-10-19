@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { formatUtcDateTime, parseMysqlDateTime } from '@/app/lib/utils';
 import enCommon from '@/messages/en/common.json';
 import jaCommon from '@/messages/ja/common.json';
+import { askConnexToolCall } from '@/test/unit/helpers/askConnexToolCards';
 
 import {
     ANSWER_ROW_PLACEHOLDER,
@@ -453,6 +454,45 @@ describe('Ask Connex file lifecycle', () => {
 });
 
 describe('Ask Connex turn state reduction', () => {
+    it('retains a committed write through omitted projections and resets only for a different turn', () => {
+        const accepted = reduceAskConnexTurn(EMPTY_ASK_CONNEX_TURN, {
+            type: 'accepted', sessionId: 4, turnId: 9, generationHandle: null, status: 'running',
+            toolCalls: [{ toolName: 'create_task', tier: 'AUTO', status: 'executed' }],
+        });
+        const omitted = reduceAskConnexTurn(accepted, {
+            type: 'status', status: 'timed_out', toolCalls: undefined,
+        });
+        expect(omitted.writeCommitted).toBe(true);
+        const reconciled = reduceAskConnexTurn(omitted, {
+            type: 'reconciled',
+            turn: { sessionId: 4, turnId: 9, status: 'timed_out', terminalReason: null, progress: [], toolCalls: [] },
+        });
+        expect(reconciled.writeCommitted).toBe(true);
+        expect(reduceAskConnexTurn(reconciled, {
+            type: 'accepted', sessionId: 4, turnId: 9, generationHandle: null, status: 'running',
+        }).writeCommitted).toBe(true);
+        expect(reduceAskConnexTurn(reconciled, {
+            type: 'accepted', sessionId: 4, turnId: 10, generationHandle: null, status: 'accepted',
+        }).writeCommitted).toBe(false);
+        expect(reduceAskConnexTurn(reconciled, { type: 'reset' }).writeCommitted).toBeUndefined();
+    });
+
+    it('rejects terminal evidence and cards from another session or turn', () => {
+        const accepted = reduceAskConnexTurn(EMPTY_ASK_CONNEX_TURN, {
+            type: 'accepted', sessionId: 4, turnId: 9, generationHandle: null, status: 'running',
+        });
+        expect(reduceAskConnexTurn(accepted, {
+            type: 'toolsObserved', sessionId: 5, toolCalls: [askConnexToolCall({ status: 'executed' })],
+        })).toBe(accepted);
+        expect(reduceAskConnexTurn(accepted, {
+            type: 'reconciled',
+            turn: {
+                sessionId: 4, turnId: 8, status: 'timed_out', terminalReason: null, progress: [],
+                toolCalls: [{ toolName: 'create_task', tier: 'AUTO', status: 'executed' }],
+            },
+        })).toBe(accepted);
+    });
+
     it('keeps durable execution evidence scoped to the accepted turn and the current server response', () => {
         const accepted = reduceAskConnexTurn(EMPTY_ASK_CONNEX_TURN, {
             type: 'accepted', sessionId: 4, turnId: 9, generationHandle: null, status: 'running',

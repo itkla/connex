@@ -4,14 +4,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type AskConnexDrawer from '@/app/components/ask-connex/AskConnexDrawer';
 import AskConnexProvider from '@/app/components/ask-connex/AskConnexProvider';
 import {
+    ApiError,
+    approveAiAssistantToolCall,
+    getAiAssistantToolCall,
     getAiAssistantToolCalls,
     getAiChatSession,
+    getAiChatSessions,
     getAiChatTurn,
     startAiChatTurn,
 } from '@/app/lib/api';
 import { askConnexSessionStorageKey } from '@/app/lib/askConnex';
 import type { AiAssistantToolCall, AiChatSessionDetail, AiChatTurn, AiChatTurnToolCall } from '@/app/lib/types';
 import type { AiChatSocketHandlers } from '@/app/lib/realtime';
+import { observeProposalReviewClock } from '@/app/lib/proposalReviewClock';
 import { installInteractiveDocument } from '@/test/unit/helpers/interactiveDocument';
 import { askConnexToolCall } from '@/test/unit/helpers/askConnexToolCards';
 
@@ -70,6 +75,8 @@ vi.mock('@/app/lib/api', async (importOriginal) => ({
     getAiChatSession: vi.fn(),
     getAiChatTurn: vi.fn(),
     getAiAssistantToolCalls: vi.fn(),
+    getAiAssistantToolCall: vi.fn(),
+    approveAiAssistantToolCall: vi.fn(),
     getAiGenerationStatus: vi.fn().mockRejectedValue(new Error('Generation handle is no longer retained')),
     startAiChatTurn: vi.fn(),
 }));
@@ -158,10 +165,24 @@ async function reconnect() {
     });
 }
 
+function approvableProposal(): AiAssistantToolCall {
+    observeProposalReviewClock(new Headers({ Date: new Date().toUTCString() }));
+    return askConnexToolCall({
+        messageId: null,
+        createdAt: '2026-10-18 12:00:00',
+        reviewExpiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+        change: {
+            field: 'owner', currentValue: null, currentValueUnresolved: false,
+            proposedValue: 'Grace Hopper', state: 'ready',
+        },
+    });
+}
+
 describe('the provider guards the Retry callback', () => {
     beforeEach(() => {
         boundary.drawer.current = null;
         boundary.socket.current = null;
+        vi.mocked(getAiChatSessions).mockResolvedValue({ items: [], total: 0 });
         vi.mocked(getAiChatSession).mockResolvedValue(DETAIL).mockResolvedValueOnce({
             ...DETAIL, messages: { items: [], total: 0 },
         });
@@ -175,6 +196,196 @@ describe('the provider guards the Retry callback', () => {
     afterEach(() => {
         vi.clearAllMocks();
         vi.unstubAllGlobals();
+    });
+
+    const proposedTurn: AiChatTurn = {
+        ...TURN,
+        toolCalls: [{ toolName: 'assign_owner', tier: 'CONFIRM', status: 'proposed' }],
+    };
+    const executedTurn: AiChatTurn = {
+        ...TURN,
+        toolCalls: [{ toolName: 'assign_owner', tier: 'CONFIRM', status: 'executed' }],
+    };
+
+    it('refreshes terminal evidence after approval outside the 100-card history window', async () => {
+        const proposal = askConnexToolCall();
+        const history = Array.from({ length: 100 }, (_, index) => askConnexToolCall({
+            id: 100 + index, turnId: 8, status: 'executed',
+        }));
+        let approved = false;
+        vi.mocked(getAiAssistantToolCalls).mockImplementation(async (_sessionId, options) =>
+            options?.pendingOnly ? approved ? [] : [proposal] : history);
+        vi.mocked(getAiChatTurn).mockImplementation(async () => approved ? executedTurn : proposedTurn);
+        const root = await mountFailedTurn();
+        try {
+            expect(drawer().turnWriteState).toBe('none');
+            expect(drawer().toolCalls).toHaveLength(101);
+            const retainedRetry = drawer().onRetryTurn;
+            vi.mocked(getAiChatTurn).mockClear();
+            approved = true;
+            await reconnect();
+
+            expect(getAiChatTurn).toHaveBeenCalledWith(4, 9, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+            expect(drawer().toolCalls).toHaveLength(100);
+            expect(drawer().toolCalls.some((card) => card.turnId === 9)).toBe(false);
+            expect(drawer().turnWriteState).toBe('committed');
+            await act(async () => { retainedRetry(); });
+            expect(startAiChatTurn).not.toHaveBeenCalled();
+        } finally {
+            await act(async () => { root.unmount(); });
+        }
+    });
+
+    it.each(['card', 'projection'] as const)('never forgets a committed write observed from a %s', async (source) => {
+        vi.mocked(getAiChatTurn).mockResolvedValue(proposedTurn);
+        const root = await mountFailedTurn();
+        try {
+            expect(drawer().turnWriteState).toBe('none');
+            const retainedRetry = drawer().onRetryTurn;
+            if (source === 'card') {
+                vi.mocked(getAiAssistantToolCalls).mockResolvedValue([askConnexToolCall({ status: 'executed' })]);
+            } else {
+                vi.mocked(getAiChatTurn).mockResolvedValue(executedTurn);
+            }
+            await reconnect();
+            expect(drawer().turnWriteState).toBe('committed');
+
+            vi.mocked(getAiAssistantToolCalls).mockResolvedValue([]);
+            vi.mocked(getAiChatTurn).mockResolvedValue(proposedTurn);
+            await reconnect();
+            expect(drawer().toolCalls).toEqual([]);
+            expect(drawer().turnWriteState).toBe('committed');
+            vi.mocked(getAiChatTurn).mockRejectedValue(new Error('Projection refresh failed'));
+            await reconnect();
+            expect(drawer().turnWriteState).toBe('committed');
+            await act(async () => { drawer().onRetryTurn(); retainedRetry(); });
+            expect(startAiChatTurn).not.toHaveBeenCalled();
+        } finally {
+            await act(async () => { root.unmount(); });
+        }
+    });
+
+    it('refreshes the projection after this tab approves a proposal and retains the commitment', async () => {
+        const proposal = approvableProposal();
+        vi.mocked(getAiChatTurn).mockResolvedValue(proposedTurn);
+        vi.mocked(getAiAssistantToolCalls).mockResolvedValue([proposal]);
+        vi.mocked(getAiAssistantToolCall).mockResolvedValue({ ...proposal, status: 'executed' });
+        vi.mocked(approveAiAssistantToolCall).mockResolvedValue({
+            id: proposal.id, tool: proposal.toolName, tier: 'confirm', status: 'executed', result: null,
+            reviewState: 'applied', reviewExpiresAt: null, undoAvailable: false, undoExpiresAt: null,
+        });
+        const root = await mountFailedTurn();
+        try {
+            expect(drawer().turnWriteState).toBe('none');
+            vi.mocked(getAiChatTurn).mockClear();
+            vi.mocked(getAiAssistantToolCalls).mockResolvedValue([]);
+            await act(async () => { await drawer().onToolAction(proposal.id, 'approve'); });
+            expect(approveAiAssistantToolCall).toHaveBeenCalledOnce();
+            expect(getAiChatTurn).toHaveBeenCalledWith(4, 9, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+            expect(drawer().toolCalls).toEqual([]);
+            expect(drawer().turnWriteState).toBe('committed');
+            await reconnect();
+            expect(drawer().turnWriteState).toBe('committed');
+            await act(async () => { drawer().onRetryTurn(); });
+            expect(startAiChatTurn).not.toHaveBeenCalled();
+        } finally {
+            await act(async () => { root.unmount(); });
+        }
+    });
+
+    it('rejects a delayed pre-approval projection after an approval with an unknown outcome', async () => {
+        const proposal = approvableProposal();
+        vi.mocked(getAiChatTurn).mockResolvedValue(proposedTurn);
+        vi.mocked(getAiAssistantToolCalls).mockResolvedValue([proposal]);
+        vi.mocked(approveAiAssistantToolCall).mockRejectedValue(new Error('Approval response was lost'));
+        const root = await mountFailedTurn();
+        const sessions = Promise.withResolvers<Awaited<ReturnType<typeof getAiChatSessions>>>();
+        try {
+            const retainedRetry = drawer().onRetryTurn;
+            const stale = Promise.withResolvers<AiChatTurn>();
+            vi.mocked(getAiChatTurn).mockReturnValueOnce(stale.promise).mockResolvedValue(executedTurn);
+            await reconnect();
+            vi.mocked(getAiChatSessions).mockReturnValue(sessions.promise);
+            await act(async () => { await drawer().onToolAction(proposal.id, 'approve'); });
+            expect(approveAiAssistantToolCall).toHaveBeenCalledOnce();
+            await act(async () => { stale.resolve(proposedTurn); });
+
+            expect(drawer().turnWriteState).toBe('uncertain');
+            await act(async () => { drawer().onRetryTurn(); retainedRetry(); });
+            expect(startAiChatTurn).not.toHaveBeenCalled();
+            vi.mocked(getAiAssistantToolCalls).mockResolvedValue([]);
+            await act(async () => { sessions.resolve({ items: [], total: 0 }); });
+            expect(drawer().turnWriteState).toBe('committed');
+        } finally {
+            sessions.resolve({ items: [], total: 0 });
+            await act(async () => { root.unmount(); });
+        }
+    });
+
+    it.each(['missing', 'failed'] as const)('keeps an unknown proposal outcome uncertain after a %s projection refresh', async (outcome) => {
+        vi.mocked(getAiChatTurn).mockResolvedValue(proposedTurn);
+        const root = await mountFailedTurn();
+        try {
+            expect(drawer().turnWriteState).toBe('none');
+            const retainedRetry = drawer().onRetryTurn;
+            if (outcome === 'missing') {
+                vi.mocked(getAiChatTurn).mockResolvedValue({ ...TURN, toolCalls: null });
+            } else {
+                vi.mocked(getAiChatTurn).mockRejectedValue(new Error('Projection refresh failed'));
+            }
+            await reconnect();
+            expect(drawer().turnWriteState).toBe('uncertain');
+            await reconnect();
+            expect(drawer().turnWriteState).toBe('uncertain');
+            await act(async () => { drawer().onRetryTurn(); retainedRetry(); });
+            expect(startAiChatTurn).not.toHaveBeenCalled();
+        } finally {
+            await act(async () => { root.unmount(); });
+        }
+    });
+
+    it('blocks Retry while a stopped turn projection is being refreshed', async () => {
+        vi.mocked(getAiChatTurn).mockResolvedValue(proposedTurn);
+        const root = await mountFailedTurn();
+        try {
+            const pending = Promise.withResolvers<AiChatTurn>();
+            const retainedRetry = drawer().onRetryTurn;
+            vi.mocked(getAiChatTurn).mockReturnValue(pending.promise);
+            await reconnect();
+            expect(drawer().turnWriteState).toBe('uncertain');
+            await act(async () => { retainedRetry(); });
+            expect(startAiChatTurn).not.toHaveBeenCalled();
+            await act(async () => { pending.resolve(executedTurn); });
+            expect(drawer().turnWriteState).toBe('committed');
+        } finally {
+            await act(async () => { root.unmount(); });
+        }
+    });
+
+    it.each(['executed', 'forbidden'] as const)('ignores late %s terminal evidence after switching sessions', async (outcome) => {
+        vi.mocked(getAiChatTurn).mockResolvedValue(proposedTurn);
+        const root = await mountFailedTurn();
+        try {
+            const pending = Promise.withResolvers<AiChatTurn>();
+            vi.mocked(getAiChatTurn).mockReturnValue(pending.promise);
+            await reconnect();
+            const nextSession = { ...DETAIL.session, id: 5 };
+            vi.mocked(getAiChatSession).mockResolvedValue({
+                session: nextSession, messages: { items: [], total: 0 }, activeTurn: null,
+            });
+            await act(async () => { drawer().onSelectSession(nextSession); });
+            await act(async () => {
+                if (outcome === 'executed') pending.resolve(executedTurn);
+                else pending.reject(new ApiError('Turn is no longer accessible', 403));
+            });
+            expect(drawer().activeSession?.id).toBe(5);
+            expect(drawer().turn.turnId).toBeNull();
+            expect(drawer().turnWriteState).toBe('uncertain');
+            await act(async () => { drawer().onRetryTurn(); });
+            expect(startAiChatTurn).not.toHaveBeenCalled();
+        } finally {
+            await act(async () => { root.unmount(); });
+        }
     });
 
     it.each([
