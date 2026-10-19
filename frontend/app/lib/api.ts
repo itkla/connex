@@ -917,6 +917,7 @@ async function requestJson<T>(
     path: string,
     init: RequestInit = {},
     workspaceSelectionBody: "standard" | "required" | "optional" = "standard",
+    workspaceHeader: "auto" | "omit" = "auto",
 ): Promise<T> {
     const suppression = privilegedMfaSuppression(path, init.method);
     if (suppression !== null) {
@@ -924,7 +925,7 @@ async function requestJson<T>(
     }
     const locale = requestLocale(init);
     const mutating = isMutating(init.method);
-    const workspaceId = requestWorkspaceId(path, mutating);
+    const workspaceId = workspaceHeader === "omit" ? null : requestWorkspaceId(path, mutating);
     const pinnedWorkspace = outgoingWorkspaceId(init, workspaceId);
     const stepUpGeneration = passkeyStepUpGeneration;
     const hasMultipartBody = typeof FormData !== "undefined" && init.body instanceof FormData;
@@ -1196,12 +1197,13 @@ async function postWorkspaceSelectionJson<T>(
     body: unknown = {},
     bodyRequired = true,
     init: RequestInit = {},
+    workspaceHeader: "auto" | "omit" = "auto",
 ): Promise<T> {
     return requestJson<T>(path, {
         ...init,
         method: "POST",
         body: JSON.stringify(body),
-    }, bodyRequired ? "required" : "optional");
+    }, bodyRequired ? "required" : "optional", workspaceHeader);
 }
 
 async function postFormData<T>(path: string, body: FormData, init: RequestInit = {}): Promise<T> {
@@ -5167,12 +5169,12 @@ export function uploadAttachment(entityType: string, entityId: number, file: Fil
     return requestMultipart<Types.Attachment>("/api/attachments/upload", "POST", formData);
 }
 
-export function uploadAttachmentImage(entityType: string, entityId: number, file: File) {
+export function uploadAttachmentImage(entityType: string, entityId: number, file: File, init: RequestInit = {}) {
     const formData = new FormData();
     formData.append("entityType", entityType);
     formData.append("entityId", String(entityId));
     formData.append("file", file);
-    return requestMultipart<Types.Attachment>("/api/attachments/upload-image", "POST", formData);
+    return requestMultipart<Types.Attachment>("/api/attachments/upload-image", "POST", formData, init);
 }
 
 export function getAttachment(id: number, init: RequestInit = {}) {
@@ -5502,13 +5504,14 @@ export async function getMyWorkspacesResultFromCookie(
  * shell renders a workspace, the viewer's memberships are read again: a
  * workspace they still belong to is pinned explicitly, and a revoked one refuses the creation as
  * {@link WORKSPACE_UNAVAILABLE_CODE} before anything is sent, so the form keeps the typed name. A
- * page with no app shell, such as onboarding, keeps the cookie's selection.
- * @returns the options to send the creation with
+ * page with no app shell, such as onboarding, omits the workspace header even when a revoked
+ * selection remains in the browser cookie, leaving recovery to the server.
+ * @returns the pinned options, or null for header-free onboarding creation
  * @throws ApiError coded {@link WORKSPACE_UNAVAILABLE_CODE} when the rendered workspace is gone
  */
-async function workspaceCreationOrigin(): Promise<RequestInit> {
+async function workspaceCreationOrigin(): Promise<RequestInit | null> {
     const rendered = renderedWorkspaceId();
-    if (rendered === null || typeof document === "undefined") return {};
+    if (rendered === null || typeof document === "undefined") return null;
     const pinned: RequestInit = { headers: { "X-Workspace-Id": String(rendered) } };
     const snapshot = await getMyWorkspaces();
     if (snapshot.workspaces.some((workspace) => workspace.id === rendered)) return pinned;
@@ -5520,14 +5523,16 @@ export async function createWorkspace(name: string) {
     try {
         return await withClientRequestIdentityReset(
             () => recoverWorkspaceSelectionResponse(
-                () => postWorkspaceSelectionJson<Types.Workspace>(`/api/workspaces`, { name }, true, origin),
+                () => postWorkspaceSelectionJson<Types.Workspace>(
+                    `/api/workspaces`, { name }, true, origin ?? {}, origin === null ? "omit" : "auto",
+                ),
                 activeWorkspaceFromSelection,
             ),
             "workspace",
         );
     } catch (error) {
         throw error instanceof ApiError
-            ? workspaceRefusal(error, new Headers(origin.headers).get("X-Workspace-Id"))
+            ? workspaceRefusal(error, new Headers(origin?.headers).get("X-Workspace-Id"))
             : error;
     }
 }

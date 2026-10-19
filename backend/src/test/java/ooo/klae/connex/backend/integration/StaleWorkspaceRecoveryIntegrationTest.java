@@ -308,6 +308,17 @@ class StaleWorkspaceRecoveryIntegrationTest {
         assertEquals(1, workspaceMapper.removeMember(workspace.getId(), member.getId()));
         assertEquals(workspace.getId(), workspaceMapper.getLastActiveWorkspaceId(member.getId()));
 
+        mockMvc.perform(get("/api/workspaces")
+                .cookie(new Cookie(WorkspaceCookie.NAME, Integer.toString(workspace.getId())))
+                .session(memberSession))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.workspaces").isEmpty())
+            .andExpect(jsonPath("$.activeWorkspaceId").doesNotHaveJsonPath())
+            .andExpect(cookie().maxAge(WorkspaceCookie.NAME, 0));
+
+        RequestContextHolder.resetRequestAttributes();
+        assertNull(workspaceMapper.getLastActiveWorkspaceId(member.getId()));
+
         mockMvc.perform(post("/api/workspaces")
                 .cookie(new Cookie(WorkspaceCookie.NAME, Integer.toString(workspace.getId())))
                 .session(memberSession)

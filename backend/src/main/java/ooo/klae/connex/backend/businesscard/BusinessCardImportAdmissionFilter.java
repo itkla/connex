@@ -76,12 +76,12 @@ public class BusinessCardImportAdmissionFilter extends OncePerRequestFilter {
             reject(response, HttpServletResponse.SC_FORBIDDEN, Rejection.CAPABILITY_UNAVAILABLE);
             return;
         }
-        Integer workspaceId = admissionWorkspaceId(request, user.getId(), admission);
-        if (workspaceId == null) {
-            reject(response, HttpServletResponse.SC_FORBIDDEN, Rejection.WORKSPACE_REQUIRED);
-            return;
-        }
         try {
+            Integer workspaceId = admissionWorkspaceId(request, user.getId(), admission);
+            if (workspaceId == null) {
+                reject(response, HttpServletResponse.SC_FORBIDDEN, Rejection.WORKSPACE_REQUIRED);
+                return;
+            }
             workspaceService.requirePermission(workspaceId, user.getId(), Permission.PERSON_CREATE);
             workspaceService.requirePermission(workspaceId, user.getId(), Permission.ATTACHMENT_CREATE);
         } catch (ForbiddenException exception) {

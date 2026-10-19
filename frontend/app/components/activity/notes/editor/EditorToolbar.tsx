@@ -47,6 +47,7 @@ import {
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { uploadAttachmentImage } from "@/app/lib/api";
+import { renderedWorkspaceId, workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
 import {
     defaultAltFromFileName,
     INLINE_MANAGED_IMAGE_ACCEPT,
@@ -118,7 +119,7 @@ type Props = {
     editor: Editor | null;
     labels: ToolbarLabels;
     compact?: boolean;
-    ensureNoteId?: () => Promise<number>;
+    ensureNoteId?: (init?: RequestInit) => Promise<number>;
     filePickerOpen?: boolean;
     onFilePickerOpenChange?: (open: boolean) => void;
 };
@@ -254,7 +255,7 @@ function ImagePopover({
 }: {
     editor: Editor;
     labels: ToolbarLabels;
-    ensureNoteId?: () => Promise<number>;
+    ensureNoteId?: (init?: RequestInit) => Promise<number>;
 }) {
     const sourceId = useId();
     const altId = useId();
@@ -308,6 +309,7 @@ function ImagePopover({
     };
 
     const uploadImageFile = async (file: File) => {
+        const origin = workspacePinnedRequest(renderedWorkspaceId());
         if (!ensureNoteId) {
             toastError(labels.imageUploadFailed);
             return;
@@ -318,8 +320,8 @@ function ImagePopover({
         }
         setUploading(true);
         try {
-            const noteId = await ensureNoteId();
-            const attachment = await uploadAttachmentImage("note", noteId, file);
+            const noteId = await ensureNoteId(origin);
+            const attachment = await uploadAttachmentImage("note", noteId, file, origin);
             const nextSource = normalizeNoteImageSource(attachment.url);
             if (!nextSource) {
                 toastError(labels.imageUploadFailed);

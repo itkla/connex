@@ -759,8 +759,8 @@ describe("creating a workspace from the shell", () => {
         ]);
     });
 
-    it("keeps onboarding creation on the cookie when no shell renders a workspace", async () => {
-        setWorkspaceCookie(null);
+    it.each([null, RENDERED])("omits the onboarding pin with no shell and cookie %s", async (cookie) => {
+        setWorkspaceCookie(cookie);
         const requests = stubWorkspaces([]);
 
         await createWorkspace("Field team");

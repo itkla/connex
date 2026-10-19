@@ -17,6 +17,9 @@ Preserve `ImageDecodeAdmissionService` behavior:
 
 Scan entitlement, workspace permission, and principal/global admission run in the security filter before multipart parsing. Do not move expensive parsing ahead of those gates.
 
+Malformed or repeated explicit workspace pins receive the filter's controlled 403 permission refusal
+before parsing, workspace permission checks, or throttling; they never fall back to the cookie or continue the chain.
+
 Never log uploaded bytes, recognized text, names, email addresses, phone numbers, headers, tokens, or provider payloads.
 
 ## Local OCR first
