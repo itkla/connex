@@ -40,7 +40,6 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate;
 
 import ooo.klae.connex.backend.mappers.DataSubjectDisclosureMapper;
-import tools.jackson.databind.ObjectMapper;
 
 /** Exercises real Spring/MyBatis connection retention while substituting JDBC query results. */
 class DataSubjectDisclosureConnectionTest {
@@ -77,7 +76,7 @@ class DataSubjectDisclosureConnectionTest {
         var factory = new SqlSessionFactoryBuilder().build(configuration);
         var sessions = new SqlSessionTemplate(factory);
         var reader = new DataSubjectDisclosureReadTransaction(
-            sessions.getMapper(DataSubjectDisclosureMapper.class), factory, new ObjectMapper());
+            sessions.getMapper(DataSubjectDisclosureMapper.class), factory);
 
         outer.executeWithoutResult(status -> {
             assertFalse(TransactionSynchronizationManager.isActualTransactionActive());

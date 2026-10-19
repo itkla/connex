@@ -1,6 +1,5 @@
 package ooo.klae.connex.backend.services;
 
-import java.io.StringWriter;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.LinkedHashMap;
@@ -8,6 +7,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.Semaphore;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -19,14 +19,13 @@ import org.apache.ibatis.session.defaults.DefaultSqlSession;
 import org.apache.ibatis.transaction.jdbc.JdbcTransaction;
 import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
-
-import tools.jackson.core.JsonGenerator;
-import tools.jackson.databind.ObjectMapper;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.PersonDisqualificationReason;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto;
+import ooo.klae.connex.backend.dto.DataSubjectDisclosureNotes;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.NoteDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.PersonDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.RecordCommentDisclosureDto;
@@ -54,7 +53,6 @@ public class DataSubjectDisclosureReadTransaction {
     private static final int NOTE_PAGE_SIZE = 100;
     private final DataSubjectDisclosureMapper dataSubjectDisclosureMapper;
     private final SqlSessionFactory sqlSessionFactory;
-    private final ObjectMapper objectMapper;
     private final Semaphore linkedMutationAdmission = new Semaphore(1, true);
 
     @Transactional(readOnly = true)
@@ -169,47 +167,59 @@ public class DataSubjectDisclosureReadTransaction {
     }
 
     /**
-     * Serializes every eligible subject note into one JSON array, reading bodies in pages of at
-     * most {@link #NOTE_PAGE_SIZE} preflight IDs so only one page of note objects is live at a
-     * time. The serialized array is accumulated in full, which is the disclosure's payload bound.
+     * Consumes the envelope and both note passes synchronously inside one explicit snapshot.
+     * The source is invalidated before the transaction and route can end, even on failure.
      */
-    private String disclosureNotes(int workspaceId, int personId, List<Integer> workspaceIds) {
-        List<Integer> noteIds = dataSubjectDisclosureMapper.findNoteIds(workspaceId, personId, workspaceIds);
-        StringWriter payload = new StringWriter();
-        try (JsonGenerator generator = objectMapper.createGenerator(payload)) {
-            generator.writeStartArray();
-            for (int start = 0; start < noteIds.size(); start += NOTE_PAGE_SIZE) {
-                appendNotePage(workspaceId, personId, workspaceIds,
-                    noteIds.subList(start, Math.min(start + NOTE_PAGE_SIZE, noteIds.size())), generator);
-            }
-            generator.writeEndArray();
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public <T> T withSnapshot(int workspaceId, int personId, List<Integer> workspaceIds,
+            Function<DataSubjectDisclosureDto, T> work) {
+        try (DataSubjectDisclosureNotes notes = new DataSubjectDisclosureNotes(
+                (consumer, beforePage) -> forEachNote(workspaceId, personId, workspaceIds, consumer, beforePage))) {
+            DataSubjectDisclosureDto disclosure = assemble(workspaceId, personId, workspaceIds);
+            disclosure.setNotes(notes);
+            return work.apply(disclosure);
         }
-        return payload.toString();
     }
 
-    private void appendNotePage(int workspaceId, int personId, List<Integer> workspaceIds,
-            List<Integer> noteIds, JsonGenerator generator) {
-        List<NoteDto> notes = dataSubjectDisclosureMapper.findNotePage(workspaceId, personId, workspaceIds, noteIds);
+    private void forEachNote(int workspaceId, int personId, List<Integer> workspaceIds,
+            Consumer<NoteDto> consumer, Runnable beforePage) {
+        Integer afterId = null;
+        do {
+            beforePage.run();
+            afterId = appendNextNotePage(workspaceId, personId, workspaceIds, afterId, consumer, beforePage);
+        } while (afterId != null);
+    }
+
+    /** Each helper returns before the next ID or body page can be allocated. */
+    private Integer appendNextNotePage(int workspaceId, int personId, List<Integer> workspaceIds,
+            Integer afterId, Consumer<NoteDto> consumer, Runnable beforePage) {
+        List<Integer> noteIds = dataSubjectDisclosureMapper.findNoteIds(
+            workspaceId, personId, workspaceIds, afterId);
+        if (noteIds.isEmpty()) {
+            return null;
+        }
+        if (noteIds.size() > NOTE_PAGE_SIZE) {
+            throw new IllegalStateException("Disclosure note ID page exceeds its bound");
+        }
+        Integer previous = afterId;
+        for (Integer noteId : noteIds) {
+            if (noteId == null || previous != null && noteId <= previous) {
+                throw new IllegalStateException("Disclosure note IDs must advance in ascending order");
+            }
+            previous = noteId;
+        }
+        beforePage.run();
+        List<NoteDto> notes = dataSubjectDisclosureMapper.findNotePage(
+            workspaceId, personId, workspaceIds, noteIds);
         if (!notes.stream().map(NoteDto::getId).toList().equals(noteIds)) {
             throw new ResourceNotFoundException("Disclosure note no longer available");
         }
-        for (NoteDto note : notes) {
-            objectMapper.writeValue(generator, note);
-        }
+        beforePage.run();
+        notes.forEach(consumer);
+        return noteIds.getLast();
     }
 
-    /**
-     * Assembles the complete subject disclosure inside one read-only transaction.
-     *
-     * <p>The single transaction is load-bearing for the note pages. Under the deployed MySQL
-     * default of REPEATABLE READ, the ID preflight and every body page share one snapshot, so the
-     * page-completeness refusal in {@link #appendNotePage} cannot be reached by a concurrent note
-     * delete. If these reads are ever split across transactions or sessions, or the isolation
-     * level is relaxed to READ COMMITTED, that refusal becomes reachable and would abort a
-     * verified statutory export; tolerate removals by intersecting with the surviving IDs instead.
-     */
-    @Transactional(readOnly = true)
-    public DataSubjectDisclosureDto assemble(int workspaceId, int personId, List<Integer> workspaceIds) {
+    private DataSubjectDisclosureDto assemble(int workspaceId, int personId, List<Integer> workspaceIds) {
         if (workspaceIds.isEmpty()) {
             throw new IllegalArgumentException("A disclosure workspace allowlist cannot be empty");
         }
@@ -233,7 +243,6 @@ public class DataSubjectDisclosureReadTransaction {
         disclosure.setProviderCaptureEvidence(
             dataSubjectDisclosureMapper.findProviderCaptureEvidence(
                 workspaceId, personId, workspaceIds));
-        disclosure.setNotes(disclosureNotes(workspaceId, personId, workspaceIds));
         disclosure.setRecordCommentThreads(
             recordCommentThreads(workspaceId, personId, workspaceIds));
         disclosure.setTasks(dataSubjectDisclosureMapper.findTasks(workspaceId, personId, workspaceIds));

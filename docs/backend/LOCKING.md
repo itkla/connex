@@ -511,28 +511,89 @@ Linked mutations reserve an independently owned JDBC-backed MyBatis tenant sessi
 
 Updates lock the exact organization-scoped request after roots and compare persisted state to the preliminary snapshot before deriving/writing the diff.
 
-Disclosure assembly is a CSRF-protected POST (#2004), with three separate phases; it does not use
-the linked-mutation person-lock path. `DataSubjectRequestService` suspends ambient transactions:
+Disclosure assembly is a synchronous CSRF-protected POST (#2004, #1733); it does not use the
+linked-mutation person-lock path. `DataSubjectRequestService` suspends ambient transactions:
 
 1. Control preparation opens its own read-only transaction, locks the matching
    `org_member(orgId, actorId)` rows `FOR SHARE`, validates step-up, then reads the request,
    workspaces and audit trail without additional locks. The membership lock is released before
    tenant assembly.
-2. Payload reads run in one read-only snapshot transaction in the linked subject workspace's
-   tenant catalog, including bounded note pages. Caller tenant context is restored afterwards.
-3. After assembly ends, the control audit transaction takes actor `app_user FOR SHARE`, target
-   `organization FOR SHARE`, then the organization integrity head exclusively (`ensureHead`'s
-   upsert followed by `lockHead FOR UPDATE`). It INSERTs the audit row, conditionally advances the
-   head, and commits before returning the response. Organization events have null workspace scope.
+2. Admission allows `MAX_CONCURRENT_DISCLOSURES = 2` per instance and
+   `MAX_CONCURRENT_DISCLOSURES_PER_ORGANIZATION = 1`. The synchronized admission map contains only
+   admitted organizations, so it has at most two keys; requests never wait for admission. Excess requests and pools
+   configured below two connections receive the existing 503 before opening a tenant snapshot.
+   The effective global capacity is the smaller of two and the configured pool size divided by
+   the per-disclosure two-connection budget: pools of two or three admit one, leaving its audit
+   connection available instead of allowing snapshots to exhaust the pool before either audit.
+   For these single-slot pools, capacity refusals from other organizations retain their first
+   refusal timestamps in a bounded insertion-ordered set
+   (`MAX_REFUSED_DISCLOSURE_ORGANIZATIONS = 128`); saturation evicts the oldest entry to record a
+   newcomer, while repeat refusals keep their position. When the holder releases, including on
+   deadline expiry, the oldest retained organization receives the freed slot exclusively for
+   `DISCLOSURE_TURNOVER_RESERVATION = 30 seconds`. Every other organization, including the former
+   holder, receives the existing 503 before a snapshot. The reservation is consumed by admission
+   or lapses after 30 seconds; other recorded refusals are cleared at turnover so stale requests
+   cannot chain idle reservations. Pools of at least four retain two slots without reservations.
+   `DataSubjectDisclosurePlacementRead` completes workspace/organization/catalog discovery in a
+   separately proxied short control read, before installing the subject route and opening the
+   snapshot. Its MyBatis session and connection are released even when the outer `NOT_SUPPORTED`
+   service has empty transaction synchronization, including different-active-workspace and
+   unresolved callers. No placement lookup resource spans the snapshot.
+   One explicitly read-only `REPEATABLE_READ` tenant transaction retains the subject route and
+   connection through both serialization passes and synchronous delivery. The non-note envelope,
+   labels, workspace names, audit metadata and generated timestamp are fixed once. Pass one
+   discards bytes while counting and hashing the complete compact UTF-8 JSON and its notes array.
+   Note ID keyset pages and exact-ID body pages are capped at 100, do not use second-level caches,
+   and flush the MyBatis session cache before every query so previous bodies cannot accumulate.
+3. `DataSubjectDisclosureAuditAccess` suspends the tenant transaction with `NOT_SUPPORTED`
+   **before** entering `TenantWorkScope.unrouted`. It calls
+   `AuditService.recordStrictIndependentScoped`, whose `REQUIRES_NEW` append takes actor
+   `app_user FOR SHARE`, target `organization FOR SHARE`, then the organization integrity head
+   exclusively (`ensureHead` upsert then `lockHead FOR UPDATE`). The audit INSERT and conditional
+   head advance commit independently. Organization events have null workspace scope. The control
+   catalog override is restored before the same physical tenant connection/transaction resumes.
+4. Only after that commit does pass two open the servlet target. It writes on the request thread
+   inside the retained snapshot and route. Both full-document and notes count/digest/byte-length
+   results must match pass one before the writer releases the final document byte. The snapshot
+   then ends and the caller context is restored on every exit. Pass two has an absolute deadline
+   from `connex.data-subject-disclosure.delivery-timeout-ms`
+   (`CONNEX_DSR_DISCLOSURE_DELIVERY_TIMEOUT_MS`, default `120000`). The writer checks before/after
+   page queries, before page writes and at most every 8 KiB of output, including before/after
+   blocking writes/flushes. The transaction-bound connection holder supplies the remaining budget
+   to subsequent MyBatis statements (JDBC query timeouts have second granularity).
+5. One deadline task per admitted delivery may only close its captured Tomcat socket; it never
+   serializes, queries, changes tenant context or completes the transaction off-thread. Expiry and
+   disarm share a monitor, so cancellation finishes before request/connection reuse; cancelled tasks
+   are removed from the timer queue. Tomcat NIO's explicit `server.tomcat.connection-timeout`
+   (`CONNEX_TOMCAT_CONNECTION_TIMEOUT`, default `30s`) initializes the native blocking write timeout.
+   Closing the socket prevents trickling progress from resetting it. A blocked native write may
+   wait one such timeout before unwinding, giving a delivery bound of deadline plus one connector
+   write timeout (150 seconds with defaults), followed by normal cleanup. The synchronous failure
+   rolls back the read, invalidates notes, restores route/context and releases organization/global
+   admission. A live server lacking this HTTP/1.1 cancellation binding fails closed before output.
 
-No preparation, person or workspace lock is carried into the audit. This preserves the
-account-before-organization-before-child order and adds no database wait edge. Authority, step-up,
-request linkage or lifecycle can still change between preparation and audit; no revalidation or
-serialization is added. The first-head initialization deadlock documented above remains possible.
-Preparation/assembly failures prevent the success audit; a final audit exception returns 503
-without disclosure data and rolls back the INSERT and head advance together. A committed audit
-survives a subsequent response/download failure. Explicit retries assemble and audit again, and
-database rollback failures may only be retried through a fresh request/transaction.
+No preparation, person, workspace or integrity-head lock is carried by the tenant read into the
+control audit. Its non-locking reads preserve actor → organization → integrity-head lock order.
+The retained snapshot occupies one pooled connection while the audit needs another: budget at
+least two connections per admitted disclosure, four for both slots, plus capacity for ordinary
+traffic. Preparation/preflight precede the delivery deadline. The snapshot remains open during a
+bounded slow download, retaining a request thread and InnoDB history;
+other disclosure sections remain materialized and one note page can still be large.
+
+Authority, step-up, request linkage or lifecycle can still change between preparation and audit;
+no revalidation or serialization is added. The first-head initialization deadlock documented above
+remains possible. Preparation/preflight failures prevent the success audit. Audit exceptions return
+503 without disclosure bytes and roll back INSERT and head advance together. A committed audit
+records complete assembly and an authorized release attempt, not client receipt, and survives a
+later stream failure. Jackson `AUTO_CLOSE_CONTENT` and `AUTO_CLOSE_TARGET` are disabled for this
+writer. After response commitment, failures leave truncated JSON with no error suffix or closing
+delimiters; before commitment the buffer is cleared and the existing 503 shape is used. Reject
+incomplete framing, invalid JSON, or integrity-header mismatches and retry explicitly. Every retry
+assembles/audits again; transaction rollback failures require a fresh request/transaction. Wait
+for an active same-organization download to finish/expire after overload. With a single-slot pool,
+retry a refused organization's request during its turnover reservation; a non-reserved organization
+must wait for that reservation to be used or its 30-second window to lapse. Discard a deadline-aborted
+download and retry on a connection able to complete within the limit; there is no continuation.
 
 SSO returning/existing-user paths discover non-locking then lock user, stored workspace when applicable, and organization before revalidation. New JIT paths without a user lock stored workspace and organization before revalidating absence/inserting.
 

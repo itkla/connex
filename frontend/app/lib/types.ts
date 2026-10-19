@@ -3468,7 +3468,8 @@ export type AiOrganizationBudget = {
 export type AiChatSessionDetail = {
     session: AiChatSession;
     messages: Page<AiChatMessage>;
-    activeTurn: AiChatTurn | null;
+    /** Omitted by the server's non-null JSON projection when no turn is active. */
+    activeTurn?: AiChatTurn | null;
 };
 
 /** One declared assistant capability the calling member may run on the current surface. */

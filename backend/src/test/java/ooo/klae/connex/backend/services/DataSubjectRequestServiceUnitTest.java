@@ -17,12 +17,18 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.LongSupplier;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
@@ -30,12 +36,14 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.beans.DataSubjectRequest;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto;
+import ooo.klae.connex.backend.dto.DataSubjectDisclosureNotes;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.AuditEntryDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.ThirdPartyProvisionDto;
 import ooo.klae.connex.backend.dto.DataSubjectRequestDto;
 import ooo.klae.connex.backend.dto.DataSubjectRequestUpsertRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.DataSubjectDisclosureStreamException;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.services.DataSubjectRequestControlOperations.DisclosureControlData;
 import ooo.klae.connex.backend.services.DataSubjectRequestControlOperations.WorkspaceSnapshot;
@@ -44,9 +52,18 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 @ExtendWith(MockitoExtension.class)
 class DataSubjectRequestServiceUnitTest {
+    private final DataSubjectDisclosureDelivery delivery = new DataSubjectDisclosureDelivery(120_000,
+        org.mockito.Mockito.mock(javax.sql.DataSource.class));
+
+    @AfterEach
+    void closeDelivery() {
+        delivery.close();
+    }
+
     @Mock private DataSubjectRequestControlOperations controlOperations;
     @Mock private DataSubjectDisclosureAccess disclosureAccess;
     @Mock private TenantWorkScope tenantWorkScope;
+    @Mock private DataSubjectDisclosureAuditAccess disclosureAuditAccess;
 
     private DataSubjectRequestService service;
 
@@ -82,7 +99,8 @@ class DataSubjectRequestServiceUnitTest {
                 Supplier<?> work = invocation.getArgument(3);
                 return work.get();
             });
-        service = new DataSubjectRequestService(controlOperations, disclosureAccess, tenantWorkScope);
+        service = new DataSubjectRequestService(controlOperations, disclosureAccess, tenantWorkScope,
+            disclosureAuditAccess, new DataSubjectDisclosureJsonWriter(new tools.jackson.databind.ObjectMapper(), delivery));
     }
 
     @Test
@@ -269,18 +287,30 @@ class DataSubjectRequestServiceUnitTest {
         provision.setTargetWorkspaceId(6);
         DataSubjectDisclosureDto assembled = new DataSubjectDisclosureDto();
         assembled.setThirdPartyProvisions(List.of(provision));
-        when(disclosureAccess.assemble(3, 7, 4, 5, List.of(4, 6))).thenReturn(assembled);
+        snapshot(assembled, List.of(4, 6));
 
-        DataSubjectDisclosureDto disclosure = service.disclosure(3, 9, 7);
+        java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
+        service.disclosure(3, 9, 7, fingerprint -> {
+            verify(disclosureAuditAccess).record(org.mockito.ArgumentMatchers.eq(3),
+                org.mockito.ArgumentMatchers.eq(9L), org.mockito.ArgumentMatchers.eq(5),
+                org.mockito.ArgumentMatchers.eq(4), any());
+            return output;
+        });
+        DataSubjectDisclosureDto disclosure = assembled;
+        assertEquals(0, new tools.jackson.databind.ObjectMapper().readTree(output.toByteArray()).path("notes").size());
 
         assertEquals("Overlay", disclosure.getThirdPartyProvisions().getFirst().getTargetWorkspaceName());
         assertEquals(List.of(audit), disclosure.getAuditTrail());
         assertEquals(1_234, disclosure.getAuditTrailTotal());
         assertNotNull(disclosure.getGeneratedAt());
-        InOrder order = inOrder(controlOperations, disclosureAccess);
+        InOrder order = inOrder(controlOperations, disclosureAccess, disclosureAuditAccess);
         order.verify(controlOperations).prepareDisclosure(3, 9, 7);
-        order.verify(disclosureAccess).assemble(3, 7, 4, 5, List.of(4, 6));
-        order.verify(controlOperations).recordDisclosureAudit(3, 9, 5, 4);
+        order.verify(disclosureAccess).withSnapshot(org.mockito.ArgumentMatchers.eq(3),
+            org.mockito.ArgumentMatchers.eq(7), org.mockito.ArgumentMatchers.eq(4),
+            org.mockito.ArgumentMatchers.eq(5), org.mockito.ArgumentMatchers.eq(List.of(4, 6)), any());
+        order.verify(disclosureAuditAccess).record(org.mockito.ArgumentMatchers.eq(3),
+            org.mockito.ArgumentMatchers.eq(9L), org.mockito.ArgumentMatchers.eq(5),
+            org.mockito.ArgumentMatchers.eq(4), any());
     }
 
     @Test
@@ -293,11 +323,13 @@ class DataSubjectRequestServiceUnitTest {
             .thenReturn(new DisclosureControlData(request, workspaces, List.of(), 0));
         DataSubjectDisclosureDto assembled = new DataSubjectDisclosureDto();
         assembled.setThirdPartyProvisions(List.of());
-        when(disclosureAccess.assemble(3, 7, 4, 5, List.of(4))).thenReturn(assembled);
+        snapshot(assembled, List.of(4));
         org.mockito.Mockito.doThrow(new IllegalStateException("audit unavailable"))
-            .when(controlOperations).recordDisclosureAudit(3, 9, 5, 4);
+            .when(disclosureAuditAccess).record(org.mockito.ArgumentMatchers.eq(3),
+                org.mockito.ArgumentMatchers.eq(9L), org.mockito.ArgumentMatchers.eq(5),
+                org.mockito.ArgumentMatchers.eq(4), any());
 
-        assertThrows(ServiceUnavailableException.class, () -> service.disclosure(3, 9, 7));
+        assertThrows(ServiceUnavailableException.class, () -> service.disclosure(3, 9, 7, fingerprint -> java.io.OutputStream.nullOutputStream()));
     }
 
     @Test
@@ -308,12 +340,243 @@ class DataSubjectRequestServiceUnitTest {
         WorkspaceSnapshot workspaces = new WorkspaceSnapshot(List.of(4), Map.of(4, "Owner"));
         when(controlOperations.prepareDisclosure(3, 9, 7))
             .thenReturn(new DisclosureControlData(request, workspaces, List.of(), 0));
-        when(disclosureAccess.assemble(3, 7, 4, 5, List.of(4)))
+        when(disclosureAccess.withSnapshot(org.mockito.ArgumentMatchers.eq(3),
+                org.mockito.ArgumentMatchers.eq(7), org.mockito.ArgumentMatchers.eq(4),
+                org.mockito.ArgumentMatchers.eq(5), org.mockito.ArgumentMatchers.eq(List.of(4)), any()))
             .thenThrow(new IllegalStateException("tenant unavailable"));
 
-        assertThrows(IllegalStateException.class, () -> service.disclosure(3, 9, 7));
-        verify(controlOperations, never()).recordDisclosureAudit(any(Integer.class), any(Long.class),
-            any(Integer.class), any(Integer.class));
+        assertThrows(IllegalStateException.class, () -> service.disclosure(3, 9, 7, fingerprint -> java.io.OutputStream.nullOutputStream()));
+        verify(disclosureAuditAccess, never()).record(any(Integer.class), any(Long.class),
+            any(Integer.class), any(Integer.class), any());
+    }
+
+    @Test
+    void preflightFailureDoesNotAuditOrOpenOutputAndReleasesAdmission() {
+        DataSubjectDisclosureDto assembled = prepareDisclosure();
+        assembled.setNotes(new DataSubjectDisclosureNotes(consumer -> {
+            throw new IllegalStateException("preflight failed");
+        }));
+        var opened = new java.util.concurrent.atomic.AtomicBoolean();
+        assertThrows(IllegalStateException.class, () -> service.disclosure(3, 9, 7, fingerprint -> {
+            opened.set(true);
+            return java.io.OutputStream.nullOutputStream();
+        }));
+        assertEquals(false, opened.get());
+        verify(disclosureAuditAccess, never()).record(anyInt(), any(Long.class), anyInt(), anyInt(), any());
+        assembled.setNotes(new DataSubjectDisclosureNotes(consumer -> {}));
+        service.disclosure(3, 9, 7, fingerprint -> java.io.OutputStream.nullOutputStream());
+        verify(disclosureAuditAccess).record(org.mockito.ArgumentMatchers.eq(3),
+            org.mockito.ArgumentMatchers.eq(9L), org.mockito.ArgumentMatchers.eq(5),
+            org.mockito.ArgumentMatchers.eq(4), any());
+    }
+
+    @Test
+    void overlappingDisclosureIsRejectedBeforeOpeningAnotherSnapshot() {
+        prepareDisclosure();
+        service.disclosure(3, 9, 7, fingerprint -> {
+            assertThrows(ServiceUnavailableException.class,
+                () -> service.disclosure(3, 9, 7, unexpected -> java.io.OutputStream.nullOutputStream()));
+            return java.io.OutputStream.nullOutputStream();
+        });
+        verify(disclosureAccess).withSnapshot(org.mockito.ArgumentMatchers.eq(3),
+            org.mockito.ArgumentMatchers.eq(7), org.mockito.ArgumentMatchers.eq(4),
+            org.mockito.ArgumentMatchers.eq(5), org.mockito.ArgumentMatchers.eq(List.of(4)), any());
+    }
+
+    @Test
+    void poolWithFewerThanTwoConnectionsIsRefusedBeforeOpeningSnapshot() {
+        DataSubjectRequest request = storedVerifiedRequest();
+        request.setSubjectWorkspaceId(4);
+        request.setSubjectPersonId(5);
+        when(controlOperations.prepareDisclosure(3, 9, 7)).thenReturn(new DisclosureControlData(
+            request, new WorkspaceSnapshot(List.of(4), Map.of(4, "Owner")), List.of(), 0));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "maximumPoolSize", 1);
+        assertThrows(ServiceUnavailableException.class,
+            () -> service.disclosure(3, 9, 7, fingerprint -> java.io.OutputStream.nullOutputStream()));
+        verify(disclosureAccess, never()).withSnapshot(anyInt(), anyInt(), anyInt(), anyInt(), any(), any());
+        verify(disclosureAuditAccess, never()).record(anyInt(), any(Long.class), anyInt(), anyInt(), any());
+    }
+
+    @Test
+    void anotherOrganizationCanUseTheSecondSlotButTheGlobalAndOrganizationCapsRemainBounded() {
+        prepareDisclosure();
+        var control = controlOperations.prepareDisclosure(3, 9, 7);
+        when(controlOperations.prepareDisclosure(6, 9, 7)).thenReturn(control);
+        when(controlOperations.prepareDisclosure(8, 9, 7)).thenReturn(control);
+        when(disclosureAccess.withSnapshot(org.mockito.ArgumentMatchers.eq(6), anyInt(), anyInt(), anyInt(), any(), any()))
+            .thenAnswer(invocation -> {
+                Function<DataSubjectDisclosureDto, ?> work = invocation.getArgument(5);
+                DataSubjectDisclosureDto disclosure = new DataSubjectDisclosureDto();
+                disclosure.setThirdPartyProvisions(List.of());
+                disclosure.setNotes(new DataSubjectDisclosureNotes(consumer -> {}));
+                return work.apply(disclosure);
+            });
+        service.disclosure(3, 9, 7, fingerprint -> {
+            service.disclosure(6, 9, 7, second -> {
+                assertThrows(ServiceUnavailableException.class,
+                    () -> service.disclosure(3, 9, 7, unused -> java.io.OutputStream.nullOutputStream()));
+                assertThrows(ServiceUnavailableException.class,
+                    () -> service.disclosure(8, 9, 7, unused -> java.io.OutputStream.nullOutputStream()));
+                return java.io.OutputStream.nullOutputStream();
+            });
+            return java.io.OutputStream.nullOutputStream();
+        });
+        verify(disclosureAccess, never()).withSnapshot(org.mockito.ArgumentMatchers.eq(8),
+            anyInt(), anyInt(), anyInt(), any(), any());
+        assertEquals(Map.of(), org.springframework.test.util.ReflectionTestUtils.getField(service, "disclosureOrganizations"));
+    }
+
+    @Test
+    void poolOfTwoRetainsOneAuditConnectionInsteadOfAdmittingTwoSnapshots() {
+        prepareDisclosure();
+        var control = controlOperations.prepareDisclosure(3, 9, 7);
+        when(controlOperations.prepareDisclosure(6, 9, 7)).thenReturn(control);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "maximumPoolSize", 2);
+        service.disclosure(3, 9, 7, fingerprint -> {
+            assertThrows(ServiceUnavailableException.class,
+                () -> service.disclosure(6, 9, 7, unused -> java.io.OutputStream.nullOutputStream()));
+            return java.io.OutputStream.nullOutputStream();
+        });
+        verify(disclosureAccess, never()).withSnapshot(org.mockito.ArgumentMatchers.eq(6),
+            anyInt(), anyInt(), anyInt(), any(), any());
+        assertEquals(Map.of(), org.springframework.test.util.ReflectionTestUtils.getField(service, "disclosureOrganizations"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {2, 3})
+    void deadlineTurnoverReservesTheSingleSlotForTheRefusedOrganization(int poolSize) {
+        var boundedDelivery = org.mockito.Mockito.mock(DataSubjectDisclosureDelivery.class);
+        var deadline = org.mockito.Mockito.mock(DataSubjectDisclosureDelivery.Deadline.class);
+        AtomicBoolean expired = new AtomicBoolean();
+        when(boundedDelivery.start()).thenReturn(deadline);
+        doAnswer(invocation -> {
+            if (expired.get()) {
+                throw new IllegalStateException("Disclosure delivery deadline exceeded");
+            }
+            return null;
+        }).when(deadline).check();
+        service = new DataSubjectRequestService(controlOperations, disclosureAccess, tenantWorkScope,
+            disclosureAuditAccess, new DataSubjectDisclosureJsonWriter(new tools.jackson.databind.ObjectMapper(), boundedDelivery));
+        prepareDisclosure();
+        prepareOtherDisclosure(6);
+        AtomicLong now = singleCapacityClock(poolSize);
+
+        assertThrows(DataSubjectDisclosureStreamException.class, () -> service.disclosure(3, 9, 7, fingerprint -> {
+            assertThrows(ServiceUnavailableException.class,
+                () -> service.disclosure(6, 9, 7, unused -> java.io.OutputStream.nullOutputStream()));
+            expired.set(true);
+            return java.io.OutputStream.nullOutputStream();
+        }));
+
+        assertThrows(ServiceUnavailableException.class,
+            () -> service.disclosure(3, 9, 7, unused -> java.io.OutputStream.nullOutputStream()));
+        verify(disclosureAccess).withSnapshot(org.mockito.ArgumentMatchers.eq(3), anyInt(), anyInt(), anyInt(), any(), any());
+        now.set(DataSubjectRequestService.DISCLOSURE_TURNOVER_RESERVATION.minusSeconds(1).toNanos());
+        expired.set(false);
+        service.disclosure(6, 9, 7, fingerprint -> java.io.OutputStream.nullOutputStream());
+        verify(disclosureAccess).withSnapshot(org.mockito.ArgumentMatchers.eq(6), anyInt(), anyInt(), anyInt(), any(), any());
+        assertEquals(Map.of(), org.springframework.test.util.ReflectionTestUtils.getField(service, "disclosureOrganizations"));
+        assertEquals(null, org.springframework.test.util.ReflectionTestUtils.getField(service, "reservedDisclosureOrganization"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {2, 3})
+    void unusedReservationRefusesEveryOtherOrganizationUntilTheExactWindowExpires(int poolSize) {
+        prepareDisclosure();
+        var control = controlOperations.prepareDisclosure(3, 9, 7);
+        when(controlOperations.prepareDisclosure(6, 9, 7)).thenReturn(control);
+        when(controlOperations.prepareDisclosure(8, 9, 7)).thenReturn(control);
+        AtomicLong now = singleCapacityClock(poolSize);
+        service.disclosure(3, 9, 7, fingerprint -> {
+            assertThrows(ServiceUnavailableException.class,
+                () -> service.disclosure(6, 9, 7, unused -> java.io.OutputStream.nullOutputStream()));
+            return java.io.OutputStream.nullOutputStream();
+        });
+        now.set(DataSubjectRequestService.DISCLOSURE_TURNOVER_RESERVATION.toNanos() - 1);
+        for (int organization : List.of(3, 8)) {
+            assertThrows(ServiceUnavailableException.class,
+                () -> service.disclosure(organization, 9, 7, unused -> java.io.OutputStream.nullOutputStream()));
+        }
+        now.incrementAndGet();
+        service.disclosure(3, 9, 7, fingerprint -> java.io.OutputStream.nullOutputStream());
+        verify(disclosureAccess, org.mockito.Mockito.times(2)).withSnapshot(
+            org.mockito.ArgumentMatchers.eq(3), anyInt(), anyInt(), anyInt(), any(), any());
+        verify(disclosureAccess, never()).withSnapshot(org.mockito.ArgumentMatchers.eq(6), anyInt(), anyInt(), anyInt(), any(), any());
+        verify(disclosureAccess, never()).withSnapshot(org.mockito.ArgumentMatchers.eq(8), anyInt(), anyInt(), anyInt(), any(), any());
+        assertEquals(null, org.springframework.test.util.ReflectionTestUtils.getField(service, "reservedDisclosureOrganization"));
+    }
+
+    @Test
+    void refusedOrganizationTimestampsAreBoundedAndRepeatedRefusalsCannotJumpTheTurnoverOrder() {
+        prepareDisclosure();
+        var control = controlOperations.prepareDisclosure(3, 9, 7);
+        when(controlOperations.prepareDisclosure(anyInt(), org.mockito.ArgumentMatchers.eq(9L), org.mockito.ArgumentMatchers.eq(7)))
+            .thenReturn(control);
+        AtomicLong now = singleCapacityClock(2);
+        service.disclosure(3, 9, 7, fingerprint -> {
+            for (int index = 0; index <= DataSubjectRequestService.MAX_REFUSED_DISCLOSURE_ORGANIZATIONS; index++) {
+                int refused = 1_000 + index;
+                now.incrementAndGet();
+                assertThrows(ServiceUnavailableException.class,
+                    () -> service.disclosure(refused, 9, 7, unused -> java.io.OutputStream.nullOutputStream()));
+            }
+            Object tracked = org.springframework.test.util.ReflectionTestUtils.getField(service, "refusedDisclosureOrganizations");
+            assertNotNull(tracked);
+            Map<?, ?> refused = (Map<?, ?>) tracked;
+            assertEquals(DataSubjectRequestService.MAX_REFUSED_DISCLOSURE_ORGANIZATIONS, refused.size());
+            assertEquals(false, refused.containsKey(1_000));
+            assertEquals(2L, refused.get(1_001));
+            now.incrementAndGet();
+            assertThrows(ServiceUnavailableException.class,
+                () -> service.disclosure(1_001, 9, 7, unused -> java.io.OutputStream.nullOutputStream()));
+            assertEquals(2L, refused.get(1_001));
+            return java.io.OutputStream.nullOutputStream();
+        });
+        assertEquals(1_001, org.springframework.test.util.ReflectionTestUtils.getField(service, "reservedDisclosureOrganization"));
+        assertEquals(Map.of(), org.springframework.test.util.ReflectionTestUtils.getField(service, "refusedDisclosureOrganizations"));
+    }
+
+    private AtomicLong singleCapacityClock(int poolSize) {
+        AtomicLong now = new AtomicLong();
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "maximumPoolSize", poolSize);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "disclosureTicker", (LongSupplier) now::get);
+        return now;
+    }
+
+    private void prepareOtherDisclosure(int orgId) {
+        var control = controlOperations.prepareDisclosure(3, 9, 7);
+        when(controlOperations.prepareDisclosure(orgId, 9, 7)).thenReturn(control);
+        when(disclosureAccess.withSnapshot(org.mockito.ArgumentMatchers.eq(orgId), anyInt(), anyInt(), anyInt(), any(), any()))
+            .thenAnswer(invocation -> {
+                Function<DataSubjectDisclosureDto, ?> work = invocation.getArgument(5);
+                DataSubjectDisclosureDto disclosure = new DataSubjectDisclosureDto();
+                disclosure.setThirdPartyProvisions(List.of());
+                disclosure.setNotes(new DataSubjectDisclosureNotes(consumer -> {}));
+                return work.apply(disclosure);
+            });
+    }
+
+    private DataSubjectDisclosureDto prepareDisclosure() {
+        DataSubjectRequest request = storedVerifiedRequest();
+        request.setSubjectWorkspaceId(4);
+        request.setSubjectPersonId(5);
+        when(controlOperations.prepareDisclosure(3, 9, 7)).thenReturn(new DisclosureControlData(
+            request, new WorkspaceSnapshot(List.of(4), Map.of(4, "Owner")), List.of(), 0));
+        DataSubjectDisclosureDto assembled = new DataSubjectDisclosureDto();
+        assembled.setThirdPartyProvisions(List.of());
+        snapshot(assembled, List.of(4));
+        return assembled;
+    }
+
+    private void snapshot(DataSubjectDisclosureDto assembled, List<Integer> workspaceIds) {
+        assembled.setNotes(new DataSubjectDisclosureNotes(consumer -> {}));
+        when(disclosureAccess.withSnapshot(org.mockito.ArgumentMatchers.eq(3),
+                org.mockito.ArgumentMatchers.eq(7), org.mockito.ArgumentMatchers.eq(4),
+                org.mockito.ArgumentMatchers.eq(5), org.mockito.ArgumentMatchers.eq(workspaceIds), any()))
+            .thenAnswer(invocation -> {
+                Function<DataSubjectDisclosureDto, ?> work = invocation.getArgument(5);
+                return work.apply(assembled);
+            });
     }
 
     private static DataSubjectRequest storedVerifiedRequest() {

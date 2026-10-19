@@ -182,15 +182,6 @@ public class DataSubjectRequestControlOperations {
         return new DisclosureControlData(request, workspaces, auditTrail, auditTrailTotal);
     }
 
-    @Transactional
-    public void recordDisclosureAudit(int orgId, long requestId, int personId, int workspaceId) {
-        auditService.recordStrict("appi.subject_request.disclosure", "organization", orgId,
-            requestLabel(requestId), "Subject-scoped disclosure export assembled",
-            Map.of("requestId", requestId, "subjectPersonId", personId,
-                "subjectWorkspaceId", workspaceId));
-    }
-
-
     /** Reads the immutable organization workspace scope before acquiring its ordered roots. */
     @Transactional(readOnly = true)
     public List<Integer> missionPurgeWorkspaceIds(int orgId, int actorId) {

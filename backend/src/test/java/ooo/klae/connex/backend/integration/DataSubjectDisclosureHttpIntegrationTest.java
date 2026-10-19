@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -275,8 +276,8 @@ class DataSubjectDisclosureHttpIntegrationTest {
     void missingSubjectFailsAssemblyWithoutSuccessAudit() throws Exception {
         jdbc.update("DELETE FROM person WHERE id = ?", personId);
         assertRefused(disclosurePost(session), 404);
-        verify(disclosureAccess).assemble(organization.getId(), actor.getId(), workspace.getId(),
-            personId, List.of(workspace.getId()));
+        verify(disclosureAccess).withSnapshot(eq(organization.getId()), eq(actor.getId()), eq(workspace.getId()),
+            eq(personId), eq(List.of(workspace.getId())), any());
     }
 
     /** The session chain denies anonymous retirement probes; MVC denies authorized methods with 405. */
@@ -443,7 +444,7 @@ class DataSubjectDisclosureHttpIntegrationTest {
     }
 
     private void assertNoAssembly() {
-        verify(disclosureAccess, never()).assemble(anyInt(), anyInt(), anyInt(), anyInt(), anyList());
+        verify(disclosureAccess, never()).withSnapshot(anyInt(), anyInt(), anyInt(), anyInt(), anyList(), any());
     }
 
     private void assertAudit(Head before, int expectedEvents) {
