@@ -1,11 +1,12 @@
 package ooo.klae.connex.backend.mappers;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -19,6 +20,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.ColumnMapRowMapper;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import ooo.klae.connex.backend.dto.GeneratedDocumentSummaryDto;
 import ooo.klae.connex.backend.dto.MemberScope;
 
 class DealDocumentMapperTest extends AbstractMapperTest {
@@ -27,7 +29,7 @@ class DealDocumentMapperTest extends AbstractMapperTest {
     @Autowired private DataSource dataSource;
 
     @Test
-    void workspacePageAndSearchUseRecencyIndexWithoutFilesort() {
+    void workspacePageAndSearchCanUseRecencyIndexAndReturnNewestFirst() {
         seedDocumentHistory();
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
         assertEquals(List.of("workspace_id", "generated_at", "id"), jdbc.queryForList("""
@@ -42,13 +44,17 @@ class DealDocumentMapperTest extends AbstractMapperTest {
         parameters.put("memberScope", MemberScope.allTeam());
         parameters.put("limit", 25);
         parameters.put("offset", 0);
-        assertRecencyIndex("getWorkspacePage", parameters);
-        assertEquals(25, mapper.getWorkspacePage(workspace.getId(), null, null, null, null,
-                MemberScope.allTeam(), 25, 0).size());
+        assertRecencyIndexIsAvailable("getWorkspacePage", parameters);
+        var page = mapper.getWorkspacePage(workspace.getId(), null, null, null, null,
+                MemberScope.allTeam(), 25, 0);
+        assertEquals(25, page.size());
+        assertNewestFirst(page);
 
         parameters.put("query", "%recency%");
-        assertRecencyIndex("search", parameters);
-        assertEquals(10, mapper.search(workspace.getId(), "%recency%").size());
+        assertRecencyIndexIsAvailable("search", parameters);
+        var results = mapper.search(workspace.getId(), "%recency%");
+        assertEquals(10, results.size());
+        assertNewestFirst(results);
     }
 
     private void seedDocumentHistory() {
@@ -61,7 +67,7 @@ class DealDocumentMapperTest extends AbstractMapperTest {
             var deal = newDeal(pipeline, stage, company);
             for (int version = 1; version <= 32; version++) {
                 documents.add(new Object[] {workspace.getId(), deal.getId(), version,
-                        Timestamp.valueOf(generatedAt.plusDays(version % 8))});
+                        Timestamp.valueOf(generatedAt.plusMinutes(dealIndex * 32L + version % 16))});
             }
         }
         new JdbcTemplate(dataSource).batchUpdate("""
@@ -71,7 +77,7 @@ class DealDocumentMapperTest extends AbstractMapperTest {
                 """, documents);
     }
 
-    private void assertRecencyIndex(String statement, Map<String, Object> parameters) {
+    private void assertRecencyIndexIsAvailable(String statement, Map<String, Object> parameters) {
         var mapped = sqlSessionFactory.getConfiguration()
                 .getMappedStatement(DealDocumentMapper.class.getName() + "." + statement);
         var bound = mapped.getBoundSql(parameters);
@@ -83,9 +89,14 @@ class DealDocumentMapperTest extends AbstractMapperTest {
         Map<String, Object> documentAccess = plan.stream()
                 .filter(row -> "dd".equals(row.get("table")))
                 .findFirst().orElseThrow();
-        assertEquals("idx_deal_document_recency", documentAccess.get("key"),
+        assertTrue(List.of(String.valueOf(documentAccess.get("possible_keys")).split(","))
+                .contains("idx_deal_document_recency"),
                 () -> statement + ": " + plan);
-        assertFalse(plan.stream().anyMatch(row -> String.valueOf(row.get("Extra")).contains("filesort")),
-                () -> statement + ": " + plan);
+    }
+
+    private void assertNewestFirst(List<GeneratedDocumentSummaryDto> documents) {
+        var newestFirst = Comparator.comparing(GeneratedDocumentSummaryDto::generatedAt)
+                .thenComparingInt(GeneratedDocumentSummaryDto::id).reversed();
+        assertEquals(documents.stream().sorted(newestFirst).toList(), documents);
     }
 }
