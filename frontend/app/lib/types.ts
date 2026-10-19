@@ -3549,6 +3549,22 @@ export type AiAssistantToolCallCreatedRecord = {
     id: number;
 };
 
+/** Derived review outcome; the review deadline only expires still-pending proposals. */
+export type LegacyProposalReviewState =
+    | 'open'
+    | 'expired'
+    | 'applied'
+    | 'undone'
+    | 'discarded'
+    | 'failed'
+    | 'unavailable';
+
+/** Immutable review deadline shared by read and mutation responses. */
+export type ProposalExpiryFields = {
+    reviewState: LegacyProposalReviewState;
+    reviewExpiresAt: string | null;
+};
+
 /** Viewer-safe transcript projection for one assistant write-tool call. */
 export type AiAssistantToolCall = {
     id: number;
@@ -3569,7 +3585,7 @@ export type AiAssistantToolCall = {
     createdAt: string;
     updatedAt: string;
     executedAt: string | null;
-};
+} & ProposalExpiryFields;
 
 /** Mutation response returned after approving, rejecting, or undoing a tool call. */
 export type AiAssistantToolCallMutation = {
@@ -3580,7 +3596,7 @@ export type AiAssistantToolCallMutation = {
     result: unknown;
     undoAvailable: boolean;
     undoExpiresAt: string | null;
-};
+} & ProposalExpiryFields;
 
 /** Minimal assistant-turn result retained behind the shared generation handle. */
 export type AiChatTurnGenerationResult = {

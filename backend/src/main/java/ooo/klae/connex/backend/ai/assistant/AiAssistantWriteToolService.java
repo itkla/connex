@@ -16,6 +16,8 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Valid;
@@ -47,6 +49,7 @@ import ooo.klae.connex.backend.beans.AiChatTurn;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.dto.AiAssistantToolCallDto;
 import ooo.klae.connex.backend.dto.CompanyDuplicatePreflightRequest;
 import ooo.klae.connex.backend.dto.DealDuplicatePreflightRequest;
@@ -64,6 +67,8 @@ import ooo.klae.connex.backend.services.DealService;
 import ooo.klae.connex.backend.services.DuplicateDecisionLockService;
 import ooo.klae.connex.backend.services.DuplicatePreflightService;
 import ooo.klae.connex.backend.services.PersonService;
+import ooo.klae.connex.backend.services.MutationAdmission;
+import ooo.klae.connex.backend.services.TagService;
 import ooo.klae.connex.backend.services.TaskService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.services.WorkspaceService.LockedPermissionSnapshot;
@@ -116,6 +121,7 @@ public class AiAssistantWriteToolService {
     private final ObjectMapper objectMapper;
     private final Validator validator;
     private final Clock clock;
+    private final TagService tagService;
 
     /** Converts one provider tool call into a typed and server-resolved durable proposal. */
     public AiAssistantPreparedWrite prepare(
@@ -504,7 +510,7 @@ public class AiAssistantWriteToolService {
                 new Authority(
                         turn.workspaceId(), turn.userId(), toolCall.getId(), clock.instant()),
                 PreliminaryPrincipals.NONE,
-                mutation);
+                mutation, new ProposalAdmission(toolCall, clock));
         String resultJson = resultEnvelope(write, outcome, null);
         toolCall.setStatus(EXECUTED);
         toolCall.setResultJson(resultJson);
@@ -550,7 +556,7 @@ public class AiAssistantWriteToolService {
                 new Authority(
                         actor.workspaceId(), actor.userId(), toolCall.getId(), clock.instant()),
                 principals,
-                mutation);
+                mutation, new ProposalAdmission(toolCall, clock));
         Map<String, Object> approval = new LinkedHashMap<>();
         approval.put("status", "approved");
         approval.put("at", clock.instant().toString());
@@ -587,6 +593,7 @@ public class AiAssistantWriteToolService {
         envelope.put("tier", "confirm");
         envelope.put("approval", approval);
         String resultJson = serialize(envelope);
+        new ProposalAdmission(toolCall, clock).beforeMutation();
         if (chatMapper.updateToolCall(
                 actor.workspaceId(), toolCall.getMessageId(), toolCall.getId(),
                 REJECTED, resultJson, actor.userId()) != 1) {
@@ -660,9 +667,9 @@ public class AiAssistantWriteToolService {
             StoredWrite write,
             Authority authority,
             PreliminaryPrincipals principals,
-            PreparedMutation mutation) {
+            PreparedMutation mutation, ProposalAdmission admission) {
         requireTargetAccessible(new Target(write.targetKind(), write.targetId()));
-        return apply(write, authority, principals.principals(), mutation);
+        return apply(write, authority, principals.principals(), mutation, admission);
     }
 
     /**
@@ -676,7 +683,7 @@ public class AiAssistantWriteToolService {
             StoredWrite write,
             Authority authority,
             List<PrincipalRequest> principals,
-            PreparedMutation mutation) {
+            PreparedMutation mutation, ProposalAdmission admission) {
         Row row = new Row(new Target(write.targetKind(), write.targetId()), write.typedRequest());
         Outcome outcome = write.tool().apply(new Execution(
                 authority,
@@ -684,7 +691,8 @@ public class AiAssistantWriteToolService {
                 principals,
                 mutation.resolution(),
                 new LockedTarget(mutation.targetUpdatedAt(), mutation.stageChange()),
-                scheduleOf(row.target()), write.pinned()));
+                scheduleOf(row.target()), write.pinned(), admission));
+        admission.requireAdmitted();
         Inverse inverse = outcome.inverse();
         Map<String, Object> undo = null;
         if (inverse != null) {
@@ -908,6 +916,15 @@ public class AiAssistantWriteToolService {
         if (write.pins() != null && !write.pins().pins(resolution)) {
             throw new ConflictException(PROPOSAL_CHANGED);
         }
+        if (lock.tagAssociations()) {
+            if (resolution == null) {
+                throw new IllegalStateException("Assistant tag was not resolved");
+            }
+            Tag tag = tagService.lockDefinitionForShare(resolution.id());
+            if (tag.getId() != resolution.id() || !Objects.equals(tag.getName(), resolution.label())) {
+                throw new ConflictException(PROPOSAL_CHANGED);
+            }
+        }
         if (lock.taskBoard()) {
             if (lock.target() == AiAssistantWriteTool.TargetLock.TASK_ROW) {
                 taskService.lockBoardForUpdate();
@@ -915,7 +932,7 @@ public class AiAssistantWriteToolService {
                 taskService.lockBoardForCreation();
             }
         }
-        return switch (lock.target()) {
+        PreparedMutation mutation = switch (lock.target()) {
             case NONE -> new PreparedMutation(null, resolution, null);
             case PERSON_SHARE -> {
                 if (!"person".equals(write.targetKind())) {
@@ -945,6 +962,10 @@ public class AiAssistantWriteToolService {
                         stageChange == null ? null : stageChange.targetUpdatedAt());
             }
         };
+        if (lock.tagAssociations()) {
+            tagService.lockAssociationsForUpdate(write.targetKind(), write.targetId());
+        }
+        return mutation;
     }
 
     private String lockTargetForUpdate(StoredWrite write) {
@@ -1195,8 +1216,23 @@ public class AiAssistantWriteToolService {
             }
         }
         String tier = result.has("tier") ? text(result, "tier") : "confirm";
+        Instant deadline = null;
+        if (toolCall.isServerProposal()) {
+            readStored(toolCall);
+            deadline = AiAssistantProposalExpiry.reviewExpiresAt(toolCall.getCreatedAt());
+        }
+        String reviewState = switch (status) {
+            case PROPOSED -> deadline == null ? "unavailable"
+                    : AiAssistantProposalExpiry.isExpired(deadline, clock.instant()) ? "expired" : "open";
+            case EXECUTED -> "applied";
+            case "undone" -> "undone";
+            case REJECTED -> "discarded";
+            case "failed" -> "failed";
+            default -> "unavailable";
+        };
         return new AiAssistantToolCallDto(
                 toolCall.getId(), toolCall.getToolName(), tier, status,
+                reviewState, deadline == null ? null : deadline.toString(),
                 outcome, undoAvailable, undoExpiresAt);
     }
 
@@ -1310,6 +1346,64 @@ public class AiAssistantWriteToolService {
             AiAssistantToolCallDto toolCall,
             AiAssistantToolResult toolResult,
             boolean replayed) {
+    }
+
+    /** One transaction-bound admission; subsequent effects retain the first successful decision. */
+    static final class ProposalAdmission implements MutationAdmission, TransactionSynchronization {
+        private final int toolCallId;
+        private final Clock clock;
+        private final Instant deadline;
+        private final Thread origin;
+        private boolean admitted;
+        private boolean completed;
+
+        ProposalAdmission(AiChatToolCall toolCall, Clock clock) {
+            this.toolCallId = toolCall.getId();
+            this.clock = Objects.requireNonNull(clock);
+            this.deadline = AiAssistantProposalExpiry.reviewExpiresAt(toolCall.getCreatedAt());
+            this.origin = Thread.currentThread();
+            if (!TransactionSynchronizationManager.isActualTransactionActive()
+                    || !TransactionSynchronizationManager.isSynchronizationActive()) {
+                throw new IllegalStateException("Assistant mutation admission requires its originating transaction");
+            }
+            TransactionSynchronizationManager.registerSynchronization(this);
+        }
+
+        @Override
+        public void beforeMutation() {
+            requireOrigin();
+            if (admitted) {
+                return;
+            }
+            if (deadline == null) {
+                throw new ConflictException("Assistant proposal review deadline is unavailable");
+            }
+            if (AiAssistantProposalExpiry.isExpired(deadline, clock.instant())) {
+                throw new AiAssistantProposalExpiredException();
+            }
+            admitted = true;
+        }
+
+        void requireAdmitted() {
+            requireOrigin();
+            if (!admitted) {
+                throw new IllegalStateException("Assistant tool did not pass mutation admission");
+            }
+        }
+
+        private void requireOrigin() {
+            if (toolCallId <= 0 || completed || Thread.currentThread() != origin
+                    || !TransactionSynchronizationManager.isActualTransactionActive()
+                    || !TransactionSynchronizationManager.isSynchronizationActive()
+                    || !TransactionSynchronizationManager.getSynchronizations().contains(this)) {
+                throw new IllegalStateException("Assistant mutation admission left its originating transaction");
+            }
+        }
+
+        @Override
+        public void afterCompletion(int status) {
+            completed = true;
+        }
     }
 
     private record Actor(int workspaceId, int userId) {

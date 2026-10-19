@@ -935,12 +935,19 @@ public class DealService {
     @Transactional(propagation = Propagation.MANDATORY)
     @RequirePermission(Permission.DEAL_UPDATE)
     public Deal changeStage(LockedStageChange lockedStageChange) {
+        return changeStage(lockedStageChange, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    @RequirePermission(Permission.DEAL_UPDATE)
+    public Deal changeStage(LockedStageChange lockedStageChange, MutationAdmission admission) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (lockedStageChange == null
                 || lockedStageChange.workspaceId != workspaceId) {
             throw new ConflictException("Prepared deal stage mutation is unavailable");
         }
-        return moveLocked(lockedStageChange, Integer.MAX_VALUE, true);
+        return moveLocked(lockedStageChange, Integer.MAX_VALUE, true, admission);
     }
 
     /**
@@ -1035,6 +1042,14 @@ public class DealService {
             Deal deal,
             String duplicateReviewToken,
             RecordCreationAugmentation augmentation) {
+        return createReviewed(deal, duplicateReviewToken, augmentation, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    Deal createReviewed(
+            Deal deal,
+            String duplicateReviewToken,
+            RecordCreationAugmentation augmentation, MutationAdmission admission) {
         duplicatePreflightService.requireReviewedDealCreation(
             new DealDuplicatePreflightRequest(
                 deal.getName(),
@@ -1047,12 +1062,19 @@ public class DealService {
                 deal.getStageId(),
                 deal.getCompanyId(),
                 augmentation);
-        return createAfterDuplicateDecisionLock(deal, prepared);
+        return createAfterDuplicateDecisionLock(deal, prepared, admission);
     }
 
     private Deal createAfterDuplicateDecisionLock(
             Deal deal,
             RecordCreationAugmentationService.PreparedAugmentation prepared) {
+        return createAfterDuplicateDecisionLock(deal, prepared, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    private Deal createAfterDuplicateDecisionLock(
+            Deal deal,
+            RecordCreationAugmentationService.PreparedAugmentation prepared, MutationAdmission admission) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         deal.setWorkspaceId(workspaceId);
         deal.setOwnerId(authService.getCurrentUser().getId());
@@ -1063,6 +1085,7 @@ public class DealService {
             deal.setPosition(dealMapper.nextDealPosition(workspaceId, deal.getStageId()));
         }
         deal.setCreatedAt(null);
+        admission.beforeMutation();
         dealOutcomeWriter.create(deal, requestedActualValue, stageOutcome);
         if (deal.getStageId() != null) {
             dealStageHistoryService.recordInitial(
@@ -1195,12 +1218,21 @@ public class DealService {
     @Transactional
     @RequirePermission(Permission.DEAL_UPDATE)
     public Deal updateValue(int id, BigDecimal value) {
+        return updateValue(id, value, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @Transactional
+    @RequirePermission(Permission.DEAL_UPDATE)
+    public Deal updateValue(int id, BigDecimal value, MutationAdmission admission) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal before = requireDealForUpdate(workspaceId, id);
         boolean valueChanged = before.getValue().compareTo(value) != 0;
         if (!valueChanged) {
+            admission.beforeMutation();
             return hydrateReferences(workspaceId, before);
         }
+        admission.beforeMutation();
         dealValueService.setManualValue(workspaceId, before, value);
         Deal after = requireDeal(workspaceId, id);
         auditService.record("deal.update", "deal", id, after.getName(),
@@ -1246,6 +1278,13 @@ public class DealService {
     @Transactional
     @RequirePermission(Permission.DEAL_UPDATE)
     public Deal reschedule(int id, String expectedCloseDate) {
+        return reschedule(id, expectedCloseDate, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @Transactional
+    @RequirePermission(Permission.DEAL_UPDATE)
+    public Deal reschedule(int id, String expectedCloseDate, MutationAdmission admission) {
         try {
             LocalDate.parse(expectedCloseDate);
         } catch (DateTimeParseException e) {
@@ -1254,6 +1293,7 @@ public class DealService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (dealMapper.getDealById(workspaceId, id) == null) throw new ResourceNotFoundException("Deal not found");
         Deal before = requireDealByPrimaryKeyForUpdate(workspaceId, id);
+        admission.beforeMutation();
         dealMapper.updateExpectedCloseDate(workspaceId, id, expectedCloseDate);
         Deal after = requireDealByPrimaryKeyForUpdate(workspaceId, id);
         auditService.record("deal.update", "deal", id, after.getName(),
@@ -1437,11 +1477,18 @@ public class DealService {
      */
     @RequirePermission(Permission.DEAL_UPDATE)
     public boolean addTag(int dealId, int tagId) {
+        return addTag(dealId, tagId, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @RequirePermission(Permission.DEAL_UPDATE)
+    public boolean addTag(int dealId, int tagId, MutationAdmission admission) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
         if (deal == null) throw new ResourceNotFoundException("Deal not found");
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
         if (tag == null) throw new ResourceNotFoundException("Tag not found");
+        admission.beforeMutation();
         if (dealMapper.addTag(workspaceId, dealId, tagId) != 1) {
             return false;
         }
@@ -1461,10 +1508,17 @@ public class DealService {
      */
     @RequirePermission(Permission.DEAL_UPDATE)
     public boolean removeTag(int dealId, int tagId) {
+        return removeTag(dealId, tagId, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @RequirePermission(Permission.DEAL_UPDATE)
+    public boolean removeTag(int dealId, int tagId, MutationAdmission admission) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
         if (deal == null) throw new ResourceNotFoundException("Deal not found");
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
+        admission.beforeMutation();
         if (dealMapper.removeTag(workspaceId, dealId, tagId) != 1) {
             return false;
         }
@@ -1767,6 +1821,14 @@ public class DealService {
             LockedStageChange lockedStageChange,
             int position,
             boolean forceStageChanged) {
+        return moveLocked(lockedStageChange, position, forceStageChanged, MutationAdmission.UNRESTRICTED);
+    }
+
+    private Deal moveLocked(
+            LockedStageChange lockedStageChange,
+            int position,
+            boolean forceStageChanged,
+            MutationAdmission admission) {
         int workspaceId = lockedStageChange.workspaceId;
         int dealId = lockedStageChange.dealId;
         int stageId = lockedStageChange.stageId;
@@ -1791,6 +1853,7 @@ public class DealService {
         int index = Math.max(0, Math.min(position, target.size()));
         target.add(index, dealId);
 
+        admission.beforeMutation();
         if (stageChanged && oldStageId != null) {
             List<Integer> source = dealIdsInStage(lockedDeals, oldStageId);
             source.removeIf(existing -> existing == dealId);
@@ -1877,10 +1940,19 @@ public class DealService {
     @Transactional
     @RequirePermission(Permission.DEAL_UPDATE)
     public Deal updateOwner(int dealId, Integer ownerId) {
+        return updateOwner(dealId, ownerId, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @Transactional
+    @RequirePermission(Permission.DEAL_UPDATE)
+    public Deal updateOwner(int dealId, Integer ownerId, MutationAdmission admission) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (dealMapper.getDealById(workspaceId, dealId) == null) throw new ResourceNotFoundException("Deal not found");
         if (ownerId != null) workspaceService.lockAndRequireMember(workspaceId, ownerId);
         Deal deal = requireDealByPrimaryKeyForUpdate(workspaceId, dealId);
+        dealMapper.getCollaboratorIdsForUpdate(workspaceId, dealId);
+        admission.beforeMutation();
         dealMapper.updateOwner(workspaceId, dealId, ownerId);
         if (ownerId != null) {
             dealMapper.removeCollaborator(workspaceId, dealId, ownerId);

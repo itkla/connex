@@ -264,6 +264,45 @@ class NoteMentionTest extends AbstractServiceTest {
         assertEquals("(private note)", asOther.getContent());
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "[Secret][m]\n\n[m]:\nnote:%s", "[Secret][m]\r\r[m]:\rnote:%s",
+            "[Secret][m]\n\n> [m]: note:%s", "[Secret][m]\n\n- [m]: note:%s",
+            "[Secret][m]\n\n1. [m]:\n   note:%s",
+            "| ` | [Secret][m] | ` |\n| --- | --- | --- |\n\n[m]: note:%s",
+            "See [^f].\n\n[^f]: [Secret][m]\n\n[m]: note:%s"
+    })
+    void parserLayoutsProtectPrivateNoteReadsAndNotificationSnippets(String layout) {
+        Note privateDraft = draft("secret acquisition plan");
+        privateDraft.setVisibility("private");
+        Note privateNote = noteService.create(privateDraft);
+        User recipient = newUser();
+        Note source = noteService.create(draft(mention("Mentioned", recipient) + "\n\n"
+                + layout.formatted(privateNote.getId())));
+
+        assertEquals(1, source.getReferences().size());
+        assertEquals("user", source.getReferences().getFirst().getRefType());
+        assertEquals(1, mentions(recipient.getId()).size());
+        assertEquals("a note", mentions(recipient.getId()).getFirst().getSourceLabel());
+        authenticateAs(recipient, workspace.getId());
+
+        Note read = noteService.getNoteById(source.getId());
+
+        assertEquals("(private note)", read.getContent());
+        assertTrue(read.getReferences().stream().noneMatch(reference -> "note".equals(reference.getRefType())));
+    }
+
+    @Test
+    void parserOnlyMemberLinksDoNotCreateReferencesOrNotificationRecipients() {
+        User target = newUser();
+        Note source = noteService.create(draft("See [^f].\n\n[^f]: [Former][m]\n\n> [m]: user:" + target.getId()));
+
+        assertTrue(source.getReferences().isEmpty());
+        assertTrue(mentions(target.getId()).isEmpty());
+        assertTrue(ReferenceService.memberReferencesInContent(source.getContent()).stream()
+                .anyMatch(reference -> reference.label().equals("Former") && reference.memberIds().contains(target.getId())));
+    }
+
     @Test
     void privateNoteTargetAfterCodeSpanBracket_isRedactedForNonAuthor() {
         Note privateDraft = draft("secret acquisition plan");

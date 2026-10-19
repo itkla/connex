@@ -176,6 +176,13 @@ public class TaskService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.TASK_CREATE)
     public Task create(Task task) {
+        return create(task, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.TASK_CREATE)
+    public Task create(Task task, MutationAdmission admission) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         User actor = currentActorOrNull();
         task.setWorkspaceId(workspaceId);
@@ -186,6 +193,7 @@ public class TaskService {
         task.setCreatedAt(null);
         validateLinkedRecords(task, workspaceId);
         workspaceService.requirePermission(Permission.TASK_CREATE);
+        admission.beforeMutation();
         taskMapper.insert(task);
         auditService.record("task.create", "task", task.getId(), task.getDescription(),
             "Created task " + task.getDescription(),
@@ -298,7 +306,14 @@ public class TaskService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.TASK_UPDATE)
     public Task complete(int id) {
-        return completeLocked(id, null);
+        return complete(id, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.TASK_UPDATE)
+    public Task complete(int id, MutationAdmission admission) {
+        return completeLocked(id, null, admission);
     }
 
     /** Completes assigned open work only when its board-locked canonical state still matches. */
@@ -308,10 +323,10 @@ public class TaskService {
         if (expectedStateHash == null || expectedStateHash.isBlank()) {
             throw new BadRequestException("Expected task state is required");
         }
-        return completeLocked(id, expectedStateHash);
+        return completeLocked(id, expectedStateHash, MutationAdmission.UNRESTRICTED);
     }
 
-    private Task completeLocked(int id, String expectedStateHash) {
+    private Task completeLocked(int id, String expectedStateHash, MutationAdmission admission) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         User currentUser = authService.getCurrentUser();
         List<Task> lockedTasks = lockTaskBoardTasks(workspaceId, id);
@@ -335,9 +350,11 @@ public class TaskService {
             }
         }
         if (task.isCompleted()) {
+            admission.beforeMutation();
             return hydrate(workspaceId, task);
         }
         int donePosition = taskMapper.nextTaskPosition(workspaceId, STATUS_DONE);
+        admission.beforeMutation();
         if (taskMapper.complete(workspaceId, id, currentUser.getId(), donePosition) == 0) {
             throw new ForbiddenException("Only the task assignee may complete this task");
         }
@@ -558,6 +575,13 @@ public class TaskService {
     @Transactional
     @RequirePermission(Permission.TASK_UPDATE)
     public Task reschedule(int id, String dueDate) {
+        return reschedule(id, dueDate, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @Transactional
+    @RequirePermission(Permission.TASK_UPDATE)
+    public Task reschedule(int id, String dueDate, MutationAdmission admission) {
         try {
             LocalDate.parse(dueDate);
         } catch (DateTimeParseException e) {
@@ -566,6 +590,7 @@ public class TaskService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Task before = taskMapper.getTaskByIdForUpdate(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Task not found with id: " + id);
+        admission.beforeMutation();
         if (taskMapper.updateDueDate(workspaceId, id, dueDate) != 1) {
             throw new ResourceNotFoundException("Task not found with id: " + id);
         }

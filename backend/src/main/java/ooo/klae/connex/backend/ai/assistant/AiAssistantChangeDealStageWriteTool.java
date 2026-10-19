@@ -107,7 +107,7 @@ public class AiAssistantChangeDealStageWriteTool implements AiAssistantWriteTool
         if (stageChange == null || resolution == null) {
             throw new ConflictException("Prepared deal stage mutation is unavailable");
         }
-        Deal changed = dealService.changeStage(stageChange);
+        Deal changed = dealService.changeStage(stageChange, execution.admission());
         if (changed == null) {
             throw new IllegalStateException("Assistant deal stage change could not be read back");
         }

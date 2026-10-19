@@ -101,28 +101,34 @@ abstract class AbstractAiAssistantWriteToolTest {
         VALIDATORS.close();
     }
 
+    @org.junit.jupiter.api.AfterEach
+    void closeAdmissionTransaction() {
+        AiAssistantAdmissionTestSupport.endTransaction();
+    }
+
     @BeforeEach
     void setUpFramework() {
+        AiAssistantAdmissionTestSupport.beginTransaction();
         chatMapper = mock(AiChatMapper.class);
         workspaceService = mock(WorkspaceService.class);
-        activityService = mock(ActivityService.class);
-        noteService = mock(NoteService.class);
-        personService = mock(PersonService.class);
+        activityService = AiAssistantAdmissionTestSupport.admittingMock(ActivityService.class);
+        noteService = AiAssistantAdmissionTestSupport.admittingMock(NoteService.class);
+        personService = AiAssistantAdmissionTestSupport.admittingMock(PersonService.class);
         when(personService.isOwnedByCurrentWorkspace(anyInt())).thenReturn(true);
-        companyService = mock(CompanyService.class);
+        companyService = AiAssistantAdmissionTestSupport.admittingMock(CompanyService.class);
         when(companyService.isOwnedByCurrentWorkspace(anyInt())).thenReturn(true);
         duplicateDecisionLockService = mock(ooo.klae.connex.backend.services.DuplicateDecisionLockService.class);
         duplicatePreflightService = mock(ooo.klae.connex.backend.services.DuplicatePreflightService.class);
-        creationService = mock(ooo.klae.connex.backend.services.GuidedRecordCreationService.class);
+        creationService = AiAssistantAdmissionTestSupport.admittingMock(ooo.klae.connex.backend.services.GuidedRecordCreationService.class);
         presetService = mock(ooo.klae.connex.backend.services.RecordCreationPresetService.class);
-        dealService = mock(DealService.class);
-        reportService = mock(ooo.klae.connex.backend.services.ReportService.class);
-        taskService = mock(TaskService.class);
-        documentService = mock(DealDocumentService.class);
+        dealService = AiAssistantAdmissionTestSupport.admittingMock(DealService.class);
+        reportService = AiAssistantAdmissionTestSupport.admittingMock(ooo.klae.connex.backend.services.ReportService.class);
+        taskService = AiAssistantAdmissionTestSupport.admittingMock(TaskService.class);
+        documentService = AiAssistantAdmissionTestSupport.admittingMock(DealDocumentService.class);
         templateService = mock(DocumentTemplateService.class);
-        tagService = mock(TagService.class);
+        tagService = AiAssistantAdmissionTestSupport.admittingMock(TagService.class);
         pipelineService = mock(PipelineService.class);
-        leadResponseSlaService = mock(LeadResponseSlaService.class);
+        leadResponseSlaService = AiAssistantAdmissionTestSupport.admittingMock(LeadResponseSlaService.class);
         executorPersonMapper = mock(PersonMapper.class);
         restrictionEpoch = mock(AiRestrictionEpoch.class);
         governanceService = mock(AiWorkspaceGovernanceService.class);
@@ -257,7 +263,7 @@ abstract class AbstractAiAssistantWriteToolTest {
                 governanceService,
                 objectMapper,
                 VALIDATORS.getValidator(),
-                CLOCK);
+                CLOCK, tagService);
     }
 
     AiAssistantDraftDocumentWriteTool draftDocumentTool() {
