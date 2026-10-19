@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
 
 import { activeWorkspaceId, csrfBootstrap, registerUser } from "./support/api";
@@ -17,7 +18,7 @@ test("a first note save cannot replace a pending workspace navigation URL", asyn
     const releaseNote = deferred();
     const releaseDashboard = deferred();
     try {
-        const run = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+        const run = randomUUID().replace(/-/g, "").slice(0, 12);
         await registerUser(context.request, { username: "chain_" + run, password: "ChainHarness!" + run + "A1", email: "chain_" + run + "@example.test", displayName: "Chain origin " + run });
         const origin = await activeWorkspaceId(context.request);
         const csrf = await csrfBootstrap(context.request);

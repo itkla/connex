@@ -1,3 +1,8 @@
+/**
+ * Inventories workspace-bound write chains and their captured request options.
+ * This is a conservative static regression net over common forms, not a soundness proof; the
+ * per-flow runtime regressions in `workspaceBound*Chains` are the behavioural evidence.
+ */
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
@@ -14,6 +19,7 @@ type Write = {
     options: ts.Expression | undefined;
     bindings: Bindings;
     awaited: boolean;
+    awaitedAt?: number;
     position: number;
     branches: Map<ts.Node, ts.Node>;
     repeated: boolean;
@@ -136,10 +142,12 @@ function scan(source: ts.SourceFile, helpers = writeHelpers): string[] {
     const functions: FunctionBody[] = [];
     const calls: ts.CallExpression[] = [];
     const variables: ts.VariableDeclaration[] = [];
+    const assignments: ts.BinaryExpression[] = [];
     visit(source, (node) => {
         if (functionBody(node)) functions.push(node);
         if (ts.isCallExpression(node)) calls.push(node);
         if (ts.isVariableDeclaration(node)) variables.push(node);
+        if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) assignments.push(node);
     });
     function owner(node: ts.Node): FunctionBody | ts.SourceFile {
         let current = node.parent;
@@ -201,6 +209,16 @@ function scan(source: ts.SourceFile, helpers = writeHelpers): string[] {
         }
         return true;
     }
+    function canSupplyHeaders(expression: ts.Expression): boolean {
+        if (ts.isParenthesizedExpression(expression)) return canSupplyHeaders(expression.expression);
+        return !ts.isObjectLiteralExpression(expression) || expression.properties.some(headerProperty);
+    }
+    function headerProperty(property: ts.ObjectLiteralElementLike): boolean {
+        if (ts.isSpreadAssignment(property)) return canSupplyHeaders(property.expression);
+        const name = property.name;
+        return (ts.isIdentifier(name) || ts.isStringLiteralLike(name)) && name.text === "headers"
+            || ts.isComputedPropertyName(name) && (!ts.isStringLiteralLike(name.expression) || name.expression.text === "headers");
+    }
     function pinned(expression: ts.Expression | undefined, bindings: Bindings, invocations: Invocation[], seen = new Set<ts.Node>()): boolean {
         if (!expression || seen.has(expression)) return false;
         const next = new Set(seen).add(expression);
@@ -243,13 +261,12 @@ function scan(source: ts.SourceFile, helpers = writeHelpers): string[] {
         }
         if (ts.isParenthesizedExpression(expression)) return pinned(expression.expression, bindings, invocations, next);
         if (ts.isObjectLiteralExpression(expression)) {
-            for (const property of [...expression.properties].reverse()) {
-                if (ts.isSpreadAssignment(property)) return pinned(property.expression, bindings, invocations, next);
-                const name = property.name;
-                if (name && (ts.isIdentifier(name) || ts.isStringLiteralLike(name)) && name.text === "headers") return false;
-                if (name && ts.isComputedPropertyName(name)
-                    && (!ts.isStringLiteralLike(name.expression) || name.expression.text === "headers")) return false;
+            let headersPinned = false;
+            for (const property of expression.properties) {
+                if (ts.isSpreadAssignment(property) && pinned(property.expression, bindings, invocations, next)) headersPinned = true;
+                else if (headerProperty(property)) headersPinned = false;
             }
+            return headersPinned;
         }
         return false;
     }
@@ -311,6 +328,39 @@ function scan(source: ts.SourceFile, helpers = writeHelpers): string[] {
             }
             return null;
         }
+        function settleReceiver(receiver: ts.Expression, at: ts.Node, boundary = at.end, seen = new Set<ts.Node>()): void {
+            if (seen.has(receiver)) return;
+            seen.add(receiver);
+            if (ts.isParenthesizedExpression(receiver)) {
+                settleReceiver(receiver.expression, at, boundary, seen);
+                return;
+            }
+            if (ts.isCallExpression(receiver) && ts.isPropertyAccessExpression(receiver.expression)
+                && ts.isIdentifier(receiver.expression.expression) && receiver.expression.expression.text === "Promise"
+                && receiver.expression.name.text === "all" && receiver.arguments[0] && ts.isArrayLiteralExpression(receiver.arguments[0])) {
+                for (const element of receiver.arguments[0].elements) settleReceiver(element, at, boundary, seen);
+                return;
+            }
+            function settle(writes: Write[]): void {
+                for (const event of writes) {
+                    event.awaited = true;
+                    event.awaitedAt = Math.min(event.awaitedAt ?? Number.POSITIVE_INFINITY, boundary);
+                }
+            }
+            const declared = ts.isIdentifier(receiver) ? declaration(receiver) : undefined;
+            const assignment = declared ? assignments.findLast((candidate) => ts.isIdentifier(candidate.left)
+                && declaration(candidate.left) === declared && candidate.end <= at.getStart(source)) : undefined;
+            const initializer = assignment?.right ?? (declared && ts.isVariableDeclaration(declared) ? declared.initializer : undefined);
+            if (initializer) {
+                const antecedents = found.filter((event) => event.position >= initializer.getStart(source) && event.position < initializer.end);
+                if (antecedents.length > 0) settle(antecedents);
+                else settleReceiver(initializer, at, boundary, seen);
+            } else {
+                const first = found.length;
+                walk(receiver);
+                settle(found.slice(first));
+            }
+        }
         function walk(node: ts.Node): void {
             if (ts.isIfStatement(node)) {
                 const decision = truth(node.expression);
@@ -321,32 +371,18 @@ function scan(source: ts.SourceFile, helpers = writeHelpers): string[] {
                 }
             }
             if (node !== fn.body && functionBody(node)) return;
+            if (ts.isAwaitExpression(node)) {
+                settleReceiver(node.expression, node);
+                return;
+            }
             if (ts.isCallExpression(node)) {
                 if (ts.isPropertyAccessExpression(node.expression) && ["then", "catch", "finally"].includes(node.expression.name.text)) {
-                    function settleReceiver(receiver: ts.Expression, seen = new Set<ts.Node>()): void {
-                        if (seen.has(receiver)) return;
-                        seen.add(receiver);
-                        const declared = ts.isIdentifier(receiver) ? declaration(receiver) : undefined;
-                        if (declared && ts.isVariableDeclaration(declared) && declared.initializer) {
-                            const initializer = declared.initializer;
-                            const antecedents = found.filter((event) => event.position >= initializer.getStart(source) && event.position < initializer.end);
-                            if (antecedents.length > 0) {
-                                for (const event of antecedents) event.awaited = true;
-                            } else {
-                                settleReceiver(initializer, seen);
-                            }
-                        } else {
-                            const first = found.length;
-                            walk(receiver);
-                            for (const event of found.slice(first)) event.awaited = true;
-                        }
-                    }
-                    settleReceiver(node.expression.expression);
+                    settleReceiver(node.expression.expression, node, node.expression.end);
                     for (const argument of node.arguments) {
                         const callback = functionBody(argument) ? argument : localFunctionAt(argument, node);
                         if (!callback) continue;
                         for (const event of events(callback, bindings, next, [...invocations, { target: callback, call: node, continuation: true }])) {
-                            found.push({ ...event, position: argument.getStart(source), branches: new Map([...event.branches, ...branches(node, fn)]) });
+                            found.push({ ...event, position: argument.getStart(source), awaitedAt: event.awaitedAt === undefined ? undefined : node.end, branches: new Map([...event.branches, ...branches(node, fn)]) });
                         }
                     }
                     return;
@@ -363,7 +399,7 @@ function scan(source: ts.SourceFile, helpers = writeHelpers): string[] {
                             if (expression) supplied.set(parameter, { expression, bindings, at: node });
                         });
                         for (const event of events(target, supplied, next, [...invocations, { target, call: node, continuation: false }])) {
-                            found.push({ ...event, position: node.getStart(source), awaited: awaited(node, fn) || event.awaited, repeated: event.repeated || repeated(node, fn), branches: new Map([...event.branches, ...branches(node, fn)]) });
+                            found.push({ ...event, position: node.getStart(source), awaited: awaited(node, fn) || event.awaited, awaitedAt: event.awaitedAt === undefined ? undefined : node.end, repeated: event.repeated || repeated(node, fn), branches: new Map([...event.branches, ...branches(node, fn)]) });
                         }
                     }
                 }
@@ -371,7 +407,7 @@ function scan(source: ts.SourceFile, helpers = writeHelpers): string[] {
                     for (const argument of node.arguments) {
                         if (functionBody(argument)) {
                             for (const event of events(argument, bindings, next, [...invocations, { target: argument, call: node, continuation: false }])) {
-                                found.push({ ...event, position: node.getStart(source), branches: new Map([...event.branches, ...branches(node, fn)]) });
+                                found.push({ ...event, position: node.getStart(source), awaitedAt: event.awaitedAt === undefined ? undefined : node.end, branches: new Map([...event.branches, ...branches(node, fn)]) });
                             }
                         }
                     }
@@ -400,6 +436,7 @@ function scan(source: ts.SourceFile, helpers = writeHelpers): string[] {
             if (!earlier.awaited) continue;
             if (earlier.repeated) chained.add(earlier);
             for (const later of writes.slice(index + 1)) {
+                if (earlier.awaitedAt !== undefined && later.position < earlier.awaitedAt) continue;
                 if ([...earlier.branches].some(([branch, arm]) => later.branches.has(branch) && later.branches.get(branch) !== arm)) continue;
                 if ([...earlier.branches].some(([branch, arm]) => ts.isIfStatement(branch) && exits(arm) && later.position >= branch.end)) continue;
                 chained.add(earlier);
@@ -425,7 +462,7 @@ const EXCEPTIONS: Record<string, string> = {
     "app/components/dashboard/customize/DashboardGrid.tsx:90 saveDashboardLayout": "The queue drains separate user actions; each SaveJob carries its composed workspaceId, rather than recapturing a live selection per iteration.",
 };
 const found = [...filesUnder("app/components"), ...filesUnder("app/(app)")].flatMap((file) => scan(parse(file)));
-const imports = "import { createContact, createContact as makeContact, uploadContactPicture, updateContact, login } from '@/app/lib/api'; import * as api from '@/app/lib/api'; import { workspacePinnedRequest, renderedWorkspaceId } from '@/app/lib/renderedWorkspace'; import * as workspace from '@/app/lib/renderedWorkspace';";
+const imports = "import { createContact, createContact as makeContact, createTask, uploadContactPicture, updateContact, login } from '@/app/lib/api'; import * as api from '@/app/lib/api'; import { workspacePinnedRequest, renderedWorkspaceId } from '@/app/lib/renderedWorkspace'; import * as workspace from '@/app/lib/renderedWorkspace';";
 function probe(body: string): string[] { return scan(parse("Probe.tsx", imports + body)); }
 
 describe("workspace write-chain inventory", () => {
@@ -467,6 +504,15 @@ describe("workspace write-chain inventory", () => {
         "function save() { const pending = createContact({}); return pending.catch(() => uploadContactPicture(1, file)); }",
         "function save() { const pending = createContact({}); return pending.finally(() => uploadContactPicture(1, file)); }",
         "function save() { const pending = createContact({}); const forwarded = pending; return forwarded.then(() => uploadContactPicture(1, file)); }",
+        "async function save() { const origin = workspacePinnedRequest(renderedWorkspaceId()); const pending = createTask(payload, origin); await pending; await createTask(followUp, workspacePinnedRequest(renderedWorkspaceId())); }",
+        "async function save() { const origin = workspacePinnedRequest(renderedWorkspaceId()); const pending = createTask(payload, origin); await Promise.all([pending]); await createTask(followUp, workspacePinnedRequest(renderedWorkspaceId())); }",
+        "async function save() { const origin = workspacePinnedRequest(renderedWorkspaceId()); const pending = createTask(payload, origin); await (pending); await createTask(followUp, workspacePinnedRequest(renderedWorkspaceId())); }",
+        "async function save() { const origin = workspacePinnedRequest(renderedWorkspaceId()); let pending; pending = createTask(payload, origin); await pending; await createTask(followUp, workspacePinnedRequest(renderedWorkspaceId())); }",
+        "async function save() { const origin = workspacePinnedRequest(renderedWorkspaceId()); let pending; pending = createTask(payload, origin); await Promise.all([pending]); await createTask(followUp, workspacePinnedRequest(renderedWorkspaceId())); }",
+        "async function save() { const origin = workspacePinnedRequest(renderedWorkspaceId()); let pending; pending = createTask(payload, origin); await (pending); await createTask(followUp, workspacePinnedRequest(renderedWorkspaceId())); }",
+        "async function save() { const origin = workspacePinnedRequest(renderedWorkspaceId()); const pending = createTask(payload, origin); const forwarded = pending; await forwarded; await createTask(followUp, workspacePinnedRequest(renderedWorkspaceId())); }",
+        "async function save() { const origin = workspacePinnedRequest(renderedWorkspaceId()); await createContact({}, origin); await uploadContactPicture(1, file, { ...origin, ...{ headers: {} } }); }",
+        "async function save() { const origin = workspacePinnedRequest(renderedWorkspaceId()); await createContact({}, origin); await uploadContactPicture(1, file, { ...origin, ...unknownInit }); }",
     ])("rejects an unpinned chain: %s", (body) => { expect(probe(body).length).toBeGreaterThan(0); });
     it.each([
         "async function save() { const origin = workspacePinnedRequest(renderedWorkspaceId()); await createContact({}, origin); await uploadContactPicture(1, file, origin); }",
@@ -486,6 +532,10 @@ describe("workspace write-chain inventory", () => {
         "async function save() { const origin = workspacePinnedRequest(renderedWorkspaceId(), { ...init, headers }); await createContact({}, origin); await uploadContactPicture(1, file, origin); }",
         "async function one(init?: RequestInit) { const origin = init ?? workspacePinnedRequest(renderedWorkspaceId()); await createContact({}, origin); } async function two(init?: RequestInit) { const origin = init ?? workspacePinnedRequest(renderedWorkspaceId()); await uploadContactPicture(1, file, origin); } async function save() { const origin = workspacePinnedRequest(renderedWorkspaceId()); await one(origin); await two(origin); }",
         "function save() { const origin = workspacePinnedRequest(renderedWorkspaceId()); const pending = createContact({}, origin); const forwarded = pending; return forwarded.then(() => uploadContactPicture(1, file, origin)); }",
+        'async function save() { const origin = workspacePinnedRequest(renderedWorkspaceId()); await createContact({}, origin); await uploadContactPicture(1, file, { ...origin, ...{ cache: "no-store" as const } }); }',
+        "async function save() { const origin = workspacePinnedRequest(renderedWorkspaceId()); const pending = createTask(payload, origin); await pending; await createTask(followUp, origin); }",
+        "async function save() { const origin = workspacePinnedRequest(renderedWorkspaceId()); let pending; pending = createTask(payload, origin); await Promise.all([pending]); await createTask(followUp, origin); }",
+        "async function save() { const origin = workspacePinnedRequest(renderedWorkspaceId()); const pending = createTask(payload, origin); createTask(followUp); await pending; }",
     ])("accepts a pinned chain or separate writes: %s", (body) => { expect(probe(body)).toEqual([]); });
     it("has no unpinned component/page chain outside the shrinking ledger", () => {
         expect(found.filter((entry) => !(entry in EXCEPTIONS))).toEqual([]);
