@@ -68,8 +68,9 @@ an empty review collection in this slice.
 
 Realtime messages are six-field metadata invalidations on the requester's private channel.
 Fresh access, generation, and state-version checks run immediately before send; the client
-refetches canonical state and ignores stale events. EN/JA progress, report access, and
-controls live inside the existing Ask Connex session. There is no separate page or rail.
+refetches canonical state and ignores stale events. The scheduler publishes state invalidations
+after execution expiry commits, including for paused missions that do not poll. EN/JA progress,
+report access, and controls live inside the existing Ask Connex session. There is no separate page or rail.
 DSR initiation and progress use the existing request detail surface. Landing vendors the
 same frontend files through its normal sync script.
 

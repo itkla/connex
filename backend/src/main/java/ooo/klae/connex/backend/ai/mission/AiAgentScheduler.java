@@ -30,6 +30,7 @@ public class AiAgentScheduler {
     private final AiAgentPrivacyInitializer initializer;
     private final AiProperties properties;
     private final AiAgentRunPersistenceService persistence;
+    private final AiAgentRealtimePublisher publisher;
     private final JobRunRecorder jobs;
     private final ThreadPoolExecutor worker = new ThreadPoolExecutor(
             1, 1, 0L, TimeUnit.MILLISECONDS, new SynchronousQueue<>(),
@@ -67,7 +68,12 @@ public class AiAgentScheduler {
                     JobRunStatus outcome = JobRunStatus.SUCCEEDED;
                     try {
                         for (var expired : runs.expiredRuns(workspaceId, 25)) {
-                            persistence.expire(expired);
+                            if (persistence.expire(expired)) {
+                                var current = runs.getRun(workspaceId, expired.getId());
+                                if (current != null) {
+                                    publisher.publish(current, "mission_state");
+                                }
+                            }
                         }
                         if (properties.isMissionsEnabled()) {
                             for (var candidate : runs.dueRuns(workspaceId, 1)) {

@@ -51,7 +51,7 @@ async function mount() {
     const invalidated = vi.fn();
     function Harness({ identity, refreshVersion, contentVersion }: { identity: string; refreshVersion: number; contentVersion: number }) {
         value = useAskConnexMissions({ identity, sessionId: 7, enabled: true, visible: true, refreshVersion,
-            contentVersion, onChanged: (id) => changed(id), onContentInvalidated: (id) => invalidated(id) });
+            contentVersion, onChanged: changed, onContentInvalidated: invalidated });
         return null;
     }
     async function render(identity = 'user:workspace', refreshVersion = 0, contentVersion = 0) {
@@ -68,7 +68,7 @@ describe('Ask Connex durable mission state', () => {
     beforeEach(() => { vi.useFakeTimers(); });
     afterEach(() => { vi.clearAllMocks(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
-    it('does not poll an idle session when callbacks and parent renders change', async () => {
+    it('does not poll an idle session when its parent rerenders', async () => {
         api.getAiAgentRuns.mockResolvedValue({ items: [], nextCursor: null });
         const mounted = await mount();
         for (let index = 0; index < 20; index++) await mounted.render();
@@ -131,6 +131,24 @@ describe('Ask Connex durable mission state', () => {
         await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
         expect(api.getAiAgentRuns).toHaveBeenCalledTimes(3);
         expect(mounted.current().runs[0]?.state).toBe('done');
+        await mounted.unmount();
+    });
+
+    it('withdraws Resume when realtime reports a paused mission expiry', async () => {
+        api.getAiAgentRuns.mockResolvedValueOnce({ items: [run({ state: 'paused', availableActions: ['resume', 'cancel'] })], nextCursor: null })
+            .mockResolvedValue({ items: [run({ state: 'failed', stateVersion: '2', reasonCode: 'expired', availableActions: [] })], nextCursor: null });
+        const mounted = await mount();
+        expect(mounted.current().runs[0]?.availableActions).toContain('resume');
+        await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+        expect(api.getAiAgentRuns).toHaveBeenCalledTimes(1);
+
+        await mounted.render('user:workspace', 1);
+        expect(api.getAiAgentRuns).toHaveBeenCalledTimes(2);
+        expect(mounted.current().runs[0]?.state).toBe('failed');
+        expect(mounted.current().runs[0]?.reasonCode).toBe('expired');
+        expect(mounted.current().runs[0]?.availableActions).not.toContain('resume');
+        await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+        expect(api.getAiAgentRuns).toHaveBeenCalledTimes(2);
         await mounted.unmount();
     });
 

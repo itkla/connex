@@ -155,7 +155,8 @@ class AiAgentMaintenanceRoutingTest {
                 var initializer = mock(AiAgentPrivacyInitializer.class);
                 when(initializer.isReady()).thenReturn(true);
                 var scheduler = new AiAgentScheduler(workspaces, scope, runs, mock(AiAgentSegmentRunner.class),
-                        initializer, new AiProperties(), mock(AiAgentRunPersistenceService.class), recorder);
+                        initializer, new AiProperties(), mock(AiAgentRunPersistenceService.class),
+                        mock(AiAgentRealtimePublisher.class), recorder);
                 try {
                     scheduler.sweep();
                     observed.get(10, TimeUnit.SECONDS);
