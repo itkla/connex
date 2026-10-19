@@ -1,5 +1,5 @@
 import { viewPreferenceStorageKey } from '@/app/hooks/viewPreference';
-import type { AiAssistantToolCall, AiChatMessage, AiChatParticipant, AiChatProgressItem, AiChatSession } from '@/app/lib/types';
+import type { AiAssistantToolCall, AiChatMessage, AiChatParticipant, AiChatProgressItem, AiChatSession, AiChatTurnToolCall } from '@/app/lib/types';
 import { parseMysqlDateTime } from '@/app/lib/utils';
 
 /**
@@ -218,42 +218,50 @@ export function askConnexBoundRetryPrompt(
 }
 
 /**
- * Reads current-turn write evidence from viewer-safe action cards and durable progress.
+ * Reads current-turn write evidence from action cards and the durable per-call projection.
  *
  * An empty list proves nothing until the transcript has been refreshed after the turn settled.
  * Undone actions still count as committed writes: replaying the request would repeat work the
- * member already chose to undo. A proposed automatic action has no human decision holding it
- * back, so its outcome remains uncertain. The action list is bounded across the whole session;
- * only a settled progress trail containing exclusively read-only sources can rule out omitted
- * writes. Tasks and activities mix reads with writes and their aggregated counts cannot tell
- * them apart. Even write-free `list_tasks` or `list_activities` calls therefore stay uncertain.
- * An unexecuted CONFIRM proposal is not a committed write, but its action progress also stays
- * uncertain because the bounded cards cannot rule out another, omitted write in that turn.
- * These cases withhold Retry while preserving the check-records guidance and composer-only
- * Continue route when a partial answer is available.
+ * member already chose to undo. The server resolves each projected tool's tier from its catalog;
+ * an unknown tool has a null tier. Retry requires a settled projection containing only reads
+ * or terminal, non-executable proposals. A proposed write could still commit after any
+ * evidence read, including when its review card has expired but its durable status has not
+ * changed. Missing projections and non-terminal or unknown write outcomes stay uncertain.
+ * Once execution has been observed, that evidence is retained for the turn even when later
+ * bounded snapshots omit it. Retry also refreshes the terminal evidence before submission.
  */
 export function askConnexTurnWriteState(
-    turn: { turnId: number | null; progress: readonly AiChatProgressItem[] },
+    turn: {
+        turnId: number | null;
+        progress: readonly AiChatProgressItem[];
+        toolCalls?: readonly AiChatTurnToolCall[] | null;
+        writeCommitted?: boolean;
+        evidenceReconciled?: boolean;
+    },
     toolCalls: readonly AiAssistantToolCall[],
     reconciledTurnId: number | null,
 ): AskConnexTurnWriteState {
-    const { turnId, progress } = turn;
+    const { turnId, progress, toolCalls: projectedCalls } = turn;
     if (turnId === null) return 'uncertain';
+    if (turn.writeCommitted === true) return 'committed';
     const current = toolCalls.filter((toolCall) => toolCall.turnId === turnId);
     if (current.some((toolCall) => toolCall.status === 'executed'
         || toolCall.status === 'undone'
-        || toolCall.executedAt !== null)) return 'committed';
-    if (reconciledTurnId !== turnId
-        || current.some((toolCall) => toolCall.status === 'proposed' && toolCall.tier === 'auto')) {
-        return 'uncertain';
-    }
+        || (projectedCalls == null && toolCall.executedAt !== null))) return 'committed';
+    if (projectedCalls?.some((call) => (call.tier === 'AUTO' || call.tier === 'CONFIRM')
+        && (call.status === 'executed' || call.status === 'undone'))) return 'committed';
+    if (reconciledTurnId !== turnId || turn.evidenceReconciled === false) return 'uncertain';
     const settledProgress = progress.some((item) => item.source === 'answer'
         && (item.status === 'failed' || item.status === 'timed_out'
             || item.status === 'complete' || item.status === 'cancelled'));
-    if (!settledProgress || progress.some((item) => ![
-        'scope', 'answer', 'records', 'deals', 'files', 'metrics', 'schedule',
-    ].includes(item.source))) return 'uncertain';
-    return 'none';
+    if (!settledProgress) return 'uncertain';
+    if (projectedCalls == null) return 'uncertain';
+    return projectedCalls.every((call) => call.toolName.length > 0
+        && ((call.tier === 'READ'
+            && ['executed', 'undone', 'proposed', 'rejected', 'failed', 'expired'].includes(call.status))
+            || ((call.tier === 'AUTO' || call.tier === 'CONFIRM')
+                && (call.status === 'rejected' || call.status === 'expired'))))
+        ? 'none' : 'uncertain';
 }
 
 /**

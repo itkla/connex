@@ -241,11 +241,11 @@ public class AiAssistantTurnService {
     @RequirePermission(Permission.AI_USE)
     public AiChatTurnDto get(int sessionId, int turnId) {
         var turn = persistenceService.readTurn(sessionId, turnId);
-        return AiChatTurnDto.from(
-                turn,
-                progressService == null ? java.util.List.of() : progressService.project(turn),
-                workspaceService.getCurrentUserId(),
-                storedScope(turn.getScopeJson()));
+        int viewerUserId = workspaceService.getCurrentUserId();
+        AiChatQueryScopeDto scope = storedScope(turn.getScopeJson());
+        return progressService == null
+                ? AiChatTurnDto.from(turn, java.util.List.of(), viewerUserId, scope)
+                : progressService.projectTurn(turn, viewerUserId, scope);
     }
 
     /**

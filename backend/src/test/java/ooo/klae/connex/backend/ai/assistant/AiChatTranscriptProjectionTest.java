@@ -17,6 +17,7 @@ import ooo.klae.connex.backend.dto.AiChatMessageDto;
 import ooo.klae.connex.backend.dto.AiChatProgressItemDto;
 import ooo.klae.connex.backend.dto.AiChatSessionDto;
 import ooo.klae.connex.backend.dto.AiChatTurnDto;
+import ooo.klae.connex.backend.dto.AiChatTurnToolCallDto;
 
 class AiChatTranscriptProjectionTest {
 
@@ -116,6 +117,22 @@ class AiChatTranscriptProjectionTest {
         turn.setStatus("running");
 
         assertFalse(AiChatTurnDto.from(turn, List.of(), null).requestedByCurrentUser());
+    }
+
+    @Test
+    void perCallEvidenceIsImmutableAndRequesterOnlyEvenForDirectConstruction() {
+        AiChatTurnToolCallDto call = new AiChatTurnToolCallDto(
+                "list_tasks", AiAssistantToolCatalog.ToolTier.READ, "executed");
+        var calls = new java.util.ArrayList<>(List.of(call));
+        AiChatTurnDto requester = new AiChatTurnDto(
+                17, 9, "failed", "provider_error", null, List.of(), true, null, calls);
+        AiChatTurnDto shared = new AiChatTurnDto(
+                17, 9, "failed", "provider_error", null, List.of(), false, null, calls);
+        calls.clear();
+
+        assertEquals(List.of(call), requester.toolCalls());
+        assertNull(shared.toolCalls());
+        assertNull(new AiChatTurnDto(17, 9, "failed", "provider_error").toolCalls());
     }
 
     @Test

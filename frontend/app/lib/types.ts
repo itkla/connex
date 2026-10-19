@@ -3483,6 +3483,14 @@ export type AiChatTurnAccepted = {
     scope?: AiChatQueryScope | null;
 };
 
+/** Requester-only execution evidence classified by the server's authoritative tool catalog. */
+export type AiChatTurnToolCall = {
+    toolName: string;
+    /** Unknown tools have no tier; future tier values must remain unsafe to retry. */
+    tier: string | null;
+    status: string;
+};
+
 /** Caller-safe durable state for one assistant turn, including the persisted streamed partial. */
 export type AiChatTurn = {
     turnId: number;
@@ -3491,6 +3499,8 @@ export type AiChatTurn = {
     terminalReason: string | null;
     partialContent?: string | null;
     progress: AiChatProgressItem[];
+    /** Absent on older servers and null for readers other than the requester. */
+    toolCalls?: AiChatTurnToolCall[] | null;
     /**
      * Whether the reader asked for this turn. A shared-session participant watching another
      * member's turn is not its requester, and the cancellation endpoint rejects them, so the stop

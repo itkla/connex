@@ -30,7 +30,6 @@ import ooo.klae.connex.backend.dto.AiChatSessionDetailDto;
 import ooo.klae.connex.backend.dto.AiChatSessionDto;
 import ooo.klae.connex.backend.dto.AiChatSessionUpdateRequest;
 import ooo.klae.connex.backend.dto.AiChatStepFrameDto;
-import ooo.klae.connex.backend.dto.AiChatTurnDto;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.UserDisplayNameDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
@@ -221,8 +220,7 @@ public class AiAssistantService {
             new PageResponse<>(messages, chatMapper.countMessages(workspaceId, id)),
             activeTurn == null
                     ? null
-                    : AiChatTurnDto.from(
-                            activeTurn, progressService.project(activeTurn), userId));
+                    : progressService.projectTurn(activeTurn, userId, null));
     }
 
     /** Applies an owner-only title change and/or one-way archive transition. */
