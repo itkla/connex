@@ -483,9 +483,10 @@ export default function ConnectionsPanel({
     const decideReview = async (
         review: CaptureReviewItem,
         decision: CaptureReviewDecision,
+        init?: RequestInit,
     ) => runProviderMutation(
         review.provider,
-        () => decideCaptureReview(review.provider, review.id, decision),
+        () => decideCaptureReview(review.provider, review.id, decision, init),
         (updated) => {
             setCaptureOverview((current) => replaceProviderOverview(current, updated));
             setReviewPage(null);
@@ -795,7 +796,7 @@ export default function ConnectionsPanel({
                     }}
                     onDecide={decideReview}
                     onApprove={approveReview}
-                    onPreflight={(request) => preflightPersonDuplicates(request)}
+                    onPreflight={(request, init) => preflightPersonDuplicates(request, init)}
                 />
             ) : null}
 

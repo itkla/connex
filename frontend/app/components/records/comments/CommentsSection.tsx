@@ -295,9 +295,9 @@ export default function CommentsSection({
     );
 
     const attachImage = useCallback(
-        async (file: File): Promise<string | null> => {
+        async (file: File, init?: RequestInit): Promise<string | null> => {
             try {
-                const attachment = await uploadAttachmentImage(targetType, targetId, file);
+                const attachment = await uploadAttachmentImage(targetType, targetId, file, init);
                 const source = normalizeNoteImageSource(attachment.url);
                 if (!source) {
                     toastError(t('imageUploadFailed'));

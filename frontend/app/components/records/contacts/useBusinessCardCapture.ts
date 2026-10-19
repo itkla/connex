@@ -22,6 +22,7 @@ import {
     scanBusinessCard,
 } from '@/app/lib/api';
 import { workspaceUnavailableDescription } from '@/app/lib/errorMessages';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import {
     BusinessCardRecoveryStorageUnavailableError,
     clearBusinessCardImportRecovery,
@@ -587,7 +588,10 @@ export function useBusinessCardCapture({
     const prepareImportDraft = async (
         pendingAvatar: boolean,
         personAction: BusinessCardPersonAction = { type: 'create' },
+        init?: RequestInit,
     ): Promise<BusinessCardImportDraft | undefined> => {
+        const origin = init ?? workspacePinnedRequest(renderedWorkspaceId());
+        const expectedWorkspaceId = new Headers(origin.headers).get('X-Workspace-Id');
         setImportError(null);
         setWorkspaceRefusal(null);
         if (!file) return undefined;
@@ -624,8 +628,11 @@ export function useBusinessCardCapture({
             if (!recoveryContext) {
                 recoveryContext = await clientRecoveryContext({ signal: controller.signal });
                 if (!recoveryContext) throw new BusinessCardRecoveryStorageUnavailableError();
-                importRecoveryContextRef.current = recoveryContext;
             }
+            if (expectedWorkspaceId !== null && recoveryContext.workspaceId !== expectedWorkspaceId) {
+                throw new ApiError('Business-card request context changed', 409, 'BUSINESS_CARD_CONTEXT_CHANGED');
+            }
+            importRecoveryContextRef.current = recoveryContext;
             if (importRequestIdRef.current) {
                 requestId = importRequestIdRef.current;
             } else {

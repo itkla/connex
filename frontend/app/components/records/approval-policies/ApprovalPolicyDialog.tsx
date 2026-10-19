@@ -30,6 +30,7 @@ import {
     previewApprovalPolicyImpact,
     updateApprovalPolicy,
 } from '@/app/lib/api';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { toastSuccess } from '@/app/lib/toast';
 import type {
@@ -181,12 +182,14 @@ export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSav
     const commit = async (
         payload: UpdateApprovalPolicyPayload,
         pendingApprovalsUnchanged = false,
+        init?: RequestInit,
     ) => {
+        const origin = init ?? workspacePinnedRequest(renderedWorkspaceId());
         setSaving(true);
         try {
             const saved = policy
-                ? await updateApprovalPolicy(policy.id, payload)
-                : await createApprovalPolicy(payload);
+                ? await updateApprovalPolicy(policy.id, payload, origin)
+                : await createApprovalPolicy(payload, origin);
             toastSuccess(policy ? t('updated') : t('created'), pendingApprovalsUnchanged
                 ? { description: t('pendingApprovalsUnchanged') }
                 : undefined);
@@ -206,16 +209,17 @@ export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSav
      * tightening, so a request that races another edit fails rather than invalidating silently.
      */
     const save = async () => {
+        const origin = workspacePinnedRequest(renderedWorkspaceId());
         if (!canSave) return;
         const payload = buildPayload();
         if (!policy) {
-            await commit(payload);
+            await commit(payload, false, origin);
             return;
         }
         setSaving(true);
         let preview: ApprovalPolicyImpact | null = null;
         try {
-            preview = await previewApprovalPolicyImpact(policy.id, payload);
+            preview = await previewApprovalPolicyImpact(policy.id, payload, origin);
         } catch {
             preview = null;
         } finally {
@@ -230,6 +234,7 @@ export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSav
             preview != null
                 && preview.changeClass !== 'TIGHTEN'
                 && preview.pendingApprovalCount > 0,
+            origin,
         );
     };
 

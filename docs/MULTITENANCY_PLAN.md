@@ -631,9 +631,18 @@ through one `requestJson` (`api.ts:17-43`) → inject the active workspace **onc
   the heal; `api.ts` re-codes that refusal as `WORKSPACE_UNAVAILABLE` and the shared error copy names
   the workspace and keeps the draft on screen. Surfaces that save after a delay (the note editor's
   autosave and unmount flush, dashboard layout saves) pin the workspace the content was composed in
-  via `workspacePinnedRequest` (#1732, closing the bound #1649 left). Multi-step note-image uploads
-  and company creation with staged contacts carry the same origin through their follow-up writes.
-  Note-image workspace refusals use the shared named-workspace error and retain the editor content.
+  via `workspacePinnedRequest` (#1732, closing the bound #1649 left). Every multi-step user action
+  captures its origin before awaiting anything, including duplicate/impact preflight, and carries
+  the same request options through parent callbacks, custom-field saves, uploads, stage creation
+  and sequential batches (#2130). Forwarded origins retain their headers and cancellation signals;
+  business-card preparation refuses a recovery context that differs from that origin before reserving
+  an import. `test/unit/workspaceWriteChainGuard.test.ts` derives workspace-bound write helpers from
+  the API client and checks component/page chains. Its shrinking exception ledger covers only the
+  dashboard worker's two writes: each queued job already carries the workspace of its separate action.
+  Note-image workspace refusals retain the editor content and its own draft; the toolbar reports
+  an inline creation refusal once, and quietly stops if an autosave already reported it. Shell
+  switch/create navigation increments a version before calling the router; an older editor's first
+  save may adopt its note id but cannot overwrite that navigation's URL, even before unmount.
   Once a new note receives an id, its kept-draft identity moves from `new` to `note:{id}` within
   the original user and workspace, so later refused edits resume from that note's editor.
 - The inbox's seven `/api/notifications` mutations (read, unread, dismiss, restore, snooze,

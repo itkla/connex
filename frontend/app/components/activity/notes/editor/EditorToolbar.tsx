@@ -120,7 +120,7 @@ type Props = {
     editor: Editor | null;
     labels: ToolbarLabels;
     compact?: boolean;
-    ensureNoteId?: (init?: RequestInit) => Promise<number>;
+    ensureNoteId?: (init?: RequestInit) => Promise<number | null>;
     filePickerOpen?: boolean;
     onFilePickerOpenChange?: (open: boolean) => void;
 };
@@ -256,7 +256,7 @@ function ImagePopover({
 }: {
     editor: Editor;
     labels: ToolbarLabels;
-    ensureNoteId?: (init?: RequestInit) => Promise<number>;
+    ensureNoteId?: (init?: RequestInit) => Promise<number | null>;
 }) {
     const sourceId = useId();
     const altId = useId();
@@ -323,6 +323,7 @@ function ImagePopover({
         setUploading(true);
         try {
             const noteId = await ensureNoteId(origin);
+            if (noteId === null) return;
             const attachment = await uploadAttachmentImage("note", noteId, file, origin);
             const nextSource = normalizeNoteImageSource(attachment.url);
             if (!nextSource) {

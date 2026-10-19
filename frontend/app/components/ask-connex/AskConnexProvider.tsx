@@ -173,7 +173,7 @@ import { LEAD_SOURCES } from '@/app/lib/contactProvenance';
 import { proposalReviewNow } from '@/app/lib/proposalReviewClock';
 import { createAiChatSocket } from '@/app/lib/realtime';
 import { workspaceUnavailableDescription } from '@/app/lib/errorMessages';
-import { workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { formatDate, formatRelativeTime, formatUtcDateTime } from '@/app/lib/utils';
 import type {
@@ -2144,6 +2144,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         toolCallId: number,
         action: AskConnexToolAction,
         deferRefresh = false,
+        init?: RequestInit,
     ): Promise<boolean> => {
         const session = activeSessionRef.current;
         const signal = identityControllerRef.current?.signal;
@@ -2157,6 +2158,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             || toolActionsRef.current.has(toolCallId)) {
             return false;
         }
+        const origin = init ?? workspacePinnedRequest(renderedWorkspaceId(), { signal });
         const operationEpoch = sessionEpochRef.current;
         let mutated = false;
         toolActionsRef.current.add(toolCallId);
@@ -2166,10 +2168,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         }
         try {
             const mutation = action === 'approve'
-                ? await approveAiAssistantToolCall(session.id, toolCallId, { signal })
+                ? await approveAiAssistantToolCall(session.id, toolCallId, origin)
                 : action === 'reject'
-                    ? await rejectAiAssistantToolCall(session.id, toolCallId, { signal })
-                    : await undoAiAssistantToolCall(session.id, toolCallId, { signal });
+                    ? await rejectAiAssistantToolCall(session.id, toolCallId, origin)
+                    : await undoAiAssistantToolCall(session.id, toolCallId, origin);
             if (signal.aborted
                 || operationEpoch !== sessionEpochRef.current
                 || activeSessionRef.current?.id !== session.id) return mutated;
@@ -2259,9 +2261,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         toolCallIds: readonly number[],
         action: AskConnexToolAction,
     ) => {
+        const origin = workspacePinnedRequest(renderedWorkspaceId(), { signal: identityControllerRef.current?.signal });
         let mutated = false;
         for (const toolCallId of toolCallIds) {
-            if (await performToolAction(toolCallId, action, true)) mutated = true;
+            if (await performToolAction(toolCallId, action, true, origin)) mutated = true;
         }
         if (mutated) router.refresh();
     }, [performToolAction, router]);

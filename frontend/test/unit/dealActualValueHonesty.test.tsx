@@ -320,6 +320,7 @@ describe("lost-deal actual value", () => {
         expect(updateDealMock).toHaveBeenCalledWith(
             WON_LINE_ITEM_DEAL.id,
             expect.objectContaining({ actualValue: WON_LINE_ITEM_DEAL.actualValue }),
+            {},
         );
     });
 
@@ -349,6 +350,7 @@ describe("lost-deal actual value", () => {
             1,
             WON_LINE_ITEM_DEAL.id,
             expect.objectContaining({ actualValue: 0 }),
+            {},
         );
         expect(updateDealMock).toHaveBeenNthCalledWith(
             2,

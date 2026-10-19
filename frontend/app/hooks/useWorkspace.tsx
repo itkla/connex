@@ -23,6 +23,7 @@ import {
     type PublishedWorkspaceIdentity,
 } from "@/app/lib/workspaceSnapshot";
 import {
+    beginRenderedWorkspaceNavigation,
     bindRenderedWorkspace,
     releaseRenderedWorkspace,
     rememberWorkspaceNames,
@@ -403,11 +404,12 @@ export function WorkspaceProvider({
     const switchTo = useCallback(
         async (id: number) => {
             await runInWorkspace(id, async () => {
+                beginRenderedWorkspaceNavigation(renderedWorkspaceOwner);
                 router.replace("/dashboard");
                 router.refresh();
             });
         },
-        [router, runInWorkspace],
+        [renderedWorkspaceOwner, router, runInWorkspace],
     );
 
     const create = useCallback(
@@ -415,11 +417,12 @@ export function WorkspaceProvider({
             const workspace = await createWorkspace(name);
             publishWorkspace(workspace);
             publishActiveWorkspace(workspace.id);
+            beginRenderedWorkspaceNavigation(renderedWorkspaceOwner);
             router.replace("/dashboard");
             router.refresh();
             return workspace;
         }),
-        [router, runSelectionChange],
+        [renderedWorkspaceOwner, router, runSelectionChange],
     );
 
     const activeWorkspace = useMemo(

@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BusinessCardCapture } from '@/app/components/records/contacts/BusinessCardCapture';
 import { useBusinessCardCapture } from '@/app/components/records/contacts/useBusinessCardCapture';
 import { importBusinessCard } from '@/app/lib/api';
-import { bindRenderedWorkspace, releaseRenderedWorkspace, rememberWorkspaceNames } from '@/app/lib/renderedWorkspace';
+import { bindRenderedWorkspace, releaseRenderedWorkspace, rememberWorkspaceNames, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import type { BusinessCardImportDraft, CreateContactPayload, Workspace } from '@/app/lib/types';
 import contactsEn from '@/messages/en/contacts.json';
 import contactsJa from '@/messages/ja/contacts.json';
@@ -116,6 +116,7 @@ function stubBackend(refusedPath: string, permissionDenied = false) {
 }
 
 beforeEach(() => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     document.cookie = 'connex_workspace=5; path=/';
     bindRenderedWorkspace(shell, WORKSPACE_ID);
     rememberWorkspaceNames([workspace]);
@@ -164,6 +165,20 @@ async function refuseOperation(path: string, file: File) {
 }
 
 describe('business-card refusals stay bound to the named workspace', () => {
+    it('refuses a prepared recovery context that differs from the submission origin before reservation', async () => {
+        const writes = stubBackend('/unused');
+        render(<NextIntlClientProvider locale="en" messages={{ ...contactsEn, ...errorsEn }}><Capture /></NextIntlClientProvider>);
+        await waitFor(() => expect(capture().recoveryStatus).toBe('ready'));
+        act(() => capture().selectFile(new File(['card'], 'card.png', { type: 'image/png' })));
+        await waitFor(() => expect(capture().status).toBe('ready'));
+        act(() => capture().selectCompanyMode('none'));
+        const before = writes.length;
+        await act(async () => {
+            expect(await capture().prepareImportDraft(false, { type: 'create' }, workspacePinnedRequest(5))).toBeUndefined();
+        });
+        expect(writes.slice(before)).toEqual([]);
+        expect(capture().importError).toBe('conflict');
+    });
     const cases = (['en', 'ja'] as const).flatMap(locale =>
         [SCAN, RESERVATION, IMPORT].map(path => ({ locale, path })));
 

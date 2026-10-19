@@ -9,11 +9,13 @@ import { EditorToolbar, type ToolbarLabels } from "@/app/components/activity/not
 import { createMarkdownTableExtensions } from "@/app/components/activity/notes/editor/MarkdownTable";
 import { createMarkdownImageExtension } from "@/app/components/activity/notes/editor/MarkdownImage";
 import { NoteDialogForm } from "@/app/components/activity/notes/NoteDialog";
+import NoteEditorView from "@/app/components/activity/notes/NoteEditorView";
 import type RichNoteEditor from "@/app/components/activity/notes/RichNoteEditor";
 import CompaniesBrowser from "@/app/components/records/companies/CompaniesBrowser";
 import type NewCompanyDialog from "@/app/components/records/companies/NewCompanyDialog";
 import type { PendingContact } from "@/app/components/records/companies/CompanyContactsField";
 import { isInlineManagedImageFile } from "@/app/lib/managed-image";
+import { readDraft } from "@/app/lib/formDrafts";
 import { bindRenderedWorkspace, releaseRenderedWorkspace, rememberWorkspaceNames } from "@/app/lib/renderedWorkspace";
 import { toastError } from "@/app/lib/toast";
 import type { Note } from "@/app/lib/types";
@@ -28,6 +30,15 @@ const browser = vi.hoisted(() => ({
 }));
 let companyDialog: ComponentProps<typeof NewCompanyDialog> | null = null;
 let noteContent: string | null = null;
+let changeNote: ((value: string) => void) | null = null;
+
+vi.mock("next/dynamic", () => ({
+    default: () => function RichNoteEditorStub({ ensureNoteId, value, onChange }: ComponentProps<typeof RichNoteEditor>) {
+        noteContent = value;
+        changeNote = onChange;
+        return <EditorToolbar editor={editor} labels={labels} compact ensureNoteId={ensureNoteId} />;
+    },
+}));
 
 vi.mock("next/navigation", () => ({
     useRouter: () => ({ refresh: browser.noop, push: browser.noop }),
@@ -70,6 +81,9 @@ vi.mock("@/app/components/records/CustomFieldColumns", () => ({
 vi.mock("@/app/components/PageShell", () => ({
     PageShell: ({ children }: { children?: ReactNode }) => <>{children}</>,
 }));
+vi.mock("@/app/hooks/useNavTrail", () => ({ CrumbLabel: () => null }));
+vi.mock("@/app/components/records/RecordReturnLink", () => ({ default: ({ children }: { children?: ReactNode }) => <a>{children}</a> }));
+vi.mock("@/app/components/activity/notes/BacklinksPanel", () => ({ default: () => null }));
 vi.mock("@/app/components/motion/Rise", () => ({ default: () => null }));
 vi.mock("@/app/components/records/companies/QuickEditCompanySheet", () => ({ default: () => null }));
 vi.mock("@/app/components/records/ArchiveRecordDialog", () => ({ default: () => null }));
@@ -170,6 +184,7 @@ beforeEach(() => {
     document.cookie = `connex_workspace=${ORIGIN}; path=/`;
     companyDialog = null;
     noteContent = null;
+    changeNote = null;
     vi.stubGlobal("matchMedia", (query: string) => ({
         media: query, matches: false, addEventListener: browser.noop, removeEventListener: browser.noop,
     }));
@@ -183,11 +198,51 @@ afterEach(async () => {
     document.body.innerHTML = "";
     document.cookie = "connex_workspace=; path=/; max-age=0";
     window.localStorage.clear();
+    window.sessionStorage.clear();
     vi.unstubAllGlobals();
     vi.clearAllMocks();
 });
 
 describe("note image upload across a workspace switch", () => {
+    it.each([false, true])("reports a refused full-page inline upload once with pending autosave %s and keeps its own draft", async (autosavePending) => {
+        const backend = stubBackend("/api/notes");
+        rememberWorkspaceNames([{ id: ORIGIN, name: "Northwind Field Team" }]);
+        editor = new Editor({
+            extensions: [StarterKit, ...createMarkdownTableExtensions(), createMarkdownImageExtension("Image failed")],
+            content: "<p>Origin draft</p>",
+        });
+        await render(<NoteEditorView note={null} currentUserId={7} persons={[]} deals={[]} users={[]} returnPath="/activity/notes" />);
+        await act(async () => {
+            if (changeNote === null) throw new Error("The note editor did not render");
+            changeNote("Origin draft");
+        });
+        if (autosavePending) {
+            await act(async () => {
+                window.dispatchEvent(new Event("beforeunload"));
+                await backend.started.promise;
+            });
+        }
+        await act(async () => document.querySelector<HTMLButtonElement>(`button[aria-label="${labels.image}"]`)?.click());
+        const input = document.querySelector<HTMLInputElement>('input[type="file"]');
+        if (input === null) throw new Error("The image input did not render");
+        await act(async () => {
+            Object.defineProperty(input, "files", { value: [image] });
+            input.dispatchEvent(new Event("change", { bubbles: true }));
+            await backend.started.promise;
+        });
+        await act(async () => {
+            backend.held.resolve(json({ code: "FORBIDDEN", message: `Not a member of workspace ${ORIGIN}` }, 403));
+            await new Promise((done) => setTimeout(done, 60));
+        });
+
+        expect(toastError).toHaveBeenCalledExactlyOnceWith("ApiErrors.title", { description: "ApiErrors.workspaceUnavailableNamed" });
+        expect(noteContent).toBe("Origin draft");
+        await act(async () => window.dispatchEvent(new Event("pagehide")));
+        expect(readDraft({ userId: 7, workspaceId: ORIGIN, formType: "noteEditor", scope: "new" }, { version: 1 })?.data)
+            .toMatchObject({ content: "Origin draft" });
+        expect(backend.requests.map(({ path, workspace }) => ({ path, workspace }))).toEqual([{ path: "/api/notes", workspace: String(ORIGIN) }]);
+    });
+
     it.each([
         ["note creation", false, 403],
         ["image upload", false, 403],

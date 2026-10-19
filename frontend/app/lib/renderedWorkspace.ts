@@ -19,6 +19,7 @@ type RenderedWorkspaceBinding = {
 };
 
 let binding: RenderedWorkspaceBinding | null = null;
+let navigationVersion = 0;
 const workspaceNames = new Map<number, string>();
 
 function isWorkspaceId(value: number): boolean {
@@ -54,6 +55,16 @@ export function releaseRenderedWorkspace(owner: object): void {
 /** Returns the workspace the mounted shell renders, or null when no shell has published one. */
 export function renderedWorkspaceId(): number | null {
     return binding?.workspaceId ?? null;
+}
+
+/** Marks a shell navigation before the router is called, invalidating older editors' URL writes. */
+export function beginRenderedWorkspaceNavigation(owner: object): void {
+    if (binding?.owner === owner) navigationVersion += 1;
+}
+
+/** Returns the shell navigation version to capture when an editor opens. */
+export function renderedWorkspaceNavigationVersion(): number {
+    return navigationVersion;
 }
 
 /**

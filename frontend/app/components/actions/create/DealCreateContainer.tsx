@@ -10,6 +10,7 @@ import NewDealDialog, {
     isDealPayloadDirty,
 } from '@/app/components/records/deals/NewDealDialog';
 import { createDeal, getCompaniesByIds, getPipelines, getStagesByPipelineId, isFieldError } from '@/app/lib/api';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useFormDraft } from '@/app/hooks/useFormDraft';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
@@ -267,7 +268,8 @@ const DealCreateContainer = forwardRef<DealCreateContainerHandle, DealCreateCont
         onOpenChange(next);
     };
 
-    const createNewDeal = async (duplicateReviewToken: string) => {
+    const createNewDeal = async (duplicateReviewToken: string, init?: RequestInit) => {
+        const origin = init ?? workspacePinnedRequest(renderedWorkspaceId(), requestInit);
         clearPendingClose();
         setSucceeded(false);
         setCreating(true);
@@ -284,7 +286,7 @@ const DealCreateContainer = forwardRef<DealCreateContainerHandle, DealCreateCont
                     duplicateReviewToken,
                     expectedCloseDate: payload.expectedCloseDate || undefined,
                 },
-                requestInit,
+                origin,
             );
             if (requestInit?.signal?.aborted) return;
             clearDraft?.();

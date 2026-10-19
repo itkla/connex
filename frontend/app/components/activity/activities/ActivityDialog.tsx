@@ -41,6 +41,7 @@ import {
 import { cn } from '@/lib/utils';
 
 import { createActivity, createTask, isFieldError } from '@/app/lib/api';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { toMysqlDateTime } from '@/app/lib/utils';
@@ -345,6 +346,7 @@ export function ActivityDialogForm({
 
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
+        const origin = workspacePinnedRequest(renderedWorkspaceId(), requestInit);
         resetFieldErrors();
         if (requireRelationshipTarget && selectedPerson === null && selectedDeal === null) {
             setRelationshipTargetMissing(true);
@@ -364,7 +366,7 @@ export function ActivityDialogForm({
                         personId: selectedPerson?.id ?? undefined,
                         dealId: selectedDeal?.id ?? undefined,
                     },
-                    requestInit,
+                    origin,
                 );
                 if (requestInit?.signal?.aborted) return;
                 activityCreatedRef.current = true;
@@ -380,7 +382,7 @@ export function ActivityDialogForm({
                             personId: selectedPerson?.id ?? undefined,
                             dealId: selectedDeal?.id ?? undefined,
                         },
-                        requestInit,
+                        origin,
                     );
                     if (requestInit?.signal?.aborted) return;
                 } catch (taskErr) {

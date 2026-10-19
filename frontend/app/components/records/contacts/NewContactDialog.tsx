@@ -41,6 +41,7 @@ import { useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
 import { initials } from '@/app/lib/utils';
 import { isFieldError } from '@/app/lib/api';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
 import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';
@@ -73,6 +74,7 @@ type Props = {
     createNewContact: (
         businessCard?: BusinessCardImportDraft,
         duplicateReviewToken?: string | null,
+        init?: RequestInit,
     ) => ContactCreationOutcome | Promise<ContactCreationOutcome>;
     onRecoveredImport?: (result: BusinessCardImportResult) => void;
     onImportRetryRequiredChange?: (required: boolean) => void;
@@ -225,6 +227,7 @@ type NewContactFormProps = {
     createNewContact: (
         businessCard?: BusinessCardImportDraft,
         duplicateReviewToken?: string | null,
+        init?: RequestInit,
     ) => ContactCreationOutcome | Promise<ContactCreationOutcome>;
     onRecoveredImport?: (result: BusinessCardImportResult) => void;
     onImportRetryRequiredChange?: (required: boolean) => void;
@@ -412,13 +415,14 @@ export function NewContactForm({
     }, [acknowledgeRecoveredImport, active, recoveredImport, recoveredImportToken, router, t]);
 
     const handleCreate = async (generation: number, signal: AbortSignal) => {
+        const origin = workspacePinnedRequest(renderedWorkspaceId(), requestInit);
         const canCommit = () => activeRef.current
             && submissionGenerationRef.current === generation
             && !signal.aborted;
         resetFieldErrors();
         let businessCardImport: BusinessCardImportDraft | undefined;
         try {
-            const duplicateDecision = await duplicatePreflight.reviewNow();
+            const duplicateDecision = await duplicatePreflight.reviewNow(origin);
             if (!canCommit()) return;
             let personAction: BusinessCardPersonAction = { type: 'create' };
             let duplicateReviewToken = duplicateDecision.duplicateReviewToken;
@@ -441,11 +445,12 @@ export function NewContactForm({
             }
             const companyDuplicateDecision = personAction.type === 'existing'
                 ? null
-                : await companyDuplicatePreflight.reviewNow();
+                : await companyDuplicatePreflight.reviewNow(origin);
             if (!canCommit() || companyDuplicateDecision?.allowed === false) return;
             businessCardImport = await businessCard.prepareImportDraft(
                 imageFile != null && personAction.type === 'create',
                 personAction,
+                origin,
             );
             if (!canCommit()) return;
             if (businessCard.file && !businessCardImport) return;
@@ -471,6 +476,7 @@ export function NewContactForm({
             const outcome = await createNewContact(
                 businessCardImport,
                 duplicateDecision.duplicateReviewToken,
+                origin,
             );
             if (!canCommit()) return;
             if (!outcome) return;

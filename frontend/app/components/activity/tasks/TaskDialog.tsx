@@ -37,6 +37,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { cn } from '@/lib/utils';
 
 import { createTask, isFieldError, isWorkspaceUnavailableError } from '@/app/lib/api';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { isSubmitShortcut } from '@/app/lib/submitShortcut';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
@@ -371,6 +372,7 @@ export function TaskDialogForm({
 
     const handleSubmit = async (e: React.SubmitEvent<HTMLFormElement>) => {
         e.preventDefault();
+        const origin = workspacePinnedRequest(renderedWorkspaceId(), requestInit);
         if (submissionBlockedMessage) return;
         resetFieldErrors();
         const assignedToId = assignee?.id ?? currentUserId;
@@ -385,7 +387,7 @@ export function TaskDialogForm({
                     personId: selectedPerson?.id ?? undefined,
                     dealId: selectedDeal?.id ?? undefined,
                 },
-                requestInit,
+                origin,
             );
             if (requestInit?.signal?.aborted) return;
             onClearDraft?.();

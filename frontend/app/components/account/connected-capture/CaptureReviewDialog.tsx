@@ -18,6 +18,7 @@ import type {
     DuplicatePreflightResponse,
     PersonDuplicatePreflightRequest,
 } from '@/app/lib/types';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { formatDateTime } from '@/app/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -53,9 +54,9 @@ export default function CaptureReviewDialog({
     busy: boolean;
     canCreatePeople: boolean;
     onBack: () => void;
-    onDecide: (decision: CaptureReviewDecision) => Promise<boolean>;
+    onDecide: (decision: CaptureReviewDecision, init?: RequestInit) => Promise<boolean>;
     onApprove: () => Promise<boolean>;
-    onPreflight: (request: PersonDuplicatePreflightRequest) => Promise<DuplicatePreflightResponse>;
+    onPreflight: (request: PersonDuplicatePreflightRequest, init?: RequestInit) => Promise<DuplicatePreflightResponse>;
 }) {
     const t = useTranslations('AccountCaptureReviews');
     const tConnections = useTranslations('AccountConnections');
@@ -69,11 +70,12 @@ export default function CaptureReviewDialog({
     });
     const [preflight, setPreflight] = useState<PreflightState>(INITIAL_PREFLIGHT);
 
-    const resolve = async (decision: CaptureReviewDecision) => {
-        if (await onDecide(decision)) onBack();
+    const resolve = async (decision: CaptureReviewDecision, init?: RequestInit) => {
+        if (await onDecide(decision, init)) onBack();
     };
 
     const create = async () => {
+        const origin = workspacePinnedRequest(renderedWorkspaceId());
         if (preflight.status === 'ready' && preflight.response) {
             const hasCandidates = preflight.response.candidates.length > 0 || preflight.response.truncated;
             if (hasCandidates && !preflight.acknowledged) return;
@@ -83,7 +85,7 @@ export default function CaptureReviewDialog({
                 duplicateReviewToken: preflight.response.reviewToken,
                 rememberExact,
                 version: review.version,
-            });
+            }, origin);
             return;
         }
 
@@ -93,7 +95,7 @@ export default function CaptureReviewDialog({
                 name: contact.name || null,
                 emails: contact.email ? [contact.email] : [],
                 phones: contact.phone ? [contact.phone] : [],
-            });
+            }, origin);
             const hasCandidates = response.candidates.length > 0 || response.truncated;
             setPreflight({ status: 'ready', response, acknowledged: !hasCandidates });
             if (!hasCandidates) {
@@ -103,7 +105,7 @@ export default function CaptureReviewDialog({
                     duplicateReviewToken: response.reviewToken,
                     rememberExact,
                     version: review.version,
-                });
+                }, origin);
             }
         } catch {
             setPreflight({ status: 'error', response: null, acknowledged: false });

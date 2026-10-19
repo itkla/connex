@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { ImagePlus, LoaderCircle } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { DRAFT_VERSIONS, readDraft, type DraftKeyParts } from '@/app/lib/formDrafts';
 import { useFormDraft } from '@/app/hooks/useFormDraft';
 import {
@@ -59,7 +60,7 @@ type Props = {
      * append a Markdown image embed to the value; submission stays gated
      * while uploads are in flight.
      */
-    onAttachImage?: (file: File) => Promise<string | null>;
+    onAttachImage?: (file: File, init?: RequestInit) => Promise<string | null>;
 };
 
 /**
@@ -134,6 +135,7 @@ export default function CommentComposer({
     }, [draftOrigin, value, draft]);
 
     const attachFiles = async (files: Iterable<File>) => {
+        const origin = workspacePinnedRequest(renderedWorkspaceId());
         if (!onAttachImage) return;
         for (const file of files) {
             if (!(await isInlineManagedImageFile(file))) {
@@ -142,7 +144,7 @@ export default function CommentComposer({
             }
             setUploadingCount((count) => count + 1);
             try {
-                const url = await onAttachImage(file);
+                const url = await onAttachImage(file, origin);
                 if (url) {
                     const markdown = commentImageMarkdown(file.name, url);
                     const editor = editorHandle.current;

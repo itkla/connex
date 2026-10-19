@@ -10,11 +10,12 @@ import { useWorkspace, WorkspaceProvider } from "@/app/hooks/useWorkspace";
 import { draftKey, listFreshDrafts, readDraft, writeDraft } from "@/app/lib/formDrafts";
 import { renderedWorkspaceId } from "@/app/lib/renderedWorkspace";
 import { toastError, toastInfo } from "@/app/lib/toast";
+import { deferred } from "./helpers/workspaceChainBackend";
 import type { DashboardWidgetType, Note, Workspace } from "@/app/lib/types";
 
 const editor = vi.hoisted<{
     onChange: ((value: string) => void) | null;
-    ensureNoteId: (() => Promise<number>) | null;
+    ensureNoteId: (() => Promise<number | null>) | null;
     value: string | null;
 }>(() => ({
     onChange: null,
@@ -22,9 +23,10 @@ const editor = vi.hoisted<{
     value: null,
 }));
 const translate = vi.hoisted(() => Object.assign((key: string) => key, { has: () => false }));
+const replace = vi.hoisted(() => vi.fn());
 
 vi.mock("next/navigation", () => ({
-    useRouter: () => ({ refresh: vi.fn(), replace: vi.fn(), push: vi.fn() }),
+    useRouter: () => ({ refresh: vi.fn(), replace, push: vi.fn() }),
 }));
 
 vi.mock("next-intl", () => ({
@@ -36,7 +38,7 @@ vi.mock("next/dynamic", () => ({
     default: () => function RichNoteEditor({ value, onChange, ensureNoteId }: {
         value: string;
         onChange: (value: string) => void;
-        ensureNoteId: () => Promise<number>;
+        ensureNoteId: () => Promise<number | null>;
     }) {
         editor.onChange = onChange;
         editor.ensureNoteId = ensureNoteId;
@@ -136,7 +138,7 @@ function json(body: unknown, status = 200): Response {
 }
 
 /** Answers the switch, and refuses or accepts each content write the way a revoked or live origin would. */
-function stubBackend(originRevoked: boolean | (() => boolean)): Recorded[] {
+function stubBackend(originRevoked: boolean | (() => boolean), noteResponse?: Promise<Response>): Recorded[] {
     const requests: Recorded[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
         const url = new URL(input instanceof Request ? input.url : String(input), "http://localhost");
@@ -165,6 +167,7 @@ function stubBackend(originRevoked: boolean | (() => boolean)): Recorded[] {
         if (revoked && workspaceHeader === String(ORIGIN)) {
             return json({ code: "FORBIDDEN", message: `Not a member of workspace ${ORIGIN}` }, 403);
         }
+        if (url.pathname === "/api/notes" && method === "POST" && noteResponse) return noteResponse;
         return method === "DELETE" ? new Response("", { status: 204 }) : json({ id: 41, layout: null });
     }));
     return requests;
@@ -246,6 +249,37 @@ afterEach(async () => {
 });
 
 describe("a note composed in one workspace and flushed after a switch to another", () => {
+    it.each(["autosave", "inline image"].flatMap((creation) => ["none", "other", "same"].map((navigation) => ({ creation, navigation }))))("settles a first $creation during $navigation workspace navigation", async ({ creation, navigation }) => {
+        const held = deferred<Response>();
+        const requests = stubBackend(false, held.promise);
+        const urlWrite = vi.spyOn(window.history, "replaceState");
+        try {
+            await renderInShell(<NoteEditorView note={null} currentUserId={USER} persons={[]} deals={[]} users={[]} returnPath="/activity/notes" />);
+            await act(async () => editor.onChange?.(DRAFT));
+            let pending: Promise<number | null> | undefined;
+            await act(async () => {
+                if (creation === "autosave") window.dispatchEvent(new Event("beforeunload"));
+                else pending = editor.ensureNoteId?.();
+                await vi.waitFor(() => expect(writesTo(requests, "/api/notes")).toHaveLength(1));
+            });
+            if (navigation === "other") await healAndSwitch();
+            if (navigation === "same") {
+                await act(async () => {
+                    if (captured === null) throw new Error("WorkspaceProvider did not render");
+                    await captured.switchTo(ORIGIN);
+                });
+            }
+            if (navigation !== "none") expect(replace).toHaveBeenCalledWith("/dashboard");
+            urlWrite.mockClear();
+            await act(async () => { held.resolve(json({ id: 41 })); await pending; });
+            if (navigation === "none") expect(urlWrite).toHaveBeenCalledExactlyOnceWith(null, "", "/activity/notes/41");
+            else expect(urlWrite).not.toHaveBeenCalled();
+            expect(editor.value).toBe(DRAFT);
+        } finally {
+            urlWrite.mockRestore();
+        }
+    });
+
     it.each(["autosave", "inline image"])("keeps later refused edits with the note created by %s and offers them there", async (creation) => {
         let revoked = false;
         const requests = stubBackend(() => revoked);
