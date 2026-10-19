@@ -243,6 +243,14 @@ export function WorkspaceProvider({
         setActiveWorkspaceId(id);
     }, [renderedWorkspaceOwner]);
 
+    const publishSelectionUnavailable = useCallback(() => {
+        navigateAfterWorkspaceSelection(() => {
+            selectionUnavailableRef.current = true;
+            publishActiveWorkspace(null);
+            setSelectionUnavailable(true);
+        });
+    }, [publishActiveWorkspace]);
+
     const publishWorkspace = useCallback((workspace: Workspace) => {
         setWorkspaceSnapshot((previous) => ({
             ...previous,
@@ -352,16 +360,14 @@ export function WorkspaceProvider({
             return await operation(publishActiveWorkspace, publishWorkspace);
         } catch (error) {
             if (error instanceof WorkspaceSelectionUnavailableError) {
-                selectionUnavailableRef.current = true;
-                publishActiveWorkspace(null);
-                setSelectionUnavailable(true);
+                publishSelectionUnavailable();
             }
             throw error;
         } finally {
             switchingRef.current = false;
             setSwitching(false);
         }
-    }, [publishActiveWorkspace, publishWorkspace]);
+    }, [publishActiveWorkspace, publishSelectionUnavailable, publishWorkspace]);
 
     const runSelectionChange = useCallback(<T,>(
         operation: (
@@ -380,10 +386,9 @@ export function WorkspaceProvider({
             navigateAfterWorkspaceSelection(() => router.refresh());
         } catch (error) {
             if (error instanceof WorkspaceSelectionInProgressError) return;
-            selectionUnavailableRef.current = true;
-            setSelectionUnavailable(true);
+            publishSelectionUnavailable();
         }
-    }, [executeSelectionChange, publishAuthoritativeWorkspaceSelection, router]);
+    }, [executeSelectionChange, publishAuthoritativeWorkspaceSelection, publishSelectionUnavailable, router]);
 
     const runInWorkspace = useCallback(async (
         id: number,

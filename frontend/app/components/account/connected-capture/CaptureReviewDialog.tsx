@@ -27,8 +27,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
 type PreflightState = {
-    status: 'idle' | 'checking' | 'ready' | 'error';
-    response: DuplicatePreflightResponse | null;
+    status: "ready";
+    response: DuplicatePreflightResponse;
+    acknowledged: boolean;
+    origin: RequestInit;
+} | {
+    status: "idle" | "checking" | "error";
+    response: null;
     acknowledged: boolean;
 };
 
@@ -75,7 +80,9 @@ export default function CaptureReviewDialog({
     };
 
     const create = async () => {
-        const origin = workspacePinnedRequest(renderedWorkspaceId());
+        const origin = preflight.status === "ready"
+            ? preflight.origin
+            : workspacePinnedRequest(renderedWorkspaceId());
         if (preflight.status === 'ready' && preflight.response) {
             const hasCandidates = preflight.response.candidates.length > 0 || preflight.response.truncated;
             if (hasCandidates && !preflight.acknowledged) return;
@@ -97,7 +104,7 @@ export default function CaptureReviewDialog({
                 phones: contact.phone ? [contact.phone] : [],
             }, origin);
             const hasCandidates = response.candidates.length > 0 || response.truncated;
-            setPreflight({ status: 'ready', response, acknowledged: !hasCandidates });
+            setPreflight({ status: "ready", response, acknowledged: !hasCandidates, origin });
             if (!hasCandidates) {
                 await resolve({
                     action: 'create',

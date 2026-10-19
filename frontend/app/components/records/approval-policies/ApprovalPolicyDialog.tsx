@@ -75,6 +75,8 @@ type Draft = {
     steps: ChainStepDraft[];
 };
 
+type PendingImpact = ApprovalPolicyImpact & { origin: RequestInit };
+
 const toStepDraft = (step: ApprovalPolicyStep, index: number): ChainStepDraft => {
     const anyApprover = step.approvers.some((approver) => approver.approverKind === 'any_approver');
     return {
@@ -129,7 +131,7 @@ export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSav
     const [saving, setSaving] = useState(false);
     const [wasOpen, setWasOpen] = useState(open);
     const [members, setMembers] = useState<WorkspaceMember[]>([]);
-    const [impact, setImpact] = useState<ApprovalPolicyImpact | null>(null);
+    const [impact, setImpact] = useState<PendingImpact | null>(null);
 
     if (open !== wasOpen) {
         setWasOpen(open);
@@ -226,7 +228,7 @@ export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSav
             setSaving(false);
         }
         if (preview && preview.changeClass === 'TIGHTEN' && preview.pendingApprovalCount > 0) {
-            setImpact(preview);
+            setImpact({ ...preview, origin });
             return;
         }
         await commit(
@@ -242,7 +244,7 @@ export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSav
         if (!impact) return;
         const impactFingerprint = impact.impactFingerprint;
         setImpact(null);
-        await commit({ ...buildPayload(), confirmInvalidation: true, impactFingerprint });
+        await commit({ ...buildPayload(), confirmInvalidation: true, impactFingerprint }, false, impact.origin);
     };
 
     if (impact) {

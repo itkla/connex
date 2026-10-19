@@ -15,7 +15,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { createCompany, createContact, createDeal, decideCaptureReview, preflightPersonDuplicates, uploadCompanyLogo, uploadContactPicture } from "@/app/lib/api";
 import { bindRenderedWorkspace, releaseRenderedWorkspace } from "@/app/lib/renderedWorkspace";
 import type { ApprovalPolicy, CaptureReviewItem, User } from "@/app/lib/types";
-import { company, contact, deal, image, ORIGIN, pipeline, shell, stage, stubBackend, switchWorkspace } from "./helpers/workspaceChainBackend";
+import { company, contact, deal, image, json, ORIGIN, pipeline, shell, stage, stubBackend, switchWorkspace } from "./helpers/workspaceChainBackend";
 
 const noop = vi.hoisted(() => () => undefined);
 const translate = vi.hoisted(() => Object.assign((key: string) => key, { has: () => false }));
@@ -162,6 +162,28 @@ describe("dialog chain origins", () => {
         expectWrites(backend, ["/api/approval-policies/41/impact", "/api/approval-policies/41"]);
     });
 
+    it("retains the approval preview origin through invalidation confirmation", async () => {
+        const previewPath = "/api/approval-policies/41/impact";
+        const backend = stubBackend(undefined, (path) => path === previewPath
+            ? json({ changeClass: "TIGHTEN", pendingApprovalCount: 1, affected: [], impactFingerprint: "origin-impact" })
+            : undefined);
+        const policy: ApprovalPolicy = { id: 41, name: "Origin policy", active: true, mode: "sequential", separationOfDuties: "strict", steps: [], createdAt: "", updatedAt: "" };
+        await render(<ApprovalPolicyDialog open onOpenChange={noop} policy={policy} onSaved={noop} />);
+        await act(async () => button("save").click());
+        expectWrites(backend, [previewPath]);
+        expect(button("impactConfirm").disabled).toBe(false);
+
+        switchWorkspace();
+        await act(async () => button("impactConfirm").click());
+
+        expectWrites(backend, [previewPath, "/api/approval-policies/41"]);
+        const body = backend.requests.at(-1)?.init.body;
+        expect(typeof body === "string" ? JSON.parse(body) : null).toMatchObject({
+            confirmInvalidation: true,
+            impactFingerprint: "origin-impact",
+        });
+    });
+
     it.each(["/api/duplicate-preflight/persons"])("keeps capture preflight and the review decision in the origin while %s is pending", async (heldPath) => {
         const backend = stubBackend(heldPath);
         const review: CaptureReviewItem = { id: 41, version: 1, interactionId: 42, interactionVersion: 1, provider: "google", stream: "calendar", interactionType: "meeting", subject: "Origin meeting", occurredAt: "2026-10-19T00:00:00Z", participantRole: "attendee", displayName: contact.name, email: contact.email, matchState: "unmatched", heldReason: "no_match", candidates: [], allowedActions: ["create"] };
@@ -170,5 +192,30 @@ describe("dialog chain origins", () => {
         switchWorkspace();
         await act(async () => backend.held.resolve(backend.response(heldPath)));
         expectWrites(backend, ["/api/duplicate-preflight/persons", "/api/account/connections/google/reviews/41"]);
+    });
+
+    it("retains the capture review origin through duplicate acknowledgement", async () => {
+        const preflightPath = "/api/duplicate-preflight/persons";
+        const backend = stubBackend(undefined, (path) => path === preflightPath
+            ? json({ candidates: [{ recordType: "person", recordId: 51, name: contact.name, strength: "STRONG", matches: [], ownedByActiveWorkspace: true }], truncated: false, reviewToken: "origin-review" })
+            : undefined);
+        const review: CaptureReviewItem = { id: 41, version: 1, interactionId: 42, interactionVersion: 1, provider: "google", stream: "calendar", interactionType: "meeting", subject: "Origin meeting", occurredAt: "2026-10-19T00:00:00Z", participantRole: "attendee", displayName: contact.name, email: contact.email, matchState: "unmatched", heldReason: "no_match", candidates: [], allowedActions: ["create"] };
+        await render(<CaptureReviewDialog review={review} busy={false} canCreatePeople onBack={noop} onApprove={async () => true} onPreflight={preflightPersonDuplicates} onDecide={async (decision, init) => { await decideCaptureReview("google", review.id, decision, init); return true; }} />);
+        await act(async () => button("create").click());
+        expectWrites(backend, [preflightPath]);
+
+        switchWorkspace();
+        const acknowledge = document.querySelector<HTMLElement>('[role="checkbox"][aria-label="acknowledge"]');
+        if (!acknowledge) throw new Error("The duplicate acknowledgement did not render");
+        await act(async () => acknowledge.click());
+        expect(acknowledge.getAttribute("aria-checked")).toBe("true");
+        await act(async () => button("create").click());
+
+        expectWrites(backend, [preflightPath, "/api/account/connections/google/reviews/41"]);
+        const body = backend.requests.at(-1)?.init.body;
+        expect(typeof body === "string" ? JSON.parse(body) : null).toMatchObject({
+            action: "create",
+            duplicateReviewToken: "origin-review",
+        });
     });
 });

@@ -8,6 +8,7 @@ import DashboardGrid from "@/app/components/dashboard/customize/DashboardGrid";
 import NewWorkspaceDialog from "@/app/components/NewWorkspaceDialog";
 import { useNotificationWorkspaceActions } from "@/app/components/notifications/useNotificationWorkspaceActions";
 import { useWorkspace, WorkspaceProvider } from "@/app/hooks/useWorkspace";
+import { WorkspaceSelectionUnavailableError } from "@/app/lib/api";
 import { draftKey, listFreshDrafts, readDraft, writeDraft } from "@/app/lib/formDrafts";
 import { renderedWorkspaceId } from "@/app/lib/renderedWorkspace";
 import { toastError, toastInfo } from "@/app/lib/toast";
@@ -260,6 +261,37 @@ afterEach(async () => {
 });
 
 describe("a note composed in one workspace and flushed after a switch to another", () => {
+    it("does not replace the recovery URL when a first save settles before the unavailable selection unmounts it", async () => {
+        const held = deferred<Response>();
+        const requests = stubBackend(false, held.promise);
+        const urlWrite = vi.spyOn(window.history, "replaceState");
+        try {
+            await renderInShell(<NoteEditorView note={null} currentUserId={USER} persons={[]} deals={[]} users={[]} returnPath="/activity/notes" />);
+            await act(async () => editor.onChange?.(DRAFT));
+            let pending: Promise<number | null> | undefined;
+            await act(async () => {
+                pending = editor.ensureNoteId?.();
+                await vi.waitFor(() => expect(writesTo(requests, "/api/notes")).toHaveLength(1));
+            });
+            urlWrite.mockClear();
+
+            await act(async () => {
+                if (captured === null) throw new Error("WorkspaceProvider did not render");
+                const unavailable = new WorkspaceSelectionUnavailableError(new Error("Selection body lost"), new Error("Recovery unavailable"));
+                await expect(captured.runSelectionChange(async () => { throw unavailable; })).rejects.toBe(unavailable);
+                expect(renderedWorkspaceId()).toBeNull();
+                held.resolve(json({ id: 41 }));
+                expect(await pending).toBe(41);
+                expect(urlWrite).not.toHaveBeenCalled();
+            });
+
+            expect(document.body.textContent).toContain("title");
+            expect(urlWrite).not.toHaveBeenCalled();
+        } finally {
+            urlWrite.mockRestore();
+        }
+    });
+
     it.each(["open", "action"])("does not replace a pending notification %s destination after selection", async (kind) => {
         const held = deferred<Response>();
         const requests = stubBackend(false, held.promise);
