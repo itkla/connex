@@ -1278,7 +1278,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         });
         setTurnRecovery((current) => {
             if (current === null || current.target.sessionId !== sessionId
-                || (firstDetail.activeTurn !== null && firstDetail.activeTurn.turnId !== current.target.turnId)) {
+                || (firstDetail.activeTurn != null && firstDetail.activeTurn.turnId !== current.target.turnId)) {
                 return null;
             }
             if (askConnexBoundRetryPrompt(current.target, current.target, nextMessages, nextToolCalls) === null) {
@@ -1301,7 +1301,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         if (signal.aborted || refreshVersion !== transcriptRefreshVersionRef.current) return null;
         setLoadState('ready');
         setLoadError(null);
-        return { session: firstDetail.session, activeTurn: firstDetail.activeTurn };
+        return { session: firstDetail.session, activeTurn: firstDetail.activeTurn ?? null };
     }, [refreshCollaboration]);
 
     const clearActiveSession = useCallback(() => {

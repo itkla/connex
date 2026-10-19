@@ -118,7 +118,6 @@ const DETAIL: AiChatSessionDetail = {
         }],
         total: 1,
     },
-    activeTurn: null,
 };
 
 function drawer(): DrawerProps {
