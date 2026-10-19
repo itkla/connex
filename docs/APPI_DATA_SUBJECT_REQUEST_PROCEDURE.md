@@ -76,11 +76,18 @@ sections remain materialized, and an individual note/page can still be large. La
 slow. There is no continuation or page parameter, and exports are never silently shortened.
 
 Each serving instance admits at most two concurrent disclosures, with at most one per organization.
-Admission does not queue; excess requests receive the existing 503 response before opening a
+Requests never wait for admission; excess requests receive the existing 503 response before opening a
 snapshot. Placement discovery finishes in a separate short control read first. One disclosure
 uses at most two connections (snapshot plus independent audit); provision four for both slots,
 plus capacity for ordinary traffic. Pools of two or three admit only one disclosure, retaining
-audit capacity; a pool smaller than two is refused before the snapshot.
+audit capacity; a pool smaller than two is refused before the snapshot. For single-slot pools,
+the instance remembers at most 128 other organizations refused for capacity, with first-refusal
+timestamps (`MAX_REFUSED_DISCLOSURE_ORGANIZATIONS`); saturation evicts the oldest entry. When the
+holder releases, including after a deadline, the oldest retained organization receives an
+exclusive 30-second reservation (`DISCLOSURE_TURNOVER_RESERVATION`). The former holder and any
+other non-reserved organization receive the same 503 before a snapshot. The reservation is
+consumed by admission or lapses unused after 30 seconds. Other refusals are cleared at turnover,
+so unused reservations cannot chain. Pools of at least four keep the two-slot behavior.
 
 Pass-two delivery has an absolute 120-second deadline, configured by
 `connex.data-subject-disclosure.delivery-timeout-ms`
@@ -106,7 +113,9 @@ committed interrupted response is left truncated: writer cleanup does not append
 or an error suffix. A durable audit records assembly and an authorized release attempt, not confirmed
 client receipt. Discard an incomplete download and retry explicitly; each retry assembles and audits
 again. For overload, wait for the organization's active download to finish or expire before
-retrying. For deadline expiry, use a connection that can finish within the configured limit; an
+retrying. In a single-slot pool, a refused organization should retry during its turnover reservation;
+other organizations must wait for the reservation to be used or its 30-second window to lapse.
+For deadline expiry, use a connection that can finish within the configured limit; an
 operator may adjust the limit with its resource budget in mind. There is no automatic network/503
 retry or continuation token.
 

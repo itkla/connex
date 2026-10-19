@@ -18,7 +18,6 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.sql.DataSource;
 
@@ -56,6 +55,8 @@ import ooo.klae.connex.backend.services.DataSubjectDisclosureJsonWriter;
 import ooo.klae.connex.backend.services.DataSubjectDisclosureReadTransaction;
 import ooo.klae.connex.backend.services.DataSubjectRequestService;
 import ooo.klae.connex.backend.support.AuthenticatedSessions;
+import ooo.klae.connex.backend.support.DisclosureConnectionTracker;
+import ooo.klae.connex.backend.support.DisclosureConnectionTracker.Observation;
 import ooo.klae.connex.backend.support.OwnershipOfferTestFixtures;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
@@ -65,7 +66,7 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
     properties = {"spring.datasource.hikari.maximum-pool-size=2", "spring.datasource.hikari.minimum-idle=2",
         "spring.datasource.hikari.connection-timeout=30000"})
 class DataSubjectDisclosureSnapshotIntegrationTest {
-    @Autowired private DataSource dataSource;
+    @MockitoSpyBean private DataSource dataSource;
     @Autowired private JdbcTemplate jdbc;
     @Autowired private OrganizationMapper organizations;
     @Autowired private WorkspaceMapper workspaces;
@@ -79,6 +80,7 @@ class DataSubjectDisclosureSnapshotIntegrationTest {
     @Autowired private DataSubjectRequestService service;
     @Autowired private SqlSessionTemplate sqlSession;
     @MockitoSpyBean private AuditLogMapper auditLogs;
+    private final DisclosureConnectionTracker connections = new DisclosureConnectionTracker();
     private Organization org;
     private Workspace workspace;
     private User actor;
@@ -87,7 +89,9 @@ class DataSubjectDisclosureSnapshotIntegrationTest {
     private int deletedId;
 
     @BeforeEach
-    void fixtures() {
+    void fixtures() throws Exception {
+        doAnswer(invocation -> connections.track((Connection) invocation.callRealMethod()))
+            .when(dataSource).getConnection();
         org = new Organization();
         org.setName("Disclosure snapshot organization");
         org.setSlug("dsr-snapshot-" + UUID.randomUUID());
@@ -148,24 +152,24 @@ class DataSubjectDisclosureSnapshotIntegrationTest {
         } else {
             context.set(active.getId(), org.getId(), actor.getId(), "owner", catalog);
         }
-        AtomicInteger peak = new AtomicInteger();
+        Observation owned = new Observation();
         AuditLogMapper realAudit = sqlSession.getMapper(AuditLogMapper.class);
         doAnswer(invocation -> {
-            peak.accumulateAndGet(pool.getHikariPoolMXBean().getActiveConnections(), Math::max);
+            assertEquals(2, owned.active(), "Only the disclosure snapshot and audit are checked out");
             return realAudit.insert(invocation.getArgument(0));
         }).when(auditLogs).insert(any());
-        try {
+        try (var observed = connections.observe(owned)) {
             ByteArrayOutputStream output = new ByteArrayOutputStream();
             assertTimeout(Duration.ofSeconds(20), () -> service.disclosure(org.getId(), requestId, actor.getId(), fingerprint -> {
-                assertEquals(1, pool.getHikariPoolMXBean().getActiveConnections(), "Only the snapshot remains during delivery");
-                try (Connection independent = dataSource.getConnection()) {
+                assertEquals(1, owned.active(), "Only the disclosure snapshot remains during delivery");
+                try (var diagnostic = connections.observe(null); Connection independent = dataSource.getConnection()) {
                     assertTrue(auditVisibleOn(independent), "Audit committed before release");
                 } catch (java.sql.SQLException exception) {
                     throw new IllegalStateException(exception);
                 }
                 return output;
             }));
-            assertEquals(2, peak.get(), "Snapshot plus audit is the complete per-disclosure connection budget");
+            assertEquals(2, owned.peak(), "Snapshot plus audit is the complete per-disclosure connection budget");
             assertEquals(2, mapper.readTree(output.toByteArray()).path("notes").size());
             assertEquals(!unresolved, context.isResolved());
             if (!unresolved) {
@@ -174,7 +178,9 @@ class DataSubjectDisclosureSnapshotIntegrationTest {
                 assertEquals(catalog, context.getCatalog());
             }
             assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
-            assertEquals(0, pool.getHikariPoolMXBean().getActiveConnections());
+            assertTrue(owned.checkouts() > 0, "The disclosure must actually borrow connections");
+            assertEquals(owned.checkouts(), owned.returns(), "Every disclosure-owned checkout must return");
+            assertEquals(0, owned.active());
         } finally {
             context.clear();
             jdbc.update("DELETE FROM workspace WHERE id = ?", active.getId());

@@ -1,14 +1,17 @@
 package ooo.klae.connex.backend.services;
 
 import java.time.LocalDateTime;
+import java.time.Duration;
 import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.Supplier;
+import java.util.function.LongSupplier;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -36,6 +39,10 @@ public class DataSubjectRequestService {
     static final int MAX_CONCURRENT_DISCLOSURES = 2;
     /** Reserves capacity for another organization even while one client downloads slowly. */
     static final int MAX_CONCURRENT_DISCLOSURES_PER_ORGANIZATION = 1;
+    /** Gives a refused organization the next single-capacity slot without waiting on a request thread. */
+    static final Duration DISCLOSURE_TURNOVER_RESERVATION = Duration.ofSeconds(30);
+    /** Bounds first-refusal timestamps retained during a single-capacity holder's lifetime. */
+    static final int MAX_REFUSED_DISCLOSURE_ORGANIZATIONS = 128;
     private static final int MIN_DISCLOSURE_POOL_SIZE = 2;
     private static final Set<String> REQUEST_TYPES = Set.of(
         "disclosure", "correction", "cease_use", "cease_provision");
@@ -48,6 +55,10 @@ public class DataSubjectRequestService {
     private final DataSubjectDisclosureAuditAccess disclosureAuditAccess;
     private final DataSubjectDisclosureJsonWriter disclosureJsonWriter;
     private final Map<Integer, Integer> disclosureOrganizations = new HashMap<>();
+    private final LinkedHashMap<Integer, Long> refusedDisclosureOrganizations = new LinkedHashMap<>();
+    private LongSupplier disclosureTicker = System::nanoTime;
+    private Integer reservedDisclosureOrganization;
+    private long disclosureReservationStartedAt;
     @Value("${spring.datasource.hikari.maximum-pool-size:10}")
     private int maximumPoolSize = 10;
 
@@ -152,20 +163,51 @@ public class DataSubjectRequestService {
         }
     }
 
-    /** Tracks only admitted organizations, so the key map cannot exceed the global capacity. */
+    /**
+     * Admission never waits. Single-capacity pools remember bounded, first-refusal timestamps
+     * during the current hold; the oldest retained organization receives the turnover reservation.
+     * Repeated refusals cannot refresh its position, and saturation evicts the oldest entry to
+     * admit a newly refused organization. Pools with two slots retain their existing admission.
+     */
     private synchronized boolean acquireDisclosure(int orgId) {
         int organizationCount = disclosureOrganizations.getOrDefault(orgId, 0);
         int capacity = Math.min(MAX_CONCURRENT_DISCLOSURES, maximumPoolSize / MIN_DISCLOSURE_POOL_SIZE);
-        if (organizationCount >= MAX_CONCURRENT_DISCLOSURES_PER_ORGANIZATION
-                || disclosureOrganizations.size() >= capacity) {
+        if (organizationCount >= MAX_CONCURRENT_DISCLOSURES_PER_ORGANIZATION) {
             return false;
+        }
+        long now = disclosureTicker.getAsLong();
+        if (disclosureOrganizations.size() >= capacity) {
+            if (capacity == 1 && !refusedDisclosureOrganizations.containsKey(orgId)) {
+                if (refusedDisclosureOrganizations.size() == MAX_REFUSED_DISCLOSURE_ORGANIZATIONS) {
+                    refusedDisclosureOrganizations.pollFirstEntry();
+                }
+                refusedDisclosureOrganizations.put(orgId, now);
+            }
+            return false;
+        }
+        if (capacity == 1 && reservedDisclosureOrganization != null) {
+            if (now - disclosureReservationStartedAt < DISCLOSURE_TURNOVER_RESERVATION.toNanos()
+                    && reservedDisclosureOrganization != orgId) {
+                return false;
+            }
+            reservedDisclosureOrganization = null;
         }
         disclosureOrganizations.put(orgId, organizationCount + 1);
         return true;
     }
 
+    /**
+     * Reserves a freed single-capacity slot for one refused organization for thirty seconds.
+     * Other refusals are forgotten at turnover, so unused reservations cannot chain indefinitely.
+     */
     private synchronized void releaseDisclosure(int orgId) {
         disclosureOrganizations.remove(orgId);
+        if (maximumPoolSize / MIN_DISCLOSURE_POOL_SIZE == 1 && disclosureOrganizations.isEmpty()) {
+            var refused = refusedDisclosureOrganizations.pollFirstEntry();
+            reservedDisclosureOrganization = refused == null ? null : refused.getKey();
+            disclosureReservationStartedAt = disclosureTicker.getAsLong();
+            refusedDisclosureOrganizations.clear();
+        }
     }
 
     private void enrichDisclosure(DataSubjectDisclosureDto disclosure, DisclosureControlData control,

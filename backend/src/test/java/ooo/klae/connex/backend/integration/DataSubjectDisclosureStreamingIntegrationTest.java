@@ -25,6 +25,7 @@ import java.time.Duration;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.LongSupplier;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -46,6 +47,8 @@ import jakarta.servlet.http.HttpServletResponseWrapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.mybatis.spring.SqlSessionTemplate;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -82,11 +85,14 @@ import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.SessionSecurityService;
+import ooo.klae.connex.backend.services.DataSubjectRequestService;
 import ooo.klae.connex.backend.services.DataSubjectDisclosureJsonWriter;
 import ooo.klae.connex.backend.services.DataSubjectDisclosureDelivery;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureNotes;
 import ooo.klae.connex.backend.support.AuthenticatedSessions;
+import ooo.klae.connex.backend.support.DisclosureConnectionTracker;
+import ooo.klae.connex.backend.support.DisclosureConnectionTracker.Observation;
 import ooo.klae.connex.backend.support.OwnershipOfferTestFixtures;
 import ooo.klae.connex.backend.tenant.TenantContext;
 
@@ -105,7 +111,8 @@ class DataSubjectDisclosureStreamingIntegrationTest {
     @Autowired private ObjectMapper json;
     @Autowired private StreamProbe probe;
     @Autowired private SqlSessionTemplate sqlSession;
-    @Autowired private DataSource dataSource;
+    @Autowired private DataSubjectRequestService service;
+    @MockitoSpyBean private DataSource dataSource;
     @MockitoSpyBean private DataSubjectDisclosureJsonWriter disclosureWriter;
     @MockitoSpyBean private DataSubjectDisclosureDelivery delivery;
     @MockitoSpyBean private DataSubjectDisclosureMapper disclosureMapper;
@@ -120,9 +127,12 @@ class DataSubjectDisclosureStreamingIntegrationTest {
     private int personId;
     private long requestId;
     private volatile DataSubjectDisclosureDelivery deadlineOverride;
+    @Autowired private DisclosureConnectionTracker connections;
 
     @BeforeEach
     void fixtures() throws Exception {
+        doAnswer(invocation -> connections.track((java.sql.Connection) invocation.callRealMethod()))
+            .when(dataSource).getConnection();
         org = new Organization();
         org.setName("Streaming disclosure organization");
         org.setSlug("dsr-stream-" + UUID.randomUUID());
@@ -250,9 +260,9 @@ class DataSubjectDisclosureStreamingIntegrationTest {
         probe.block = true;
         try (var executor = Executors.newFixedThreadPool(2)) {
             var first = executor.submit(this::disclose);
-            assertTrue(probe.firstWrite.await(30, TimeUnit.SECONDS));
-            int before = probe.reads.get();
             try {
+                assertTrue(probe.firstWrite.await(30, TimeUnit.SECONDS));
+                int before = probe.reads.get();
                 var overloaded = disclose();
                 assertEquals(503, overloaded.statusCode());
                 assertEquals("This deployment cannot serve the request", new String(overloaded.body(), StandardCharsets.UTF_8));
@@ -268,52 +278,19 @@ class DataSubjectDisclosureStreamingIntegrationTest {
 
     @Test
     void slowOrganizationCannotConsumeTheOtherOrganizationsSlot() throws Exception {
-        Organization other = new Organization();
-        other.setName("Other disclosure organization");
-        other.setSlug("dsr-fair-" + UUID.randomUUID());
-        organizations.insert(other);
-        Workspace otherWorkspace = new Workspace();
-        otherWorkspace.setOrgId(other.getId());
-        otherWorkspace.setName("Other disclosure workspace");
-        otherWorkspace.setSlug("dsr-fair-" + UUID.randomUUID());
-        workspaces.insert(otherWorkspace);
-        User otherActor = AuthenticatedSessions.account(users, "dsr-fair");
-        workspaces.addMember(otherWorkspace.getId(), otherActor.getId(), "owner");
-        jdbc.update("INSERT INTO org_member (org_id, user_id, org_role) VALUES (?, ?, 'owner')", other.getId(), otherActor.getId());
-        jdbc.update("INSERT INTO person (workspace_id, name) VALUES (?, 'Other subject')", otherWorkspace.getId());
-        int otherPerson = jdbc.queryForObject("SELECT id FROM person WHERE workspace_id = ?", Integer.class, otherWorkspace.getId());
-        jdbc.update("INSERT INTO note (workspace_id, person_id, author_id, content) VALUES (?, ?, ?, 'Other note')",
-            otherWorkspace.getId(), otherPerson, otherActor.getId());
-        jdbc.update("""
-            INSERT INTO data_subject_request
-              (org_id, request_type, status, requester_name, subject_name, subject_workspace_id,
-               subject_person_id, received_at, identity_verified_at)
-            VALUES (?, 'disclosure', 'received', 'Other requester', 'Other subject', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            """, other.getId(), otherWorkspace.getId(), otherPerson);
-        long otherRequest = jdbc.queryForObject("SELECT id FROM data_subject_request WHERE org_id = ?", Long.class, other.getId());
-        String otherSession = session(sessions, other, otherActor);
-        probe.peer = new StreamProbe(probe.context, dataSource);
-        probe.peer.reset(other.getId(), otherWorkspace.getId(), otherActor.getId());
-        try {
-            String otherCookie = sessionCookie(otherSession);
-            var bootstrap = raw("GET", "/api/auth/csrf", otherCookie, null, null, otherWorkspace.getId());
-            assertEquals(200, bootstrap.statusCode());
-            var token = json.readTree(bootstrap.body());
+        try (OtherDisclosure other = new OtherDisclosure()) {
             probe.block = true;
             try (var executor = Executors.newSingleThreadExecutor()) {
                 var first = executor.submit(this::disclose);
-                assertTrue(probe.firstWrite.await(30, TimeUnit.SECONDS));
                 try {
+                    assertTrue(probe.firstWrite.await(30, TimeUnit.SECONDS));
                     int readsBefore = probe.reads.get();
                     var repeated = disclose();
-                    assertEquals(503, repeated.statusCode());
-                    assertEquals("This deployment cannot serve the request", new String(repeated.body(), StandardCharsets.UTF_8));
+                    assertCapacityRefused(repeated);
                     assertEquals(readsBefore, probe.reads.get(), "Refusal must not open a second organization-A snapshot");
-                    var second = raw("POST", "/api/orgs/" + other.getId() + "/data-subject-requests/" + otherRequest + "/disclosure",
-                        otherCookie, token.path("headerName").asString(), token.path("token").asString(), otherWorkspace.getId());
+                    var second = other.disclose();
                     assertEquals(200, second.statusCode(), new String(second.body(), StandardCharsets.UTF_8));
                     assertEquals("Other note", json.readTree(second.body()).path("notes").get(0).path("content").asString());
-                    assertTrue(probe.peer.completed.await(10, TimeUnit.SECONDS));
                     assertEquals(1, probe.peer.firstWrites.get());
                     assertFalse(probe.completed.await(100, TimeUnit.MILLISECONDS), "Organization A still holds its slow delivery");
                     probe.peer.assertHealthy();
@@ -324,17 +301,55 @@ class DataSubjectDisclosureStreamingIntegrationTest {
             }
             assertEquals(1, auditCount());
             probe.assertHealthy();
-        } finally {
-            probe.release.countDown();
-            probe.peer = null;
-            sessions.deleteById(otherSession);
-            jdbc.update("DELETE FROM note WHERE workspace_id = ?", otherWorkspace.getId());
-            jdbc.update("DELETE FROM person WHERE workspace_id = ?", otherWorkspace.getId());
-            jdbc.update("DELETE FROM data_subject_request WHERE org_id = ?", other.getId());
-            jdbc.update("DELETE FROM workspace WHERE id = ?", otherWorkspace.getId());
-            jdbc.update("DELETE FROM organization WHERE id = ?", other.getId());
-            jdbc.update("DELETE FROM app_user WHERE id = ?", otherActor.getId());
         }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"2, true", "3, true", "2, false", "3, false"})
+    void singleSlotDeadlineTurnoverReservesForTheRefusedOrganizationOrLapses(int poolSize, boolean useReservation)
+            throws Exception {
+        HikariDataSource pool = dataSource.unwrap(HikariDataSource.class);
+        int previousMaximum = pool.getMaximumPoolSize();
+        int previousMinimum = pool.getMinimumIdle();
+        int previousAdmissionMaximum = (int) ReflectionTestUtils.getField(service, "maximumPoolSize");
+        LongSupplier previousTicker = (LongSupplier) ReflectionTestUtils.getField(service, "disclosureTicker");
+        AtomicLong now = new AtomicLong();
+        Duration reservation = (Duration) ReflectionTestUtils.getField(
+            DataSubjectRequestService.class, "DISCLOSURE_TURNOVER_RESERVATION");
+        assertNotNull(reservation);
+        pool.setMinimumIdle(Math.min(previousMinimum, poolSize));
+        pool.setMaximumPoolSize(poolSize);
+        ReflectionTestUtils.setField(service, "maximumPoolSize", poolSize);
+        ReflectionTestUtils.setField(service, "disclosureTicker", (LongSupplier) now::get);
+        try (OtherDisclosure other = new OtherDisclosure()) {
+            assertDeliveryDeadline(false, () -> {
+                assertCapacityRefused(other.disclose());
+                assertEquals(0, probe.peer.reads.get(), "Organization B must be refused before a snapshot");
+                assertEquals(0, probe.peer.firstWrites.get());
+            }, () -> {
+                int readsBefore = probe.reads.get();
+                assertCapacityRefused(disclose());
+                assertEquals(readsBefore, probe.reads.get(), "Organization A cannot reacquire its expired slot");
+                if (useReservation) {
+                    var second = other.disclose();
+                    assertEquals(200, second.statusCode(), new String(second.body(), StandardCharsets.UTF_8));
+                    assertEquals("Other note", json.readTree(second.body()).path("notes").get(0).path("content").asString());
+                    probe.peer.assertHealthy();
+                } else {
+                    now.addAndGet(reservation.toNanos());
+                }
+            });
+        } finally {
+            ReflectionTestUtils.setField(service, "maximumPoolSize", previousAdmissionMaximum);
+            ReflectionTestUtils.setField(service, "disclosureTicker", previousTicker);
+            pool.setMaximumPoolSize(previousMaximum);
+            pool.setMinimumIdle(previousMinimum);
+        }
+    }
+
+    private static void assertCapacityRefused(HttpResponse<byte[]> response) {
+        assertEquals(503, response.statusCode());
+        assertEquals("This deployment cannot serve the request", new String(response.body(), StandardCharsets.UTF_8));
     }
 
     @Test
@@ -348,6 +363,11 @@ class DataSubjectDisclosureStreamingIntegrationTest {
     }
 
     private void assertDeliveryDeadline(boolean trickle) throws Exception {
+        assertDeliveryDeadline(trickle, () -> {}, () -> {});
+    }
+
+    private void assertDeliveryDeadline(boolean trickle, CheckedAction duringHold, CheckedAction afterCleanup)
+            throws Exception {
         deadlineOverride = new DataSubjectDisclosureDelivery(10_000, dataSource);
         jdbc.update("UPDATE note SET content = REPEAT('x', 131072) WHERE workspace_id = ?", workspace.getId());
         try (Socket socket = new Socket()) {
@@ -374,6 +394,7 @@ class DataSubjectDisclosureStreamingIntegrationTest {
             int firstBodyByte = socket.getInputStream().read();
             assertEquals('{', firstBodyByte);
             partial.write(firstBodyByte);
+            duringHold.run();
             try (var executor = Executors.newSingleThreadExecutor()) {
                 var reader = executor.submit(() -> {
                     if (trickle) {
@@ -396,14 +417,27 @@ class DataSubjectDisclosureStreamingIntegrationTest {
                     }
                     return null;
                 });
-                assertTrue(probe.completed.await(30, TimeUnit.SECONDS), "Deadline plus the 15-second connector write timeout must end delivery");
-                reader.get(5, TimeUnit.SECONDS);
+                boolean finished = false;
+                try {
+                    assertTrue(probe.completed.await(30, TimeUnit.SECONDS), "Deadline plus the 15-second connector write timeout must end delivery");
+                    reader.get(5, TimeUnit.SECONDS);
+                    finished = true;
+                } finally {
+                    if (!finished) {
+                        try {
+                            socket.close();
+                        } finally {
+                            reader.cancel(true);
+                        }
+                    }
+                }
             }
             var deadline = probe.deadline.get();
             assertNotNull(deadline);
             assertEquals(true, ReflectionTestUtils.getField(deadline, "expired"), "Absolute deadline must cancel even an active trickling socket");
             long startedAt = (long) ReflectionTestUtils.getField(deadline, "startedAt");
-            long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
+            assertTrue(probe.cleanupCompletedAt.get() >= startedAt);
+            long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(probe.cleanupCompletedAt.get() - startedAt);
             assertTrue(elapsedMillis < 25_000, "Delivery cleanup exceeded deadline plus one connector timeout: " + elapsedMillis);
             assertEquals(1, probe.transportAborts.get());
             assertTrue(probe.transportAbortedAt.get() - startedAt < Duration.ofSeconds(12).toNanos(),
@@ -413,7 +447,11 @@ class DataSubjectDisclosureStreamingIntegrationTest {
             }
             assertEquals(TransactionSynchronization.STATUS_ROLLED_BACK, probe.transactionCompletion.get());
             assertTrue(probe.sourceInvalidated.get());
-            assertEquals(0, dataSource.unwrap(HikariDataSource.class).getHikariPoolMXBean().getActiveConnections());
+            Observation owned = probe.ownedConnections.get();
+            assertNotNull(owned);
+            assertTrue(owned.checkouts() > 0);
+            assertEquals(owned.checkouts(), owned.returns(), "Every disclosure-owned checkout must return");
+            assertEquals(0, owned.active());
             assertEquals(1, auditCount());
             probe.assertHealthy();
             if (trickle) {
@@ -432,6 +470,7 @@ class DataSubjectDisclosureStreamingIntegrationTest {
             assertFalse(partial.toString(StandardCharsets.UTF_8).contains("This deployment cannot serve the request"));
             System.out.println("DSR " + (trickle ? "trickling" : "stalled") + " delivery cleanup ms=" + elapsedMillis);
         }
+        afterCleanup.run();
         jdbc.update("UPDATE note SET content = 'Retry note' WHERE workspace_id = ?", workspace.getId());
         probe.reset(org.getId(), workspace.getId(), actor.getId());
         probe.expectedAudits = 2;
@@ -535,6 +574,79 @@ class DataSubjectDisclosureStreamingIntegrationTest {
             Integer.class, org.getId());
     }
 
+    @FunctionalInterface
+    private interface CheckedAction {
+        void run() throws Exception;
+    }
+
+    /** Owns a second authenticated organization's servlet fixture and cleanup. */
+    private final class OtherDisclosure implements AutoCloseable {
+        private final Organization organization = new Organization();
+        private final Workspace otherWorkspace = new Workspace();
+        private final User otherActor;
+        private final long otherRequest;
+        private final String otherSession;
+        private final String otherCookie;
+        private final String otherHeader;
+        private final String otherToken;
+
+        private OtherDisclosure() throws Exception {
+            organization.setName("Other disclosure organization");
+            organization.setSlug("dsr-fair-" + UUID.randomUUID());
+            organizations.insert(organization);
+            otherWorkspace.setOrgId(organization.getId());
+            otherWorkspace.setName("Other disclosure workspace");
+            otherWorkspace.setSlug("dsr-fair-" + UUID.randomUUID());
+            workspaces.insert(otherWorkspace);
+            otherActor = AuthenticatedSessions.account(users, "dsr-fair");
+            workspaces.addMember(otherWorkspace.getId(), otherActor.getId(), "owner");
+            jdbc.update("INSERT INTO org_member (org_id, user_id, org_role) VALUES (?, ?, 'owner')",
+                organization.getId(), otherActor.getId());
+            jdbc.update("INSERT INTO person (workspace_id, name) VALUES (?, 'Other subject')", otherWorkspace.getId());
+            int otherPerson = jdbc.queryForObject("SELECT id FROM person WHERE workspace_id = ?", Integer.class, otherWorkspace.getId());
+            jdbc.update("INSERT INTO note (workspace_id, person_id, author_id, content) VALUES (?, ?, ?, 'Other note')",
+                otherWorkspace.getId(), otherPerson, otherActor.getId());
+            jdbc.update("""
+                INSERT INTO data_subject_request
+                  (org_id, request_type, status, requester_name, subject_name, subject_workspace_id,
+                   subject_person_id, received_at, identity_verified_at)
+                VALUES (?, 'disclosure', 'received', 'Other requester', 'Other subject', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, organization.getId(), otherWorkspace.getId(), otherPerson);
+            otherRequest = jdbc.queryForObject("SELECT id FROM data_subject_request WHERE org_id = ?", Long.class, organization.getId());
+            otherSession = session(sessions, organization, otherActor);
+            otherCookie = sessionCookie(otherSession);
+            probe.peer = new StreamProbe(probe.context, dataSource, connections);
+            probe.peer.reset(organization.getId(), otherWorkspace.getId(), otherActor.getId());
+            var bootstrap = raw("GET", "/api/auth/csrf", otherCookie, null, null, otherWorkspace.getId());
+            assertEquals(200, bootstrap.statusCode());
+            var token = json.readTree(bootstrap.body());
+            otherHeader = token.path("headerName").asString();
+            otherToken = token.path("token").asString();
+        }
+
+        private HttpResponse<byte[]> disclose() throws Exception {
+            var response = raw("POST", "/api/orgs/" + organization.getId() + "/data-subject-requests/" + otherRequest + "/disclosure",
+                otherCookie, otherHeader, otherToken, otherWorkspace.getId());
+            if (response.statusCode() == 200) {
+                assertTrue(probe.peer.completed.await(10, TimeUnit.SECONDS));
+            }
+            return response;
+        }
+
+        @Override
+        public void close() {
+            probe.release.countDown();
+            probe.peer = null;
+            sessions.deleteById(otherSession);
+            jdbc.update("DELETE FROM note WHERE workspace_id = ?", otherWorkspace.getId());
+            jdbc.update("DELETE FROM person WHERE workspace_id = ?", otherWorkspace.getId());
+            jdbc.update("DELETE FROM data_subject_request WHERE org_id = ?", organization.getId());
+            jdbc.update("DELETE FROM workspace WHERE id = ?", otherWorkspace.getId());
+            jdbc.update("DELETE FROM organization WHERE id = ?", organization.getId());
+            jdbc.update("DELETE FROM app_user WHERE id = ?", otherActor.getId());
+        }
+    }
+
     @TestConfiguration(proxyBeanMethods = false)
     static class ProbeConfiguration {
         @Bean
@@ -543,8 +655,14 @@ class DataSubjectDisclosureStreamingIntegrationTest {
         }
 
         @Bean
-        StreamProbe disclosureStreamProbe(TenantContext context, DataSource dataSource) {
-            return new StreamProbe(context, dataSource);
+        DisclosureConnectionTracker disclosureConnectionTracker() {
+            return new DisclosureConnectionTracker();
+        }
+
+        @Bean
+        StreamProbe disclosureStreamProbe(TenantContext context, DataSource dataSource,
+                DisclosureConnectionTracker connections) {
+            return new StreamProbe(context, dataSource, connections);
         }
     }
 
@@ -552,6 +670,7 @@ class DataSubjectDisclosureStreamingIntegrationTest {
     static final class StreamProbe extends OncePerRequestFilter {
         private final TenantContext context;
         private final DataSource dataSource;
+        private final DisclosureConnectionTracker connections;
         private final AtomicReference<Thread> owner = new AtomicReference<>();
         private final AtomicReference<Throwable> failure = new AtomicReference<>();
         private final AtomicInteger reads = new AtomicInteger();
@@ -559,6 +678,8 @@ class DataSubjectDisclosureStreamingIntegrationTest {
         private final AtomicInteger cleanups = new AtomicInteger();
         private final AtomicInteger progressWrites = new AtomicInteger();
         private final AtomicLong lastProgressAt = new AtomicLong();
+        private final AtomicLong cleanupCompletedAt = new AtomicLong();
+        private final AtomicReference<Observation> ownedConnections = new AtomicReference<>();
         private final AtomicInteger transportAborts = new AtomicInteger();
         private final AtomicLong transportAbortedAt = new AtomicLong();
         private final AtomicReference<Thread> abortThread = new AtomicReference<>();
@@ -577,9 +698,10 @@ class DataSubjectDisclosureStreamingIntegrationTest {
         private volatile int failAfter = Integer.MAX_VALUE;
         private volatile boolean block;
 
-        StreamProbe(TenantContext context, DataSource dataSource) {
+        StreamProbe(TenantContext context, DataSource dataSource, DisclosureConnectionTracker connections) {
             this.context = context;
             this.dataSource = dataSource;
+            this.connections = connections;
         }
 
         void reset(int orgId, int workspaceId, int actorId) {
@@ -593,6 +715,8 @@ class DataSubjectDisclosureStreamingIntegrationTest {
             cleanups.set(0);
             progressWrites.set(0);
             lastProgressAt.set(0);
+            cleanupCompletedAt.set(0);
+            ownedConnections.set(null);
             transportAborts.set(0);
             transportAbortedAt.set(0);
             abortThread.set(null);
@@ -620,6 +744,8 @@ class DataSubjectDisclosureStreamingIntegrationTest {
             }
             try {
                 owner.compareAndSet(null, Thread.currentThread());
+                assertNotNull(connections.current());
+                ownedConnections.compareAndSet(null, connections.current());
                 assertScope();
                 reads.incrementAndGet();
             } catch (Throwable problem) {
@@ -675,7 +801,8 @@ class DataSubjectDisclosureStreamingIntegrationTest {
                                 try {
                                     assertScope();
                                     if (written == 0) {
-                                        try (var connection = dataSource.getConnection();
+                                        try (var diagnostic = connections.observe(null);
+                                                var connection = dataSource.getConnection();
                                                 var statement = connection.prepareStatement(
                                                     "SELECT changes FROM audit_log WHERE org_id = ? AND action = 'appi.subject_request.disclosure' ORDER BY id")) {
                                             statement.setInt(1, orgId);
@@ -715,7 +842,7 @@ class DataSubjectDisclosureStreamingIntegrationTest {
                     return stream;
                 }
             };
-            try {
+            try (var observed = connections.observe(new Observation())) {
                 chain.doFilter(request, wrapper);
             } finally {
                 try {
@@ -725,12 +852,17 @@ class DataSubjectDisclosureStreamingIntegrationTest {
                     if (owner.get() == Thread.currentThread() && noteSource.get() != null) {
                         assertEquals(null, ReflectionTestUtils.getField(noteSource.get(), "source"));
                         sourceInvalidated.set(true);
+                        assertNotNull(ownedConnections.get());
+                        assertTrue(ownedConnections.get().checkouts() > 0);
+                        assertEquals(ownedConnections.get().checkouts(), ownedConnections.get().returns());
+                        assertEquals(0, ownedConnections.get().active());
                     }
                     cleanups.incrementAndGet();
                 } catch (Throwable problem) {
                     failure.compareAndSet(null, problem);
                 } finally {
                     if (owner.get() == Thread.currentThread()) {
+                        cleanupCompletedAt.set(System.nanoTime());
                         completed.countDown();
                     }
                 }

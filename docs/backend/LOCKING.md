@@ -520,11 +520,20 @@ linked-mutation person-lock path. `DataSubjectRequestService` suspends ambient t
    tenant assembly.
 2. Admission allows `MAX_CONCURRENT_DISCLOSURES = 2` per instance and
    `MAX_CONCURRENT_DISCLOSURES_PER_ORGANIZATION = 1`. The synchronized admission map contains only
-   admitted organizations, so it has at most two keys; refusals do not queue. Excess requests and pools
+   admitted organizations, so it has at most two keys; requests never wait for admission. Excess requests and pools
    configured below two connections receive the existing 503 before opening a tenant snapshot.
    The effective global capacity is the smaller of two and the configured pool size divided by
    the per-disclosure two-connection budget: pools of two or three admit one, leaving its audit
    connection available instead of allowing snapshots to exhaust the pool before either audit.
+   For these single-slot pools, capacity refusals from other organizations retain their first
+   refusal timestamps in a bounded insertion-ordered set
+   (`MAX_REFUSED_DISCLOSURE_ORGANIZATIONS = 128`); saturation evicts the oldest entry to record a
+   newcomer, while repeat refusals keep their position. When the holder releases, including on
+   deadline expiry, the oldest retained organization receives the freed slot exclusively for
+   `DISCLOSURE_TURNOVER_RESERVATION = 30 seconds`. Every other organization, including the former
+   holder, receives the existing 503 before a snapshot. The reservation is consumed by admission
+   or lapses after 30 seconds; other recorded refusals are cleared at turnover so stale requests
+   cannot chain idle reservations. Pools of at least four retain two slots without reservations.
    `DataSubjectDisclosurePlacementRead` completes workspace/organization/catalog discovery in a
    separately proxied short control read, before installing the subject route and opening the
    snapshot. Its MyBatis session and connection are released even when the outer `NOT_SUPPORTED`
@@ -581,7 +590,9 @@ writer. After response commitment, failures leave truncated JSON with no error s
 delimiters; before commitment the buffer is cleared and the existing 503 shape is used. Reject
 incomplete framing, invalid JSON, or integrity-header mismatches and retry explicitly. Every retry
 assembles/audits again; transaction rollback failures require a fresh request/transaction. Wait
-for an active same-organization download to finish/expire after overload. Discard a deadline-aborted
+for an active same-organization download to finish/expire after overload. With a single-slot pool,
+retry a refused organization's request during its turnover reservation; a non-reserved organization
+must wait for that reservation to be used or its 30-second window to lapse. Discard a deadline-aborted
 download and retry on a connection able to complete within the limit; there is no continuation.
 
 SSO returning/existing-user paths discover non-locking then lock user, stored workspace when applicable, and organization before revalidation. New JIT paths without a user lock stored workspace and organization before revalidating absence/inserting.
