@@ -159,6 +159,10 @@ metadata after audit sanitization or the transaction aborts.
 
 T1 runs after C1 commits. It uses only the frozen workspace list; each workspace installs
 its cutoff exactly once under `(workspace_id,operation_key)` and operation fingerprint.
+Initiation attempts T1 synchronously before projecting progress. C1's reserved linked-person
+connection restores its original auto-commit mode after rollback, so a surrounding nontransactional
+Spring scope cannot retain an implicit snapshot that hides T1's committed work. Initiation and
+scheduled recovery failures log the recovery job name and exception class without exception payloads.
 T2 is the bounded privacy worker. C2 strictly records completion only after all accepted
 workspaces have completed residual-verified work. Recovery scans the acceptance ledger
 in bounded keyset pages. It does not reauthorize against mutable subject linkage or the

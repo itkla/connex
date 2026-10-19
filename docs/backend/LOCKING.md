@@ -507,7 +507,7 @@ Control writes share this root order:
 
 Linked APPI request create/update mutations perform preliminary workspace/person validation outside the write, then retain actor user, all previous/requested subject workspace roots ascending, and the shared organization lock while locking the requested tenant person.
 
-Linked mutations use the established reserved tenant-connection pattern: reserve non-auto-commit tenant connection before control locks, prove the person through a separate short session, then join the final control write to the root-lock transaction while retaining the person lock through commit. Roll back the reserved transaction before release.
+Linked mutations use the established reserved tenant-connection pattern: reserve non-auto-commit tenant connection before control locks, prove the person through a separate short session, then join the final control write to the root-lock transaction while retaining the person lock through commit. Roll back the reserved transaction and restore its original auto-commit mode before release. A nontransactional Spring synchronization can retain the connection after raw-session close; subsequent reads must not inherit an implicit transaction. Restore auto-commit only after successful rollback, so cleanup cannot commit an unrolled-back reservation.
 
 Updates lock the exact organization-scoped request after roots and compare persisted state to the preliminary snapshot before deriving/writing the diff.
 

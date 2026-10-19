@@ -14,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import ooo.klae.connex.backend.beans.AiAgentPrivacyWork;
 import ooo.klae.connex.backend.beans.AuditLog;
 import ooo.klae.connex.backend.dto.AiAgentHoldingsPurgeDto;
@@ -34,6 +35,7 @@ import tools.jackson.databind.ObjectMapper;
 @Service
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 @RequiredArgsConstructor
+@Slf4j
 public class AiAgentDsrPurgeService {
     private final DataSubjectRequestService requestService;
     private final DataSubjectRequestControlOperations controlOperations;
@@ -53,7 +55,8 @@ public class AiAgentDsrPurgeService {
         try {
             recover(accepted);
         } catch (RuntimeException failure) {
-            return projection(accepted);
+            log.warn("Job failed jobName={} phase=initiation exceptionClass={}",
+                    JobRunRecorder.AI_AGENT_DSR_RECOVERY, failure.getClass().getSimpleName());
         }
         return projection(accepted);
     }
@@ -81,6 +84,8 @@ public class AiAgentDsrPurgeService {
                 recover(AiAgentPurgeAcceptance.from(receipt, objectMapper));
             } catch (RuntimeException failure) {
                 failed = true;
+                log.warn("Job failed jobName={} phase=recovery exceptionClass={}",
+                        JobRunRecorder.AI_AGENT_DSR_RECOVERY, failure.getClass().getSimpleName());
             } finally {
                 jobRunRecorder.record(JobRunRecorder.AI_AGENT_DSR_RECOVERY, null,
                         failed ? JobRunStatus.FAILED : JobRunStatus.SUCCEEDED,

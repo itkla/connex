@@ -66,7 +66,7 @@ public class DataSubjectDisclosureReadTransaction {
         acquireLinkedMutationAdmission();
         try (SqlSession session = sqlSessionFactory.openSession(false)) {
             Connection connection = session.getConnection();
-            beginReservedTransaction(connection);
+            boolean autoCommit = beginReservedTransaction(connection);
             DataSubjectDisclosureMapper lockedMapper =
                 session.getMapper(DataSubjectDisclosureMapper.class);
             T result;
@@ -85,19 +85,21 @@ public class DataSubjectDisclosureReadTransaction {
                     return work.get();
                 });
             } catch (RuntimeException | Error failure) {
-                rollbackReservedTransaction(connection, failure);
+                rollbackReservedTransaction(connection, autoCommit, failure);
                 throw failure;
             }
-            rollbackReservedTransaction(connection, null);
+            rollbackReservedTransaction(connection, autoCommit, null);
             return result;
         } finally {
             linkedMutationAdmission.release();
         }
     }
 
-    private static void beginReservedTransaction(Connection connection) {
+    private static boolean beginReservedTransaction(Connection connection) {
         try {
+            boolean autoCommit = connection.getAutoCommit();
             connection.setAutoCommit(false);
+            return autoCommit;
         } catch (SQLException exception) {
             throw new ServiceUnavailableException(
                 "Data-subject request validation could not reserve a tenant transaction",
@@ -105,9 +107,15 @@ public class DataSubjectDisclosureReadTransaction {
         }
     }
 
-    private static void rollbackReservedTransaction(Connection connection, Throwable primary) {
+    /**
+     * Restores JDBC state only after rollback succeeds. A NOT_SUPPORTED caller can retain this
+     * connection through Spring synchronization after the raw session closes; leaving auto-commit
+     * disabled would give later progress reads an implicit snapshot predating tenant invalidation.
+     */
+    private static void rollbackReservedTransaction(Connection connection, boolean autoCommit, Throwable primary) {
         try {
             connection.rollback();
+            connection.setAutoCommit(autoCommit);
         } catch (SQLException exception) {
             if (primary != null) {
                 primary.addSuppressed(exception);

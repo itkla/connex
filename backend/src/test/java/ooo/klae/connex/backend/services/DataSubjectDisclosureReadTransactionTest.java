@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
@@ -37,6 +38,7 @@ import tools.jackson.databind.ObjectMapper;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.PersonDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.NoteDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.LifecycleTransitionDto;
@@ -56,13 +58,14 @@ class DataSubjectDisclosureReadTransactionTest {
     private DataSubjectDisclosureReadTransaction readTransaction;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         readTransaction = new DataSubjectDisclosureReadTransaction(
             dataSubjectDisclosureMapper,
             sqlSessionFactory,
             objectMapper);
         lenient().when(sqlSessionFactory.openSession(false)).thenReturn(sqlSession);
         lenient().when(sqlSession.getConnection()).thenReturn(connection);
+        lenient().when(connection.getAutoCommit()).thenReturn(true);
         lenient().when(sqlSession.getMapper(DataSubjectDisclosureMapper.class))
             .thenReturn(lockedMapper);
     }
@@ -101,6 +104,7 @@ class DataSubjectDisclosureReadTransactionTest {
         order.verify(dataSubjectDisclosureMapper).subjectPersonExists(4, 5);
         order.verify(lockedMapper).lockSubjectPersonForShare(4, 5);
         order.verify(connection).rollback();
+        order.verify(connection).setAutoCommit(true);
         order.verify(sqlSession).close();
     }
 
@@ -127,6 +131,7 @@ class DataSubjectDisclosureReadTransactionTest {
         assertEquals(false, controlWrite.get());
         verify(lockedMapper, never()).lockSubjectPersonForShare(4, 5);
         verify(connection).rollback();
+        verify(connection).setAutoCommit(true);
         verify(sqlSession).close();
     }
 
@@ -172,6 +177,56 @@ class DataSubjectDisclosureReadTransactionTest {
 
         assertEquals(primary, thrown);
         assertEquals(List.of(rollbackFailure), List.of(thrown.getSuppressed()));
+        verify(connection, never()).setAutoCommit(true);
+        verify(sqlSession).close();
+    }
+
+    @Test
+    void rollbackPreservesAnOriginallyManualConnection() throws Exception {
+        when(connection.getAutoCommit()).thenReturn(false);
+        when(dataSubjectDisclosureMapper.subjectPersonExists(4, 5)).thenReturn(true);
+        when(lockedMapper.lockSubjectPersonForShare(4, 5)).thenReturn(5);
+
+        assertEquals("written", readTransaction.withLockedSubjectPerson(
+            4, 5, work -> work.get(), () -> "written"));
+
+        verify(connection).rollback();
+        verify(connection, never()).setAutoCommit(true);
+        verify(sqlSession).close();
+    }
+
+    @Test
+    void restorationFailureIsSuppressedOntoTheControlFailure() throws Exception {
+        IllegalStateException primary = new IllegalStateException("control failed");
+        SQLException restorationFailure = new SQLException("restoration failed");
+        when(dataSubjectDisclosureMapper.subjectPersonExists(4, 5)).thenReturn(true);
+        doThrow(restorationFailure).when(connection).setAutoCommit(true);
+        doNothing().when(connection).setAutoCommit(false);
+
+        IllegalStateException thrown = assertThrows(IllegalStateException.class,
+            () -> readTransaction.withLockedSubjectPerson(4, 5, work -> {
+                throw primary;
+            }, () -> "unused"));
+
+        assertEquals(primary, thrown);
+        assertEquals(List.of(restorationFailure), List.of(thrown.getSuppressed()));
+        verify(connection).rollback();
+        verify(sqlSession).close();
+    }
+
+    @Test
+    void restorationFailureAfterSuccessfulControlWorkRefusesSuccess() throws Exception {
+        SQLException restorationFailure = new SQLException("restoration failed");
+        when(dataSubjectDisclosureMapper.subjectPersonExists(4, 5)).thenReturn(true);
+        when(lockedMapper.lockSubjectPersonForShare(4, 5)).thenReturn(5);
+        doThrow(restorationFailure).when(connection).setAutoCommit(true);
+        doNothing().when(connection).setAutoCommit(false);
+
+        ServiceUnavailableException thrown = assertThrows(ServiceUnavailableException.class,
+            () -> readTransaction.withLockedSubjectPerson(4, 5, work -> work.get(), () -> "written"));
+
+        assertEquals(restorationFailure, thrown.getCause());
+        verify(connection).rollback();
         verify(sqlSession).close();
     }
 
