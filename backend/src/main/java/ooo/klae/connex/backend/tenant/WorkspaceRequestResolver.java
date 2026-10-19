@@ -1,11 +1,14 @@
 package ooo.klae.connex.backend.tenant;
 
+import java.util.Enumeration;
+
 import org.springframework.stereotype.Component;
 import org.springframework.security.core.Authentication;
 
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.publicapi.ApiCredentialPrincipal;
 import ooo.klae.connex.backend.publicapi.PublicApiPaths;
@@ -14,6 +17,7 @@ import ooo.klae.connex.backend.publicapi.PublicApiPaths;
  * Resolves the requested workspace candidate from the header, cookie, or raw remembered
  * workspace id. With no remembered selection, uses the caller's first active membership.
  * Membership validation and method-specific stale-selection recovery belong to the interceptor.
+ * A present malformed or repeated header is an invalid explicit pin and is refused without fallback.
  */
 @Component
 @RequiredArgsConstructor
@@ -23,8 +27,13 @@ public class WorkspaceRequestResolver {
     private final WorkspaceService workspaceService;
 
     public Integer resolve(HttpServletRequest request, int userId) {
-        Integer fromHeader = parseId(request.getHeader(HEADER));
-        if (fromHeader != null) {
+        Enumeration<String> headers = request.getHeaders(HEADER);
+        String header = headers != null && headers.hasMoreElements() ? headers.nextElement() : null;
+        if (header != null) {
+            Integer fromHeader = parseId(header);
+            if (fromHeader == null || headers.hasMoreElements()) {
+                throw new ForbiddenException("Not a member of workspace " + header);
+            }
             return fromHeader;
         }
         Integer fromCookie = cookieId(request);

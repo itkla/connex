@@ -96,7 +96,11 @@ function requestWorkspaceId(path: string, mutating: boolean): string | null {
  * {@link requestWorkspaceId} chose.
  */
 function outgoingWorkspaceId(init: RequestInit, chosen: string | null): string | null {
-    return new Headers(init.headers).get("X-Workspace-Id") ?? chosen;
+    const workspace = new Headers(init.headers).get("X-Workspace-Id") ?? chosen;
+    if (workspace !== null && parseWorkspaceId(workspace) === null) {
+        throw new TypeError("X-Workspace-Id must contain one valid workspace id");
+    }
+    return workspace;
 }
 
 /**
@@ -5490,7 +5494,7 @@ export async function getMyWorkspacesResultFromCookie(
  * The options that create a workspace from the organization of the workspace on screen (#1732).
  * The backend takes a new workspace's organization from the resolved workspace, so a creation that
  * followed a healed cookie could place a name typed under one organization inside another. When the
- * shell renders a workspace the cookie no longer names, the viewer's memberships are read again: a
+ * shell renders a workspace, the viewer's memberships are read again: a
  * workspace they still belong to is pinned explicitly, and a revoked one refuses the creation as
  * {@link WORKSPACE_UNAVAILABLE_CODE} before anything is sent, so the form keeps the typed name. A
  * page with no app shell, such as onboarding, keeps the cookie's selection.
@@ -5501,7 +5505,6 @@ async function workspaceCreationOrigin(): Promise<RequestInit> {
     const rendered = renderedWorkspaceId();
     if (rendered === null || typeof document === "undefined") return {};
     const pinned: RequestInit = { headers: { "X-Workspace-Id": String(rendered) } };
-    if (workspaceIdFromCookieHeader(document.cookie) === rendered) return pinned;
     const snapshot = await getMyWorkspaces();
     if (snapshot.workspaces.some((workspace) => workspace.id === rendered)) return pinned;
     throw workspaceUnavailableError(rendered, `Not a member of workspace ${rendered}`);
@@ -5509,13 +5512,19 @@ async function workspaceCreationOrigin(): Promise<RequestInit> {
 
 export async function createWorkspace(name: string) {
     const origin = await workspaceCreationOrigin();
-    return withClientRequestIdentityReset(
-        () => recoverWorkspaceSelectionResponse(
-            () => postWorkspaceSelectionJson<Types.Workspace>(`/api/workspaces`, { name }, true, origin),
-            activeWorkspaceFromSelection,
-        ),
-        "workspace",
-    );
+    try {
+        return await withClientRequestIdentityReset(
+            () => recoverWorkspaceSelectionResponse(
+                () => postWorkspaceSelectionJson<Types.Workspace>(`/api/workspaces`, { name }, true, origin),
+                activeWorkspaceFromSelection,
+            ),
+            "workspace",
+        );
+    } catch (error) {
+        throw error instanceof ApiError
+            ? workspaceRefusal(error, new Headers(origin.headers).get("X-Workspace-Id"))
+            : error;
+    }
 }
 
 export function updateWorkspaceIdentity(
@@ -6461,6 +6470,12 @@ export async function uploadAiChatAttachment(
     const pinnedWorkspace = outgoingWorkspaceId(init, workspaceId);
     const send = async (forceRefresh: boolean): Promise<Response> => {
         const csrf = await csrfHeader(forceRefresh);
+        const headers = new Headers({
+            'Accept-Language': locale,
+            ...(pinnedWorkspace ? { 'X-Workspace-Id': pinnedWorkspace } : {}),
+            ...csrf,
+        });
+        new Headers(init.headers).forEach((value, name) => headers.set(name, value));
         const formData = new FormData();
         formData.append('file', file);
         return new Promise<Response>((resolve, reject) => {
@@ -6468,10 +6483,7 @@ export async function uploadAiChatAttachment(
             const abort = () => request.abort();
             request.open('POST', `${API_BASE}${path}`);
             request.withCredentials = true;
-            request.setRequestHeader('Accept-Language', locale);
-            if (workspaceId) request.setRequestHeader('X-Workspace-Id', workspaceId);
-            Object.entries(csrf).forEach(([name, value]) => request.setRequestHeader(name, value));
-            new Headers(init.headers).forEach((value, name) => request.setRequestHeader(name, value));
+            headers.forEach((value, name) => request.setRequestHeader(name, value));
             request.upload.addEventListener('progress', (event) => {
                 if (!event.lengthComputable || event.total <= 0) return;
                 onProgress(Math.min(99, Math.round((event.loaded / event.total) * 100)));

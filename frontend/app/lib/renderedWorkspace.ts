@@ -88,11 +88,12 @@ export function rememberedWorkspaceName(workspaceId: number): string | null {
  *   pass through `TenantResolutionInterceptor`, so no workspace is resolved for them.
  * - `interceptorSelfResolved` expands the interceptor's own early exits: its `SELECTION_PATH`
  *   selection and link-bootstrap routes, the ownership-offer decisions and the organization and
- *   workspace lifecycle deletes. Each authorizes the target it names itself.
+ *   workspace lifecycle deletes. Each authorizes the target it names itself; shell workspace
+ *   creation supplies its explicit origin separately, and the server validates membership there.
  * - `accountAndOrganization` is the account and organization families, and the personal provider
- *   connection controls (connect, pause, resume, disconnect). Their target is the signed-in user or
+ *   connection controls (connect, pause, resume, disconnect, native pairing). Their target is the signed-in user or
  *   the organization named in the path, and the API surface ledger shows them authorized by user,
- *   organization and `ProviderConnectionService` code rather than by a workspace permission, so a
+ *   organization, `ProviderConnectionService` and `NativeConnectService` code rather than by a workspace permission, so a
  *   revoked rendered workspace must not refuse them before that authorization runs. The other
  *   connection routes (capture review, approval, sync, capture purges and policies) write workspace
  *   content and stay pinned.
@@ -137,6 +138,7 @@ export const UNPINNED_WRITE_ROUTES = {
         "/api/account/connections/{provider}/authorize",
         "/api/account/connections/{provider}/pause",
         "/api/account/connections/{provider}/resume",
+        "/api/account/connections/native/{provider}/pairing",
     ],
 } as const satisfies Record<string, readonly string[]>;
 

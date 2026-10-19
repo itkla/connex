@@ -10,7 +10,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
     ApiError,
+    beginManagedPairing,
     beginProviderConnection,
+    cancelManagedPairing,
     clientRecoveryContext,
     createNote,
     createReportSnapshot,
@@ -493,17 +495,25 @@ describe("the routes that keep their previous selection behaviour", () => {
             "POST /api/account/connections/12/pause",
             "POST /api/account/connections/12/resume",
             "DELETE /api/account/connections/12",
+            "POST /api/account/connections/native/12/pairing",
+            "DELETE /api/account/connections/native/12/pairing",
         ]));
         expect(covered.filter(({ authorization }) => /\b[A-Z]+(?:_[A-Z]+)+\b/.test(authorization))).toEqual([]);
         const connectionControls = covered.filter(({ route }) => route.startsWith("/api/account/connections/"));
         expect(connectionControls.map(({ route }) => route).sort()).toEqual([
+            "/api/account/connections/native/{provider}/pairing",
+            "/api/account/connections/native/{provider}/pairing",
             "/api/account/connections/{provider}",
             "/api/account/connections/{provider}/authorize",
             "/api/account/connections/{provider}/pause",
             "/api/account/connections/{provider}/resume",
         ]);
-        expect(connectionControls.every(({ authorization }) => /^ProviderConnectionService#[a-zA-Z]+:domain authorization$/
-            .test(authorization))).toBe(true);
+        for (const { route, authorization } of connectionControls) {
+            const service = route === "/api/account/connections/native/{provider}/pairing"
+                ? "NativeConnectService"
+                : "ProviderConnectionService";
+            expect(authorization).toMatch(new RegExp(`^${service}#[a-zA-Z]+:domain authorization$`));
+        }
     });
 
     it.each([
@@ -520,6 +530,7 @@ describe("the routes that keep their previous selection behaviour", () => {
         ["/api/notification-preferences/quiet-hours", false],
         ["/api/account/connections/google/pause", false],
         ["/api/account/connections/google", false],
+        ["/api/account/connections/native/google/pairing", false],
         ["/api/account/connections/google/sync", true],
         ["/api/account/connections/google/captured/3/approve", true],
         ["/api/account/connections/google/capture-policy", true],
@@ -549,6 +560,8 @@ describe("with the shell rendering a revoked workspace and the cookie healed", (
         await pauseProviderConnection("google");
         await resumeProviderConnection("google");
         await disconnectProviderConnection("microsoft");
+        await beginManagedPairing("google");
+        await cancelManagedPairing("microsoft");
 
         expect(requests.map(({ url, method, workspace }) => [method, url, workspace])).toEqual([
             ["PATCH", "/api/users/me", String(HEALED)],
@@ -560,6 +573,8 @@ describe("with the shell rendering a revoked workspace and the cookie healed", (
             ["POST", "/api/account/connections/google/pause", String(HEALED)],
             ["POST", "/api/account/connections/google/resume", String(HEALED)],
             ["DELETE", "/api/account/connections/microsoft", String(HEALED)],
+            ["POST", "/api/account/connections/native/google/pairing", String(HEALED)],
+            ["DELETE", "/api/account/connections/native/microsoft/pairing", String(HEALED)],
         ]);
     });
 
@@ -699,14 +714,49 @@ describe("creating a workspace from the shell", () => {
         ]);
     });
 
-    it("does not re-read memberships when the cookie already names the workspace on screen", async () => {
+    it("re-reads memberships even when the cookie names the workspace on screen", async () => {
         setWorkspaceCookie(RENDERED);
         bindRenderedWorkspace(owner(), RENDERED);
         const requests = stubWorkspaces([RENDERED]);
 
         await createWorkspace("Field team");
 
-        expect(requests).toEqual([{ url: "/api/workspaces", method: "POST", workspace: String(RENDERED) }]);
+        expect(requests).toEqual([
+            { url: "/api/workspaces", method: "GET", workspace: String(RENDERED) },
+            { url: "/api/workspaces", method: "POST", workspace: String(RENDERED) },
+        ]);
+    });
+
+    it("refuses a revoked origin even when the cookie still names it", async () => {
+        setWorkspaceCookie(RENDERED);
+        bindRenderedWorkspace(owner(), RENDERED);
+        const requests = stubWorkspaces([HEALED]);
+
+        await expect(createWorkspace("Field team")).rejects.toMatchObject({
+            code: WORKSPACE_UNAVAILABLE_CODE,
+            workspaceId: RENDERED,
+        });
+
+        expect(requests).toEqual([{ url: "/api/workspaces", method: "GET", workspace: String(RENDERED) }]);
+    });
+
+    it("reports a server refusal when the origin is revoked after preflight", async () => {
+        bindRenderedWorkspace(owner(), RENDERED);
+        const requests = stubBackend((url, method) => {
+            if (url !== "/api/workspaces") return null;
+            return method === "GET"
+                ? json({ workspaces: [workspace(RENDERED, REVOKED_NAME)], activeWorkspaceId: RENDERED })
+                : refusal();
+        });
+
+        await expect(createWorkspace("Field team")).rejects.toMatchObject({
+            code: WORKSPACE_UNAVAILABLE_CODE,
+            workspaceId: RENDERED,
+        });
+
+        expect(requests.filter(({ method }) => method === "POST")).toEqual([
+            { url: "/api/workspaces", method: "POST", workspace: String(RENDERED) },
+        ]);
     });
 
     it("keeps onboarding creation on the cookie when no shell renders a workspace", async () => {
@@ -731,7 +781,7 @@ class RefusingUpload {
     open(): void {}
 
     setRequestHeader(name: string, value: string): void {
-        this.headers.set(name, value);
+        this.headers.append(name, value);
     }
 
     addEventListener(type: string, listener: () => void): void {
@@ -789,6 +839,71 @@ describe("transports outside the JSON pipeline", () => {
 
         expect(RefusingUpload.sent).toEqual([{ workspace: String(RENDERED) }]);
         expect(error).toMatchObject({ code: WORKSPACE_UNAVAILABLE_CODE, workspaceId: RENDERED });
+    });
+
+    it("sends the explicit pin used by AskConnexProvider exactly once", async () => {
+        stubBackend();
+        RefusingUpload.sent = [];
+        vi.stubGlobal("XMLHttpRequest", RefusingUpload);
+
+        const error = await uploadAiChatAttachment(
+            8,
+            new File(["notes"], "brief.txt", { type: "text/plain" }),
+            () => undefined,
+            workspacePinnedRequest(RENDERED, { signal: new AbortController().signal }),
+        ).then(() => null, (failure: unknown) => failure);
+
+        expect(RefusingUpload.sent).toEqual([{ workspace: String(RENDERED) }]);
+        expect(error).toMatchObject({ code: WORKSPACE_UNAVAILABLE_CODE, workspaceId: RENDERED });
+    });
+
+    it("uses a case-insensitive explicit upload pin instead of appending the rendered pin", async () => {
+        stubBackend();
+        RefusingUpload.sent = [];
+        vi.stubGlobal("XMLHttpRequest", RefusingUpload);
+
+        await expect(uploadAiChatAttachment(
+            8,
+            new File(["notes"], "brief.txt", { type: "text/plain" }),
+            () => undefined,
+            { headers: { "x-workspace-id": String(HEALED) } },
+        )).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+        expect(RefusingUpload.sent).toEqual([{ workspace: String(HEALED) }]);
+    });
+
+    it.each(["9, 9", "not-an-id", "", "0", "2147483648"])(
+        "refuses a malformed workspace pin %j before sending JSON, CSV or XHR",
+        async (pin) => {
+            const requests = stubBackend();
+            RefusingUpload.sent = [];
+            vi.stubGlobal("XMLHttpRequest", RefusingUpload);
+            const init: RequestInit = { headers: { "X-Workspace-Id": pin } };
+
+            await expect(createNote({ content: "Draft", visibility: "private", author: 7 }, init))
+                .rejects.toThrow("X-Workspace-Id must contain one valid workspace id");
+            await expect(downloadCsv("/api/exports/deals/segment", "deals.csv", { ...init, method: "POST" }))
+                .rejects.toThrow("X-Workspace-Id must contain one valid workspace id");
+            await expect(uploadAiChatAttachment(
+                8,
+                new File(["notes"], "brief.txt", { type: "text/plain" }),
+                () => undefined,
+                init,
+            )).rejects.toThrow("X-Workspace-Id must contain one valid workspace id");
+
+            expect(requests).toEqual([]);
+            expect(RefusingUpload.sent).toEqual([]);
+        },
+    );
+
+    it("refuses differently-cased duplicate workspace headers before sending", async () => {
+        const requests = stubBackend();
+        const headers: [string, string][] = [["X-Workspace-Id", "9"], ["x-workspace-id", "9"]];
+
+        await expect(createNote({ content: "Draft", visibility: "private", author: 7 }, { headers }))
+            .rejects.toThrow("X-Workspace-Id must contain one valid workspace id");
+
+        expect(requests).toEqual([]);
     });
 
     it("pins a later save to the workspace its content was composed in", () => {

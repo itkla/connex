@@ -56,6 +56,7 @@ import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.OneTimeLinkFlowService;
+import ooo.klae.connex.backend.support.OwnershipOfferTestFixtures;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 import ooo.klae.connex.backend.util.OneTimeTokenDigest;
@@ -328,6 +329,101 @@ class StaleWorkspaceRecoveryIntegrationTest {
     }
 
     @ParameterizedTest
+    @CsvSource({
+        "false, false, false", "false, false, true", "false, true, false", "false, true, true",
+        "true, false, false", "true, false, true", "true, true, false", "true, true, true"
+    })
+    void workspaceCreationRefusesForeignOrRevokedPinsWithoutProvisioning(
+            boolean revoked, boolean remainingMembership, boolean matchingCookie) throws Exception {
+        Workspace origin = newWorkspaceInNewOrganization();
+        Workspace remaining = newWorkspaceInNewOrganization();
+        User creator = newUser();
+        if (remainingMembership) {
+            workspaceMapper.addMember(remaining.getId(), creator.getId(), "owner");
+        }
+        if (revoked) {
+            workspaceMapper.addMember(origin.getId(), creator.getId(), "owner");
+        }
+        MockHttpSession session = loginWithApprovedPasskey(creator);
+        RequestContextHolder.resetRequestAttributes();
+        if (revoked) {
+            assertEquals(1, workspaceMapper.removeMember(origin.getId(), creator.getId()));
+        }
+        String name = "Refused creation " + UUID.randomUUID();
+        int cookieWorkspace = matchingCookie ? origin.getId() : remaining.getId();
+        Integer remembered = workspaceMapper.getLastActiveWorkspaceId(creator.getId());
+
+        mockMvc.perform(post("/api/workspaces")
+                .header("X-Workspace-Id", origin.getId())
+                .cookie(new Cookie(WorkspaceCookie.NAME, Integer.toString(cookieWorkspace)))
+                .session(session)
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(java.util.Map.of("name", name))))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+            .andExpect(jsonPath("$.message").value("Not a member of workspace " + origin.getId()))
+            .andExpect(cookie().doesNotExist(WorkspaceCookie.NAME));
+
+        RequestContextHolder.resetRequestAttributes();
+        assertEquals(0, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM workspace WHERE name = ?", Integer.class, name));
+        assertEquals(0, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM organization WHERE name = ?", Integer.class, name));
+        assertEquals(remainingMembership ? 1 : 0, workspaceMapper.getMembershipsForUser(creator.getId()).size());
+        assertEquals(remembered, workspaceMapper.getLastActiveWorkspaceId(creator.getId()));
+    }
+
+    @Test
+    void workspaceCreationUsesTheValidPinnedOriginsOrganizationInsteadOfTheCookie() throws Exception {
+        Workspace origin = newWorkspaceInNewOrganization();
+        Workspace cookieWorkspace = newWorkspaceInNewOrganization();
+        User creator = newUser();
+        workspaceMapper.addMember(origin.getId(), creator.getId(), "owner");
+        workspaceMapper.addMember(cookieWorkspace.getId(), creator.getId(), "owner");
+        MockHttpSession session = loginWithApprovedPasskey(creator);
+
+        MvcResult result = mockMvc.perform(post("/api/workspaces")
+                .header("X-Workspace-Id", origin.getId())
+                .cookie(new Cookie(WorkspaceCookie.NAME, Integer.toString(cookieWorkspace.getId())))
+                .session(session)
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"Pinned organization\"}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.orgId").value(origin.getOrgId()))
+            .andReturn();
+
+        int created = objectMapper.readTree(result.getResponse().getContentAsString()).path("id").asInt();
+        RequestContextHolder.resetRequestAttributes();
+        trackProvisionedWorkspace(created);
+        assertEquals(origin.getOrgId(), workspaceMapper.getOrgId(created));
+        assertEquals("owner", workspaceMapper.getRole(created, creator.getId()));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"9, 9", "not-an-id", ""})
+    void malformedExplicitPinCannotWriteIntoTheCookieWorkspace(String header) throws Exception {
+        Workspace cookieWorkspace = newWorkspaceInNewOrganization();
+        User author = newUser();
+        workspaceMapper.addMember(cookieWorkspace.getId(), author.getId(), "owner");
+        MockHttpSession session = loginWithApprovedPasskey(author);
+
+        mockMvc.perform(post("/api/notes")
+                .header("X-Workspace-Id", header)
+                .cookie(new Cookie(WorkspaceCookie.NAME, Integer.toString(cookieWorkspace.getId())))
+                .session(session)
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"content\":\"Pinned draft\",\"visibility\":\"workspace\"}"))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+            .andExpect(jsonPath("$.message").value("Not a member of workspace " + header))
+            .andExpect(cookie().doesNotExist(WorkspaceCookie.NAME));
+
+        RequestContextHolder.resetRequestAttributes();
+        assertTrue(noteMapper.getAllNotes(cookieWorkspace.getId()).isEmpty());
+    }
+
+    @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void staleSelectionAllowsInviteExchangeAndAcceptanceWithoutAuthorizingForeignSwitch(
             boolean shareable) throws Exception {
@@ -532,6 +628,14 @@ class StaleWorkspaceRecoveryIntegrationTest {
             .andExpect(status().isOk())
             .andReturn();
         return assertInstanceOf(MockHttpSession.class, result.getRequest().getSession(false));
+    }
+
+    /** Satisfies the incidental owner's MFA prerequisites so requests reach tenant resolution. */
+    private MockHttpSession loginWithApprovedPasskey(User user) throws Exception {
+        int credential = OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, user);
+        MockHttpSession session = login(user);
+        OwnershipOfferTestFixtures.stepUp(jdbcTemplate, user, session, credential);
+        return session;
     }
 
     private Workspace newWorkspaceInNewOrganization() {

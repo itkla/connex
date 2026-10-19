@@ -632,6 +632,19 @@ through one `requestJson` (`api.ts:17-43`) → inject the active workspace **onc
   the workspace and keeps the draft on screen. Surfaces that save after a delay (the note editor's
   autosave and unmount flush, dashboard layout saves) pin the workspace the content was composed in
   via `workspacePinnedRequest` (#1732, closing the bound #1649 left).
+- Workspace creation from the shell explicitly pins the rendered origin and preflights membership
+  even when the cookie still matches. The server refuses an unavailable explicit origin with
+  `403 FORBIDDEN "Not a member of workspace {id}"`, including revoked or foreign pins when no other
+  membership remains. Provisioning revalidates the origin under its existing shared account lock,
+  which membership removal acquires exclusively, before choosing an organization. Administrators
+  create in that origin's organization; ordinary members retain the fresh-organization rule.
+  Header-free creation retains the unresolved onboarding/recovery path. The client preflight keeps
+  the entered name locally, while the server check enforces the boundary after the preflight.
+- Explicit workspace headers contain exactly one parseable integer. Malformed, comma-combined or
+  repeated headers are refused without cookie or remembered-selection fallback; the frontend
+  rejects malformed pins before sending and merges XHR headers case-insensitively before setting
+  each name once. Personal native pairing POST/DELETE controls remain in the account allowlist:
+  `NativeConnectService` authorizes them by the current user, independently of the rendered workspace.
 - **SSR pages** (`records/deals/page.tsx`, `me`, `notes`, `search`) → already forward
   `headers: { cookie }` via `safeWithCookie` (`api.ts:80-90`); the `connex_workspace` cookie rides along.
   Resolver precedence: header > cookie > user's default membership.

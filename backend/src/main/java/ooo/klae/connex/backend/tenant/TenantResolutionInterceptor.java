@@ -37,6 +37,8 @@ import ooo.klae.connex.backend.services.WorkspaceService;
  * or first membership only when no workspace is remembered.
  * The candidate is always re-validated against membership, so a forged header or
  * cookie cannot grant access to a workspace the caller does not belong to.
+ * A present malformed or repeated workspace header is refused as an invalid explicit pin;
+ * it never falls back to the cookie or remembered selection.
  * Public API requests retain the authoritative workspace and catalog already
  * resolved by the credential filter and deliberately ignore both browser
  * selection mechanisms.
@@ -53,8 +55,8 @@ import ooo.klae.connex.backend.services.WorkspaceService;
  * disagreeing with it) still returns 403 when the caller is not a member.
  * Only a membership the caller still holds is ever installed in {@link TenantContext}.
  *
- * <p>When no membership remains at all the request falls through <em>unresolved</em> for
- * every method, and the dead selection is forgotten — the cookie is cleared and
+ * <p>When no membership remains at all an implicit stale selection falls through
+ * <em>unresolved</em> for every method, and the dead selection is forgotten — the cookie is cleared and
  * {@link WorkspaceService#forgetActive(int)} NULLs the remembered id. There is no workspace a
  * write could be redirected into, {@link TenantScopeInterceptor} still refuses every
  * workspace-scoped statement without a resolved scope, and refusing instead would lock the
@@ -66,7 +68,10 @@ import ooo.klae.connex.backend.services.WorkspaceService;
  * {@code POST /api/workspaces/{id}/switch|accept|decline|leave},
  * {@code POST /api/invites/exchange|accept}, {@code POST /api/invite-links/exchange|accept},
  * {@code POST /api/delivery/unsubscribe/exchange} and {@code POST /api/document-acceptance/exchange}.
- * Each authorizes its own path or bearer target independently of {@link TenantContext}; token
+ * Workspace creation with an explicit header instead requires active membership in that origin,
+ * even when the header matches the cookie or no membership remains. Header-free creation retains
+ * the unresolved onboarding path. Each other route authorizes its own path or bearer target
+ * independently of {@link TenantContext}; token
  * exchange must remain reachable before the client's first healing read. No fallback scope is
  * installed, and the endpoint's token, CSRF and admission checks still apply. Nothing else is exempt.
  *
@@ -88,8 +93,10 @@ import ooo.klae.connex.backend.services.WorkspaceService;
  * interceptor exempts, those {@code WebConfig} excludes, and account, organization and personal
  * provider-connection routes that authorize their own target keep sending the cookie's selection.
  * Workspace creation is the exception among the exempt routes: because a new workspace joins the
- * resolved workspace's organization, the client names the workspace on screen and refuses creation
- * itself when that workspace is no longer a membership. A page still rendering a revoked
+ * resolved workspace's organization when the creator administers it, the client names the workspace
+ * on screen and preflights membership even when the cookie agrees. The server enforces active
+ * membership in that explicit origin before provisioning, and provisioning revalidates it under
+ * the creator's existing account lock. A page still rendering a revoked
  * workspace therefore arrives here as a matching stale pair before the heal, or as an explicit pin
  * that disagrees with the healed cookie after it, and both get the 403 above instead of following
  * the heal into another organization. The client recognizes that refusal by its exact message,
@@ -183,6 +190,11 @@ public class TenantResolutionInterceptor implements AsyncHandlerInterceptor {
 
         String role = workspaceService.getRole(candidate, user.getId());
         if (role == null) {
+            if ("POST".equals(request.getMethod())
+                    && "/api/workspaces".equals(normalizedPathOrNull(request))
+                    && request.getHeader("X-Workspace-Id") != null) {
+                throw new ForbiddenException("Not a member of workspace " + candidate);
+            }
             boolean selectionRequest = isSelectionRequest(request);
             if (!selectionRequest
                     && !workspaceRequestResolver.isStaleWorkspacePin(request, candidate)) {
