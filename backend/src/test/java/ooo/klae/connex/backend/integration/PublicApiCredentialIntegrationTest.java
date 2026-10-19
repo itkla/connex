@@ -15,9 +15,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.sql.SQLException;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -53,15 +59,21 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.session.Session;
+import org.springframework.session.SessionRepository;
+import org.springframework.session.web.http.CookieSerializer;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -85,7 +97,9 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 /** Database-backed public credential authentication and management contract. */
-@SpringBootTest(properties = "connex.public-api.enabled=true")
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+    properties = {"connex.public-api.enabled=true", "server.address=127.0.0.1",
+        "server.servlet.context-path="})
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 @ExtendWith(OutputCaptureExtension.class)
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
@@ -105,7 +119,11 @@ class PublicApiCredentialIntegrationTest {
     @Autowired private ApiCredentialMapper apiCredentialMapper;
     @Autowired private StatementCounter statementCounter;
     @Autowired private TenantContext tenantContext;
+    @Autowired private SessionRepository<? extends Session> sessions;
+    @Autowired private CookieSerializer cookies;
+    @LocalServerPort private int port;
 
+    private final List<String> httpSessionIds = new ArrayList<>();
     private PublicApiFixtureSupport fixtures;
     private MockMvc mockMvc;
 
@@ -124,7 +142,11 @@ class PublicApiCredentialIntegrationTest {
     void cleanUpControlPlaneState() {
         tenantContext.clear();
         RequestContextHolder.resetRequestAttributes();
-        fixtures.cleanUp(true);
+        try {
+            httpSessionIds.forEach(sessions::deleteById);
+        } finally {
+            fixtures.cleanUp(true);
+        }
     }
 
     @Test
@@ -570,6 +592,102 @@ class PublicApiCredentialIntegrationTest {
     }
 
     @Test
+    void deletionReservedAccountCannotIssueOverHttpAndErasureConverges() throws Exception {
+        Workspace workspace = newWorkspace("reserved-issue");
+        User manager = newMember(workspace, "member", "reserved-issue");
+        grantApiManager(workspace, manager, "reserved-issue");
+        String session = httpSession(sessions, loginWithStepUp(manager));
+        Issued existing = issueOverHttp(session, workspace, "Before reservation");
+        var credentialsBefore = credentialRows(workspace);
+        var scopesBefore = credentialScopeRows(workspace);
+        var auditsBefore = credentialAuditRows(workspace);
+        String owner = "public-api-reserved-issue";
+        userDeletionTransaction.reserve(manager.getId(), owner);
+        assertTrue(userMapper.isAccountDeletionReserved(manager.getId()));
+
+        HttpResponse<String> response = httpRequest("POST", "/api/api-credentials", session,
+            workspace, issueBody("After reservation", "crm.read"));
+
+        assertEquals(403, response.statusCode(), response.body());
+        assertEquals("Requires API_CREDENTIAL_MANAGE permission in this workspace",
+            objectMapper.readTree(response.body()).path("message").asString());
+        assertEquals(credentialsBefore, credentialRows(workspace));
+        assertEquals(scopesBefore, credentialScopeRows(workspace));
+        assertEquals(auditsBefore, credentialAuditRows(workspace));
+
+        userDeletionTransaction.delete(manager.getId(), owner);
+
+        assertErasedAccountReferences(manager);
+        assertTrue(credentialRows(workspace).isEmpty());
+        assertTrue(credentialScopeRows(workspace).isEmpty());
+        assertEquals(0, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM api_credential_scope WHERE credential_id = ?",
+            Integer.class, existing.id()));
+        assertEquals(1, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log"
+                + " WHERE action = 'api_credential.account_erased' AND workspace_id = ?",
+            Integer.class, workspace.getId()));
+    }
+
+    @Test
+    void deletionReservedAccountCannotRevokeOverHttpAndErasureConverges() throws Exception {
+        Workspace workspace = newWorkspace("reserved-revoke");
+        User manager = newMember(workspace, "member", "reserved-revoker");
+        User creator = newMember(workspace, "member", "reserved-revoke-creator");
+        grantApiManager(workspace, manager, "reserved-revoker");
+        grantApiManager(workspace, creator, "reserved-revoke-creator");
+        String session = httpSession(sessions, loginWithStepUp(manager));
+        String creatorSession = httpSession(sessions, loginWithStepUp(creator));
+        Issued owned = issueOverHttp(session, workspace, "Reserved account creator");
+        Issued revoked = issueOverHttp(creatorSession, workspace, "Before reserved revocation");
+        Issued target = issueOverHttp(creatorSession, workspace, "After reserved revocation");
+        HttpResponse<String> beforeReservation = httpRequest("DELETE",
+            "/api/api-credentials/" + revoked.id(), session, workspace, null);
+        assertEquals(204, beforeReservation.statusCode(), beforeReservation.body());
+        assertEquals(1, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM api_credential"
+                + " WHERE id = ? AND revoked_by_id = ? AND revoked_at IS NOT NULL",
+            Integer.class, revoked.id(), manager.getId()));
+        var credentialsBefore = credentialRows(workspace);
+        var scopesBefore = credentialScopeRows(workspace);
+        var auditsBefore = credentialAuditRows(workspace);
+        String owner = "public-api-reserved-revoke";
+        userDeletionTransaction.reserve(manager.getId(), owner);
+        assertTrue(userMapper.isAccountDeletionReserved(manager.getId()));
+
+        HttpResponse<String> response = httpRequest("DELETE",
+            "/api/api-credentials/" + target.id(), session, workspace, null);
+
+        assertEquals(403, response.statusCode(), response.body());
+        assertEquals("Requires API_CREDENTIAL_MANAGE permission in this workspace",
+            objectMapper.readTree(response.body()).path("message").asString());
+        assertEquals(credentialsBefore, credentialRows(workspace));
+        assertEquals(scopesBefore, credentialScopeRows(workspace));
+        assertEquals(auditsBefore, credentialAuditRows(workspace));
+        assertEquals(1, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM api_credential"
+                + " WHERE id = ? AND revoked_by_id IS NULL AND revoked_at IS NULL",
+            Integer.class, target.id()));
+
+        userDeletionTransaction.delete(manager.getId(), owner);
+
+        assertErasedAccountReferences(manager);
+        assertEquals(credentialsBefore.stream()
+            .filter(row -> ((Number) row.get("id")).longValue() == target.id()).toList(),
+            credentialRows(workspace));
+        assertEquals(scopesBefore.stream()
+            .filter(row -> ((Number) row.get("credential_id")).longValue() == target.id()).toList(),
+            credentialScopeRows(workspace));
+        assertEquals(0, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM api_credential_scope WHERE credential_id IN (?, ?)",
+            Integer.class, owned.id(), revoked.id()));
+        assertEquals(1, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log"
+                + " WHERE action = 'api_credential.account_erased' AND workspace_id = ?",
+            Integer.class, workspace.getId()));
+    }
+
+    @Test
     void crossRevokerAccountErasuresConvergeWithoutDeadlock() throws Exception {
         Workspace workspace = newWorkspace("cross-revoker");
         User firstUser = newMember(workspace, "member", "cross-revoker-first");
@@ -728,8 +846,6 @@ class PublicApiCredentialIntegrationTest {
 
         assertNull(firstFailure);
         assertNull(secondFailure);
-        assertFalse(hasDeadlockCause(firstFailure));
-        assertFalse(hasDeadlockCause(secondFailure));
         assertEquals(0, jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM app_user WHERE id IN (?, ?)",
             Integer.class,
@@ -788,8 +904,6 @@ class PublicApiCredentialIntegrationTest {
 
         assertNull(firstFailure);
         assertNull(secondFailure);
-        assertFalse(hasDeadlockCause(firstFailure));
-        assertFalse(hasDeadlockCause(secondFailure));
         assertEquals(0, jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM app_user WHERE id IN (?, ?)",
             Integer.class,
@@ -866,8 +980,6 @@ class PublicApiCredentialIntegrationTest {
 
         assertNull(erasureFailure);
         assertNull(revokeFailure);
-        assertFalse(hasDeadlockCause(erasureFailure));
-        assertFalse(hasDeadlockCause(revokeFailure));
         assertEquals(0, jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM app_user WHERE id = ?",
             Integer.class,
@@ -1025,6 +1137,82 @@ class PublicApiCredentialIntegrationTest {
         return new Issued(body.path("credential").path("id").longValue(), body.path("token").textValue());
     }
 
+    private Issued issueOverHttp(String session, Workspace workspace, String name) throws Exception {
+        HttpResponse<String> response = httpRequest("POST", "/api/api-credentials", session,
+            workspace, issueBody(name, "crm.read"));
+        assertEquals(201, response.statusCode(), response.body());
+        JsonNode body = objectMapper.readTree(response.body());
+        return new Issued(body.path("credential").path("id").longValue(), body.path("token").asString());
+    }
+
+    private <S extends Session> String httpSession(SessionRepository<S> repository, MockHttpSession source) {
+        S session = repository.createSession();
+        for (String name : Collections.list(source.getAttributeNames())) {
+            session.setAttribute(name, source.getAttribute(name));
+        }
+        repository.save(session);
+        httpSessionIds.add(session.getId());
+        return session.getId();
+    }
+
+    private HttpResponse<String> httpRequest(
+            String method, String path, String session, Workspace workspace, String body) throws Exception {
+        HttpResponse<String> bootstrap = rawHttpRequest(
+            "GET", "/api/auth/csrf", session, workspace, null, null, null);
+        assertEquals(200, bootstrap.statusCode(), bootstrap.body());
+        JsonNode csrfToken = objectMapper.readTree(bootstrap.body());
+        return rawHttpRequest(method, path, session, workspace, body,
+            csrfToken.path("headerName").asString(), csrfToken.path("token").asString());
+    }
+
+    private HttpResponse<String> rawHttpRequest(String method, String path, String session,
+            Workspace workspace, String body, String csrfHeader, String csrfToken) throws Exception {
+        MockHttpServletResponse cookieResponse = new MockHttpServletResponse();
+        cookies.writeCookieValue(new CookieSerializer.CookieValue(
+            new MockHttpServletRequest(), cookieResponse, session));
+        var request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
+            .timeout(Duration.ofSeconds(45))
+            .header("Cookie", cookieResponse.getHeader("Set-Cookie").split(";", 2)[0])
+            .header("X-Workspace-Id", Integer.toString(workspace.getId()));
+        if (csrfHeader != null) {
+            request.header(csrfHeader, csrfToken);
+        }
+        if (body != null) {
+            request.header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE);
+        }
+        request.method(method, body == null ? HttpRequest.BodyPublishers.noBody()
+            : HttpRequest.BodyPublishers.ofString(body));
+        try (HttpClient client = HttpClient.newHttpClient()) {
+            return client.send(request.build(), HttpResponse.BodyHandlers.ofString());
+        }
+    }
+
+    private List<Map<String, Object>> credentialRows(Workspace workspace) {
+        return jdbcTemplate.queryForList(
+            "SELECT * FROM api_credential WHERE workspace_id = ? ORDER BY id", workspace.getId());
+    }
+
+    private List<Map<String, Object>> credentialScopeRows(Workspace workspace) {
+        return jdbcTemplate.queryForList(
+            "SELECT s.* FROM api_credential_scope s JOIN api_credential c ON c.id = s.credential_id"
+                + " WHERE c.workspace_id = ? ORDER BY s.credential_id, s.scope", workspace.getId());
+    }
+
+    private List<Map<String, Object>> credentialAuditRows(Workspace workspace) {
+        return jdbcTemplate.queryForList(
+            "SELECT id, action FROM audit_log"
+                + " WHERE workspace_id = ? AND action LIKE 'api_credential.%' ORDER BY id",
+            workspace.getId());
+    }
+
+    private void assertErasedAccountReferences(User account) {
+        assertEquals(0, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM app_user WHERE id = ?", Integer.class, account.getId()));
+        assertEquals(0, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM api_credential WHERE created_by_id = ? OR revoked_by_id = ?",
+            Integer.class, account.getId(), account.getId()));
+    }
+
     private static String issueBody(String name, String... scopes) {
         String scopeJson = java.util.Arrays.stream(scopes)
             .map(scope -> "\"" + scope + "\"")
@@ -1109,21 +1297,6 @@ class PublicApiCredentialIntegrationTest {
         } catch (Throwable failure) {
             return failure;
         }
-    }
-
-    private static boolean hasDeadlockCause(Throwable failure) {
-        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
-            if (cause instanceof SQLException sqlException
-                    && (sqlException.getErrorCode() == 1213
-                        || "40001".equals(sqlException.getSQLState()))) {
-                return true;
-            }
-            if (cause.getMessage() != null
-                    && cause.getMessage().toLowerCase(java.util.Locale.ROOT).contains("deadlock")) {
-                return true;
-            }
-        }
-        return false;
     }
 
     @FunctionalInterface
