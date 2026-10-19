@@ -48,6 +48,115 @@ import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 
 class AiAssistantIdentifierResolverTest {
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "[Former][m]\n\n[m]:\nuser:42", "[Former][m]\r\r[m]:\ruser:42",
+            "[Former][m]\n\n> - [m]: user:42",
+            "| ` | [Former][m] | ` |\n| --- | --- | --- |\n\n[m]: user:42",
+            "See [^f].\n\n[^f]: [Former][m]\n\n[m]: user:42"
+    })
+    void queuedParserLayoutsRetainOriginalMemberLabelsBesideInvisibleTargets(String content) {
+        var mapper = mock(AiAssistantIdentifierMapper.class);
+        var workspace = mock(WorkspaceService.class);
+        var scope = mock(OrganizationWorkspaceScopeControlAccess.class);
+        var references = mock(ReferenceService.class);
+        when(workspace.getCurrentWorkspaceId()).thenReturn(7);
+        when(scope.getForWorkspace(7)).thenReturn(new WorkspaceScope(1, List.of(7), "[7]"));
+        when(references.visibleMemberIds(7, Set.of(42))).thenReturn(Set.of(42));
+        var resolver = new AiAssistantIdentifierResolver(mapper, workspace, scope, references);
+        String original = "[Hidden](person:999 \"title\")\n\n" + content;
+
+        var result = resolver.resolve(original);
+
+        assertEquals(List.of(new AiAssistantIdentifierResolver.Identifier(EntityKind.MEMBER, "Former")), result.identifiers());
+        assertTrue(result.resources().isEmpty());
+        verify(references).visibleMemberIds(7, Set.of(42));
+        verify(references, never()).redactInvisibleTargets(anyInt(), anyList());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"input", "blocks", "inlines", "table", "footnote", "brackets",
+            "raw", "code", "disagreement", "same-id", "encoded", "label"})
+    void incompleteQueueReadingsRefuseBeforeIdentifierLookupOrProviderAdmission(String kind) {
+        String text = switch (kind) {
+            case "input" -> "x".repeat(262_145) + "[Late](user:42)";
+            case "blocks" -> "> ".repeat(100) + "[Former](user:42)";
+            case "inlines" -> "**".repeat(100) + "[Former](user:42)" + "**".repeat(100);
+            case "table" -> "| x ".repeat(258) + "[Former](user:42)";
+            case "footnote" -> "See [^a\\]b].\n\nprefix `\n[^a\\]b]: [Former](user:42 \"title\")\n    `";
+            case "brackets" -> "[".repeat(131_000) + "[](u)".repeat(26_000);
+            case "raw" -> "literal <user:42";
+            case "code" -> "```\n[Former](user:42)\n```";
+            case "disagreement" -> "| h |\n| - |\n|\nprefix `\n[Former `]` Member](user:42 \"title\")\nsuffix `";
+            case "same-id" -> "| h |\n| - |\n|\nprefix `\n[Former `]` Member](user:42 \"title\")\nsuffix `\n\n[unused]: user:42";
+            case "encoded" -> "| h |\n| - |\n|\nprefix `\n[Former `]` Member](u&#115;er:42 \"title\")\nsuffix `";
+            case "label" -> "[" + "a".repeat(1_000) + "](user:42)";
+            default -> throw new IllegalArgumentException(kind);
+        };
+        var mapper = mock(AiAssistantIdentifierMapper.class);
+        var workspace = mock(WorkspaceService.class);
+        var scope = mock(OrganizationWorkspaceScopeControlAccess.class);
+        var references = mock(ReferenceService.class);
+        var resolver = new AiAssistantIdentifierResolver(mapper, workspace, scope, references);
+
+        var refused = assertThrows(AiAssistantLoopException.class, () -> resolver.resolve(text));
+
+        assertEquals("identifier_text_unsafe", refused.detailReason());
+        verifyNoInteractions(mapper, workspace, scope, references);
+    }
+
+    @Test
+    void incompleteReaderAuthorizedProjectionsDegradeAndRetainCompatibilityCandidates() {
+        String text = "x".repeat(262_145) + "[Late](user:42)";
+        var reading = ReferenceService.memberReferenceReading(text);
+        assertFalse(reading.complete());
+        assertEquals(List.of(new ReferenceService.MemberReference("Late", Set.of(42))), reading.references());
+        var context = new MaskingContext();
+
+        assertEquals("(unavailable reference)", AiAssistantMemberIdentifiers.seedReferenceText(text, context));
+        assertTrue(AiAssistantMemberIdentifiers.referenceIdentifiers(text).isEmpty());
+        assertTrue(context.identifierDictionary().isEmpty());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"0", "-1", "2147483648", "42x", ""})
+    void unrepresentableMemberProvenanceRefusesBeforeLookupAndDirectAiProjection(String id) {
+        String text = "[Former](user:" + id + ")";
+        var mapper = mock(AiAssistantIdentifierMapper.class);
+        var workspace = mock(WorkspaceService.class);
+        var scope = mock(OrganizationWorkspaceScopeControlAccess.class);
+        var references = mock(ReferenceService.class);
+        var resolver = new AiAssistantIdentifierResolver(mapper, workspace, scope, references);
+        var context = new MaskingContext();
+
+        assertEquals("identifier_text_unsafe", assertThrows(AiAssistantLoopException.class,
+                () -> resolver.resolve(text)).detailReason());
+        assertEquals("(unavailable reference)", AiAssistantMemberIdentifiers.seedReferenceText(text, context));
+        assertTrue(AiAssistantMemberIdentifiers.referenceIdentifiers(text).isEmpty());
+        assertTrue(context.identifierDictionary().isEmpty());
+        verifyNoInteractions(mapper, workspace, scope, references);
+    }
+
+    @Test
+    void unrepresentableNonMemberTargetsDoNotSuppressAuthorizableMemberProvenance() {
+        var mapper = mock(AiAssistantIdentifierMapper.class);
+        var workspace = mock(WorkspaceService.class);
+        var scope = mock(OrganizationWorkspaceScopeControlAccess.class);
+        var references = mock(ReferenceService.class);
+        when(workspace.getCurrentWorkspaceId()).thenReturn(7);
+        when(scope.getForWorkspace(7)).thenReturn(new WorkspaceScope(1, List.of(7), "[7]"));
+        when(references.visibleMemberIds(7, Set.of(42))).thenReturn(Set.of(42));
+        var resolver = new AiAssistantIdentifierResolver(mapper, workspace, scope, references);
+
+        var result = resolver.resolve("[Hidden](person:2147483648) [Former](user:42)");
+
+        assertEquals(List.of(new AiAssistantIdentifierResolver.Identifier(EntityKind.MEMBER, "Former")), result.identifiers());
+        assertTrue(result.resources().isEmpty());
+        verify(references).visibleMemberIds(7, Set.of(42));
+        verify(references, never()).redactInvisibleTargets(anyInt(), anyList());
+    }
+
     @Test
     void queuedReferencesRegisterAuthorizedAuthoredAndDecodedLabelsWithoutMemberHandles() {
         var mapper = mock(AiAssistantIdentifierMapper.class);
