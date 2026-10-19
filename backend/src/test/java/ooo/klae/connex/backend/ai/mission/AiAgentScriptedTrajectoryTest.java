@@ -3,6 +3,8 @@ package ooo.klae.connex.backend.ai.mission;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -482,13 +484,22 @@ class AiAgentScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
         Person selected = person("Theodora Alderhaven", "theodora.alderhaven@example.invalid", null);
         AiAgentRun run = createRuntimeTwo(selected, "mission_continuation_budget", 4, false);
         execute(run);
-        execute(runs.getRun(workspaceId(), run.getId()));
+        AiAgentRun checkpointed = runs.getRun(workspaceId(), run.getId());
+        assertEquals("queued", checkpointed.getStatus());
+        assertEquals(3, checkpointed.getConsumedSteps());
+        assertEquals(1, checkpointed.getLastCommittedSegmentNo());
+        assertAttempts(3, 3);
+        execute(checkpointed);
         assertCompletedContinuation(run, 4);
         AiAgentRun done = runs.getRun(workspaceId(), run.getId());
         assertEquals(done.getMaxSteps(), done.getConsumedSteps());
-        execute(done);
-        assertAttempts(4, 4);
-        assertEquals(2, runs.listSegments(workspaceId(), run.getId()).size());
+        assertNull(done.getReasonCode());
+        assertNull(done.getActiveSegmentId());
+        assertNotNull(done.getFinishedAt());
+        var segments = runs.listSegments(workspaceId(), run.getId());
+        assertEquals(List.of(1, 2), segments.stream().map(AiAgentSegment::getSegmentNo).toList());
+        assertEquals(List.of(3, 1), segments.stream().map(AiAgentSegment::getKnownSteps).toList());
+        assertTrue(segments.stream().allMatch(segment -> "completed".equals(segment.getStatus())));
     }
 
     @Test
