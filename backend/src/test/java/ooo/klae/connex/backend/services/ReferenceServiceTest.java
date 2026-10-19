@@ -151,6 +151,56 @@ class ReferenceServiceTest extends AbstractServiceTest {
         assertTrue(result.resources().isEmpty());
     }
 
+    @Test
+    void parserMemberReadingsAgreeWithRealPendingRemovedAndForeignMembership() {
+        User active = newUser();
+        User pending = newPendingMember();
+        User removed = newUser();
+        User outsider = newNonMember();
+        workspaceMapper.removeMember(workspace.getId(), removed.getId());
+        String content = "| ` | [Active Parser Alias][active] | ` |\n| --- | --- | --- |\n\n"
+                + "See [^f].\n\n[^f]: [Pending Parser Alias][pending]\n\n"
+                + "[Removed Parser Alias][removed] [Foreign Parser Alias][foreign]\n\n"
+                + "> [active]:\n> user:" + active.getId() + "\n\n"
+                + "- [pending]: user:" + pending.getId() + "\n\n"
+                + "[removed]:\ruser:" + removed.getId() + "\n\n[foreign]: user:" + outsider.getId();
+        var candidates = ReferenceService.memberReferencesInContent(content);
+        assertEquals(java.util.Set.of(active.getId(), pending.getId(), removed.getId(), outsider.getId()),
+                candidates.stream().flatMap(reference -> reference.memberIds().stream())
+                        .collect(java.util.stream.Collectors.toSet()));
+        assertEquals(java.util.Set.of(active.getId(), pending.getId()), referenceService.visibleMemberIds(workspace.getId(),
+                List.of(active.getId(), pending.getId(), removed.getId(), outsider.getId())));
+        assertEquals("(unavailable reference)", referenceService.redactInvisibleTargets(workspace.getId(),
+                List.of(new ReferenceService.ReaderVisibleContent(content, List.of()))).getFirst().content());
+
+        var resolution = identifierResolver.resolve(content);
+
+        assertEquals(java.util.Set.of("Active Parser Alias", "Pending Parser Alias"), resolution.identifiers().stream()
+                .map(AiAssistantIdentifierResolver.Identifier::value).collect(java.util.stream.Collectors.toSet()));
+        assertTrue(resolution.resources().isEmpty());
+        Note note = newNote(currentUser, null, null);
+        assertTrue(referenceService.syncReferences(workspace.getId(), note.getId(), content).isEmpty());
+        assertTrue(stored(note).isEmpty());
+    }
+
+    @Test
+    void parserDefinitionsKeepForeignWorkspaceCompanyTargetsInvisible() {
+        Workspace other = new Workspace();
+        other.setName("Other " + unique());
+        other.setSlug("other_" + unique());
+        workspaceMapper.insert(other);
+        Company foreign = new Company();
+        foreign.setName("Foreign " + unique());
+        foreign.setWorkspaceId(other.getId());
+        companyMapper.insert(foreign);
+        String content = "See [^f].\n\n[^f]: [Foreign Company][m]\n\n> [m]: company:" + foreign.getId();
+
+        assertEquals("(unavailable reference)", referenceService.redactInvisibleTargets(workspace.getId(),
+                List.of(new ReferenceService.ReaderVisibleContent(content, List.of()))).getFirst().content());
+        assertThrows(ResourceNotFoundException.class, () -> referenceService.requireVisibleTarget(
+                workspace.getId(), "company", foreign.getId(), currentUser.getId()));
+    }
+
     /**
      * The same member mentioned twice yields a single reference.
      */

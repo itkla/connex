@@ -212,7 +212,7 @@ public class AiAssistantScopeReadService {
         Map<Integer, Activity> readerProse = new LinkedHashMap<>();
         for (Activity prose : referenceService.hydrateActivities(workspaceId, storedProse)) {
             AiAssistantMemberIdentifiers.seedReferences(prose.getReferences(), resources.maskingContext());
-            AiAssistantMemberIdentifiers.seedReferenceText(prose.getNotes(), resources.maskingContext());
+            prose.setNotes(AiAssistantMemberIdentifiers.seedReferenceText(prose.getNotes(), resources.maskingContext()));
             readerProse.put(prose.getId(), prose);
         }
         TextBudget budget = new TextBudget(MAX_RESULT_TEXT_CHARS);

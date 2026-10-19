@@ -232,14 +232,14 @@ export type SettingsEntry = {
     /**
      * Query keys the forward carries and a successor redirect must preserve.
      *
-     * Names the keys a shipped forward is known to depend on. The redirect stubs preserve the whole
-     * query string regardless — an unrecognized parameter is the reader's, not the route's, and
+     * Names the keys a shipped forward is known to depend on. The `next.config.ts` redirects pass the
+     * whole query string through — an unrecognized parameter is the reader's, not the route's, and
      * dropping it silently is how a shared link stops meaning what it said.
      */
     redirectQuery: readonly string[];
     /** A capability state under which a rendering destination forwards away instead; null when none. */
     conditionalForward: SettingsConditionalForward | null;
-    /** The shipped message key that labels this destination in navigation; null for a bare stub. */
+    /** The shipped message key that labels this destination in navigation; null for an unlabeled forward. */
     titleKey: string | null;
     access: SettingsAccess;
     /** Every navigation surface that links here today. */

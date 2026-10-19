@@ -1,8 +1,4 @@
 {
-  "RecordsApprovalPoliciesLayout": {
-    "title": "承認ポリシー",
-    "description": "生成ドキュメントを送付前に社内承認が必要となる条件を設定します。"
-  },
   "ApprovalPoliciesBrowser": {
     "title": "承認ポリシー",
     "newButton": "新規ポリシー",

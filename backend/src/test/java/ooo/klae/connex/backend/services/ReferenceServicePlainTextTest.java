@@ -14,6 +14,40 @@ import org.junit.jupiter.api.Test;
 
 class ReferenceServicePlainTextTest {
 
+    static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> adjacentAutolinkDestinations() {
+        return ReferenceContentReaderTest.adjacentAutolinkDestinations()
+                .filter(arguments -> ((String) arguments.get()[1]).startsWith("| h |"));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("adjacentAutolinkDestinations")
+    void toPlainText_redactsUnexplainedAutolinksFollowingExternalUrls(String type, String content) {
+        assertEquals(type.equals("note") ? "a note" : "(unavailable reference)", ReferenceService.toPlainText(content));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "Visit https://example.com/user:42 today.", "[Help](https://example.com/user:42)", "/superuser:42",
+            "Visit https://example.com/:note:42 today.", "[Help](https://example.com/(note:42))",
+            "Visit https://example.com/(docs)/:user:42 today.", "[Help](https://example.com/(docs)/:user:42)",
+            "Visit https://example.com/?q='docs'/:user:42 today.", "[Help](https://example.com/?q='docs'/:user:42)"
+    })
+    void toPlainText_preservesExternalUrlsAndEmbeddedWords(String content) {
+        assertEquals(content, ReferenceService.toPlainText(content));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "[Secret][m]\n\n[m]:\nnote:42", "[Secret][m]\r\r[m]:\rnote:42",
+            "[Secret][m]\n\n> [m]: note:42", "[Secret][m]\n\n- [m]: note:42",
+            "[Secret][m]\n\n1. [m]:\n   note:42",
+            "| ` | [Secret][m] | ` |\n| --- | --- | --- |\n\n[m]: note:42",
+            "See [^f].\n\n[^f]: [Secret][m]\n\n[m]: note:42"
+    })
+    void toPlainText_redactsNewParserLayouts(String content) {
+        assertEquals("a note", ReferenceService.toPlainText(content));
+    }
+
     @Test
     void toPlainText_redactsReferenceStyleNoteLinksAndDefinitions() {
         String content = "Discuss [Secret][n], [Collapsed][], and [Shortcut].\n\n"
@@ -115,6 +149,15 @@ class ReferenceServicePlainTextTest {
         assertEquals(content, ReferenceService.toPlainText(content));
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "| h |\n| - |\n|\nprefix `\n[Secret `]` Member](note:42 \"title\")\nsuffix `",
+            "prefix `\n\nh|i\n--|--|--\n[Secret|Label](note:42 \"title\")\n`"
+    })
+    void toPlainText_redactsBothTableParserDisagreements(String content) {
+        assertEquals("a note", ReferenceService.toPlainText(content));
+    }
+
     @Test
     void toPlainText_redactsOversizedNoteDestinationIds() {
         assertEquals("a note", ReferenceService.toPlainText(
@@ -145,6 +188,13 @@ class ReferenceServicePlainTextTest {
     @Test
     void toPlainText_preservesCodeSpanBracketsNearNoteLikeProse() {
         String content = "Use `]` in prose before reviewing note:123";
+
+        assertEquals(content, ReferenceService.toPlainText(content));
+    }
+
+    @Test
+    void toPlainText_preservesCodeSpanBracketsNearNonDestinationProse() {
+        String content = "Use `]` in prose before reviewing note:abc";
 
         assertEquals(content, ReferenceService.toPlainText(content));
     }
