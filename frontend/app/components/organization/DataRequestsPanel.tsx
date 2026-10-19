@@ -30,6 +30,7 @@ import {
     type SettingsPanelPresentation,
 } from "@/app/components/settings/SettingsSection";
 import { NoAccessCard, EmptyRow, ListCard, rowActionTrigger } from "@/app/components/organization/OrgPrimitives";
+import MissionHoldingsPurgeDialog from "@/app/components/organization/MissionHoldingsPurgeDialog";
 import DataRequestDialog from "@/app/components/organization/DataRequestDialog";
 
 const PAGE_SIZE = 30;
@@ -84,7 +85,7 @@ export default function DataRequestsPanel({
     const t = useTranslations("OrgDataRequests");
     const showApiError = useApiErrorToast("OrgDataRequests");
     const locale = useLocale();
-    const { activeWorkspace } = useWorkspace();
+    const { activeWorkspace, switching } = useWorkspace();
     const orgId = activeWorkspace?.orgId ?? null;
 
     const [requests, setRequests] = useState<DataSubjectRequest[]>([]);
@@ -97,6 +98,8 @@ export default function DataRequestsPanel({
     const [dialogOpen, setDialogOpen] = useState(false);
     const [editing, setEditing] = useState<DataSubjectRequest | null>(null);
     const [downloadingId, setDownloadingId] = useState<number | null>(null);
+    const [purging, setPurging] = useState<{ orgId: number; request: DataSubjectRequest } | null>(null);
+    const [reloadVersion, setReloadVersion] = useState(0);
 
     useEffect(() => {
         if (!orgId) return;
@@ -124,7 +127,7 @@ export default function DataRequestsPanel({
         return () => {
             cancelled = true;
         };
-    }, [orgId, statusFilter]);
+    }, [orgId, reloadVersion, statusFilter]);
 
     async function loadMore() {
         if (!orgId) return;
@@ -271,6 +274,11 @@ export default function DataRequestsPanel({
                                                 <PencilSquareIcon className="size-4" />
                                                 {t("edit")}
                                             </DropdownMenuItem>
+                                            {request.orgId === orgId && request.identityVerifiedAt && request.subjectPersonId && request.subjectWorkspaceId && request.snapshotToken ? (
+                                                <DropdownMenuItem onClick={() => { if (orgId !== null) setPurging({ orgId, request }); }}>
+                                                    {t("missionPurge.action")}
+                                                </DropdownMenuItem>
+                                            ) : null}
                                             {request.requestType === "disclosure" && (
                                                 <DropdownMenuItem
                                                     disabled={downloadingId != null}
@@ -296,6 +304,11 @@ export default function DataRequestsPanel({
                 </>
             )}
 
+            {purging && purging.orgId === orgId && !switching ? (
+                <MissionHoldingsPurgeDialog key={`${orgId}:${purging.request.id}`} orgId={purging.orgId}
+                    request={purging.request} onClose={() => setPurging(null)}
+                    onStale={() => setReloadVersion((version) => version + 1)} />
+            ) : null}
             <DataRequestDialog
                 open={dialogOpen}
                 onOpenChange={setDialogOpen}

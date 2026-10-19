@@ -558,7 +558,7 @@ describe("failed-answer recovery", () => {
     });
 
     it("offers nothing once the member's authority to read the answer was withdrawn", () => {
-        for (const reason of ["access_revoked", "restrictions_changed"]) {
+        for (const reason of ["access_revoked", "restrictions_changed", "privacy_invalidated"]) {
             expect(isAskConnexAuthorizationWithdrawal(reason)).toBe(true);
             expect(askConnexRecovery("failed", reason, true, true, "none")).toEqual({
                 retry: false,
@@ -673,6 +673,7 @@ describe("the terminal reason vocabulary", () => {
         "no_progress",
         "org_invocation_quota_exhausted",
         "owner_lost",
+        "privacy_invalidated",
         "provider_error",
         "provider_idle_timeout",
         "quota_exhausted",
@@ -709,6 +710,7 @@ describe("the terminal reason vocabulary", () => {
             ["no_progress", { category: "transient", message: "stalled" }],
             ["org_invocation_quota_exhausted", { category: "capacity", message: "capacity" }],
             ["owner_lost", { category: "interrupted", message: "ownerLost" }],
+            ["privacy_invalidated", { category: "authorization", message: "restrictionsChanged" }],
             ["provider_error", { category: "transient", message: "provider" }],
             ["provider_idle_timeout", { category: "transient", message: "timeout" }],
             ["quota_exhausted", { category: "capacity", message: "capacity" }],

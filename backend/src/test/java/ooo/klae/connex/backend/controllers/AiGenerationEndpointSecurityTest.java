@@ -75,6 +75,7 @@ import org.springframework.test.web.servlet.MockMvc;
 @WebMvcTest(
     controllers = {
         AiAssistantController.class,
+        AiAgentRunController.class,
         AiGenerationController.class,
         BusinessCardController.class,
         DealController.class,
@@ -131,12 +132,37 @@ class AiGenerationEndpointSecurityTest {
     @MockitoBean private DenialAuditRateLimiter denialAuditRateLimiter;
     @MockitoBean private ClientIpResolver clientIpResolver;
     @MockitoBean private AiAssistantService aiAssistantService;
+    @MockitoBean private ooo.klae.connex.backend.ai.mission.AiAgentRunService missions;
     @MockitoBean private AiAssistantTurnService aiAssistantTurnService;
     @MockitoBean private AiAssistantToolCallReadService aiAssistantToolCallReadService;
     @MockitoBean private AiAssistantWriteToolService aiAssistantWriteToolService;
     @MockitoBean private AiChatAttachmentService aiChatAttachmentService;
     @MockitoBean private SupportBundleService supportBundleService;
     @MockitoBean private AuthService authService;
+
+    @Test
+    void missionControlsRequireCsrf() throws Exception {
+        for (String action : List.of("pause", "resume", "cancel")) {
+            String path = "/api/ai/assistant/missions/17/" + action;
+            mockMvc.perform(post(path).contentType("application/json")
+                    .content("{\"expectedStateVersion\":\"1\"}"))
+                    .andExpect(status().isForbidden());
+            mockMvc.perform(post(path).with(csrf().asHeader()).contentType("application/json")
+                    .content("{\"expectedStateVersion\":\"1\"}"))
+                    .andExpect(status().isOk());
+        }
+        mockMvc.perform(post("/api/ai/assistant/sessions/42/missions").contentType("application/json").content("{}"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithAnonymousUser
+    void missionReadsRequireAuthentication() throws Exception {
+        for (String path : List.of("/api/ai/assistant/missions", "/api/ai/assistant/missions/17",
+                "/api/ai/assistant/missions/17/output")) {
+            mockMvc.perform(get(path)).andExpect(status().isUnauthorized());
+        }
+    }
 
     /**
      * The routes that were moved off {@code GET} because they write durable {@code audit_log} rows

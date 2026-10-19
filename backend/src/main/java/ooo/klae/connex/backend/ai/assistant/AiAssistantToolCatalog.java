@@ -184,6 +184,7 @@ public class AiAssistantToolCatalog {
     public List<ToolSpec> tools(Set<Toolset> loadedToolsets) {
         return TOOLS.values().stream()
                 .filter(spec -> loadedToolsets.contains(spec.toolset()))
+                .filter(spec -> ooo.klae.connex.backend.ai.mission.AiAgentExecutionPolicy.permits(spec.name()))
                 .toList();
     }
 
@@ -197,6 +198,7 @@ public class AiAssistantToolCatalog {
         return TOOLS.values().stream()
                 .filter(ToolSpec::executable)
                 .filter(spec -> loadedToolsets.contains(spec.toolset()))
+                .filter(spec -> ooo.klae.connex.backend.ai.mission.AiAgentExecutionPolicy.permits(spec.name()))
                 .map(spec -> new AiToolDefinition(
                         spec.name(), description(spec.name()), parametersSchema(objectMapper, spec)))
                 .toList();
@@ -325,6 +327,8 @@ public class AiAssistantToolCatalog {
     /** @return every loadable toolset paired with its server-authored summary, in declaration order */
     public List<Map.Entry<Toolset, String>> directory() {
         return LOADABLE.stream()
+                .filter(toolset -> TOOLS.values().stream().anyMatch(spec -> spec.toolset() == toolset
+                        && ooo.klae.connex.backend.ai.mission.AiAgentExecutionPolicy.permits(spec.name())))
                 .map(toolset -> Map.entry(toolset, toolset.summary()))
                 .toList();
     }

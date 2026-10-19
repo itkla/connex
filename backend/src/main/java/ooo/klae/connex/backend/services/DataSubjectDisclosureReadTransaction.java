@@ -12,8 +12,11 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import org.apache.ibatis.session.ExecutorType;
 import org.apache.ibatis.session.SqlSession;
 import org.apache.ibatis.session.SqlSessionFactory;
+import org.apache.ibatis.session.defaults.DefaultSqlSession;
+import org.apache.ibatis.transaction.jdbc.JdbcTransaction;
 import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Isolation;
@@ -39,7 +42,8 @@ import ooo.klae.connex.backend.mappers.DataSubjectDisclosureMapper;
  * <p>Linked request writes reserve one routed tenant session before the control
  * transaction takes roots. One fair admission permit prevents reserved sessions
  * from exhausting the shared pool. The reserved session owns a non-auto-commit
- * connection but stays SQL-idle while a separate short session proves the person.
+ * connection obtained directly from the routed data source, independently of Spring-bound
+ * control resources. Preliminary person proof is nonlocking on that owned session.
  * The control callback then takes roots, locks the person on the reserved session,
  * and commits the control write before that tenant transaction rolls back.
  */
@@ -62,14 +66,14 @@ public class DataSubjectDisclosureReadTransaction {
             Function<Supplier<T>, T> controlTransaction,
             Supplier<T> work) {
         acquireLinkedMutationAdmission();
-        try (SqlSession session = sqlSessionFactory.openSession(false)) {
+        try (SqlSession session = openReservedSession()) {
             Connection connection = session.getConnection();
-            beginReservedTransaction(connection);
+            boolean autoCommit = beginReservedTransaction(connection);
             DataSubjectDisclosureMapper lockedMapper =
                 session.getMapper(DataSubjectDisclosureMapper.class);
             T result;
             try {
-                if (!dataSubjectDisclosureMapper.subjectPersonExists(workspaceId, personId)) {
+                if (!lockedMapper.subjectPersonExists(workspaceId, personId)) {
                     throw new BadRequestException(
                         "Subject person must exist in a workspace belonging to the organization");
                 }
@@ -83,19 +87,49 @@ public class DataSubjectDisclosureReadTransaction {
                     return work.get();
                 });
             } catch (RuntimeException | Error failure) {
-                rollbackReservedTransaction(connection, failure);
+                rollbackReservedTransaction(connection, autoCommit, failure);
                 throw failure;
             }
-            rollbackReservedTransaction(connection, null);
+            rollbackReservedTransaction(connection, autoCommit, null);
             return result;
         } finally {
             linkedMutationAdmission.release();
         }
     }
 
-    private static void beginReservedTransaction(Connection connection) {
+    /** Owns a routed connection so suspended control synchronization cannot supply the reservation. */
+    private SqlSession openReservedSession() {
+        var configuration = sqlSessionFactory.getConfiguration();
         try {
+            var transaction = new ReservedTransaction(configuration.getEnvironment().getDataSource().getConnection());
+            try {
+                return new DefaultSqlSession(configuration, configuration.newExecutor(transaction, ExecutorType.SIMPLE), false);
+            } catch (RuntimeException | Error failure) {
+                try {
+                    transaction.close();
+                } catch (SQLException cleanup) {
+                    failure.addSuppressed(cleanup);
+                }
+                throw failure;
+            }
+        } catch (SQLException exception) {
+            throw new ServiceUnavailableException("Data-subject request validation could not reserve a tenant transaction", exception);
+        }
+    }
+
+    /** Only successful explicit rollback may restore auto-commit; closing must never commit a failed reservation. */
+    private static final class ReservedTransaction extends JdbcTransaction {
+        private ReservedTransaction(Connection connection) {
+            super(connection);
+            skipSetAutoCommitOnClose = true;
+        }
+    }
+
+    private static boolean beginReservedTransaction(Connection connection) {
+        try {
+            boolean autoCommit = connection.getAutoCommit();
             connection.setAutoCommit(false);
+            return autoCommit;
         } catch (SQLException exception) {
             throw new ServiceUnavailableException(
                 "Data-subject request validation could not reserve a tenant transaction",
@@ -103,9 +137,14 @@ public class DataSubjectDisclosureReadTransaction {
         }
     }
 
-    private static void rollbackReservedTransaction(Connection connection, Throwable primary) {
+    /**
+     * Restores JDBC state only after rollback succeeds, before the owned session returns its
+     * connection to the pool. A cleanup failure must never commit an unrolled-back reservation.
+     */
+    private static void rollbackReservedTransaction(Connection connection, boolean autoCommit, Throwable primary) {
         try {
             connection.rollback();
+            connection.setAutoCommit(autoCommit);
         } catch (SQLException exception) {
             if (primary != null) {
                 primary.addSuppressed(exception);

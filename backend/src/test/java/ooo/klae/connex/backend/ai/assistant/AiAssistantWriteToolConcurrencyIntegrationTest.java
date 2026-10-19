@@ -41,6 +41,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import ooo.klae.connex.backend.ai.AiPrivacyMode;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatSession;
@@ -75,6 +76,7 @@ import ooo.klae.connex.backend.services.PersonService;
 import ooo.klae.connex.backend.services.RuleTriggerPublisher;
 import ooo.klae.connex.backend.services.TaskService;
 import ooo.klae.connex.backend.support.MySqlLockWaitProbe;
+import ooo.klae.connex.backend.support.TestEntityFixtures;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import tools.jackson.databind.ObjectMapper;
@@ -134,6 +136,7 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
         workspace.setName("Assistant write locks " + unique);
         workspace.setSlug("assistant-write-locks-" + unique);
         workspaceMapper.insert(workspace);
+        TestEntityFixtures.seedExistingWorkspacePrivacy(jdbcTemplate, workspace.getId());
 
         firstActor = user("assistant-lock-first-" + unique, "First Actor " + displaySuffix);
         secondActor = user("assistant-lock-second-" + unique, "Second Actor " + displaySuffix);
@@ -178,6 +181,7 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
                             + " WHERE wr.workspace_id = ?",
                     workspace.getId());
             jdbcTemplate.update("DELETE FROM workspace_role WHERE workspace_id = ?", workspace.getId());
+            TestEntityFixtures.deleteChatPrivacy(jdbcTemplate, workspace.getId());
             jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", workspace.getId());
         }
         if (firstActor != null) {
@@ -688,11 +692,14 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
         turn.setSessionId(session.getId());
         turn.setRequestedByUserId(actor.getId());
         turn.setStatus("running");
+        turn.setPrivacyGeneration(1L);
         chatMapper.insertTurn(turn);
         AiChatToolCall toolCall = toolCall(message, write);
         AiChatQueuedTurn queued = new AiChatQueuedTurn(
                 workspace.getId(), actor.getId(), session.getId(), turn.getId(),
-                message.getId(), message.getSeq(), expectedEpoch, true, List.of(), List.of());
+                message.getId(), message.getSeq(), expectedEpoch, true, List.of(), List.of(),
+                AiPrivacyMode.MASKED, false, AiChatQueryScope.none(),
+                new AiChatPrivacyToken(workspace.getId(), session.getId(), 1, null));
         return new ToolFixture(session.getId(), toolCall.getId(), queued);
     }
 

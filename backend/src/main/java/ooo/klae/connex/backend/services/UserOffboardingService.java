@@ -125,6 +125,9 @@ public class UserOffboardingService {
     private final ApiCredentialLifecycleService apiCredentialLifecycleService;
     private final OwnershipOfferWriter ownershipOfferWriter;
     private final OrganizationMapper ownershipOfferOrganizationMapper;
+    private final ooo.klae.connex.backend.ai.mission.AiAgentPrivacyService missionPrivacy;
+    private final ooo.klae.connex.backend.ai.mission.AiAgentDepartureMaintenanceService missionDeparture;
+    private final org.springframework.context.ApplicationEventPublisher missionEvents;
 
     /**
      * Refuses deletion while the user still owns authored content, mirroring
@@ -238,6 +241,7 @@ public class UserOffboardingService {
             throw new ResourceNotFoundException("Workspace not found");
         }
         if (workspaceMapper.lockAuthorizationMembership(workspaceId, userId) == null) {
+            missionDeparture.requireSettledBeforeFreshMembership(workspaceId, userId);
             ownershipOfferOrganizationMapper.lockByIdForShare(orgId);
             ownershipOfferWriter.invalidateDepartingMembershipLocked(orgId, workspaceId, userId);
             ownershipOfferWriter.detachDestinationLocked(orgId, workspaceId, userId);
@@ -355,6 +359,8 @@ public class UserOffboardingService {
         teamMapper.deleteMembershipsForUser(workspaceId, userId);
         teamMapper.clearManagerForUser(workspaceId, userId);
         apiCredentialLifecycleService.deleteForMembership(workspaceId, userId);
+        missionEvents.publishEvent(new ooo.klae.connex.backend.ai.mission.AiAgentDepartureMaintenanceService.Departure(
+                workspaceId, userId));
     }
 
     /**
@@ -367,7 +373,9 @@ public class UserOffboardingService {
      * record-comment authorship, creation, redaction, and resolution provenance, task assignment, uploader,
      * notification actor, report and campaign actors, rule principals,
      * consent/suppression actors, share grantors, and team managers).
-     * Statements are grouped deletes-then-nulls for readability except that affected team
+     * Every session containing the user's provenance is locked in workspace/id order before
+     * provider cleanup or provenance updates, including contributions to another member's session.
+     * Chat child writes retain those mutexes through domain mutations and mission privacy invalidation. Affected team
      * parents are locked in deterministic order before team seats are deleted and manager
      * references are cleared. Must run inside the caller's deletion transaction.
      * Surviving goal creators are cleared, while decisions and appended assignment history remain.
@@ -379,11 +387,17 @@ public class UserOffboardingService {
      * @param userId the account being deleted
      */
     public void eraseOrgDataReferences(int userId) {
+        eraseOrgDataReferences(userId, lockOrgDataReferences(userId));
+    }
+
+    /** Retains authority and chat roots before catalog provider cleanup can acquire domain roots. */
+    AccountNotificationLocks lockOrgDataReferences(int userId) {
         userMapper.lockById(userId);
         AccountNotificationLocks locks = snapshotAccountNotificationRecipients(userId);
         workflowOffboardingService.lockWorkspaceRoots(locks.workflowPlan());
         lockAccountNotificationRecipientMemberships(userId, locks);
-        eraseOrgDataReferences(userId, locks);
+        aiChatMapper.lockSessionsForUserErasureAnywhere(userId);
+        return locks;
     }
 
     AccountNotificationLocks snapshotAccountNotificationRecipients(int userId) {
@@ -402,6 +416,7 @@ public class UserOffboardingService {
         return locks.workflowPlan().workspaceIds();
     }
 
+    /** Erases references with the roots from {@link #lockOrgDataReferences(int)} retained by this transaction. */
     void eraseOrgDataReferences(int userId, AccountNotificationLocks locks) {
         departureApprovalGuard.assertCanErase(userId);
         workflowOffboardingService.offboard(userId, locks.workflowPlan());
@@ -413,6 +428,10 @@ public class UserOffboardingService {
         dealDuplicateReviewProofMapper.deleteForActorAnywhere(userId);
         duplicateReviewMapper.clearDismissedByAnywhere(userId);
         userDashboardMapper.deleteForUserAnywhere(userId);
+        aiChatMapper.clearSessionCreatorsAnywhere(userId);
+        aiChatMapper.clearMessageAuthorsAnywhere(userId);
+        aiChatMapper.clearToolCallExecutorsAnywhere(userId);
+        aiChatMapper.clearTurnRequestersAnywhere(userId);
         aiChatMapper.deleteParticipantsForUserAnywhere(userId);
         aiChatMapper.clearParticipantInvitersAnywhere(userId);
         aiBriefScheduleMapper.deleteForUserAnywhere(userId);
@@ -431,10 +450,6 @@ public class UserOffboardingService {
         personLifecyclePassMapper.clearOwnerAnywhere(userId);
         dealMapper.clearOwnershipAnywhere(userId);
         recordCreationTemplateMapper.clearUserReferencesAnywhere(userId);
-        aiChatMapper.clearSessionCreatorsAnywhere(userId);
-        aiChatMapper.clearMessageAuthorsAnywhere(userId);
-        aiChatMapper.clearToolCallExecutorsAnywhere(userId);
-        aiChatMapper.clearTurnRequestersAnywhere(userId);
         recordCommentMapper.clearAuthorsAnywhere(userId);
         recordCommentMapper.clearDeletersAnywhere(userId);
         recordCommentMapper.clearThreadCreatorsAnywhere(userId);
@@ -467,6 +482,7 @@ public class UserOffboardingService {
         documentApprovalMapper.findDepartureReferencesAnywhere(userId).forEach(approver ->
             documentApprovalMapper.deleteDepartingApproverAnywhere(
                 approver.getWorkspaceId(), approver.getId(), userId));
+        missionPrivacy.invalidateOwner(userId);
     }
 
     private void lockTeamReferences(List<Team> teams) {

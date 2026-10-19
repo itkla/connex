@@ -37,8 +37,10 @@ import org.mockito.ArgumentCaptor;
 
 import jakarta.validation.Validation;
 import jakarta.validation.ValidatorFactory;
+import ooo.klae.connex.backend.ai.AiPrivacyMode;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.beans.Activity;
+import ooo.klae.connex.backend.beans.AiAgentPrivacyBarrier;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.AiChatTurn;
@@ -121,7 +123,9 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
     private static final Clock CLOCK = Clock.fixed(
             Instant.parse("2026-03-06T15:00:00Z"), ZoneOffset.UTC);
     private static final AiChatQueuedTurn TURN = new AiChatQueuedTurn(
-            7, 11, 13, 17, 19, 1, 23L, true, List.of(), List.of());
+            7, 11, 13, 17, 19, 1, 23L, true, List.of(), List.of(),
+            AiPrivacyMode.MASKED, false, AiChatQueryScope.none(),
+            new AiChatPrivacyToken(7, 13, 1, null));
     private static final String TASK_ARGUMENTS = "{\"tool\":\"create_task\",\"tier\":\"auto\","
             + "\"restrictionEpoch\":23,\"target\":{\"kind\":\"person\",\"id\":31},"
             + "\"request\":{\"handle\":\"r1\",\"description\":\"Prepare agenda\","
@@ -276,9 +280,16 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 CLOCK, tagService);
         AiChatSession session = new AiChatSession();
         session.setId(TURN.sessionId());
+        session.setWorkspaceId(TURN.workspaceId());
         session.setCreatedByUserId(TURN.userId());
         session.setVisibility("private");
         session.setStatus("active");
+        AiAgentPrivacyBarrier barrier = new AiAgentPrivacyBarrier();
+        barrier.setWorkspaceId(TURN.workspaceId());
+        barrier.setGeneration(1);
+        when(chatMapper.getPrivacyBarrier(TURN.workspaceId())).thenReturn(barrier);
+        when(chatMapper.lockPrivacyBarrierForShare(TURN.workspaceId())).thenReturn(barrier);
+        when(chatMapper.getPrivacySession(TURN.workspaceId(), TURN.sessionId())).thenReturn(session);
         AiChatTurn turn = new AiChatTurn();
         turn.setId(TURN.turnId());
         turn.setRequestedByUserId(TURN.userId());

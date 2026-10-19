@@ -122,6 +122,9 @@ class UserOffboardingOrderTest {
 
     @Mock private OwnershipOfferWriter ownershipOfferWriter;
     @Mock private OrganizationMapper ownershipOfferOrganizationMapper;
+    @Mock private ooo.klae.connex.backend.ai.mission.AiAgentPrivacyService missionPrivacy;
+    @Mock private ooo.klae.connex.backend.ai.mission.AiAgentDepartureMaintenanceService missionDeparture;
+    @Mock private org.springframework.context.ApplicationEventPublisher missionEvents;
     @InjectMocks private UserOffboardingService service;
 
     @org.junit.jupiter.api.BeforeEach
@@ -320,9 +323,10 @@ class UserOffboardingOrderTest {
             dealDuplicateReviewProofMapper, duplicateReviewMapper,
             aiChatMapper, aiBriefScheduleMapper, aiWatchMapper,
             stateVersionService, companyMapper,
-            personMapper, dealMapper, recordCreationTemplateMapper, workflowOffboardingService, suppressionMapper,
+            personMapper, personLifecyclePassMapper, dealMapper, recordCreationTemplateMapper,
+            workflowOffboardingService, suppressionMapper,
             relationshipSignalMapper, recordCommentMapper, sequenceMapper, teamMapper,
-            departureApprovalGuard, goalMapper, approvalPolicyMapper, documentApprovalMapper);
+            departureApprovalGuard, goalMapper, approvalPolicyMapper, documentApprovalMapper, missionPrivacy);
         order.verify(userMapper).lockById(9);
         order.verify(notificationMapper).findRecipientIdsByActor(9);
         order.verify(workflowOffboardingService).discover(9);
@@ -330,6 +334,7 @@ class UserOffboardingOrderTest {
         order.verify(notificationMapper).lockRecipientMemberships(3);
         order.verify(notificationMapper).lockRecipientMemberships(9);
         order.verify(notificationMapper).lockRecipientMemberships(11);
+        order.verify(aiChatMapper).lockSessionsForUserErasureAnywhere(9);
         order.verify(departureApprovalGuard).assertCanErase(9);
         order.verify(workflowOffboardingService).offboard(9, plan);
         order.verify(notificationMapper).lockRecipientIdsByActor(9);
@@ -338,6 +343,10 @@ class UserOffboardingOrderTest {
         order.verify(savedViewMapper).deleteForUserAnywhere(9);
         order.verify(dealDuplicateReviewProofMapper).deleteForActorAnywhere(9);
         order.verify(duplicateReviewMapper).clearDismissedByAnywhere(9);
+        order.verify(aiChatMapper).clearSessionCreatorsAnywhere(9);
+        order.verify(aiChatMapper).clearMessageAuthorsAnywhere(9);
+        order.verify(aiChatMapper).clearToolCallExecutorsAnywhere(9);
+        order.verify(aiChatMapper).clearTurnRequestersAnywhere(9);
         order.verify(aiChatMapper).deleteParticipantsForUserAnywhere(9);
         order.verify(aiChatMapper).clearParticipantInvitersAnywhere(9);
         order.verify(aiBriefScheduleMapper).deleteForUserAnywhere(9);
@@ -351,12 +360,9 @@ class UserOffboardingOrderTest {
         order.verify(stateVersionService).markChanged(11);
         order.verify(companyMapper).clearOwnershipAnywhere(9);
         order.verify(personMapper).clearOwnershipAnywhere(9);
+        order.verify(personLifecyclePassMapper).clearOwnerAnywhere(9);
         order.verify(dealMapper).clearOwnershipAnywhere(9);
         order.verify(recordCreationTemplateMapper).clearUserReferencesAnywhere(9);
-        order.verify(aiChatMapper).clearSessionCreatorsAnywhere(9);
-        order.verify(aiChatMapper).clearMessageAuthorsAnywhere(9);
-        order.verify(aiChatMapper).clearToolCallExecutorsAnywhere(9);
-        order.verify(aiChatMapper).clearTurnRequestersAnywhere(9);
         order.verify(recordCommentMapper).clearAuthorsAnywhere(9);
         order.verify(recordCommentMapper).clearDeletersAnywhere(9);
         order.verify(recordCommentMapper).clearThreadCreatorsAnywhere(9);
@@ -374,6 +380,7 @@ class UserOffboardingOrderTest {
         order.verify(goalMapper).findDepartureReferencesAnywhere(9);
         order.verify(approvalPolicyMapper).findDepartureReferencesAnywhere(9);
         order.verify(documentApprovalMapper).findDepartureReferencesAnywhere(9);
+        order.verify(missionPrivacy).invalidateOwner(9);
     }
 
     private Team team(int workspaceId, int id) {

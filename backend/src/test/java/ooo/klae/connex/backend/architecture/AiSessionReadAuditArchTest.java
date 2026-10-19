@@ -49,7 +49,7 @@ class AiSessionReadAuditArchTest {
             "startTurn",
             new UnitCoverage(
                 "src/test/java/ooo/klae/connex/backend/ai/assistant/AiChatTurnPersistenceServiceTest.java",
-                "queueingATurnRecordsTheAgentLoopReadBeforeTakingAnyLock"));
+                "queueingATurnRetainsParentsBeforeLocksAndAppendsAfterFences"));
 
     private static final Set<String> DISCLOSING_RETAINED = Set.of(
             "pageRetained",
@@ -100,8 +100,7 @@ class AiSessionReadAuditArchTest {
             Map.of("requireAccessibleSession", "sessionReadAudit.recordAccessible("),
             "ooo/klae/connex/backend/ai/assistant/AiChatTurnPersistenceService.java",
             Map.of(
-                    "queue#AiChatQueryScope scope", "auditAgentLoopRead(",
-                    "auditAgentLoopRead", "sessionReadAudit.recordAccessible("));
+                    "queue#AiChatQueryScope scope", "sessionReadAudit.recordAccessible("));
 
     @Test
     void everyAssistantHandlerHasExactlyOneDisclosureClassification() {
@@ -195,11 +194,15 @@ class AiSessionReadAuditArchTest {
     private static void assertPositiveAuditCoverage(String source, UnitCoverage coverage) {
         String body = methodBody(source, coverage.methodName(), "");
         assertTrue(body.contains("service.queue("), coverage.methodName());
-        assertTrue(body.contains("inOrder(sessionReadAudit, workspaceService)"), coverage.methodName());
+        assertTrue(body.contains("inOrder(sessionReadAudit, workspaceService, restrictionEpoch, chatMapper)"),
+            coverage.methodName());
+        int parents = body.indexOf("ordered.verify(sessionReadAudit).retainTranscriptAuditParents(");
+        int member = body.indexOf("ordered.verify(workspaceService).lockAndRequireMember(");
+        int restriction = body.indexOf("ordered.verify(restrictionEpoch).retainReadFenceUntilTransactionCompletionIfCurrent(");
+        int privacy = body.indexOf("ordered.verify(chatMapper).lockPrivacyBarrierForShare(");
         int audit = body.indexOf("ordered.verify(sessionReadAudit).recordAccessible(");
-        int lock = body.indexOf("ordered.verify(workspaceService).lockAndRequireMember(");
-        assertTrue(audit >= 0 && lock > audit,
-            coverage.methodName() + " must positively verify the audit before the membership lock");
+        assertTrue(parents >= 0 && member > parents && restriction > member && privacy > restriction && audit > privacy,
+            coverage.methodName() + " must verify audit parents before membership and audit append after both fences");
     }
 
     private record UnitCoverage(String sourcePath, String methodName) {

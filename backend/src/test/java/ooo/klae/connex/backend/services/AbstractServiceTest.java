@@ -162,6 +162,7 @@ public abstract class AbstractServiceTest {
             created.setName("Test Workspace");
             created.setSlug("default");
             workspaceMapper.insert(created);
+            TestEntityFixtures.seedExistingWorkspacePrivacy(approvalFixtureJdbc, created.getId());
             Workspace reloaded = workspaceMapper.getDefaultWorkspace();
             return reloaded == null ? created : reloaded;
         }), "default workspace");

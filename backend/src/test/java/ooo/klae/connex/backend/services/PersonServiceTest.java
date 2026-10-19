@@ -17,7 +17,9 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -47,6 +49,7 @@ import ooo.klae.connex.backend.mappers.AiOutputCacheMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.storage.UploadSource;
+import ooo.klae.connex.backend.support.TestEntityFixtures;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -579,11 +582,16 @@ class PersonServiceTest extends AbstractServiceTest {
             workspace.getId(), "deal.risk_rationale:ja", subjectDeal.getId(), 0));
         assertNotNull(aiOutputCacheMapper.getBySubject(workspace.getId(), "deal.brief:en", otherDeal.getId(), 0));
         assertNull(aiOutputCacheMapper.getBySubject(workspace.getId(), "report.narrative:v2:en", 4242, 0));
-        ArgumentCaptor<List<Integer>> bumpedWorkspaceIds = ArgumentCaptor.captor();
-        verify(aiRestrictionEpoch).bumpAll(bumpedWorkspaceIds.capture());
+        ArgumentCaptor<List<Integer>> fencedWorkspaceIds = ArgumentCaptor.captor();
+        var epochOrder = inOrder(aiRestrictionEpoch);
+        epochOrder.verify(aiRestrictionEpoch).retainWriteFencesUntilTransactionCompletion(fencedWorkspaceIds.capture());
         assertEquals(
-            Set.of(workspace.getId(), grantee.getId()),
-            Set.copyOf(bumpedWorkspaceIds.getValue()));
+            List.of(workspace.getId(), grantee.getId()).stream().sorted().toList(),
+            fencedWorkspaceIds.getValue());
+        for (int workspaceId : fencedWorkspaceIds.getValue()) {
+            epochOrder.verify(aiRestrictionEpoch).bump(workspaceId);
+        }
+        verifyNoMoreInteractions(aiRestrictionEpoch);
 
         String changes = jdbcTemplate.queryForObject(
             "SELECT changes FROM audit_log WHERE workspace_id = ? AND entity_type = 'person' "
@@ -962,6 +970,7 @@ class PersonServiceTest extends AbstractServiceTest {
         other.setName("Other Workspace");
         other.setSlug("other-" + unique());
         workspaceMapper.insert(other);
+        TestEntityFixtures.seedExistingWorkspacePrivacy(jdbcTemplate, other.getId());
         return other;
     }
 
@@ -971,6 +980,7 @@ class PersonServiceTest extends AbstractServiceTest {
         other.setSlug("other-" + unique());
         other.setOrgId(workspaceMapper.getOrgId(workspace.getId()));
         workspaceMapper.insert(other);
+        TestEntityFixtures.seedExistingWorkspacePrivacy(jdbcTemplate, other.getId());
         return other;
     }
 

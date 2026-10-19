@@ -617,11 +617,12 @@ describe('the provider guards the Retry callback', () => {
         try {
             const retainedRetry = drawer().onRetryTurn;
             const stale = Promise.withResolvers<AiChatTurn>();
-            vi.mocked(getAiChatTurn).mockReturnValueOnce(stale.promise).mockResolvedValue(executedTurn);
+            vi.mocked(getAiChatTurn).mockReturnValue(stale.promise);
             await reconnect();
             vi.mocked(getAiChatSessions).mockReturnValue(sessions.promise);
             await act(async () => { await drawer().onToolAction(proposal.id, 'approve'); });
             expect(approveAiAssistantToolCall).toHaveBeenCalledOnce();
+            vi.mocked(getAiChatTurn).mockResolvedValue(executedTurn);
             await act(async () => { stale.resolve(proposedTurn); });
 
             expect(drawer().turnWriteState).toBe('uncertain');
@@ -831,6 +832,32 @@ describe('the provider guards the Retry callback', () => {
             await act(async () => { root.unmount(); });
         }
     });
+
+    it.each([403, 404, 'privacy_invalidated'] as const)(
+        'withdraws retained content when Retry discovers %s terminal evidence', async (outcome) => {
+            const root = await mountFailedTurn();
+            try {
+                expect(drawer().canRetryTurn).toBe(true);
+                expect(drawer().messages).not.toEqual([]);
+                vi.mocked(getAiChatSession).mockResolvedValue({
+                    ...DETAIL, messages: { items: [], total: 0 }, activeTurn: null,
+                });
+                if (outcome === 'privacy_invalidated') {
+                    vi.mocked(getAiChatTurn).mockResolvedValue({
+                        ...TURN, status: 'cancelled', terminalReason: outcome, partialContent: '', toolCalls: [],
+                    });
+                } else {
+                    vi.mocked(getAiChatTurn).mockRejectedValue(new ApiError('Turn removed', outcome));
+                }
+                await act(async () => { drawer().onRetryTurn(); });
+                expect(drawer().messages).toEqual([]);
+                expect(drawer().streamStore.getSnapshot()).toBeNull();
+                expect(drawer().canRetryTurn).toBe(false);
+                expect(startAiChatTurn).not.toHaveBeenCalled();
+            } finally {
+                await act(async () => { root.unmount(); });
+            }
+        });
 
     it('refuses retry after reconnect reveals another tab completed a newer turn with a write', async () => {
         const root = await mountFailedTurn();

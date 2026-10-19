@@ -13,7 +13,9 @@ usernames, and emails are deterministic and globally unique. Rerunning the same 
 already-seeded schema therefore fails on those unique values by design. Drop and recreate the
 disposable schema, or select a new schema name, before another run.
 
-Each workspace commits in its own transaction. If a multi-workspace run fails after an earlier
+Each workspace commits in its own transaction. Its workspace-provisioned event initializes
+durable AI privacy authority afterward through the same placement-aware path as self-service
+provisioning; this is one workspace lifecycle event, not per-row automation traffic. If a multi-workspace run fails after an earlier
 workspace committed, discard and recreate the schema rather than trying to resume it.
 
 ## Profiles and deterministic inputs

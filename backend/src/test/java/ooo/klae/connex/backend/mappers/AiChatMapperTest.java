@@ -34,6 +34,35 @@ class AiChatMapperTest extends AbstractMapperTest {
     @Autowired private org.mybatis.spring.SqlSessionTemplate sqlSession;
 
     @Test
+    void accountErasureLocksTheOrderedUnionOfEveryProvenanceSource() {
+        User erased = newUser();
+        User retained = newUser();
+        Workspace laterWorkspace = newWorkspace();
+        AiChatSession later = session(laterWorkspace, erased, "Later workspace", "private");
+        AiChatSession owned = session(workspace, erased, "Owned", "private");
+        AiChatSession authored = session(workspace, retained, "Shared message", "shared");
+        message(authored, erased, 1, "Contribution");
+        AiChatSession executed = session(workspace, retained, "Shared tool", "shared");
+        AiChatMessage retainedMessage = message(executed, retained, 1, "Retained message");
+        jdbcTemplate.update(
+            "INSERT INTO ai_chat_tool_call (workspace_id, message_id, tool_name, status, executed_by_user_id) "
+                + "VALUES (?, ?, 'erasure_fixture', 'executed', ?)",
+            workspace.getId(), retainedMessage.getId(), erased.getId());
+        AiChatSession requested = session(workspace, retained, "Shared turn", "shared");
+        jdbcTemplate.update(
+            "INSERT INTO ai_chat_turn (workspace_id, session_id, requested_by_user_id, status) "
+                + "VALUES (?, ?, ?, 'resolved')",
+            workspace.getId(), requested.getId(), erased.getId());
+        message(owned, erased, 1, "Overlapping provenance");
+        AiChatSession unrelated = session(workspace, retained, "Unrelated", "shared");
+        message(unrelated, retained, 1, "Retained contribution");
+
+        assertEquals(List.of(owned.getId(), authored.getId(), executed.getId(), requested.getId(), later.getId()),
+            chatMapper.lockSessionsForUserErasureAnywhere(erased.getId()));
+        assertTrue(chatMapper.lockSessionsForUserErasureAnywhere(newUser().getId()).isEmpty());
+    }
+
+    @Test
     void sessionAndMessageColumnsRoundTrip() {
         User owner = newUser();
         AiChatSession session = session(workspace, owner, "Quarterly planning", "private");

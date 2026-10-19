@@ -32,6 +32,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import ooo.klae.connex.backend.ai.AiPrivacyMode;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatSession;
@@ -70,6 +71,7 @@ import ooo.klae.connex.backend.recordcreation.RecordCreationDefaultKind;
 import ooo.klae.connex.backend.recordcreation.RecordCreationRecordType;
 import ooo.klae.connex.backend.services.CustomFieldDefinitionService;
 import ooo.klae.connex.backend.services.RecordCreationTemplateService;
+import ooo.klae.connex.backend.support.TestEntityFixtures;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import tools.jackson.databind.ObjectMapper;
 
@@ -140,6 +142,7 @@ abstract class AbstractAiProposalExpiryIntegrationTest {
         workspace.setName("Expiry workspace " + suffix);
         workspace.setSlug("expiry-" + suffix);
         workspaces.insert(workspace);
+        TestEntityFixtures.seedExistingWorkspacePrivacy(jdbc, workspace.getId());
         actor = member("expiry-actor-" + suffix, "Expiry Actor");
         other = member("expiry-other-" + suffix, "Expiry Owner");
         authenticate(actor);
@@ -350,11 +353,14 @@ abstract class AbstractAiProposalExpiryIntegrationTest {
         message.setAuthorUserId(actor.getId());
         message.setContent("Please review");
         chats.insertMessage(message);
+        jdbc.update("UPDATE ai_chat_session SET message_seq_high_water = GREATEST(message_seq_high_water, ?)"
+                + " WHERE workspace_id = ? AND id = ?", sequence, workspace.getId(), sessionId);
         AiChatTurn turn = new AiChatTurn();
         turn.setWorkspaceId(workspace.getId());
         turn.setSessionId(sessionId);
         turn.setRequestedByUserId(actor.getId());
         turn.setStatus("running");
+        turn.setPrivacyGeneration(1L);
         chats.insertTurn(turn);
         AiChatToolCall call = new AiChatToolCall();
         call.setWorkspaceId(workspace.getId());
@@ -369,7 +375,8 @@ abstract class AbstractAiProposalExpiryIntegrationTest {
                 dbTime(createdAt), dbTime(createdAt), workspace.getId(), call.getId());
         return new Proposal(sessionId, call.getId(), new AiChatQueuedTurn(workspace.getId(), actor.getId(),
                 sessionId, turn.getId(), message.getId(), sequence, restrictionEpoch.current(workspace.getId()),
-                true, List.of(), List.of()), write.tier() == AiAssistantToolCatalog.ToolTier.AUTO);
+                true, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(),
+                new AiChatPrivacyToken(workspace.getId(), sessionId, 1, null)), write.tier() == AiAssistantToolCatalog.ToolTier.AUTO);
     }
 
     void execute(Proposal proposal) {
@@ -456,6 +463,7 @@ abstract class AbstractAiProposalExpiryIntegrationTest {
         }
         jdbc.update("DELETE FROM workspace_role_permission WHERE workspace_role_id IN (SELECT id FROM workspace_role WHERE workspace_id = ?)", workspace.getId());
         jdbc.update("DELETE FROM workspace_role WHERE workspace_id = ?", workspace.getId());
+        TestEntityFixtures.deleteChatPrivacy(jdbc, workspace.getId());
         jdbc.update("DELETE FROM workspace WHERE id = ?", workspace.getId());
         if (actor != null) {
             jdbc.update("DELETE FROM app_user WHERE id = ?", actor.getId());

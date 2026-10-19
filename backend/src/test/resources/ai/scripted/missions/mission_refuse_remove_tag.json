@@ -1,0 +1,25 @@
+{
+  "id": "mission_refuse_remove_tag",
+  "selector": "connex_script_mission_refuse_remove_tag",
+  "capabilityClass": "scripted-native",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "remove_tag",
+        "arguments": "{\"handle\":\"r1\",\"tag\":\"reviewed\"}"
+      }
+    },
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "onRepair": true,
+      "emit": {
+        "kind": "failure",
+        "failureKind": "transport"
+      }
+    }
+  ]
+}
