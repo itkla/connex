@@ -81,8 +81,7 @@ server.listen(0, '127.0.0.1', async () => {
     if (address === null || typeof address === 'string') throw new Error('No capture app address');
     const baseURL = `http://127.0.0.1:${address.port}`;
     process.env.API_URL = baseURL;
-    const dev = process.env.NODE_ENV === 'development';
-    const app = next({ dev, hostname: '127.0.0.1', port: address.port, httpServer: server });
+    const app = next({ dev: false, hostname: '127.0.0.1', port: address.port, httpServer: server });
     const handle = app.getRequestHandler();
     server.on('request', (request, response) => {
         if (request.url?.startsWith('/api/')) {

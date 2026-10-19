@@ -427,7 +427,7 @@ export async function expectChartsSettled(content: Locator, timeout?: number): P
                 const bounds = surface.getBoundingClientRect();
                 if (bounds.width === 0 || bounds.height === 0) return null;
                 const marks = surface.querySelectorAll(
-                    'path.recharts-area-area, path.recharts-line-curve, .recharts-line-dots circle, '
+                    'path.recharts-area-area, path.recharts-area-curve, path.recharts-line-curve, .recharts-line-dots circle, '
                     + '.recharts-bar-rectangles path, .recharts-bar-rectangles rect, .recharts-pie path',
                 );
                 const painted = Array.from(marks).some((mark) => {
@@ -437,7 +437,9 @@ export async function expectChartsSettled(content: Locator, timeout?: number): P
                         return false;
                     }
                     return (bounds.width > 0 && bounds.height > 0)
-                        || (mark.matches('.recharts-line-curve') && style.stroke !== 'none'
+                        || (mark.matches('.recharts-line-curve, .recharts-area-curve')
+                            && (mark.getAttribute('d')?.trim().length ?? 0) > 0 && style.stroke !== 'none'
+                            && Number(style.strokeOpacity) > 0
                             && Number.parseFloat(style.strokeWidth) > 0 && (bounds.width > 0 || bounds.height > 0));
                 });
                 if (!painted) return null;

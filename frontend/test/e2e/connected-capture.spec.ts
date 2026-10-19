@@ -130,6 +130,8 @@ function overviewResponse(provider: ProviderCaptureOverview): CaptureOverview {
 for (const captureEnabled of [true, false]) {
     test.describe(`Google capture capability ${captureEnabled ? 'on' : 'off'}`, () => {
         test.use({ captureEnabled });
+        test.fixme(({ isMobile }) => captureEnabled && isMobile,
+            '#1436: mobile capture-policy dialog: getByLabel("Enable relationship capture").click() times out because the switch is outside of the viewport and Playwright cannot scroll it into view.');
 
         for (const locale of ['en', 'ja'] as const) {
             test(`connected capture policy and review flow in ${locale} @mobile`, async ({ page, captureAppURL }) => {

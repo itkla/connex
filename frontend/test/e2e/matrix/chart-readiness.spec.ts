@@ -10,6 +10,8 @@ for (const [name, series] of [
     ['zero-height bar', '<g class="recharts-bar-rectangles"><rect width="30" height="0" /></g>'],
     ['empty dot group', '<g class="recharts-line-dots"></g>'],
     ['axes without series', '<path d="M0 0L50 50" />'],
+    ['empty area curve', '<path class="recharts-area-curve" d="" stroke="black" />'],
+    ['unstroked flat area', '<path class="recharts-area-curve" d="M0 50L50 50" fill="none" />'],
 ] as const) {
     test(`chart readiness rejects ${name}`, async ({ page }) => {
         await page.setContent(`<main><div class="recharts-responsive-container" style="width:100px;height:100px">
@@ -25,6 +27,10 @@ for (const [name, series] of [
     ['bar path', '<g class="recharts-bar-rectangles"><path d="M0 0L50 0L50 50L0 50Z" /></g>'],
     ['bar rect', '<g class="recharts-bar-rectangles"><rect width="30" height="50" /></g>'],
     ['flat line', '<path class="recharts-line-curve" d="M0 50L50 50" stroke="black" />'],
+    ['flat area', `<g class="recharts-area">
+        <path class="recharts-area-area" d="M0 50L50 50L50 50L0 50Z" />
+        <path class="recharts-area-curve" d="M0 50L50 50" fill="none" stroke="black" />
+    </g>`],
     ['line dot', '<g class="recharts-line-dots"><circle cx="30" cy="30" r="3" /></g>'],
 ] as const) {
     test(`chart readiness accepts a painted ${name}`, async ({ page }) => {

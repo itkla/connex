@@ -7,16 +7,18 @@ import { test as base } from '@playwright/test';
 /** Runs the shipped server-rendered capture surface against a capability-controlled stub API. */
 export const test = base.extend<{ captureEnabled: boolean }, { captureAppURL: string }>({
     captureEnabled: [true, { option: true }],
-    captureAppURL: [async ({}, provide, workerInfo) => {
+    captureAppURL: [async ({}, provide) => {
         const directory = path.resolve(__dirname, '../../..');
         const distDir = process.env.NEXT_DIST_DIR ?? '.next';
-        const dev = !existsSync(path.join(directory, distDir, 'BUILD_ID'));
+        if (!existsSync(path.join(directory, distDir, 'BUILD_ID'))) {
+            throw new Error(`Connected-capture e2e tests require a production frontend build (${distDir}/BUILD_ID missing). Run pnpm build in frontend/ first.`);
+        }
         const child = spawn(process.execPath, ['--experimental-strip-types', path.join(__dirname, 'capture-app.ts')], {
             cwd: directory,
             env: {
                 ...process.env,
-                NODE_ENV: dev ? 'development' : 'production',
-                NEXT_DIST_DIR: dev ? `.next-capture-e2e-${workerInfo.parallelIndex}` : distDir,
+                NODE_ENV: 'production',
+                NEXT_DIST_DIR: distDir,
             },
             stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
         });

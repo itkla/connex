@@ -37,10 +37,11 @@ Useful selections: `playwright test --project=mobile-chromium` (phone viewport o
 `connected-capture.spec.ts` can run without the backend or auth bootstrap. Its test-only fixture
 starts the real Next.js app against a stub API; a per-test `e2e_capture` cookie switches the
 server-rendered capability on or off. Browser route mocks own the capture responses and validate
-mutation bodies. The fixture uses the existing production build when available, otherwise an
-isolated `.next-capture-e2e-*` development output directory.
+mutation bodies. The fixture requires a production frontend build and fails before starting Next.js
+when `BUILD_ID` is missing.
 
 ```bash
+pnpm build
 pnpm exec playwright test connected-capture.spec.ts --no-deps
 ```
 
