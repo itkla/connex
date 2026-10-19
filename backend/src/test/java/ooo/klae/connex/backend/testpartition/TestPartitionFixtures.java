@@ -43,6 +43,21 @@ abstract class TestPartitionFixtures {
         }
     }
 
+    static class AnnotationTypeReference {
+        Class<ComposedTest> annotationType() {
+            return ComposedTest.class;
+        }
+    }
+
+    static class AnnotationField {
+        ComposedTest annotation;
+    }
+
+    static class AnnotationParameter {
+        void accept(ComposedTest annotation) {
+        }
+    }
+
     static class StaticOnly {
         @Test
         void independent() {

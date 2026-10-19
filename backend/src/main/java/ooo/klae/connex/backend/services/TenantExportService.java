@@ -83,7 +83,7 @@ public class TenantExportService {
     private final Clock clock;
     private final LongSupplier nanoTime;
     private final LongConsumer admissionWait;
-    private final ScheduledThreadPoolExecutor deadlineExecutor = deadlineExecutor();
+    private final ScheduledThreadPoolExecutor deadlineExecutor;
     private final ThreadPoolExecutor cancellationExecutor = cancellationExecutor();
 
     /** Constructs the export service with the system monotonic clock and admission wait. */
@@ -113,7 +113,8 @@ public class TenantExportService {
             objectMapper,
             clock,
             System::nanoTime,
-            LockSupport::parkNanos);
+            LockSupport::parkNanos,
+            deadlineExecutor());
     }
 
     TenantExportService(
@@ -129,7 +130,8 @@ public class TenantExportService {
             ObjectMapper objectMapper,
             Clock clock,
             LongSupplier nanoTime,
-            LongConsumer admissionWait) {
+            LongConsumer admissionWait,
+            ScheduledThreadPoolExecutor deadlineExecutor) {
         this.orgMemberService = orgMemberService;
         this.sessionSecurityService = sessionSecurityService;
         this.tenantWorkScope = tenantWorkScope;
@@ -143,6 +145,7 @@ public class TenantExportService {
         this.clock = clock;
         this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
         this.admissionWait = Objects.requireNonNull(admissionWait, "admissionWait");
+        this.deadlineExecutor = Objects.requireNonNull(deadlineExecutor, "deadlineExecutor");
     }
 
     /**

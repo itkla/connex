@@ -229,6 +229,10 @@ tasks.register('verifyTestPartition') {
 			'Lorg/junit/jupiter/api/RepeatedTest;', 'Lorg/junit/jupiter/api/TestFactory;',
 			'Lorg/junit/jupiter/api/TestTemplate;', 'Lorg/junit/jupiter/api/Nested;'
 		]
+		def runtimeAnnotations = { element ->
+			element.findAttribute(java.lang.classfile.Attributes.runtimeVisibleAnnotations())
+				.orElse(null)?.annotations()?.collect { it.className().stringValue() } ?: []
+		}
 		def compiledClasses = [:]
 		def classNamesByFile = [:]
 		sourceSets.test.output.classesDirs.asFileTree.matching { include '**/*.class' }.each { file ->
@@ -240,7 +244,8 @@ tasks.register('verifyTestPartition') {
 			compiledClasses[name] = [
 				superclass: model.superclass().orElse(null)?.asInternalName(),
 				interfaces: model.interfaces().collect { it.asInternalName() },
-				constants: new String(bytes, java.nio.charset.StandardCharsets.ISO_8859_1),
+				annotations: runtimeAnnotations(model),
+				methodAnnotations: model.methods().collectMany { runtimeAnnotations(it) },
 				annotation: model.flags().has(java.lang.reflect.AccessFlag.ANNOTATION),
 				concrete: !model.flags().has(java.lang.reflect.AccessFlag.ABSTRACT),
 				enclosing: inner?.outerClass()?.orElse(null)?.asInternalName(),
@@ -254,12 +259,12 @@ tasks.register('verifyTestPartition') {
 			do {
 				composed = inventory.findAll { name, model ->
 					model.annotation && !testAnnotations.contains('L' + name + ';') &&
-						testAnnotations.any { model.constants.contains(it) }
+						model.annotations.any { testAnnotations.contains(it) }
 				}.keySet().collect { 'L' + it + ';' }
 				testAnnotations.addAll(composed)
 			} while (!composed.empty)
 			def carriers = inventory.findAll { name, model ->
-				testAnnotations.any { model.constants.contains(it) }
+				(model.annotations + model.methodAnnotations).any { testAnnotations.contains(it) }
 			}.keySet().toSet()
 			def inherited
 			do {
@@ -341,7 +346,7 @@ tasks.register('verifyTestPartition') {
 			throw new GradleException("Invalid compiled test partition: missing=${problems.missing}, " +
 				"overlapping=${problems.overlapping}, empty=${problems.empty}")
 		}
-		logger.lifecycle('Compiled partition fixtures: composed, static, inherited, inner, missing, overlapping and empty checks passed')
+		logger.lifecycle('Compiled partition fixtures: composed, static, inherited, inner, annotation references, missing, overlapping and empty checks passed')
 	}
 }
 

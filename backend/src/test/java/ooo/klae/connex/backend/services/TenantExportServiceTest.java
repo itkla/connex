@@ -42,12 +42,13 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.concurrent.locks.LockSupport;
 import java.util.function.LongConsumer;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
@@ -111,12 +112,26 @@ class TenantExportServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = createService(System::nanoTime, LockSupport::parkNanos);
+        service = new TenantExportService(
+            orgMemberService,
+            sessionSecurityService,
+            tenantWorkScope,
+            controlOperations,
+            lifecycleAccess,
+            snapshotTransaction,
+            managedObjectService,
+            auditService,
+            properties,
+            objectMapper,
+            Clock.fixed(Instant.parse("2026-07-27T12:00:00Z"), ZoneOffset.UTC));
         lenient().doAnswer(invocation -> invocation.<Supplier<?>>getArgument(0).get())
             .when(tenantWorkScope).unrouted(any());
     }
 
-    private TenantExportService createService(LongSupplier nanoTime, LongConsumer admissionWait) {
+    private TenantExportService createService(
+            LongSupplier nanoTime,
+            LongConsumer admissionWait,
+            ScheduledThreadPoolExecutor deadlineExecutor) {
         return new TenantExportService(
             orgMemberService,
             sessionSecurityService,
@@ -130,7 +145,8 @@ class TenantExportServiceTest {
             objectMapper,
             Clock.fixed(Instant.parse("2026-07-27T12:00:00Z"), ZoneOffset.UTC),
             nanoTime,
-            admissionWait);
+            admissionWait,
+            deadlineExecutor);
     }
 
     @AfterEach
@@ -544,11 +560,17 @@ class TenantExportServiceTest {
             throws Exception {
         AtomicLong nanoTime = new AtomicLong();
         List<Duration> waits = new ArrayList<>();
+        ScheduledThreadPoolExecutor deadlineExecutor = mock(ScheduledThreadPoolExecutor.class);
+        ScheduledFuture<?> deadlineTask = mock(ScheduledFuture.class);
+        doAnswer(invocation -> deadlineTask).when(deadlineExecutor).schedule(
+            any(Runnable.class),
+            eq(properties.getExportTimeout().toNanos()),
+            eq(TimeUnit.NANOSECONDS));
         service.shutdownDeadlineExecutor();
         service = createService(nanoTime::get, nanos -> {
             waits.add(Duration.ofNanos(nanos));
             nanoTime.addAndGet(nanos);
-        });
+        }, deadlineExecutor);
         properties.setExportObjectReadTimeout(Duration.ofMillis(45));
         stubStreamingRoute();
         ActiveObjectReference reference = reference("retry.pdf", 1);
@@ -611,6 +633,11 @@ class TenantExportServiceTest {
                 .stream().map(Duration::ofMillis).toList(),
             waits);
         assertEquals(Duration.ofMillis(admissionSucceeds ? 20 : 45).toNanos(), nanoTime.get());
+        verify(deadlineExecutor).schedule(
+            any(Runnable.class),
+            eq(properties.getExportTimeout().toNanos()),
+            eq(TimeUnit.NANOSECONDS));
+        verify(deadlineTask).cancel(false);
         verify(controlOperations).release(OPERATION_LEASE);
     }
 
