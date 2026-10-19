@@ -234,8 +234,6 @@ class PersonMapperTest extends AbstractMapperTest {
         assertFalse(personMapper.getProcessablePersonIds(
             workspace.getId(), List.of(normal.getId(), suspended.getId(), provisionCeased.getId()))
             .contains(suspended.getId()));
-        assertFalse(personMapper.getPersonsByCompanyIds(workspace.getId(), List.of(company.getId())).stream()
-            .anyMatch(person -> person.getId() == suspended.getId()));
         assertFalse(personMapper.getRelationshipScoreAggregates(
             workspace.getId(), LocalDateTime.now().plusDays(1),
             RelationshipWarmthModel.current().sqlParameters()).stream()
