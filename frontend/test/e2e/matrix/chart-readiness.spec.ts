@@ -12,6 +12,18 @@ for (const [name, series] of [
     ['axes without series', '<path d="M0 0L50 50" />'],
     ['empty area curve', '<path class="recharts-area-curve" d="" stroke="black" />'],
     ['unstroked flat area', '<path class="recharts-area-curve" d="M0 50L50 50" fill="none" />'],
+    ['unpainted bar', '<g class="recharts-bar-rectangles"><rect width="30" height="50" fill="none" /></g>'],
+    ['unpainted bar path', '<g class="recharts-bar-rectangles"><path d="M0 0L50 0L50 50L0 50Z" fill="none" /></g>'],
+    ['transparent fill', '<g class="recharts-bar-rectangles"><rect width="30" height="50" fill="transparent" /></g>'],
+    ['transparent line stroke', '<path class="recharts-line-curve" d="M0 0L25 50L50 0" fill="none" stroke="transparent" />'],
+    ['zero-alpha fill color', '<g class="recharts-bar-rectangles"><rect width="30" height="50" fill="rgba(10, 20, 30, 0)" /></g>'],
+    ['zero-alpha flat stroke color', '<path class="recharts-area-curve" d="M0 50L50 50" fill="none" stroke="rgba(10, 20, 30, 0)" />'],
+    ['zero-alpha wide-gamut color', '<g class="recharts-bar-rectangles"><rect width="30" height="50" fill="color(display-p3 0.1 0.2 0.3 / 0)" /></g>'],
+    ['zero fill opacity', '<g class="recharts-bar-rectangles"><rect width="30" height="50" fill-opacity="0" /></g>'],
+    ['zero stroke opacity', '<path class="recharts-line-curve" d="M0 0L25 50L50 0" fill="none" stroke="black" stroke-opacity="0" />'],
+    ['zero stroke width', '<path class="recharts-line-curve" d="M0 0L25 50L50 0" fill="none" stroke="black" stroke-width="0" />'],
+    ['zero mark opacity', '<g class="recharts-bar-rectangles"><rect width="30" height="50" opacity="0" /></g>'],
+    ['zero ancestor opacity', '<g class="recharts-bar-rectangles" opacity="0"><rect width="30" height="50" /></g>'],
 ] as const) {
     test(`chart readiness rejects ${name}`, async ({ page }) => {
         await page.setContent(`<main><div class="recharts-responsive-container" style="width:100px;height:100px">
@@ -32,6 +44,9 @@ for (const [name, series] of [
         <path class="recharts-area-curve" d="M0 50L50 50" fill="none" stroke="black" />
     </g>`],
     ['line dot', '<g class="recharts-line-dots"><circle cx="30" cy="30" r="3" /></g>'],
+    ['stroke-only bar', '<g class="recharts-bar-rectangles"><rect width="30" height="50" fill="none" stroke="black" /></g>'],
+    ['fill-only bar with transparent stroke', '<g class="recharts-bar-rectangles"><rect width="30" height="50" stroke="transparent" /></g>'],
+    ['partially transparent bar', '<g class="recharts-bar-rectangles" opacity="0.5"><rect width="30" height="50" fill="rgba(10, 20, 30, 0.5)" fill-opacity="0.5" opacity="0.5" /></g>'],
 ] as const) {
     test(`chart readiness accepts a painted ${name}`, async ({ page }) => {
         await page.setContent(`<main><div class="recharts-responsive-container" style="width:100px;height:100px">

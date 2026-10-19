@@ -418,6 +418,17 @@ export async function expectChartsSettled(content: Locator, timeout?: number): P
                     && (chart.classList.contains('recharts-responsive-container')
                         || emptyMessages.includes(chart.textContent?.trim() ?? ''));
             });
+            const hasVisibleColor = (paint: string): boolean => {
+                if (paint === 'none' || paint === 'transparent') return false;
+                const color = paint.match(/^([\w-]+)\(([^)]*)\)$/);
+                if (color === null || color[1] === 'url') return true;
+                const alpha = color[2].includes('/')
+                    ? color[2].split('/')[1]
+                    : color[1] === 'rgba' || color[1] === 'hsla'
+                        ? color[2].split(',')[3]
+                        : undefined;
+                return alpha === undefined || Number.parseFloat(alpha) > 0;
+            };
             const snapshot = () => visible.map((chart) => {
                 if (!chart.classList.contains('recharts-responsive-container')) {
                     return chart.textContent;
@@ -436,11 +447,18 @@ export async function expectChartsSettled(content: Locator, timeout?: number): P
                     if (style.visibility === 'hidden' || style.display === 'none' || Number(style.opacity) === 0) {
                         return false;
                     }
-                    return (bounds.width > 0 && bounds.height > 0)
+                    for (let ancestor = mark.parentElement; ancestor !== null; ancestor = ancestor.parentElement) {
+                        if (Number(getComputedStyle(ancestor).opacity) === 0) return false;
+                    }
+                    const hasArea = bounds.width > 0 && bounds.height > 0;
+                    const hasStrokeGeometry = hasArea
                         || (mark.matches('.recharts-line-curve, .recharts-area-curve')
-                            && (mark.getAttribute('d')?.trim().length ?? 0) > 0 && style.stroke !== 'none'
-                            && Number(style.strokeOpacity) > 0
-                            && Number.parseFloat(style.strokeWidth) > 0 && (bounds.width > 0 || bounds.height > 0));
+                            && (mark.getAttribute('d')?.trim().length ?? 0) > 0
+                            && (bounds.width > 0 || bounds.height > 0));
+                    const hasFill = hasVisibleColor(style.fill) && Number(style.fillOpacity) > 0;
+                    const hasStroke = hasVisibleColor(style.stroke) && Number(style.strokeOpacity) > 0
+                        && Number.parseFloat(style.strokeWidth) > 0;
+                    return (hasArea && hasFill) || (hasStrokeGeometry && hasStroke);
                 });
                 if (!painted) return null;
                 if (surface.querySelector('.recharts-area > g defs clipPath') !== null) return null;
