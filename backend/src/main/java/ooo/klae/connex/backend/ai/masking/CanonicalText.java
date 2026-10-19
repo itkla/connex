@@ -13,7 +13,7 @@ import java.util.regex.Pattern;
  * The additional label projection composes link-removal offsets, identically on both operands;
  * it supplies lookup aliases without discarding matches in the original literal projection.
  */
-final class CanonicalText {
+public final class CanonicalText {
     private static final Pattern GRAPHEME = Pattern.compile("\\X");
 
     private CanonicalText() {
@@ -49,7 +49,7 @@ final class CanonicalText {
     }
 
     /** Projects the original text, retaining offsets across canonical preparation. */
-    static Projection project(String raw) {
+    public static Projection project(String raw) {
         return project(prepareProjection(raw));
     }
 
@@ -317,17 +317,19 @@ final class CanonicalText {
     }
 
     /** Every UTF-16 code unit maps to its complete source code point or composed grapheme. */
-    record Projection(String value, int[] starts, int[] ends) {
+    public record Projection(String value, int[] starts, int[] ends) {
         /** A reversible replacement must not split one source character's normalized expansion. */
         boolean isSourceBoundary(int offset) {
             return offset == 0 || offset == value.length() || sourceEnd(offset) <= sourceStart(offset);
         }
 
-        int sourceStart(int offset) {
+        /** Returns the original UTF-16 start of the projected unit at this offset. */
+        public int sourceStart(int offset) {
             return starts[offset];
         }
 
-        int sourceEnd(int end) {
+        /** Returns the original exclusive UTF-16 end of the projected range ending here. */
+        public int sourceEnd(int end) {
             return ends[end - 1];
         }
     }

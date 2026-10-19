@@ -824,13 +824,14 @@ public class AiAssistantToolExecutor {
     private static void seedMemberReferences(
             Object record, List<EntityReference> references, MaskingContext context) {
         AiAssistantMemberIdentifiers.seedReferences(references, context);
-        String content = switch (record) {
-            case Note note -> note.getContent();
-            case Activity activity -> activity.getNotes();
-            case Task task -> task.getDescription();
-            default -> null;
-        };
-        AiAssistantMemberIdentifiers.seedReferenceText(content, context);
+        switch (record) {
+            case Note note -> note.setContent(AiAssistantMemberIdentifiers.seedReferenceText(note.getContent(), context));
+            case Activity activity -> activity.setNotes(
+                    AiAssistantMemberIdentifiers.seedReferenceText(activity.getNotes(), context));
+            case Task task -> task.setDescription(
+                    AiAssistantMemberIdentifiers.seedReferenceText(task.getDescription(), context));
+            default -> { }
+        }
     }
 
     private static boolean putBounded(
