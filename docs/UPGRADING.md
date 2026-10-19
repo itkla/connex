@@ -7,6 +7,49 @@ migration-discipline part of #87 §9 / #102).
 > The specific support window below is a **proposed** policy; confirm it before it is published to
 > customers.
 
+## Dormant assistant proposal-set storage (tenant V233)
+
+V233 adds the chat-owned proposal-set parent, nullable membership/preparation columns on tool
+calls, and tenant-local ancestry constraints. Existing calls retain their trust, statuses and
+timestamps; no proposal sets are backfilled or produced by the running application. The new
+storage participates in chat deletion, account-erasure attribution cleanup, tenant export and
+residual verification.
+
+Following the V220/V222/V230 nullable-column precedent, the tool-call columns are added separately
+with `ALGORITHM=INSTANT, LOCK=DEFAULT` (MySQL permits only the default lock clause with INSTANT).
+Ancestry indexes, the membership unique index and the FK-supporting index require
+`ALGORITHM=INPLACE, LOCK=NONE`. The child metadata/trust invariant uses BEFORE INSERT and BEFORE
+UPDATE triggers: adding an enforced CHECK to this retained table would require COPY on MySQL 8.4.
+The new parent table retains its CHECK constraints. These explicit algorithm/lock guards fail
+instead of silently rebuilding the retained chat tables or blocking writers for a table copy.
+
+The child FK is installed separately with `ALGORITHM=INPLACE, LOCK=NONE`, temporarily disabling
+`foreign_key_checks` **only on the migration connection**, then restoring its saved value. That
+connection performs no DML while checks are disabled. This is safe because every existing child
+has a null proposal key and concurrent legacy writers continue to omit the new columns; no
+production proposal-set writer may be enabled during this migration. Re-enabling FK checks does
+not validate old rows, so this procedure must not be reused after set production is activated.
+
+Online DDL still needs brief exclusive metadata locks, and index creation consumes I/O and index
+build space. Deploy outside long-running chat transactions and monitor metadata-lock waits and
+disk capacity. If a guarded ALTER fails, stop the migration, close its connection (especially if
+FK checks were suspended), and inspect the partially committed DDL before recovery. Keep proposal
+writers disabled; reconcile the applied statements and Flyway failure record through the normal
+migration recovery procedure before retrying. Do not remove algorithm/lock guards to force an
+upgrade through. The V233 migration test checks those guards, unchanged InnoDB tool-call table
+identity, FK-check restoration on the migration connection, and both trigger write paths; its
+MySQL account needs `PROCESS` to read `information_schema.INNODB_TABLES`.
+
+MySQL documents the [online FK/index operations](https://dev.mysql.com/doc/refman/8.4/en/innodb-online-ddl-operations.html)
+and [INSTANT lock restriction](https://dev.mysql.com/doc/refman/8.4/en/alter-table.html#alter-table-concurrency).
+
+The rollback floor stays `tenant/V232__ai_agent_runs.sql`: V233 is additive and dormant, and
+V232-compatible binaries continue writing null-set calls. The existing
+[V232 privacy and message-sequence cutover](#v232-mission-privacy-and-message-sequence-cutover)
+still applies, including when missions are disabled. Production set activation and set-specific
+privacy admission require a later semantic cutover; V233 alone authorizes neither. See the
+[storage contract](backend/AI_SECURITY.md#dormant-chat-proposal-set-storage-tenant-v233).
+
 ## AI identifier lookup keys (tenant V230)
 
 V230 adds four nullable derived columns to each of person, company and deal. Each ALTER explicitly
@@ -122,7 +165,7 @@ contract is in [AI_SECURITY.md](backend/AI_SECURITY.md#exposure-enforcement-acro
   [`deploy/staging/rollback-floor`](../deploy/staging/rollback-floor) in the **same PR** as any
   migration that earlier binaries cannot survive. Keep the highest such migration as one path
   relative to `backend/src/main/resources/db/migration/`, such as
-  `tenant/V231__ai_proposal_review_expiry_cutover.sql`; blank lines and `#` comment lines
+  `tenant/V232__ai_agent_runs.sql`; blank lines and `#` comment lines
   are allowed. Staging records `backend_starting` before copying the target JAR into the live path.
   The floor has one exception: a matching transaction still in `prepared` or `frontend_stopped`,
   with **both** the live JAR and serving backend identified as the prior release, proves the target
@@ -211,9 +254,11 @@ are unchanged. Expiry is not deletion, archival, or a retained-chat privacy repa
 this cutover. Older binaries can execute known expired proposal IDs despite the unchanged schema.
 Staging automatic rollback and interrupted-deployment recovery therefore refuse a prior JAR lacking
 V231 and use the existing forward-recovery procedure. Do not remove the marker or relabel timestamps
-to permit rollback. A compatible V231 release remains eligible for ordinary paired rollback.
+to permit rollback. A compatible V231 release is eligible for ordinary paired rollback only when
+it also meets every later cutover's rollback floor.
 
-V232 is reserved for Phase 2 slice 1. This cutover introduces no proposal-set storage or producer.
+The later [V232 mission privacy cutover](#v232-mission-privacy-and-message-sequence-cutover)
+raises the floor to V232. V231 introduces no proposal-set storage or producer.
 
 ### V227/V228 campaign unsubscribe cutover
 

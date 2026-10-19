@@ -432,6 +432,7 @@ public class UserOffboardingService {
         aiChatMapper.clearMessageAuthorsAnywhere(userId);
         aiChatMapper.clearToolCallExecutorsAnywhere(userId);
         aiChatMapper.clearTurnRequestersAnywhere(userId);
+        aiChatMapper.clearProposalSetRequestersAnywhere(userId);
         aiChatMapper.deleteParticipantsForUserAnywhere(userId);
         aiChatMapper.clearParticipantInvitersAnywhere(userId);
         aiBriefScheduleMapper.deleteForUserAnywhere(userId);

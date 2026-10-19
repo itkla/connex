@@ -122,6 +122,7 @@ public final class TablePlaneRegistry {
     /** Workspace-scoped tenant content — the future per-org catalog. */
     public static final Set<String> ORG_DATA_TABLES = Set.of(
         "activity",
+        "ai_assistant_proposal_set",
         "ai_brief_schedule",
         "ai_agent_run",
         "ai_agent_segment",

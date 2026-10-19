@@ -895,6 +895,55 @@ are unchanged. V231 is marker-only, raises the rollback floor, and does not repa
 privacy. Ship the full contract together and drain older instances as described in
 [UPGRADING.md](../UPGRADING.md#v231-assistant-proposal-review-expiry).
 
+### Dormant chat proposal-set storage (tenant V233)
+
+`ai_assistant_proposal_set` stores one immutable chat invocation: opaque workspace-scoped key,
+real session/message/turn ancestry, original requester, step/call coordinates, tool, scalar/bulk
+mode, row count, intent fingerprint, scope revision, privacy generation and original timestamp.
+The generated bulk slot reserves one bulk invocation per turn, including failed calls and arrays
+of one. Scalar sets require one child; bulk sets permit 1–20. No legacy rows are backfilled.
+The parent stores no copied labels, rationale or argument JSON. `publication_state` is technical
+settlement (`staged`, `ready`, `failed`), independent of child decisions; failed storage requires a
+closed reason (`call_failed`, `cancelled`, `timed_out`, `execution_lost`), never exception text.
+
+Composite cascading FKs bind parents to messages and turns in the same workspace and session,
+and children to their parent's exact message. Children keep `message_id NOT NULL`, the existing
+status vocabulary and trust marker. Set-owned children add a unique ordinal and preparation
+anchor; legacy rows retain null membership columns. BEFORE INSERT/UPDATE triggers enforce complete
+membership metadata, ordinal bounds and server trust without adding a COPY-requiring CHECK to the
+retained tool-call table; parent constraints remain CHECKs. The guarded online DDL and migration-only
+FK installation procedure are documented in [UPGRADING](../UPGRADING.md#dormant-assistant-proposal-set-storage-tenant-v233).
+Their creation timestamp and privacy generation are copied from the parent, separately from the
+earlier preparation anchor. Children remain ordinary reactive chat artifacts with no mission run;
+read-only missions use their separate persistence path and do not produce proposal sets.
+Proposal-key FK columns explicitly use
+the same ASCII binary collation. Account erasure clears the parent's requester beside message
+authors and turn requesters; membership departure retains attribution and never transfers it.
+The table's `TenantLifecycleRegistry` message cascade supplies tenant export, teardown and
+residual reach while chat messages, tools and turns retain their direct lifecycle declarations.
+Export applies the existing mission privacy barrier and parent message/turn visibility to set
+metadata; residual counts remain unconditional. V232 restriction and DSR cleanup remove sets
+through their message and origin-turn cascades, including sets attached to retained pre-taint
+user input, because the originating turn remains enrolled. The mapper reads no person rows, so
+the person-reader restriction registry does not apply. Account erasure discovers proposal-set
+requester provenance when locking session roots and clears it in the chat-child phase before
+domain mutations, restriction fences and privacy invalidation.
+
+`AiAssistantProposalSetMapper` is a dormant storage surface with no production consumer. Its
+inserts admit a user message and turn with matching requester/session, then stage trusted children
+under that parent. It has no identity, mode, membership or timestamp update operation and no
+publication transition. Exact reads return all children in ordinal order, without transcript caps;
+`hasCompleteMembership` checks count, contiguous ordinals, trust, tool, requester ancestry and
+creation/preparation anchors. It is an integrity check, not authorization or readiness. MySQL
+constraints alone cannot enforce a cross-row child count at commit.
+
+The later creation service must establish current authority, privacy generation and exact
+turn/message association under the session mutex, insert the parent and every member in one
+transaction, and require complete membership before commit. Existing chat readers and writers
+retain their legacy behavior. Production set creation, effective-tier decisions, whole-call
+publication, set-specific privacy admission and discovery remain disabled until their own slices. V233
+preserves the existing V232 rollback floor; activation requires a fresh semantic cutover.
+
 ### Adding an assistant write tool
 
 Adding an assistant write tool is one `AiAssistantWriteTool` bean, its catalog line and `description` arm, its record in the sealed `AiAssistantWriteToolRequest`, its two `AiChatProgressService` arms (`sourceForTool` and `resultCount`, forced by `AiChatProgressServiceTest`), its own permitted-method grants in `AiAssistantWriteToolSpiArchTest`, its request and outcome label arms in `frontend/app/lib/askConnex.ts` with EN and JA copy (forced by the same arch test), its toolset staying within that toolset's pinned ceiling in `AiAssistantPromptEnvelopeTest`, and its trajectory golden. A tool that changes an existing record is confirm-tier unless [`docs/PRODUCT.md`](../PRODUCT.md) enumerates it as an immediate write; a confirm-tier tool returns non-empty `diffs` for every card it can apply (the client never arms Apply without one) and resolves any name the model wrote through `resolve`, never inside `apply`, so the framework pins it. A card that states a column the target holds now as its before-value declares `ReviewInput.FIELDS` and reads it from `RecordSnapshot.fields`, which the card projection fills from the row it already loaded for the page (a person's `title` and `firstResponseDueAt`; a company's `website`, `industry`, `address`; a deal's `value`, `expectedCloseDate`); a tool that does not declare it is handed an empty map. A shared-in row can have owner-only columns masked; `RecordSnapshot.sharedIn` keeps a missing field there from being treated as a statement that the record holds none. A tool whose delegate writes only a record the workspace owns (the lead-response service behind `set_response_due`) declares `requiresOwnedTarget()`: the framework then refuses a contact or company shared in from another workspace recoverably with `unresolved_reference` when the proposal is prepared, so no card offers an approval the delegate could only refuse, and the registry permits it only on record kinds (person, company, deal); deal ownership is checked through the workspace-scoped `DealService.getDealById` query. `update_record_fields` declares it because both person and company update delegates require ownership. `AiAssistantRemoveTagWriteTool` is the reference for a new confirm-tier tool.

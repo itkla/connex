@@ -120,6 +120,35 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void accountErasureClearsProposalRequestersAcrossWorkspacesWithoutTransferringOwnership() {
+        User target = newUser();
+        User retainedOwner = newUser();
+        AiChatSession erasedSession = chatSession(target);
+        AiChatMessage erasedMessage = chatMessage(erasedSession, target, "Erased proposal requester");
+        chatTurn(erasedSession, target, "Resolved erased proposal");
+        String erasedKey = chatProposalSet(erasedMessage, target);
+        AiChatSession retainedSession = chatSession(retainedOwner);
+        AiChatMessage retainedMessage = chatMessage(retainedSession, retainedOwner, "Retained proposal requester");
+        chatTurn(retainedSession, retainedOwner, "Resolved retained proposal");
+        String retainedKey = chatProposalSet(retainedMessage, retainedOwner);
+        Workspace otherWorkspace = newOtherWorkspace();
+        AiChatSession otherSession = chatSession(otherWorkspace, target);
+        AiChatMessage otherMessage = chatMessage(otherSession, target, "Other workspace proposal requester");
+        chatTurn(otherSession, target, "Resolved other workspace proposal");
+        String otherKey = chatProposalSet(otherMessage, target);
+
+        offboardingService.eraseOrgDataReferences(target.getId());
+
+        assertNull(proposalRequester(workspace.getId(), erasedKey));
+        assertNull(proposalRequester(otherWorkspace.getId(), otherKey));
+        assertEquals(Integer.valueOf(retainedOwner.getId()), proposalRequester(workspace.getId(), retainedKey));
+        assertEquals(1, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM ai_chat_tool_call WHERE workspace_id = ? AND proposal_key = ?",
+            Integer.class, workspace.getId(), erasedKey));
+        assertNotNull(userMapper.getUserById(target.getId()));
+    }
+
+    @Test
     void teamReferencesDoNotBlockDeletionAndAreClearedAcrossWorkspaces() {
         User target = newUser();
         Team localTeam = teamInWorkspace(workspace, target);
@@ -434,6 +463,8 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         AiChatSession departingSession = chatSession(departing);
         AiChatMessage departingMessage = chatMessage(
             departingSession, departing, "Departing member transcript");
+        chatTurn(departingSession, departing, "Resolved departing proposal");
+        String departingKey = chatProposalSet(departingMessage, departing);
         AiChatSession retainedSession = chatSession(retainedOwner);
         AiChatMessage retainedMessage = chatMessage(
             retainedSession, retainedOwner, "Retained member transcript");
@@ -446,6 +477,7 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         assertFalse(aiChatMapper.isParticipant(
             workspace.getId(), retainedSession.getId(), departing.getId()));
         assertFalse(workspaceMapper.isMember(workspace.getId(), departing.getId()));
+        assertEquals(Integer.valueOf(departing.getId()), proposalRequester(workspace.getId(), departingKey));
         assertChatTranscriptOwnedBy(departingSession, departingMessage, departing);
         assertChatTranscriptOwnedBy(retainedSession, retainedMessage, retainedOwner);
     }
@@ -595,8 +627,12 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
     }
 
     private AiChatSession chatSession(User owner) {
+        return chatSession(workspace, owner);
+    }
+
+    private AiChatSession chatSession(Workspace targetWorkspace, User owner) {
         AiChatSession session = new AiChatSession();
-        session.setWorkspaceId(workspace.getId());
+        session.setWorkspaceId(targetWorkspace.getId());
         session.setCreatedByUserId(owner.getId());
         session.setTitle("Offboarding session " + unique());
         session.setVisibility("shared");
@@ -631,6 +667,35 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
                 + "(workspace_id, session_id, requested_by_user_id, status, terminal_reason) "
                 + "VALUES (?, ?, ?, 'resolved', ?)",
             session.getWorkspaceId(), session.getId(), requester.getId(), terminalReason);
+    }
+
+    private String chatProposalSet(AiChatMessage message, User requester) {
+        String proposalKey = UUID.randomUUID().toString();
+        assertEquals(1, jdbcTemplate.update(
+            "INSERT INTO ai_assistant_proposal_set "
+                + "(workspace_id, proposal_key, session_id, origin_turn_id, message_id, requested_by_user_id, "
+                + "step_number, call_ordinal, tool_name, invocation_mode, row_count, intent_fingerprint, "
+                + "scope_revision, privacy_generation) "
+                + "SELECT t.workspace_id, ?, t.session_id, t.id, ?, ?, 1, 0, 'assign_owner', 'scalar', "
+                + "1, ?, '1', 0 FROM ai_chat_turn t WHERE t.workspace_id = ? AND t.session_id = ?",
+            proposalKey, message.getId(), requester.getId(), "a".repeat(64),
+            message.getWorkspaceId(), message.getSessionId()));
+        assertEquals(1, jdbcTemplate.update(
+            "INSERT INTO ai_chat_tool_call "
+                + "(workspace_id, message_id, tool_name, status, arguments_json, idempotency_key, "
+                + "server_proposal, proposal_key, proposal_ordinal, proposal_prepared_at, created_at, updated_at) "
+                + "SELECT workspace_id, message_id, tool_name, 'proposed', '{}', ?, TRUE, proposal_key, "
+                + "1, created_at, created_at, created_at FROM ai_assistant_proposal_set "
+                + "WHERE workspace_id = ? AND proposal_key = ?",
+            UUID.randomUUID().toString(), message.getWorkspaceId(), proposalKey));
+        return proposalKey;
+    }
+
+    private Integer proposalRequester(int workspaceId, String proposalKey) {
+        return jdbcTemplate.queryForObject(
+            "SELECT requested_by_user_id FROM ai_assistant_proposal_set "
+                + "WHERE workspace_id = ? AND proposal_key = ?",
+            Integer.class, workspaceId, proposalKey);
     }
 
     private void assertChatTranscriptOwnedBy(

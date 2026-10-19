@@ -347,6 +347,7 @@ class UserOffboardingOrderTest {
         order.verify(aiChatMapper).clearMessageAuthorsAnywhere(9);
         order.verify(aiChatMapper).clearToolCallExecutorsAnywhere(9);
         order.verify(aiChatMapper).clearTurnRequestersAnywhere(9);
+        order.verify(aiChatMapper).clearProposalSetRequestersAnywhere(9);
         order.verify(aiChatMapper).deleteParticipantsForUserAnywhere(9);
         order.verify(aiChatMapper).clearParticipantInvitersAnywhere(9);
         order.verify(aiBriefScheduleMapper).deleteForUserAnywhere(9);

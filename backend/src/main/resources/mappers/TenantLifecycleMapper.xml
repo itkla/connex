@@ -47,6 +47,23 @@
         AND (t0.mission_run_id IS NULL OR EXISTS (SELECT 1 FROM ai_agent_run r
           WHERE r.workspace_id = t0.workspace_id AND r.id = t0.mission_run_id AND r.withheld_at IS NULL))
       </when>
+      <when test="declaration.table == 'ai_assistant_proposal_set'">
+        AND EXISTS (SELECT 1 FROM ai_chat_session s
+          JOIN ai_chat_turn t ON t.workspace_id = s.workspace_id AND t.session_id = s.id
+          JOIN ai_chat_message m ON m.workspace_id = s.workspace_id AND m.session_id = s.id
+          WHERE s.workspace_id = t0.workspace_id AND s.id = t0.session_id
+            AND t.id = t0.origin_turn_id AND m.id = t0.message_id
+            AND (s.mission_taint_seq IS NULL OR EXISTS (SELECT 1 FROM ai_agent_privacy_barrier b
+              WHERE b.workspace_id = t0.workspace_id AND b.blocked = FALSE
+                AND b.generation = t0.privacy_generation
+                AND b.generation = COALESCE(t.privacy_generation, s.mission_taint_generation)
+                AND ((m.mission_run_id IS NULL AND m.author_kind = 'user' AND m.seq &lt; s.mission_taint_seq)
+                  OR b.generation = COALESCE(m.privacy_generation, s.mission_taint_generation))))
+            AND (t.mission_run_id IS NULL OR EXISTS (SELECT 1 FROM ai_agent_run r
+              WHERE r.workspace_id = t.workspace_id AND r.id = t.mission_run_id AND r.withheld_at IS NULL))
+            AND (m.mission_run_id IS NULL OR EXISTS (SELECT 1 FROM ai_agent_run r
+              WHERE r.workspace_id = m.workspace_id AND r.id = m.mission_run_id AND r.withheld_at IS NULL)))
+      </when>
       <when test="declaration.table == 'ai_chat_tool_call'">
         AND EXISTS (SELECT 1 FROM ai_chat_message m
           JOIN ai_chat_session s ON s.workspace_id = m.workspace_id AND s.id = m.session_id

@@ -172,6 +172,7 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.AiChatMapper.clearMessageAuthorsAnywhere",
         "ooo.klae.connex.backend.mappers.AiChatMapper.clearToolCallExecutorsAnywhere",
         "ooo.klae.connex.backend.mappers.AiChatMapper.clearTurnRequestersAnywhere",
+        "ooo.klae.connex.backend.mappers.AiChatMapper.clearProposalSetRequestersAnywhere",
         "ooo.klae.connex.backend.mappers.RecordCommentMapper.clearAuthorsAnywhere",
         "ooo.klae.connex.backend.mappers.RecordCommentMapper.clearDeletersAnywhere",
         "ooo.klae.connex.backend.mappers.RecordCommentMapper.clearThreadCreatorsAnywhere",

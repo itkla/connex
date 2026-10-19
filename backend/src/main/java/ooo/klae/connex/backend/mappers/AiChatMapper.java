@@ -164,6 +164,9 @@ public interface AiChatMapper {
     /** Clears turn provenance for a permanently erased account across every workspace. */
     void clearTurnRequestersAnywhere(@Param("userId") int userId);
 
+    /** Clears proposal-set ownership for a permanently erased account without transferring it. */
+    void clearProposalSetRequestersAnywhere(@Param("userId") int userId);
+
     boolean isParticipant(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,

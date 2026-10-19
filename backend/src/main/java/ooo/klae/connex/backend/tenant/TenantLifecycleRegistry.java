@@ -385,6 +385,10 @@ public final class TenantLifecycleRegistry {
         raw.add(cascade("ai_chat_session_participant", "ai_chat_session",
             "fk_ai_chat_session_participant_session",
             link("workspace_id", "workspace_id"), link("session_id", "id")));
+        raw.add(cascade("ai_assistant_proposal_set", "ai_chat_message",
+            "fk_ai_assistant_proposal_set_message",
+            link("workspace_id", "workspace_id"), link("session_id", "session_id"),
+            link("message_id", "id")));
         raw.add(direct("sequence_version_publisher", 621));
         raw.add(direct("sequence_version", 622));
         raw.add(direct("sequence_step_content", 623));

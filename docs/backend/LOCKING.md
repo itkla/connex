@@ -700,7 +700,7 @@ The session row is the per-session mutex. V232 allocates every ordinary or missi
 
 Account erasure retains all session roots in the routed catalog with one locking read ordered by
 `(workspace_id, id)`, covering sessions created by the account and sessions containing its message,
-tool-call, or turn provenance, including other members' shared sessions. The catalog erasure
+tool-call, turn, or proposal-set requester provenance, including other members' shared sessions. The catalog erasure
 transaction uses `READ_COMMITTED` so child-reference discovery stays fresh after authority-lock
 waits. This chat-root phase precedes provider activity deletion and every provenance update;
 the same roots remain held through domain cleanup and trailing mission privacy invalidation.
