@@ -3,11 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type AskConnexDrawer from '@/app/components/ask-connex/AskConnexDrawer';
 import AskConnexProvider from '@/app/components/ask-connex/AskConnexProvider';
+import { ASK_CONNEX_REALTIME_REFRESH_DELAY_MS } from '@/app/components/ask-connex/realtimeRefreshCoalescer';
 import {
     ApiError,
     approveAiAssistantToolCall,
     getAiAssistantToolCall,
     getAiAssistantToolCalls,
+    getAiChatAttachments,
+    getAiChatInvitations,
     getAiChatParticipants,
     getAiChatPresence,
     getAiChatSession,
@@ -16,7 +19,7 @@ import {
     startAiChatTurn,
 } from '@/app/lib/api';
 import { askConnexSessionStorageKey } from '@/app/lib/askConnex';
-import type { AiAssistantToolCall, AiChatSessionDetail, AiChatTurn, AiChatTurnToolCall } from '@/app/lib/types';
+import type { AiAssistantToolCall, AiChatMetadataFrame, AiChatSessionDetail, AiChatTurn, AiChatTurnToolCall } from '@/app/lib/types';
 import type { AiChatSocketHandlers } from '@/app/lib/realtime';
 import { observeProposalReviewClock } from '@/app/lib/proposalReviewClock';
 import { installInteractiveDocument } from '@/test/unit/helpers/interactiveDocument';
@@ -34,6 +37,7 @@ const boundary = vi.hoisted(() => {
         translate: (key: string) => key,
         showApiError: vi.fn(),
         router: { push: vi.fn(), replace: vi.fn(), refresh: vi.fn() },
+        workspace: { activeWorkspaceId: 7, switching: false },
         context: { user: { id: 3, displayName: 'Aiko' }, record: null, selection: null },
     };
 });
@@ -54,7 +58,7 @@ vi.mock('@/app/hooks/useActions', () => ({
     useActions: () => ({ context: boundary.context }),
     useRegisterActions: () => {},
 }));
-vi.mock('@/app/hooks/useWorkspace', () => ({ useWorkspace: () => ({ activeWorkspaceId: 7, switching: false }) }));
+vi.mock('@/app/hooks/useWorkspace', () => ({ useWorkspace: () => boundary.workspace }));
 vi.mock('@/app/hooks/usePermissions', () => ({
     usePermissionCheck: (permission: string) => permission === 'AI_USE' ? 'granted' : 'denied',
 }));
@@ -177,6 +181,21 @@ async function reconnect() {
         socket.onStatusChange?.('connected');
         socket.onStatusChange?.('connected');
     });
+    await flushRealtimeRefresh();
+}
+
+async function flushRealtimeRefresh() {
+    await act(async () => {
+        await vi.advanceTimersByTimeAsync(ASK_CONNEX_REALTIME_REFRESH_DELAY_MS);
+    });
+}
+
+function metadataFrame(overrides: Partial<AiChatMetadataFrame> = {}): AiChatMetadataFrame {
+    return {
+        workspaceId: 7, sessionId: 4, turnId: 9, seq: 1,
+        kind: 'step', tool: null, status: 'running', reason: null,
+        ...overrides,
+    };
 }
 
 function approvableProposal(): AiAssistantToolCall {
@@ -194,8 +213,10 @@ function approvableProposal(): AiAssistantToolCall {
 
 describe('the provider guards the Retry callback', () => {
     beforeEach(() => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
         boundary.drawer.current = null;
         boundary.socket.current = null;
+        boundary.workspace.activeWorkspaceId = 7;
         vi.mocked(getAiChatSessions).mockResolvedValue({ items: [], total: 0 });
         vi.mocked(getAiChatSession).mockResolvedValue(DETAIL).mockResolvedValueOnce({
             ...DETAIL, messages: { items: [], total: 0 },
@@ -210,6 +231,7 @@ describe('the provider guards the Retry callback', () => {
     });
 
     afterEach(() => {
+        vi.useRealTimers();
         vi.clearAllMocks();
         vi.unstubAllGlobals();
     });
@@ -222,6 +244,114 @@ describe('the provider guards the Retry callback', () => {
         ...TURN,
         toolCalls: [{ toolName: 'assign_owner', tier: 'CONFIRM', status: 'executed' }],
     };
+
+    it.each(['private', 'shared'] as const)('refreshes a %s session once for a 48-frame metadata burst', async (visibility) => {
+        vi.mocked(getAiChatSession).mockReset().mockResolvedValue({
+            ...DETAIL, session: { ...DETAIL.session, visibility },
+        });
+        const root = await mountProvider();
+        try {
+            expect(drawer().activeSession?.id).toBe(4);
+            vi.clearAllMocks();
+            const socket = boundary.socket.current;
+            if (socket === null) throw new Error('The provider did not connect its socket');
+            const kinds: AiChatMetadataFrame['kind'][] = ['session', 'message', 'state', 'reset', 'step', 'terminal'];
+            await act(async () => {
+                for (const kind of kinds) {
+                    for (let seq = 0; seq < 8; seq++) socket.onFrame(metadataFrame({ kind, seq }));
+                }
+            });
+            expect(getAiChatSessions).not.toHaveBeenCalled();
+            expect(getAiChatSession).not.toHaveBeenCalled();
+            await flushRealtimeRefresh();
+            expect(getAiChatSessions).toHaveBeenCalledOnce();
+            expect(getAiChatInvitations).toHaveBeenCalledOnce();
+            expect(getAiChatSession).toHaveBeenCalledOnce();
+            expect(getAiChatAttachments).toHaveBeenCalledOnce();
+            expect(getAiAssistantToolCalls).toHaveBeenCalledTimes(2);
+            expect(getAiChatParticipants).toHaveBeenCalledTimes(visibility === 'shared' ? 1 : 0);
+            expect(getAiChatPresence).toHaveBeenCalledTimes(visibility === 'shared' ? 1 : 0);
+            await flushRealtimeRefresh();
+            expect(getAiChatSessions).toHaveBeenCalledOnce();
+            expect(getAiChatSession).toHaveBeenCalledOnce();
+        } finally {
+            await act(async () => { root.unmount(); });
+        }
+    });
+
+    it('refreshes the active transcript when other sessions share its batch', async () => {
+        const root = await mountProvider();
+        try {
+            vi.clearAllMocks();
+            const socket = boundary.socket.current;
+            if (socket === null) throw new Error('The provider did not connect its socket');
+            await act(async () => {
+                socket.onFrame(metadataFrame());
+                socket.onFrame(metadataFrame({ sessionId: 5 }));
+            });
+            await flushRealtimeRefresh();
+            expect(getAiChatSessions).toHaveBeenCalledOnce();
+            expect(getAiChatSession).toHaveBeenCalledExactlyOnceWith(4, expect.anything(), expect.anything());
+            vi.clearAllMocks();
+            await act(async () => { socket.onFrame(metadataFrame({ sessionId: 5 })); });
+            await flushRealtimeRefresh();
+            expect(getAiChatSessions).toHaveBeenCalledOnce();
+            expect(getAiChatSession).not.toHaveBeenCalled();
+        } finally {
+            await act(async () => { root.unmount(); });
+        }
+    });
+
+    it('drops a pending refresh when switching workspaces aborts its identity', async () => {
+        const root = await mountProvider();
+        try {
+            const socket = boundary.socket.current;
+            if (socket === null) throw new Error('The provider did not connect its socket');
+            await act(async () => { socket.onFrame(metadataFrame()); });
+            boundary.workspace.activeWorkspaceId = 8;
+            await act(async () => { root.render(<AskConnexProvider>{null}</AskConnexProvider>); });
+            vi.clearAllMocks();
+            await flushRealtimeRefresh();
+            expect(getAiChatSessions).not.toHaveBeenCalled();
+            expect(getAiChatSession).not.toHaveBeenCalled();
+            const nextSocket = boundary.socket.current;
+            if (nextSocket === null) throw new Error('The provider did not reconnect its socket');
+            await act(async () => { nextSocket.onFrame(metadataFrame({ workspaceId: 8, sessionId: 5 })); });
+            await flushRealtimeRefresh();
+            expect(getAiChatSessions).toHaveBeenCalledOnce();
+        } finally {
+            await act(async () => { root.unmount(); });
+        }
+    });
+
+    it('cancels pending realtime work on unmount', async () => {
+        const root = await mountProvider();
+        const socket = boundary.socket.current;
+        if (socket === null) throw new Error('The provider did not connect its socket');
+        await act(async () => { socket.onFrame(metadataFrame()); });
+        await act(async () => { root.unmount(); });
+        vi.clearAllMocks();
+        await flushRealtimeRefresh();
+        expect(getAiChatSessions).not.toHaveBeenCalled();
+        expect(getAiChatSession).not.toHaveBeenCalled();
+    });
+
+    it('applies revocation immediately before its delayed refresh', async () => {
+        const root = await mountProvider();
+        try {
+            vi.clearAllMocks();
+            const socket = boundary.socket.current;
+            if (socket === null) throw new Error('The provider did not connect its socket');
+            await act(async () => { socket.onFrame(metadataFrame({ kind: 'session', status: 'revoked' })); });
+            expect(drawer().activeSession).toBeNull();
+            expect(getAiChatSessions).not.toHaveBeenCalled();
+            await flushRealtimeRefresh();
+            expect(getAiChatSessions).toHaveBeenCalledOnce();
+            expect(getAiChatSession).not.toHaveBeenCalled();
+        } finally {
+            await act(async () => { root.unmount(); });
+        }
+    });
 
     it('never offers Retry for a proposal approved remotely after the evidence read without frames', async () => {
         vi.mocked(getAiChatTurn).mockResolvedValue(proposedTurn);
@@ -463,6 +593,7 @@ describe('the provider guards the Retry callback', () => {
             vi.mocked(getAiChatTurn).mockClear();
             vi.mocked(getAiAssistantToolCalls).mockResolvedValue([]);
             await act(async () => { await drawer().onToolAction(proposal.id, 'approve'); });
+            await flushRealtimeRefresh();
             expect(approveAiAssistantToolCall).toHaveBeenCalledOnce();
             expect(getAiChatTurn).toHaveBeenCalledWith(4, 9, expect.objectContaining({ signal: expect.any(AbortSignal) }));
             expect(drawer().toolCalls).toEqual([]);
@@ -486,11 +617,12 @@ describe('the provider guards the Retry callback', () => {
         try {
             const retainedRetry = drawer().onRetryTurn;
             const stale = Promise.withResolvers<AiChatTurn>();
-            vi.mocked(getAiChatTurn).mockReturnValueOnce(stale.promise).mockResolvedValue(executedTurn);
+            vi.mocked(getAiChatTurn).mockReturnValue(stale.promise);
             await reconnect();
             vi.mocked(getAiChatSessions).mockReturnValue(sessions.promise);
             await act(async () => { await drawer().onToolAction(proposal.id, 'approve'); });
             expect(approveAiAssistantToolCall).toHaveBeenCalledOnce();
+            vi.mocked(getAiChatTurn).mockResolvedValue(executedTurn);
             await act(async () => { stale.resolve(proposedTurn); });
 
             expect(drawer().turnWriteState).toBe('uncertain');
@@ -498,6 +630,7 @@ describe('the provider guards the Retry callback', () => {
             expect(startAiChatTurn).not.toHaveBeenCalled();
             vi.mocked(getAiAssistantToolCalls).mockResolvedValue([]);
             await act(async () => { sessions.resolve({ items: [], total: 0 }); });
+            await flushRealtimeRefresh();
             expect(drawer().turnWriteState).toBe('committed');
         } finally {
             sessions.resolve({ items: [], total: 0 });
