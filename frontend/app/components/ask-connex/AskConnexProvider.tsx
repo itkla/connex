@@ -21,6 +21,11 @@ import AskConnexDrawer, {
     type AskConnexJobOffer,
     type AskConnexScopeSurface,
 } from '@/app/components/ask-connex/AskConnexDrawer';
+import {
+    ASK_CONNEX_REALTIME_REFRESH_DELAY_MS,
+    createRealtimeRefreshCoalescer,
+    type RealtimeRefreshCoalescer,
+} from '@/app/components/ask-connex/realtimeRefreshCoalescer';
 import { useActions, useRegisterActions } from '@/app/hooks/useActions';
 import { useAskConnexSkills } from '@/app/hooks/useAskConnexSkills';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
@@ -572,7 +577,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const typingRef = useRef(false);
     const sessionsRefreshVersionRef = useRef(0);
     const transcriptRefreshVersionRef = useRef(0);
-    const realtimeRefreshQueueRef = useRef<Promise<void>>(Promise.resolve());
+    const realtimeRefreshCoalescerRef = useRef<RealtimeRefreshCoalescer | null>(null);
     const submittingRef = useRef(false);
     const toolActionsRef = useRef<Set<number>>(new Set());
     const retryValidationRef = useRef(false);
@@ -1753,27 +1758,44 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         return () => controller.abort();
     }, [canPersist, activeTurn, clearActiveSession, deferApiError, followDurableTurn, identity, refreshTranscript, resetStream, router, sessionKey, stateIdentity, switching, t, turnKey, workspaceMode, workspaceSessionId]);
 
-    const enqueueRealtimeRefresh = useCallback((sessionId: number, signal: AbortSignal) => {
-        realtimeRefreshQueueRef.current = realtimeRefreshQueueRef.current.then(async () => {
+    const runRealtimeRefresh = useCallback(async (sessionIds: ReadonlySet<number>, signal: AbortSignal) => {
+        if (signal.aborted) return;
+        try {
+            await refreshSessions(signal);
             if (signal.aborted) return;
-            try {
-                await refreshSessions(signal);
-                const session = activeSessionRef.current;
-                if (session?.id === sessionId) {
-                    const detail = await refreshTranscript(session.id, signal, true);
-                    if (detail?.activeTurn
-                            && activeTurnRef.current?.turnId !== detail.activeTurn.turnId) {
-                        void followDurableTurn(detail.activeTurn, signal);
-                    }
-                }
-            } catch (error) {
-                if (signal.aborted) return;
-                if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
-                    clearActiveSession();
+            const session = activeSessionRef.current;
+            if (session && sessionIds.has(session.id)) {
+                const detail = await refreshTranscript(session.id, signal, true);
+                if (detail?.activeTurn
+                        && activeTurnRef.current?.turnId !== detail.activeTurn.turnId) {
+                    void followDurableTurn(detail.activeTurn, signal);
                 }
             }
-        });
+        } catch (error) {
+            if (signal.aborted) return;
+            if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
+                clearActiveSession();
+            }
+        }
     }, [clearActiveSession, followDurableTurn, refreshSessions, refreshTranscript]);
+
+    const runRealtimeRefreshRef = useRef(runRealtimeRefresh);
+    useLayoutEffect(() => {
+        runRealtimeRefreshRef.current = runRealtimeRefresh;
+    }, [runRealtimeRefresh]);
+
+    const enqueueRealtimeRefresh = useCallback((sessionId: number, signal: AbortSignal) => {
+        realtimeRefreshCoalescerRef.current ??= createRealtimeRefreshCoalescer({
+            run: (sessionIds, batchSignal) => runRealtimeRefreshRef.current(sessionIds, batchSignal),
+            delayMs: ASK_CONNEX_REALTIME_REFRESH_DELAY_MS,
+        });
+        realtimeRefreshCoalescerRef.current.enqueue(sessionId, signal);
+    }, []);
+
+    useEffect(() => () => {
+        realtimeRefreshCoalescerRef.current?.dispose();
+        realtimeRefreshCoalescerRef.current = null;
+    }, []);
 
     useEffect(() => {
         if (userId === null || activeWorkspaceId === null || switching) return;
