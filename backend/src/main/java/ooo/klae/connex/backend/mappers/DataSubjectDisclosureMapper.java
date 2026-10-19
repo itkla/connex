@@ -59,9 +59,11 @@ public interface DataSubjectDisclosureMapper {
         @Param("personId") int personId,
         @Param("workspaceIds") List<Integer> workspaceIds);
 
+    /** Reads at most 100 ascending IDs after the cursor, evicting the preceding body page. */
     List<Integer> findNoteIds(@Param("workspaceId") int workspaceId,
         @Param("personId") int personId,
-        @Param("workspaceIds") List<Integer> workspaceIds);
+        @Param("workspaceIds") List<Integer> workspaceIds,
+        @Param("afterId") Integer afterId);
 
     /**
      * Reads at most 100 subject notes. The statement applies no visibility filter, so a statutory

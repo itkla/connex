@@ -45,3 +45,19 @@ unchanged. Workspace, entity, and organization CSV exports include the origin th
 `context` column. Sensitive secret-store and AI projections retain only the validated origin envelope
 and approved error token; extra fields in that envelope are excluded. Support bundles continue to
 exclude context bodies as specified in [SUPPORT_BUNDLE.md](../SUPPORT_BUNDLE.md).
+
+## Subject disclosure release (#1733)
+
+`appi.subject_request.disclosure` retains its organization scope (null workspace), actor, request
+label, summary and request/subject identifiers. Its strict independent control append commits
+between two synchronous serialization passes through the same tenant snapshot and before the
+servlet target opens. The approved metadata adds `fingerprintVersion: 1`, `noteCount`,
+`notesSha256`, `jsonByteLength` and `jsonSha256`. Counts and SHA-256 fingerprints contain no note
+text. Version one hashes exact compact UTF-8 JSON before HTTP content coding, with the notes
+fingerprint covering the ordinary array including `[` and `]`.
+
+The event proves complete assembly and an authorized release attempt. It does not prove delivery
+or client receipt. It survives a later serialization/transport failure; committed output is then
+left truncated without an error suffix or closing delimiters. An explicit retry creates another
+event. [LOCKING.md](LOCKING.md) defines suspension, catalog restoration, snapshot resumption and
+the two-connection budget; [API_SURFACE.md](API_SURFACE.md) defines integrity headers and failures.

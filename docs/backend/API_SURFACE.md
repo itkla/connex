@@ -145,7 +145,9 @@ The Security Owner's 2026-10-12 decision replaces
 `POST` on the same path. There is no GET/HEAD alias or redirect. The POST requires an authenticated
 session, a valid CSRF header, organization admin/owner authority, and fresh account-bound WebAuthn
 step-up. The body is optional; the SPA sends `{}` as JSON. Success remains HTTP 200 with the existing
-`DataSubjectDisclosureDto`, after the strict disclosure-access audit commits. Request type, identity
+JSON properties, order, null omission and ordinary `notes` array, after the strict disclosure-access
+audit commits. The servlet response is written synchronously on the request thread inside the
+retained tenant snapshot. Request type, identity
 verification, and linked-subject checks are unchanged.
 
 Authorized retired GET/HEAD requests receive 405 (method denied); anonymous requests receive 401
@@ -165,7 +167,50 @@ no disclosure payload, and the audit INSERT and integrity-head advance roll back
 committed audit remains recorded if the response or download later fails. An explicit retry
 assembles again and adds another access event; there is no automatic network/503 retry. The SPA's
 bounded CSRF-refresh and step-up refusal retries remain unchanged. See [LOCKING.md](LOCKING.md)
-for the three transaction phases and retained race windows.
+for the retained snapshot, suspend/audit/resume sequence and retained race windows.
+
+The additive `X-Disclosure-Note-Count`, `X-Disclosure-Notes-SHA256`, `X-Disclosure-Byte-Length` and
+`X-Disclosure-SHA256` headers describe pass one's complete representation. Hashes use exact compact
+UTF-8 JSON before HTTP content coding; the notes hash covers the array including its delimiters.
+Both passes use one explicitly REPEATABLE READ tenant snapshot, bounded note ID/body pages, and a
+fixed non-note envelope. Admission permits two concurrent disclosures per instance and one per
+organization; requests never wait for admission. Overload and a configured pool smaller than two connections
+use the existing 503 shape before any snapshot. Placement discovery completes in a separate
+control transaction first, keeping the per-disclosure connection peak at two (snapshot plus audit),
+including cross-workspace and unresolved caller contexts. Provision four connections for both
+admission slots, plus ordinary traffic. Pools of two or three admit only one disclosure to retain
+audit capacity; the second request is refused before a snapshot. In these single-slot pools,
+capacity refusals from other organizations retain first-refusal timestamps for at most 128
+organization IDs (`MAX_REFUSED_DISCLOSURE_ORGANIZATIONS`), evicting the oldest entry on saturation.
+When the holder releases, the oldest retained organization receives a 30-second exclusive
+turnover reservation (`DISCLOSURE_TURNOVER_RESERVATION`). All non-reserved organizations,
+including the former holder, receive the same 503 before a snapshot. Admission consumes the
+reservation; an unused reservation lapses after 30 seconds. Other recorded refusals are cleared
+at turnover, preventing chained unused reservations. Pools of at least four keep two slots and
+the existing admission behavior.
+
+The absolute pass-two delivery deadline is
+`connex.data-subject-disclosure.delivery-timeout-ms` (environment
+`CONNEX_DSR_DISCLOSURE_DELIVERY_TIMEOUT_MS`, default `120000`). It is checked before each note
+page read/write and every 8 KiB of output; expiry closes the specific request socket, rolls back
+the snapshot, invalidates the source and releases context/admission. The deployed Tomcat HTTP/1.1
+NIO connector sets `server.tomcat.connection-timeout` (`CONNEX_TOMCAT_CONNECTION_TIMEOUT`, default
+`30s`), which initializes its blocking write timeout. A blocked write can take one such timeout to
+unwind after socket closure: the delivery bound is deadline plus one connector write timeout
+(150 seconds by default). Preparation/preflight time is separate. A live server without the
+cancellable transport hook refuses disclosure before opening the response.
+
+Pass-two failures before commitment clear buffered disclosure bytes and use the existing 503
+shape. After commitment the response stays truncated; no error suffix or automatic closing JSON
+is appended. The writer withholds the final document byte until both passes' counts, digests and
+byte lengths match. Clients must reject incomplete framing, invalid JSON or integrity-header
+mismatches and retry explicitly. Wait for an active same-organization download to end after a 503.
+With a single-slot pool, a refused organization should retry during its turnover reservation;
+non-reserved organizations must wait for that reservation to be used or its 30-second window to lapse.
+After deadline expiry, discard the partial download and retry on a connection able to finish within
+the limit. Each retry assembles and audits anew; there is no continuation. Retain raw response bytes for hash verification: the SPA reformats
+its download. See [APPI_DATA_SUBJECT_REQUEST_PROCEDURE.md](../APPI_DATA_SUBJECT_REQUEST_PROCEDURE.md)
+for operator handling.
 
 ## Current source audit (2026-09-08)
 

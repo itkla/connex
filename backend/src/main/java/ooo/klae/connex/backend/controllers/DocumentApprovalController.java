@@ -20,6 +20,7 @@ import ooo.klae.connex.backend.dto.ApprovalDelegationRequest;
 import ooo.klae.connex.backend.dto.ApprovalRequestBody;
 import ooo.klae.connex.backend.dto.ApprovalStepApproverChangeRequest;
 import ooo.klae.connex.backend.dto.ApprovalStepApproverDto;
+import ooo.klae.connex.backend.dto.ApprovalStepCandidatesDto;
 import ooo.klae.connex.backend.dto.DocumentApprovalDto;
 import ooo.klae.connex.backend.services.DocumentApprovalService;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -67,6 +68,14 @@ public class DocumentApprovalController {
     public List<ApprovalDelegateDto> delegateCandidates(@PathVariable int dealId,
             @PathVariable int documentId, @PathVariable int stepId) {
         return approvalService.eligibleDelegates(dealId, documentId, stepId);
+    }
+
+    /** Lists advisory candidates for managing one active approval step. */
+    @GetMapping("/steps/{stepId}/approver-candidates")
+    @RequirePermission(Permission.DOCUMENT_MANAGE)
+    public ApprovalStepCandidatesDto approverCandidates(@PathVariable int dealId,
+            @PathVariable int documentId, @PathVariable int stepId) {
+        return approvalService.approverCandidates(dealId, documentId, stepId);
     }
 
     @PostMapping("/steps/{stepId}/approvers")

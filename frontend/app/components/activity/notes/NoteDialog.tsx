@@ -575,13 +575,15 @@ export function NoteDialogForm({
         });
     }, [content, formChanged, isEdit, onClearDraft, onPersistDraft, selectedDealId, selectedPersonId, succeeded, title, visibility]);
 
-    const ensureNoteId = useCallback(async (): Promise<number> => {
+    const ensureNoteId = useCallback(async (origin: RequestInit = {}): Promise<number> => {
         const existing = persistedNoteIdRef.current;
         if (existing != null) return existing;
         if (ensureNoteIdInFlightRef.current) return ensureNoteIdInFlightRef.current;
 
         const snapshot = formSnapshotRef.current;
         const body = snapshot.content.trim() ? snapshot.content : '\u200B';
+        const headers = new Headers(origin.headers);
+        new Headers(requestInit?.headers).forEach((value, key) => headers.set(key, value));
         const promise = createNote(
             {
                 content: body,
@@ -591,7 +593,7 @@ export function NoteDialogForm({
                 person: snapshot.personId,
                 deal: snapshot.dealId,
             },
-            requestInit,
+            { ...origin, ...requestInit, headers },
         ).then((saved) => {
             if (!saved?.id) throw new Error('missing-note-id');
             persistedNoteIdRef.current = saved.id;

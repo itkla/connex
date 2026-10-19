@@ -153,7 +153,9 @@ describe('the provider adopts a successful answer into the real drawer', () => {
         fireEvent.click(screen.getByRole('button', { name: enCommon.AskConnex.send }));
         await waitFor(() => expect(startAiChatTurn).toHaveBeenCalledExactlyOnceWith(
             4, expect.objectContaining({ content: QUESTION }),
+            { headers: expect.any(Headers) },
         ));
+        expect(new Headers(vi.mocked(startAiChatTurn).mock.calls[0]?.[2]?.headers).get('X-Workspace-Id')).toBe('7');
         await waitFor(() => expect(getAiChatTurn).toHaveBeenCalled());
         const socket = boundary.socket.current;
         if (socket === null) throw new Error('The provider did not connect its socket');

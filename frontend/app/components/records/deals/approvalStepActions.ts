@@ -1,9 +1,8 @@
 import type {
     ApprovalStepApproverChangePayload,
-    CustomRole,
+    ApprovalStepCandidates,
     DealDocument,
     DocumentApprovalStep,
-    WorkspaceMember,
 } from '@/app/lib/types';
 
 export const MAX_APPROVAL_STEP_APPROVERS = 20;
@@ -15,45 +14,6 @@ export type ApprovalMemberDirectoryStatus = 'hidden' | 'loading' | 'ready' | 'un
 export type ApprovalStepApproverSelection =
     | { mode: 'any_approver' }
     | { mode: 'members'; memberIds: readonly number[] };
-
-export type ApprovalCandidateDirectory = {
-    members: WorkspaceMember[];
-    verifiedApproverIds: number[];
-};
-
-/**
- * Filters the active member directory with role definitions the viewer could read. A role that
- * cannot be resolved remains selectable, but is not claimed as verified approval capacity; the
- * approval mutation remains authoritative for that member.
- */
-export function approvalCandidateDirectory(
-    members: readonly WorkspaceMember[],
-    builtInRoles: readonly CustomRole[],
-    customRoles: readonly CustomRole[],
-): ApprovalCandidateDirectory {
-    const builtInCanApproveByName = new Map(builtInRoles.map((role) => [
-        role.name,
-        new Set(role.permissions).has('DOCUMENT_APPROVE'),
-    ]));
-    const customCanApproveById = new Map(customRoles.map((role) => [
-        role.id,
-        new Set(role.permissions).has('DOCUMENT_APPROVE'),
-    ]));
-    const candidates: WorkspaceMember[] = [];
-    const verifiedApproverIds: number[] = [];
-
-    for (const member of members) {
-        if (member.status === 'pending') continue;
-        const roleCanApprove = member.roleId == null
-            ? builtInCanApproveByName.get(member.builtInRole)
-            : customCanApproveById.get(member.roleId);
-        if (roleCanApprove === false) continue;
-        candidates.push(member);
-        if (roleCanApprove === true) verifiedApproverIds.push(member.id);
-    }
-
-    return { members: candidates, verifiedApproverIds };
-}
 
 /** Returns the active steps the current viewer may manage, in policy order. */
 export function manageableApprovalSteps(
@@ -83,36 +43,32 @@ export function widenableApprovalSteps(
         .filter((step) => !step.effectiveAnyApprover);
 }
 
-/** Returns how many additional verified, undecided approvers the proposed change still needs. */
+/** Returns how many additional server-authorized, undecided approvers the proposed change still needs. */
 export function approvalStepQuorumShortfall(
-    step: DocumentApprovalStep,
+    snapshot: ApprovalStepCandidates,
     action: ApprovalStepManagementAction,
     selection: ApprovalStepApproverSelection,
-    verifiedApproverIds: readonly number[],
 ): number {
-    const approvedIds = new Set<number>();
-    for (const decision of step.decisions) {
-        if (decision.decision === 'approved') approvedIds.add(decision.decidedBy);
-    }
-    const verifiedIds = new Set(verifiedApproverIds);
+    const decidedIds = new Set(snapshot.decidedByUserIds);
+    const candidateIds = snapshot.candidates.map((candidate) => candidate.id);
+    const availableIds = new Set(candidateIds);
     const eligibleIds = new Set<number>();
     if (action === 'escalate') {
-        for (const id of step.effectiveApproverIds) {
-            if (verifiedIds.has(id)) eligibleIds.add(id);
+        for (const id of snapshot.effectiveApproverIds) {
+            if (availableIds.has(id)) eligibleIds.add(id);
         }
     }
     const proposedIds = selection.mode === 'any_approver'
-        ? verifiedApproverIds
+        ? candidateIds
         : selection.memberIds;
     for (const id of proposedIds) {
-        if (verifiedIds.has(id)) eligibleIds.add(id);
+        if (availableIds.has(id)) eligibleIds.add(id);
     }
     let undecidedCount = 0;
     for (const id of eligibleIds) {
-        if (!approvedIds.has(id)) undecidedCount += 1;
+        if (!decidedIds.has(id)) undecidedCount += 1;
     }
-    const remainingCount = Math.max(0, step.requiredCount - step.approvedCount);
-    return Math.max(0, remainingCount - undecidedCount);
+    return Math.max(0, snapshot.remainingRequiredCount - undecidedCount);
 }
 
 /** Shapes the mutually exclusive approver selection into the existing backend request contract. */
