@@ -25,7 +25,8 @@ class AiAgentStartupRecoveryServiceTest {
     private final AiAgentRunMapper runs = mock(AiAgentRunMapper.class);
     private final AiAgentRunPersistenceService persistence = mock(AiAgentRunPersistenceService.class);
     private final AiRunLeaseMapper leases = mock(AiRunLeaseMapper.class);
-    private final AiAgentStartupRecoveryService recovery = new AiAgentStartupRecoveryService(runs, persistence, leases);
+    private final AiAgentStartupRecoveryService recovery = new AiAgentStartupRecoveryService(runs, persistence, leases,
+            mock(org.springframework.transaction.PlatformTransactionManager.class));
 
     @Test
     void recoveryPassesObservedEpochToConditionalTakeoverInsteadOfUnconditionalInterruption() {

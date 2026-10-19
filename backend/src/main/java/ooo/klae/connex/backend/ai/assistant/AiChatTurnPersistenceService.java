@@ -129,7 +129,7 @@ public class AiChatTurnPersistenceService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = workspaceService.getCurrentUserId();
         requireActiveAiAccess(workspaceId, userId);
-        auditAgentLoopRead(workspaceId, userId, sessionId);
+        sessionReadAudit.retainTranscriptAuditParents(workspaceId, userId);
         workspaceService.lockAndRequireMember(workspaceId, userId);
         workspaceService.requirePermission(workspaceId, userId, Permission.AI_USE);
         List<Integer> activeMemberIds = activeMemberIds(workspaceId, userId);
@@ -222,6 +222,7 @@ public class AiChatTurnPersistenceService {
             throw new AiAssistantLoopException("restrictions_changed", "restrictions_changed");
         }
         AiChatPrivacyGuard.retain(chatMapper, privacyToken);
+        sessionReadAudit.recordAccessible(workspaceId, userId, session);
         expiredTurnIds.forEach(expiredId -> releaseRunLease(workspaceId, expiredId));
         return new AiChatQueuedTurn(
                 workspaceId, userId, sessionId, turn.getId(), message.getId(),
@@ -268,7 +269,9 @@ public class AiChatTurnPersistenceService {
      * locks, and an audit append then takes shared locks on the actor, workspace and organization
      * rows — the opposite order from a membership mutation, which is a deadlock cycle on a route
      * the client polls once per second. The {@code partialContent} it projects is a view of the
-     * transcript whose disclosure is already recorded at the session read.
+     * transcript whose disclosure is already recorded at the session read. The privacy barrier
+     * remains shared through the calling turn service's complete DTO projection; provenance is
+     * reloaded after acquiring it so an earlier invalidation always withholds partials and scope.
      */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.AI_USE)
@@ -289,40 +292,19 @@ public class AiChatTurnPersistenceService {
         refuseMissionTurn(turn);
         boolean expired = expireStaleTurn(turn, expiryCutoff());
         AiChatTurn result = turn;
+        if (expired) {
+            retainTerminalPrivacy(result);
+        }
+        chatMapper.lockPrivacyBarrierForShare(workspaceId);
         if (!turnTokenCurrent(result)) {
             result.setPartialContent(null);
             result.setPartialContentUtf16Offset(0);
             result.setScopeJson(null);
         }
         if (expired) {
-            retainTerminalPrivacy(result);
             releaseRunLease(workspaceId, turnId);
         }
         return result;
-    }
-
-    /**
-     * Records the administrative agent-loop read before any membership, session or turn lock is
-     * taken.
-     *
-     * <p>Starting a turn is an action against another member's transcript, not a view of it, so it
-     * earns its own record rather than relying on the session read. Placement is the whole point:
-     * an audit append takes shared locks on the actor, workspace and organization rows, and a
-     * membership mutation takes those same roots before {@code workspace_member}. Appending here,
-     * ahead of {@code lockAndRequireMember}, keeps both paths in one global order and removes the
-     * cycle. An independent transaction would not help — it acquires the same roots on a second
-     * connection while this one still holds {@code workspace_member}, which deadlocks against
-     * itself.
-     *
-     * <p>The lookup is the unlocked accessible-session read, so it adds no lock of its own, and the
-     * append shares this transaction: a turn that is later refused rolls the row back with it.
-     */
-    private void auditAgentLoopRead(int workspaceId, int userId, int sessionId) {
-        AiChatSession session = chatMapper.getAccessibleSessionById(
-                workspaceId, userId, sessionId);
-        if (session != null) {
-            sessionReadAudit.recordAccessible(workspaceId, userId, session);
-        }
     }
 
     /**

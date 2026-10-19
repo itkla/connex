@@ -6,6 +6,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.ai.AiFeature;
 import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
@@ -237,7 +239,8 @@ public class AiAssistantTurnService {
         return objectMapper.writeValueAsString(resolution.interpreted().withoutLabels());
     }
 
-    /** Returns one authorized durable turn after applying lazy expiry. */
+    /** Projects the complete turn response while retaining its authorization and privacy fences. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.AI_USE)
     public AiChatTurnDto get(int sessionId, int turnId) {
         var turn = persistenceService.readTurn(sessionId, turnId);

@@ -79,7 +79,8 @@ public class AiAgentPrivacyService {
     /** Settles legacy executions before readiness; no expired process-local token is adopted. */
     public void reconcileLegacyTurns(int workspaceId) {
         while (true) {
-            var legacy = privacyMapper.legacyActiveTurns(workspaceId, BATCH_SIZE);
+            var legacy = Objects.requireNonNull(transaction().execute(
+                    status -> privacyMapper.legacyActiveTurns(workspaceId, BATCH_SIZE)));
             if (legacy.isEmpty()) {
                 return;
             }

@@ -193,6 +193,25 @@ class AiAgentDsrPurgeHttpIntegrationTest {
     }
 
     @Test
+    void organizationAdministratorWithoutWorkspaceMembershipCanInitiateAndReadProgress() throws Exception {
+        jdbc.update("DELETE FROM workspace_member WHERE workspace_id=? AND user_id=?", workspace.getId(), actor.getId());
+        String accepted = mvc.perform(post(initiatePath()).session(session.http())
+                .header(session.header(), session.token()).contentType(MediaType.APPLICATION_JSON).content(body()))
+                .andExpect(status().isAccepted()).andExpect(jsonPath("$.state").value("purging"))
+                .andExpect(jsonPath("$.workspaceCount").value(1))
+                .andReturn().getResponse().getContentAsString();
+        String operation = json.readTree(accepted).path("operationId").asString();
+        mvc.perform(get(progressPath(operation)).session(session.http()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.state").value("purging"))
+                .andExpect(jsonPath("$.operationId").value(operation));
+        assertEquals(1, acceptedCount());
+        jdbc.update("DELETE FROM org_member WHERE org_id=? AND user_id=?", organization.getId(), actor.getId());
+        mvc.perform(get(progressPath(operation)).session(session.http())).andExpect(status().isForbidden());
+        mvc.perform(post(initiatePath()).session(session.http()).header(session.header(), session.token())
+                .contentType(MediaType.APPLICATION_JSON).content(body())).andExpect(status().isForbidden());
+    }
+
+    @Test
     void currentOrganizationAuthorityIsRequiredForInitiationAndProgress() throws Exception {
         String accepted = mvc.perform(postRequest().content(body())).andExpect(status().isAccepted())
                 .andReturn().getResponse().getContentAsString();

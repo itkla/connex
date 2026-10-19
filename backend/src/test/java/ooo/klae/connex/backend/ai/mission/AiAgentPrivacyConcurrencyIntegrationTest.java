@@ -29,6 +29,14 @@ import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import ooo.klae.connex.backend.beans.AiAgentPrivacyWork;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatSession;
+import ooo.klae.connex.backend.beans.AiChatTurn;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantTurnService;
+import ooo.klae.connex.backend.ai.assistant.AiChatProgressService;
+import ooo.klae.connex.backend.ai.assistant.AiChatTurnPersistenceService;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantLoopException;
+import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
+import ooo.klae.connex.backend.dto.AiChatTurnCreateRequest;
+import ooo.klae.connex.backend.services.PersonService;
 import ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard;
 import ooo.klae.connex.backend.ai.assistant.AiChatPrivacyToken;
 import ooo.klae.connex.backend.mappers.AiAgentPrivacyMapper;
@@ -43,6 +51,11 @@ class AiAgentPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivacyInt
     @MockitoSpyBean private AiAgentPrivacyMapper workMapper;
     @MockitoSpyBean private AiChatMapper chat;
     @Autowired private AiAssistantService assistant;
+    @Autowired private AiAssistantTurnService turns;
+    @MockitoSpyBean private AiChatProgressService progress;
+    @MockitoSpyBean private AiRestrictionEpoch epochs;
+    @Autowired private AiChatTurnPersistenceService persistence;
+    @Autowired private PersonService persons;
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
@@ -166,6 +179,214 @@ class AiAgentPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivacyInt
         }
         finish(operation);
         assertTrue(assistant.get(session.getId(), 1, 50).messages().items().isEmpty());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void admissionAndRestrictionCannotInvertFenceAndAuditHead(boolean admissionFirst) throws Exception {
+        var author = newUser();
+        workspaceMapper.updateMemberRole(workspace.getId(), author.getId(), "owner");
+        var person = newPerson(null);
+        AiChatSession session = new AiChatSession();
+        session.setWorkspaceId(workspace.getId());
+        session.setCreatedByUserId(author.getId());
+        session.setTitle("Shared ordinary session");
+        session.setVisibility("shared");
+        session.setStatus("active");
+        chatMapper.insertSession(session);
+        long epoch = epochs.current(workspace.getId());
+        CountDownLatch admissionAtFence = new CountDownLatch(1);
+        CountDownLatch releaseAdmission = new CountDownLatch(1);
+        CountDownLatch invalidating = new CountDownLatch(1);
+        AtomicLong restrictionConnection = new AtomicLong();
+        AiAgentPrivacyMapper realPrivacy = sqlSessions.getMapper(AiAgentPrivacyMapper.class);
+        doAnswer(invocation -> {
+            admissionAtFence.countDown();
+            await(releaseAdmission);
+            return invocation.callRealMethod();
+        }).when(epochs).retainReadFenceUntilTransactionCompletionIfCurrent(workspace.getId(), epoch);
+        doAnswer(invocation -> {
+            restrictionConnection.set(connectionId());
+            invalidating.countDown();
+            return realPrivacy.lockBarrier(invocation.getArgument(0));
+        }).when(workMapper).lockBarrier(workspace.getId());
+        try (var workers = Executors.newFixedThreadPool(2)) {
+            java.util.concurrent.Callable<AiAssistantLoopException> admission = () -> {
+                authenticateAs(currentUser, workspace.getId());
+                try {
+                    return assertThrows(AiAssistantLoopException.class, () -> persistence.queue(session.getId(),
+                            new AiChatTurnCreateRequest("A question", List.of()), epoch));
+                } finally {
+                    clearAuthentication();
+                }
+            };
+            java.util.concurrent.Callable<Boolean> restriction = () -> {
+                authenticateAs(author, workspace.getId());
+                try {
+                    persons.updateProcessingRestrictions(person.getId(), true, false);
+                    return true;
+                } finally {
+                    clearAuthentication();
+                }
+            };
+            var admitted = new java.util.concurrent.atomic.AtomicReference<java.util.concurrent.Future<AiAssistantLoopException>>();
+            var restricted = new java.util.concurrent.atomic.AtomicReference<java.util.concurrent.Future<Boolean>>();
+            try {
+                transaction().executeWithoutResult(status -> {
+                    privacyMapper.lockBarrierForShare(workspace.getId());
+                    if (admissionFirst) {
+                        admitted.set(workers.submit(admission));
+                        await(admissionAtFence);
+                    }
+                    restricted.set(workers.submit(restriction));
+                    await(invalidating);
+                    MySqlLockWaitProbe.awaitExclusiveRecordLock(jdbc, restrictionConnection.get(),
+                            "ai_agent_privacy_barrier", Integer.toString(workspace.getId()));
+                    if (!admissionFirst) {
+                        admitted.set(workers.submit(admission));
+                        await(admissionAtFence);
+                        releaseAdmission.countDown();
+                    }
+                });
+                assertTrue(restricted.get().get(10, TimeUnit.SECONDS));
+                releaseAdmission.countDown();
+                assertEquals("restrictions_changed", admitted.get().get(10, TimeUnit.SECONDS).detailReason());
+            } finally {
+                releaseAdmission.countDown();
+            }
+        } finally {
+            jdbc.update("DELETE FROM person WHERE workspace_id=? AND id=?", workspace.getId(), person.getId());
+            jdbc.update("DELETE FROM workspace_member WHERE workspace_id=? AND user_id=?", workspace.getId(), author.getId());
+            jdbc.update("UPDATE ai_chat_session SET created_by_user_id=NULL WHERE workspace_id=? AND id=?",
+                    workspace.getId(), session.getId());
+            jdbc.update("DELETE FROM app_user WHERE id=?", author.getId());
+        }
+    }
+
+    @Test
+    void pollingRetainsPrivacyUntilTheCompleteResponseIsProjected() throws Exception {
+        AiChatSession session = taintedSession();
+        AiChatTurn turn = ordinaryPartial(session);
+        CountDownLatch projecting = new CountDownLatch(1);
+        CountDownLatch releaseProjection = new CountDownLatch(1);
+        CountDownLatch invalidating = new CountDownLatch(1);
+        AtomicLong waitingConnection = new AtomicLong();
+        AiAgentPrivacyMapper realPrivacy = sqlSessions.getMapper(AiAgentPrivacyMapper.class);
+        doAnswer(invocation -> {
+            if (Thread.currentThread().getName().equals("mission-polling-reader")) {
+                projecting.countDown();
+                await(releaseProjection);
+            }
+            return invocation.callRealMethod();
+        }).when(progress).project(org.mockito.ArgumentMatchers.any(AiChatTurn.class));
+        doAnswer(invocation -> {
+            waitingConnection.set(connectionId());
+            invalidating.countDown();
+            return realPrivacy.lockBarrier(invocation.getArgument(0));
+        }).when(workMapper).lockBarrier(workspace.getId());
+        String operation;
+        try (var workers = Executors.newFixedThreadPool(2)) {
+            var reader = workers.submit(() -> {
+                Thread.currentThread().setName("mission-polling-reader");
+                authenticateAs(currentUser, workspace.getId());
+                try {
+                    return turns.get(session.getId(), turn.getId());
+                } finally {
+                    clearAuthentication();
+                }
+            });
+            try {
+                assertTrue(projecting.await(10, TimeUnit.SECONDS));
+                var invalidation = workers.submit(() -> tenantWorkScope.inWorkspace(workspace.getId(), this::invalidate));
+                assertTrue(invalidating.await(10, TimeUnit.SECONDS));
+                MySqlLockWaitProbe.awaitExclusiveRecordLock(jdbc, waitingConnection.get(),
+                        "ai_agent_privacy_barrier", Integer.toString(workspace.getId()));
+                releaseProjection.countDown();
+                var response = reader.get(10, TimeUnit.SECONDS);
+                assertEquals("Private partial", response.partialContent());
+                assertNotNull(response.scope());
+                assertEquals("workspace", response.scope().ownerMode());
+                operation = invalidation.get(10, TimeUnit.SECONDS);
+            } finally {
+                releaseProjection.countDown();
+            }
+        }
+        assertNull(turns.get(session.getId(), turn.getId()).partialContent());
+        assertNull(turns.get(session.getId(), turn.getId()).scope());
+        finish(operation);
+        assertThrows(ooo.klae.connex.backend.exceptions.ResourceNotFoundException.class,
+                () -> turns.get(session.getId(), turn.getId()));
+    }
+
+    @Test
+    void pollingRechecksProvenanceAfterWaitingForInvalidation() throws Exception {
+        AiChatSession session = taintedSession();
+        AiChatTurn turn = ordinaryPartial(session);
+        CountDownLatch invalidated = new CountDownLatch(1);
+        CountDownLatch releaseInvalidation = new CountDownLatch(1);
+        CountDownLatch reading = new CountDownLatch(1);
+        AtomicLong waitingConnection = new AtomicLong();
+        AiChatMapper realChat = sqlSessions.getMapper(AiChatMapper.class);
+        doAnswer(invocation -> {
+            if (Thread.currentThread().getName().equals("mission-polling-reader")) {
+                waitingConnection.set(connectionId());
+                reading.countDown();
+            }
+            return realChat.lockPrivacyBarrierForShare(invocation.getArgument(0));
+        }).when(chat).lockPrivacyBarrierForShare(workspace.getId());
+        String operation;
+        try (var workers = Executors.newFixedThreadPool(2)) {
+            var invalidation = workers.submit(() -> tenantWorkScope.inWorkspace(workspace.getId(),
+                    () -> transaction().execute(status -> {
+                        String accepted = invalidate();
+                        invalidated.countDown();
+                        await(releaseInvalidation);
+                        return accepted;
+                    })));
+            try {
+                assertTrue(invalidated.await(10, TimeUnit.SECONDS));
+                var reader = workers.submit(() -> {
+                    Thread.currentThread().setName("mission-polling-reader");
+                    authenticateAs(currentUser, workspace.getId());
+                    try {
+                        return turns.get(session.getId(), turn.getId());
+                    } finally {
+                        clearAuthentication();
+                    }
+                });
+                assertTrue(reading.await(10, TimeUnit.SECONDS));
+                MySqlLockWaitProbe.awaitSharedRecordLock(jdbc, waitingConnection.get(),
+                        "ai_agent_privacy_barrier", Integer.toString(workspace.getId()));
+                releaseInvalidation.countDown();
+                operation = invalidation.get(10, TimeUnit.SECONDS);
+                var response = reader.get(10, TimeUnit.SECONDS);
+                assertNull(response.partialContent());
+                assertNull(response.scope());
+            } finally {
+                releaseInvalidation.countDown();
+            }
+        }
+        finish(operation);
+    }
+
+    private AiChatTurn ordinaryPartial(AiChatSession session) {
+        AiChatTurn turn = new AiChatTurn();
+        turn.setWorkspaceId(workspace.getId());
+        turn.setSessionId(session.getId());
+        turn.setRequestedByUserId(currentUser.getId());
+        turn.setStatus("running");
+        turn.setPrivacyMode("masked");
+        turn.setStreamed(true);
+        turn.setPrivacyGeneration(1L);
+        turn.setPrivacyTaintSeq(1);
+        turn.setScopeJson(new tools.jackson.databind.ObjectMapper().writeValueAsString(
+                new ooo.klae.connex.backend.dto.AiChatQueryScopeDto(true, null, null, null, "workspace",
+                        List.of(), List.of(), List.of("person"), List.of(), List.of(), List.of(),
+                        null, null, false, 20, 100, 10, List.of())));
+        chatMapper.insertTurn(turn);
+        jdbc.update("UPDATE ai_chat_turn SET partial_content='Private partial', partial_content_utf16_offset=15"
+                + " WHERE workspace_id=? AND id=?", workspace.getId(), turn.getId());
+        return turn;
     }
 
     @Test

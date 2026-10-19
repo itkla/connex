@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -25,9 +26,11 @@ import ooo.klae.connex.backend.mappers.AiAgentPrivacyMapper;
 import ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper;
 import ooo.klae.connex.backend.services.DataSubjectRequestControlOperations;
 import ooo.klae.connex.backend.services.DataSubjectRequestService;
+import ooo.klae.connex.backend.services.SystemActor;
 import ooo.klae.connex.backend.observability.JobRunRecorder;
 import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunDetail;
 import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunStatus;
+import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 import tools.jackson.databind.ObjectMapper;
 
@@ -44,6 +47,8 @@ public class AiAgentDsrPurgeService {
     private final AiAgentPrivacyService privacyService;
     private final TenantLifecycleControlMapper lifecycleMapper;
     private final TenantWorkScope tenantWorkScope;
+    private final TenantContext tenantContext;
+    private final SystemActor systemActor;
     private final PlatformTransactionManager transactionManager;
     private final ObjectMapper objectMapper;
     private final JobRunRecorder jobRunRecorder;
@@ -101,7 +106,8 @@ public class AiAgentDsrPurgeService {
         if (completed != null) {
             return;
         }
-        tenantWorkScope.inWorkspace(accepted.workspaceIds().getFirst(), () -> {
+        tenantWorkScope.inWorkspace(accepted.workspaceIds().getFirst(), () -> inAcceptedScope(
+                accepted, accepted.workspaceIds().getFirst(), () -> {
             TransactionTemplate tenant = new TransactionTemplate(transactionManager);
             tenant.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
             tenant.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
@@ -119,7 +125,7 @@ public class AiAgentDsrPurgeService {
                         "dsr", accepted.requestId(), accepted.auditId());
             });
             return null;
-        });
+        }));
         AiAgentHoldingsPurgeDto current = projection(accepted);
         if (current.completedWorkspaceCount() == current.workspaceCount()) {
             tenantWorkScope.unrouted(() -> {
@@ -136,7 +142,13 @@ public class AiAgentDsrPurgeService {
         String finishedAt = null;
         for (int workspaceId : accepted.workspaceIds()) {
             AiAgentPrivacyWork work = tenantWorkScope.inLifecycleWorkspace(workspaceId,
-                    () -> privacyMapper.getWork(workspaceId, accepted.operationId()));
+                    () -> inAcceptedScope(accepted, workspaceId, () -> {
+                        TransactionTemplate read = new TransactionTemplate(transactionManager);
+                        read.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+                        read.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+                        read.setReadOnly(true);
+                        return read.execute(status -> privacyMapper.getWork(workspaceId, accepted.operationId()));
+                    }));
             if (work == null) {
                 missing = true;
             } else if ("complete".equals(work.getPhase()) && Long.valueOf(0).equals(work.getLastResidualCount())
@@ -158,5 +170,26 @@ public class AiAgentDsrPurgeService {
                 AiAgentPurgeAcceptance.SCOPE, AiAgentPurgeAcceptance.CUTOFF_POLICY, accepted.acceptedAt(), state,
                 accepted.workspaceIds().size(), complete, completed ? finishedAt : null,
                 retrying ? "cleanup_retry" : null);
+    }
+
+    /** Installs only frozen accepted workspace authority and restores the caller after every tenant phase. */
+    private <T> T inAcceptedScope(AiAgentPurgeAcceptance accepted, int workspaceId, Supplier<T> work) {
+        boolean hadTenant = tenantContext.isResolved();
+        Integer previousWorkspace = tenantContext.getWorkspaceId();
+        Integer previousOrg = tenantContext.getOrgId();
+        Integer previousUser = tenantContext.getUserId();
+        String previousRole = tenantContext.getRole();
+        String previousCatalog = tenantContext.getScopeCatalog();
+        int systemUserId = tenantWorkScope.unroutedRead(systemActor::user).getId();
+        tenantContext.set(workspaceId, accepted.orgId(), systemUserId, "system", tenantContext.getCatalog());
+        try {
+            return work.get();
+        } finally {
+            if (hadTenant) {
+                tenantContext.set(previousWorkspace, previousOrg, previousUser, previousRole, previousCatalog);
+            } else {
+                tenantContext.clear();
+            }
+        }
     }
 }

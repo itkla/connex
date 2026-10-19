@@ -95,7 +95,10 @@ current access, and an unwithheld mission source. Reader predicates apply before
 erasure, including ordinary transcript, retained content, notification sources, and tenant
 export. Transcript detail reads use READ COMMITTED, lock the actor/workspace/organization audit parents
 shared before barrier S, append strict read audits after the barrier, and retain it through projection. They flush the
-mapper cache at that lock, and reload session metadata afterward. Browser invalidation discards
+mapper cache at that lock, and reload session metadata afterward. Ordinary turn polling likewise holds
+barrier S through partial, progress, and scope DTO construction, with fresh provenance validation
+after acquiring the barrier. Admission retains audit parents early and appends its audit only after
+the restriction and privacy fences. Browser invalidation discards
 rendered and buffered text, including missing-turn reconnects and late responses. Canonical terminal
 partials replace local text exactly. Withdrawal invalidates mission output snapshots before reload.
 Export residual counting remains unconditional: privacy filtering cannot hide
@@ -160,8 +163,12 @@ metadata after audit sanitization or the transaction aborts.
 T1 runs after C1 commits. It uses only the frozen workspace list; each workspace installs
 its cutoff exactly once under `(workspace_id,operation_key)` and operation fingerprint.
 Initiation attempts T1 synchronously before projecting progress. C1's reserved linked-person
-connection restores its original auto-commit mode after rollback, so a surrounding nontransactional
-Spring scope cannot retain an implicit snapshot that hides T1's committed work. Initiation and
+session owns an independent routed JDBC connection, so a surrounding nontransactional Spring
+scope cannot lend it a retained control connection. It rolls back and restores connection state
+before release. T1 and tenant progress reads install a restorable system tenant identity from
+accepted authority; they do not require workspace membership. Progress reads open fresh
+READ COMMITTED transactions after placement installation, including scheduled recovery after
+control-ledger enumeration, and lifecycle progress continues to use lifecycle placement. Initiation and
 scheduled recovery failures log the recovery job name and exception class without exception payloads.
 T2 is the bounded privacy worker. C2 strictly records completion only after all accepted
 workspaces have completed residual-verified work. Recovery scans the acceptance ledger
@@ -192,7 +199,9 @@ Self-service, signup/bootstrap, and volume seeding publish the same workspace-pr
 event inside their control transaction. Its after-commit callback suspends the completed
 transaction's resources before resolving placement, then installs the system actor's tenant
 scope through `AutomationExecutor`. A catalog pin alone does not authorize scoped mapper
-calls on an unresolved signup request thread. Tenant initialization commits separately.
+calls on an unresolved signup request thread. Tenant initialization commits separately. Legacy discovery pages and startup recovery reads use fresh
+routed transactions after placement is installed, ending before each independent settlement; resumed control sessions from placement lookup
+never supply their tenant reads.
 A crash between commits leaves mission admission unavailable until startup/periodic
 reconciliation completes; no cross-plane atomicity is claimed.
 

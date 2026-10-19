@@ -60,11 +60,16 @@ class AiAgentDsrPurgeRecoveryTest {
             .thenThrow(new IllegalStateException("sensitive-exception-payload")).thenReturn(null);
         var workspaces = mock(WorkspaceMapper.class);
         when(workspaces.getOrgId(7)).thenReturn(11);
-        var scope = new TenantWorkScope(new TenantContext(), mock(TenantCatalogResolver.class), workspaces);
+        var context = new TenantContext();
+        var system = mock(ooo.klae.connex.backend.services.SystemActor.class);
+        var principal = new ooo.klae.connex.backend.beans.User();
+        principal.setId(1);
+        when(system.user()).thenReturn(principal);
+        var scope = new TenantWorkScope(context, mock(TenantCatalogResolver.class), workspaces);
         var recorder = mock(JobRunRecorder.class);
         var service = new AiAgentDsrPurgeService(requests, mock(DataSubjectRequestControlOperations.class),
             receipts, mock(AiAgentPrivacyMapper.class), mock(AiAgentPrivacyService.class),
-            mock(TenantLifecycleControlMapper.class), scope, mock(PlatformTransactionManager.class), json, recorder);
+            mock(TenantLifecycleControlMapper.class), scope, context, system, mock(PlatformTransactionManager.class), json, recorder);
         var logger = (Logger) LoggerFactory.getLogger(AiAgentDsrPurgeService.class);
         var events = new ListAppender<ILoggingEvent>();
         events.start();

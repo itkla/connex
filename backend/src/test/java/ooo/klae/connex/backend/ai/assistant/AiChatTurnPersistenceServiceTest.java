@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.ai.assistant;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.inOrder;
@@ -564,14 +565,9 @@ class AiChatTurnPersistenceServiceTest {
                         && message.getStructuredJson().contains("\"id\":47")));
     }
 
-    /**
-     * Starting a turn runs the agent loop over another member's transcript, so it earns its own
-     * record. The ordering is the fix, not an accident: appending the row before
-     * {@code lockAndRequireMember} keeps this path and a membership mutation in one global lock
-     * order. Reverting the placement reintroduces the deadlock cycle, so the order is asserted.
-     */
+    /** Audit parents precede membership; the audit head follows the restriction and privacy fences. */
     @Test
-    void queueingATurnRecordsTheAgentLoopReadBeforeTakingAnyLock() {
+    void queueingATurnRetainsParentsBeforeLocksAndAppendsAfterFences() {
         when(chatMapper.listActiveTurnsBySessionForUpdate(
                 TURN.workspaceId(), TURN.sessionId())).thenReturn(List.of());
         when(chatMapper.countActiveTurns(
@@ -585,11 +581,13 @@ class AiChatTurnPersistenceServiceTest {
                 TURN.sessionId(), new AiChatTurnCreateRequest("A question", List.of()),
                 TURN.restrictionEpoch());
 
-        InOrder ordered = inOrder(sessionReadAudit, workspaceService);
-        ordered.verify(sessionReadAudit).recordAccessible(
-                TURN.workspaceId(), TURN.userId(), auditedSession);
-        ordered.verify(workspaceService).lockAndRequireMember(
-                TURN.workspaceId(), TURN.userId());
+        InOrder ordered = inOrder(sessionReadAudit, workspaceService, restrictionEpoch, chatMapper);
+        ordered.verify(sessionReadAudit).retainTranscriptAuditParents(TURN.workspaceId(), TURN.userId());
+        ordered.verify(workspaceService).lockAndRequireMember(TURN.workspaceId(), TURN.userId());
+        ordered.verify(restrictionEpoch).retainReadFenceUntilTransactionCompletionIfCurrent(
+                TURN.workspaceId(), TURN.restrictionEpoch());
+        ordered.verify(chatMapper).lockPrivacyBarrierForShare(TURN.workspaceId());
+        ordered.verify(sessionReadAudit).recordAccessible(TURN.workspaceId(), TURN.userId(), auditedSession);
     }
 
     /** Following your own turn polls this route once per second, so it must record nothing. */
@@ -600,6 +598,31 @@ class AiChatTurnPersistenceServiceTest {
 
         verify(sessionReadAudit, never()).recordAccessible(
                 anyInt(), anyInt(), any(AiChatSession.class));
+    }
+
+    @Test
+    void pollingRevalidatesPartialsAndScopeAfterAcquiringThePrivacyBarrier() {
+        storedTurn.setPrivacyTaintSeq(1);
+        storedTurn.setPartialContent("Private partial");
+        storedTurn.setPartialContentUtf16Offset(15);
+        storedTurn.setScopeJson("private scope");
+        auditedSession.setMissionTaintSeq(1);
+        var barrier = chatMapper.getPrivacyBarrier(TURN.workspaceId());
+        when(chatMapper.lockPrivacyBarrierForShare(TURN.workspaceId())).thenAnswer(call -> {
+            barrier.setGeneration(2);
+            barrier.setBlocked(false);
+            return barrier;
+        });
+
+        var response = service.readTurn(TURN.sessionId(), TURN.turnId());
+
+        assertNull(response.getPartialContent());
+        assertEquals(0, response.getPartialContentUtf16Offset());
+        assertNull(response.getScopeJson());
+        InOrder ordered = inOrder(chatMapper);
+        ordered.verify(chatMapper).getTurnByIdForUpdate(TURN.workspaceId(), TURN.sessionId(), TURN.turnId());
+        ordered.verify(chatMapper).lockPrivacyBarrierForShare(TURN.workspaceId());
+        ordered.verify(chatMapper).getPrivacyBarrier(TURN.workspaceId());
     }
 
     @Test
