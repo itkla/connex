@@ -133,10 +133,10 @@ async function openNewNote(page: Page) {
 
 /**
  * #1732: a draft composed while a workspace was selected must never be written into another
- * workspace. The first half switches workspaces explicitly, without a reload, while the full-page
- * note editor still holds text: whichever save carries that text (autosave or the flush on unmount)
- * must land in the workspace it was written in. The unit lifecycle test pins the unmount ordering
- * itself. The second half revokes the membership server-side and lets a safe read heal the selection
+ * workspace. The first half lets the full-page note editor's first autosave settle, then switches
+ * workspaces explicitly without a reload: the saved text must land in the workspace it was written
+ * in. The unit lifecycle test pins the unmount-flush ordering itself, which a browser cannot time
+ * deterministically. The second half revokes the membership server-side and lets a safe read heal the selection
  * cookie to the member's other workspace, the exact two-step path the backend cannot close on its own.
  */
 test.describe("drafts stay in the workspace they were started in", () => {
@@ -188,6 +188,7 @@ test.describe("drafts stay in the workspace they were started in", () => {
             await page.goto("/activity/notes/new");
             await expect(switcher).toContainText(revokedName);
             await page.locator('.tiptap[contenteditable="true"]').fill(flushedBody);
+            await expect(page).toHaveURL(/\/activity\/notes\/\d+$/);
             await switchWorkspace(page, homeName);
             await expect.poll(() => notesMatching(memberContext.request, revokedWorkspaceId, flushedBody)).toBe(1);
             expect(await notesMatching(memberContext.request, homeWorkspaceId, flushedBody)).toBe(0);
