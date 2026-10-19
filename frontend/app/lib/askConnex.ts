@@ -1883,21 +1883,6 @@ export function latestAskConnexSuggestions(
     return [...unique];
 }
 
-/**
- * The prompt a stopped answer offers to send again: the most recent thing the member themselves
- * wrote. A withheld or empty message carries nothing to resend, so it yields nothing to offer.
- */
-export function askConnexRetryPrompt(messages: readonly AiChatMessage[]): string | null {
-    for (let index = messages.length - 1; index >= 0; index--) {
-        const message = messages[index];
-        if (message === undefined || message.authorKind !== 'user') continue;
-        if (message.contentWithheld === true) return null;
-        const content = message.content.trim();
-        return content.length === 0 ? null : content;
-    }
-    return null;
-}
-
 /** Groups consecutive messages by sender without crossing a required transcript insertion point. */
 export function groupAskConnexMessages(
     messages: readonly AiChatMessage[],

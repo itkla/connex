@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceProvider, useWorkspace } from "@/app/hooks/useWorkspace";
 import type { Workspace } from "@/app/lib/types";
 import {
+    ApiError,
     acceptInvite,
     acceptInviteLink,
     acceptWorkspace,
@@ -520,6 +521,48 @@ describe("authoritative workspace selection adoption", () => {
         await expect(firstSelection).resolves.toBeUndefined();
     });
 
+    it("keeps the shell mounted without creating when the origin membership preflight is unavailable", async () => {
+        const existing = workspaceFixture(7, "Existing workspace");
+        const rendered = await renderInteractiveWorkspaceProvider(
+            [existing],
+            existing.id,
+            "NEXT_LOCALE=en; connex_workspace=7",
+        );
+        const fetchMock = vi.fn(async (
+            input: string | URL | Request,
+            init?: RequestInit,
+        ): Promise<Response> => {
+            const url = new URL(input instanceof Request ? input.url : input.toString(), "http://localhost:8080");
+            if (url.pathname === "/api/workspaces" && init?.method === "GET") {
+                return new Response("", { status: 503 });
+            }
+            throw new Error(`Unexpected request to ${url.pathname}`);
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        await act(async () => {
+            await expect(rendered.readWorkspace().create("Uncreated workspace"))
+                .rejects.toBeInstanceOf(ApiError);
+        });
+
+        expect(fetchMock).toHaveBeenCalledOnce();
+        expect(workspaceUnavailable.renderCount).toBe(0);
+        expect(workspaceUnavailable.onRetry).toBeUndefined();
+        expect(document.cookie).toContain("connex_workspace=7");
+        expect(rendered.readWorkspace().activeWorkspaceId).toBe(existing.id);
+        expect(rendered.readWorkspace().activeWorkspace).toEqual(existing);
+        expect(rendered.readWorkspace().switching).toBe(false);
+        expect(router.replace).not.toHaveBeenCalled();
+        expect(router.refresh).not.toHaveBeenCalled();
+        const subsequentOperation = vi.fn(async () => {});
+        await act(async () => {
+            await expect(rendered.readWorkspace().runSelectionChange(subsequentOperation)).resolves.toBeUndefined();
+        });
+        expect(subsequentOperation).toHaveBeenCalledOnce();
+
+        await rendered.unmount();
+    });
+
     it("fails closed and retries under the mutex when authoritative recovery is unavailable", async () => {
         const existing = workspaceFixture(7, "Existing workspace");
         const created = workspaceFixture(22, "Created workspace");
@@ -546,7 +589,10 @@ describe("authoritative workspace selection adoption", () => {
             }
             if (url.pathname === "/api/workspaces" && init?.method === "GET") {
                 snapshotReads += 1;
-                if (snapshotReads === 1) return new Response("", { status: 503 });
+                if (snapshotReads === 1) {
+                    return jsonResponse({ workspaces: [existing], activeWorkspaceId: existing.id });
+                }
+                if (snapshotReads === 2) return new Response("", { status: 503 });
                 retryStarted.resolve();
                 return retryResponse;
             }
@@ -558,6 +604,7 @@ describe("authoritative workspace selection adoption", () => {
                 .rejects.toBeInstanceOf(WorkspaceSelectionUnavailableError);
         });
 
+        expect(snapshotReads).toBe(2);
         expect(workspaceUnavailable.renderCount).toBeGreaterThan(0);
         expect(workspaceUnavailable.onRetry).toBeDefined();
         const staleWorkspace = rendered.readWorkspace();
@@ -583,6 +630,7 @@ describe("authoritative workspace selection adoption", () => {
             await retryPromise;
         });
 
+        expect(snapshotReads).toBe(3);
         expect(document.cookie).toContain("connex_workspace=22");
         expect(rendered.readWorkspace().activeWorkspaceId).toBe(created.id);
         expect(rendered.readWorkspace().activeWorkspace).toEqual(created);

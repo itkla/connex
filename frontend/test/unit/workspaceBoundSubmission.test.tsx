@@ -2,7 +2,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
-import { act, type ReactNode } from "react";
+import { act, useEffect, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createTranslator, NextIntlClientProvider } from "next-intl";
@@ -302,7 +302,10 @@ describe("the refused pinned write", () => {
 
 describe("WorkspaceProvider", () => {
     function Capture({ onRender }: { onRender: (value: ReturnType<typeof useWorkspace>) => void }): ReactNode {
-        onRender(useWorkspace());
+        const workspace = useWorkspace();
+        useEffect(() => {
+            onRender(workspace);
+        }, [onRender, workspace]);
         return null;
     }
 
