@@ -252,6 +252,7 @@ public abstract class AbstractScriptedTrajectoryTest {
             jdbcTemplate.update("DELETE FROM ai_chat_turn WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("DELETE FROM ai_chat_message WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("DELETE FROM ai_agent_run WHERE workspace_id = ?", workspace.getId());
+            jdbcTemplate.update("UPDATE ai_agent_privacy_barrier SET latest_operation_key = NULL WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("DELETE FROM ai_agent_privacy_work WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("DELETE FROM ai_agent_privacy_barrier WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("DELETE FROM ai_chat_session_participant WHERE workspace_id = ?", workspace.getId());
