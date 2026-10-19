@@ -1951,6 +1951,8 @@ export type ApprovalStepCandidates = {
     requiredCount: number;
     approvedCount: number;
     remainingRequiredCount: number;
+    decidedByUserIds: number[];
+    effectiveApproverIds: number[];
 };
 
 /** One frozen step of an approval chain, with the approvals collected so far. */

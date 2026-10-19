@@ -77,16 +77,14 @@ export default function ApprovalStepApproversDialog({
     const t = useTranslations('DealsDocuments');
     const selectedStep = steps.find((step) => step.id === selectedStepId) ?? null;
     const invalidStepSelection = steps.length === 0 || (selectedStepId !== null && selectedStep === null);
-    const quorumShortfall = selectedStep === null
+    const quorumShortfall = quorum === null
         ? 0
         : approvalStepQuorumShortfall(
-            selectedStep,
+            quorum,
             action,
             mode === 'any_approver'
                 ? { mode: 'any_approver' }
                 : { mode: 'members', memberIds: selectedMembers.map((member) => member.id) },
-            members.map((member) => member.id),
-            quorum?.remainingRequiredCount,
         );
     const canSubmit = selectedStep !== null
         && (mode === 'any_approver' || selectedMembers.length > 0)

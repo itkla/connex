@@ -237,47 +237,30 @@ describe('approval step management payloads', () => {
 });
 
 describe('approval step quorum validation', () => {
-    const quorumStep = {
-        ...step(1, 1, 'active'),
+    const snapshot = candidates([member(1), member(2), member(3)], {
         requiredCount: 3,
         approvedCount: 1,
+        remainingRequiredCount: 2,
+        decidedByUserIds: [1],
         effectiveApproverIds: [1, 2],
-        decisions: [{
-            id: 1,
-            stepId: 1,
-            decision: 'approved' as const,
-            decidedBy: 1,
-            decidedAt: '2026-09-02T10:30:00Z',
-        }],
-    };
+    });
 
     it('counts current undecided approvers for widening but not reassignment', () => {
         expect(approvalStepQuorumShortfall(
-            quorumStep,
-            'escalate',
-            { mode: 'members', memberIds: [3] },
-            [1, 2, 3],
+            snapshot, 'escalate', { mode: 'members', memberIds: [3] },
         )).toBe(0);
         expect(approvalStepQuorumShortfall(
-            quorumStep,
-            'reassign',
-            { mode: 'members', memberIds: [3] },
-            [1, 2, 3],
+            snapshot, 'reassign', { mode: 'members', memberIds: [3] },
         )).toBe(1);
     });
 
-    it('uses only verified undecided candidates when every approver is allowed', () => {
+    it('uses only server-authorized undecided candidates when every approver is allowed', () => {
         expect(approvalStepQuorumShortfall(
-            quorumStep,
-            'reassign',
-            { mode: 'any_approver' },
-            [1, 2],
+            { ...snapshot, candidates: [member(1), member(2)] },
+            'reassign', { mode: 'any_approver' },
         )).toBe(1);
         expect(approvalStepQuorumShortfall(
-            quorumStep,
-            'reassign',
-            { mode: 'any_approver' },
-            [1, 2, 3],
+            snapshot, 'reassign', { mode: 'any_approver' },
         )).toBe(0);
     });
 
@@ -312,7 +295,8 @@ function candidates(
     members: ApprovalStepCandidate[] = [member(1), member(2)],
     counts: Partial<Omit<ApprovalStepCandidates, 'candidates'>> = {},
 ): ApprovalStepCandidates {
-    return { candidates: members, requiredCount: 1, approvedCount: 0, remainingRequiredCount: 1, ...counts };
+    return { candidates: members, requiredCount: 1, approvedCount: 0, remainingRequiredCount: 1,
+        decidedByUserIds: [], effectiveApproverIds: [], ...counts };
 }
 
 function deferred<T>() {
@@ -379,6 +363,9 @@ function DialogHarness({
             approvedCount: steps.find((step) => step.id === selectedStepId)?.approvedCount ?? 0,
             remainingRequiredCount: Math.max(0, (steps.find((step) => step.id === selectedStepId)?.requiredCount ?? 1)
                 - (steps.find((step) => step.id === selectedStepId)?.approvedCount ?? 0)),
+            decidedByUserIds: steps.find((step) => step.id === selectedStepId)?.decisions
+                .map((decision) => decision.decidedBy) ?? [],
+            effectiveApproverIds: steps.find((step) => step.id === selectedStepId)?.effectiveApproverIds ?? [],
         }),
         memberLabelStatus: 'ready',
         memberLabels: members,
@@ -453,6 +440,7 @@ describe('approval component lifecycle', () => {
         vi.clearAllMocks();
         mobileViewport = false;
         api.getDocumentTemplates.mockResolvedValue([]);
+        api.getDealDocumentById.mockResolvedValue(pendingDocument([namedStep(1, 1)]));
         api.getActiveWorkspaceMembers.mockResolvedValue(Array.from({ length: 21 }, (_, index) => member(index + 1)));
         workspaceContext.id = 42;
         api.getDocumentApprovalApproverCandidates.mockResolvedValue(candidates(
@@ -861,7 +849,7 @@ describe('approval component lifecycle', () => {
             await renderDocuments({ canManageApprovals: true });
             await chooseMenuAction('reassignApprovers');
             await click(button('approvalAnyApprover'));
-            expect(document.body.textContent).toContain('approvalCandidatesNoMatches');
+            expect(document.body.textContent).toContain('approvalCandidatesEmpty');
             expect(button('reassignConfirm').disabled).toBe(true);
         });
 
@@ -876,6 +864,51 @@ describe('approval component lifecycle', () => {
             await chooseMember(2);
             expect(document.body.textContent).toContain('approvalQuorumContext');
             expect(button('reassignConfirm').disabled).toBe(false);
+        });
+
+        it('does not count a newly decided member from the older document projection', async () => {
+            api.getDocumentApprovalApproverCandidates.mockResolvedValue(candidates([member(1), member(2), member(3)], {
+                requiredCount: 2, approvedCount: 1, remainingRequiredCount: 1,
+                decidedByUserIds: [2], effectiveApproverIds: [2, 3],
+            }));
+            await renderDocuments({ canManageApprovals: true,
+                document: pendingDocument([{ ...namedStep(1, 1, [2, 3]), requiredCount: 2 }]),
+            });
+            await chooseMenuAction('reassignApprovers');
+            await chooseMember(2);
+            expect(button('reassignConfirm').disabled).toBe(true);
+            await chooseMember(3);
+            expect(button('reassignConfirm').disabled).toBe(false);
+        });
+
+        it('counts newly effective approvers missing from the older document projection', async () => {
+            api.getDocumentApprovalApproverCandidates.mockResolvedValue(candidates([member(2), member(3)], {
+                requiredCount: 2, approvedCount: 0, remainingRequiredCount: 2,
+                decidedByUserIds: [], effectiveApproverIds: [3],
+            }));
+            await renderDocuments({ canManageApprovals: true,
+                document: pendingDocument([{ ...namedStep(1, 1, []), requiredCount: 2 }]),
+            });
+            await chooseMenuAction('widenApprovers');
+            await chooseMember(2);
+            expect(button('widenConfirm').disabled).toBe(false);
+        });
+
+        it('reports a filtered search miss separately from an empty candidate pool', async () => {
+            api.getDocumentApprovalApproverCandidates.mockResolvedValue(candidates([member(2)]));
+            await renderDocuments({ canManageApprovals: true });
+            await chooseMenuAction('reassignApprovers');
+            const input = document.querySelector<HTMLInputElement>('#approval-management-members');
+            if (!input) throw new Error('Member picker input not found');
+            await pointerClick(input);
+            await keyDown(input, 'ArrowDown');
+            await act(async () => {
+                const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+                setter?.call(input, 'No such member');
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+            });
+            expect(document.body.textContent).toContain('approvalCandidatesNoMatches');
+            expect(document.body.textContent).not.toContain('approvalCandidatesEmpty');
         });
 
         it('aborts superseded step requests and rejects an out-of-order response', async () => {
@@ -916,7 +949,7 @@ describe('approval component lifecycle', () => {
             expect(button('reassignConfirm').disabled).toBe(true);
             await act(async () => refreshedA.resolve(candidates([])));
             expect(button('reassignConfirm').disabled).toBe(true);
-            expect(document.body.textContent).toContain('approvalCandidatesNoMatches');
+            expect(document.body.textContent).toContain('approvalCandidatesEmpty');
         });
 
         it('aborts a request when the workspace changes and does not reuse its response', async () => {
@@ -988,23 +1021,19 @@ describe('approval component lifecycle', () => {
         });
 
         it.each([400, 404])(
-            'routes a %s reassignment failure through the API error toast without changing the view',
+            'refreshes both projections after a %s reassignment refusal',
             async (status) => {
-                const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
                 const requestError = Object.assign(new Error(`request failed: ${status}`), { status });
                 api.reassignDocumentApprovalStepApprovers.mockRejectedValue(requestError);
                 await renderDocuments({ canManageApprovals: true });
                 await chooseMenuAction('reassignApprovers');
                 await chooseMember(2);
-                const before = container.innerHTML;
 
                 await click(button('reassignConfirm'));
 
                 expect(errors.show).toHaveBeenCalledWith(requestError, 'reassignFailed');
-                expect(container.innerHTML).toBe(before);
-                expect(api.getDealDocumentById).not.toHaveBeenCalled();
-                expect(consoleError).not.toHaveBeenCalled();
-                consoleError.mockRestore();
+                expect(api.getDealDocumentById).toHaveBeenCalledWith(10, 20);
+                expect(api.getDocumentApprovalApproverCandidates).toHaveBeenCalledTimes(2);
             },
         );
 
@@ -1024,7 +1053,8 @@ describe('approval component lifecycle', () => {
             );
             expect(dealsMessages.DealsDocuments.approverChangeRefused).toContain('refused');
             expect(japaneseDealsMessages.DealsDocuments.approverChangeRefused).toContain('拒否');
-            expect(api.getDealDocumentById).not.toHaveBeenCalled();
+            expect(api.getDealDocumentById).toHaveBeenCalledWith(10, 20);
+            expect(api.getDocumentApprovalApproverCandidates).toHaveBeenCalledTimes(2);
         });
     });
 });

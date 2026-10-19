@@ -4,12 +4,17 @@ import java.util.List;
 
 import ooo.klae.connex.backend.beans.User;
 
-/** Advisory management candidates and the active step's current quorum context. */
+/**
+ * Advisory management candidates and one authoritative step snapshot. Counts, decision authors and
+ * effective approver ids are projected from the same hydrated step for client quorum checks.
+ */
 public record ApprovalStepCandidatesDto(
     List<Candidate> candidates,
     int requiredCount,
     int approvedCount,
-    int remainingRequiredCount
+    int remainingRequiredCount,
+    List<Integer> decidedByUserIds,
+    List<Integer> effectiveApproverIds
 ) {
     /** Identity fields needed to select and disambiguate an eligible workspace member. */
     public record Candidate(int id, String username, String displayName, String email) {

@@ -551,11 +551,9 @@ export default function DealDocuments({
             ? { mode: 'any_approver' as const }
             : { mode: 'members' as const, memberIds: selectedApprovalMembers.map((member) => member.id) };
         if (approvalStepQuorumShortfall(
-            selectedStep,
+            candidateResult.data,
             action,
             selection,
-            approvalCandidates.map((candidate) => candidate.id),
-            candidateResult.data.remainingRequiredCount,
         ) > 0) return;
         const payload = approvalStepApproverChangePayload(
             selection,
@@ -572,6 +570,11 @@ export default function DealDocuments({
         });
         if (!updatedApproval) {
             setApprovalCandidateLoadAttempt((attempt) => attempt + 1);
+            try {
+                await refreshDocument(doc.id);
+            } catch (error) {
+                showApiError(error, 'refreshFailed');
+            }
             return;
         }
         setDocuments((current) => current.map((document) => (

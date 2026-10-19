@@ -40,6 +40,7 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.support.AuthenticatedSessions;
+import ooo.klae.connex.backend.support.OwnershipOfferTestFixtures;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -112,10 +113,14 @@ class DocumentApprovalCandidatesHttpIntegrationTest {
         var response = request(graphA.path(), workspaceA, managerSessionA);
         assertEquals(200, response.statusCode(), response.body());
         JsonNode result = json.readTree(response.body());
-        assertEquals(Set.of("candidates", "requiredCount", "approvedCount", "remainingRequiredCount"), fields(result));
+        assertEquals(Set.of("candidates", "requiredCount", "approvedCount", "remainingRequiredCount",
+            "decidedByUserIds", "effectiveApproverIds"), fields(result));
         assertEquals(1, result.path("requiredCount").asInt());
         assertEquals(0, result.path("approvedCount").asInt());
         assertEquals(1, result.path("remainingRequiredCount").asInt());
+        assertEquals(0, result.path("decidedByUserIds").size());
+        assertEquals(1, result.path("effectiveApproverIds").size());
+        assertEquals(approverA.getId(), result.path("effectiveApproverIds").get(0).asInt());
         assertEquals(1, result.path("candidates").size());
         JsonNode candidate = result.path("candidates").get(0);
         assertEquals(Set.of("id", "username", "displayName", "email"), fields(candidate));
@@ -183,6 +188,7 @@ class DocumentApprovalCandidatesHttpIntegrationTest {
             workspace.getId(), "Candidates " + user.getId());
         jdbc.update("INSERT INTO workspace_role_permission (workspace_role_id, permission) VALUES (?, ?)", role, permission);
         workspaces.setMemberCustomRole(workspace.getId(), user.getId(), role);
+        OwnershipOfferTestFixtures.approvedPasskey(jdbc, user);
         return user;
     }
 

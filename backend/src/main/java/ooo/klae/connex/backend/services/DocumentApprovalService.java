@@ -249,6 +249,12 @@ public class DocumentApprovalService {
         return new ApproverPool(members, approvers);
     }
 
+    private ApproverPool managementApproverPool(int workspaceId) {
+        List<User> members = workspaceService.documentApprovalCandidateMembers(workspaceId);
+        return new ApproverPool(members, members.stream().map(User::getId)
+            .collect(Collectors.toCollection(LinkedHashSet::new)));
+    }
+
     /**
      * Refuses a request that this particular actor could never get past. Separation of duties
      * removes the requester and the document's author from the pool for this request only, so a step
@@ -1036,7 +1042,7 @@ public class DocumentApprovalService {
         }
         approval = withChain(workspaceId, List.of(approval)).getFirst();
         DocumentApprovalStep step = requireActiveStep(approval.getSteps(), stepId);
-        ApproverPool pool = approverPool(workspaceId);
+        ApproverPool pool = managementApproverPool(workspaceId);
         Set<Integer> exclusions = separationExclusions(approval, document);
         EffectiveApprovers effective = eligibility.resolve(step, pool, exclusions);
         List<ApprovalStepCandidatesDto.Candidate> candidates = attributionFailure(approval, document) == null
@@ -1049,7 +1055,9 @@ public class DocumentApprovalService {
             .filter(decision -> APPROVED.equals(decision.getDecision()))
             .map(DocumentApprovalDecision::getDecidedBy).distinct().count();
         return new ApprovalStepCandidatesDto(candidates, step.getRequiredCount(), approvedCount,
-            effective.remainingNeeded());
+            effective.remainingNeeded(), step.getDecisions().stream()
+                .map(DocumentApprovalDecision::getDecidedBy).distinct().toList(),
+            List.copyOf(effective.eligible()));
     }
 
     /**

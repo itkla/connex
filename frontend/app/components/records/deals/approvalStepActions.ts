@@ -1,5 +1,6 @@
 import type {
     ApprovalStepApproverChangePayload,
+    ApprovalStepCandidates,
     DealDocument,
     DocumentApprovalStep,
 } from '@/app/lib/types';
@@ -44,34 +45,30 @@ export function widenableApprovalSteps(
 
 /** Returns how many additional server-authorized, undecided approvers the proposed change still needs. */
 export function approvalStepQuorumShortfall(
-    step: DocumentApprovalStep,
+    snapshot: ApprovalStepCandidates,
     action: ApprovalStepManagementAction,
     selection: ApprovalStepApproverSelection,
-    candidateIds: readonly number[],
-    remainingRequiredCount = Math.max(0, step.requiredCount - step.approvedCount),
 ): number {
-    const approvedIds = new Set<number>();
-    for (const decision of step.decisions) {
-        if (decision.decision === 'approved') approvedIds.add(decision.decidedBy);
-    }
-    const verifiedIds = new Set(candidateIds);
+    const decidedIds = new Set(snapshot.decidedByUserIds);
+    const candidateIds = snapshot.candidates.map((candidate) => candidate.id);
+    const availableIds = new Set(candidateIds);
     const eligibleIds = new Set<number>();
     if (action === 'escalate') {
-        for (const id of step.effectiveApproverIds) {
-            if (verifiedIds.has(id)) eligibleIds.add(id);
+        for (const id of snapshot.effectiveApproverIds) {
+            if (availableIds.has(id)) eligibleIds.add(id);
         }
     }
     const proposedIds = selection.mode === 'any_approver'
         ? candidateIds
         : selection.memberIds;
     for (const id of proposedIds) {
-        if (verifiedIds.has(id)) eligibleIds.add(id);
+        if (availableIds.has(id)) eligibleIds.add(id);
     }
     let undecidedCount = 0;
     for (const id of eligibleIds) {
-        if (!approvedIds.has(id)) undecidedCount += 1;
+        if (!decidedIds.has(id)) undecidedCount += 1;
     }
-    return Math.max(0, remainingRequiredCount - undecidedCount);
+    return Math.max(0, snapshot.remainingRequiredCount - undecidedCount);
 }
 
 /** Shapes the mutually exclusive approver selection into the existing backend request contract. */

@@ -104,14 +104,17 @@ already recorded and every frozen step and approver assignment remain as histori
 
 `GET /api/deals/{dealId}/documents/{documentId}/approval/steps/{stepId}/approver-candidates`
 requires `DOCUMENT_MANAGE` and returns advisory candidates for one active step of the document's
-pending approval, plus `requiredCount`, `approvedCount` and `remainingRequiredCount`. The caller
+pending approval, plus `requiredCount`, `approvedCount`, `remainingRequiredCount`,
+`decidedByUserIds` and `effectiveApproverIds` from the same hydrated step snapshot. The caller
 need not hold `DOCUMENT_APPROVE` or be assigned to that step. Parent-resource mismatches and a
 missing pending approval return 404; a matching inactive step returns 400.
 
 Candidates come only from active members of the server-resolved workspace with a current
 `DOCUMENT_APPROVE` grant from a built-in role or a custom role anchored to that workspace.
 Pending, disabled, suspended and removed members, deletion-reserved accounts, unresolved roles,
-foreign-workspace roles and revoked grants contribute no candidates. The request's frozen
+foreign-workspace roles and revoked grants contribute no candidates. Candidate authorization uses
+three batch reads for members, workspace role grants and deletion reservations, rather than reading
+permissions per member. Unknown roles fail closed only in this candidate resolver. The request's frozen
 separation-of-duties exclusions apply; missing requester attribution (or missing author attribution
 under `strict`) produces an empty candidate list. `off` requires neither attribution.
 
@@ -121,7 +124,9 @@ preview or a guarantee that a proposed assignment can satisfy quorum. This read 
 assignments, audit events or notifications. Existing mutations and their locked validation remain
 unchanged. The picker uses these server candidates and quorum counts, aborts superseded reads,
 rejects stale workspace/document/approval/step responses and removes selections absent on refresh.
-The member directory supplies historical labels only.
+Quorum checks use only the candidate response, including its decision authors and effective approver
+ids. A refused mutation refreshes both the document projection and candidates. The member directory
+supplies historical labels only.
 
 ## Member departure and account erasure
 

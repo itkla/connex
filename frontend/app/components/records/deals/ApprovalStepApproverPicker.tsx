@@ -100,7 +100,7 @@ export default function ApprovalStepApproverPicker({
                         )}
                         {memberDirectoryStatus === 'ready' && members.length === 0 && (
                             <p role="alert" className="text-xs text-destructive">
-                                {t('approvalCandidatesNoMatches')}
+                                {t('approvalCandidatesEmpty')}
                             </p>
                         )}
                     </>
@@ -158,7 +158,8 @@ export default function ApprovalStepApproverPicker({
                             </ComboboxChips>
                             <ComboboxContent anchor={memberAnchor} className="pointer-events-auto">
                                 <ComboboxList>
-                                    <ComboboxEmpty>{t('approvalCandidatesNoMatches')}</ComboboxEmpty>
+                                    <ComboboxEmpty>{t(members.length === 0
+                                        ? 'approvalCandidatesEmpty' : 'approvalCandidatesNoMatches')}</ComboboxEmpty>
                                     {members.map((member) => (
                                         <ComboboxItem
                                             key={member.id}

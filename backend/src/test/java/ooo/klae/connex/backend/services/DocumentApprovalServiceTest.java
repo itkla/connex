@@ -1812,8 +1812,8 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         assertEquals(1, result.requiredCount());
         assertEquals(0, result.approvedCount());
         assertEquals(1, result.remainingRequiredCount());
-        verify(workspaceService, times(1)).getMembers(workspace.getId());
-        verify(workspaceService, times(1)).permissionsFor(workspace.getId(), custom.getId());
+        verify(workspaceService, times(1)).documentApprovalCandidateMembers(workspace.getId());
+        verify(workspaceService, never()).permissionsFor(workspace.getId(), custom.getId());
     }
 
     @Test
@@ -1866,6 +1866,9 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         assertEquals(2, result.requiredCount());
         assertEquals(1, result.approvedCount());
         assertEquals(1, result.remainingRequiredCount());
+        assertEquals(List.of(assigned.getId()), result.decidedByUserIds());
+        assertEquals(java.util.Set.of(assigned.getId(), rescuer.getId()),
+            java.util.Set.copyOf(result.effectiveApproverIds()));
         assertEquals(0, assignmentCount(stepId));
         assertEquals(auditCount, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM audit_log WHERE workspace_id = ?",
             Integer.class, workspace.getId()));
