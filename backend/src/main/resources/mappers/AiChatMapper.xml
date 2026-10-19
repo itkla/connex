@@ -850,19 +850,14 @@
     FOR UPDATE
   </select>
 
-  <select id="listActiveTurnsBySessionForUpdate" resultMap="turnResult" flushCache="true" useCache="false">
-    SELECT id, workspace_id, session_id, requested_by_user_id, status,
-           terminal_reason, skill_key, skill_version, scope_json,
-           mission_run_id, mission_segment_id, privacy_generation, privacy_taint_seq,
-           privacy_mode, streamed, partial_content,
-           partial_content_utf16_offset, cancel_requested_at, created_at, updated_at
+  <select id="listActiveTurnIdsBySession" resultType="int" flushCache="true" useCache="false">
+    SELECT id
     FROM ai_chat_turn
     WHERE workspace_id = #{workspaceId}
       AND session_id = #{sessionId}
       AND mission_run_id IS NULL
       AND status IN ('queued', 'running')
     ORDER BY id ASC
-    FOR UPDATE
   </select>
 
   <select id="listTurnsByIds" resultMap="turnResult">

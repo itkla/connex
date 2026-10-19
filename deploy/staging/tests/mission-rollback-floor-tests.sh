@@ -4,11 +4,12 @@ set -euo pipefail
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd)"
 MISSION_TEST_DIR="$(mktemp -d)"
 trap 'rm -rf -- "$MISSION_TEST_DIR"' EXIT
-STAGING_DIR="$MISSION_TEST_DIR"
+export STAGING_DIR="$MISSION_TEST_DIR"
 RELEASES_DIR="$MISSION_TEST_DIR/releases"
-DEPLOY_TARGET=compatible
+export DEPLOY_TARGET=compatible
 
 # Load only the production archive/floor functions; never execute the deployment entry point.
+# shellcheck source=/dev/null
 source <(awk '
   /^(archive_reader_available|read_archive_entry|jar_contains_migration|rollback_floor_allows_release)\(\) \{/ { emit=1 }
   emit { print }

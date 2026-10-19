@@ -142,8 +142,12 @@ public class AiChatTurnPersistenceService {
             throw new ConflictException("Assistant session is not active");
         }
         LocalDateTime cutoff = expiryCutoff();
-        List<Integer> expiredTurnIds = chatMapper.listActiveTurnsBySessionForUpdate(workspaceId, sessionId)
-                .stream().filter(turn -> expireStaleTurn(turn, cutoff)).map(AiChatTurn::getId).toList();
+        List<AiChatTurn> activeTurns = chatMapper.listActiveTurnIdsBySession(workspaceId, sessionId)
+                .stream().sorted()
+                .map(id -> chatMapper.getTurnByIdForUpdate(workspaceId, sessionId, id))
+                .filter(Objects::nonNull).toList();
+        List<Integer> expiredTurnIds = activeTurns.stream()
+                .filter(turn -> expireStaleTurn(turn, cutoff)).map(AiChatTurn::getId).toList();
         if (chatMapper.countActiveTurns(workspaceId, sessionId) != 0) {
             throw new ConflictException("Assistant session already has an active turn");
         }

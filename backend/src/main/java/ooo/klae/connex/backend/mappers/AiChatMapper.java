@@ -415,7 +415,8 @@ public interface AiChatMapper {
         @Param("sessionId") int sessionId,
         @Param("id") int id);
 
-    List<AiChatTurn> listActiveTurnsBySessionForUpdate(
+    /** Discovers ordinary active turns without locks while the caller retains the session mutex. */
+    List<Integer> listActiveTurnIdsBySession(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId);
 

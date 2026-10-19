@@ -758,6 +758,13 @@ Restriction invalidation has the opposite **authority direction**, not an invert
 
 Ordinary admission retains actor/workspace/organization audit parents before membership and session roots, then the local restriction read fence and privacy barrier S, then appends its administrative-read audit. The workspace audit head must never precede either the restriction fence or privacy barrier. Turn polling joins one READ COMMITTED transaction through the complete DTO projection: session/turn roots, privacy barrier S, then fresh provenance validation and content projection. Lazy expiry retains its restriction fence before that barrier and releases the lease last.
 
+Admission discovers ordinary active turn IDs without locks under the retained session mutex,
+then locks every discovered turn by exact key in ascending Java order before expiring any of
+them. A locking status-range scan can encounter another session's retained turn before filtering
+it, blocking admission before its privacy barrier; this is especially visible against an immediate
+write, which retains its originating turn while approval does not. Complete all exact turn locks
+before expiry can acquire a restriction fence or privacy barrier.
+
 Ordinary derived writers carry the admission token `(workspace, session, privacy generation, nullable original taint sequence)` and retain barrier S through commit. Do not replace its generation when persisting an old result. Null-to-nonnull taint changes invalidate pre-mission derived jobs. Terminal maintenance may clear stale content without execution authority; retaining content requires current provenance. Ordinary expiry and orphan settlement now finish their content writes before releasing/taking over leases. No content root may be acquired afterward.
 
 ### AI identifier key reconciliation

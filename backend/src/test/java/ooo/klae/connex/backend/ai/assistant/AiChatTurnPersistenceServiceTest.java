@@ -532,7 +532,7 @@ class AiChatTurnPersistenceServiceTest {
         when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(owner));
         when(chatMapper.getSessionByIdForUpdate(
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
-        when(chatMapper.listActiveTurnsBySessionForUpdate(
+        when(chatMapper.listActiveTurnIdsBySession(
                 TURN.workspaceId(), TURN.sessionId())).thenReturn(List.of());
         when(chatMapper.nextMessageSequence(TURN.workspaceId(), TURN.sessionId())).thenReturn(1);
         when(identifierResolver.resolve("Question"))
@@ -568,7 +568,7 @@ class AiChatTurnPersistenceServiceTest {
     /** Audit parents precede membership; the audit head follows the restriction and privacy fences. */
     @Test
     void queueingATurnRetainsParentsBeforeLocksAndAppendsAfterFences() {
-        when(chatMapper.listActiveTurnsBySessionForUpdate(
+        when(chatMapper.listActiveTurnIdsBySession(
                 TURN.workspaceId(), TURN.sessionId())).thenReturn(List.of());
         when(chatMapper.countActiveTurns(
                 TURN.workspaceId(), TURN.sessionId())).thenReturn(0);
@@ -588,6 +588,50 @@ class AiChatTurnPersistenceServiceTest {
                 TURN.workspaceId(), TURN.restrictionEpoch());
         ordered.verify(chatMapper).lockPrivacyBarrierForShare(TURN.workspaceId());
         ordered.verify(sessionReadAudit).recordAccessible(TURN.workspaceId(), TURN.userId(), auditedSession);
+    }
+
+    /** Every discovered content root precedes expiry's privacy fences, audit head and lease release. */
+    @Test
+    void queueLocksAllDiscoveredTurnsBeforeExpiringTheirLockedState() {
+        AiChatTurn earlier = new AiChatTurn();
+        earlier.setId(101);
+        earlier.setWorkspaceId(TURN.workspaceId());
+        earlier.setSessionId(TURN.sessionId());
+        earlier.setStatus("queued");
+        AiChatTurn later = new AiChatTurn();
+        later.setId(102);
+        later.setWorkspaceId(TURN.workspaceId());
+        later.setSessionId(TURN.sessionId());
+        later.setStatus("resolved");
+        when(chatMapper.listActiveTurnIdsBySession(TURN.workspaceId(), TURN.sessionId()))
+                .thenReturn(List.of(102, 101));
+        when(chatMapper.getTurnByIdForUpdate(TURN.workspaceId(), TURN.sessionId(), 101)).thenReturn(earlier);
+        when(chatMapper.getTurnByIdForUpdate(TURN.workspaceId(), TURN.sessionId(), 102)).thenReturn(later);
+        LocalDateTime cutoff = LocalDateTime.ofInstant(
+                NOW.minus(AiAssistantTurnBudget.DURABLE_LIFETIME), ZoneOffset.UTC);
+        when(chatMapper.updateTurnTerminal(TURN.workspaceId(), TURN.sessionId(), 101,
+                "timed_out", "generation_timeout", "queued", cutoff)).thenReturn(1);
+
+        service.queue(TURN.sessionId(), new AiChatTurnCreateRequest("A question", List.of()),
+                TURN.restrictionEpoch());
+
+        InOrder ordered = inOrder(chatMapper, restrictionEpoch, sessionReadAudit, runLeaseService);
+        ordered.verify(chatMapper).getSessionByIdForUpdate(TURN.workspaceId(), TURN.userId(), TURN.sessionId());
+        ordered.verify(chatMapper).listActiveTurnIdsBySession(TURN.workspaceId(), TURN.sessionId());
+        ordered.verify(chatMapper).getTurnByIdForUpdate(TURN.workspaceId(), TURN.sessionId(), 101);
+        ordered.verify(chatMapper).getTurnByIdForUpdate(TURN.workspaceId(), TURN.sessionId(), 102);
+        ordered.verify(chatMapper).updateTurnTerminal(TURN.workspaceId(), TURN.sessionId(), 101,
+                "timed_out", "generation_timeout", "queued", cutoff);
+        ordered.verify(restrictionEpoch).retainReadFenceUntilTransactionCompletionIfCurrent(
+                TURN.workspaceId(), TURN.restrictionEpoch());
+        ordered.verify(chatMapper).lockPrivacyBarrierForShare(TURN.workspaceId());
+        ordered.verify(sessionReadAudit).recordAccessible(TURN.workspaceId(), TURN.userId(), auditedSession);
+        ordered.verify(runLeaseService).releaseHeldInCurrentTransaction(
+                new AiRunLeaseKey(TURN.workspaceId(), AiRunLeaseSubject.CHAT_TURN, 101));
+        verify(chatMapper, never()).updateTurnTerminal(eq(TURN.workspaceId()), eq(TURN.sessionId()),
+                eq(102), any(), any(), any(), any());
+        verify(runLeaseService, never()).releaseHeldInCurrentTransaction(
+                new AiRunLeaseKey(TURN.workspaceId(), AiRunLeaseSubject.CHAT_TURN, 102));
     }
 
     /** Following your own turn polls this route once per second, so it must record nothing. */
@@ -642,7 +686,7 @@ class AiChatTurnPersistenceServiceTest {
         when(chatMapper.updateTurnTerminal(
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId(),
                 "timed_out", "generation_timeout", "running", cutoff)).thenReturn(1);
-        when(chatMapper.listActiveTurnsBySessionForUpdate(
+        when(chatMapper.listActiveTurnIdsBySession(
                 TURN.workspaceId(), TURN.sessionId())).thenReturn(List.of());
         when(chatMapper.countActiveTurns(
                 TURN.workspaceId(), TURN.sessionId())).thenReturn(0);

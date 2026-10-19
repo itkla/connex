@@ -299,6 +299,23 @@ class TenantWorkScopeTest {
     }
 
     @Test
+    void lifecycleReadNestedInSupplierWorkKeepsTheSharedRouteSnapshot() {
+        when(tenantLifecycleControlMapper.findWorkspaceOrgIdForLifecycle(7)).thenReturn(42);
+        when(tenantCatalogResolver.resolveCatalog(42)).thenReturn("cnx_cleanup");
+
+        String catalog = workScope.inLifecycleWorkspace(7, () -> {
+            assertEquals("cnx_cleanup", workScope.inLifecycleWorkspaceRead(7, tenantContext::getCatalog));
+            return tenantContext.getCatalog();
+        });
+
+        assertEquals("cnx_cleanup", catalog);
+        assertNull(tenantContext.getCatalog());
+        verify(tenantLifecycleControlMapper).findWorkspaceOrgIdForLifecycle(7);
+        verify(tenantCatalogResolver).resolveCatalog(42);
+        verifyNoInteractions(workspaceMapper);
+    }
+
+    @Test
     void lifecycleReadRestoresCatalogAndDiscardsFailedRouteSnapshot() {
         when(tenantLifecycleControlMapper.findWorkspaceOrgIdForLifecycle(7)).thenReturn(42, 43);
         when(tenantCatalogResolver.resolveCatalog(42)).thenReturn("cnx_cleanup");
@@ -320,13 +337,17 @@ class TenantWorkScopeTest {
     }
 
     @Test
-    void ordinaryWorkNestedInALifecycleReadIsStillFenced() {
+    void ordinaryWorkNestedInALifecycleScopeRestoresTheOuterCatalogAfterRefusal() {
         when(tenantLifecycleControlMapper.findWorkspaceOrgIdForLifecycle(7)).thenReturn(42);
         when(tenantCatalogResolver.resolveCatalog(42)).thenReturn("cnx_cleanup");
         when(workspaceMapper.getOrgId(7)).thenReturn(null);
 
-        assertThrows(IllegalStateException.class, () -> workScope.inLifecycleWorkspaceRead(
-                7, () -> workScope.inWorkspace(7, () -> null)));
+        workScope.withCatalog("cnx_outer", () -> {
+            assertThrows(IllegalStateException.class, () -> workScope.inLifecycleWorkspace(
+                    7, () -> workScope.inWorkspace(7, () -> null)));
+            assertEquals("cnx_outer", tenantContext.getCatalog());
+            return null;
+        });
         assertNull(tenantContext.getCatalog());
     }
 

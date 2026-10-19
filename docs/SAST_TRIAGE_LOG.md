@@ -1264,7 +1264,13 @@ appends completion evidence. The reported sinks in `AiBudgetControlOperations` a
 the invalidation callback.
 
 The structural remediation adds `inLifecycleWorkspaceRead(WorkspaceRead)` with a separate callback
-invocation and moves placement lookup onto `unroutedRead`. Progress installs accepted system
+invocation and moves placement lookup onto `unroutedRead`. Both lifecycle reads and mutating
+workspace entries use the same private, callback-free route scope for operation snapshots,
+lifecycle fencing, transaction catalog-change refusal, override restoration, and thread-local
+cleanup. The read entry invokes `read.read()` directly. No `WorkspaceRead` implementation,
+including test callbacks compiled by CodeQL, may call a Supplier/Runnable-based scope entry;
+nesting/fencing tests use `inLifecycleWorkspace`, exercising the shared route scope instead.
+Progress installs accepted system
 identity through callback-free helpers and directly executes its fresh, read-only READ COMMITTED
 transaction, without passing through invalidation's `Supplier`. The system-principal lookup uses
 an uncached SELECT, keeping the control-plane read free of shared-state mutation. Placement,
