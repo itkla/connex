@@ -103,7 +103,10 @@ export default function CapturePolicyDialog({
 
     return (
         <ResponsiveDialog open={open} onOpenChange={onOpenChange}>
-            <ResponsiveDialogContent className="sm:max-w-2xl" showCloseButton={!saving}>
+            <ResponsiveDialogContent
+                className="md:max-h-[calc(100dvh-4rem)] md:overflow-y-auto sm:max-w-2xl"
+                showCloseButton={!saving}
+            >
                 <ResponsiveDialogHeader className="px-4 pt-4 sm:px-0 sm:pt-0">
                     <ResponsiveDialogTitle>{t('title')}</ResponsiveDialogTitle>
                     <ResponsiveDialogDescription>{t('description')}</ResponsiveDialogDescription>
