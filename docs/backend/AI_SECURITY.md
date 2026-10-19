@@ -772,6 +772,9 @@ Native assistant tools are capability-declared transport choices, not a second a
   Pending or failed execution-evidence refreshes cannot authorize Retry from a cached proposal.
   Approval settlement invalidates outstanding transcript refreshes so a delayed pre-approval
   projection cannot replace the execution evidence after an unknown approval response.
+  The Retry callback also revalidates the bound turn's projection and cards immediately before
+  submission, regardless of realtime notifications. Only fresh `none` evidence can submit;
+  failed reads, committed writes, and unknown proposal outcomes refuse and update client state.
 - Citations are re-authorized and filtered per viewer.
 - Realtime fanout resolves current joined recipients after commit; cached/caller-supplied recipient sets are not authorization.
 - Presence/typing signals are bounded ephemeral hints and never authorization evidence.

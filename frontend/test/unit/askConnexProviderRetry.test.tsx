@@ -207,6 +207,126 @@ describe('the provider guards the Retry callback', () => {
         toolCalls: [{ toolName: 'assign_owner', tier: 'CONFIRM', status: 'executed' }],
     };
 
+    it('revalidates Retry and refuses an approval in another tab without frames or reconnect', async () => {
+        vi.mocked(getAiChatTurn).mockResolvedValue(proposedTurn);
+        const root = await mountFailedTurn();
+        try {
+            expect(drawer().turnWriteState).toBe('none');
+            vi.mocked(getAiChatTurn).mockClear().mockResolvedValue(executedTurn);
+            vi.mocked(getAiAssistantToolCalls).mockClear().mockResolvedValue([]);
+            await act(async () => { drawer().onRetryTurn(); });
+
+            expect(getAiChatTurn).toHaveBeenCalledExactlyOnceWith(4, 9, expect.anything());
+            expect(getAiAssistantToolCalls).toHaveBeenCalledWith(4, {}, expect.anything());
+            expect(getAiAssistantToolCalls).toHaveBeenCalledWith(4, { pendingOnly: true }, expect.anything());
+            expect(startAiChatTurn).not.toHaveBeenCalled();
+            expect(drawer().turnWriteState).toBe('committed');
+        } finally {
+            await act(async () => { root.unmount(); });
+        }
+    });
+
+    it.each(['projection', 'history', 'pending'] as const)('refuses Retry and shows uncertain evidence when the fresh %s read fails', async (read) => {
+        vi.mocked(getAiChatTurn).mockResolvedValue(proposedTurn);
+        const root = await mountFailedTurn();
+        try {
+            expect(drawer().turnWriteState).toBe('none');
+            if (read === 'projection') {
+                vi.mocked(getAiChatTurn).mockRejectedValue(new Error('Projection unavailable'));
+            } else {
+                vi.mocked(getAiAssistantToolCalls).mockImplementation(async (_sessionId, options) => {
+                    if ((options?.pendingOnly === true) === (read === 'pending')) throw new Error('Cards unavailable');
+                    return [];
+                });
+            }
+            await act(async () => { drawer().onRetryTurn(); });
+            expect(startAiChatTurn).not.toHaveBeenCalled();
+            expect(drawer().turnWriteState).toBe('uncertain');
+            expect(drawer().turn.evidenceReconciled).toBe(false);
+        } finally {
+            await act(async () => { root.unmount(); });
+        }
+    });
+
+    it('waits for fresh none evidence before submitting one Retry', async () => {
+        vi.mocked(getAiChatTurn).mockResolvedValue(proposedTurn);
+        const root = await mountFailedTurn();
+        const fresh = Promise.withResolvers<AiChatTurn>();
+        try {
+            vi.mocked(getAiChatTurn).mockClear().mockReturnValueOnce(fresh.promise);
+            vi.mocked(getAiAssistantToolCalls).mockClear();
+            const retry = drawer().onRetryTurn;
+            await act(async () => { retry(); retry(); });
+            expect(getAiChatTurn).toHaveBeenCalledExactlyOnceWith(4, 9, expect.anything());
+            expect(getAiAssistantToolCalls).toHaveBeenCalledTimes(2);
+            expect(startAiChatTurn).not.toHaveBeenCalled();
+            expect(drawer().turnWriteState).toBe('uncertain');
+
+            await act(async () => { fresh.resolve(proposedTurn); });
+            expect(startAiChatTurn).toHaveBeenCalledExactlyOnceWith(4, expect.objectContaining({ content: QUESTION }));
+        } finally {
+            fresh.resolve(proposedTurn);
+            await act(async () => { root.unmount(); });
+        }
+    });
+
+    it.each([
+        { tier: null, status: 'proposed' },
+        { tier: 'CONFIRM', status: 'unknown' },
+    ])('refuses Retry when a fresh proposal outcome is unknown: %j', async (call) => {
+        vi.mocked(getAiChatTurn).mockResolvedValue(proposedTurn);
+        const root = await mountFailedTurn();
+        try {
+            vi.mocked(getAiChatTurn).mockResolvedValue({
+                ...TURN, toolCalls: [{ toolName: 'assign_owner', ...call }],
+            });
+            await act(async () => { drawer().onRetryTurn(); });
+            expect(startAiChatTurn).not.toHaveBeenCalled();
+            expect(drawer().turnWriteState).toBe('uncertain');
+        } finally {
+            await act(async () => { root.unmount(); });
+        }
+    });
+
+    it('refuses a pending Retry when revalidation finds a newer question', async () => {
+        vi.mocked(getAiChatTurn).mockResolvedValue(proposedTurn);
+        const root = await mountFailedTurn();
+        try {
+            vi.mocked(getAiChatSession).mockResolvedValue({
+                ...DETAIL,
+                messages: { items: [...DETAIL.messages.items, {
+                    ...DETAIL.messages.items[0], id: 23, seq: 2, content: 'Another question',
+                }], total: 2 },
+            });
+            await act(async () => { drawer().onRetryTurn(); });
+            expect(startAiChatTurn).not.toHaveBeenCalled();
+            expect(drawer().canRetryTurn).toBe(false);
+        } finally {
+            await act(async () => { root.unmount(); });
+        }
+    });
+
+    it('refuses a pending Retry after switching sessions during its projection read', async () => {
+        vi.mocked(getAiChatTurn).mockResolvedValue(proposedTurn);
+        const root = await mountFailedTurn();
+        const fresh = Promise.withResolvers<AiChatTurn>();
+        try {
+            vi.mocked(getAiChatTurn).mockReturnValueOnce(fresh.promise);
+            await act(async () => { drawer().onRetryTurn(); });
+            const nextSession = { ...DETAIL.session, id: 5 };
+            vi.mocked(getAiChatSession).mockResolvedValue({
+                session: nextSession, messages: { items: [], total: 0 }, activeTurn: null,
+            });
+            await act(async () => { drawer().onSelectSession(nextSession); });
+            await act(async () => { fresh.resolve(proposedTurn); });
+            expect(drawer().activeSession?.id).toBe(5);
+            expect(startAiChatTurn).not.toHaveBeenCalled();
+        } finally {
+            fresh.resolve(proposedTurn);
+            await act(async () => { root.unmount(); });
+        }
+    });
+
     it('refreshes terminal evidence after approval outside the 100-card history window', async () => {
         const proposal = askConnexToolCall();
         const history = Array.from({ length: 100 }, (_, index) => askConnexToolCall({

@@ -183,6 +183,9 @@ evidence, keep the conservative check-records guidance when Connex cannot rule o
 Reconciliation re-checks the failed answer's own execution evidence, including after a proposal is
 approved. Once this client has seen a saved change for that answer, later refreshes cannot restore
 Retry by omitting its action card. An unreadable or missing proposal outcome keeps Retry hidden.
+Each Retry click revalidates that answer's execution evidence and action cards with the server
+before sending, so approval in another tab is detected even without a live update. A failed check
+keeps Retry hidden and shows the existing guidance to check records.
 
 ## 7. Where things live
 

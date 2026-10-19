@@ -176,6 +176,7 @@ import { toastError, toastSuccess } from '@/app/lib/toast';
 import { formatDate, formatRelativeTime, formatUtcDateTime } from '@/app/lib/utils';
 import type {
     AiAssistantCreatedRecordKind,
+    AiAssistantToolCall,
     AiAssistantToolCallChangeField,
     AiChatCitation,
     AiChatAttachment,
@@ -571,6 +572,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const realtimeRefreshQueueRef = useRef<Promise<void>>(Promise.resolve());
     const submittingRef = useRef(false);
     const toolActionsRef = useRef<Set<number>>(new Set());
+    const retryValidationRef = useRef(false);
     const streamRef = useRef<AskConnexStreamState | null>(null);
     const streamEpochRef = useRef(0);
     const streamCoalescerRef = useRef<AskConnexFrameCoalescer | null>(null);
@@ -1239,7 +1241,13 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         signal: AbortSignal,
         animateNew: boolean,
         settledTurnId?: number,
-    ): Promise<{ session: AiChatSession; activeTurn: AiChatTurn | null } | null> => {
+    ): Promise<{
+        session: AiChatSession;
+        activeTurn: AiChatTurn | null;
+        terminalEvidence: AiChatTurn | null;
+        toolCalls: AiAssistantToolCall[];
+        refreshVersion: number;
+    } | null> => {
         const refreshVersion = ++transcriptRefreshVersionRef.current;
         const recovery = recoveryTurnRef.current;
         const terminalTurnId = settledTurnId ?? (
@@ -1326,7 +1334,13 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         if (signal.aborted || refreshVersion !== transcriptRefreshVersionRef.current) return null;
         setLoadState('ready');
         setLoadError(null);
-        return { session: firstDetail.session, activeTurn: firstDetail.activeTurn ?? null };
+        return {
+            session: firstDetail.session,
+            activeTurn: firstDetail.activeTurn ?? null,
+            terminalEvidence,
+            toolCalls: nextToolCalls,
+            refreshVersion,
+        };
     }, [refreshCollaboration]);
 
     const clearActiveSession = useCallback(() => {
@@ -2416,14 +2430,48 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     useLayoutEffect(() => {
         currentRetryRef.current = { target: retryTarget, turn, toolCalls, turnWriteState, send };
     }, [retryTarget, send, toolCalls, turn, turnWriteState]);
-    const retryTurn = useCallback(() => {
+    const retryTurn = useCallback(async () => {
         const current = currentRetryRef.current;
-        if (retryTarget === null || current.target !== retryTarget || toolActionsRef.current.size > 0) return;
+        if (retryTarget === null || current.target !== retryTarget || toolActionsRef.current.size > 0
+            || retryValidationRef.current) return;
         const prompt = askConnexBoundRetryPrompt(current.target, current.turn, messagesRef.current, current.toolCalls);
         if (prompt === null
             || !askConnexRecovery(current.turn.phase, current.turn.reason, true, false, current.turnWriteState).retry) return;
-        void current.send(prompt);
-    }, [retryTarget]);
+        const signal = identityControllerRef.current?.signal;
+        if (!signal || signal.aborted) return;
+        const operationEpoch = sessionEpochRef.current;
+        retryValidationRef.current = true;
+        try {
+            const refreshed = await refreshTranscript(retryTarget.sessionId, signal, true, retryTarget.turnId);
+            const latest = currentRetryRef.current;
+            if (signal.aborted || operationEpoch !== sessionEpochRef.current
+                || latest.target !== retryTarget || toolActionsRef.current.size > 0
+                || refreshed === null || refreshed.refreshVersion !== transcriptRefreshVersionRef.current) return;
+            const durable = refreshed.terminalEvidence;
+            if (durable === null || durable.sessionId !== retryTarget.sessionId
+                || durable.turnId !== retryTarget.turnId
+                || (durable.status !== 'failed' && durable.status !== 'timed_out')) {
+                dispatchTurn({ type: 'reconciling', sessionId: retryTarget.sessionId, turnId: retryTarget.turnId });
+                return;
+            }
+            const evidence = reduceAskConnexTurn(latest.turn, { type: 'reconciled', turn: durable });
+            const writeState = askConnexTurnWriteState(evidence, refreshed.toolCalls, retryTarget.turnId);
+            const freshPrompt = askConnexBoundRetryPrompt(
+                retryTarget, durable, messagesRef.current, refreshed.toolCalls,
+            );
+            if (freshPrompt === null
+                || !askConnexRecovery(durable.status, durable.terminalReason, true, false, writeState).retry) return;
+            void latest.send(freshPrompt);
+        } catch {
+            if (!signal.aborted && operationEpoch === sessionEpochRef.current
+                && currentRetryRef.current.target === retryTarget) {
+                transcriptRefreshVersionRef.current += 1;
+                dispatchTurn({ type: 'reconciling', sessionId: retryTarget.sessionId, turnId: retryTarget.turnId });
+            }
+        } finally {
+            retryValidationRef.current = false;
+        }
+    }, [refreshTranscript, retryTarget]);
 
     const cancelTurn = useCallback(async () => {
         const signal = identityControllerRef.current?.signal;
