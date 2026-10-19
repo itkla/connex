@@ -13,6 +13,8 @@ import java.time.ZoneOffset;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
 import org.mockito.Mock;
@@ -57,8 +59,9 @@ class AuditIntegrityLockOrderTest {
                 org.mockito.Mockito.mock(ooo.klae.connex.backend.observability.SecuritySignalMetrics.class));
     }
 
-    @Test
-    void independentAppendLocksForeignKeyParentsBeforeIntegrityHead() {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void joinedAndIndependentAppendsLockForeignKeyParentsBeforeIntegrityHead(boolean independent) {
         AuditLog entry = new AuditLog();
         entry.setActorId(9);
         entry.setWorkspaceId(7);
@@ -79,7 +82,11 @@ class AuditIntegrityLockOrderTest {
         when(auditIntegrityMapper.advanceHead(eq("workspace"), eq(7), eq(1L), eq(2L), any()))
                 .thenReturn(1);
 
-        service.appendIndependent(entry);
+        if (independent) {
+            service.appendIndependent(entry);
+        } else {
+            service.append(entry);
+        }
 
         InOrder order = inOrder(
                 userMapper, workspaceMapper, organizationMapper, auditIntegrityMapper, auditLogMapper);

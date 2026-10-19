@@ -599,7 +599,7 @@ public class CompanyService {
     public Company updateOwner(int companyId, Integer ownerId, MutationAdmission admission) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requireOwnedCompany(workspaceId, companyId);
-        if (ownerId != null) workspaceService.lockAndRequireMember(workspaceId, ownerId);
+        workspaceService.lockAssignmentMembers(workspaceId, ownerId == null ? List.of() : List.of(ownerId));
         Company before = companyMapper.getOwnedCompanyByIdForUpdate(workspaceId, companyId);
         if (before == null || before.getArchivedAt() != null) {
             throw new ResourceNotFoundException("Company not found");

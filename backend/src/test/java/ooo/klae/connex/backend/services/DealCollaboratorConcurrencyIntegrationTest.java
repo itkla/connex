@@ -28,6 +28,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicLong;
 
 import javax.sql.DataSource;
 
@@ -46,6 +47,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import ooo.klae.connex.backend.support.MySqlLockWaitProbe;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.Pipeline;
@@ -184,7 +186,8 @@ class DealCollaboratorConcurrencyIntegrationTest {
         CountDownLatch releaseRemoval = new CountDownLatch(1);
         CountDownLatch replacementStarted = new CountDownLatch(1);
         NotificationMapper realNotificationMapper = sqlSessionTemplate.getMapper(NotificationMapper.class);
-        WorkspaceMapper realWorkspaceMapper = sqlSessionTemplate.getMapper(WorkspaceMapper.class);
+        DealMapper realDealMapper = sqlSessionTemplate.getMapper(DealMapper.class);
+        AtomicLong replacementConnection = new AtomicLong();
         doAnswer(invocation -> {
             List<Integer> locked = realNotificationMapper.lockRecipientMemberships(targetUserId);
             removalLocked.countDown();
@@ -192,9 +195,11 @@ class DealCollaboratorConcurrencyIntegrationTest {
             return locked;
         }).when(notificationMapper).lockRecipientMemberships(targetUserId);
         doAnswer(invocation -> {
+            Deal discovered = realDealMapper.getDealById(workspaceId, deal.getId());
+            replacementConnection.set(jdbcTemplate.queryForObject("SELECT CONNECTION_ID()", Long.class));
             replacementStarted.countDown();
-            return realWorkspaceMapper.lockActiveMembership(workspaceId, targetUserId);
-        }).when(workspaceMapper).lockActiveMembership(eq(workspaceId), eq(targetUserId));
+            return discovered;
+        }).when(dealMapper).getDealById(workspaceId, deal.getId());
         ExecutorService executor = Executors.newFixedThreadPool(2);
 
         try {
@@ -202,7 +207,8 @@ class DealCollaboratorConcurrencyIntegrationTest {
             assertTrue(removalLocked.await(10, TimeUnit.SECONDS));
             Future<List<UserDto>> replacement = executor.submit(() -> addTargetAsCollaborator(workspaceId));
             assertTrue(replacementStarted.await(10, TimeUnit.SECONDS));
-            assertThrows(TimeoutException.class, () -> replacement.get(1, TimeUnit.SECONDS));
+            MySqlLockWaitProbe.awaitSharedRecordLock(jdbcTemplate, replacementConnection.get(),
+                "app_user", Integer.toString(currentUser.getId()));
             releaseRemoval.countDown();
 
             removal.get(20, TimeUnit.SECONDS);

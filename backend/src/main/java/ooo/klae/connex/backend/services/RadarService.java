@@ -325,6 +325,9 @@ public class RadarService {
     private void lockTaskMutation(
             int workspaceId, int userId, @Nullable Integer requestedAssigneeId) {
         lockActorIdentity(userId);
+        if (workspaceMapper.lockWorkspaceForShare(workspaceId) == null) {
+            throw new ResourceNotFoundException("Radar signal not found");
+        }
         int assigneeId = requestedAssigneeId == null ? userId : requestedAssigneeId;
         Set<Integer> membershipIds = new TreeSet<>();
         membershipIds.add(userId);
@@ -339,6 +342,7 @@ public class RadarService {
             throw new ForbiddenException(
                 "User " + membershipId + " is not a member of this workspace");
         }
+        workspaceService.retainAuditOrganization(workspaceId);
     }
 
     private void lockActorIdentity(int userId) {

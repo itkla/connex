@@ -75,6 +75,7 @@ class AiAssistantWriteToolLockOrderTest extends AbstractAiAssistantWriteToolTest
                 workspaceService, chatMapper, taskService, personService, restrictionEpoch);
         order.verify(workspaceService).lockAndRequirePermissionsSnapshot(
                 TURN.workspaceId(), Map.of(TURN.userId(), Set.of(Permission.AI_USE)));
+        order.verify(workspaceService).retainAuditOrganization(TURN.workspaceId());
         order.verify(chatMapper).getSessionByIdForUpdate(
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId());
         order.verify(chatMapper).getToolCallBySessionForUpdate(
@@ -109,6 +110,7 @@ class AiAssistantWriteToolLockOrderTest extends AbstractAiAssistantWriteToolTest
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId());
         order.verify(workspaceService).lockAndRequirePermissionsSnapshot(
                 TURN.workspaceId(), Map.of(TURN.userId(), Set.of(Permission.AI_USE)));
+        order.verify(workspaceService).retainAuditOrganization(TURN.workspaceId());
         order.verify(chatMapper).getSessionByIdForUpdate(
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId());
         order.verify(chatMapper).getToolCallBySessionForUpdate(
@@ -158,6 +160,7 @@ class AiAssistantWriteToolLockOrderTest extends AbstractAiAssistantWriteToolTest
         InOrder order = inOrder(workspaceService, chatMapper, taskService, restrictionEpoch, deletionAudit);
         order.verify(workspaceService).lockAndRequirePermissionsSnapshot(
                 TURN.workspaceId(), Map.of(TURN.userId(), Set.of(Permission.AI_USE)));
+        order.verify(workspaceService).retainAuditOrganization(TURN.workspaceId());
         order.verify(chatMapper).getSessionByIdForUpdate(
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId());
         order.verify(chatMapper).getToolCallBySessionForUpdate(
@@ -213,6 +216,7 @@ class AiAssistantWriteToolLockOrderTest extends AbstractAiAssistantWriteToolTest
         order.verify(workspaceService).lockAndRequirePermissionsSnapshot(
                 TURN.workspaceId(),
                 Map.of(TURN.userId(), Set.of(Permission.AI_USE), 21, Set.of()));
+        order.verify(workspaceService).retainAuditOrganization(TURN.workspaceId());
         order.verify(chatMapper).getSessionByIdForUpdate(
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId());
         assertEquals(1, applied.get().principals().size());
@@ -285,6 +289,7 @@ class AiAssistantWriteToolLockOrderTest extends AbstractAiAssistantWriteToolTest
                 workspaceService, chatMapper, personService, restrictionEpoch, activityService);
         order.verify(workspaceService).lockAndRequirePermissionsSnapshot(
                 TURN.workspaceId(), Map.of(TURN.userId(), Set.of(Permission.AI_USE)));
+        order.verify(workspaceService).retainAuditOrganization(TURN.workspaceId());
         order.verify(chatMapper).getSessionByIdForUpdate(
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId());
         order.verify(chatMapper).getToolCallBySessionForUpdate(
@@ -321,6 +326,7 @@ class AiAssistantWriteToolLockOrderTest extends AbstractAiAssistantWriteToolTest
                 workspaceService, chatMapper, companyService, restrictionEpoch, tagService);
         order.verify(workspaceService).lockAndRequirePermissionsSnapshot(
                 TURN.workspaceId(), Map.of(TURN.userId(), Set.of(Permission.AI_USE)));
+        order.verify(workspaceService).retainAuditOrganization(TURN.workspaceId());
         order.verify(chatMapper).getSessionByIdForUpdate(
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId());
         order.verify(chatMapper).getToolCallBySessionForUpdate(
@@ -387,6 +393,7 @@ class AiAssistantWriteToolLockOrderTest extends AbstractAiAssistantWriteToolTest
         order.verify(workspaceService).lockAndRequirePermissionsSnapshot(
                 TURN.workspaceId(),
                 Map.of(TURN.userId(), Set.of(Permission.AI_USE), 21, Set.of()));
+        order.verify(workspaceService).retainAuditOrganization(TURN.workspaceId());
         order.verify(chatMapper).getSessionByIdForUpdate(
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId());
         order.verify(chatMapper).getToolCallBySessionForUpdate(

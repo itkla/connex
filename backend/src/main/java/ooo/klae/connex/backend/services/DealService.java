@@ -1956,7 +1956,7 @@ public class DealService {
     public Deal updateOwner(int dealId, Integer ownerId, MutationAdmission admission) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (dealMapper.getDealById(workspaceId, dealId) == null) throw new ResourceNotFoundException("Deal not found");
-        if (ownerId != null) workspaceService.lockAndRequireMember(workspaceId, ownerId);
+        workspaceService.lockAssignmentMembers(workspaceId, ownerId == null ? List.of() : List.of(ownerId));
         Deal deal = requireDealByPrimaryKeyForUpdate(workspaceId, dealId);
         dealMapper.getCollaboratorIdsForUpdate(workspaceId, dealId);
         admission.beforeMutation();
@@ -2068,7 +2068,7 @@ public class DealService {
         if (requested.stream().anyMatch(Objects::isNull)) {
             throw new BadRequestException("Collaborator IDs cannot be null");
         }
-        workspaceService.lockAndRequireMembers(workspaceId, requested);
+        workspaceService.lockAssignmentMembers(workspaceId, requested);
         Deal deal = requireDealForUpdate(workspaceId, dealId);
         List<Integer> normalized = requested.stream()
             .filter(userId -> !userId.equals(deal.getOwnerId()))
