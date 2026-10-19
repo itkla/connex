@@ -59,9 +59,9 @@ export function isConfigForwarded(entry: SettingsEntry): entry is ConfigForwarde
  * @returns one permanent redirect per config-forwarded manifest entry, in manifest order
  */
 export function settingsConfigRedirects(): readonly SettingsConfigRedirect[] {
-    return MANIFEST_ENTRIES.filter(isConfigForwarded).map((entry) => ({
-        source: entry.currentRoute,
-        destination: entry.redirectsTo,
-        permanent: true,
-    }));
+    return MANIFEST_ENTRIES.flatMap((entry): SettingsConfigRedirect[] => (
+        isConfigForwarded(entry)
+            ? [{ source: entry.currentRoute, destination: entry.redirectsTo, permanent: true }]
+            : []
+    ));
 }
