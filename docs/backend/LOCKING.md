@@ -750,11 +750,11 @@ inside the inverse's locked fingerprint predicate, before deletion/audit, and re
 that skips admission. Replays and discard retain privacy directly without domain acquisition.
 No successful write decision acquires either fence after the audited delegate returns.
 
-### Durable record-review missions (V232/V234)
+### Durable record-review missions (V232/V235)
 
 The complete privacy and rollout contract is [AI_MISSIONS.md](AI_MISSIONS.md). Mission claim, resume and publication use `READ_COMMITTED`: authorization roots in existing order, session X, run X, existing tool X if any, turn X, segment X, domain roots if applicable, local restriction read fence, privacy barrier S, audit head if needed, lease last. Slice 1 admits read tools only. Root re-reads after locks flush MyBatis's transaction cache. Every execution write compares the exact active attempt and execution generation; a stale callback cannot settle or release its successor.
 
-V234 retains this order for every runtime-2 transaction:
+V235 retains this order for every runtime-2 transaction:
 
 | Transaction | Ordered atomic contents and ending |
 |---|---|

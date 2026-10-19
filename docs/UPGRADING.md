@@ -1111,9 +1111,9 @@ version baselines exist.
 
 Existing-scope owner promotions create offers; acceptance grants ownership. The HTTP, MFA, locking, control-plane, notice and cleanup contracts are in [Ownership offers](backend/OWNERSHIP_OFFERS.md). Founding, admin changes and last-owner checks retain their existing behavior. The self-offer card is authoritative on every catalog layout; ordinary inbox delivery retains the existing cross-catalog limitation.
 
-## Mission continuation and durable plans — tenant V234
+## Mission continuation and durable plans — tenant V235
 
-V234 adds bounded versioned mission plans, checkpoints, and memory. New missions use runtime contract 2. Existing runtime-1 missions retain their original single-segment behavior, limits, accounting, and deadlines; migration performs no content backfill or runtime promotion.
+V235 adds bounded versioned mission plans, checkpoints, and memory. New missions use runtime contract 2. Existing runtime-1 missions retain their original single-segment behavior, limits, accounting, and deadlines; migration performs no content backfill or runtime promotion.
 
 Drain older serving binaries and mission workers before deploying this cutover. Keep missions disabled until the compatible context builder, version guards, accounting, recovery, privacy cleanup, and export validation are installed. The existing single-serving-JVM requirement remains.
 
@@ -1121,4 +1121,4 @@ Column additions and the default change require `ALGORITHM=INSTANT, LOCK=DEFAULT
 
 DDL auto-commits. If migration fails, keep writers disabled, inspect the applied statements and Flyway failure record, and recover through the normal migration procedure. Do not bypass the algorithm guards.
 
-The rollback floor is `tenant/V234__ai_agent_continuation.sql`, including when missions are disabled. Earlier binaries cannot safely clean up runtime-2 holdings. Returning below the floor requires an explicit reviewed drain, settlement, privacy-purge, and residual-verification procedure.
+The rollback floor is `tenant/V235__ai_agent_continuation.sql`, including when missions are disabled. Earlier binaries cannot safely clean up runtime-2 holdings. Returning below the floor requires an explicit reviewed drain, settlement, privacy-purge, and residual-verification procedure.

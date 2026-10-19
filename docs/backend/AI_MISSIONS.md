@@ -1,7 +1,7 @@
 # Durable read-only missions
 
 Phase 2 slice 2 retains `record_review_v1` definition 1 and introduces runtime contract 2
-for new requests. V234 adds continuation columns and replaces V232's single-segment
+for new requests. V235 adds continuation columns and replaces V232's single-segment
 constraint with bounded immutable attempt-number triggers. Existing runtime-1 requests
 replay unchanged and execute one logical segment with at most three attempts. Runtime 2
 allows logical segments 1–8, each with attempts 1–3. Neither version permits domain writes,
@@ -17,7 +17,7 @@ The existing dedicated single worker discovers bounded workspace pages and queue
 Unavailable readiness backs off for 30 seconds without spending an attempt.
 
 Create, claim, plan, checkpoint, accounting and controls use READ COMMITTED and the
-[global mission lock order](LOCKING.md#durable-record-review-missions-v232v234).
+[global mission lock order](LOCKING.md#durable-record-review-missions-v232v235).
 Claims install a fresh turn, segment, generation and AGENT_RUN lease. Every callback binds
 those identities. A stale callback refuses before any lease operation, including an old
 checkpoint arriving after its successor claims. Lease heartbeat subject reads remain nonlocking;
@@ -336,12 +336,12 @@ Missions remain disabled by default. Initial activation requires one serving app
 JVM, initialized barriers, completed active-attempt reconciliation, and the full compatible
 reader/writer rollout. Drain all older serving binaries and background message writers
 before V232's one-time sequence backfill; keep writes stopped until the allocator cutover.
-V234 is the rollback floor, including with missions disabled. Multi-instance activation requires the separately reviewed
+V235 is the rollback floor, including with missions disabled. Multi-instance activation requires the separately reviewed
 #941 distributed fencing contract.
 
 Focused continuation selectors are `AiAgentContinuationCodecTest`, `AiAgentPlanServiceTest`,
 `AiAgentBudgetServiceTest`, `AiAgentContextBuilderTest`, `AiAgentContinuationIntegrationTest`,
-`AiAgentContinuationV234MigrationIntegrationTest`, and the extended HTTP, concurrency,
+`AiAgentContinuationV235MigrationIntegrationTest`, and the extended HTTP, concurrency,
 privacy-lifecycle and scripted-trajectory classes. Scripted goldens prove server behavior,
 not live-model quality; this slice authorizes no live runner or egress.
 

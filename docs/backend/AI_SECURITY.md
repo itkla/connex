@@ -1115,7 +1115,7 @@ Deterministic warmth, risk, report figures, and other non-AI behavior remain ava
 - Budgets/governance/admission are database-coordinated and checked before egress.
 - Provider, masking, leak-scan, timeout, cancellation, budget, and cross-workspace tests pass.
 
-## Durable mission continuation (V234)
+## Durable mission continuation (V235)
 
 Runtime-2 plans and checkpoints follow [AI_MISSIONS.md](AI_MISSIONS.md). Bookkeeping has
 strict mission-only schemas and bypasses ordinary todo normalization, result caching and

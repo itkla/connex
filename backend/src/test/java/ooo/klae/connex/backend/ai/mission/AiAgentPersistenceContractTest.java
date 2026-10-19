@@ -42,8 +42,8 @@ class AiAgentPersistenceContractTest {
     }
 
     @Test
-    void v234ContinuationWritersAndResidualEnrollmentStayLosslessAndScoped() throws Exception {
-        String migration = Files.readString(Path.of("src/main/resources/db/migration/tenant/V234__ai_agent_continuation.sql"));
+    void v235ContinuationWritersAndResidualEnrollmentStayLosslessAndScoped() throws Exception {
+        String migration = Files.readString(Path.of("src/main/resources/db/migration/tenant/V235__ai_agent_continuation.sql"));
         assertTrue(migration.contains("ALGORITHM=INSTANT, LOCK=DEFAULT"));
         assertTrue(migration.contains("ALGORITHM=INPLACE, LOCK=NONE"));
         assertFalse(migration.toLowerCase(java.util.Locale.ROOT).contains("from the"));

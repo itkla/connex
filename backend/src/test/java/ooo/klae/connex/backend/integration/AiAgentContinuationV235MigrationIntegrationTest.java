@@ -52,7 +52,7 @@ import ooo.klae.connex.backend.mappers.AiAgentRunMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 /** Real-MySQL online cutover and lossless continuation transport through every mapper writer. */
-class AiAgentContinuationV234MigrationIntegrationTest {
+class AiAgentContinuationV235MigrationIntegrationTest {
     private static final JsonMapper JSON = JsonMapper.builder().build();
     private static MySqlScratchCatalog catalog;
     private static String url = "";
@@ -64,23 +64,29 @@ class AiAgentContinuationV234MigrationIntegrationTest {
     private static List<String> oldSegment = List.of();
 
     @BeforeAll
-    static void migratePopulatedV233() throws SQLException {
+    static void migratePopulatedV234() throws SQLException {
         String configuredUsername = System.getenv("CONNEX_DB_USERNAME");
         String configuredPassword = System.getenv("CONNEX_DB_PASSWORD");
         assumeTrue(configuredUsername != null && configuredPassword != null,
-                "CONNEX_DB_USERNAME/CONNEX_DB_PASSWORD required for V234 migration test");
+                "CONNEX_DB_USERNAME/CONNEX_DB_PASSWORD required for V235 migration test");
         username = Objects.requireNonNull(configuredUsername);
         password = Objects.requireNonNull(configuredPassword);
         String configured = System.getenv().getOrDefault("CONNEX_DB_URL",
                 "jdbc:mysql://localhost:3306/connexdb?createDatabaseIfNotExist=true&sslMode=DISABLED");
         catalog = MySqlScratchCatalog.create(configured, username, password,
-                "connex_mission_v234_it_", "utf8mb4", "utf8mb4_unicode_ci");
+                "connex_mission_v235_it_", "utf8mb4", "utf8mb4_unicode_ci");
         url = catalog.url();
-        assertEquals(MigrationVersion.fromVersion("233"),
-                Objects.requireNonNull(migrate("233").info().current()).getVersion());
+        assertEquals(MigrationVersion.fromVersion("234"),
+                Objects.requireNonNull(migrate("234").info().current()).getVersion());
         try (Connection connection = connection(); Statement statement = connection.createStatement()) {
             assertTrue(connection.getMetaData().getDatabaseProductVersion().startsWith("8.4"),
-                    "V234 online guards must be exercised on MySQL 8.4");
+                    "V235 online guards must be exercised on MySQL 8.4");
+            assertEquals(List.of("[workspace_id]", "[generated_at]", "[id]"), rows(connection, """
+                    SELECT COLUMN_NAME FROM information_schema.STATISTICS
+                    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'deal_document'
+                      AND INDEX_NAME = 'idx_deal_document_recency'
+                    ORDER BY SEQ_IN_INDEX
+                    """));
             insertSession(connection, 234000);
             statement.executeUpdate("""
                     INSERT INTO ai_agent_run
@@ -105,8 +111,8 @@ class AiAgentContinuationV234MigrationIntegrationTest {
             oldRun = rows(connection, "SELECT * FROM ai_agent_run WHERE id = 234000");
             oldSegment = rows(connection, "SELECT * FROM ai_agent_segment WHERE id = 234000");
         }
-        assertEquals(MigrationVersion.fromVersion("234"),
-                Objects.requireNonNull(migrate("234").info().current()).getVersion());
+        assertEquals(MigrationVersion.fromVersion("235"),
+                Objects.requireNonNull(migrate("235").info().current()).getVersion());
     }
 
     @AfterAll
@@ -117,7 +123,7 @@ class AiAgentContinuationV234MigrationIntegrationTest {
     }
 
     @Test
-    void upgradesPopulatedV233WithoutRebuildingMissionTables() throws SQLException {
+    void upgradesPopulatedV234WithoutRebuildingMissionTables() throws SQLException {
         try (Connection connection = connection()) {
             assertEquals(tableIdentity, tableIdentity(connection));
             assertEquals(2, tableIdentity.size());
@@ -140,7 +146,7 @@ class AiAgentContinuationV234MigrationIntegrationTest {
 
     @Test
     void onlineGuardsAndAttemptTriggersEnforceContract() throws Exception {
-        String migration = Files.readString(Path.of("src/main/resources/db/migration/tenant/V234__ai_agent_continuation.sql"));
+        String migration = Files.readString(Path.of("src/main/resources/db/migration/tenant/V235__ai_agent_continuation.sql"));
         String uncommented = migration.replaceAll("(?m)--[^\\r\\n]*", "");
         List<String> alterations = Arrays.stream(uncommented.split(";"))
                 .map(String::strip).filter(sql -> sql.startsWith("ALTER TABLE ")).toList();
@@ -483,10 +489,10 @@ class AiAgentContinuationV234MigrationIntegrationTest {
 
     private static SqlSessionFactory mapperFactory(String jdbcUrl) throws Exception {
         var dataSource = new DriverManagerDataSource(jdbcUrl, username, password);
-        var configuration = new Configuration(new Environment("mission-v234", new JdbcTransactionFactory(), dataSource));
+        var configuration = new Configuration(new Environment("mission-v235", new JdbcTransactionFactory(), dataSource));
         configuration.setMapUnderscoreToCamelCase(true);
         String resource = "mappers/AiAgentRunMapper.xml";
-        try (InputStream input = AiAgentContinuationV234MigrationIntegrationTest.class.getClassLoader().getResourceAsStream(resource)) {
+        try (InputStream input = AiAgentContinuationV235MigrationIntegrationTest.class.getClassLoader().getResourceAsStream(resource)) {
             assertNotNull(input);
             new XMLMapperBuilder(input, configuration, resource, configuration.getSqlFragments()).parse();
         }
