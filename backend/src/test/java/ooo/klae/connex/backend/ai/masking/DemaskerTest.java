@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.ai.masking;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 
 import org.junit.jupiter.api.Test;
 
@@ -10,6 +11,23 @@ import tools.jackson.databind.node.ObjectNode;
 
 class DemaskerTest {
     private final JsonMapper mapper = JsonMapper.builder().build();
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(EntityKind.class)
+    void existingCallerOutputMatchesTheEstablishedUtf8Contract(EntityKind kind) {
+        MaskingContext context = new MaskingContext();
+        String token = context.tokenFor(kind, "Résumé 東京");
+        String output = "Before " + token + " after.";
+        var omitted = Demasker.demask(output, context);
+        assertArrayEquals("Before [unknown reference] after.".getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                omitted.text().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        assertEquals(1, omitted.warnings());
+        context.exposeDispatchedPayload(token);
+        var exposed = Demasker.demask(output, context);
+        assertArrayEquals("Before Résumé 東京 after.".getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                exposed.text().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        assertEquals(0, exposed.warnings());
+    }
 
     @Test
     void memberTokenProvenanceRemainsExactAlongsideRawCandidateProvenance() {

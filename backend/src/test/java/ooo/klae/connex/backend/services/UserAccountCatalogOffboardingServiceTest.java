@@ -29,6 +29,8 @@ import org.springframework.transaction.TransactionStatus;
 
 import ooo.klae.connex.backend.connectedaccounts.capture.ProviderCapturePurgeService;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.services.UserOffboardingService.AccountNotificationLocks;
+import ooo.klae.connex.backend.services.WorkflowOffboardingService.OffboardingPlan;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 @ExtendWith(MockitoExtension.class)
@@ -43,6 +45,8 @@ class UserAccountCatalogOffboardingServiceTest {
     @InjectMocks private UserAccountCatalogOffboardingService service;
 
     private final AtomicReference<String> catalog = new AtomicReference<>();
+    private final AccountNotificationLocks locks =
+        new AccountNotificationLocks(List.of(), new OffboardingPlan(List.of(), List.of(), List.of()));
 
     @BeforeEach
     void setUp() {
@@ -61,6 +65,7 @@ class UserAccountCatalogOffboardingServiceTest {
 
     @Test
     void preflightAndErasureVisitEveryCatalogWithTheGuardBeforeDestructiveWork() {
+        when(offboarding.lockOrgDataReferences(9)).thenReturn(locks);
         AtomicInteger authoredChecks = new AtomicInteger();
         List<String> authoredCatalogs = List.of("catalog_a", "catalog_b", "catalog_a", "catalog_b");
         doAnswer(invocation -> {
@@ -73,7 +78,7 @@ class UserAccountCatalogOffboardingServiceTest {
         }).doAnswer(invocation -> {
             assertEquals("catalog_b", catalog.get());
             return null;
-        }).when(offboarding).eraseOrgDataReferences(9);
+        }).when(offboarding).eraseOrgDataReferences(9, locks);
 
         service.assertNoAuthoredContent(9);
         service.eraseReferences(9);
@@ -87,11 +92,12 @@ class UserAccountCatalogOffboardingServiceTest {
         for (String handle : List.of("catalog_a", "catalog_b")) {
             order.verify(tenantWorkScope).withCatalog(eq(handle), any());
             order.verify(guard).assertCanErase(9);
+            order.verify(offboarding).lockOrgDataReferences(9);
             order.verify(capturePurge).purgeAccountCatalog(9, "google");
             order.verify(capturePurge).purgeAccountCatalog(9, "microsoft");
             order.verify(capturePurge).clearAccountReferencesInCatalog(9);
             order.verify(offboarding).assertNoAuthoredContent(9);
-            order.verify(offboarding).eraseOrgDataReferences(9);
+            order.verify(offboarding).eraseOrgDataReferences(9, locks);
         }
         order.verify(ownershipOfferCleanup).eraseAfterCatalogs(9);
         order.verifyNoMoreInteractions();
@@ -99,6 +105,7 @@ class UserAccountCatalogOffboardingServiceTest {
 
     @Test
     void aCatalogGuardRefusalPrecedesAllCaptureAndReferenceErasureInThatCatalog() {
+        when(offboarding.lockOrgDataReferences(9)).thenReturn(locks);
         doAnswer(invocation -> {
             if ("catalog_b".equals(catalog.get())) {
                 throw new ConflictException("Reassign first");
@@ -111,11 +118,12 @@ class UserAccountCatalogOffboardingServiceTest {
         InOrder order = inOrder(tenantWorkScope, guard, offboarding, capturePurge, ownershipOfferCleanup);
         order.verify(tenantWorkScope).withCatalog(eq("catalog_a"), any());
         order.verify(guard).assertCanErase(9);
+        order.verify(offboarding).lockOrgDataReferences(9);
         order.verify(capturePurge).purgeAccountCatalog(9, "google");
         order.verify(capturePurge).purgeAccountCatalog(9, "microsoft");
         order.verify(capturePurge).clearAccountReferencesInCatalog(9);
         order.verify(offboarding).assertNoAuthoredContent(9);
-        order.verify(offboarding).eraseOrgDataReferences(9);
+        order.verify(offboarding).eraseOrgDataReferences(9, locks);
         order.verify(tenantWorkScope).withCatalog(eq("catalog_b"), any());
         order.verify(guard).assertCanErase(9);
         order.verifyNoMoreInteractions();
@@ -134,10 +142,10 @@ class UserAccountCatalogOffboardingServiceTest {
     }
 
     @Test
-    void guardedCatalogErasureRetainsTheExistingDefaultIsolation() {
+    void guardedCatalogErasureDiscoversSharedSessionChildrenAtReadCommitted() {
         when(transactionManager.getTransaction(any())).thenAnswer(invocation -> {
             TransactionDefinition definition = invocation.getArgument(0);
-            assertEquals(TransactionDefinition.ISOLATION_DEFAULT, definition.getIsolationLevel());
+            assertEquals(TransactionDefinition.ISOLATION_READ_COMMITTED, definition.getIsolationLevel());
             return mock(TransactionStatus.class);
         });
 
@@ -146,6 +154,7 @@ class UserAccountCatalogOffboardingServiceTest {
 
     @Test
     void ownershipErasureRunsOnlyAfterEveryCatalogTransactionHasCommitted() {
+        when(offboarding.lockOrgDataReferences(9)).thenReturn(locks);
         AtomicInteger commits = new AtomicInteger();
         doAnswer(invocation -> {
             commits.incrementAndGet();
@@ -163,8 +172,9 @@ class UserAccountCatalogOffboardingServiceTest {
         for (int catalogIndex = 0; catalogIndex < 2; catalogIndex++) {
             order.verify(transactionManager).getTransaction(any());
             order.verify(guard).assertCanErase(9);
+            order.verify(offboarding).lockOrgDataReferences(9);
             order.verify(offboarding).assertNoAuthoredContent(9);
-            order.verify(offboarding).eraseOrgDataReferences(9);
+            order.verify(offboarding).eraseOrgDataReferences(9, locks);
             order.verify(transactionManager).commit(any());
         }
         order.verify(ownershipOfferCleanup).eraseAfterCatalogs(9);

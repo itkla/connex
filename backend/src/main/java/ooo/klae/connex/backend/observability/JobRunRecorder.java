@@ -43,6 +43,10 @@ public class JobRunRecorder {
     public static final String AI_WATCH_EVALUATION = "ai_watch_evaluation";
     public static final String AI_RUN_LEASE_SWEEP = "ai_run_lease_sweep";
     public static final String AI_CHAT_TURN_LIFETIME_SWEEP = "ai_chat_turn_lifetime_sweep";
+    public static final String AI_AGENT_SCHEDULER = "ai_agent_scheduler";
+    public static final String AI_AGENT_PRIVACY_CLEANUP = "ai_agent_privacy_cleanup";
+    public static final String AI_AGENT_PRIVACY_INITIALIZATION = "ai_agent_privacy_initialization";
+    public static final String AI_AGENT_DSR_RECOVERY = "ai_agent_dsr_recovery";
 
     private static final Logger log = LoggerFactory.getLogger(JobRunRecorder.class);
     /**
@@ -75,7 +79,11 @@ public class JobRunRecorder {
         AI_BRIEF_DELIVERY,
         AI_WATCH_EVALUATION,
         AI_RUN_LEASE_SWEEP,
-        AI_CHAT_TURN_LIFETIME_SWEEP);
+        AI_CHAT_TURN_LIFETIME_SWEEP,
+        AI_AGENT_SCHEDULER,
+        AI_AGENT_PRIVACY_CLEANUP,
+        AI_AGENT_PRIVACY_INITIALIZATION,
+        AI_AGENT_DSR_RECOVERY);
     private static final Set<String> METADATA_KEYS = Set.of(
         "phase",
         "purgedCount",

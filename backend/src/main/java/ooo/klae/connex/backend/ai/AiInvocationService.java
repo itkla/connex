@@ -1539,6 +1539,12 @@ public class AiInvocationService {
                             null, null, null, null, null, structured, null,
                             outputTokensClamped);
                 }
+                var mission = ooo.klae.connex.backend.ai.mission.AiAgentExecutionPolicy.current();
+                if (mission != null) {
+                    mission.capability().requireTarget(resolved.target());
+                    mission.persistence().reserveDispatch(mission,
+                            (long) serializedPrompt.getBytes(StandardCharsets.UTF_8).length + invocation.maxTokens());
+                }
                 return aiRestrictionEpoch.invokeAtEgress(workspaceId, () -> {
                     requireCurrentProviderSnapshot();
                     aiFeatureGate.requireAiUsable(invocation.feature());
@@ -1609,6 +1615,10 @@ public class AiInvocationService {
         }
 
         private void requireCurrentProviderSnapshot() {
+            var mission = ooo.klae.connex.backend.ai.mission.AiAgentExecutionPolicy.current();
+            if (mission != null) {
+                mission.capability().requireTarget(resolved.target());
+            }
             ResolvedAiProvider current = aiProviderConfigService.resolveForOrg(orgId, userId);
             if (!resolved.equals(current)) {
                 throw new AiProviderException(
@@ -1648,6 +1658,10 @@ public class AiInvocationService {
                 throw new IllegalStateException("Provider attempt completed without a budget reservation");
             }
             activeLease.settle(inputTokens, outputTokens);
+            var mission = ooo.klae.connex.backend.ai.mission.AiAgentExecutionPolicy.current();
+            if (mission != null) {
+                mission.persistence().recordUsage(mission, inputTokens, outputTokens);
+            }
             budgetLease = null;
         }
 

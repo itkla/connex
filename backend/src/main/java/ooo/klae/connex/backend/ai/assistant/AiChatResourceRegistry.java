@@ -41,6 +41,10 @@ public final class AiChatResourceRegistry {
 
     /** Allocates or returns the stable per-turn handle for one resource. */
     public String register(String kind, int id) {
+        var mission = ooo.klae.connex.backend.ai.mission.AiAgentScopePolicy.current();
+        if (mission != null && !"task".equals(kind)) {
+            mission.requireRecord(kind, id);
+        }
         if ("task".equals(kind)) {
             return registerTask(id);
         }
@@ -49,6 +53,9 @@ public final class AiChatResourceRegistry {
 
     /** Issues a task argument handle, excluded from durable citations and record replay. */
     public String registerTask(int id) {
+        if (ooo.klae.connex.backend.ai.mission.AiAgentScopePolicy.current() != null) {
+            throw new AiAssistantLoopException("mission_scope_refused", "mission_scope_refused");
+        }
         return register(new ResourceRef("task", id), true);
     }
 
@@ -68,6 +75,10 @@ public final class AiChatResourceRegistry {
         ResourceRef resource = resources.get(handle);
         if (resource == null) {
             throw AiAssistantLoopException.refusedArguments("unknown_handle");
+        }
+        var mission = ooo.klae.connex.backend.ai.mission.AiAgentScopePolicy.current();
+        if (mission != null) {
+            mission.requireRecord(resource.kind(), resource.id());
         }
         return resource;
     }

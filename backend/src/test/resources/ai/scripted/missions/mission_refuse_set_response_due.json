@@ -1,0 +1,25 @@
+{
+  "id": "mission_refuse_set_response_due",
+  "selector": "connex_script_mission_refuse_set_response_due",
+  "capabilityClass": "scripted-native",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "set_response_due",
+        "arguments": "{\"handle\":\"r1\",\"due_in_hours\":24}"
+      }
+    },
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "onRepair": true,
+      "emit": {
+        "kind": "failure",
+        "failureKind": "transport"
+      }
+    }
+  ]
+}

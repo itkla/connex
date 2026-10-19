@@ -408,6 +408,8 @@ type AskConnexDrawerProps = {
     loadState: DrawerLoadState;
     loadError: Error | null;
     composer: string;
+    missionProgress?: ReactNode;
+    missionComposerAction?: ReactNode;
     implicitContext: AskConnexAttachment | null;
     selectionContext: AskConnexSelectionContext | null;
     unsupportedPageContext: { type: AskConnexSelectionContext['type']; label: string } | null;
@@ -1685,6 +1687,8 @@ function ConversationSurface({
     loadState,
     loadError,
     composer,
+    missionProgress,
+    missionComposerAction,
     implicitContext,
     selectionContext,
     unsupportedPageContext,
@@ -2073,6 +2077,11 @@ function ConversationSurface({
                                     />
                                 </MessageScrollerItem>
                             ) : null}
+                            {loadState === 'ready' && missionProgress ? (
+                                <MessageScrollerItem messageId="mission-progress" className="px-4 pt-4">
+                                    {missionProgress}
+                                </MessageScrollerItem>
+                            ) : null}
                             {loadState === 'ready' && historySummarized ? (
                                 <MessageScrollerItem messageId="history-summary" className="px-4 pt-5">
                                     <HistorySummaryMarker label={labels.historySummarized} />
@@ -2385,6 +2394,7 @@ function ConversationSurface({
                                     ? labels.scopeFiltersSet(scope.filterCount)
                                     : labels.scopeFilters}
                             </Button>
+                            {missionComposerAction}
                             <div className="min-w-0 text-xs text-muted-foreground">
                                 {contentTooLong ? (
                                     <p role="alert" className="text-destructive">{labels.tooLong}</p>
@@ -2724,6 +2734,8 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
         loadState: props.loadState,
         loadError: props.loadError,
         composer: props.composer,
+        missionProgress: props.missionProgress,
+        missionComposerAction: props.missionComposerAction,
         implicitContext: props.implicitContext,
         selectionContext: props.selectionContext,
         unsupportedPageContext: props.unsupportedPageContext,

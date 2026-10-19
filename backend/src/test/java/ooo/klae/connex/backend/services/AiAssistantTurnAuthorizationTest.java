@@ -90,6 +90,7 @@ class AiAssistantTurnAuthorizationTest extends AbstractServiceTest {
         turn.setSessionId(session.getId());
         turn.setRequestedByUserId(requester.getId());
         turn.setStatus("running");
+        turn.setPrivacyGeneration(chatMapper.getPrivacyBarrier(workspace.getId()).getGeneration());
         chatMapper.insertTurn(turn);
         AiChatMessage message = new AiChatMessage();
         message.setWorkspaceId(workspace.getId());
@@ -98,6 +99,7 @@ class AiAssistantTurnAuthorizationTest extends AbstractServiceTest {
         message.setAuthorKind("user");
         message.setAuthorUserId(requester.getId());
         message.setContent("Read tasks");
+        message.setPrivacyGeneration(turn.getPrivacyGeneration());
         chatMapper.insertMessage(message);
         AiChatToolCall call = new AiChatToolCall();
         call.setWorkspaceId(workspace.getId());
@@ -105,6 +107,7 @@ class AiAssistantTurnAuthorizationTest extends AbstractServiceTest {
         call.setToolName("list_tasks");
         call.setStatus("executed");
         call.setIdempotencyKey("turn-" + turn.getId() + "-step-1");
+        call.setPrivacyGeneration(turn.getPrivacyGeneration());
         chatMapper.insertToolCall(call);
 
         assertNull(turnService.get(session.getId(), turn.getId()).toolCalls());

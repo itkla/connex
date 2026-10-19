@@ -43,6 +43,33 @@ public class TenantWorkScope {
 
     private record WorkspaceRoute(int orgId, String catalog) {}
 
+    private final class WorkspaceRouteScope implements AutoCloseable {
+        private final WorkspaceRoutes routes;
+        private final WorkspaceRoute route;
+        private final boolean root;
+        private final Optional<String> previous;
+
+        private WorkspaceRouteScope(
+                WorkspaceRoutes routes, WorkspaceRoute route, boolean root) {
+            this.routes = routes;
+            this.route = route;
+            this.root = root;
+            this.previous = beginOverride(Optional.ofNullable(route.catalog()));
+        }
+
+        @Override
+        public void close() {
+            try {
+                tenantContext.swapCatalogOverride(previous);
+            } finally {
+                routes.depth--;
+                if (root && routes.depth == 0) {
+                    CURRENT_WORKSPACE_ROUTES.remove();
+                }
+            }
+        }
+    }
+
     private static final ThreadLocal<WorkspaceRoutes> CURRENT_WORKSPACE_ROUTES = new ThreadLocal<>();
 
     private final TenantContext tenantContext;
@@ -154,6 +181,22 @@ public class TenantWorkScope {
         return runInWorkspace(workspaceId, true, route -> work.get());
     }
 
+    /**
+     * Reads trusted lifecycle progress through the same placement rules as
+     * {@link #inLifecycleWorkspace(int, Supplier)}, without sharing a callback with mutations.
+     *
+     * @param <T> the read's result type
+     * @param workspaceId the workspace whose lifecycle placement governs the read
+     * @param read the workspace read, which must not mutate persistent or shared state or call
+     *     a Supplier/Runnable-based {@code TenantWorkScope} entry
+     * @return the read's result
+     */
+    public <T> T inLifecycleWorkspaceRead(int workspaceId, WorkspaceRead<T> read) {
+        try (var scope = enterWorkspaceRoute(workspaceId, true)) {
+            return read.read();
+        }
+    }
+
     /** {@link #inLifecycleWorkspace(int, Supplier)} for void cleanup work. */
     public void inLifecycleWorkspace(int workspaceId, Runnable work) {
         inLifecycleWorkspace(workspaceId, () -> {
@@ -166,6 +209,12 @@ public class TenantWorkScope {
             int workspaceId,
             boolean lifecycle,
             Function<WorkspaceRoute, T> work) {
+        try (var scope = enterWorkspaceRoute(workspaceId, lifecycle)) {
+            return work.apply(scope.route);
+        }
+    }
+
+    private WorkspaceRouteScope enterWorkspaceRoute(int workspaceId, boolean lifecycle) {
         WorkspaceRoutes routes = CURRENT_WORKSPACE_ROUTES.get();
         boolean root = routes == null;
         if (root) {
@@ -180,14 +229,16 @@ public class TenantWorkScope {
             WorkspaceRoute route = routeFor(routes, workspaceId, lifecycle);
             routes.depth++;
             try {
-                return runWithOverride(Optional.ofNullable(route.catalog()), () -> work.apply(route));
-            } finally {
+                return new WorkspaceRouteScope(routes, route, root);
+            } catch (RuntimeException | Error failure) {
                 routes.depth--;
+                throw failure;
             }
-        } finally {
+        } catch (RuntimeException | Error failure) {
             if (root && routes.depth == 0) {
                 CURRENT_WORKSPACE_ROUTES.remove();
             }
+            throw failure;
         }
     }
 
@@ -260,7 +311,7 @@ public class TenantWorkScope {
     }
 
     private WorkspaceRoute resolveRouteForWorkspace(int workspaceId) {
-        return unrouted(() -> {
+        return unroutedRead(() -> {
             Integer orgId = workspaceMapper.getOrgId(workspaceId);
             if (orgId == null) {
                 throw new IllegalStateException("Workspace " + workspaceId + " does not exist");
@@ -270,7 +321,7 @@ public class TenantWorkScope {
     }
 
     private WorkspaceRoute resolveLifecycleRouteForWorkspace(int workspaceId) {
-        return unrouted(() -> {
+        return unroutedRead(() -> {
             Integer orgId = lifecycleOrgResolver.apply(workspaceId);
             if (orgId == null) {
                 throw new IllegalStateException("Workspace " + workspaceId + " does not exist");

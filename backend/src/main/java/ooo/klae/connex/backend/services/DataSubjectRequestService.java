@@ -228,6 +228,35 @@ public class DataSubjectRequestService {
         disclosure.setGeneratedAt(LocalDateTime.now());
     }
 
+
+    /** Accepts a conservative purge through the existing linked-person proof and control roots. */
+    public ooo.klae.connex.backend.ai.mission.AiAgentPurgeAcceptance acceptMissionPurge(
+            int orgId, long requestId, int actorId,
+            ooo.klae.connex.backend.dto.AiAgentHoldingsPurgeRequest request) {
+        if (!ooo.klae.connex.backend.ai.mission.AiAgentPurgeAcceptance.SCOPE.equals(request.scopeAcknowledgement())
+                || !ooo.klae.connex.backend.ai.mission.AiAgentPurgeAcceptance.CUTOFF_POLICY.equals(request.cutoffPolicyAcknowledgement())) {
+            throw new BadRequestException("Mission holdings purge scope must be acknowledged");
+        }
+        var replay = tenantWorkScope.unroutedRead(
+                () -> controlOperations.missionPurgeByKey(orgId, requestId, actorId, request.idempotencyKey()));
+        if (replay != null) {
+            return replay;
+        }
+        DataSubjectRequest subject = tenantWorkScope.unrouted(
+                () -> controlOperations.loadForMutation(orgId, requestId, actorId));
+        if (subject.getIdentityVerifiedAt() == null || subject.getSubjectWorkspaceId() == null
+                || subject.getSubjectPersonId() == null) {
+            throw new BadRequestException("A verified linked subject is required");
+        }
+        List<Integer> workspaceIds = tenantWorkScope.unroutedRead(
+                () -> controlOperations.missionPurgeWorkspaceIds(orgId, actorId));
+        return withLockedSubjectPerson(orgId, actorId, new TreeSet<>(workspaceIds),
+                subject.getSubjectWorkspaceId(), subject.getSubjectPersonId(),
+                () -> tenantWorkScope.unrouted(
+                    () -> controlOperations.acceptMissionPurge(orgId, requestId, actorId, request, workspaceIds,
+                            subject.getSubjectWorkspaceId(), subject.getSubjectPersonId())));
+    }
+
     private void apply(DataSubjectRequest target, int orgId, int actorId,
             DataSubjectRequestUpsertRequest request, boolean create) {
         validateRequestShape(request);

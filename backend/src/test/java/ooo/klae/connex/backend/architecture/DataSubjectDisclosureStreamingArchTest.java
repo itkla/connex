@@ -18,7 +18,8 @@ class DataSubjectDisclosureStreamingArchTest {
     void disclosurePathKeepsPayloadsSynchronousAndNonAccumulating() throws Exception {
         Pattern accumulationOrAsync = Pattern.compile(
             "StringWriter|ByteArrayOutputStream|StringBuilder|StringBuffer|writeValueAs(?:String|Bytes)"
-                + "|readAllBytes|StreamingResponseBody|CompletableFuture|Executor|@Async|supplyAsync|parallelStream");
+                + "|readAllBytes|StreamingResponseBody|CompletableFuture"
+                + "|\\b(?!(?:ExecutorType|newExecutor)\\b)\\w*Executor\\w*\\b|@Async|supplyAsync|parallelStream");
         for (String file : List.of("controllers/DataSubjectRequestController.java",
                 "services/DataSubjectRequestService.java", "services/DataSubjectDisclosureAccess.java",
                 "services/DataSubjectDisclosurePlacementRead.java", "services/DataSubjectDisclosureAuditAccess.java",

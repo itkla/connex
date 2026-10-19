@@ -50,6 +50,35 @@ class AiAssistantMutationAdmissionTest {
     }
 
     @Test
+    void privacyContentionPrecedesTheFinalDeadlineCheck() {
+        Runnable privacyFence = org.mockito.Mockito.mock(Runnable.class);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            org.mockito.Mockito.when(clock.instant()).thenReturn(DEADLINE);
+            return null;
+        }).when(privacyFence).run();
+        var admission = new AiAssistantWriteToolService.ProposalAdmission(call(), clock, privacyFence);
+
+        assertThrows(AiAssistantProposalExpiredException.class, admission::beforeMutation);
+
+        var order = org.mockito.Mockito.inOrder(privacyFence, clock);
+        order.verify(privacyFence).run();
+        order.verify(clock).instant();
+        assertThrows(IllegalStateException.class, admission::requireAdmitted);
+    }
+
+    @Test
+    void multipleEffectsNeverReacquirePrivacyAfterTheFirstMutation() {
+        Runnable privacyFence = org.mockito.Mockito.mock(Runnable.class);
+        var admission = new AiAssistantWriteToolService.ProposalAdmission(call(), clock, privacyFence);
+
+        admission.beforeMutation();
+        admission.beforeMutation();
+
+        org.mockito.Mockito.verify(privacyFence, org.mockito.Mockito.times(1)).run();
+        assertDoesNotThrow(admission::requireAdmitted);
+    }
+
+    @Test
     void admittedActionMayCommitAfterDeadline() {
         var admission = admission(clock);
         admission.beforeMutation();

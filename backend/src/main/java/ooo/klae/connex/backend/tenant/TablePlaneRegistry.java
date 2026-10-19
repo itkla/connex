@@ -123,6 +123,10 @@ public final class TablePlaneRegistry {
     public static final Set<String> ORG_DATA_TABLES = Set.of(
         "activity",
         "ai_brief_schedule",
+        "ai_agent_run",
+        "ai_agent_segment",
+        "ai_agent_privacy_barrier",
+        "ai_agent_privacy_work",
         "ai_chat_message",
         "ai_chat_session",
         "ai_chat_session_participant",

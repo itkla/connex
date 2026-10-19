@@ -1,0 +1,25 @@
+{
+  "id": "mission_refuse_change_deal_stage",
+  "selector": "connex_script_mission_refuse_change_deal_stage",
+  "capabilityClass": "scripted-native",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "change_deal_stage",
+        "arguments": "{\"handle\":\"r1\",\"stage\":\"Discovery\"}"
+      }
+    },
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "onRepair": true,
+      "emit": {
+        "kind": "failure",
+        "failureKind": "transport"
+      }
+    }
+  ]
+}

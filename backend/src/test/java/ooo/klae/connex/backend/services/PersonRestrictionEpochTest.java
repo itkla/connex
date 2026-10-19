@@ -12,7 +12,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 
-import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
+import ooo.klae.connex.backend.ai.mission.AiAgentPrivacyService;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
@@ -42,7 +42,7 @@ class PersonRestrictionEpochTest {
     private final DuplicateDecisionLockService duplicateDecisionLockService =
             mock(DuplicateDecisionLockService.class);
     private final ProviderCaptureMapper providerCaptureMapper = mock(ProviderCaptureMapper.class);
-    private final AiRestrictionEpoch restrictionEpoch = mock(AiRestrictionEpoch.class);
+    private final AiAgentPrivacyService restrictionEpoch = mock(AiAgentPrivacyService.class);
     private final PersonService personService = new PersonService(
             personMapper,
             mock(ShareMapper.class),
@@ -97,7 +97,11 @@ class PersonRestrictionEpochTest {
         InOrder fence = inOrder(personMapper, workspaceMapper, restrictionEpoch, aiOutputCacheMapper);
         fence.verify(personMapper).getOwnedPersonByIdForUpdate(WORKSPACE_ID, PERSON_ID);
         fence.verify(workspaceMapper).findByOrgId(ORG_ID);
-        fence.verify(restrictionEpoch).bumpAll(List.of(WORKSPACE_ID, OTHER_WORKSPACE_ID));
+        fence.verify(restrictionEpoch).invalidateWorkspaces(
+                org.mockito.ArgumentMatchers.eq(List.of(WORKSPACE_ID, OTHER_WORKSPACE_ID)),
+                org.mockito.ArgumentMatchers.any(java.util.UUID.class),
+                org.mockito.ArgumentMatchers.eq("restriction"),
+                org.mockito.ArgumentMatchers.isNull(), org.mockito.ArgumentMatchers.isNull());
         fence.verify(aiOutputCacheMapper).deleteForPerson(WORKSPACE_ID, PERSON_ID);
     }
 

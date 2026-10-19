@@ -1,0 +1,25 @@
+{
+  "id": "mission_refuse_create_person",
+  "selector": "connex_script_mission_refuse_create_person",
+  "capabilityClass": "scripted-native",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "create_person",
+        "arguments": "{\"handle\":\"r1\",\"name\":\"Review Contact\"}"
+      }
+    },
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "onRepair": true,
+      "emit": {
+        "kind": "failure",
+        "failureKind": "transport"
+      }
+    }
+  ]
+}
