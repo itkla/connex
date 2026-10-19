@@ -124,6 +124,12 @@ tasks.withType(JavaCompile).configureEach {
 // shared one. The required Backend CI path names `scriptedTrajectoryTest` alongside the DB shards:
 // a task nothing runs proves nothing.
 def scriptedTrajectoryPattern = '**/*ScriptedTrajectory*Test.class'
+def testPartitionFixtureRoot = 'ooo/klae/connex/backend/testpartition/TestPartitionFixtures'
+def testPartitionFixturePatterns = [testPartitionFixtureRoot + '.class', testPartitionFixtureRoot + '$*.class']
+
+tasks.withType(Test).configureEach {
+	exclude testPartitionFixturePatterns
+}
 
 // Parse once at configuration time so all CI tasks share the same source inventory. The JDK parser
 // distinguishes top-level classes from nested fixtures, comments and text blocks without loading
@@ -229,49 +235,113 @@ tasks.register('verifyTestPartition') {
 			def bytes = file.bytes
 			def model = java.lang.classfile.ClassFile.of().parse(bytes)
 			def name = model.thisClass().asInternalName()
-			def constants = new String(bytes, java.nio.charset.StandardCharsets.ISO_8859_1)
+			def inner = model.findAttribute(java.lang.classfile.Attributes.innerClasses())
+				.orElse(null)?.classes()?.find { it.innerClass().asInternalName() == name }
 			compiledClasses[name] = [
 				superclass: model.superclass().orElse(null)?.asInternalName(),
 				interfaces: model.interfaces().collect { it.asInternalName() },
-				carrier: descriptors.any { constants.contains(it) },
-				concrete: !model.flags().has(java.lang.reflect.AccessFlag.ABSTRACT)
+				constants: new String(bytes, java.nio.charset.StandardCharsets.ISO_8859_1),
+				annotation: model.flags().has(java.lang.reflect.AccessFlag.ANNOTATION),
+				concrete: !model.flags().has(java.lang.reflect.AccessFlag.ABSTRACT),
+				enclosing: inner?.outerClass()?.orElse(null)?.asInternalName(),
+				staticNested: inner?.has(java.lang.reflect.AccessFlag.STATIC) ?: false
 			]
 			classNamesByFile[file] = name
 		}
-		def carriers = compiledClasses.findAll { name, model -> model.carrier }.keySet().toSet()
-		def inherited
-		do {
-			inherited = compiledClasses.findAll { name, model ->
-				!carriers.contains(name) && (carriers.contains(model.superclass) ||
-					model.interfaces.any { carriers.contains(it) })
-			}.keySet()
-			carriers.addAll(inherited)
-		} while (!inherited.empty)
-		// Abstract harnesses supply inherited tests but cannot run independently under Jupiter.
-		def executableCarriers = carriers.findAll { compiledClasses[it].concrete }.toSet()
-		def ownerNames = executableCarriers.collect { it.split(/\$/)[0] }.toSet()
-		def executableOwners = ownerNames.collect { it.replace('/', '.') }.toSorted().toSet()
-		// Gradle discards non-static inner candidates without their outer selector. Only the owner's
-		// own class file proves coverage, even when an executable nested class remains selected.
+		def findOwners = { inventory ->
+			def testAnnotations = descriptors.toSet()
+			def composed
+			do {
+				composed = inventory.findAll { name, model ->
+					model.annotation && !testAnnotations.contains('L' + name + ';') &&
+						testAnnotations.any { model.constants.contains(it) }
+				}.keySet().collect { 'L' + it + ';' }
+				testAnnotations.addAll(composed)
+			} while (!composed.empty)
+			def carriers = inventory.findAll { name, model ->
+				testAnnotations.any { model.constants.contains(it) }
+			}.keySet().toSet()
+			def inherited
+			do {
+				inherited = inventory.findAll { name, model ->
+					!carriers.contains(name) && (carriers.contains(model.superclass) ||
+						model.interfaces.any { carriers.contains(it) })
+				}.keySet()
+				carriers.addAll(inherited)
+			} while (!inherited.empty)
+			// Abstract harnesses supply inherited tests but cannot run independently under Jupiter.
+			carriers.findAll { inventory[it].concrete }.collect { name ->
+				def owner = name
+				while (inventory[owner]?.enclosing != null && !inventory[owner].staticNested) {
+					owner = inventory[owner].enclosing
+				}
+				// Static members are independent candidates; inner tests need their enclosing owner.
+				inventory[owner]?.staticNested ? owner : owner.split(/\$/)[0]
+			}.toSet()
+		}
+		def selectedOwners = { files, owners ->
+			files.collect { classNamesByFile[it] }.findAll { owners.contains(it) }
+				.collect { it.replace('/', '.') }.toSet()
+		}
+		def partitionProblems = { owners, selections ->
+			def selected = selections.values().flatten()
+			[
+				missing: (owners.collect { it.replace('/', '.') }.toSet() - selected).toSorted(),
+				overlapping: selected.countBy { it }.findAll { name, count -> count > 1 }.keySet().toSorted(),
+				empty: selections.findAll { name, classes -> classes.empty }.keySet().toSorted()
+			]
+		}
+		def fixtures = compiledClasses.findAll { name, model ->
+			name == testPartitionFixtureRoot || name.startsWith(testPartitionFixtureRoot + '$')
+		}
+		def fixtureOwners = findOwners(fixtures)
+		def expectedFixtureOwners = ['ComposedOnly', 'ParameterizedOnly', 'StaticOnly',
+			'InheritedOnly', 'NestedOwner', 'ExcludedOwner'].collect {
+				testPartitionFixtureRoot + '$' + it
+			}.toSet()
+		if (fixtureOwners != expectedFixtureOwners) {
+			throw new GradleException("Unexpected compiled partition fixtures: ${fixtureOwners}")
+		}
+		def fixtureFiles = sourceSets.test.output.classesDirs.asFileTree.matching {
+			expectedFixtureOwners.each { include it + '.class' }
+		}.files
+		def fixtureSelections = [fixtures: selectedOwners(fixtureFiles, fixtureOwners)]
+		if (partitionProblems(fixtureOwners, fixtureSelections).values().any { !it.empty }) {
+			throw new GradleException('Independently selected static partition fixtures were rejected')
+		}
+		// Every carrier must still be rejected when excluded, even with its helpers/inner files selected.
+		expectedFixtureOwners.each { omitted ->
+			def files = sourceSets.test.output.classesDirs.asFileTree.matching {
+				include testPartitionFixturePatterns
+				exclude omitted + '.class'
+			}.files
+			def problems = partitionProblems(fixtureOwners,
+				[fixtures: selectedOwners(files, fixtureOwners)])
+			if (problems.missing != [omitted.replace('/', '.')]) {
+				throw new GradleException("Missing partition fixture was accepted: ${omitted}")
+			}
+		}
+		def overlappingFixtures = fixtureSelections + [duplicate: fixtureSelections.fixtures]
+		def emptyFixtures = fixtureSelections + [empty: [] as Set]
+		if (partitionProblems(fixtureOwners, overlappingFixtures).overlapping.size() != fixtureOwners.size() ||
+			partitionProblems(fixtureOwners, emptyFixtures).empty != ['empty']) {
+			throw new GradleException('Overlapping or empty partition fixtures were accepted')
+		}
+		def ownerNames = findOwners(compiledClasses.findAll { name, model -> !fixtures.containsKey(name) })
+		// Gradle's candidate tree applies the task's actual include/exclude patterns.
 		def selections = ['unitTest', 'dbTestShard1', 'dbTestShard2', 'scriptedTrajectoryTest']
 			.collectEntries { taskName ->
-				// Gradle's candidate tree applies the task's actual include/exclude patterns.
-				def selectedOwners = tasks.named(taskName, Test).get().candidateClassFiles.files
-					.collect { classNamesByFile[it] }.findAll { ownerNames.contains(it) }
-					.collect { it.replace('/', '.') }.toSet()
-				[(taskName): selectedOwners]
+				[(taskName): selectedOwners(tasks.named(taskName, Test).get().candidateClassFiles.files, ownerNames)]
 			}
-		def selected = selections.values().flatten()
-		def duplicates = selected.countBy { it }.findAll { name, count -> count > 1 }.keySet().toSorted()
-		def missing = executableOwners - selected
-		def empty = selections.findAll { name, classes -> classes.empty }.keySet()
-		logger.lifecycle("Test partition: total=${executableOwners.size()}, " + selections.collect {
+		def problems = partitionProblems(ownerNames, selections)
+		logger.lifecycle("Test partition: total=${ownerNames.size()}, " + selections.collect {
 			name, classes -> "${name}=${classes.size()}"
 		}.join(', '))
-		if (duplicates || missing || empty) {
-			throw new GradleException("Invalid compiled test partition: missing=${missing}, " +
-				"overlapping=${duplicates}, empty=${empty}")
+		if (problems.values().any { !it.empty }) {
+			throw new GradleException("Invalid compiled test partition: missing=${problems.missing}, " +
+				"overlapping=${problems.overlapping}, empty=${problems.empty}")
 		}
+		logger.lifecycle('Compiled partition fixtures: composed, static, inherited, inner, missing, overlapping and empty checks passed')
 	}
 }
 

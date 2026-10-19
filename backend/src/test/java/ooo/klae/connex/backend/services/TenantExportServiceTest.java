@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
@@ -46,7 +45,11 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.LockSupport;
+import java.util.function.LongConsumer;
+import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -56,6 +59,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
@@ -106,7 +111,13 @@ class TenantExportServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new TenantExportService(
+        service = createService(System::nanoTime, LockSupport::parkNanos);
+        lenient().doAnswer(invocation -> invocation.<Supplier<?>>getArgument(0).get())
+            .when(tenantWorkScope).unrouted(any());
+    }
+
+    private TenantExportService createService(LongSupplier nanoTime, LongConsumer admissionWait) {
+        return new TenantExportService(
             orgMemberService,
             sessionSecurityService,
             tenantWorkScope,
@@ -117,9 +128,9 @@ class TenantExportServiceTest {
             auditService,
             properties,
             objectMapper,
-            Clock.fixed(Instant.parse("2026-07-27T12:00:00Z"), ZoneOffset.UTC));
-        lenient().doAnswer(invocation -> invocation.<Supplier<?>>getArgument(0).get())
-            .when(tenantWorkScope).unrouted(any());
+            Clock.fixed(Instant.parse("2026-07-27T12:00:00Z"), ZoneOffset.UTC),
+            nanoTime,
+            admissionWait);
     }
 
     @AfterEach
@@ -527,8 +538,17 @@ class TenantExportServiceTest {
         assertFalse(entryNames(output.toByteArray()).contains("manifest.json"));
     }
 
-    @Test
-    void objectAdmissionRetryUsesOneBoundedDeadlineWithoutResetting() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void objectAdmissionRetryUsesOneBoundedDeadlineWithoutResetting(boolean admissionSucceeds)
+            throws Exception {
+        AtomicLong nanoTime = new AtomicLong();
+        List<Duration> waits = new ArrayList<>();
+        service.shutdownDeadlineExecutor();
+        service = createService(nanoTime::get, nanos -> {
+            waits.add(Duration.ofNanos(nanos));
+            nanoTime.addAndGet(nanos);
+        });
         properties.setExportObjectReadTimeout(Duration.ofMillis(45));
         stubStreamingRoute();
         ActiveObjectReference reference = reference("retry.pdf", 1);
@@ -544,26 +564,54 @@ class TenantExportServiceTest {
             any(),
             any(Path.class),
             any(TenantExportExecution.class));
-        when(managedObjectService.openTenantExportObject(
-                eq(WORKSPACE_ID),
-                eq(ACTOR_ID),
-                eq(reference),
-                any()))
-            .thenThrow(new TooManyRequestsException("busy"));
+        TooManyRequestsException busy = new TooManyRequestsException("busy");
+        var admission = when(managedObjectService.openTenantExportObject(
+            eq(WORKSPACE_ID),
+            eq(ACTOR_ID),
+            eq(reference),
+            any()));
+        if (admissionSucceeds) {
+            admission.thenThrow(busy, busy).thenReturn(new ManagedTenantObject(
+                reference.objectKey(),
+                new StoredObject(new ByteArrayInputStream(new byte[] {1}), 1),
+                1));
+        } else {
+            admission.thenThrow(busy, busy, busy, busy, busy,
+                new AssertionError("Object admission exceeded the bounded retry attempts"));
+        }
         TenantExportDownload download = service.prepare(ORG_ID, WORKSPACE_ID, ACTOR_ID);
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
 
-        assertThrows(
-            TooManyRequestsException.class,
-            () -> download.writeTo(new ByteArrayOutputStream()));
+        if (admissionSucceeds) {
+            download.writeTo(output);
+            assertTrue(entryNames(output.toByteArray()).contains("manifest.json"));
+            assertArrayEquals(
+                new byte[] {1},
+                entryBytes(output.toByteArray(), "objects/" + reference.objectKey()));
+        } else {
+            assertSame(busy, assertThrows(
+                TooManyRequestsException.class,
+                () -> download.writeTo(output)));
+            assertFalse(entryNames(output.toByteArray()).contains("manifest.json"));
+        }
 
+        List<Duration> expectedTimeouts = (admissionSucceeds
+            ? List.of(45L, 35L, 25L)
+            : List.of(45L, 35L, 25L, 15L, 5L))
+            .stream().map(Duration::ofMillis).toList();
         ArgumentCaptor<Duration> timeouts = ArgumentCaptor.forClass(Duration.class);
-        verify(managedObjectService, atLeast(2)).openTenantExportObject(
+        verify(managedObjectService, times(expectedTimeouts.size())).openTenantExportObject(
             eq(WORKSPACE_ID),
             eq(ACTOR_ID),
             eq(reference),
             timeouts.capture());
-        List<Duration> captured = timeouts.getAllValues();
-        assertTrue(captured.getLast().compareTo(captured.getFirst()) < 0);
+        assertEquals(expectedTimeouts, timeouts.getAllValues());
+        assertEquals(
+            (admissionSucceeds ? List.of(10L, 10L) : List.of(10L, 10L, 10L, 10L, 5L))
+                .stream().map(Duration::ofMillis).toList(),
+            waits);
+        assertEquals(Duration.ofMillis(admissionSucceeds ? 20 : 45).toNanos(), nanoTime.get());
+        verify(controlOperations).release(OPERATION_LEASE);
     }
 
     @Test
