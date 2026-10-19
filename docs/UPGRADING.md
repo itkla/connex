@@ -43,10 +43,11 @@ MySQL account needs `PROCESS` to read `information_schema.INNODB_TABLES`.
 MySQL documents the [online FK/index operations](https://dev.mysql.com/doc/refman/8.4/en/innodb-online-ddl-operations.html)
 and [INSTANT lock restriction](https://dev.mysql.com/doc/refman/8.4/en/alter-table.html#alter-table-concurrency).
 
-The rollback floor stays `tenant/V231__ai_proposal_review_expiry_cutover.sql`: this storage is
-dormant and earlier expiry-compatible binaries continue writing null-set calls. V232 is reserved
-for missions. Privacy enforcement and production set activation require their later semantic
-cutovers and rollback floors; V233 alone authorizes neither. See the
+The rollback floor stays `tenant/V232__ai_agent_runs.sql`: V233 is additive and dormant, and
+V232-compatible binaries continue writing null-set calls. The existing
+[V232 privacy and message-sequence cutover](#v232-mission-privacy-and-message-sequence-cutover)
+still applies, including when missions are disabled. Production set activation and set-specific
+privacy admission require a later semantic cutover; V233 alone authorizes neither. See the
 [storage contract](backend/AI_SECURITY.md#dormant-chat-proposal-set-storage-tenant-v233).
 
 ## AI identifier lookup keys (tenant V230)
@@ -164,7 +165,7 @@ contract is in [AI_SECURITY.md](backend/AI_SECURITY.md#exposure-enforcement-acro
   [`deploy/staging/rollback-floor`](../deploy/staging/rollback-floor) in the **same PR** as any
   migration that earlier binaries cannot survive. Keep the highest such migration as one path
   relative to `backend/src/main/resources/db/migration/`, such as
-  `tenant/V231__ai_proposal_review_expiry_cutover.sql`; blank lines and `#` comment lines
+  `tenant/V232__ai_agent_runs.sql`; blank lines and `#` comment lines
   are allowed. Staging records `backend_starting` before copying the target JAR into the live path.
   The floor has one exception: a matching transaction still in `prepared` or `frontend_stopped`,
   with **both** the live JAR and serving backend identified as the prior release, proves the target
@@ -253,9 +254,11 @@ are unchanged. Expiry is not deletion, archival, or a retained-chat privacy repa
 this cutover. Older binaries can execute known expired proposal IDs despite the unchanged schema.
 Staging automatic rollback and interrupted-deployment recovery therefore refuse a prior JAR lacking
 V231 and use the existing forward-recovery procedure. Do not remove the marker or relabel timestamps
-to permit rollback. A compatible V231 release remains eligible for ordinary paired rollback.
+to permit rollback. A compatible V231 release is eligible for ordinary paired rollback only when
+it also meets every later cutover's rollback floor.
 
-V232 is reserved for Phase 2 slice 1. This cutover introduces no proposal-set storage or producer.
+The later [V232 mission privacy cutover](#v232-mission-privacy-and-message-sequence-cutover)
+raises the floor to V232. V231 introduces no proposal-set storage or producer.
 
 ### V227/V228 campaign unsubscribe cutover
 

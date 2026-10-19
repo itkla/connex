@@ -913,8 +913,10 @@ anchor; legacy rows retain null membership columns. BEFORE INSERT/UPDATE trigger
 membership metadata, ordinal bounds and server trust without adding a COPY-requiring CHECK to the
 retained tool-call table; parent constraints remain CHECKs. The guarded online DDL and migration-only
 FK installation procedure are documented in [UPGRADING](../UPGRADING.md#dormant-assistant-proposal-set-storage-tenant-v233).
-Their creation timestamp is copied from the
-parent, separately from the earlier preparation anchor. Proposal-key FK columns explicitly use
+Their creation timestamp and privacy generation are copied from the parent, separately from the
+earlier preparation anchor. Children remain ordinary reactive chat artifacts with no mission run;
+read-only missions use their separate persistence path and do not produce proposal sets.
+Proposal-key FK columns explicitly use
 the same ASCII binary collation. Account erasure clears the parent's requester beside message
 authors and turn requesters; membership departure retains attribution and never transfers it.
 The table's `TenantLifecycleRegistry` message cascade supplies tenant export, teardown and
@@ -940,7 +942,7 @@ turn/message association under the session mutex, insert the parent and every me
 transaction, and require complete membership before commit. Existing chat readers and writers
 retain their legacy behavior. Production set creation, effective-tier decisions, whole-call
 publication, set-specific privacy admission and discovery remain disabled until their own slices. V233
-preserves the V231 rollback floor; activation requires a fresh semantic cutover.
+preserves the existing V232 rollback floor; activation requires a fresh semantic cutover.
 
 ### Adding an assistant write tool
 

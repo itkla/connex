@@ -45,9 +45,11 @@ class AiAssistantProposalSetMapperTest extends AbstractMapperTest {
     void arrayOfOneAndScalarReloadTheirOriginalModeAndEnvelope() {
         AiAssistantProposalSet bulk = proposalSet(workspace, newUser(), "bulk", 1);
         AiAssistantProposalSet scalar = proposalSet(workspace, newUser(), "scalar", 1);
+        scalar.setPrivacyGeneration(11);
         insert(bulk);
         insert(scalar);
         AiChatToolCall bulkMember = member(bulk, 1);
+        bulkMember.setPrivacyGeneration(99L);
         bulkMember.setArgumentsJson("{\"tier\":\"confirm\",\"pinned\":{\"tagId\":42}}");
         AiChatToolCall scalarMember = member(scalar, 1);
         scalarMember.setArgumentsJson("{\"tier\":\"auto\"}");
@@ -72,6 +74,7 @@ class AiAssistantProposalSetMapperTest extends AbstractMapperTest {
             assertEquals(1, storedBulk.getRowCount());
             assertEquals(bulk.getScopeRevision(), storedBulk.getScopeRevision());
             assertEquals(7, storedBulk.getPrivacyGeneration());
+            assertEquals(11, storedScalar.getPrivacyGeneration());
             assertEquals("scalar", storedScalar.getInvocationMode());
             assertNull(storedScalar.getBulkTurnSlot());
             List<AiChatToolCall> bulkRows = reloaded.listMembers(
@@ -81,6 +84,8 @@ class AiAssistantProposalSetMapperTest extends AbstractMapperTest {
             assertEquals(1, bulkRows.size());
             assertEquals(1, scalarRows.size());
             AiChatToolCall storedMember = bulkRows.getFirst();
+            assertEquals(storedBulk.getPrivacyGeneration(), storedMember.getPrivacyGeneration());
+            assertEquals(storedScalar.getPrivacyGeneration(), scalarRows.getFirst().getPrivacyGeneration());
             assertEquals("bulk", storedMember.getInvocationMode());
             assertEquals("staged", storedMember.getPublicationState());
             assertEquals(storedBulk.getCreatedAt(), storedMember.getCreatedAt());
@@ -90,6 +95,8 @@ class AiAssistantProposalSetMapperTest extends AbstractMapperTest {
             assertTrue(scalarRows.getFirst().getArgumentsJson().contains("auto"));
             for (AiChatToolCall row : List.of(storedMember, scalarRows.getFirst())) {
                 assertEquals("proposed", row.getStatus());
+                assertNull(row.getMissionRunId());
+                assertEquals("reactive", row.getArtifactOrigin());
                 assertNull(row.getExecutedAt());
                 assertNull(row.getResultJson());
                 assertTrue(row.isServerProposal());
@@ -142,6 +149,9 @@ class AiAssistantProposalSetMapperTest extends AbstractMapperTest {
         }
         assertEquals(IntStream.rangeClosed(1, 20).boxed().toList(),
                 members(set).stream().map(AiChatToolCall::getProposalOrdinal).toList());
+        for (AiChatToolCall row : members(set)) {
+            assertEquals(set.getPrivacyGeneration(), row.getPrivacyGeneration());
+        }
         assertTrue(complete(set));
         assertThrows(DataAccessException.class, () -> mapper.insertMember(member(set, 1)));
         jdbc.update("DELETE FROM ai_chat_tool_call WHERE workspace_id = ? AND proposal_key = ? AND proposal_ordinal = 10",

@@ -56,10 +56,10 @@
     INSERT INTO ai_chat_tool_call
       (workspace_id, message_id, tool_name, status, arguments_json, thought_signature,
        idempotency_key, server_proposal, proposal_key, proposal_ordinal, proposal_prepared_at,
-       created_at, updated_at)
+       privacy_generation, created_at, updated_at)
     SELECT p.workspace_id, p.message_id, p.tool_name, 'proposed', #{argumentsJson,jdbcType=VARCHAR},
            #{thoughtSignature,jdbcType=LONGVARCHAR}, #{idempotencyKey}, TRUE, p.proposal_key,
-           #{proposalOrdinal}, #{proposalPreparedAt}, p.created_at, p.created_at
+           #{proposalOrdinal}, #{proposalPreparedAt}, p.privacy_generation, p.created_at, p.created_at
     FROM ai_assistant_proposal_set p
     WHERE p.workspace_id = #{workspaceId}
       AND p.session_id = #{sessionId}
