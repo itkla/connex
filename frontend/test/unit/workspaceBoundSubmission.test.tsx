@@ -748,6 +748,118 @@ describe("creating a workspace from the shell", () => {
         expect(requests.filter(({ method }) => method === "POST")).toEqual([]);
     });
 
+    it.each([2, 3])("abandons creation when the account changes during CSRF fetch %s", async (heldFetch) => {
+        setWorkspaceCookie(RENDERED);
+        bindRenderedWorkspace(owner(), RENDERED);
+        synchronizeBrowserAccount(1);
+        let account = 1;
+        let csrfFetches = 0;
+        let releaseCsrf: (response: Response) => void = () => undefined;
+        const heldCsrf = new Promise<Response>((resolve) => { releaseCsrf = resolve; });
+        const posts: Array<{ account: number; token: string | null; body: BodyInit | null | undefined }> = [];
+        const csrf = (identity: number) => json({
+            token: `csrf-${identity}`, headerName: "X-XSRF-TOKEN", requestIdentity: `identity-${identity}`,
+        });
+        vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+            const url = input instanceof Request ? input.url : String(input);
+            if (url.endsWith("/api/auth/csrf")) {
+                csrfFetches += 1;
+                return csrfFetches === heldFetch ? heldCsrf : csrf(account);
+            }
+            if (init?.method !== "POST") {
+                return json({ workspaces: [workspace(RENDERED, REVOKED_NAME)], activeWorkspaceId: RENDERED });
+            }
+            const token = new Headers(init.headers).get("X-XSRF-TOKEN");
+            posts.push({ account, token, body: init.body });
+            return token !== `csrf-${account}` || (heldFetch === 3 && posts.length === 1)
+                ? new Response("Invalid CSRF token", { status: 403 })
+                : json(workspace(77, "Field team"));
+        }));
+
+        const creation = createWorkspace("Field team").then(() => null, (error: unknown) => error);
+        await vi.waitFor(() => expect(csrfFetches).toBe(heldFetch));
+        account = 2;
+        synchronizeBrowserAccount(account);
+        releaseCsrf(csrf(1));
+
+        expect(await creation).toBeInstanceOf(Error);
+        expect(posts).toEqual(heldFetch === 2 ? [] : [{
+            account: 1, token: "csrf-1", body: JSON.stringify({ name: "Field team" }),
+        }]);
+    });
+
+    it.each([false, true])("refuses an unproven preflight identity with failed bootstrap %s", async (failed) => {
+        setWorkspaceCookie(RENDERED);
+        bindRenderedWorkspace(owner(), RENDERED);
+        synchronizeBrowserAccount(1);
+        let csrfFetches = 0;
+        const posts: Recorded[] = [];
+        vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+            const url = input instanceof Request ? input.url : String(input);
+            if (url.endsWith("/api/auth/csrf")) {
+                csrfFetches += 1;
+                if (csrfFetches === 1) {
+                    return failed ? new Response("", { status: 503 }) : json({
+                        token: "csrf-1", headerName: "X-XSRF-TOKEN",
+                    });
+                }
+                return json({ token: "csrf-2", headerName: "X-XSRF-TOKEN", requestIdentity: "identity-2" });
+            }
+            if (init?.method !== "POST") {
+                return json({ workspaces: [workspace(RENDERED, REVOKED_NAME)], activeWorkspaceId: RENDERED });
+            }
+            posts.push({ url, method: init.method, workspace: new Headers(init.headers).get("X-Workspace-Id") });
+            return json(workspace(77, "Field team"));
+        }));
+
+        await expect(createWorkspace("Field team")).rejects.toThrow(
+            "Unable to establish the authenticated workspace creation identity",
+        );
+
+        expect(csrfFetches).toBe(1);
+        expect(posts).toEqual([]);
+    });
+
+    it.each([false, true])("checks the server identity before a CSRF retry with account change %s", async (changed) => {
+        setWorkspaceCookie(RENDERED);
+        bindRenderedWorkspace(owner(), RENDERED);
+        synchronizeBrowserAccount(1);
+        let csrfFetches = 0;
+        const posts: Array<{ token: string | null; workspace: string | null }> = [];
+        vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+            const url = input instanceof Request ? input.url : String(input);
+            if (url.endsWith("/api/auth/csrf")) {
+                csrfFetches += 1;
+                return json({
+                    token: `csrf-${csrfFetches}`,
+                    headerName: "X-XSRF-TOKEN",
+                    requestIdentity: changed && csrfFetches === 3 ? "identity-2" : "identity-1",
+                });
+            }
+            if (init?.method !== "POST") {
+                return json({ workspaces: [workspace(RENDERED, REVOKED_NAME)], activeWorkspaceId: RENDERED });
+            }
+            const headers = new Headers(init.headers);
+            posts.push({ token: headers.get("X-XSRF-TOKEN"), workspace: headers.get("X-Workspace-Id") });
+            return posts.length === 1
+                ? new Response("Invalid CSRF token", { status: 403 })
+                : json(workspace(77, "Field team"));
+        }));
+
+        const creation = createWorkspace("Field team");
+        if (changed) {
+            await expect(creation).rejects.toThrow("The workspace changed before this request was sent");
+        } else {
+            await expect(creation).resolves.toMatchObject({ id: 77 });
+        }
+
+        expect(csrfFetches).toBe(3);
+        expect(posts).toEqual([
+            { token: "csrf-2", workspace: String(RENDERED) },
+            ...changed ? [] : [{ token: "csrf-3", workspace: String(RENDERED) }],
+        ]);
+    });
+
     it("re-reads memberships even when the cookie names the workspace on screen", async () => {
         setWorkspaceCookie(RENDERED);
         bindRenderedWorkspace(owner(), RENDERED);

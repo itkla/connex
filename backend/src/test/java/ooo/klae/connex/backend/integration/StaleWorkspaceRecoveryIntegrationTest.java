@@ -47,12 +47,14 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.beans.WorkspaceInvite;
 import ooo.klae.connex.backend.beans.WorkspaceInviteLink;
+import ooo.klae.connex.backend.beans.WorkspaceRole;
 import ooo.klae.connex.backend.config.OneTimeLinkFlowCookie;
 import ooo.klae.connex.backend.mappers.InviteLinkMapper;
 import ooo.klae.connex.backend.mappers.InviteMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.OrgAllowedDomainMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.OneTimeLinkFlowService;
@@ -72,6 +74,7 @@ class StaleWorkspaceRecoveryIntegrationTest {
     @Autowired private UserMapper userMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private OrganizationMapper organizationMapper;
+    @Autowired private RoleMapper roleMapper;
     @Autowired private NoteMapper noteMapper;
     @Autowired private InviteMapper inviteMapper;
     @Autowired private InviteLinkMapper inviteLinkMapper;
@@ -235,6 +238,51 @@ class StaleWorkspaceRecoveryIntegrationTest {
         assertEquals(0, jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM business_card_import_request WHERE workspace_id IN (?, ?)",
             Integer.class, workspaceId, browser.remaining().getId()));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/business-cards/scan", "/api/business-cards/import/reservation",
+        "/api/business-cards/import"})
+    void staleSessionEpochHidesBusinessCardMembershipBeforeMultipartParsing(String path) throws Exception {
+        StaleBrowser browser = staleBrowser();
+        WorkspaceRole role = new WorkspaceRole();
+        role.setWorkspaceId(browser.remaining().getId());
+        role.setName("No business-card permissions");
+        roleMapper.insertRole(role);
+        assertEquals(1, workspaceMapper.setMemberCustomRole(
+            browser.remaining().getId(), browser.user().getId(), role.getId()));
+
+        mockMvc.perform(post(path)
+                .header("X-Workspace-Id", browser.remaining().getId())
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .session(browser.session())
+                .with(csrf().asHeader())
+                .contentType("multipart/form-data; boundary=unparsed")
+                .content("Not a multipart body"))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.code").value("BUSINESS_CARD_PERMISSION_DENIED"));
+        RequestContextHolder.resetRequestAttributes();
+        assertEquals(1, userMapper.bumpSessionEpoch(browser.user().getId()));
+
+        for (int workspaceId : List.of(browser.revoked().getId(), browser.remaining().getId())) {
+            MvcResult refused = mockMvc.perform(post(path)
+                    .header("X-Workspace-Id", workspaceId)
+                    .header("Idempotency-Key", UUID.randomUUID().toString())
+                    .session(browser.session())
+                    .with(csrf().asHeader())
+                    .contentType("multipart/form-data; boundary=unparsed")
+                    .content("Not a multipart body"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(cookie().doesNotExist(WorkspaceCookie.NAME))
+                .andReturn();
+
+            assertEquals("", refused.getResponse().getContentAsString());
+            RequestContextHolder.resetRequestAttributes();
+            assertFalse(tenantContext.isResolved());
+        }
+        assertEquals(0, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM business_card_import_request WHERE workspace_id IN (?, ?)",
+            Integer.class, browser.revoked().getId(), browser.remaining().getId()));
     }
 
     @Test

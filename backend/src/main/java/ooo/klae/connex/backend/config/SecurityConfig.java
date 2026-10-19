@@ -273,12 +273,15 @@ public class SecurityConfig {
         boolean oauthEnabled = ssoEnabled || socialLoginClientRegistrations.anyEnabled();
         http.addFilterAfter(new AbsoluteSessionTimeoutFilter(sessionSecurityService), SecurityContextHolderFilter.class);
         http.addFilterAfter(
+            new SessionEpochFilter(userMapper, sessionSecurityService, webSocketSessions),
+            CsrfFilter.class);
+        http.addFilterAfter(
             new BusinessCardImportAdmissionFilter(
                 businessCardRateLimiter,
                 capabilityEntitlement,
                 workspaceRequestResolver,
                 workspaceService),
-            CsrfFilter.class);
+            SessionEpochFilter.class);
         http.addFilterAfter(
             new OneTimeLinkExchangeAdmissionFilter(loginRateLimiter, clientIpResolver),
             CsrfFilter.class);
@@ -286,9 +289,6 @@ public class SecurityConfig {
             new AiAssistantNavigationAdmissionFilter(corsAllowedOrigins),
             CsrfFilter.class);
         http.addFilterBefore(new MetricsScrapeTokenFilter(metricsScrapeToken), AuthorizationFilter.class);
-        http.addFilterBefore(
-            new SessionEpochFilter(userMapper, sessionSecurityService, webSocketSessions),
-            AuthorizationFilter.class);
         http.addFilterAfter(
             new PrivilegedMfaEnforcementFilter(
                 privilegedMfaProperties,

@@ -17,6 +17,10 @@ Preserve `ImageDecodeAdmissionService` behavior:
 
 Scan entitlement, workspace permission, and principal/global admission run in the security filter before multipart parsing. Do not move expensive parsing ahead of those gates.
 
+Session-epoch validation precedes business-card admission, so a revoked session receives the same
+authentication refusal whether its explicit workspace pin names a nonmembership or a membership
+without the required permission.
+
 Malformed or repeated explicit workspace pins receive the filter's controlled 403 permission refusal
 before parsing, workspace permission checks, or throttling; they never fall back to the cookie or continue the chain.
 

@@ -643,7 +643,10 @@ through one `requestJson` (`api.ts:17-43`) → inject the active workspace **onc
   cookie, preserving the unresolved recovery path. The client preflight keeps
   the entered name locally, while the server check enforces the boundary after the preflight.
   Creation registers with the pinned-write identity guard before the preflight and rechecks identity
-  afterward, so an account or workspace transition during that wait abandons the creation.
+  afterward. Cancellation remains active through final CSRF preparation and every retry; immediately
+  before each POST, the client checks the transition epoch and the preflight's opaque server identity,
+  so an account or workspace transition abandons the creation before sending it under another account.
+  Pinned creation also refuses when the preflight cannot establish that authenticated identity.
 - Explicit workspace headers contain exactly one parseable integer. Malformed, comma-combined or
   repeated headers are refused without cookie or remembered-selection fallback; the frontend
   rejects malformed pins before sending and merges XHR headers case-insensitively before setting

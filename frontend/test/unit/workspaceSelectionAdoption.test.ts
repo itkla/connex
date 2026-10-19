@@ -329,7 +329,9 @@ describe("authoritative workspace selection adoption", () => {
             init?: RequestInit,
         ): Promise<Response> => {
             const url = new URL(input instanceof Request ? input.url : input.toString(), "http://localhost:8080");
-            if (url.pathname === "/api/auth/csrf") return new Response("", { status: 503 });
+            if (url.pathname === "/api/auth/csrf") {
+                return jsonResponse({ token: "csrf-token", headerName: "X-XSRF-TOKEN", requestIdentity: "identity" });
+            }
             if (url.pathname === "/api/workspaces" && init?.method === "POST") {
                 document.cookie = "NEXT_LOCALE=en; connex_workspace=22";
                 return new Response('{"id":22', { status: 200 });
@@ -582,7 +584,9 @@ describe("authoritative workspace selection adoption", () => {
             init?: RequestInit,
         ): Promise<Response> => {
             const url = new URL(input instanceof Request ? input.url : input.toString(), "http://localhost:8080");
-            if (url.pathname === "/api/auth/csrf") return new Response("", { status: 503 });
+            if (url.pathname === "/api/auth/csrf") {
+                return jsonResponse({ token: "csrf-token", headerName: "X-XSRF-TOKEN", requestIdentity: "identity" });
+            }
             if (url.pathname === "/api/workspaces" && init?.method === "POST") {
                 document.cookie = "NEXT_LOCALE=en; connex_workspace=22";
                 return new Response('{"id":22', { status: 200 });

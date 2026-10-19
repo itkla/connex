@@ -224,7 +224,7 @@ const clientRequestIdentityInvalidationListeners = new Set<() => void>();
 const pendingPinnedWriteIdentities = new Set<AbortController>();
 
 /**
- * Abandons every pinned write still waiting for its request identity, because a workspace or
+ * Abandons every pinned write still preparing its request identity or CSRF retry, because a workspace or
  * account transition has begun or landed (#1732). A write prepared under the previous selection must
  * not be sent once the shell may already render another workspace.
  */
@@ -923,6 +923,7 @@ async function requestJson<T>(
     init: RequestInit = {},
     workspaceSelectionBody: "standard" | "required" | "optional" = "standard",
     workspaceHeader: "auto" | "omit" = "auto",
+    beforeSend?: (headers: Headers) => void,
 ): Promise<T> {
     const suppression = privilegedMfaSuppression(path, init.method);
     if (suppression !== null) {
@@ -943,6 +944,7 @@ async function requestJson<T>(
             ...csrf,
         });
         new Headers(init.headers).forEach((value, key) => headers.set(key, value));
+        beforeSend?.(headers);
         return fetch(`${API_BASE}${path}`, {
             ...init,
             credentials: "include",
@@ -1203,12 +1205,13 @@ async function postWorkspaceSelectionJson<T>(
     bodyRequired = true,
     init: RequestInit = {},
     workspaceHeader: "auto" | "omit" = "auto",
+    beforeSend?: (headers: Headers) => void,
 ): Promise<T> {
     return requestJson<T>(path, {
         ...init,
         method: "POST",
         body: JSON.stringify(body),
-    }, bodyRequired ? "required" : "optional", workspaceHeader);
+    }, bodyRequired ? "required" : "optional", workspaceHeader, beforeSend);
 }
 
 async function postFormData<T>(path: string, body: FormData, init: RequestInit = {}): Promise<T> {
@@ -5513,30 +5516,63 @@ export async function getMyWorkspacesResultFromCookie(
  * selection remains in the browser cookie, leaving recovery to the server.
  * @returns the pinned options, or null for header-free onboarding creation
  * @throws ApiError coded {@link WORKSPACE_UNAVAILABLE_CODE} when the rendered workspace is gone
+ * @throws Error when the authenticated creation identity cannot be established
  */
 async function workspaceCreationOrigin(): Promise<RequestInit | null> {
     const rendered = renderedWorkspaceId();
     if (rendered === null || typeof document === "undefined") return null;
     const pinned: RequestInit = { headers: { "X-Workspace-Id": String(rendered) } };
-    await identityBeforePinnedWrite(async () => {
+    const identity = await identityBeforePinnedWrite(async () => {
         const snapshot = await getMyWorkspaces();
         if (!snapshot.workspaces.some((workspace) => workspace.id === rendered)) {
             throw workspaceUnavailableError(rendered, `Not a member of workspace ${rendered}`);
         }
     });
+    if (identity === null) {
+        throw new Error("Unable to establish the authenticated workspace creation identity");
+    }
     return pinned;
 }
 
+/** Creates under the origin's account identity, including final CSRF preparation and every retry. */
 export async function createWorkspace(name: string) {
+    const preflightEpoch = clientRequestIdentityEpoch;
     const origin = await workspaceCreationOrigin();
+    if (clientRequestIdentityEpoch !== preflightEpoch) {
+        throw new Error("The workspace changed before this request was sent");
+    }
+    const requestIdentity = origin === null ? null : csrfTokenCache?.requestIdentity;
+    if (origin !== null && requestIdentity == null) {
+        throw new Error("Unable to establish the authenticated workspace creation identity");
+    }
     try {
         return await withClientRequestIdentityReset(
-            () => recoverWorkspaceSelectionResponse(
-                () => postWorkspaceSelectionJson<Types.Workspace>(
-                    `/api/workspaces`, { name }, true, origin ?? {}, origin === null ? "omit" : "auto",
-                ),
-                activeWorkspaceFromSelection,
-            ),
+            async () => {
+                const waiting = new AbortController();
+                pendingPinnedWriteIdentities.add(waiting);
+                const identityEpoch = clientRequestIdentityEpoch;
+                const beforeSend = (headers: Headers) => {
+                    const currentCsrf = csrfTokenCache;
+                    if (waiting.signal.aborted
+                        || clientRequestIdentityEpoch !== identityEpoch
+                        || (requestIdentity != null && (currentCsrf === null
+                            || currentCsrf.requestIdentity !== requestIdentity
+                            || headers.get(currentCsrf.headerName) !== currentCsrf.token))) {
+                        throw new Error("The workspace changed before this request was sent");
+                    }
+                };
+                try {
+                    return await recoverWorkspaceSelectionResponse(
+                        () => postWorkspaceSelectionJson<Types.Workspace>(
+                            `/api/workspaces`, { name }, true, origin ?? {},
+                            origin === null ? "omit" : "auto", beforeSend,
+                        ),
+                        activeWorkspaceFromSelection,
+                    );
+                } finally {
+                    pendingPinnedWriteIdentities.delete(waiting);
+                }
+            },
             "workspace",
         );
     } catch (error) {
