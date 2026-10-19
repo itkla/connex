@@ -46,7 +46,8 @@ import {
     PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { uploadAttachmentImage } from "@/app/lib/api";
+import { isWorkspaceUnavailableError, uploadAttachmentImage } from "@/app/lib/api";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { renderedWorkspaceId, workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
 import {
     defaultAltFromFileName,
@@ -259,6 +260,7 @@ function ImagePopover({
 }) {
     const sourceId = useId();
     const altId = useId();
+    const showApiError = useApiErrorToast();
     const sourceErrorId = `${sourceId}-error`;
     const altErrorId = `${altId}-error`;
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -332,8 +334,12 @@ function ImagePopover({
             setAlt(nextAlt);
             applyImageAttrs(nextSource, nextAlt);
             setOpen(false);
-        } catch {
-            toastError(labels.imageUploadFailed);
+        } catch (error) {
+            if (isWorkspaceUnavailableError(error)) {
+                showApiError(error);
+            } else {
+                toastError(labels.imageUploadFailed);
+            }
         } finally {
             setUploading(false);
             setDragActive(false);

@@ -90,13 +90,14 @@ export function rememberedWorkspaceName(workspaceId: number): string | null {
  *   selection and link-bootstrap routes, the ownership-offer decisions and the organization and
  *   workspace lifecycle deletes. Each authorizes the target it names itself; shell workspace
  *   creation supplies its explicit origin separately, and the server validates membership there.
- * - `accountAndOrganization` is the account and organization families, and the personal provider
+ * - `accountAndOrganization` is the account and organization families, recipient-scoped notification
+ *   mutations authorized by `NotificationService`, and the personal provider
  *   connection controls (connect, pause, resume, disconnect, native pairing). Their target is the signed-in user or
  *   the organization named in the path, and the API surface ledger shows them authorized by user,
  *   organization, `ProviderConnectionService` and `NativeConnectService` code rather than by a workspace permission, so a
  *   revoked rendered workspace must not refuse them before that authorization runs. The other
- *   connection routes (capture review, approval, sync, capture purges and policies) write workspace
- *   content and stay pinned.
+ *   connection routes (capture review, approval, sync, capture purges and policies) and My Work
+ *   notification actions write workspace content and stay pinned.
  *
  * Patterns use the backend's path syntax: `{id}` is one decimal segment, any other `{name}` is one
  * non-empty segment, and a trailing `/**` matches the path itself and anything beneath it.
@@ -133,6 +134,13 @@ export const UNPINNED_WRITE_ROUTES = {
     accountAndOrganization: [
         "/api/users/me/**",
         "/api/notification-preferences/**",
+        "/api/notifications/{id}/read",
+        "/api/notifications/{id}/unread",
+        "/api/notifications/{id}/dismiss",
+        "/api/notifications/{id}/restore",
+        "/api/notifications/{id}/snooze",
+        "/api/notifications/{id}/unsnooze",
+        "/api/notifications/read-all",
         "/api/orgs/{id}/**",
         "/api/account/connections/{provider}",
         "/api/account/connections/{provider}/authorize",

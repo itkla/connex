@@ -10,10 +10,15 @@ import { useWorkspace, WorkspaceProvider } from "@/app/hooks/useWorkspace";
 import { draftKey, listFreshDrafts, readDraft, writeDraft } from "@/app/lib/formDrafts";
 import { renderedWorkspaceId } from "@/app/lib/renderedWorkspace";
 import { toastError, toastInfo } from "@/app/lib/toast";
-import type { DashboardWidgetType, Workspace } from "@/app/lib/types";
+import type { DashboardWidgetType, Note, Workspace } from "@/app/lib/types";
 
-const editor = vi.hoisted<{ onChange: ((value: string) => void) | null; value: string | null }>(() => ({
+const editor = vi.hoisted<{
+    onChange: ((value: string) => void) | null;
+    ensureNoteId: (() => Promise<number>) | null;
+    value: string | null;
+}>(() => ({
     onChange: null,
+    ensureNoteId: null,
     value: null,
 }));
 const translate = vi.hoisted(() => Object.assign((key: string) => key, { has: () => false }));
@@ -28,8 +33,13 @@ vi.mock("next-intl", () => ({
 }));
 
 vi.mock("next/dynamic", () => ({
-    default: () => function RichNoteEditor({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+    default: () => function RichNoteEditor({ value, onChange, ensureNoteId }: {
+        value: string;
+        onChange: (value: string) => void;
+        ensureNoteId: () => Promise<number>;
+    }) {
         editor.onChange = onChange;
+        editor.ensureNoteId = ensureNoteId;
         editor.value = value;
         return null;
     },
@@ -126,7 +136,7 @@ function json(body: unknown, status = 200): Response {
 }
 
 /** Answers the switch, and refuses or accepts each content write the way a revoked or live origin would. */
-function stubBackend(originRevoked: boolean): Recorded[] {
+function stubBackend(originRevoked: boolean | (() => boolean)): Recorded[] {
     const requests: Recorded[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
         const url = new URL(input instanceof Request ? input.url : String(input), "http://localhost");
@@ -135,6 +145,7 @@ function stubBackend(originRevoked: boolean): Recorded[] {
             return json({ token: "csrf-token", headerName: "X-XSRF-TOKEN", requestIdentity: "identity" });
         }
         const workspaceHeader = new Headers(init?.headers).get("X-Workspace-Id");
+        const revoked = typeof originRevoked === "function" ? originRevoked() : originRevoked;
         requests.push({
             method,
             path: url.pathname,
@@ -146,12 +157,12 @@ function stubBackend(originRevoked: boolean): Recorded[] {
             return new Response("", { status: 200 });
         }
         if (url.pathname === "/api/workspaces" && method === "GET") {
-            const memberships = originRevoked
+            const memberships = revoked
                 ? [workspace(HEALED, "Head Office")]
                 : [workspace(HEALED, "Head Office"), workspace(ORIGIN, "Northwind Field Team")];
             return json({ workspaces: memberships, activeWorkspaceId: HEALED });
         }
-        if (originRevoked && workspaceHeader === String(ORIGIN)) {
+        if (revoked && workspaceHeader === String(ORIGIN)) {
             return json({ code: "FORBIDDEN", message: `Not a member of workspace ${ORIGIN}` }, 403);
         }
         return method === "DELETE" ? new Response("", { status: 204 }) : json({ id: 41, layout: null });
@@ -216,8 +227,10 @@ async function healAndSwitch(): Promise<void> {
 }
 
 beforeEach(() => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     document.cookie = `connex_workspace=${ORIGIN}; path=/`;
     editor.onChange = null;
+    editor.ensureNoteId = null;
     editor.value = null;
     captured = null;
 });
@@ -233,6 +246,84 @@ afterEach(async () => {
 });
 
 describe("a note composed in one workspace and flushed after a switch to another", () => {
+    it.each(["autosave", "inline image"])("keeps later refused edits with the note created by %s and offers them there", async (creation) => {
+        let revoked = false;
+        const requests = stubBackend(() => revoked);
+        const savedNote: Note = {
+            id: 41,
+            author: USER,
+            content: DRAFT,
+            createdAt: "2026-10-18T00:00:00Z",
+            updatedAt: "2026-10-18T00:00:00Z",
+        };
+        await renderInShell(
+            <NoteEditorView note={null} currentUserId={USER} persons={[]} deals={[]} users={[]} returnPath="/activity/notes" />,
+        );
+        await act(async () => {
+            if (editor.onChange === null) throw new Error("The note editor did not render");
+            editor.onChange(DRAFT);
+        });
+        await act(async () => {
+            if (creation === "autosave") {
+                window.dispatchEvent(new Event("beforeunload"));
+            } else {
+                if (editor.ensureNoteId === null) throw new Error("The note editor did not render");
+                expect(await editor.ensureNoteId()).toBe(savedNote.id);
+            }
+        });
+        expect(writesTo(requests, "/api/notes")).toHaveLength(1);
+        expect(window.location.pathname).toBe(`/activity/notes/${savedNote.id}`);
+
+        revoked = true;
+        document.cookie = `connex_workspace=${HEALED}; path=/`;
+        const refusedContent = `${DRAFT}, revised after creation`;
+        await act(async () => {
+            editor.onChange?.(refusedContent);
+        });
+        await act(async () => {
+            window.dispatchEvent(new Event("beforeunload"));
+        });
+        await settle(500);
+
+        const editorParts = { userId: USER, workspaceId: ORIGIN, formType: "noteEditor", scope: `note:${savedNote.id}` };
+        expect(editor.value).toBe(refusedContent);
+        expect(readDraft(editorParts, { version: 1 })?.data).toMatchObject({ content: refusedContent });
+        expect(readDraft({ ...editorParts, scope: "new" }, { version: 1 })).toBeNull();
+        expect(listFreshDrafts({ userId: USER, workspaceId: HEALED })).toEqual([]);
+        expect(writesTo(requests, `/api/notes/${savedNote.id}`)).toMatchObject([
+            { method: "PUT", workspace: String(ORIGIN), body: expect.stringContaining(refusedContent) },
+        ]);
+
+        await act(async () => root?.unmount());
+        vi.mocked(toastInfo).mockClear();
+        await renderInShell(
+            <NoteEditorView note={null} currentUserId={USER} persons={[]} deals={[]} users={[]} returnPath="/activity/notes" />,
+        );
+        expect(toastInfo).not.toHaveBeenCalled();
+
+        await act(async () => root?.unmount());
+        await renderInShell(
+            <NoteEditorView note={savedNote} currentUserId={USER} persons={[]} deals={[]} users={[]} returnPath="/activity/notes" />,
+        );
+        const offer = vi.mocked(toastInfo).mock.calls.find(([, options]) => options?.id === draftKey(editorParts));
+        await act(async () => {
+            const action = offer?.[1]?.action;
+            if (typeof action !== "object" || action === null || !("onClick" in action)) {
+                throw new Error("The saved note's kept edits were not offered");
+            }
+            Reflect.apply(action.onClick, undefined, []);
+        });
+        expect(editor.value).toBe(refusedContent);
+        vi.mocked(toastError).mockClear();
+        await act(async () => {
+            window.dispatchEvent(new Event("beforeunload"));
+            await vi.waitFor(() => expect(toastError).toHaveBeenCalledWith(
+                "ApiErrors.title",
+                { description: "ApiErrors.workspaceUnavailableNamed" },
+            ));
+        });
+    });
+
     it.each([
         ["still a member", false],
         ["revoked", true],

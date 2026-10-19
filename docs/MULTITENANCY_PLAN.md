@@ -633,6 +633,14 @@ through one `requestJson` (`api.ts:17-43`) → inject the active workspace **onc
   autosave and unmount flush, dashboard layout saves) pin the workspace the content was composed in
   via `workspacePinnedRequest` (#1732, closing the bound #1649 left). Multi-step note-image uploads
   and company creation with staged contacts carry the same origin through their follow-up writes.
+  Note-image workspace refusals use the shared named-workspace error and retain the editor content.
+  Once a new note receives an id, its kept-draft identity moves from `new` to `note:{id}` within
+  the original user and workspace, so later refused edits resume from that note's editor.
+- The inbox's seven `/api/notifications` mutations (read, unread, dismiss, restore, snooze,
+  unsnooze, read-all) follow the cookie: `NotificationController` delegates to `NotificationService`,
+  which authorizes the current recipient across memberships rather than the rendered workspace.
+  The allowlist names these exact routes and is checked against the API-surface ledger. My Work
+  notification dismiss/snooze remain workspace-bound and pinned to the rendered workspace.
 - Workspace creation from the shell explicitly pins the rendered origin and preflights membership
   even when the cookie still matches. The server refuses an unavailable explicit origin with
   `403 FORBIDDEN "Not a member of workspace {id}"`, including revoked or foreign pins when no other

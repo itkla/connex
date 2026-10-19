@@ -98,7 +98,8 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
     const { activeWorkspaceId } = useWorkspace();
     const tResume = useTranslations("DraftResume");
     const [originWorkspaceId] = useState(activeWorkspaceId);
-    const [editorDraftScope] = useState(() => (note === null ? "new" : `note:${note.id}`));
+    const [noteId, setNoteId] = useState<number | null>(note?.id ?? null);
+    const editorDraftScope = noteId === null ? "new" : `note:${noteId}`;
     const editorDraftParts = useMemo<DraftKeyParts>(() => ({
         userId: currentUserId,
         workspaceId: originWorkspaceId,
@@ -111,8 +112,8 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
     });
     const persistEditorDraft = editorDraft.persist;
     const clearEditorDraft = editorDraft.clear;
+    const rekeyEditorDraft = editorDraft.rekeyScope;
 
-    const [noteId, setNoteId] = useState<number | null>(note?.id ?? null);
     const [title, setTitle] = useState(note?.title ?? "");
     const [content, setContent] = useState(note?.content ?? "");
     const [visibility, setVisibility] = useState<NoteVisibility>(
@@ -222,6 +223,7 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
         request
             .then((saved) => {
                 if (snapshot.noteId == null && saved?.id) {
+                    rekeyEditorDraft(`note:${saved.id}`);
                     stateRef.current = { ...stateRef.current, noteId: saved.id };
                     setNoteId(saved.id);
                     if (mountedRef.current) window.history.replaceState(null, "", `/activity/notes/${saved.id}`);
@@ -239,7 +241,7 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
                 savingRef.current = false;
                 if (dirtyRef.current) saveRef.current();
             });
-    }, [clearEditorDraft, currentUserId, keepRefusedText, noteWorkspaceRefused, originWorkspaceId, t]);
+    }, [clearEditorDraft, currentUserId, keepRefusedText, noteWorkspaceRefused, originWorkspaceId, rekeyEditorDraft, t]);
 
     const ensureNoteId = useCallback(async (): Promise<number> => {
         const existing = stateRef.current.noteId;
@@ -274,6 +276,7 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
                 author: currentUserId,
             }, workspacePinnedRequest(originWorkspaceId));
             if (!saved?.id) throw new Error("missing-note-id");
+            rekeyEditorDraft(`note:${saved.id}`);
             stateRef.current = { ...stateRef.current, noteId: saved.id };
             setNoteId(saved.id);
             if (mountedRef.current) window.history.replaceState(null, "", `/activity/notes/${saved.id}`);
@@ -288,7 +291,7 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
             savingRef.current = false;
             if (dirtyRef.current) saveRef.current();
         }
-    }, [currentUserId, noteWorkspaceRefused, originWorkspaceId, t]);
+    }, [currentUserId, noteWorkspaceRefused, originWorkspaceId, rekeyEditorDraft, t]);
 
     useEffect(() => {
         saveRef.current = save;

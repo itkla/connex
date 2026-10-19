@@ -19,12 +19,20 @@ import {
     createWorkspace,
     decideCaptureReview,
     disconnectProviderConnection,
+    dismissMyWorkNotification,
+    dismissNotification,
     downloadCsv,
     exportReportCsv,
     getNotesPage,
     isWorkspaceUnavailableError,
+    markAllNotificationsRead,
+    markNotificationRead,
+    markNotificationUnread,
     pauseProviderConnection,
     resumeProviderConnection,
+    restoreNotification,
+    snoozeMyWorkNotification,
+    snoozeNotification,
     startAiChatTurn,
     switchWorkspace,
     synchronizeBrowserAccount,
@@ -32,6 +40,7 @@ import {
     updateMyTimezone,
     updateNotificationPreferences,
     updateOrganizationIdentity,
+    unsnoozeNotification,
     uploadAiChatAttachment,
     uploadAttachmentImage,
     uploadCurrentUserProfilePicture,
@@ -83,7 +92,7 @@ function json(body: unknown, status = 200): Response {
     });
 }
 
-function stubBackend(answer: (url: string, method: string) => Response | null = () => null): Recorded[] {
+function stubBackend(answer: (url: string, method: string, workspace: string | null) => Response | null = () => null): Recorded[] {
     const requests: Recorded[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
         const url = input instanceof Request ? input.url : String(input);
@@ -91,8 +100,9 @@ function stubBackend(answer: (url: string, method: string) => Response | null = 
         if (url.endsWith("/api/auth/csrf")) {
             return json({ token: "csrf-token", headerName: "X-XSRF-TOKEN", requestIdentity: "identity" });
         }
-        requests.push({ url, method, workspace: new Headers(init?.headers).get("X-Workspace-Id") });
-        return answer(url, method) ?? json({ id: 41, items: [], total: 0 });
+        const workspaceHeader = new Headers(init?.headers).get("X-Workspace-Id");
+        requests.push({ url, method, workspace: workspaceHeader });
+        return answer(url, method, workspaceHeader) ?? json({ id: 41, items: [], total: 0 });
     }));
     return requests;
 }
@@ -518,6 +528,16 @@ describe("the routes that keep their previous selection behaviour", () => {
                 : "ProviderConnectionService";
             expect(authorization).toMatch(new RegExp(`^${service}#[a-zA-Z]+:domain authorization$`));
         }
+        const notifications = covered.filter(({ route }) => route.startsWith("/api/notifications/"));
+        expect(notifications.map(({ method, route, authorization }) => [method, route, authorization])).toEqual([
+            ["POST", "/api/notifications/read-all", "NotificationService#markAllRead:domain authorization"],
+            ["POST", "/api/notifications/{id}/dismiss", "NotificationService#dismiss:domain authorization"],
+            ["POST", "/api/notifications/{id}/read", "NotificationService#markRead:domain authorization"],
+            ["POST", "/api/notifications/{id}/restore", "NotificationService#restore:domain authorization"],
+            ["POST", "/api/notifications/{id}/snooze", "NotificationService#snooze:domain authorization"],
+            ["POST", "/api/notifications/{id}/unread", "NotificationService#markUnread:domain authorization"],
+            ["POST", "/api/notifications/{id}/unsnooze", "NotificationService#unsnooze:domain authorization"],
+        ]);
     });
 
     it.each([
@@ -532,6 +552,15 @@ describe("the routes that keep their previous selection behaviour", () => {
         ["/api/orgs/12", false],
         ["/api/orgs/12/data-subject-requests", false],
         ["/api/notification-preferences/quiet-hours", false],
+        ["/api/notifications/12/read", false],
+        ["/api/notifications/12/unread", false],
+        ["/api/notifications/12/dismiss", false],
+        ["/api/notifications/12/restore", false],
+        ["/api/notifications/12/snooze", false],
+        ["/api/notifications/12/unsnooze", false],
+        ["/api/notifications/read-all", false],
+        ["/api/my-work/notifications/12/dismiss", true],
+        ["/api/my-work/notifications/12/snooze", true],
         ["/api/account/connections/google/pause", false],
         ["/api/account/connections/google", false],
         ["/api/account/connections/native/google/pairing", false],
@@ -548,6 +577,35 @@ describe("the routes that keep their previous selection behaviour", () => {
 describe("with the shell rendering a revoked workspace and the cookie healed", () => {
     beforeEach(() => {
         bindRenderedWorkspace(owner(), RENDERED);
+    });
+
+    it.each([
+        ["/api/notifications/41/read", () => markNotificationRead(41)],
+        ["/api/notifications/41/unread", () => markNotificationUnread(41)],
+        ["/api/notifications/41/dismiss", () => dismissNotification(41)],
+        ["/api/notifications/41/restore", () => restoreNotification(41)],
+        ["/api/notifications/41/snooze", () => snoozeNotification(41, { preset: "tomorrow_morning", timezone: "Asia/Tokyo" })],
+        ["/api/notifications/41/unsnooze", () => unsnoozeNotification(41)],
+        ["/api/notifications/read-all", () => markAllNotificationsRead()],
+    ] as const)("leaves the recipient-scoped mutation %s on the healed cookie", async (route, mutate) => {
+        const requests = stubBackend((_url, _method, workspaceHeader) => workspaceHeader === String(RENDERED) ? refusal() : null);
+
+        await expect(mutate()).resolves.toBeDefined();
+
+        expect(requests).toEqual([{ url: route, method: "POST", workspace: String(HEALED) }]);
+    });
+
+    it.each([
+        ["dismiss", () => dismissMyWorkNotification(41, "a".repeat(64))],
+        ["snooze", () => snoozeMyWorkNotification(41, "a".repeat(64), { preset: "tomorrow_morning", timezone: "Asia/Tokyo" })],
+    ] as const)("keeps the workspace-scoped My Work notification %s pinned", async (action, mutate) => {
+        const requests = stubBackend(() => refusal());
+
+        await expect(mutate()).rejects.toMatchObject({ code: WORKSPACE_UNAVAILABLE_CODE, workspaceId: RENDERED });
+
+        expect(requests).toEqual([{
+            url: `/api/my-work/notifications/41/${action}`, method: "POST", workspace: String(RENDERED),
+        }]);
     });
 
     it("leaves account and organization writes on the cookie, as before", async () => {

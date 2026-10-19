@@ -14,10 +14,12 @@ import CompaniesBrowser from "@/app/components/records/companies/CompaniesBrowse
 import type NewCompanyDialog from "@/app/components/records/companies/NewCompanyDialog";
 import type { PendingContact } from "@/app/components/records/companies/CompanyContactsField";
 import { isInlineManagedImageFile } from "@/app/lib/managed-image";
-import { bindRenderedWorkspace, releaseRenderedWorkspace } from "@/app/lib/renderedWorkspace";
+import { bindRenderedWorkspace, releaseRenderedWorkspace, rememberWorkspaceNames } from "@/app/lib/renderedWorkspace";
+import { toastError } from "@/app/lib/toast";
+import type { Note } from "@/app/lib/types";
 import activityEn from "@/messages/en/activity.json";
 
-const translate = vi.hoisted(() => Object.assign((key: string) => key, { has: () => false }));
+const translate = vi.hoisted(() => Object.assign(vi.fn((key: string) => key), { has: () => false }));
 const browser = vi.hoisted(() => ({
     items: [],
     selectedIds: new Set<number>(),
@@ -25,6 +27,7 @@ const browser = vi.hoisted(() => ({
     noop: () => undefined,
 }));
 let companyDialog: ComponentProps<typeof NewCompanyDialog> | null = null;
+let noteContent: string | null = null;
 
 vi.mock("next/navigation", () => ({
     useRouter: () => ({ refresh: browser.noop, push: browser.noop }),
@@ -79,8 +82,10 @@ vi.mock("@/app/components/records/companies/NewCompanyDialog", () => ({
     },
 }));
 vi.mock("@/app/components/activity/notes/RichNoteEditor", () => ({
-    default: ({ ensureNoteId }: ComponentProps<typeof RichNoteEditor>) =>
-        <EditorToolbar editor={editor} labels={labels} compact ensureNoteId={ensureNoteId} />,
+    default: ({ ensureNoteId, value }: ComponentProps<typeof RichNoteEditor>) => {
+        noteContent = value;
+        return <EditorToolbar editor={editor} labels={labels} compact ensureNoteId={ensureNoteId} />;
+    },
 }));
 vi.mock("@/components/ui/dialog-status-cover", () => ({
     DialogStatusCover: () => null,
@@ -107,8 +112,8 @@ function deferred<T>() {
     return { promise, resolve };
 }
 
-function json(body: unknown): Response {
-    return new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
+function json(body: unknown, status = 200): Response {
+    return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
 function stubBackend(heldPath?: string) {
@@ -164,6 +169,7 @@ beforeEach(() => {
     bindRenderedWorkspace(shell, ORIGIN);
     document.cookie = `connex_workspace=${ORIGIN}; path=/`;
     companyDialog = null;
+    noteContent = null;
     vi.stubGlobal("matchMedia", (query: string) => ({
         media: query, matches: false, addEventListener: browser.noop, removeEventListener: browser.noop,
     }));
@@ -182,6 +188,68 @@ afterEach(async () => {
 });
 
 describe("note image upload across a workspace switch", () => {
+    it.each([
+        ["note creation", false, 403],
+        ["image upload", false, 403],
+        ["image upload", true, 403],
+        ["image upload", true, 500],
+    ] as const)("reports a %s failure with existing note %s and status %s while keeping the content", async (stage, existing, status) => {
+        const heldPath = stage === "note creation" ? "/api/notes" : "/api/attachments/upload-image";
+        const backend = stubBackend(heldPath);
+        rememberWorkspaceNames([{ id: ORIGIN, name: "Northwind Field Team" }]);
+        document.cookie = `connex_workspace=${NEXT}; path=/`;
+        editor = new Editor({
+            extensions: [StarterKit, ...createMarkdownTableExtensions(), createMarkdownImageExtension("Image failed")],
+            content: "<p>Origin draft</p>",
+        });
+        const note: Note | null = existing ? {
+            id: 41,
+            author: 7,
+            content: "Origin draft",
+            createdAt: "2026-10-18T00:00:00Z",
+            updatedAt: "2026-10-18T00:00:00Z",
+        } : null;
+        const onClose = vi.fn();
+        await render(
+            <NoteDialogForm
+                note={note} persons={[]} deals={[]} currentUserId={7}
+                defaultPerson={null} defaultDeal={null} defaultContent="Origin draft"
+                onSubmittingChange={browser.noop} onCancel={browser.noop} onClose={onClose}
+            />,
+        );
+        await act(async () => document.querySelector<HTMLButtonElement>(`button[aria-label="${labels.image}"]`)?.click());
+        const input = document.querySelector<HTMLInputElement>('input[type="file"]');
+        if (input === null) throw new Error("The image input did not render");
+        await act(async () => {
+            Object.defineProperty(input, "files", { value: [image] });
+            input.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+        await backend.started.promise;
+        await act(async () => {
+            backend.held.resolve(status === 403
+                ? json({ code: "FORBIDDEN", message: `Not a member of workspace ${ORIGIN}` }, status)
+                : json({ code: "INTERNAL_ERROR" }, status));
+        });
+
+        expect(backend.requests.map(({ path, workspace }) => ({ path, workspace }))).toEqual([
+            ...existing ? [] : [{ path: "/api/notes", workspace: String(ORIGIN) }],
+            ...stage === "note creation" ? [] : [{ path: "/api/attachments/upload-image", workspace: String(ORIGIN) }],
+        ]);
+        if (status === 403) {
+            expect(toastError).toHaveBeenCalledExactlyOnceWith(
+                "ApiErrors.title",
+                { description: "ApiErrors.workspaceUnavailableNamed" },
+            );
+            expect(translate).toHaveBeenCalledWith("ApiErrors.workspaceUnavailableNamed", { workspace: "Northwind Field Team" });
+        } else {
+            expect(toastError).toHaveBeenCalledExactlyOnceWith(labels.imageUploadFailed);
+        }
+        expect(noteContent).toBe("Origin draft");
+        expect(editor.getHTML()).toBe("<p>Origin draft</p>");
+        expect(onClose).not.toHaveBeenCalled();
+        expect(input.isConnected).toBe(true);
+    });
+
     it.each(["note creation", "file validation"])("keeps the origin while %s is pending", async (waitingFor) => {
         const backend = stubBackend(waitingFor === "note creation" ? "/api/notes" : undefined);
         const validation = deferred<boolean>();
