@@ -1937,6 +1937,22 @@ export type ApprovalDelegate = {
     email: string;
 };
 
+/** One server-authorized candidate for managing an active approval step. */
+export type ApprovalStepCandidate = {
+    id: number;
+    username: string;
+    displayName: string | null;
+    email: string;
+};
+
+/** Advisory candidates and quorum context, resolved in the caller's active workspace. */
+export type ApprovalStepCandidates = {
+    candidates: ApprovalStepCandidate[];
+    requiredCount: number;
+    approvedCount: number;
+    remainingRequiredCount: number;
+};
+
 /** One frozen step of an approval chain, with the approvals collected so far. */
 export type DocumentApprovalStep = {
     id: number;

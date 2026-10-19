@@ -4643,6 +4643,19 @@ export function getDocumentApprovalDelegateCandidates(
     );
 }
 
+/** Reads the server-authorized management candidates for one active approval step. */
+export function getDocumentApprovalApproverCandidates(
+    dealId: number,
+    documentId: number,
+    stepId: number,
+    init: RequestInit = {},
+) {
+    return getJson<Types.ApprovalStepCandidates>(
+        `/api/deals/${dealId}/documents/${documentId}/approval/steps/${stepId}/approver-candidates`,
+        { cache: 'no-store', ...init },
+    );
+}
+
 export function widenDocumentApprovalStepApprovers(
     dealId: number,
     documentId: number,

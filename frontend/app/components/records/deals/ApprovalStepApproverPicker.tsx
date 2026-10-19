@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/combobox';
 import { Label } from '@/components/ui/label';
 import { SegmentedControl } from '@/components/ui/segmented-control';
-import type { DocumentApprovalStep, WorkspaceMember } from '@/app/lib/types';
+import type { ApprovalStepCandidate, ApprovalStepCandidates } from '@/app/lib/types';
 import {
     MAX_APPROVAL_STEP_APPROVERS,
     type ApprovalMemberDirectoryStatus,
@@ -27,19 +27,19 @@ import {
 
 type ApproverMode = ApprovalStepApproverSelection['mode'];
 
-const displayName = (member: WorkspaceMember) => member.displayName.trim() || member.username;
+const displayName = (member: ApprovalStepCandidate) => member.displayName?.trim() || member.username;
 
 type Props = {
-    selectedStep: DocumentApprovalStep;
+    quorum: ApprovalStepCandidates | null;
     memberDirectoryStatus: ApprovalMemberDirectoryStatus;
-    members: WorkspaceMember[];
+    members: ApprovalStepCandidate[];
     mode: ApproverMode;
-    selectedMembers: WorkspaceMember[];
+    selectedMembers: ApprovalStepCandidate[];
     quorumShortfall: number;
     busy: boolean;
     onRetryMembers: () => void;
     onModeChange: (mode: ApproverMode) => void;
-    onSelectedMembersChange: (members: WorkspaceMember[]) => void;
+    onSelectedMembersChange: (members: ApprovalStepCandidate[]) => void;
 };
 
 function DirectoryUnavailable({ onRetry }: { onRetry: () => void }) {
@@ -57,7 +57,7 @@ function DirectoryUnavailable({ onRetry }: { onRetry: () => void }) {
 
 /** Chooses the approver mode and, when needed, the capped member set. */
 export default function ApprovalStepApproverPicker({
-    selectedStep,
+    quorum,
     memberDirectoryStatus,
     members,
     mode,
@@ -130,7 +130,7 @@ export default function ApprovalStepApproverPicker({
                         >
                             <ComboboxChips ref={memberAnchor}>
                                 <ComboboxValue>
-                                    {(selected: WorkspaceMember[]) => (
+                                    {(selected: ApprovalStepCandidate[]) => (
                                         <>
                                             {selected.map((member) => (
                                                 <ComboboxChip
@@ -188,8 +188,19 @@ export default function ApprovalStepApproverPicker({
                 </div>
             )}
 
+            {memberDirectoryStatus === 'ready' && quorum && (
+                <p className="text-xs text-muted-foreground">
+                    {t('approvalQuorumContext', {
+                        required: quorum.requiredCount,
+                        approved: quorum.approvedCount,
+                        remaining: quorum.remainingRequiredCount,
+                    })}
+                </p>
+            )}
+
             {memberDirectoryStatus === 'ready'
-                && selectedStep.requiredCount > 1
+                && quorum !== null
+                && quorum.requiredCount > 1
                 && quorumShortfall > 0 && (
                 <p role="alert" className="text-xs text-destructive">
                     {t('approvalQuorumShortfall', { count: quorumShortfall })}

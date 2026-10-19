@@ -46,7 +46,9 @@ import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Product;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.ApprovalDelegateDto;
+import ooo.klae.connex.backend.dto.ApprovalStepCandidatesDto;
 import ooo.klae.connex.backend.dto.ApprovalInboxItemDto;
 import ooo.klae.connex.backend.dto.DealDocumentDto;
 import ooo.klae.connex.backend.dto.DealLineItemRequest;
@@ -1737,6 +1739,201 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         assertNull(notificationMapper.findByDedupe(workspace.getId(), dave.getId(),
             "document.approval_request:" + requested.id() + ":" + stepId
                 + ":delegated:" + assignmentId + ":" + dave.getId()));
+    }
+
+    private int candidateRole(int workspaceId, User member, String... permissions) {
+        String name = "Candidates " + unique();
+        jdbcTemplate.update("INSERT INTO workspace_role (workspace_id, name) VALUES (?, ?)", workspaceId, name);
+        int roleId = jdbcTemplate.queryForObject(
+            "SELECT id FROM workspace_role WHERE workspace_id = ? AND name = ?", Integer.class, workspaceId, name);
+        for (String permission : permissions) {
+            jdbcTemplate.update("INSERT INTO workspace_role_permission (workspace_role_id, permission) VALUES (?, ?)",
+                roleId, permission);
+        }
+        jdbcTemplate.update("UPDATE workspace_member SET role_id = ? WHERE workspace_id = ? AND user_id = ?",
+            roleId, workspace.getId(), member.getId());
+        flushSession();
+        return roleId;
+    }
+
+    private List<Integer> candidateIds(int dealId, int documentId, int stepId) {
+        return approvalService.approverCandidates(dealId, documentId, stepId).candidates().stream()
+            .map(ApprovalStepCandidatesDto.Candidate::id).toList();
+    }
+
+    @Test
+    void managementCandidatesUseOnlyActiveWorkspaceMembersWithAnchoredApprovalGrants() {
+        User builtIn = approver();
+        User custom = newUser();
+        candidateRole(workspace.getId(), custom, "DOCUMENT_APPROVE");
+        User pending = approver();
+        User disabled = approver();
+        User suspended = approver();
+        User removed = approver();
+        User reserved = approver();
+        User unresolved = approver();
+        User revoked = newUser();
+        int revokedRole = candidateRole(workspace.getId(), revoked, "DOCUMENT_APPROVE");
+        User foreignRole = approver();
+        Workspace other = new Workspace();
+        other.setName("Other candidates");
+        other.setSlug("candidates-" + unique());
+        other.setOrgId(workspace.getOrgId());
+        workspaceMapper.insert(other);
+        candidateRole(other.getId(), foreignRole, "DOCUMENT_APPROVE");
+        User foreignMember = newUser();
+        workspaceMapper.addMember(other.getId(), foreignMember.getId(), "admin");
+        workspaceMapper.removeMember(workspace.getId(), foreignMember.getId());
+        chainPolicy("sequential", step(1, "Named", builtIn));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(deal.getId(), document.id(), null);
+        for (var entry : java.util.Map.of(pending, "pending", disabled, "disabled", suspended, "suspended").entrySet()) {
+            jdbcTemplate.update("UPDATE workspace_member SET status = ? WHERE workspace_id = ? AND user_id = ?",
+                entry.getValue(), workspace.getId(), entry.getKey().getId());
+        }
+        workspaceMapper.removeMember(workspace.getId(), removed.getId());
+        jdbcTemplate.update("UPDATE app_user SET account_deletion_reserved_at = UTC_TIMESTAMP(6), "
+            + "account_deletion_reservation_owner = 'candidates-test', "
+            + "account_deletion_reservation_until = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 1 HOUR) WHERE id = ?",
+            reserved.getId());
+        workspaceMapper.updateMemberRole(workspace.getId(), unresolved.getId(), "unresolved");
+        jdbcTemplate.update("DELETE FROM workspace_role_permission WHERE workspace_role_id = ?", revokedRole);
+        flushSession();
+        clearInvocations(workspaceService);
+
+        ApprovalStepCandidatesDto result = approvalService.approverCandidates(
+            deal.getId(), document.id(), stepOf(requested, 1).id());
+
+        assertEquals(java.util.Set.of(builtIn.getId(), custom.getId()), result.candidates().stream()
+            .map(ApprovalStepCandidatesDto.Candidate::id).collect(java.util.stream.Collectors.toSet()));
+        assertEquals(custom.getUsername(), result.candidates().stream()
+            .filter(candidate -> candidate.id() == custom.getId()).findFirst().orElseThrow().username());
+        assertEquals(1, result.requiredCount());
+        assertEquals(0, result.approvedCount());
+        assertEquals(1, result.remainingRequiredCount());
+        verify(workspaceService, times(1)).getMembers(workspace.getId());
+        verify(workspaceService, times(1)).permissionsFor(workspace.getId(), custom.getId());
+    }
+
+    @Test
+    void managementCandidatesRequireManagePermissionWithoutRequiringApproveOrAssignment() {
+        User assigned = approver();
+        User manager = newUser();
+        candidateRole(workspace.getId(), manager, "DOCUMENT_MANAGE");
+        User approveOnly = newUser();
+        candidateRole(workspace.getId(), approveOnly, "DOCUMENT_APPROVE");
+        chainPolicy("sequential", step(1, "Named", assigned));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(deal.getId(), document.id(), null);
+        int stepId = stepOf(requested, 1).id();
+        authenticateAs(manager, workspace.getId());
+
+        assertTrue(candidateIds(deal.getId(), document.id(), stepId).contains(approveOnly.getId()));
+        assertFalse(candidateIds(deal.getId(), document.id(), stepId).contains(manager.getId()));
+        authenticateAs(approveOnly, workspace.getId());
+        assertThrows(ForbiddenException.class,
+            () -> approvalService.approverCandidates(deal.getId(), document.id(), stepId));
+    }
+
+    @Test
+    void managementCandidatesUseFrozenStrictSeparationAndRemainAdvisoryAfterDecisions() {
+        User requester = approver();
+        User assigned = approver();
+        User rescuer = approver();
+        ApprovalPolicy policy = chainPolicy("sequential", step(2, "Two", requester, assigned, rescuer));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        authenticateAs(requester, workspace.getId());
+        DocumentApprovalDto requested = approvalService.requestApproval(deal.getId(), document.id(), null);
+        int stepId = stepOf(requested, 1).id();
+        authenticateAs(assigned, workspace.getId());
+        approvalService.decide(deal.getId(), document.id(), "approved", null, stepId);
+        authenticateAs(currentUser, workspace.getId());
+        jdbcTemplate.update("UPDATE approval_policy SET separation_of_duties = 'off' WHERE id = ?", policy.getId());
+        flushSession();
+        int auditCount = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM audit_log WHERE workspace_id = ?",
+            Integer.class, workspace.getId());
+        int notificationCount = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM notification WHERE workspace_id = ?",
+            Integer.class, workspace.getId());
+        clearInvocations(approvalMapper, documentMapper, ruleTriggers);
+
+        ApprovalStepCandidatesDto result = approvalService.approverCandidates(deal.getId(), document.id(), stepId);
+
+        assertEquals(java.util.Set.of(assigned.getId(), rescuer.getId()), result.candidates().stream()
+            .map(ApprovalStepCandidatesDto.Candidate::id).collect(java.util.stream.Collectors.toSet()));
+        assertEquals(2, result.requiredCount());
+        assertEquals(1, result.approvedCount());
+        assertEquals(1, result.remainingRequiredCount());
+        assertEquals(0, assignmentCount(stepId));
+        assertEquals(auditCount, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM audit_log WHERE workspace_id = ?",
+            Integer.class, workspace.getId()));
+        assertEquals(notificationCount, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM notification WHERE workspace_id = ?",
+            Integer.class, workspace.getId()));
+        assertEquals("pending_approval", documentMapper.getById(workspace.getId(), document.id()).getStatus());
+        verify(ruleTriggers, never()).publish(anyInt(), anyString(), anyInt(), anyString());
+        verify(documentMapper, never()).updateStatus(anyInt(), anyInt(), anyString());
+    }
+
+    @Test
+    void managementCandidatesApplyRequesterAndOffSeparationAndFailClosedForMissingAttribution() {
+        User requester = approver();
+        User assigned = approver();
+        chainPolicy("sequential", step(1, "Named", assigned));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        authenticateAs(requester, workspace.getId());
+        DocumentApprovalDto requested = approvalService.requestApproval(deal.getId(), document.id(), null);
+        int stepId = stepOf(requested, 1).id();
+        authenticateAs(currentUser, workspace.getId());
+        jdbcTemplate.update("UPDATE document_approval SET separation_of_duties = 'requester' WHERE id = ?", requested.id());
+        flushSession();
+        assertTrue(candidateIds(deal.getId(), document.id(), stepId).contains(currentUser.getId()));
+        assertFalse(candidateIds(deal.getId(), document.id(), stepId).contains(requester.getId()));
+        jdbcTemplate.update("UPDATE deal_document SET created_by = NULL WHERE id = ?", document.id());
+        flushSession();
+        assertFalse(candidateIds(deal.getId(), document.id(), stepId).isEmpty());
+        jdbcTemplate.update("UPDATE document_approval SET requested_by = NULL WHERE id = ?", requested.id());
+        flushSession();
+        assertTrue(candidateIds(deal.getId(), document.id(), stepId).isEmpty());
+        jdbcTemplate.update("UPDATE document_approval SET separation_of_duties = 'off' WHERE id = ?", requested.id());
+        flushSession();
+        assertTrue(candidateIds(deal.getId(), document.id(), stepId).contains(requester.getId()));
+        assertTrue(candidateIds(deal.getId(), document.id(), stepId).contains(currentUser.getId()));
+        jdbcTemplate.update("UPDATE document_approval SET requested_by = ?, separation_of_duties = 'strict' WHERE id = ?",
+            requester.getId(), requested.id());
+        flushSession();
+        assertTrue(candidateIds(deal.getId(), document.id(), stepId).isEmpty());
+    }
+
+    @Test
+    void managementCandidatesRejectWrongParentsAndInactiveStepsWithoutReconciling() {
+        User assigned = approver();
+        chainPolicy("sequential", step(1, "First", assigned), step(1, "Future", assigned));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(deal.getId(), document.id(), null);
+        int stepId = stepOf(requested, 1).id();
+        Deal otherDeal = jpyDeal();
+        DealDocumentDto otherDocument = generate(otherDeal);
+        DocumentApprovalDto otherApproval = approvalService.requestApproval(otherDeal.getId(), otherDocument.id(), null);
+        assertThrows(ResourceNotFoundException.class,
+            () -> approvalService.approverCandidates(otherDeal.getId(), document.id(), stepId));
+        assertThrows(ResourceNotFoundException.class,
+            () -> approvalService.approverCandidates(deal.getId(), otherDocument.id(), stepId));
+        assertThrows(ResourceNotFoundException.class,
+            () -> approvalService.approverCandidates(deal.getId(), document.id(), stepOf(otherApproval, 1).id()));
+        assertThrows(BadRequestException.class,
+            () -> approvalService.approverCandidates(deal.getId(), document.id(), stepOf(requested, 2).id()));
+        workspaceMapper.updateMemberRole(workspace.getId(), assigned.getId(), "member");
+        flushSession();
+        assertFalse(approvalService.approverCandidates(deal.getId(), document.id(), stepId).candidates().stream()
+            .anyMatch(candidate -> candidate.id() == assigned.getId()));
+        assertEquals("pending", approvalMapper.getById(workspace.getId(), requested.id()).getStatus());
+        approvalService.cancel(deal.getId(), document.id());
+        assertThrows(ResourceNotFoundException.class,
+            () -> approvalService.approverCandidates(deal.getId(), document.id(), stepId));
     }
 
     @Test

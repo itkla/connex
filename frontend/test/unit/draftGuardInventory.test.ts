@@ -754,7 +754,7 @@ const ownerScenarios: Record<string, OwnerScenario> = {
                 selectedStepId: approvalStep.id,
                 memberDirectoryStatus: "ready",
                 members: [selectedMember],
-                verifiedApproverIds: [selectedMember.id],
+                quorum: { candidates: [selectedMember], requiredCount: 1, approvedCount: 0, remainingRequiredCount: 1 },
                 memberLabelStatus: "ready",
                 memberLabels: [selectedMember],
                 mode: "members",
