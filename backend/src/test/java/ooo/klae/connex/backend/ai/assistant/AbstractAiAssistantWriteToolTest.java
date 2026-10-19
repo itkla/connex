@@ -338,6 +338,11 @@ abstract class AbstractAiAssistantWriteToolTest {
             Task created = invocation.getArgument(0);
             created.setId(74);
             created.setStatus("todo");
+            doAnswer(deletion -> {
+                java.util.function.Predicate<Task> guard = deletion.getArgument(1);
+                org.junit.jupiter.api.Assertions.assertTrue(guard.test(created));
+                return null;
+            }).when(taskService).deleteIf(eq(74), any());
             return created;
         }).when(taskService).create(any(Task.class));
     }

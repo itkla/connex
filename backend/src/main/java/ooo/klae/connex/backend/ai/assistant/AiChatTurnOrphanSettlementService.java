@@ -33,11 +33,9 @@ import ooo.klae.connex.backend.notifications.AiChatRealtimeDispatcher;
  * lease subject owes, not a chat-turn detail, and it is recorded as such in
  * {@code docs/backend/LOCKING.md} under "AI run leases".
  *
- * <p>Deliberately no {@code AiRestrictionEpoch} read fence, mirroring the reader-triggered expiry:
- * settlement removes a capability and writes no model-derived content, and gating it on the fence
- * would leave a workspace under a processing restriction unable to have its stuck turns released
- * at all. The retained partial answer still passes the same special-care screen every other
- * terminal transition applies.
+ * <p>Settlement retains the restriction fence and privacy barrier after the session/turn roots
+ * and before lease takeover. Stale provenance clears retained content without preventing terminal
+ * settlement; current content also passes the shared special-care screen.
  */
 @Service
 @RequiredArgsConstructor

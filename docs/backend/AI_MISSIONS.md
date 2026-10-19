@@ -129,7 +129,10 @@ messages, removes terminal turns, resets generated titles to the static Ask Conn
 recomputes preview timing, and removes notification/brief projections. Deletion batches
 contain at most 100 rows; a settlement transaction handles one leased subject.
 
-Mutation order is session/run/content roots, barrier S, exact work X, lease last.
+Mutation order follows [the global locking rule](LOCKING.md#global-privacy-restriction-and-audit-order):
+session/run/content roots, domain roots if any, restriction fences if needed, barrier S,
+exact work X, audit head if needed, lease last. No barrier or restriction fence follows an audit
+head or lease. Existing authority-parent contracts remain unchanged. Initializers and completion hold barrier X without acquiring content roots afterward.
 Discovery occurs outside the transaction. Changed work revisions abort a stale batch.
 Failure preserves blocking and schedules metadata-only retries from one second up to
 five minutes; exception payloads are not persisted.

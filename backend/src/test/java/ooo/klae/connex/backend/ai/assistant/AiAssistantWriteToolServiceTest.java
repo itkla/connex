@@ -482,7 +482,7 @@ class AiAssistantWriteToolServiceTest {
                 ConflictException.class, () -> service.undo(TURN.sessionId(), 29));
 
         assertEquals("Assistant tool has no owned inverse", refused.getMessage());
-        verify(addTagTool, never()).undo(any(), any());
+        verify(addTagTool, never()).undo(any(), any(), any());
         verify(personService, never()).removeTag(anyInt(), anyInt());
         verify(personService, never()).removeTagIfUnchanged(anyInt(), anyInt());
         verify(chatMapper, never()).updateExecutedToolResult(
@@ -1134,7 +1134,14 @@ class AiAssistantWriteToolServiceTest {
         storedToolCall.setStatus("executed");
         storedToolCall.setResultJson(capturedResultJson());
         when(governanceService.isEnabled(TURN.workspaceId())).thenReturn(false);
-        doAnswer(invocation -> null).when(taskService).deleteIf(eq(74), any());
+        doAnswer(invocation -> {
+            java.util.function.Predicate<Task> guard = invocation.getArgument(1);
+            Task created = org.mockito.Mockito.mockingDetails(taskService).getInvocations().stream()
+                    .filter(call -> call.getMethod().getName().equals("create"))
+                    .map(call -> (Task) call.getArgument(0)).findFirst().orElseThrow();
+            assertTrue(guard.test(created));
+            return null;
+        }).when(taskService).deleteIf(eq(74), any());
 
         assertEquals("undone", service.undo(TURN.sessionId(), 29).status());
         verify(taskService).deleteIf(eq(74), any());
@@ -1201,7 +1208,14 @@ class AiAssistantWriteToolServiceTest {
         storedToolCall.setStatus("executed");
         storedToolCall.setResultJson(capturedResultJson());
         storedToolCall.setServerProposal(false);
-        doAnswer(invocation -> null).when(taskService).deleteIf(eq(74), any());
+        doAnswer(invocation -> {
+            java.util.function.Predicate<Task> guard = invocation.getArgument(1);
+            Task created = org.mockito.Mockito.mockingDetails(taskService).getInvocations().stream()
+                    .filter(call -> call.getMethod().getName().equals("create"))
+                    .map(call -> (Task) call.getArgument(0)).findFirst().orElseThrow();
+            assertTrue(guard.test(created));
+            return null;
+        }).when(taskService).deleteIf(eq(74), any());
 
         assertEquals("undone", service.undo(TURN.sessionId(), 29).status());
     }
