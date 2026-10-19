@@ -96,18 +96,7 @@ public class AiRestrictionEpoch {
                 .distinct()
                 .sorted(Comparator.comparingInt(this::stripe).thenComparingInt(Integer::intValue))
                 .toList();
-        for (int workspaceId : ordered) {
-            ReentrantReadWriteLock lock = workspaceLocks[stripe(workspaceId)];
-            lock.writeLock().lock();
-            boolean retained = false;
-            try {
-                retained = retainWriteFenceUntilTransactionCompletion(lock);
-            } finally {
-                if (!retained) {
-                    lock.writeLock().unlock();
-                }
-            }
-        }
+        ordered.forEach(workspaceId -> acquireWriteFence(workspaceId, false));
     }
 
     /**
@@ -117,12 +106,18 @@ public class AiRestrictionEpoch {
      * @param workspaceId workspace whose in-flight cache writes must be fenced
      */
     public void bump(int workspaceId) {
+        acquireWriteFence(workspaceId, true);
+    }
+
+    private void acquireWriteFence(int workspaceId, boolean advanceEpoch) {
         int stripe = stripe(workspaceId);
         ReentrantReadWriteLock lock = workspaceLocks[stripe];
         lock.writeLock().lock();
         boolean retainedForTransaction = false;
         try {
-            workspaceEpochs[stripe].set(nextEpoch());
+            if (advanceEpoch) {
+                workspaceEpochs[stripe].set(nextEpoch());
+            }
             retainedForTransaction = retainWriteFenceUntilTransactionCompletion(lock);
         } finally {
             if (!retainedForTransaction) {

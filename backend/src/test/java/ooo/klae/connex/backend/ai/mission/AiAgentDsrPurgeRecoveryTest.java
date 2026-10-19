@@ -64,7 +64,7 @@ class AiAgentDsrPurgeRecoveryTest {
         var system = mock(ooo.klae.connex.backend.services.SystemActor.class);
         var principal = new ooo.klae.connex.backend.beans.User();
         principal.setId(1);
-        when(system.user()).thenReturn(principal);
+        when(system.readUser()).thenReturn(principal);
         var scope = new TenantWorkScope(context, mock(TenantCatalogResolver.class), workspaces);
         var recorder = mock(JobRunRecorder.class);
         var service = new AiAgentDsrPurgeService(requests, mock(DataSubjectRequestControlOperations.class),

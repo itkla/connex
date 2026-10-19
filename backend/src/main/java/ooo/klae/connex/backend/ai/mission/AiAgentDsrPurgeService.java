@@ -141,14 +141,8 @@ public class AiAgentDsrPurgeService {
         boolean retrying = false;
         String finishedAt = null;
         for (int workspaceId : accepted.workspaceIds()) {
-            AiAgentPrivacyWork work = tenantWorkScope.inLifecycleWorkspace(workspaceId,
-                    () -> inAcceptedScope(accepted, workspaceId, () -> {
-                        TransactionTemplate read = new TransactionTemplate(transactionManager);
-                        read.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
-                        read.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
-                        read.setReadOnly(true);
-                        return read.execute(status -> privacyMapper.getWork(workspaceId, accepted.operationId()));
-                    }));
+            AiAgentPrivacyWork work = tenantWorkScope.inLifecycleWorkspaceRead(workspaceId,
+                    () -> readAcceptedWork(accepted, workspaceId));
             if (work == null) {
                 missing = true;
             } else if ("complete".equals(work.getPhase()) && Long.valueOf(0).equals(work.getLastResidualCount())
@@ -174,22 +168,43 @@ public class AiAgentDsrPurgeService {
 
     /** Installs only frozen accepted workspace authority and restores the caller after every tenant phase. */
     private <T> T inAcceptedScope(AiAgentPurgeAcceptance accepted, int workspaceId, Supplier<T> work) {
-        boolean hadTenant = tenantContext.isResolved();
-        Integer previousWorkspace = tenantContext.getWorkspaceId();
-        Integer previousOrg = tenantContext.getOrgId();
-        Integer previousUser = tenantContext.getUserId();
-        String previousRole = tenantContext.getRole();
-        String previousCatalog = tenantContext.getScopeCatalog();
-        int systemUserId = tenantWorkScope.unroutedRead(systemActor::user).getId();
-        tenantContext.set(workspaceId, accepted.orgId(), systemUserId, "system", tenantContext.getCatalog());
+        TenantIdentity previous = installAcceptedIdentity(accepted, workspaceId);
         try {
             return work.get();
         } finally {
-            if (hadTenant) {
-                tenantContext.set(previousWorkspace, previousOrg, previousUser, previousRole, previousCatalog);
-            } else {
-                tenantContext.clear();
-            }
+            restoreIdentity(previous);
         }
     }
+
+    private AiAgentPrivacyWork readAcceptedWork(AiAgentPurgeAcceptance accepted, int workspaceId) {
+        TenantIdentity previous = installAcceptedIdentity(accepted, workspaceId);
+        try {
+            TransactionTemplate read = new TransactionTemplate(transactionManager);
+            read.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+            read.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+            read.setReadOnly(true);
+            return read.execute(status -> privacyMapper.getWork(workspaceId, accepted.operationId()));
+        } finally {
+            restoreIdentity(previous);
+        }
+    }
+
+    private TenantIdentity installAcceptedIdentity(AiAgentPurgeAcceptance accepted, int workspaceId) {
+        TenantIdentity previous = new TenantIdentity(tenantContext.getWorkspaceId(), tenantContext.getOrgId(),
+                tenantContext.getUserId(), tenantContext.getRole(), tenantContext.getScopeCatalog());
+        int systemUserId = tenantWorkScope.unroutedRead(systemActor::readUser).getId();
+        tenantContext.set(workspaceId, accepted.orgId(), systemUserId, "system", tenantContext.getCatalog());
+        return previous;
+    }
+
+    private void restoreIdentity(TenantIdentity previous) {
+        if (previous.workspaceId() != null) {
+            tenantContext.set(previous.workspaceId(), previous.orgId(), previous.userId(),
+                    previous.role(), previous.catalog());
+        } else {
+            tenantContext.clear();
+        }
+    }
+
+    private record TenantIdentity(Integer workspaceId, Integer orgId, Integer userId, String role, String catalog) {}
 }

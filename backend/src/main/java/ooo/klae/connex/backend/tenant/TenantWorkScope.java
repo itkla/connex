@@ -154,6 +154,46 @@ public class TenantWorkScope {
         return runInWorkspace(workspaceId, true, route -> work.get());
     }
 
+    /**
+     * Reads trusted lifecycle progress through the same placement rules as
+     * {@link #inLifecycleWorkspace(int, Supplier)}, without sharing a callback with mutations.
+     *
+     * @param <T> the read's result type
+     * @param workspaceId the workspace whose lifecycle placement governs the read
+     * @param read the workspace read, which must not mutate persistent or shared state
+     * @return the read's result
+     */
+    public <T> T inLifecycleWorkspaceRead(int workspaceId, WorkspaceRead<T> read) {
+        WorkspaceRoutes routes = CURRENT_WORKSPACE_ROUTES.get();
+        boolean root = routes == null;
+        if (root) {
+            routes = new WorkspaceRoutes();
+            if (tenantContext.isResolved()) {
+                routes.routes.put(tenantContext.getWorkspaceId(),
+                    new WorkspaceRoute(tenantContext.getOrgId(), tenantContext.getScopeCatalog()));
+            }
+            CURRENT_WORKSPACE_ROUTES.set(routes);
+        }
+        try {
+            WorkspaceRoute route = routeFor(routes, workspaceId, true);
+            routes.depth++;
+            try {
+                Optional<String> previous = beginOverride(Optional.ofNullable(route.catalog()));
+                try {
+                    return read.read();
+                } finally {
+                    tenantContext.swapCatalogOverride(previous);
+                }
+            } finally {
+                routes.depth--;
+            }
+        } finally {
+            if (root && routes.depth == 0) {
+                CURRENT_WORKSPACE_ROUTES.remove();
+            }
+        }
+    }
+
     /** {@link #inLifecycleWorkspace(int, Supplier)} for void cleanup work. */
     public void inLifecycleWorkspace(int workspaceId, Runnable work) {
         inLifecycleWorkspace(workspaceId, () -> {
@@ -260,7 +300,7 @@ public class TenantWorkScope {
     }
 
     private WorkspaceRoute resolveRouteForWorkspace(int workspaceId) {
-        return unrouted(() -> {
+        return unroutedRead(() -> {
             Integer orgId = workspaceMapper.getOrgId(workspaceId);
             if (orgId == null) {
                 throw new IllegalStateException("Workspace " + workspaceId + " does not exist");
@@ -270,7 +310,7 @@ public class TenantWorkScope {
     }
 
     private WorkspaceRoute resolveLifecycleRouteForWorkspace(int workspaceId) {
-        return unrouted(() -> {
+        return unroutedRead(() -> {
             Integer orgId = lifecycleOrgResolver.apply(workspaceId);
             if (orgId == null) {
                 throw new IllegalStateException("Workspace " + workspaceId + " does not exist");

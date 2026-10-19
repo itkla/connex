@@ -69,7 +69,7 @@ src/main/java/ooo/klae/connex/backend/ai/masking/AiIdentifierLookupKeys.java	222
 src/main/java/ooo/klae/connex/backend/ai/masking/ConversationText.java	1e643dbdbc8f5efc4cdcb01ed63f26c083e78579f55c3722af568d8c1cfd533b
 src/main/java/ooo/klae/connex/backend/ai/masking/MaskingEngine.java	6ca42f31bf3a3c005ab3adc392b64bf1a2f65cc3682a3a9cc2ec01527864d58d
 src/main/java/ooo/klae/connex/backend/ai/mission/AiAgentCapabilityGate.java	ab75d4e4ce9a15da1e7f431808fc7517e69abc70d713de0604956a651e1f97c4
-src/main/java/ooo/klae/connex/backend/ai/mission/AiAgentDsrPurgeService.java	5c2eda77842ab42ef471931ebc3524f6ec2f28c01810d374b7cfb6da2441eae7
+src/main/java/ooo/klae/connex/backend/ai/mission/AiAgentDsrPurgeService.java	4a35c1dcb341aebc47ec3dc5b231f742061c6b5453312c95fe80d60c5df16fdb
 src/main/java/ooo/klae/connex/backend/ai/mission/AiAgentPrivacyService.java	4501b8595b5ef2d4953e81c6069f3664fbfe74ed9401df2097e4cc201594d917
 src/main/java/ooo/klae/connex/backend/ai/mission/AiAgentPurgeAcceptance.java	647f75a587c642070f81074b3974d5efaf05b274e0584dee2e36122f094eb6ee
 src/main/java/ooo/klae/connex/backend/ai/mission/AiAgentRealtimePublisher.java	568ca3578dc3bf9b049e9b85c7b1d781dcf3fff46e1ec156bf7b8649ec70d512
@@ -625,7 +625,7 @@ src/main/java/ooo/klae/connex/backend/services/SupportBundleConfigService.java	5
 src/main/java/ooo/klae/connex/backend/services/SupportBundleReadinessService.java	d3edfe1a037d290f4bb8b58177ab234d480092c39dcf97c74f660a8ddfff1680
 src/main/java/ooo/klae/connex/backend/services/SupportBundleService.java	746131a3820de4a4bf9f1d75424b87548b5d85fbff5dfcf409a9349d30f0b567
 src/main/java/ooo/klae/connex/backend/services/SuppressionService.java	5de28f4691d2126b916b12a81779ff6113d2b3511c8ead4d359744ddb16da37f
-src/main/java/ooo/klae/connex/backend/services/SystemActor.java	54c377758d0e9568b816adb34f9a87a5f53da07221ca4dfa66167c2c83090781
+src/main/java/ooo/klae/connex/backend/services/SystemActor.java	3192b67fa96bf09fb216fde4b6b890cb2506261e26a3abf384c5901aa1b73019
 src/main/java/ooo/klae/connex/backend/services/TagService.java	fa95601705c61f07adebb3114363aabc5513ce45164cf3a5fa1a7fdc3f2d51b0
 src/main/java/ooo/klae/connex/backend/services/TaskService.java	d7895cff3c9a66503624d13932e2aa9c3e970c8e5c3ce36b5b11ead32be00269
 src/main/java/ooo/klae/connex/backend/services/TeamService.java	18c89698a55a332b55902c89653ce26a2aaf8ed0dd88ce0c5e790fb1ec1c4c33
@@ -749,9 +749,10 @@ src/main/java/ooo/klae/connex/backend/tenant/TenantResolutionInterceptor.java	b0
 src/main/java/ooo/klae/connex/backend/tenant/TenantRoutingDataSource.java	1b07c23a3c1f65a18bed5792472a261c666a4045bf1b3e472c0aa7633075b648
 src/main/java/ooo/klae/connex/backend/tenant/TenantRoutingProperties.java	6e3300e4a8820d43d0a2816441dc9a7f25dc9092676fe396b61b27ae9b72cc19
 src/main/java/ooo/klae/connex/backend/tenant/TenantScopeInterceptor.java	47f832f7b1be50786458de3b2e973f400c159269eca926e088940154d5c49249
-src/main/java/ooo/klae/connex/backend/tenant/TenantWorkScope.java	c14e1caa9b66b97373c0804e2b378d94ec3e373fa814634f2c37f157a5739dd7
+src/main/java/ooo/klae/connex/backend/tenant/TenantWorkScope.java	48524e877984e816260dc94c47582c8d0ae753389875e09c4ed9dee4b32a08d5
 src/main/java/ooo/klae/connex/backend/tenant/WorkspaceCookie.java	5f59019e016119aa9d24f336fbbec6bfe0623486398e5ee0715893098884ad55
 src/main/java/ooo/klae/connex/backend/tenant/WorkspaceCookieProperties.java	192f655fd91b299f66d8da78048df9bda1750dc9f722d1c41ea4d177bcf8e0f3
+src/main/java/ooo/klae/connex/backend/tenant/WorkspaceRead.java	70770743c09dc9a8079e21059e2842a14cab5c2a58faf3a02fc9f7c0c68be688
 src/main/java/ooo/klae/connex/backend/tenant/WorkspaceRequestResolver.java	75b306b75b1e972894cba55e3fe372cab45a1f9c7a3990bbb8b58226a5c877e6
 src/main/java/ooo/klae/connex/backend/util/ClientIpResolver.java	1e7331788239f9408b4aa9491e5b5bd6d409fd13cc57d59cd6c68ff93096c824
 src/main/java/ooo/klae/connex/backend/util/DealFilterNormalizer.java	7964170cc99079c0d024efb010048bbc9595f289d833212cb0d708f82318587a

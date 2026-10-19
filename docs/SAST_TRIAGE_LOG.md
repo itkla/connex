@@ -1252,3 +1252,22 @@ The historical dispositions above remain evidence of the earlier assessment. #41
 stands until shipment and automatic CodeQL resolution is evidenced; #120 remains fixed. Post-merge
 CodeQL scan evidence and staging direct/proxy retirement probes must be attached to #2004 before
 closure. Post-merge scan and deployed retirement evidence remain pending.
+
+### `java/csrf-unprotected-request-type` — #195: mission-holdings purge progress read
+
+PR [#2120](https://github.com/itkla/connex/pull/2120) adds a progress GET whose control authorization
+and projection execute only SELECTs. Current organization-administrator authorization remains in
+`DataSubjectRequestControlOperations.missionPurgeOperation`; progress never initiates deletion or
+appends completion evidence. The reported sinks in `AiBudgetControlOperations` and
+`AiOutputCacheStore` are the shared callback merge described in #1815 above. The read reached
+`TenantWorkScope.runWithOverride` through `inLifecycleWorkspace` and shared `inAcceptedScope` with
+the invalidation callback.
+
+The structural remediation adds `inLifecycleWorkspaceRead(WorkspaceRead)` with a separate callback
+invocation and moves placement lookup onto `unroutedRead`. Progress installs accepted system
+identity through callback-free helpers and directly executes its fresh, read-only READ COMMITTED
+transaction, without passing through invalidation's `Supplier`. The system-principal lookup uses
+an uncached SELECT, keeping the control-plane read free of shared-state mutation. Placement,
+transaction catalog guards, current administrator checks, and identity restoration remain
+fail-closed. Routing tests cover dedicated placement and restoration after read failure. No
+suppression or dismissal is added; clearance requires a subsequent Security workflow scan.

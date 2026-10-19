@@ -2,6 +2,8 @@ package ooo.klae.connex.backend.ai.mission;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -39,6 +41,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mybatis.spring.MyBatisSystemException;
 import org.mybatis.spring.SqlSessionTemplate;
 import org.mybatis.spring.transaction.SpringManagedTransactionFactory;
 import org.springframework.aop.framework.ProxyFactory;
@@ -125,6 +128,10 @@ class AiAgentPrivacySessionRoutingTest {
             org.junit.jupiter.api.Assertions.assertNull(context.getCatalog());
             return principal;
         });
+        when(system.readUser()).thenAnswer(call -> {
+            assertNull(context.getCatalog());
+            return principal;
+        });
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(new MockHttpServletRequest()));
     }
 
@@ -181,6 +188,45 @@ class AiAgentPrivacySessionRoutingTest {
         verify(persistence).settleOrphan(org.mockito.ArgumentMatchers.eq(orphan), any(),
                 org.mockito.ArgumentMatchers.eq(4L));
         assertFalse(context.isResolved());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void dedicatedDsrProgressRestoresCallerAfterReadFailure(boolean resolvedCaller) throws Exception {
+        var accepted = new AiAgentPurgeAcceptance(42, 11, 19, UUID.randomUUID().toString(),
+                UUID.randomUUID().toString(), List.of(7), "2026-10-18T00:00:00Z");
+        prepare(id -> {
+            if ("getWork".equals(id)) {
+                throw new IllegalStateException("Read failed");
+            }
+            throw new AssertionError(id);
+        });
+        var control = mock(DataSubjectRequestControlOperations.class);
+        when(control.missionPurgeOperation(11, 19, 5, accepted.operationId())).thenReturn(accepted);
+        var service = proxied(new AiAgentDsrPurgeService(mock(DataSubjectRequestService.class), control,
+                sessions.getMapper(AiAgentDsrControlMapper.class), sessions.getMapper(AiAgentPrivacyMapper.class),
+                mock(AiAgentPrivacyService.class), lifecycle, scope, context, system, transactions,
+                new ObjectMapper(), mock(JobRunRecorder.class)), AiAgentDsrPurgeService.class);
+        if (resolvedCaller) {
+            context.set(99, 22, 5, "member", "cnx_request");
+        }
+
+        var failure = assertThrows(MyBatisSystemException.class,
+                () -> service.get(11, 19, 5, accepted.operationId()));
+        assertEquals("Read failed", failure.getMostSpecificCause().getMessage());
+
+        assertEquals(resolvedCaller, context.isResolved());
+        if (resolvedCaller) {
+            assertEquals(99, context.getWorkspaceId());
+            assertEquals(22, context.getOrgId());
+            assertEquals(5, context.getUserId());
+            assertEquals("member", context.getRole());
+            assertEquals("cnx_request", context.getScopeCatalog());
+            assertEquals("cnx_request", context.getCatalog());
+        } else {
+            assertNull(context.getCatalog());
+        }
+        assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
     }
 
     @ParameterizedTest
@@ -281,6 +327,11 @@ class AiAgentPrivacySessionRoutingTest {
                 assertTrue(TransactionSynchronizationManager.isActualTransactionActive(), id);
                 assertEquals(7, context.getWorkspaceId());
                 assertEquals("system", context.getRole());
+                if ("getWork".equals(id)) {
+                    assertTrue(TransactionSynchronizationManager.isCurrentTransactionReadOnly());
+                    assertEquals(Connection.TRANSACTION_READ_COMMITTED,
+                            TransactionSynchronizationManager.getCurrentTransactionIsolationLevel());
+                }
                 tenantReads.add(id);
             }
             return results.apply(id);
