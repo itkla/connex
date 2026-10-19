@@ -1,14 +1,16 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { ApiError } from '@/app/lib/api';
 import { loadCollection } from '@/app/lib/recordAccess';
+import { settingsConfigRedirects } from '@/app/lib/settingsRedirects';
 
 const AUDIT_PAGE = 'app/(app)/settings/workspace/audit-diagnostics/page.tsx';
 const AUDIT_BROWSER = 'app/components/admin/AuditLogBrowser.tsx';
 const AUDIT_VIEW = 'app/components/settings/AuditDiagnostics.tsx';
 const RETIRED_AUDIT_PAGE = 'app/(app)/admin/logs/page.tsx';
+const RETIRED_AUDIT_ADDRESS = '/admin/logs';
 
 function source(relativePath: string): string {
     return readFileSync(path.resolve(process.cwd(), relativePath), 'utf8');
@@ -110,13 +112,13 @@ describe('the audit log never manufactures an empty audit log', () => {
     });
 
     it('leaves the retired address forwarding rather than rendering a second audit log', () => {
-        const retired = source(RETIRED_AUDIT_PAGE);
-
-        expect(retired).toContain('permanentRedirect(settingsRedirectTarget(');
         expect(
-            retired,
+            settingsConfigRedirects().map((redirect) => redirect.source),
+        ).toContain(RETIRED_AUDIT_ADDRESS);
+        expect(
+            existsSync(path.join(process.cwd(), RETIRED_AUDIT_PAGE)),
             'a second copy of the audit log behind an old address is a second thing to keep honest',
-        ).not.toContain('AuditLogBrowser');
+        ).toBe(false);
     });
 
     it('localizes the denial copy in both supported locales', () => {

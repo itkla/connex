@@ -1,8 +1,4 @@
 {
-  "RecordsApprovalPoliciesLayout": {
-    "title": "Approval policies",
-    "description": "Decide when generated documents need internal approval before they go out."
-  },
   "ApprovalPoliciesBrowser": {
     "title": "Approval policies",
     "newButton": "New policy",

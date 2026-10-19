@@ -198,7 +198,7 @@ export default function UsersBrowser({
                                 body={t("emptyBody")}
                                 action={
                                     <Button asChild variant="brand">
-                                        <Link href={embedded ? peopleSectionHref("members") : "/settings/members"}>
+                                        <Link href={peopleSectionHref("members")}>
                                             {t("emptyCta")}
                                         </Link>
                                     </Button>
