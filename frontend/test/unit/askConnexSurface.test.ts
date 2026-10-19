@@ -23,7 +23,7 @@ import {
     parseStoredAskConnexWidth,
 } from "@/app/lib/askConnexSurface";
 import { askConnexToolCall } from "@/test/unit/helpers/askConnexToolCards";
-import type { AiChatMessage, AiChatParticipant, AiChatProgressItem, AiChatSession } from "@/app/lib/types";
+import type { AiChatMessage, AiChatParticipant, AiChatProgressItem, AiChatSession, AiChatTurnToolCall } from "@/app/lib/types";
 
 const NOW = Date.parse("2026-03-10T12:00:00Z");
 
@@ -288,6 +288,82 @@ describe("the exact failed question Retry can repeat", () => {
 });
 
 describe("current-turn write evidence", () => {
+    const projectedTurn = (toolCalls: AiChatTurnToolCall[]) => ({
+        ...WRITE_FREE_TURN,
+        progress: [...READ_ONLY_PROGRESS, {
+            seq: 2, source: "tasks", status: "complete", count: 1, truncated: false,
+        } satisfies AiChatProgressItem],
+        toolCalls,
+    });
+
+    it.each(["list_tasks", "list_activities"])("restores Retry for a read-only %s timeout", (toolName) => {
+        const state = askConnexTurnWriteState(projectedTurn([
+            { toolName, tier: "READ", status: "executed" },
+            { toolName, tier: "READ", status: "failed" },
+        ]), [], 9);
+        expect(state).toBe("none");
+        expect(askConnexRecovery("timed_out", "turn_deadline_exceeded", true, true, state).retry).toBe(true);
+    });
+
+    it.each(["AUTO", "CONFIRM"])("blocks Retry for an executed %s write omitted from cards", (tier) => {
+        const turn = projectedTurn([{ toolName: "create_task", tier, status: "executed" }]);
+        const state = askConnexTurnWriteState(turn, [], 9);
+        expect(state).toBe("committed");
+        expect(askConnexTurnWriteState(turn, [], null)).toBe("committed");
+        expect(askConnexRecovery("timed_out", "turn_deadline_exceeded", true, true, state).retry).toBe(false);
+    });
+
+    it.each(["AUTO", "CONFIRM"])("permits Retry for an unexecuted %s proposal", (tier) => {
+        for (const status of ["proposed", "rejected", "failed"]) {
+            const state = askConnexTurnWriteState(projectedTurn([
+                { toolName: "assign_owner", tier, status },
+            ]), [], 9);
+            expect(state).toBe("none");
+            expect(askConnexRecovery("failed", "provider_error", true, true, state).retry).toBe(true);
+        }
+    });
+
+    it.each(["rejected", "failed"] as const)("does not infer execution from a %s proposal's decision timestamp", (status) => {
+        const state = askConnexTurnWriteState(projectedTurn([
+            { toolName: "assign_owner", tier: "CONFIRM", status },
+        ]), [askConnexToolCall({
+            toolName: "assign_owner", tier: "confirm", status, executedAt: "2026-10-18T12:00:00Z",
+        })], 9);
+        expect(state).toBe("none");
+        expect(askConnexRecovery("failed", "provider_error", true, true, state).retry).toBe(true);
+    });
+
+    it.each([
+        { toolName: "future_tool", tier: null, status: "executed" },
+        { toolName: "create_task", tier: "FUTURE", status: "executed" },
+        { toolName: "", tier: "READ", status: "executed" },
+        { toolName: "create_task", tier: "AUTO", status: "future_state" },
+    ])("withholds Retry for unknown execution evidence: %j", (call) => {
+        const state = askConnexTurnWriteState(projectedTurn([call]), [], 9);
+        expect(state).toBe("uncertain");
+        expect(askConnexRecovery("failed", "provider_error", true, true, state).retry).toBe(false);
+    });
+
+    it("requires reconciliation and settled progress even with an empty projection", () => {
+        expect(askConnexTurnWriteState(projectedTurn([]), [], null)).toBe("uncertain");
+        expect(askConnexTurnWriteState({ ...projectedTurn([]), progress: [] }, [], 9)).toBe("uncertain");
+        expect(askConnexTurnWriteState(projectedTurn([]), [], 9)).toBe("none");
+    });
+
+    it("keeps committed cards authoritative over a stale write-free projection", () => {
+        expect(askConnexTurnWriteState(projectedTurn([]), [askConnexToolCall({ status: "executed" })], 9))
+            .toBe("committed");
+        expect(askConnexTurnWriteState(projectedTurn([
+            { toolName: "create_task", tier: "AUTO", status: "undone" },
+        ]), [], 9)).toBe("committed");
+    });
+
+    it("retains conservative legacy behavior when the projection is absent or null", () => {
+        const turn = projectedTurn([]);
+        expect(askConnexTurnWriteState({ ...turn, toolCalls: undefined }, [], 9)).toBe("uncertain");
+        expect(askConnexTurnWriteState({ ...turn, toolCalls: null }, [], 9)).toBe("uncertain");
+    });
+
     it("treats a missing turn or an unreconciled snapshot as uncertain", () => {
         expect(askConnexTurnWriteState({ ...WRITE_FREE_TURN, turnId: null }, [], null)).toBe("uncertain");
         expect(askConnexTurnWriteState(WRITE_FREE_TURN, [], null)).toBe("uncertain");

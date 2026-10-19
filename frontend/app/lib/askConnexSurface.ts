@@ -1,5 +1,5 @@
 import { viewPreferenceStorageKey } from '@/app/hooks/viewPreference';
-import type { AiAssistantToolCall, AiChatMessage, AiChatParticipant, AiChatProgressItem, AiChatSession } from '@/app/lib/types';
+import type { AiAssistantToolCall, AiChatMessage, AiChatParticipant, AiChatProgressItem, AiChatSession, AiChatTurnToolCall } from '@/app/lib/types';
 import { parseMysqlDateTime } from '@/app/lib/utils';
 
 /**
@@ -218,39 +218,46 @@ export function askConnexBoundRetryPrompt(
 }
 
 /**
- * Reads current-turn write evidence from viewer-safe action cards and durable progress.
+ * Reads current-turn write evidence from action cards and the durable per-call projection.
  *
  * An empty list proves nothing until the transcript has been refreshed after the turn settled.
  * Undone actions still count as committed writes: replaying the request would repeat work the
- * member already chose to undo. A proposed automatic action has no human decision holding it
- * back, so its outcome remains uncertain. The action list is bounded across the whole session;
- * only a settled progress trail containing exclusively read-only sources can rule out omitted
- * writes. Tasks and activities mix reads with writes and their aggregated counts cannot tell
- * them apart. Even write-free `list_tasks` or `list_activities` calls therefore stay uncertain.
- * An unexecuted CONFIRM proposal is not a committed write, but its action progress also stays
- * uncertain because the bounded cards cannot rule out another, omitted write in that turn.
- * These cases withhold Retry while preserving the check-records guidance and composer-only
- * Continue route when a partial answer is available.
+ * member already chose to undo. The server resolves each projected tool's tier from its catalog;
+ * an unknown tool has a null tier. A settled projection rules out writes only when every tier
+ * and state is understood. Without it, the session-wide bounded action cards and aggregated
+ * progress retain their conservative interpretation, including ambiguous task/activity reads
+ * and unexecuted write proposals.
  */
 export function askConnexTurnWriteState(
-    turn: { turnId: number | null; progress: readonly AiChatProgressItem[] },
+    turn: {
+        turnId: number | null;
+        progress: readonly AiChatProgressItem[];
+        toolCalls?: readonly AiChatTurnToolCall[] | null;
+    },
     toolCalls: readonly AiAssistantToolCall[],
     reconciledTurnId: number | null,
 ): AskConnexTurnWriteState {
-    const { turnId, progress } = turn;
+    const { turnId, progress, toolCalls: projectedCalls } = turn;
     if (turnId === null) return 'uncertain';
     const current = toolCalls.filter((toolCall) => toolCall.turnId === turnId);
     if (current.some((toolCall) => toolCall.status === 'executed'
         || toolCall.status === 'undone'
-        || toolCall.executedAt !== null)) return 'committed';
-    if (reconciledTurnId !== turnId
-        || current.some((toolCall) => toolCall.status === 'proposed' && toolCall.tier === 'auto')) {
-        return 'uncertain';
-    }
+        || (projectedCalls == null && toolCall.executedAt !== null))) return 'committed';
+    if (projectedCalls?.some((call) => (call.tier === 'AUTO' || call.tier === 'CONFIRM')
+        && (call.status === 'executed' || call.status === 'undone'))) return 'committed';
+    if (reconciledTurnId !== turnId) return 'uncertain';
     const settledProgress = progress.some((item) => item.source === 'answer'
         && (item.status === 'failed' || item.status === 'timed_out'
             || item.status === 'complete' || item.status === 'cancelled'));
-    if (!settledProgress || progress.some((item) => ![
+    if (!settledProgress) return 'uncertain';
+    if (projectedCalls != null) {
+        return projectedCalls.every((call) => call.toolName.length > 0
+            && (call.tier === 'READ' || call.tier === 'AUTO' || call.tier === 'CONFIRM')
+            && ['executed', 'undone', 'proposed', 'rejected', 'failed'].includes(call.status))
+            ? 'none' : 'uncertain';
+    }
+    if (current.some((toolCall) => toolCall.status === 'proposed' && toolCall.tier === 'auto')
+        || progress.some((item) => ![
         'scope', 'answer', 'records', 'deals', 'files', 'metrics', 'schedule',
     ].includes(item.source))) return 'uncertain';
     return 'none';

@@ -758,6 +758,14 @@ Native assistant tools are capability-declared transport choices, not a second a
 - A provider without native-tool capability retains the existing ReAct protocol; do not silently change its prompt/request semantics.
 - Each tool step executes as the member who authored that turn.
 - Shared transcript access requires joined membership in the same workspace.
+- Durable turn responses include requester-only `toolCalls` execution evidence: the tool key,
+  its current authoritative `AiAssistantToolCatalog.ToolTier` (null for unknown tools), and its
+  durable status. `AiChatProgressService.projectTurn` derives this and progress from one query
+  bounded by `MAX_TOOL_CALL_ROWS_PER_TURN`; no arguments, results, or record identifiers enter
+  the projection. `AiChatTurnDto` applies the same requester identity check as partial text and
+  detailed progress, returning null for shared viewers. Retry still requires settled progress
+  and transcript reconciliation; unknown tiers or states fail closed, while absent projections
+  retain the older conservative progress-based fallback.
 - Citations are re-authorized and filtered per viewer.
 - Realtime fanout resolves current joined recipients after commit; cached/caller-supplied recipient sets are not authorization.
 - Presence/typing signals are bounded ephemeral hints and never authorization evidence.

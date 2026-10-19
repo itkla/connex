@@ -1345,6 +1345,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 status: current.status,
                 reason: current.terminalReason,
                 progress: current.progress,
+                toolCalls: current.toolCalls,
             });
             absorbTurnPartial(current, streamEpoch);
             await delay(1_000, signal);
@@ -1367,6 +1368,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 status: durable.status,
                 reason: durable.terminalReason,
                 progress: durable.progress,
+                toolCalls: durable.toolCalls,
             });
             absorbTurnPartial(durable, durableStreamEpoch);
 
@@ -1404,6 +1406,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 status: durable.status,
                 reason: durable.terminalReason,
                 progress: durable.progress,
+                toolCalls: durable.toolCalls,
             });
             absorbTurnPartial(durable, streamEpochRef.current);
             safeStorageRemove(turnKey);
@@ -1449,6 +1452,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             generationHandle: null,
             status: initial.status,
             progress: initial.progress,
+            toolCalls: initial.toolCalls,
             cancellable: initial.requestedByCurrentUser === true,
         });
         absorbTurnPartial(initial, streamEpochRef.current);
@@ -1465,6 +1469,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 status: durable.status,
                 reason: durable.terminalReason,
                 progress: durable.progress,
+                toolCalls: durable.toolCalls,
             });
             absorbTurnPartial(durable, streamEpochRef.current);
             const stored = parseStoredAskConnexTurn(safeStorageGet(turnKey));

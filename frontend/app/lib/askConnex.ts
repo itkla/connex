@@ -16,6 +16,7 @@ import type {
     AiChatProgressSource,
     AiChatThinkingFrame,
     AiChatTodo,
+    AiChatTurnToolCall,
     Page,
 } from '@/app/lib/types';
 import { formatDate, formatUtcDateTime, parseMysqlDateTime } from '@/app/lib/utils';
@@ -292,6 +293,8 @@ export type AskConnexTurnState = {
     generationHandle: string | null;
     reason: string | null;
     progress: AiChatProgressItem[];
+    /** Latest durable per-call evidence; absent until supplied by a supporting server. */
+    toolCalls?: AiChatTurnToolCall[] | null;
     /**
      * Whether this client may stop the turn. A shared-session participant who opened the session
      * while another member's turn was running adopts that turn into the same state the requester
@@ -310,9 +313,16 @@ export type AskConnexTurnEvent =
         generationHandle: string | null;
         status: string;
         progress?: AiChatProgressItem[];
+        toolCalls?: AiChatTurnToolCall[] | null;
         cancellable?: boolean;
     }
-    | { type: 'status'; status: string; reason?: string | null; progress?: AiChatProgressItem[] }
+    | {
+        type: 'status';
+        status: string;
+        reason?: string | null;
+        progress?: AiChatProgressItem[];
+        toolCalls?: AiChatTurnToolCall[] | null;
+    }
     | { type: 'reset' };
 
 /** User action exposed by an assistant tool-call card. */
@@ -1564,6 +1574,7 @@ export function reduceAskConnexTurn(
             generationHandle: event.generationHandle,
             reason: null,
             progress: event.progress ?? [],
+            toolCalls: event.toolCalls,
             cancellable: event.cancellable ?? false,
         };
     }
@@ -1583,6 +1594,7 @@ export function reduceAskConnexTurn(
         phase,
         reason: event.reason ?? null,
         progress: event.progress ?? state.progress,
+        toolCalls: 'toolCalls' in event ? event.toolCalls : state.toolCalls,
     };
 }
 

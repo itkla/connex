@@ -10,7 +10,7 @@ import {
     startAiChatTurn,
 } from '@/app/lib/api';
 import { askConnexSessionStorageKey } from '@/app/lib/askConnex';
-import type { AiAssistantToolCall, AiChatSessionDetail, AiChatTurn } from '@/app/lib/types';
+import type { AiAssistantToolCall, AiChatSessionDetail, AiChatTurn, AiChatTurnToolCall } from '@/app/lib/types';
 import type { AiChatSocketHandlers } from '@/app/lib/realtime';
 import { installInteractiveDocument } from '@/test/unit/helpers/interactiveDocument';
 import { askConnexToolCall } from '@/test/unit/helpers/askConnexToolCards';
@@ -177,6 +177,41 @@ describe('the provider guards the Retry callback', () => {
         vi.unstubAllGlobals();
     });
 
+    it.each([
+        { toolName: 'list_tasks', tier: 'READ', status: 'executed', state: 'none', retry: true },
+        { toolName: 'list_activities', tier: 'READ', status: 'failed', state: 'none', retry: true },
+        { toolName: 'create_task', tier: 'AUTO', status: 'executed', state: 'committed', retry: false },
+        { toolName: 'assign_owner', tier: 'CONFIRM', status: 'proposed', state: 'none', retry: true },
+        { toolName: 'create_task', tier: 'AUTO', status: 'proposed', state: 'none', retry: true },
+        { toolName: 'future_tool', tier: null, status: 'executed', state: 'uncertain', retry: false },
+        { toolName: 'create_task', tier: 'FUTURE', status: 'executed', state: 'uncertain', retry: false },
+    ])('uses durable $toolName $tier $status evidence through the Retry callback', async ({
+        toolName, tier, status, state, retry,
+    }) => {
+        const call: AiChatTurnToolCall = { toolName, tier, status };
+        vi.mocked(getAiChatTurn).mockResolvedValue({
+            ...TURN,
+            toolCalls: [call],
+            progress: [...TURN.progress, {
+                seq: 2, source: 'tasks', status: 'complete', count: 1, truncated: false,
+            }],
+        });
+        const root = await mountFailedTurn();
+        try {
+            expect(drawer().turnWriteState).toBe(state);
+            await act(async () => { drawer().onRetryTurn(); });
+            if (retry) {
+                expect(startAiChatTurn).toHaveBeenCalledExactlyOnceWith(4, expect.objectContaining({
+                    content: QUESTION,
+                }));
+            } else {
+                expect(startAiChatTurn).not.toHaveBeenCalled();
+            }
+        } finally {
+            await act(async () => { root.unmount(); });
+        }
+    });
+
     it.each(['executed', 'proposed'] as const)('refuses direct retry with an %s automatic write', async (status) => {
         const card = askConnexToolCall({ toolName: 'create_task', tier: 'auto', status });
         vi.mocked(getAiAssistantToolCalls).mockResolvedValue([card]);
@@ -188,6 +223,25 @@ describe('the provider guards the Retry callback', () => {
             expect(drawer().toolCalls).toEqual([expect.objectContaining({ id: card.id, status })]);
             await act(async () => { drawer().onRetryTurn(); });
             expect(startAiChatTurn).not.toHaveBeenCalled();
+        } finally {
+            await act(async () => { root.unmount(); });
+        }
+    });
+
+    it('allows an unapplied proposal with a recorded decision timestamp', async () => {
+        vi.mocked(getAiChatTurn).mockResolvedValue({
+            ...TURN,
+            toolCalls: [{ toolName: 'assign_owner', tier: 'CONFIRM', status: 'rejected' }],
+        });
+        vi.mocked(getAiAssistantToolCalls).mockResolvedValue([askConnexToolCall({
+            toolName: 'assign_owner', tier: 'confirm', status: 'rejected',
+            executedAt: '2026-10-18T12:00:00Z',
+        })]);
+        const root = await mountFailedTurn();
+        try {
+            expect(drawer().turnWriteState).toBe('none');
+            await act(async () => { drawer().onRetryTurn(); });
+            expect(startAiChatTurn).toHaveBeenCalledExactlyOnceWith(4, expect.objectContaining({ content: QUESTION }));
         } finally {
             await act(async () => { root.unmount(); });
         }

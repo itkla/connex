@@ -453,6 +453,25 @@ describe('Ask Connex file lifecycle', () => {
 });
 
 describe('Ask Connex turn state reduction', () => {
+    it('keeps durable execution evidence scoped to the accepted turn and the current server response', () => {
+        const accepted = reduceAskConnexTurn(EMPTY_ASK_CONNEX_TURN, {
+            type: 'accepted', sessionId: 4, turnId: 9, generationHandle: null, status: 'running',
+            toolCalls: [{ toolName: 'create_task', tier: 'AUTO', status: 'executed' }],
+        });
+        expect(reduceAskConnexTurn(accepted, { type: 'status', status: 'running' }).toolCalls)
+            .toEqual(accepted.toolCalls);
+        expect(reduceAskConnexTurn(accepted, {
+            type: 'status', status: 'timed_out', toolCalls: [],
+        }).toolCalls).toEqual([]);
+        expect(reduceAskConnexTurn(accepted, {
+            type: 'status', status: 'timed_out', toolCalls: undefined,
+        }).toolCalls).toBeUndefined();
+        expect(reduceAskConnexTurn(accepted, {
+            type: 'accepted', sessionId: 4, turnId: 10, generationHandle: null, status: 'accepted',
+        }).toolCalls).toBeUndefined();
+        expect(reduceAskConnexTurn(accepted, { type: 'reset' }).toolCalls).toBeUndefined();
+    });
+
     it('keeps accepted, running, resolved, failed, and timed-out states distinct', () => {
         const accepted = reduceAskConnexTurn(EMPTY_ASK_CONNEX_TURN, {
             type: 'accepted',

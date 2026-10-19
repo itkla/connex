@@ -176,11 +176,10 @@ removes Retry from the older answer. If changes were saved, their action cards r
 Connex cannot confirm what was saved, it says so and asks the member to check their records.
 Continue from here puts a follow-up in the composer for the member to read and edit, without sending it.
 
-With the evidence currently available, an answer that only read tasks or activities can still be
-uncertain. The same applies when it prepared a proposal without applying it: a proposal does not
-mean a change was saved, but Connex cannot rule out other saved changes. These answers keep Retry
-hidden, ask the member to check their records, and retain Continue from here when partial text is
-available.
+The requester's per-call execution evidence lets an answer that only read records, tasks, or
+activities retain Retry. Preparing a proposal without applying it also permits Retry when no
+other call saved changes. Unknown tools or execution states, and older servers without this
+evidence, keep the conservative check-records guidance when Connex cannot rule out saved changes.
 
 ## 7. Where things live
 
