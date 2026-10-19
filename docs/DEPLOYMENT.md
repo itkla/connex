@@ -19,6 +19,20 @@ Single-origin means cookies, WebAuthn (RP = the serving host), and realtime all 
 browser-facing backend URL. Internally, browser rewrites still talk to `backend:8080`, while
 server-rendered preview fetches use the app-network-only `backend-app:8080` alias.
 
+Data-subject disclosure uses the synchronous Tomcat HTTP/1.1 NIO connector behind Caddy. Its
+pass-two absolute delivery deadline is `CONNEX_DSR_DISCLOSURE_DELIVERY_TIMEOUT_MS=120000`
+(`connex.data-subject-disclosure.delivery-timeout-ms`). The backend explicitly sets
+`CONNEX_TOMCAT_CONNECTION_TIMEOUT=30s` (`server.tomcat.connection-timeout`); Tomcat also uses this
+positive setting for blocking writes. Deadline cancellation closes the specific socket, so stalled
+or trickling delivery ends within the deadline plus one connector write timeout (150 seconds with
+defaults), followed by normal rollback/cleanup. Unlimited connector writes are rejected at startup.
+Admission is two disclosures per instance and one per organization. Budget four pooled connections
+for both slots plus ordinary traffic; each disclosure peaks at two, after its separate placement
+lookup has returned its connection. Pools of two or three admit one disclosure to retain audit
+capacity. See the [operator procedure](APPI_DATA_SUBJECT_REQUEST_PROCEDURE.md)
+for incomplete-download rejection and explicit retries. An unsupported live connector/protocol
+fails disclosure closed before output; it needs equivalent cancellation support before use.
+
 The site-level edge header contract applies to every response, including frontend HTML and static
 assets, downloads, backend JSON, and Caddy-generated error responses. Caddy normalizes
 `X-Content-Type-Options: nosniff` and `X-Frame-Options: DENY`. It preserves an upstream
