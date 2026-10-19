@@ -373,8 +373,9 @@ public class UserOffboardingService {
      * record-comment authorship, creation, redaction, and resolution provenance, task assignment, uploader,
      * notification actor, report and campaign actors, rule principals,
      * consent/suppression actors, share grantors, and team managers).
-     * Chat provenance is cleared before participant and domain mutations so session, tool, and turn
-     * locks precede domain roots and the trailing mission privacy invalidation. Affected team
+     * Every session containing the user's provenance is locked in workspace/id order before
+     * provider cleanup or provenance updates, including contributions to another member's session.
+     * Chat child writes retain those mutexes through domain mutations and mission privacy invalidation. Affected team
      * parents are locked in deterministic order before team seats are deleted and manager
      * references are cleared. Must run inside the caller's deletion transaction.
      * Surviving goal creators are cleared, while decisions and appended assignment history remain.
@@ -386,11 +387,17 @@ public class UserOffboardingService {
      * @param userId the account being deleted
      */
     public void eraseOrgDataReferences(int userId) {
+        eraseOrgDataReferences(userId, lockOrgDataReferences(userId));
+    }
+
+    /** Retains authority and chat roots before catalog provider cleanup can acquire domain roots. */
+    AccountNotificationLocks lockOrgDataReferences(int userId) {
         userMapper.lockById(userId);
         AccountNotificationLocks locks = snapshotAccountNotificationRecipients(userId);
         workflowOffboardingService.lockWorkspaceRoots(locks.workflowPlan());
         lockAccountNotificationRecipientMemberships(userId, locks);
-        eraseOrgDataReferences(userId, locks);
+        aiChatMapper.lockSessionsForUserErasureAnywhere(userId);
+        return locks;
     }
 
     AccountNotificationLocks snapshotAccountNotificationRecipients(int userId) {
@@ -409,6 +416,7 @@ public class UserOffboardingService {
         return locks.workflowPlan().workspaceIds();
     }
 
+    /** Erases references with the roots from {@link #lockOrgDataReferences(int)} retained by this transaction. */
     void eraseOrgDataReferences(int userId, AccountNotificationLocks locks) {
         departureApprovalGuard.assertCanErase(userId);
         workflowOffboardingService.offboard(userId, locks.workflowPlan());

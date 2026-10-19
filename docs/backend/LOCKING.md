@@ -637,6 +637,13 @@ Invitation/participant-removal paths lock caller/target active memberships ascen
 
 The session row is the per-session mutex. V232 allocates every ordinary or mission message from its durable `message_seq_high_water`: lock the session, reject overflow, advance the counter, insert, and commit together. Never recompute from surviving messages; privacy deletion retains the counter and immutable first-mission taint boundary. Summary updates and request replays do not allocate a sequence.
 
+Account erasure retains all session roots in the routed catalog with one locking read ordered by
+`(workspace_id, id)`, covering sessions created by the account and sessions containing its message,
+tool-call, or turn provenance, including other members' shared sessions. The catalog erasure
+transaction uses `READ_COMMITTED` so child-reference discovery stays fresh after authority-lock
+waits. This chat-root phase precedes provider activity deletion and every provenance update;
+the same roots remain held through domain cleanup and trailing mission privacy invalidation.
+
 ### Global privacy, restriction and audit order
 
 Every transaction that combines these scoped resources uses this single acquisition order:

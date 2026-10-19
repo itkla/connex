@@ -149,6 +149,9 @@ public interface AiChatMapper {
     /** Clears invitation provenance for a permanently erased account across every workspace. */
     void clearParticipantInvitersAnywhere(@Param("userId") int userId);
 
+    /** Locks every session containing the user's provenance in workspace/id order within the catalog. */
+    List<Integer> lockSessionsForUserErasureAnywhere(@Param("userId") int userId);
+
     /** Clears session provenance for a permanently erased account across every workspace. */
     void clearSessionCreatorsAnywhere(@Param("userId") int userId);
 

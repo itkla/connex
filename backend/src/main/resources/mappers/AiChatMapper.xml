@@ -450,6 +450,30 @@
     WHERE invited_by_user_id = #{userId}
   </update>
 
+  <select id="lockSessionsForUserErasureAnywhere" resultType="int" flushCache="true" useCache="false">
+    SELECT s.id
+    FROM ai_chat_session s FORCE INDEX (uq_ai_chat_session_workspace_id)
+    WHERE s.created_by_user_id = #{userId}
+       OR EXISTS (
+         SELECT 1 FROM ai_chat_message m
+         WHERE m.workspace_id = s.workspace_id AND m.session_id = s.id
+           AND m.author_user_id = #{userId}
+       )
+       OR EXISTS (
+         SELECT 1 FROM ai_chat_tool_call tc
+         JOIN ai_chat_message m ON m.workspace_id = tc.workspace_id AND m.id = tc.message_id
+         WHERE m.workspace_id = s.workspace_id AND m.session_id = s.id
+           AND tc.executed_by_user_id = #{userId}
+       )
+       OR EXISTS (
+         SELECT 1 FROM ai_chat_turn t
+         WHERE t.workspace_id = s.workspace_id AND t.session_id = s.id
+           AND t.requested_by_user_id = #{userId}
+       )
+    ORDER BY s.workspace_id ASC, s.id ASC
+    FOR UPDATE OF s
+  </select>
+
   <update id="clearSessionCreatorsAnywhere">
     UPDATE ai_chat_session
     SET created_by_user_id = NULL

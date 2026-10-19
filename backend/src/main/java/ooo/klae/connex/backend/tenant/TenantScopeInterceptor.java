@@ -300,6 +300,7 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "AiAgentRunMapper.ownerWorkspaceIdsAnywhere",
         MAPPERS + "AiChatMapper.deleteParticipantsForUser",
         MAPPERS + "AiChatMapper.deleteParticipantsForUserAnywhere",
+        MAPPERS + "AiChatMapper.lockSessionsForUserErasureAnywhere",
         MAPPERS + "AiChatMapper.clearSessionCreatorsAnywhere",
         MAPPERS + "AiChatMapper.clearParticipantInvitersAnywhere",
         MAPPERS + "AiChatMapper.clearMessageAuthorsAnywhere",

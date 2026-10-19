@@ -84,6 +84,8 @@ class TenantScopeArchTest {
      * workspace whose runs all settle cleanly holds no expired lease and still accumulates
      * tombstones. Mission account-erasure discovery likewise returns only workspace IDs for the
      * exact departing owner in the pinned catalog; each subsequent purge is workspace-bound.
+     * Account erasure's session mutex read binds the departing user across all provenance sources
+     * and returns only session IDs from that catalog before any child provenance is cleared.
      */
     private static final Set<String> EXEMPT_SELECTS = Set.of(
         "ooo.klae.connex.backend.mappers.AssignmentSweepMapper.findWatermark",
@@ -115,6 +117,7 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.AiRunLeaseMapper.workspaceIdsWithExpiredLeases",
         "ooo.klae.connex.backend.mappers.AiRunLeaseMapper.workspaceIdsWithReapableTombstones",
         "ooo.klae.connex.backend.mappers.AiChatMapper.workspaceIdsWithUnleasedStaleTurns",
+        "ooo.klae.connex.backend.mappers.AiChatMapper.lockSessionsForUserErasureAnywhere",
         "ooo.klae.connex.backend.mappers.AiAgentRunMapper.ownerWorkspaceIdsAnywhere",
         "ooo.klae.connex.backend.mappers.TeamMapper.findReferencesForUserAnywhere",
         "ooo.klae.connex.backend.mappers.ScheduleMapper.dueScheduleRefs",

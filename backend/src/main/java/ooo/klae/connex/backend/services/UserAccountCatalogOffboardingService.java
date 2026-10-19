@@ -64,15 +64,21 @@ public class UserAccountCatalogOffboardingService {
         }
     }
 
-    /** Erases guarded tenant references before removing control-plane ownership offers. */
+    /**
+     * Erases guarded tenant references before removing control-plane ownership offers.
+     * READ_COMMITTED keeps chat-reference discovery fresh after waiting for authority roots.
+     */
     public void eraseReferences(int userId) {
         for (String catalog : placementRegistry.activeCatalogs()) {
             tenantWorkScope.withCatalog(
                 catalog,
                 () -> {
-                    new TransactionTemplate(transactionManager).executeWithoutResult(
+                    TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+                    transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+                    transaction.executeWithoutResult(
                         status -> {
                             departureApprovalGuard.assertCanErase(userId);
+                            var locks = userOffboardingService.lockOrgDataReferences(userId);
                             providerCapturePurgeService.purgeAccountCatalog(
                                 userId, ConnectedAccountProviders.GOOGLE);
                             providerCapturePurgeService.purgeAccountCatalog(
@@ -80,7 +86,7 @@ public class UserAccountCatalogOffboardingService {
                             providerCapturePurgeService.clearAccountReferencesInCatalog(
                                 userId);
                             userOffboardingService.assertNoAuthoredContent(userId);
-                            userOffboardingService.eraseOrgDataReferences(userId);
+                            userOffboardingService.eraseOrgDataReferences(userId, locks);
                         });
                     return null;
                 });

@@ -334,6 +334,7 @@ class UserOffboardingOrderTest {
         order.verify(notificationMapper).lockRecipientMemberships(3);
         order.verify(notificationMapper).lockRecipientMemberships(9);
         order.verify(notificationMapper).lockRecipientMemberships(11);
+        order.verify(aiChatMapper).lockSessionsForUserErasureAnywhere(9);
         order.verify(departureApprovalGuard).assertCanErase(9);
         order.verify(workflowOffboardingService).offboard(9, plan);
         order.verify(notificationMapper).lockRecipientIdsByActor(9);
