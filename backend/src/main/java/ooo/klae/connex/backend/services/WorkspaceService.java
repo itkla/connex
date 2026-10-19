@@ -2359,7 +2359,7 @@ public class WorkspaceService {
             notification.setBody("You have a pending workspace invitation.");
             notification.setActorId(actor.getId());
             notification.setActorLabel(actor.getDisplayName());
-            notification.setActionUrl("/settings/membership");
+            notification.setActionUrl("/settings/personal/workspaces");
             notification.setDedupeKey("workspace.join:" + workspaceId);
             notification.setTriggeredAt(LocalDateTime.now(ZoneOffset.UTC).format(TS));
             notificationDelivery.deliver(notification);

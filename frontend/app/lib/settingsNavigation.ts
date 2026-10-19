@@ -229,8 +229,8 @@ function navigable(route: string): boolean {
 /**
  * The destinations a group can offer today, in the manifest's order.
  *
- * A group's canonical route does not exist yet, so the navigation offers the entries the manifest
- * files under it. Three of them cannot be offered: a redirect stub is not a destination, an entry
+ * When a group's canonical route is not yet served, the navigation offers the entries the manifest
+ * files under it. Three of them cannot be offered: a forward is not a destination, an entry
  * with no shipped label has nothing to render, and a parameterized route is not an address.
  */
 function groupDestinations(

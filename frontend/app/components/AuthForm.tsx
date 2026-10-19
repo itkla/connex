@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { sameOriginPath } from "@/app/lib/sessionExpiry";
+import { sameOriginPath, withSectionFragment } from "@/app/lib/sessionExpiry";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { useTranslations } from "next-intl";
 import {
@@ -129,7 +129,7 @@ export function AuthForm({
         const hasWorkspace = /(?:^|;\s*)connex_workspace=/.test(document.cookie);
         const safeRedirect = sameOriginPath(redirectUrl);
         if (safeRedirect) {
-            router.push(safeRedirect);
+            router.push(withSectionFragment(safeRedirect, window.location.hash));
         } else if (!hasWorkspace) {
             router.replace("/onboarding");
         } else {
