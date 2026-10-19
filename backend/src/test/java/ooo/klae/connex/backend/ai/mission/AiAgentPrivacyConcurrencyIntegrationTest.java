@@ -284,7 +284,9 @@ class AiAgentPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivacyInt
                 await(releaseProjection);
             }
             return invocation.callRealMethod();
-        }).when(progress).project(org.mockito.ArgumentMatchers.any(AiChatTurn.class));
+        }).when(progress).projectTurn(
+                org.mockito.ArgumentMatchers.any(AiChatTurn.class), eq(currentUser.getId()),
+                org.mockito.ArgumentMatchers.any());
         doAnswer(invocation -> {
             waitingConnection.set(connectionId());
             invalidating.countDown();
