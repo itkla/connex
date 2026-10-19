@@ -27,6 +27,7 @@ import {
     resumeProviderConnection,
     startAiChatTurn,
     switchWorkspace,
+    synchronizeBrowserAccount,
     updateMyLocale,
     updateMyTimezone,
     updateNotificationPreferences,
@@ -715,6 +716,36 @@ describe("creating a workspace from the shell", () => {
         expect(requests.filter(({ method }) => method === "POST")).toEqual([
             { url: "/api/workspaces", method: "POST", workspace: String(RENDERED) },
         ]);
+    });
+
+    it("abandons creation when the account changes during the membership preflight", async () => {
+        bindRenderedWorkspace(owner(), RENDERED);
+        synchronizeBrowserAccount(1);
+        const requests: Recorded[] = [];
+        let releasePreflight: (response: Response) => void = () => undefined;
+        const preflight = new Promise<Response>((resolve) => { releasePreflight = resolve; });
+        vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+            const url = input instanceof Request ? input.url : String(input);
+            if (url.endsWith("/api/auth/csrf")) {
+                return json({ token: "csrf-token", headerName: "X-XSRF-TOKEN", requestIdentity: "identity" });
+            }
+            const method = init?.method ?? "GET";
+            requests.push({ url, method, workspace: new Headers(init?.headers).get("X-Workspace-Id") });
+            return method === "GET" ? preflight : json(workspace(77, "Field team"));
+        }));
+
+        const creation = createWorkspace("Field team").then(() => null, (error: unknown) => error);
+        await vi.waitFor(() => expect(requests).toContainEqual({
+            url: "/api/workspaces", method: "GET", workspace: String(HEALED),
+        }));
+        synchronizeBrowserAccount(2);
+        releasePreflight(json({
+            workspaces: [workspace(RENDERED, REVOKED_NAME)],
+            activeWorkspaceId: RENDERED,
+        }));
+
+        expect(await creation).toBeInstanceOf(Error);
+        expect(requests.filter(({ method }) => method === "POST")).toEqual([]);
     });
 
     it("re-reads memberships even when the cookie names the workspace on screen", async () => {

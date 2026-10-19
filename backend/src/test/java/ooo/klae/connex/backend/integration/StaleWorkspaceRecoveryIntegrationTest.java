@@ -208,6 +208,35 @@ class StaleWorkspaceRecoveryIntegrationTest {
             .andExpect(jsonPath("$.total").value(1));
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/business-cards/scan", "/api/business-cards/import/reservation",
+        "/api/business-cards/import"})
+    void revokedBusinessCardPinsKeepTheWorkspaceRefusalAfterTheCookieHeals(String path) throws Exception {
+        StaleBrowser browser = staleBrowser();
+        int workspaceId = browser.revoked().getId();
+
+        mockMvc.perform(post(path)
+                .header("X-Workspace-Id", workspaceId)
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .cookie(new Cookie(WorkspaceCookie.NAME, Integer.toString(browser.remaining().getId())))
+                .session(browser.session())
+                .with(csrf().asHeader())
+                .contentType("multipart/form-data; boundary=unparsed")
+                .content("Not a multipart body"))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+            .andExpect(jsonPath("$.error").value("Not a member of workspace " + workspaceId))
+            .andExpect(cookie().doesNotExist(WorkspaceCookie.NAME));
+
+        RequestContextHolder.resetRequestAttributes();
+        assertNull(workspaceMapper.getRole(workspaceId, browser.user().getId()));
+        assertEquals(browser.revoked().getId(),
+            workspaceMapper.getLastActiveWorkspaceId(browser.user().getId()));
+        assertEquals(0, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM business_card_import_request WHERE workspace_id IN (?, ?)",
+            Integer.class, workspaceId, browser.remaining().getId()));
+    }
+
     @Test
     void pinlessRequestsAfterRevocationRejectNoteWritesAndRecoverOnGet() throws Exception {
         Workspace workspaceA = newWorkspaceInNewOrganization();

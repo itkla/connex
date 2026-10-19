@@ -262,6 +262,64 @@ class BusinessCardImportAdmissionFilterTest {
         verify(rateLimiter, never()).requireScanAdmissionAllowed(9);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/business-cards/scan", "/api/business-cards/import/reservation",
+        "/api/business-cards/import"})
+    void revokedExplicitPinsReturnWorkspaceRefusalBeforeMultipartAuthorizationOrThrottleAccess(
+            String path) throws Exception {
+        when(workspaceService.getRole(7, 9)).thenReturn(null);
+        TrackingMultipartRequest request = request("POST", path, IDEMPOTENCY_KEY);
+        request.addHeader("X-Workspace-Id", "7");
+        request.setCookies(new Cookie(WorkspaceCookie.NAME, "23"));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertEquals(403, response.getStatus());
+        assertEquals("no-store", response.getHeader("Cache-Control"));
+        assertJsonRejection(response, "FORBIDDEN", "Not a member of workspace 7");
+        assertNull(chain.getRequest());
+        assertFalse(request.bodyAccessed());
+        verify(workspaceService, never()).requirePermission(7, 9, Permission.PERSON_CREATE);
+        verify(workspaceService, never()).requirePermission(7, 9, Permission.ATTACHMENT_CREATE);
+        verify(workspaceService, never()).defaultWorkspaceIdFor(9);
+        verifyNoInteractions(rateLimiter);
+    }
+
+    @ParameterizedTest
+    @MethodSource("deniedPinnedPermissions")
+    void pinnedMembersWithoutPermissionKeepTheBusinessCardRefusal(
+            String path, Permission permission) throws Exception {
+        TrackingMultipartRequest request = request("POST", path, IDEMPOTENCY_KEY);
+        request.addHeader("X-Workspace-Id", "7");
+        request.setCookies(new Cookie(WorkspaceCookie.NAME, "23"));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+        if (permission == Permission.ATTACHMENT_CREATE) {
+            doNothing().when(workspaceService).requirePermission(7, 9, Permission.PERSON_CREATE);
+        }
+        doThrow(new ForbiddenException("denied"))
+            .when(workspaceService).requirePermission(7, 9, permission);
+
+        filter.doFilter(request, response, chain);
+
+        assertEquals(403, response.getStatus());
+        assertEquals("no-store", response.getHeader("Cache-Control"));
+        assertJsonRejection(response, "BUSINESS_CARD_PERMISSION_DENIED", "Business-card permission is required");
+        assertNull(chain.getRequest());
+        assertFalse(request.bodyAccessed());
+        verify(workspaceService, never()).defaultWorkspaceIdFor(9);
+        verifyNoInteractions(rateLimiter);
+    }
+
+    private static Stream<Arguments> deniedPinnedPermissions() {
+        return Stream.of("/api/business-cards/scan", "/api/business-cards/import/reservation",
+                "/api/business-cards/import")
+            .flatMap(path -> Stream.of(Permission.PERSON_CREATE, Permission.ATTACHMENT_CREATE)
+                .map(permission -> Arguments.of(path, permission)));
+    }
+
     @Test
     void attachmentPermissionDenialReturns403BeforeMultipartAndThrottleAccess() throws Exception {
         TrackingMultipartRequest request = request(

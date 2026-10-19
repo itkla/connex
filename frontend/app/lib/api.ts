@@ -432,15 +432,20 @@ async function currentClientRequestIdentity(): Promise<string | null> {
  * {@link pinWriteNow}. The wait is registered before it starts, so a workspace or account transition
  * that begins while it is pending abandons the write rather than sending it after the shell may
  * have moved to another workspace (#1732).
+ * @param preflight optional preparation guarded by the same transition and identity checks
  * @returns the identity, or null when none can be proven
  * @throws Error when a transition abandoned the write while it waited
  */
-async function identityBeforePinnedWrite(): Promise<string | null> {
+async function identityBeforePinnedWrite(preflight?: () => Promise<void>): Promise<string | null> {
     const waiting = new AbortController();
     pendingPinnedWriteIdentities.add(waiting);
+    const identityEpoch = clientRequestIdentityEpoch;
     try {
+        if (preflight) {
+            await preflight();
+        }
         const identity = await currentClientRequestIdentity();
-        if (waiting.signal.aborted) {
+        if (waiting.signal.aborted || (preflight && clientRequestIdentityEpoch !== identityEpoch)) {
             throw new Error("The workspace changed before this request was sent");
         }
         return identity;
@@ -5513,9 +5518,13 @@ async function workspaceCreationOrigin(): Promise<RequestInit | null> {
     const rendered = renderedWorkspaceId();
     if (rendered === null || typeof document === "undefined") return null;
     const pinned: RequestInit = { headers: { "X-Workspace-Id": String(rendered) } };
-    const snapshot = await getMyWorkspaces();
-    if (snapshot.workspaces.some((workspace) => workspace.id === rendered)) return pinned;
-    throw workspaceUnavailableError(rendered, `Not a member of workspace ${rendered}`);
+    await identityBeforePinnedWrite(async () => {
+        const snapshot = await getMyWorkspaces();
+        if (!snapshot.workspaces.some((workspace) => workspace.id === rendered)) {
+            throw workspaceUnavailableError(rendered, `Not a member of workspace ${rendered}`);
+        }
+    });
+    return pinned;
 }
 
 export async function createWorkspace(name: string) {

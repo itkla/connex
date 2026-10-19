@@ -642,6 +642,8 @@ through one `requestJson` (`api.ts:17-43`) → inject the active workspace **onc
   Onboarding explicitly omits the workspace header even when the browser retains a revoked selection
   cookie, preserving the unresolved recovery path. The client preflight keeps
   the entered name locally, while the server check enforces the boundary after the preflight.
+  Creation registers with the pinned-write identity guard before the preflight and rechecks identity
+  afterward, so an account or workspace transition during that wait abandons the creation.
 - Explicit workspace headers contain exactly one parseable integer. Malformed, comma-combined or
   repeated headers are refused without cookie or remembered-selection fallback; the frontend
   rejects malformed pins before sending and merges XHR headers case-insensitively before setting

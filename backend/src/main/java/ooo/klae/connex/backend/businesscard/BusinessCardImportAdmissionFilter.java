@@ -82,6 +82,13 @@ public class BusinessCardImportAdmissionFilter extends OncePerRequestFilter {
                 reject(response, HttpServletResponse.SC_FORBIDDEN, Rejection.WORKSPACE_REQUIRED);
                 return;
             }
+            if (admission != Operation.STATUS
+                    && request.getHeader("X-Workspace-Id") != null
+                    && workspaceService.getRole(workspaceId, user.getId()) == null) {
+                reject(response, HttpServletResponse.SC_FORBIDDEN,
+                    "FORBIDDEN", "Not a member of workspace " + workspaceId);
+                return;
+            }
             workspaceService.requirePermission(workspaceId, user.getId(), Permission.PERSON_CREATE);
             workspaceService.requirePermission(workspaceId, user.getId(), Permission.ATTACHMENT_CREATE);
         } catch (ForbiddenException exception) {
@@ -138,12 +145,17 @@ public class BusinessCardImportAdmissionFilter extends OncePerRequestFilter {
 
     private static void reject(HttpServletResponse response, int status, Rejection rejection)
             throws IOException {
+        reject(response, status, rejection.code, rejection.error);
+    }
+
+    private static void reject(HttpServletResponse response, int status, String code, String error)
+            throws IOException {
         response.setHeader("Cache-Control", "no-store");
         response.setStatus(status);
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.getWriter().write(
-            "{\"error\":\"" + rejection.error + "\",\"code\":\"" + rejection.code + "\"}");
+            "{\"error\":\"" + error + "\",\"code\":\"" + code + "\"}");
     }
 
     private enum Rejection {

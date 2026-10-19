@@ -745,6 +745,7 @@ export function NewContactForm({
                             status={businessCard.status}
                             requestError={businessCard.requestError}
                             importError={businessCard.importError}
+                            workspaceUnavailableMessage={businessCard.workspaceUnavailableMessage}
                             requiresExactImportRetry={businessCard.requiresExactImportRetry}
                             disabled={formPending}
                             onCancelScan={businessCard.cancelScan}

@@ -20,6 +20,12 @@ Scan entitlement, workspace permission, and principal/global admission run in th
 Malformed or repeated explicit workspace pins receive the filter's controlled 403 permission refusal
 before parsing, workspace permission checks, or throttling; they never fall back to the cookie or continue the chain.
 
+Pinned scan, reservation, and import writes without active membership receive the interceptor's
+`403 FORBIDDEN "Not a member of workspace {id}"` refusal before permission checks, throttling, or
+multipart parsing. Active members missing a required permission retain
+`BUSINESS_CARD_PERMISSION_DENIED`. The client names the unavailable workspace and preserves the
+card and entered contact details without treating that refusal as an ambiguous import outcome.
+
 Never log uploaded bytes, recognized text, names, email addresses, phone numbers, headers, tokens, or provider payloads.
 
 ## Local OCR first
