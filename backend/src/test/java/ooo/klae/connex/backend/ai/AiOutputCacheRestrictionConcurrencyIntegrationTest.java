@@ -53,6 +53,7 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.PersonService;
+import ooo.klae.connex.backend.support.TestEntityFixtures;
 import ooo.klae.connex.backend.tenant.TenantContext;
 
 /** Verifies contact restrictions and person-aware AI cache writes serialize in real MySQL. */
@@ -182,6 +183,8 @@ class AiOutputCacheRestrictionConcurrencyIntegrationTest {
             jdbcTemplate.update("DELETE FROM person WHERE id = ?", person.getId());
         }
         if (ownerWorkspace != null && granteeWorkspace != null) {
+            TestEntityFixtures.deleteChatPrivacy(jdbcTemplate, ownerWorkspace.getId());
+            TestEntityFixtures.deleteChatPrivacy(jdbcTemplate, granteeWorkspace.getId());
             jdbcTemplate.update(
                     "DELETE FROM workspace_member WHERE workspace_id IN (?, ?)",
                     ownerWorkspace.getId(), granteeWorkspace.getId());
@@ -330,6 +333,7 @@ class AiOutputCacheRestrictionConcurrencyIntegrationTest {
         workspace.setName(name);
         workspace.setSlug(slug);
         workspaceMapper.insert(workspace);
+        TestEntityFixtures.seedExistingWorkspacePrivacy(jdbcTemplate, workspace.getId());
         return workspace;
     }
 }

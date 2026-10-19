@@ -21,8 +21,10 @@ import org.mockito.ArgumentCaptor;
 
 import jakarta.validation.Validation;
 import jakarta.validation.ValidatorFactory;
+import ooo.klae.connex.backend.ai.AiPrivacyMode;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.beans.Activity;
+import ooo.klae.connex.backend.beans.AiAgentPrivacyBarrier;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.AiChatTurn;
@@ -65,7 +67,9 @@ abstract class AbstractAiAssistantWriteToolTest {
     static final ValidatorFactory VALIDATORS = Validation.buildDefaultValidatorFactory();
     static final Clock CLOCK = Clock.fixed(Instant.parse("2026-03-06T15:00:00Z"), ZoneOffset.UTC);
     static final AiChatQueuedTurn TURN = new AiChatQueuedTurn(
-            7, 11, 13, 17, 19, 1, 23L, true, List.of(), List.of());
+            7, 11, 13, 17, 19, 1, 23L, true, List.of(), List.of(),
+            AiPrivacyMode.MASKED, false, AiChatQueryScope.none(),
+            new AiChatPrivacyToken(7, 13, 1, null));
     static final int TOOL_CALL_ID = 29;
 
     final ObjectMapper objectMapper = JsonMapper.builder().build();
@@ -145,15 +149,23 @@ abstract class AbstractAiAssistantWriteToolTest {
         when(workspaceService.lockAndRequirePermissionsSnapshot(anyInt(), any()))
                 .thenReturn(authority);
         when(governanceService.isEnabled(TURN.workspaceId())).thenReturn(true);
+        when(restrictionEpoch.current(TURN.workspaceId())).thenReturn(TURN.restrictionEpoch());
         when(restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
                 TURN.workspaceId(), TURN.restrictionEpoch())).thenReturn(true);
         dateResolver = new AiAssistantDateResolver(authService, CLOCK);
         catalog = new AiAssistantToolCatalog();
         AiChatSession session = new AiChatSession();
         session.setId(TURN.sessionId());
+        session.setWorkspaceId(TURN.workspaceId());
         session.setCreatedByUserId(TURN.userId());
         session.setVisibility("private");
         session.setStatus("active");
+        AiAgentPrivacyBarrier barrier = new AiAgentPrivacyBarrier();
+        barrier.setWorkspaceId(TURN.workspaceId());
+        barrier.setGeneration(1);
+        when(chatMapper.getPrivacyBarrier(TURN.workspaceId())).thenReturn(barrier);
+        when(chatMapper.lockPrivacyBarrierForShare(TURN.workspaceId())).thenReturn(barrier);
+        when(chatMapper.getPrivacySession(TURN.workspaceId(), TURN.sessionId())).thenReturn(session);
         AiChatTurn turn = new AiChatTurn();
         turn.setId(TURN.turnId());
         turn.setRequestedByUserId(TURN.userId());
@@ -326,6 +338,11 @@ abstract class AbstractAiAssistantWriteToolTest {
             Task created = invocation.getArgument(0);
             created.setId(74);
             created.setStatus("todo");
+            doAnswer(deletion -> {
+                java.util.function.Predicate<Task> guard = deletion.getArgument(1);
+                org.junit.jupiter.api.Assertions.assertTrue(guard.test(created));
+                return null;
+            }).when(taskService).deleteIf(eq(74), any());
             return created;
         }).when(taskService).create(any(Task.class));
     }

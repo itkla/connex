@@ -1,0 +1,15 @@
+{
+  "id": "mission_transport_failure",
+  "selector": "connex_script_mission_transport_failure",
+  "capabilityClass": "scripted-native",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "emit": {
+        "kind": "failure",
+        "failureKind": "transport"
+      }
+    }
+  ]
+}

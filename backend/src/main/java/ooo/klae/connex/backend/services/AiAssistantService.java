@@ -13,6 +13,8 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard;
+import ooo.klae.connex.backend.ai.assistant.AiChatPrivacyToken;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantSessionReadAudit;
 import ooo.klae.connex.backend.ai.assistant.AiChatCitationProjector;
 import ooo.klae.connex.backend.ai.assistant.AiChatPresenceRegistry;
@@ -30,9 +32,9 @@ import ooo.klae.connex.backend.dto.AiChatSessionDetailDto;
 import ooo.klae.connex.backend.dto.AiChatSessionDto;
 import ooo.klae.connex.backend.dto.AiChatSessionUpdateRequest;
 import ooo.klae.connex.backend.dto.AiChatStepFrameDto;
-import ooo.klae.connex.backend.dto.AiChatTurnDto;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.UserDisplayNameDto;
+import ooo.klae.connex.backend.exceptions.AiPrivacyInitializationPendingException;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
@@ -141,19 +143,22 @@ public class AiAssistantService {
     }
 
     /** Returns one accessible session together with an ordered page of messages. */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.AI_USE)
     public AiChatSessionDetailDto get(int id, int messagePage, int messageSize) {
         int offset = pageOffset(messagePage, messageSize);
         int workspaceId = currentWorkspaceId();
         int userId = currentUserId();
         AiChatSession session = requireAccessible(workspaceId, userId, id);
+        sessionReadAudit.retainTranscriptAuditParents(workspaceId, userId);
+        retainTranscriptPrivacy(workspaceId);
         sessionReadAudit.recordAccessible(workspaceId, userId, session);
+        session = requireAccessible(workspaceId, userId, id);
         return detail(workspaceId, userId, id, messageSize, offset, session);
     }
 
     /** Returns one retained session and records the metadata-only administrative read. */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.AI_SESSION_ADMIN)
     public AiChatSessionDetailDto getRetained(int id, int messagePage, int messageSize) {
         int offset = pageOffset(messagePage, messageSize);
@@ -166,7 +171,14 @@ public class AiAssistantService {
             throw inaccessible();
         }
         requireStillRetained(workspaceId, userId, session);
+        sessionReadAudit.retainTranscriptAuditParents(workspaceId, userId);
+        retainTranscriptPrivacy(workspaceId);
         auditRetainedRead(session);
+        session = chatMapper.getRetainedSessionById(workspaceId, userId, id, activeMemberIds);
+        if (session == null) {
+            throw inaccessible();
+        }
+        requireStillRetained(workspaceId, userId, session);
         return detail(workspaceId, userId, id, messageSize, offset, session);
     }
 
@@ -182,6 +194,13 @@ public class AiAssistantService {
         }
         if (activeMemberIds(workspaceId, userId).contains(session.getCreatedByUserId())) {
             throw inaccessible();
+        }
+    }
+
+    /** Holds fresh privacy authority through projection; the lock also flushes the mapper cache. */
+    private void retainTranscriptPrivacy(int workspaceId) {
+        if (chatMapper.lockPrivacyBarrierForShare(workspaceId) == null) {
+            throw new AiPrivacyInitializationPendingException();
         }
     }
 
@@ -216,13 +235,24 @@ public class AiAssistantService {
             })
             .toList();
         var activeTurn = chatMapper.getLatestActiveTurnBySession(workspaceId, id);
+        if (activeTurn != null && (activeTurn.getMissionRunId() != null
+                || activeTurn.getPrivacyGeneration() == null)) {
+            activeTurn = null;
+        }
+        if (activeTurn != null) {
+            try {
+                AiChatPrivacyGuard.requireCurrent(chatMapper, new AiChatPrivacyToken(workspaceId, id,
+                        activeTurn.getPrivacyGeneration(), activeTurn.getPrivacyTaintSeq()));
+            } catch (ooo.klae.connex.backend.ai.assistant.AiAssistantLoopException stale) {
+                activeTurn = null;
+            }
+        }
         return new AiChatSessionDetailDto(
             AiChatSessionDto.from(session),
             new PageResponse<>(messages, chatMapper.countMessages(workspaceId, id)),
             activeTurn == null
                     ? null
-                    : AiChatTurnDto.from(
-                            activeTurn, progressService.project(activeTurn), userId));
+                    : progressService.projectTurn(activeTurn, userId, null));
     }
 
     /** Applies an owner-only title change and/or one-way archive transition. */
@@ -242,6 +272,9 @@ public class AiAssistantService {
         workspaceService.lockAndRequireMember(workspaceId, userId);
         workspaceService.requirePermission(workspaceId, userId, Permission.AI_USE);
         requireOwnedLocked(workspaceId, userId, id);
+        if (status != null && chatMapper.countNonterminalMissions(workspaceId, id) != 0) {
+            throw new ConflictException("mission_control_required");
+        }
         if (chatMapper.updateSession(workspaceId, id, title, status, null) != 1) {
             throw inaccessible();
         }
@@ -259,6 +292,9 @@ public class AiAssistantService {
         workspaceService.lockAndRequireMember(workspaceId, userId);
         workspaceService.requirePermission(workspaceId, userId, Permission.AI_USE);
         AiChatSession session = requireOwnedLocked(workspaceId, userId, id);
+        if (chatMapper.countNonterminalMissions(workspaceId, id) != 0) {
+            throw new ConflictException("mission_control_required");
+        }
         if (!ARCHIVED.equals(session.getStatus())
                 && chatMapper.updateSession(workspaceId, id, null, ARCHIVED, null) != 1) {
             throw inaccessible();
@@ -277,6 +313,9 @@ public class AiAssistantService {
                 workspaceId,
                 Map.of(userId, Set.of(Permission.AI_USE, Permission.AI_SESSION_SHARE)));
         AiChatSession session = requireOwnedLocked(workspaceId, userId, id);
+        if (chatMapper.countNonterminalMissions(workspaceId, id) != 0) {
+            throw new ConflictException("mission_control_required");
+        }
         if (shared && !ACTIVE.equals(session.getStatus())) {
             throw new ConflictException("Archived sessions cannot be shared");
         }
@@ -496,6 +535,8 @@ public class AiAssistantService {
         AiChatMessage message = new AiChatMessage();
         message.setWorkspaceId(workspaceId);
         message.setSessionId(id);
+        var privacyToken = ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard.capture(chatMapper, session);
+        message.setPrivacyGeneration(privacyToken.privacyGeneration());
         message.setSeq(chatMapper.nextMessageSequence(workspaceId, id));
         message.setAuthorKind(USER);
         message.setAuthorUserId(userId);
@@ -508,6 +549,7 @@ public class AiAssistantService {
         }
         realtimeDispatcher.sessionAfterCommit(
                 workspaceId, id, sessionFrame(workspaceId, id, "message_created"));
+        ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard.retain(chatMapper, privacyToken);
         return AiChatMessageDto.from(stored, List.of(), authService.getCurrentUser().getDisplayName());
     }
 

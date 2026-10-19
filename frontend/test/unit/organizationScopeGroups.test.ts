@@ -35,6 +35,7 @@ import {
     sectionVisible,
     type SettingsNavViewer,
 } from "@/app/lib/settingsNavigation";
+import { settingsConfigRedirects } from "@/app/lib/settingsRedirects";
 import type { InstanceCapabilities } from "@/app/lib/types";
 
 /**
@@ -586,10 +587,13 @@ describe("the legacy organization routes forward to the destinations that absorb
                 : `${entry?.canonicalRoute}#${entry?.canonicalSection}`,
         );
         expect(
+            settingsConfigRedirects(),
+            "next.config.ts keeps the address alive with a permanent forward; dropping it would 404 an address readers have bookmarked",
+        ).toContainEqual({ source: route, destination: entry?.redirectsTo, permanent: true });
+        expect(
             existsSync(path.join(routeDir(route), "page.tsx")),
-            "the page survives as a stub; deleting it would 404 an address readers have bookmarked",
-        ).toBe(true);
-        expect(source(path.join(routeDir(route), "page.tsx"))).toContain("permanentRedirect(");
+            "the config forward wins before routing, so a page left here could never render",
+        ).toBe(false);
     });
 
     /**

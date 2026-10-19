@@ -242,8 +242,9 @@ public interface AiAssistantWriteTool {
      *
      * @param authority who is undoing the write, never why they may
      * @param inverse the durable inverse {@link #apply} recorded
+     * @param admission privacy fences to retain after all inverse locks and before mutation/audit
      */
-    default void undo(Authority authority, Inverse inverse) {
+    default void undo(Authority authority, Inverse inverse, MutationAdmission admission) {
         throw new ConflictException("Assistant tool has no owned inverse");
     }
 

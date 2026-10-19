@@ -500,6 +500,14 @@
     WHERE <include refid="visible"/> AND p.id = #{id}
   </select>
 
+  <select id="getAssistantPrimaryPersonById" resultMap="PersonResult">
+    SELECT <include refid="personColumns"/>,
+      NULL AS company_id, NULL AS company_name, NULL AS company_logo_url
+    FROM person p
+    WHERE <include refid="visible"/> AND p.id = #{id}
+      AND p.suspended_at IS NULL AND p.provision_ceased_at IS NULL
+  </select>
+
   <select id="getSequencePreviewPerson" resultMap="PersonResult">
     SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
     FROM person p
@@ -583,17 +591,6 @@
       AND p.id IN
       <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
     ORDER BY p.name, p.id
-  </select>
-
-  <select id="getPersonsByCompanyIds" resultMap="PersonResult">
-    SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
-    FROM person p
-    <include refid="companyJoin"/>
-    WHERE <include refid="visible"/>
-      AND p.suspended_at IS NULL
-      AND p.company_id IN
-      <foreach item="id" collection="companyIds" open="(" separator="," close=")">#{id}</foreach>
-    ORDER BY p.id
   </select>
 
   <select id="exists" resultType="boolean">

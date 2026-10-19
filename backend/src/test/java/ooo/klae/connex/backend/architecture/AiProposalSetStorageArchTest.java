@@ -79,6 +79,28 @@ class AiProposalSetStorageArchTest {
         assertEquals("fk_ai_assistant_proposal_set_message", cascade.constraintName());
         assertEquals(Set.of("workspace_id", "session_id", "message_id"), cascade.columns().stream()
                 .map(TenantLifecycleRegistry.ColumnLink::childColumn).collect(java.util.stream.Collectors.toSet()));
+        assertEquals(TablePlaneRegistry.ORG_DATA_TABLES, TenantLifecycleRegistry.declarations().keySet());
+        for (String table : Set.of("ai_chat_message", "ai_chat_tool_call", "ai_chat_turn")) {
+            assertTrue(TenantLifecycleRegistry.require(table).direct(), table);
+        }
+    }
+
+    @Test
+    void accountErasureRetainsSessionsContainingOnlyProposalSetRequesterProvenance() throws Exception {
+        var selects = mapper("AiChatMapper").getElementsByTagName("select");
+        boolean found = false;
+        for (int index = 0; index < selects.getLength(); index++) {
+            var select = (org.w3c.dom.Element) selects.item(index);
+            if (select.getAttribute("id").equals("lockSessionsForUserErasureAnywhere")) {
+                found = true;
+                String sql = select.getTextContent().replaceAll("\\s+", " ");
+                assertTrue(sql.contains("OR EXISTS ( SELECT 1 FROM ai_assistant_proposal_set p"
+                        + " WHERE p.workspace_id = s.workspace_id AND p.session_id = s.id"
+                        + " AND p.requested_by_user_id = #{userId} )"));
+                assertTrue(sql.contains("ORDER BY s.workspace_id ASC, s.id ASC FOR UPDATE OF s"));
+            }
+        }
+        assertTrue(found);
     }
 
     private Document mapper(String name) throws Exception {

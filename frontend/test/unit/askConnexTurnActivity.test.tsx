@@ -62,6 +62,8 @@ const labels: AskConnexTurnLabels = {
     turnAccepted: "Request accepted",
     turnCancelled: "Response stopped",
     turnResolved: "Answer ready",
+    turnWritesSaved: "This answer already saved changes. Review the action cards before deciding what to ask next.",
+    turnWritesUncertain: "Connex could not confirm whether this answer saved any changes. Check your records before deciding what to ask next.",
     turnStreaming: "Writing…",
     turnWorking: "Thinking…",
     thinkingToggle: "Show thinking",
@@ -151,6 +153,7 @@ function activity(overrides: Partial<Parameters<typeof TurnActivity>[0]> = {}): 
                 streaming={false}
                 cancelling={false}
                 canRetry
+                writeState="none"
                 labels={labels}
                 onCancel={() => {}}
                 onRetry={() => {}}
@@ -206,6 +209,18 @@ describe("partial answers that stopped", () => {
 });
 
 describe("what a stopped answer offers next", () => {
+    describe.each(["generation_timeout", "turn_deadline_exceeded", "provider_idle_timeout", "no_progress"])("%s", (reason) => {
+        it.each(["none", "committed", "uncertain"] as const)("shows recovery for %s writes", (writeState) => {
+            for (const phase of ["failed", "timed_out"] as const) {
+                const rendered = activity({ turn: turn({ phase, reason }), writeState, hasPartial: true });
+                expect(rendered.includes(labels.retry)).toBe(writeState === "none");
+                expect(rendered).toContain(labels.continueFromPartial);
+                expect(rendered.includes(labels.turnWritesSaved)).toBe(writeState === "committed");
+                expect(rendered.includes(labels.turnWritesUncertain)).toBe(writeState === "uncertain");
+            }
+        });
+    });
+
     it("offers to send the same question again after a failure or a timeout", () => {
         for (const phase of ["failed", "timed_out"] as const) {
             expect(activity({ turn: turn({ phase, progress: PROGRESS }) })).toContain("Try again");
@@ -304,6 +319,7 @@ describe("retry sends the question again", () => {
                     streaming={false}
                     cancelling={false}
                     canRetry
+                    writeState="none"
                     labels={labels}
                     onCancel={() => {}}
                     onRetry={() => retries.push(1)}
@@ -405,6 +421,7 @@ describe("recovery routes a stopped answer offers", () => {
                     streaming={false}
                     cancelling={false}
                     canRetry
+                    writeState="none"
                     hasPartial
                     labels={labels}
                     onCancel={() => {}}

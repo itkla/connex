@@ -14,6 +14,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.same;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
@@ -2341,6 +2342,53 @@ class AiInvocationServiceTest {
         verify(invocationAdmission).commitLeaderInvocation();
         verify(fallbackAdmission, never()).commitInvocation();
         verify(fallbackAdmission).close();
+        verify(providerTransport).run();
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void durablePrivacyIsRecheckedAtActualFallbackEgress(boolean expectedEpoch) {
+        var mapper = mock(ooo.klae.connex.backend.mappers.AiChatMapper.class);
+        var session = new ooo.klae.connex.backend.beans.AiChatSession();
+        session.setMissionTaintSeq(1);
+        var barrier = new ooo.klae.connex.backend.beans.AiAgentPrivacyBarrier();
+        barrier.setGeneration(1);
+        when(mapper.getPrivacySession(WORKSPACE_ID, 7)).thenReturn(session);
+        when(mapper.getPrivacyBarrier(WORKSPACE_ID)).thenReturn(barrier);
+        var token = new ooo.klae.connex.backend.ai.assistant.AiChatPrivacyToken(WORKSPACE_ID, 7, 1, 1);
+        AiInvocation invocation = invocation("Summarize relationship state");
+        when(aiInvocationAdmissionService.acquireDirect()).thenReturn(fallbackAdmission);
+        when(aiProvider.complete(any(AiCompletionRequest.class))).thenAnswer(call -> {
+            AiCompletionRequest request = call.getArgument(0);
+            assertThrows(AiProviderRequestRejectedException.class, () ->
+                    request.providerAttemptExecutor().execute(() -> {
+                        request.providerAttemptExecutor().beforeSend();
+                        providerTransport.run();
+                        throw new AiProviderRequestRejectedException("provider", 400);
+                    }));
+            barrier.setGeneration(2);
+            request.providerAttemptExecutor().execute(() -> {
+                request.providerAttemptExecutor().beforeSend();
+                providerTransport.run();
+                return "forbidden fallback";
+            });
+            throw new AssertionError("Durable privacy did not reject fallback egress");
+        });
+        java.util.function.Supplier<AiStructuredOutcome<IntroRationaleContent>> complete = () ->
+                ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard.execute(mapper, token,
+                        () -> service.completeStructured(invocation, IntroRationaleContent.class, invocationAdmission));
+        var refused = assertThrows(ooo.klae.connex.backend.ai.assistant.AiAssistantLoopException.class,
+                () -> {
+                    if (expectedEpoch) {
+                        restrictionEpoch.runWithExpectedEgressEpoch(WORKSPACE_ID,
+                                restrictionEpoch.current(WORKSPACE_ID), () -> complete.get());
+                    } else {
+                        complete.get();
+                    }
+                });
+        assertEquals("restrictions_changed", refused.detailReason());
+        verify(invocationAdmission).commitLeaderInvocation();
+        verify(fallbackAdmission, never()).commitInvocation();
         verify(providerTransport).run();
     }
 

@@ -8,6 +8,10 @@ import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.AiChatSession;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -18,6 +22,18 @@ import ooo.klae.connex.backend.tenant.Permission;
 public class AiAssistantSessionReadAudit {
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
+    private final UserMapper users;
+    private final WorkspaceMapper workspaces;
+    private final OrganizationMapper organizations;
+
+    /** Holds audit parents before the privacy barrier so strict auditing cannot invert root order. */
+    public void retainTranscriptAuditParents(int workspaceId, int userId) {
+        if (users.lockByIdForShare(userId) == null
+                || workspaces.lockWorkspaceForShare(workspaceId) == null
+                || organizations.lockByIdForShare(workspaceService.getCurrentOrgId()) == null) {
+            throw new ForbiddenException("AI assistant session is not accessible");
+        }
+    }
 
     /** Records one accessible administrative read when the caller holds the administrative role. */
     public void recordAccessible(int workspaceId, int userId, AiChatSession session) {

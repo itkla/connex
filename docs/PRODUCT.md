@@ -72,6 +72,7 @@ Numbered and testable. Cite them by number in reviews.
 |---|---|---|---|
 | The relationship metric (the differentiator) | **Warmth**; bands: **warmth band** (hot / warm / cool / cold); trend: "warmth is cooling" | **温度感**; bands: **温度帯**（ホット／ウォーム／クール／コールド） | relationship temperature, temperature band, relationship score; 温度バンド, 関係の温度, 関係性の温度, 関係スコア, 温度 alone as the metric name |
 | The signals triage surface | **Radar** ("Relationship Radar" only as an occasional full name in onboarding/marketing prose) | **レーダー** | Relationship Radar as the everyday label |
+| Read-only Ask Connex review of one selected record | **Record review** | **レコードの確認** | — |
 | The personal work page | **My Work** — your tasks, your relationships, your follow-ups | **マイワーク** | Profile (for this page); マイページ |
 | Company record | **Company** | **会社** | account (for the record); アカウント, 取引先 (legal pages: allowed) |
 | Person record | **Contact** (labels, columns, counts, search groups); "person/people" only inside explanatory prose | **連絡先**; 文中の「人」は可 | People (as a label for contact lists) |
@@ -169,6 +170,26 @@ creation. At the deadline, Apply and Discard become unavailable and the card exp
 proposal is needed. Reopening or refreshing never extends the window. Completed, discarded,
 failed and undone outcomes retain their meaning; an executed action's ten-minute undo window is
 independent. Expired proposal history remains readable under the existing access rules.
+
+When an assistant answer fails, Retry is offered only after Connex confirms that the answer made no
+changes and can identify that answer's own question unambiguously. A newer request in the chat
+removes Retry from the older answer. If changes were saved, their action cards remain visible; if
+Connex cannot confirm what was saved, it says so and asks the member to check their records.
+Continue from here puts a follow-up in the composer for the member to read and edit, without sending it.
+
+The requester's per-call execution evidence lets an answer that only read records, tasks, or
+activities retain Retry. Every call must be a read or a proposal in a server-guaranteed terminal,
+non-executable state (rejected or expired). A still-proposed or pending change keeps Retry hidden:
+another tab or an older action card could apply it after any check. A card's review deadline alone
+does not establish a terminal outcome; an action admitted before expiry may still finish afterward.
+Unknown tools or execution states, and older servers without this evidence, keep the conservative
+check-records guidance.
+Reconciliation re-checks the failed answer's own execution evidence, including after a proposal is
+approved. Once this client has seen a saved change for that answer, later refreshes cannot restore
+Retry by omitting its action card. An unreadable or missing proposal outcome keeps Retry hidden.
+Each Retry click revalidates that answer's execution evidence and action cards with the server
+before sending and proceeds only when that fresh evidence still rules out executable or saved
+changes. A failed check keeps Retry hidden and shows the existing guidance to check records.
 
 ## 7. Where things live
 

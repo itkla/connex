@@ -69,6 +69,8 @@ public interface PersonMapper {
     List<Person> getPersonsByTagId(@Param("workspaceId") int workspaceId, @Param("tagId") int tagId);
     List<Person> getPersonsByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     Person getPersonById(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    /** Reads one processable primary record without retrieving its linked company. */
+    Person getAssistantPrimaryPersonById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     /**
      * Returns one active, processable, workspace-owned contact inside the supplied member scope.
      * Shared-in, unassigned, archived, suspended, and provision-ceased contacts are excluded, and
@@ -88,8 +90,6 @@ public interface PersonMapper {
     List<Integer> getProcessablePersonIds(@Param("workspaceId") int workspaceId,
             @Param("ids") List<Integer> ids);
     List<Person> getByIds(@Param("workspaceId") int workspaceId, @Param("ids") List<Integer> ids);
-    List<Person> getPersonsByCompanyIds(@Param("workspaceId") int workspaceId,
-            @Param("companyIds") List<Integer> companyIds);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Integer> getVisibleIdsIn(
         @Param("workspaceId") int workspaceId,

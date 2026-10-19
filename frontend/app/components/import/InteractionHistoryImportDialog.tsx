@@ -12,9 +12,11 @@ import {
 import { LoaderCircle } from "lucide-react";
 
 import { useWorkspace } from "@/app/hooks/useWorkspace";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import {
     commitInteractionHistoryImport,
     isFieldError,
+    isWorkspaceUnavailableError,
     previewInteractionHistoryImport,
     search,
 } from "@/app/lib/api";
@@ -122,6 +124,11 @@ export default function InteractionHistoryImportDialog({
     onOpenChange: (open: boolean) => void;
 }) {
     const t = useTranslations("importExport.history");
+    const showApiError = useApiErrorToast();
+    const reportFailure = (error: unknown, fallback: string) => {
+        if (isWorkspaceUnavailableError(error)) showApiError(error);
+        else toastError(firstFieldError(error, fallback));
+    };
     const { activeWorkspaceId } = useWorkspace();
     const [step, setStep] = useState<Step>("upload");
     const [kind, setKind] = useState<HistoryImportKind>("activities");
@@ -294,7 +301,7 @@ export default function InteractionHistoryImportDialog({
                 !controller.signal.aborted
                 && operationGenerationRef.current === generation
             ) {
-                toastError(firstFieldError(error, t("errors.preview")));
+                reportFailure(error, t("errors.preview"));
             }
         } finally {
             if (
@@ -337,7 +344,7 @@ export default function InteractionHistoryImportDialog({
             ) {
                 setReviewProof(null);
                 setReviewedKey(null);
-                toastError(firstFieldError(error, t("errors.commit")));
+                reportFailure(error, t("errors.commit"));
             }
         } finally {
             if (

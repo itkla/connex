@@ -84,6 +84,7 @@ Read the relevant contract before editing that subsystem:
 | API mappings, anonymous access, deprecation or retirement | `../docs/backend/API_SURFACE.md` |
 | Security/auth/provider/upload boundary | `../docs/backend/SECURITY_BOUNDARIES.md` |
 | AI, masking, assistant, model-provider egress | `../docs/backend/AI_SECURITY.md` |
+| Durable missions, enrolled chat privacy, DSR cleanup | `../docs/backend/AI_MISSIONS.md` |
 | Business-card upload/OCR/fallback/import | `../docs/backend/BUSINESS_CARD_SCANNING.md`, `../ocr/AGENTS.md` |
 | Automation, segments, rules, workflows | `../docs/backend/AUTOMATION.md` |
 | Duplicate review, CSV, interaction-history import | `../docs/backend/IMPORTS_AND_DUPLICATE_REVIEW.md` |
@@ -151,7 +152,7 @@ Architecture tests are enforcement, not obstacles. If a migration or mapper chan
 
 ## Verification
 
-Use targeted local verification. The required `Backend — build & test` CI job aggregates `backend-unit` (`verifyTestPartition unitTest`, two DB-free forks) and `backend-db` (two shards, each with its own MySQL service). `dbTestShard1` runs DB-backed service tests; `dbTestShard2` runs the remaining DB-backed tests plus the separate `scriptedTrajectoryTest` task. `verifyTestPartition` compiles tests and independently checks compiled test carriers against the tasks' actual selections for complete, disjoint, non-empty coverage. Local `test`, `scriptedTrajectoryTest`, and `check` keep their existing behavior.
+Use targeted local verification. The required `Backend — build & test` CI job aggregates `backend-unit` (`verifyTestPartition unitTest`, two DB-free forks) and `backend-db` (two shards, each with its own MySQL service). `dbTestShard1` runs DB-backed service tests; `dbTestShard2` runs the remaining DB-backed tests plus the separate `scriptedTrajectoryTest` task. `verifyTestPartition` compiles tests and independently checks runtime-visible class/method annotations for direct, composed-annotation, inherited, and nested test carriers against the tasks' actual selections for complete, disjoint, non-empty coverage. Static nested carriers can be selected independently; inner carriers require their enclosing owner. Compiled verifier fixtures are excluded from normal test suites. Local `test`, `scriptedTrajectoryTest`, and `check` keep their existing behavior.
 
 For a material backend change:
 

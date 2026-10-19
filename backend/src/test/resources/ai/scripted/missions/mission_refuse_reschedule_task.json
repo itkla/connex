@@ -1,0 +1,25 @@
+{
+  "id": "mission_refuse_reschedule_task",
+  "selector": "connex_script_mission_refuse_reschedule_task",
+  "capabilityClass": "scripted-native",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "reschedule_task",
+        "arguments": "{\"handle\":\"t1\",\"due_date\":\"2026-10-20\"}"
+      }
+    },
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "onRepair": true,
+      "emit": {
+        "kind": "failure",
+        "failureKind": "transport"
+      }
+    }
+  ]
+}

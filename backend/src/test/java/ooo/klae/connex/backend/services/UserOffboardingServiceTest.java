@@ -235,6 +235,10 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
             retainedChatSession, retainedChatOwner, "Retained account transcript");
         chatToolCall(retainedChatMessage, retainedChatOwner, "retained_account_tool");
         chatTurn(retainedChatSession, retainedChatOwner, "Retained account turn");
+        AiChatSession sharedChatSession = chatSession(retainedChatOwner);
+        AiChatMessage sharedChatMessage = chatMessage(sharedChatSession, target, "Shared contribution");
+        chatToolCall(sharedChatMessage, target, "shared_account_tool");
+        chatTurn(sharedChatSession, target, "Shared account turn");
         aiChatMapper.insertParticipant(
             workspace.getId(), erasedChatSession.getId(), retainedChatOwner.getId());
         aiChatMapper.insertParticipant(
@@ -338,6 +342,18 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         assertNull(jdbcTemplate.queryForObject(
             "SELECT requested_by_user_id FROM ai_chat_turn WHERE workspace_id = ? AND session_id = ?",
             Integer.class, workspace.getId(), erasedChatSession.getId()));
+        assertEquals(retainedChatOwner.getId(), aiChatMapper.getSessionById(
+            workspace.getId(), retainedChatOwner.getId(), sharedChatSession.getId()).getCreatedByUserId());
+        AiChatMessage sharedMessageAfter = aiChatMapper.getMessageById(
+            workspace.getId(), sharedChatSession.getId(), sharedChatMessage.getId());
+        assertNull(sharedMessageAfter.getAuthorUserId());
+        assertEquals("Shared contribution", sharedMessageAfter.getContent());
+        assertNull(jdbcTemplate.queryForObject(
+            "SELECT executed_by_user_id FROM ai_chat_tool_call WHERE workspace_id = ? AND message_id = ?",
+            Integer.class, workspace.getId(), sharedChatMessage.getId()));
+        assertNull(jdbcTemplate.queryForObject(
+            "SELECT requested_by_user_id FROM ai_chat_turn WHERE workspace_id = ? AND session_id = ?",
+            Integer.class, workspace.getId(), sharedChatSession.getId()));
         RecordCommentThread retainedThread = recordCommentService.getThread(commentThread.getId());
         assertNull(retainedThread.getCreatedByUserId());
         assertNull(retainedThread.getResolvedByUserId());
@@ -629,7 +645,7 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         AiChatMessage message = new AiChatMessage();
         message.setWorkspaceId(session.getWorkspaceId());
         message.setSessionId(session.getId());
-        message.setSeq(1);
+        message.setSeq(aiChatMapper.nextMessageSequence(session.getWorkspaceId(), session.getId()));
         message.setAuthorKind("user");
         message.setAuthorUserId(author.getId());
         message.setContent(content);

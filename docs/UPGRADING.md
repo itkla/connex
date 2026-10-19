@@ -187,6 +187,14 @@ contract is in [AI_SECURITY.md](backend/AI_SECURITY.md#exposure-enforcement-acro
   previous rollback behavior. This guard does not reverse migrations or replace the coordinated
   restart requirements below.
 
+### V232 mission privacy and message-sequence cutover
+
+V232 requires a coordinated drain of every old backend, scheduled worker, and message writer before migration. Keep message writes stopped through backfill and deploy only binaries that use the session's durable `message_seq_high_water` allocator for every message insertion. Deleting messages never resets that counter or the immutable first-mission taint boundary.
+
+The rollback floor is `tenant/V232__ai_agent_runs.sql`. Once this backend may have run, a pre-V232 binary cannot safely read or write enrolled chat holdings, even with missions disabled. Use forward recovery. Returning below this floor requires an explicit drain, terminal settlement, privacy purge and residual verification; disabling the flag alone is insufficient.
+
+Keep missions disabled until routed initialization has verified every workspace barrier, recovered legacy null-token turns and unowned mission attempts, and confirmed incomplete privacy work remains blocked. Missing barriers with mission evidence require repair, never generation-1 recreation. Complete the [mission acceptance gate](backend/AI_MISSIONS.md) and record synthetic staging evidence on #2101 before enabling exact provider declarations. Slice 1 requires a drained single serving JVM; mixed-version or multi-JVM operation is not supported by the local dispatch fence.
+
 ### Malware-scanning cutover — start the sidecar before the backend
 
 The release that introduces upload malware scanning (issue #1240) adds a required ClamAV sidecar.
@@ -247,7 +255,7 @@ Staging automatic rollback and interrupted-deployment recovery therefore refuse 
 V231 and use the existing forward-recovery procedure. Do not remove the marker or relabel timestamps
 to permit rollback. A compatible V231 release remains eligible for ordinary paired rollback.
 
-V231 is reserved for Phase 2 slice 1. This cutover introduces no proposal-set storage or producer.
+V232 is reserved for Phase 2 slice 1. This cutover introduces no proposal-set storage or producer.
 
 ### V227/V228 campaign unsubscribe cutover
 

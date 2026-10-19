@@ -547,6 +547,26 @@ class TenantResolutionInterceptorTest {
     }
 
     @ParameterizedTest
+    @ValueSource(ints = {11, 19})
+    void workspaceCreationRefusesAnUnavailableExplicitOriginBeforeSelectionRecovery(int cookieWorkspace) {
+        liveContext.set(11, 3, 7, "member", null);
+        when(workspaceService.getRole(11, 7)).thenReturn(null);
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/workspaces");
+        request.addHeader("X-Workspace-Id", "11");
+        request.setCookies(new Cookie(WorkspaceCookie.NAME, Integer.toString(cookieWorkspace)));
+
+        ForbiddenException failure = assertThrows(ForbiddenException.class,
+            () -> interceptorWithRealResolver().preHandle(request, response, handler));
+
+        assertEquals("Not a member of workspace 11", failure.getMessage());
+        assertFalse(liveContext.isResolved());
+        verify(workspaceService, never()).defaultWorkspaceIdFor(anyInt());
+        verify(workspaceService, never()).rememberActive(anyInt(), anyInt());
+        verify(workspaceService, never()).forgetActive(anyInt());
+        verifyNoInteractions(workspaceCookie, catalogResolver);
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {
         "/api/workspaces/11",
         "/api/workspaces/11/members",

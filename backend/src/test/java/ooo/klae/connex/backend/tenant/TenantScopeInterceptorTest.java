@@ -140,6 +140,8 @@ class TenantScopeInterceptorTest {
         assertFalse(interceptor.requiresResolvedContext(
             NS + "AiChatMapper.deleteParticipantsForUserAnywhere"));
         assertFalse(interceptor.requiresResolvedContext(
+            NS + "AiChatMapper.lockSessionsForUserErasureAnywhere"));
+        assertFalse(interceptor.requiresResolvedContext(
             NS + "AiChatMapper.clearSessionCreatorsAnywhere"));
         assertFalse(interceptor.requiresResolvedContext(
             NS + "AiChatMapper.clearMessageAuthorsAnywhere"));

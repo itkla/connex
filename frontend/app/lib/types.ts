@@ -1460,6 +1460,7 @@ export type DataSubjectRequestStatus =
     | 'closed';
 
 export type DataSubjectRequest = {
+    snapshotToken: string;
     id: number;
     orgId: number;
     requestType: DataSubjectRequestType;
@@ -1935,6 +1936,24 @@ export type ApprovalDelegate = {
     username: string;
     displayName?: string | null;
     email: string;
+};
+
+/** One server-authorized candidate for managing an active approval step. */
+export type ApprovalStepCandidate = {
+    id: number;
+    username: string;
+    displayName: string | null;
+    email: string;
+};
+
+/** Advisory candidates and quorum context, resolved in the caller's active workspace. */
+export type ApprovalStepCandidates = {
+    candidates: ApprovalStepCandidate[];
+    requiredCount: number;
+    approvedCount: number;
+    remainingRequiredCount: number;
+    decidedByUserIds: number[];
+    effectiveApproverIds: number[];
 };
 
 /** One frozen step of an approval chain, with the approvals collected so far. */
@@ -3244,6 +3263,111 @@ export type AiChatMessage = {
     todos?: AiChatTodo[] | null;
 };
 
+/** Slice-one record review scope, fixed when the request is accepted. */
+export type AiAgentRecordScope = {
+    kind: 'record';
+    recordKind: AiChatPageContextKind;
+    recordId: number;
+};
+
+export type AiAgentRunState = 'queued' | 'running' | 'waiting_approval' | 'paused' | 'done' | 'failed' | 'cancelled';
+export type AiAgentRunControl = 'pause' | 'resume' | 'cancel';
+
+/** Mission revisions remain decimal strings throughout the browser. */
+export type AiAgentRun = {
+    schemaVersion: 1;
+    id: number;
+    sessionId: number | null;
+    missionType: 'record_review_v1';
+    definitionVersion: 1;
+    state: AiAgentRunState;
+    reasonCode: string | null;
+    stateVersion: string;
+    goal: string | null;
+    scope: AiAgentRecordScope | null;
+    createdAt: string;
+    executionDeadlineAt: string;
+    hardDeadlineAt: string;
+    startedAt: string | null;
+    finishedAt: string | null;
+    outputAvailable: boolean;
+    contentWithheld: boolean;
+    availableActions: (AiAgentRunControl | 'view_output')[];
+    progress: {
+        phase: 'queued' | 'reading' | 'writing_report';
+        completedRecords: number;
+        totalRecords: number;
+    } | null;
+};
+
+export type AiAgentRunCreateRequest = {
+    clientRequestKey: string;
+    missionType: 'record_review_v1';
+    goal: string;
+    scope: AiAgentRecordScope;
+    limits?: {
+        maxSteps?: number;
+        maxTokens?: number;
+        executionLifetimeSeconds?: number;
+    };
+};
+
+export type AiAgentRunPage = { items: AiAgentRun[]; nextCursor: string | null };
+
+/** Slice one has a canonical report and no proposals or write receipts. */
+export type AiAgentOutput = {
+    schemaVersion: 1;
+    runId: number;
+    outputRevision: '1';
+    report: {
+        messageId: number;
+        markdown: string;
+        citations: AiChatCitation[];
+        coverage: { processed: number; skipped: number; failed: number; unprocessed: number };
+        generatedAt: string;
+    };
+    proposalSet: {
+        id: number;
+        revision: '0';
+        frozen: true;
+        reviewExpiresAt: null;
+        items: never[];
+        derivedCounts: { pending: 0; executed: 0; rejected: 0; withdrawn: 0 };
+    };
+    autoWriteReceipts: never[];
+};
+
+/** Mission realtime carries invalidation metadata only; content comes from authorized GETs. */
+export type AiAgentRealtimeFrame = {
+    workspaceId: number;
+    sessionId: number;
+    runId: number;
+    stateVersion: string;
+    kind: 'mission_created' | 'mission_state' | 'mission_output';
+    coarseState: AiAgentRunState;
+};
+
+export type AiAgentHoldingsPurgeRequest = {
+    idempotencyKey: string;
+    snapshotToken: string;
+    scopeAcknowledgement: 'organization_mission_holdings_v1';
+    cutoffPolicyAcknowledgement: 'contents_at_each_workspace_first_invalidation_v1';
+};
+
+export type AiAgentHoldingsPurge = {
+    schemaVersion: 1;
+    operationId: string;
+    requestId: string;
+    scope: 'organization_mission_holdings_v1';
+    cutoffPolicy: 'contents_at_each_workspace_first_invalidation_v1';
+    acceptedAt: string;
+    state: 'invalidation_pending' | 'purging' | 'retrying' | 'complete';
+    workspaceCount: number;
+    completedWorkspaceCount: number;
+    completedAt: string | null;
+    reasonCode: string | null;
+};
+
 /** Viewer-safe membership state for one shared assistant session participant. */
 export type AiChatParticipant = {
     userId: number;
@@ -3362,7 +3486,8 @@ export type AiOrganizationBudget = {
 export type AiChatSessionDetail = {
     session: AiChatSession;
     messages: Page<AiChatMessage>;
-    activeTurn: AiChatTurn | null;
+    /** Omitted by the server's non-null JSON projection when no turn is active. */
+    activeTurn?: AiChatTurn | null;
 };
 
 /** One declared assistant capability the calling member may run on the current surface. */
@@ -3464,6 +3589,14 @@ export type AiChatTurnAccepted = {
     scope?: AiChatQueryScope | null;
 };
 
+/** Requester-only execution evidence classified by the server's authoritative tool catalog. */
+export type AiChatTurnToolCall = {
+    toolName: string;
+    /** Unknown tools have no tier; future tier values must remain unsafe to retry. */
+    tier: string | null;
+    status: string;
+};
+
 /** Caller-safe durable state for one assistant turn, including the persisted streamed partial. */
 export type AiChatTurn = {
     turnId: number;
@@ -3472,6 +3605,8 @@ export type AiChatTurn = {
     terminalReason: string | null;
     partialContent?: string | null;
     progress: AiChatProgressItem[];
+    /** Absent on older servers and null for readers other than the requester. */
+    toolCalls?: AiChatTurnToolCall[] | null;
     /**
      * Whether the reader asked for this turn. A shared-session participant watching another
      * member's turn is not its requester, and the cancellation endpoint rejects them, so the stop

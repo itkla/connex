@@ -62,6 +62,10 @@ public class AiAssistantIdentifierResolver {
     }
 
     private Resolution resolveConverged(String message) {
+        var memberReading = ReferenceService.memberReferenceReading(message);
+        if (!memberReading.complete()) {
+            throw AiAssistantLoopException.malformed("identifier_text_unsafe");
+        }
         MaskingEngine.MentionScanText scanText = MaskingEngine.mentionScanText(message);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         String orgWorkspaceIdsJson = workspaceScopeControlAccess
@@ -100,7 +104,7 @@ public class AiAssistantIdentifierResolver {
         var memberLabels = new LinkedHashSet<String>();
         AiAssistantMemberIdentifiers.labels(workspaceService.getMembers(workspaceId)).stream()
                 .filter(label -> MaskingEngine.containsMemberMention(scanText, label)).forEach(memberLabels::add);
-        List<ReferenceService.MemberReference> memberReferences = ReferenceService.memberReferencesInContent(message);
+        List<ReferenceService.MemberReference> memberReferences = memberReading.references();
         Set<Set<Integer>> targetGroups = Collections.newSetFromMap(new IdentityHashMap<>());
         var memberIds = new LinkedHashSet<Integer>();
         for (ReferenceService.MemberReference reference : memberReferences) {

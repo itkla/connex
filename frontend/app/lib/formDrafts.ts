@@ -11,7 +11,14 @@ export const DEFAULT_DRAFT_FRESHNESS_MS = 60 * 60 * 1000;
  * version no longer matches its form type is dropped on read (the version lives in the envelope, not the
  * key, so a newer reader still sees and sweeps older drafts).
  */
-export const DRAFT_VERSIONS: Record<string, number> = { activity: 1, note: 1, task: 1, comment: 1, deal: 1 };
+export const DRAFT_VERSIONS: Record<string, number> = {
+    activity: 1,
+    note: 1,
+    noteEditor: 1,
+    task: 1,
+    comment: 1,
+    deal: 1,
+};
 
 /** The serializable fields owned by the shell deal quick-create composer. */
 export type DealDraft = {

@@ -16,7 +16,6 @@ import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
-import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
@@ -87,7 +86,7 @@ public class PersonService {
     private final DuplicateDecisionLockService duplicateDecisionLockService;
     private final RecordCreationAugmentationService recordCreationAugmentationService;
     private final ProviderCaptureMapper providerCaptureMapper;
-    private final AiRestrictionEpoch aiRestrictionEpoch;
+    private final ooo.klae.connex.backend.ai.mission.AiAgentPrivacyService aiAgentPrivacyService;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "email", "phone", "title", "imageUrl");
@@ -274,6 +273,14 @@ public class PersonService {
             referenceService.hydrateNotePreviews(workspaceId, noteMapper.getVisibleNotesByPersonId(
                 workspaceId, id, workspaceService.getCurrentUserId(), 25, 0)).toArray(new Note[0]));
         return hydrated;
+    }
+
+    /** Returns a processable primary record without loading linked records or attached evidence. */
+    public Person getAssistantPrimaryPersonById(int id) {
+        Person person = personMapper.getAssistantPrimaryPersonById(
+                workspaceService.getCurrentWorkspaceId(), id);
+        if (person == null) throw new ResourceNotFoundException("Contact not found");
+        return person;
     }
 
     /**
@@ -734,7 +741,8 @@ public class PersonService {
         int revokedShares = provisionCeased ? shareMapper.revokePersonShares(id, workspaceId) : 0;
         int purgedAiOutputs = 0;
         if (suspended || provisionCeased) {
-            aiRestrictionEpoch.bumpAll(restrictionWorkspaceIds);
+            aiAgentPrivacyService.invalidateWorkspaces(
+                    restrictionWorkspaceIds, java.util.UUID.randomUUID(), "restriction", null, null);
             purgedAiOutputs = aiOutputCacheMapper.deleteForPerson(workspaceId, id);
         }
         Person after = requireOwnedPerson(workspaceId, id);

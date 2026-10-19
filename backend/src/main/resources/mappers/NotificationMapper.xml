@@ -229,6 +229,11 @@
         SELECT 1 FROM ai_chat_session source_session
         WHERE source_session.workspace_id = n.workspace_id
           AND source_session.id = n.source_id
+          AND (source_session.mission_taint_generation IS NULL OR EXISTS (
+            SELECT 1 FROM ai_agent_privacy_barrier source_barrier
+            WHERE source_barrier.workspace_id = source_session.workspace_id
+              AND source_barrier.blocked = FALSE
+          ))
           AND (
             source_session.created_by_user_id = n.recipient_id
             OR EXISTS (

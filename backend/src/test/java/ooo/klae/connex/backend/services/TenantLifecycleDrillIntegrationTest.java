@@ -371,6 +371,7 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
                 BodySafeSmtpTransport.class.getPackageName());
         java.util.logging.Level previousSmtpLevel = smtpLogger.getLevel();
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.list = new java.util.concurrent.CopyOnWriteArrayList<>();
         appender.start();
         logger.addAppender(appender);
         logger.setLevel(Level.DEBUG);

@@ -115,8 +115,8 @@ public class AiAssistantWorkBriefReadService {
         Map<Integer, String> descriptions = new LinkedHashMap<>();
         for (Task task : referenceService.hydrateTasks(workspaceId, storedProse)) {
             AiAssistantMemberIdentifiers.seedReferences(task.getReferences(), resources.maskingContext());
-            AiAssistantMemberIdentifiers.seedReferenceText(task.getDescription(), resources.maskingContext());
-            descriptions.put(task.getId(), task.getDescription());
+            descriptions.put(task.getId(), AiAssistantMemberIdentifiers.seedReferenceText(
+                    task.getDescription(), resources.maskingContext()));
         }
         List<Identifier> identifiers = new ArrayList<>();
         TextBudget budget = new TextBudget(MAX_RESULT_TEXT_CHARS);
