@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { act, type ReactNode } from "react";
+import { act, type ReactNode, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -173,7 +173,10 @@ let root: Root | null = null;
 let captured: ReturnType<typeof useWorkspace> | null = null;
 
 function Capture({ onRender }: { onRender: (value: ReturnType<typeof useWorkspace>) => void }): null {
-    onRender(useWorkspace());
+    const value = useWorkspace();
+    useEffect(() => {
+        onRender(value);
+    }, [onRender, value]);
     return null;
 }
 
