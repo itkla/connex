@@ -18,7 +18,7 @@ import type {
     DuplicatePreflightResponse,
     PersonDuplicatePreflightRequest,
 } from '@/app/lib/types';
-import { renderedWorkspaceId, workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { formatDateTime } from '@/app/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -27,12 +27,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
 type PreflightState = {
-    status: "ready";
+    status: 'ready';
     response: DuplicatePreflightResponse;
     acknowledged: boolean;
     origin: RequestInit;
 } | {
-    status: "idle" | "checking" | "error";
+    status: 'idle' | 'checking' | 'error';
     response: null;
     acknowledged: boolean;
 };
@@ -80,7 +80,7 @@ export default function CaptureReviewDialog({
     };
 
     const create = async () => {
-        const origin = preflight.status === "ready"
+        const origin = preflight.status === 'ready'
             ? preflight.origin
             : workspacePinnedRequest(renderedWorkspaceId());
         if (preflight.status === 'ready' && preflight.response) {
@@ -104,7 +104,7 @@ export default function CaptureReviewDialog({
                 phones: contact.phone ? [contact.phone] : [],
             }, origin);
             const hasCandidates = response.candidates.length > 0 || response.truncated;
-            setPreflight({ status: "ready", response, acknowledged: !hasCandidates, origin });
+            setPreflight({ status: 'ready', response, acknowledged: !hasCandidates, origin });
             if (!hasCandidates) {
                 await resolve({
                     action: 'create',

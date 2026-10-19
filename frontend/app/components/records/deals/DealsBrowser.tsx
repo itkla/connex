@@ -97,7 +97,7 @@ import {
     ApiError,
     isFieldError,
 } from '@/app/lib/api';
-import { renderedWorkspaceId, workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import {
     recordDetailNavigationPath,
     recordDetailPath,

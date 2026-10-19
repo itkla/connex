@@ -11,7 +11,7 @@ import QuickEditDealSheet, { type DealDraft } from '@/app/components/records/dea
 import { CustomFieldsEditSection, type CustomFieldsEditHandle } from '@/app/components/records/CustomFieldsEditSection';
 import { actualValueForOutcome } from '@/app/components/records/deals/dealOutcome';
 import { getPipelines, getStagesByPipelineId, updateDeal } from '@/app/lib/api';
-import { renderedWorkspaceId, workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { type Deal, type Pipeline, type Stage, type UpdateDealPayload } from '@/app/lib/types';
 
 function toDraft(d: Deal): DealDraft {

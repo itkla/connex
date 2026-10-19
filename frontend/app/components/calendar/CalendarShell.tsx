@@ -9,7 +9,7 @@ import { ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
 import Rise from '@/app/components/motion/Rise';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { completeTask, rescheduleDeal, rescheduleTask } from '@/app/lib/api';
-import { renderedWorkspaceId, workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { useNow } from '@/app/hooks/useNow';
 import { isTypingTarget, parseCalendarDate } from '@/app/lib/utils';
 import type { Activity, Contact, Deal, Note, RelationshipTemperature, Task } from '@/app/lib/types';

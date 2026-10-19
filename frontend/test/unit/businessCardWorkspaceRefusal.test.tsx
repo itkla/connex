@@ -9,13 +9,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BusinessCardCapture } from '@/app/components/records/contacts/BusinessCardCapture';
 import { useBusinessCardCapture } from '@/app/components/records/contacts/useBusinessCardCapture';
 import { importBusinessCard } from '@/app/lib/api';
-import { bindRenderedWorkspace, releaseRenderedWorkspace, rememberWorkspaceNames, workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
+import { bindRenderedWorkspace, releaseRenderedWorkspace, rememberWorkspaceNames, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import type { BusinessCardImportDraft, CreateContactPayload, Workspace } from '@/app/lib/types';
 import contactsEn from '@/messages/en/contacts.json';
 import contactsJa from '@/messages/ja/contacts.json';
 import errorsEn from '@/messages/en/errors.json';
 import errorsJa from '@/messages/ja/errors.json';
-import { deferred } from "./helpers/workspaceChainBackend";
+import { deferred } from './helpers/workspaceChainBackend';
 
 vi.mock('@/app/hooks/useWorkspace', () => ({
     useWorkspace: () => ({ activeWorkspaceId: 9 }),
@@ -169,22 +169,22 @@ async function refuseOperation(path: string, file: File) {
 }
 
 describe('business-card refusals stay bound to the named workspace', () => {
-    it.each(["already aborted", "during identity"])("cancels import preparation when the caller is %s", async (when) => {
-        const writes = stubBackend("/unused");
+    it.each(['already aborted', 'during identity'])('cancels import preparation when the caller is %s', async (when) => {
+        const writes = stubBackend('/unused');
         render(<NextIntlClientProvider locale="en" messages={{ ...contactsEn, ...errorsEn }}><Capture /></NextIntlClientProvider>);
-        await waitFor(() => expect(capture().recoveryStatus).toBe("ready"));
-        act(() => capture().selectFile(new File(["card"], "card.png", { type: "image/png" })));
-        await waitFor(() => expect(capture().status).toBe("ready"));
-        act(() => capture().selectCompanyMode("none"));
+        await waitFor(() => expect(capture().recoveryStatus).toBe('ready'));
+        act(() => capture().selectFile(new File(['card'], 'card.png', { type: 'image/png' })));
+        await waitFor(() => expect(capture().status).toBe('ready'));
+        act(() => capture().selectCompanyMode('none'));
         const backend = vi.mocked(fetch).getMockImplementation();
-        if (!backend) throw new Error("The business-card backend was not installed");
+        if (!backend) throw new Error('The business-card backend was not installed');
         const held = deferred<Response>();
         const started = deferred<void>();
         let identitySignal: AbortSignal | null | undefined;
-        let holdIdentity = when === "during identity";
+        let holdIdentity = when === 'during identity';
         vi.mocked(fetch).mockImplementation(async (input, init) => {
             const path = input instanceof Request ? input.url : String(input);
-            if (holdIdentity && path === "/api/auth/me") {
+            if (holdIdentity && path === '/api/auth/me') {
                 holdIdentity = false;
                 identitySignal = init?.signal;
                 started.resolve();
@@ -193,12 +193,12 @@ describe('business-card refusals stay bound to the named workspace', () => {
             return backend(input, init);
         });
         const controller = new AbortController();
-        if (when === "already aborted") controller.abort();
+        if (when === 'already aborted') controller.abort();
         const before = writes.length;
         let pending: Promise<BusinessCardImportDraft | undefined> | undefined;
         await act(async () => {
-            pending = capture().prepareImportDraft(false, { type: "create" }, workspacePinnedRequest(WORKSPACE_ID, { signal: controller.signal }));
-            if (when === "during identity") await started.promise;
+            pending = capture().prepareImportDraft(false, { type: 'create' }, workspacePinnedRequest(WORKSPACE_ID, { signal: controller.signal }));
+            if (when === 'during identity') await started.promise;
         });
         let draft: BusinessCardImportDraft | undefined;
         await act(async () => {
@@ -209,8 +209,8 @@ describe('business-card refusals stay bound to the named workspace', () => {
 
         expect(writes.slice(before)).toEqual([]);
         expect(draft).toBeUndefined();
-        if (when === "during identity") expect(identitySignal?.aborted).toBe(true);
-        expect(Object.keys(window.localStorage).filter((key) => key.startsWith("connex:business-card-import-recovery:"))).toEqual([]);
+        if (when === 'during identity') expect(identitySignal?.aborted).toBe(true);
+        expect(Object.keys(window.localStorage).filter((key) => key.startsWith('connex:business-card-import-recovery:'))).toEqual([]);
         expect(capture().requiresExactImportRetry).toBe(false);
     });
 

@@ -178,7 +178,7 @@ import { LEAD_SOURCES } from '@/app/lib/contactProvenance';
 import { proposalReviewNow } from '@/app/lib/proposalReviewClock';
 import { createAiChatSocket } from '@/app/lib/realtime';
 import { workspaceUnavailableDescription } from '@/app/lib/errorMessages';
-import { renderedWorkspaceId, workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { formatDate, formatRelativeTime, formatUtcDateTime } from '@/app/lib/utils';
 import type {

@@ -7,7 +7,7 @@ import { useTranslations } from 'next-intl';
 import { Checkbox } from '@/components/ui/checkbox';
 import NoteContent from '@/app/components/activity/notes/NoteContent';
 import { updateTask } from '@/app/lib/api';
-import { renderedWorkspaceId, workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { noteContentToPlainText } from '@/app/lib/references';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { formatShortDate, startOfLocalDay, timeOf } from '@/app/lib/utils';

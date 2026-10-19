@@ -16,7 +16,7 @@ import {
     getCompanyPeople,
     getUsers,
 } from '@/app/lib/api';
-import { renderedWorkspaceId, workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { toastWarn } from '@/app/lib/toast';
 import type {
     Contact,

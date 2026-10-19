@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useTransition, type ComponentProps } from 'react';
 
 import { Button } from '@/components/ui/button';
-import { navigateAfterWorkspaceSelection } from "@/app/lib/renderedWorkspace";
+import { navigateAfterWorkspaceSelection } from '@/app/lib/renderedWorkspace';
 
 /**
  * Retries workspace resolution without navigating away from the requested route. Server-rendered

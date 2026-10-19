@@ -14,8 +14,9 @@ import CaptureReviewDialog from "@/app/components/account/connected-capture/Capt
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { createCompany, createContact, createDeal, decideCaptureReview, preflightPersonDuplicates, uploadCompanyLogo, uploadContactPicture } from "@/app/lib/api";
 import { bindRenderedWorkspace, releaseRenderedWorkspace } from "@/app/lib/renderedWorkspace";
+import { toastError, toastSuccess } from "@/app/lib/toast";
 import type { ApprovalPolicy, CaptureReviewItem, User } from "@/app/lib/types";
-import { company, contact, deal, image, json, ORIGIN, pipeline, shell, stage, stubBackend, switchWorkspace } from "./helpers/workspaceChainBackend";
+import { company, contact, deal, image, json, NEXT, ORIGIN, pipeline, shell, stage, stubBackend, switchWorkspace } from "./helpers/workspaceChainBackend";
 
 const noop = vi.hoisted(() => () => undefined);
 const translate = vi.hoisted(() => Object.assign((key: string) => key, { has: () => false }));
@@ -51,6 +52,15 @@ function button(label: string): HTMLButtonElement {
     const found = [...document.querySelectorAll("button")].find((item) => item.textContent?.trim() === label);
     if (!found) throw new Error("Missing button " + label);
     return found;
+}
+async function changeInput(id: string, value: string): Promise<void> {
+    const input = document.getElementById(id);
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    if (!(input instanceof HTMLInputElement) || !setValue) throw new Error("Missing input " + id);
+    await act(async () => {
+        setValue.call(input, value);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
 }
 async function ready(): Promise<void> {
     await act(async () => { await new Promise((done) => setTimeout(done, 450)); });
@@ -182,6 +192,87 @@ describe("dialog chain origins", () => {
             confirmInvalidation: true,
             impactFingerprint: "origin-impact",
         });
+    });
+
+    it.each([
+        { boundary: "reopen", outcome: "tightening" },
+        { boundary: "reopen", outcome: "unchanged" },
+        { boundary: "reopen", outcome: "failure" },
+        { boundary: "policy change", outcome: "tightening" },
+        { boundary: "policy change", outcome: "unchanged" },
+        { boundary: "unmount", outcome: "unchanged" },
+    ])("discards a late $outcome approval preview after $boundary", async ({ boundary, outcome }) => {
+        const previewPath = "/api/approval-policies/41/impact";
+        const backend = stubBackend(previewPath);
+        const policy: ApprovalPolicy = { id: 41, name: "Origin policy", active: true, mode: "sequential", separationOfDuties: "strict", steps: [], createdAt: "", updatedAt: "" };
+        const reopened = boundary === "policy change" ? { ...policy, id: 52, name: "Reopened policy" } : policy;
+        const onSaved = vi.fn();
+        await render(<ApprovalPolicyDialog open onOpenChange={noop} policy={policy} onSaved={onSaved} />);
+        await act(async () => { button("save").click(); await backend.started.promise; });
+        if (boundary === "reopen") await render(<ApprovalPolicyDialog open={false} onOpenChange={noop} policy={policy} onSaved={onSaved} />);
+        if (boundary === "unmount") await render(null);
+        switchWorkspace();
+        await render(<ApprovalPolicyDialog open onOpenChange={noop} policy={reopened} onSaved={onSaved} />);
+        await changeInput("policy-name", "Reopened policy");
+        await act(async () => backend.held.resolve(outcome === "failure"
+            ? json({ error: "Preview unavailable" }, 500)
+            : json({ changeClass: outcome === "tightening" ? "TIGHTEN" : "UNCHANGED", pendingApprovalCount: 1, affected: [], impactFingerprint: "closed-session-impact" })));
+
+        expect(document.body.textContent).not.toContain("impactTitle");
+        expect(document.querySelector<HTMLInputElement>("#policy-name")?.value).toBe("Reopened policy");
+        expect(button("save").disabled).toBe(false);
+        expectWrites(backend, [previewPath]);
+        expect(onSaved).not.toHaveBeenCalled();
+        expect(toastSuccess).not.toHaveBeenCalled();
+        expect(toastError).not.toHaveBeenCalled();
+
+        await act(async () => button("save").click());
+
+        expect(backend.requests.map(({ path, workspace }) => ({ path, workspace }))).toEqual([
+            { path: previewPath, workspace: String(ORIGIN) },
+            { path: `/api/approval-policies/${reopened.id}/impact`, workspace: String(NEXT) },
+            { path: `/api/approval-policies/${reopened.id}`, workspace: String(NEXT) },
+        ]);
+        const body = backend.requests.at(-1)?.init.body;
+        expect(typeof body === "string" ? JSON.parse(body) : null).toMatchObject({ name: "Reopened policy" });
+        expect(onSaved).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(["closed", "reopened"].flatMap((boundary) => ["success", "failure"].map((outcome) => ({ boundary, outcome }))))("reports a late approval save $outcome while $boundary", async ({ boundary, outcome }) => {
+        const savePath = "/api/approval-policies/41";
+        const backend = stubBackend(savePath, (path) => path.endsWith("/impact")
+            ? json({ changeClass: "UNCHANGED", pendingApprovalCount: 1 })
+            : undefined);
+        const policy: ApprovalPolicy = { id: 41, name: "Origin policy", active: true, mode: "sequential", separationOfDuties: "strict", steps: [], createdAt: "", updatedAt: "" };
+        const onSaved = vi.fn();
+        const onOpenChange = vi.fn();
+        await render(<ApprovalPolicyDialog open onOpenChange={onOpenChange} policy={policy} onSaved={onSaved} />);
+        await act(async () => { button("save").click(); await backend.started.promise; });
+        onOpenChange(false);
+        await render(<ApprovalPolicyDialog open={false} onOpenChange={onOpenChange} policy={policy} onSaved={onSaved} />);
+        if (boundary === "reopened") {
+            switchWorkspace();
+            await render(<ApprovalPolicyDialog open onOpenChange={onOpenChange} policy={policy} onSaved={onSaved} />);
+            await changeInput("policy-name", "Reopened policy");
+        }
+        await act(async () => backend.held.resolve(outcome === "success"
+            ? json(policy)
+            : json({ error: "Save unavailable" }, 500)));
+
+        expect(document.querySelector<HTMLInputElement>("#policy-name")?.value).toBe(boundary === "reopened" ? "Reopened policy" : policy.name);
+        expect(button("save").disabled).toBe(false);
+        expect(document.body.textContent).not.toContain("impactTitle");
+        expect(onOpenChange).toHaveBeenCalledExactlyOnceWith(false);
+        if (outcome === "success") {
+            expect(onSaved).toHaveBeenCalledExactlyOnceWith(policy, false);
+            expect(toastSuccess).toHaveBeenCalledExactlyOnceWith("updated", { description: "pendingApprovalsUnchanged" });
+            expect(toastError).not.toHaveBeenCalled();
+        } else {
+            expect(onSaved).not.toHaveBeenCalled();
+            expect(toastSuccess).not.toHaveBeenCalled();
+            expect(toastError).toHaveBeenCalledExactlyOnceWith("ApiErrors.title", { description: "ApiErrors.serverError" });
+        }
+        expectWrites(backend, ["/api/approval-policies/41/impact", savePath]);
     });
 
     it.each(["/api/duplicate-preflight/persons"])("keeps capture preflight and the review decision in the origin while %s is pending", async (heldPath) => {

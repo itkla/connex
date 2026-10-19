@@ -22,7 +22,7 @@ import {
     scanBusinessCard,
 } from '@/app/lib/api';
 import { workspaceUnavailableDescription } from '@/app/lib/errorMessages';
-import { renderedWorkspaceId, workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import {
     BusinessCardRecoveryStorageUnavailableError,
     clearBusinessCardImportRecovery,
@@ -624,7 +624,7 @@ export function useBusinessCardCapture({
         let requestId: string;
         const controller = new AbortController();
         const abortFromCaller = () => controller.abort(origin.signal?.reason);
-        origin.signal?.addEventListener("abort", abortFromCaller, { once: true });
+        origin.signal?.addEventListener('abort', abortFromCaller, { once: true });
         importControllerRef.current?.abort();
         importControllerRef.current = controller;
         try {
@@ -670,7 +670,7 @@ export function useBusinessCardCapture({
             );
             return undefined;
         } finally {
-            origin.signal?.removeEventListener("abort", abortFromCaller);
+            origin.signal?.removeEventListener('abort', abortFromCaller);
             if (importControllerRef.current === controller) importControllerRef.current = null;
         }
         const contact = companyAction.type === 'existing'
