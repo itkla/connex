@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.util.List;
 
@@ -10,10 +11,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.WorkspaceRole;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.tenant.TenantContext;
 
@@ -33,6 +36,7 @@ class WorkspaceOrgPlacementTest extends AbstractServiceTest {
     @Autowired private WorkspaceService workspaceService;
     @Autowired private TenantContext tenantContext;
     @Autowired private RoleMapper roleMapper;
+    @Autowired private JdbcTemplate jdbcTemplate;
 
     @AfterEach
     void clearTenantContext() {
@@ -83,6 +87,19 @@ class WorkspaceOrgPlacementTest extends AbstractServiceTest {
 
         assertNotEquals(existingOrg, workspaceService.getOrgId(created.getId()),
             "without an administrative context a new workspace mints its own organization");
+    }
+
+    @Test
+    void membershipRevokedAfterResolutionRefusesCreationWithoutProvisioningAnything() {
+        String name = "Revoked origin " + unique();
+        assertEquals(1, workspaceMapper.removeMember(workspace.getId(), currentUser.getId()));
+
+        ForbiddenException failure = assertThrows(ForbiddenException.class,
+            () -> workspaceService.createWorkspace(name, currentUser.getId()));
+
+        assertEquals("Not a member of workspace " + workspace.getId(), failure.getMessage());
+        assertEquals(0, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM workspace WHERE name = ?", Integer.class, name));
+        assertEquals(0, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM organization WHERE name = ?", Integer.class, name));
     }
 
     @Test

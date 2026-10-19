@@ -47,15 +47,18 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.beans.WorkspaceInvite;
 import ooo.klae.connex.backend.beans.WorkspaceInviteLink;
+import ooo.klae.connex.backend.beans.WorkspaceRole;
 import ooo.klae.connex.backend.config.OneTimeLinkFlowCookie;
 import ooo.klae.connex.backend.mappers.InviteLinkMapper;
 import ooo.klae.connex.backend.mappers.InviteMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.OrgAllowedDomainMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.OneTimeLinkFlowService;
+import ooo.klae.connex.backend.support.OwnershipOfferTestFixtures;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 import ooo.klae.connex.backend.util.OneTimeTokenDigest;
@@ -71,6 +74,7 @@ class StaleWorkspaceRecoveryIntegrationTest {
     @Autowired private UserMapper userMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private OrganizationMapper organizationMapper;
+    @Autowired private RoleMapper roleMapper;
     @Autowired private NoteMapper noteMapper;
     @Autowired private InviteMapper inviteMapper;
     @Autowired private InviteLinkMapper inviteLinkMapper;
@@ -207,6 +211,80 @@ class StaleWorkspaceRecoveryIntegrationTest {
             .andExpect(jsonPath("$.total").value(1));
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/business-cards/scan", "/api/business-cards/import/reservation",
+        "/api/business-cards/import"})
+    void revokedBusinessCardPinsKeepTheWorkspaceRefusalAfterTheCookieHeals(String path) throws Exception {
+        StaleBrowser browser = staleBrowser();
+        int workspaceId = browser.revoked().getId();
+
+        mockMvc.perform(post(path)
+                .header("X-Workspace-Id", workspaceId)
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .cookie(new Cookie(WorkspaceCookie.NAME, Integer.toString(browser.remaining().getId())))
+                .session(browser.session())
+                .with(csrf().asHeader())
+                .contentType("multipart/form-data; boundary=unparsed")
+                .content("Not a multipart body"))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+            .andExpect(jsonPath("$.error").value("Not a member of workspace " + workspaceId))
+            .andExpect(cookie().doesNotExist(WorkspaceCookie.NAME));
+
+        RequestContextHolder.resetRequestAttributes();
+        assertNull(workspaceMapper.getRole(workspaceId, browser.user().getId()));
+        assertEquals(browser.revoked().getId(),
+            workspaceMapper.getLastActiveWorkspaceId(browser.user().getId()));
+        assertEquals(0, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM business_card_import_request WHERE workspace_id IN (?, ?)",
+            Integer.class, workspaceId, browser.remaining().getId()));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/business-cards/scan", "/api/business-cards/import/reservation",
+        "/api/business-cards/import"})
+    void staleSessionEpochHidesBusinessCardMembershipBeforeMultipartParsing(String path) throws Exception {
+        StaleBrowser browser = staleBrowser();
+        WorkspaceRole role = new WorkspaceRole();
+        role.setWorkspaceId(browser.remaining().getId());
+        role.setName("No business-card permissions");
+        roleMapper.insertRole(role);
+        assertEquals(1, workspaceMapper.setMemberCustomRole(
+            browser.remaining().getId(), browser.user().getId(), role.getId()));
+
+        mockMvc.perform(post(path)
+                .header("X-Workspace-Id", browser.remaining().getId())
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .session(browser.session())
+                .with(csrf().asHeader())
+                .contentType("multipart/form-data; boundary=unparsed")
+                .content("Not a multipart body"))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.code").value("BUSINESS_CARD_PERMISSION_DENIED"));
+        RequestContextHolder.resetRequestAttributes();
+        assertEquals(1, userMapper.bumpSessionEpoch(browser.user().getId()));
+
+        for (int workspaceId : List.of(browser.revoked().getId(), browser.remaining().getId())) {
+            MvcResult refused = mockMvc.perform(post(path)
+                    .header("X-Workspace-Id", workspaceId)
+                    .header("Idempotency-Key", UUID.randomUUID().toString())
+                    .session(browser.session())
+                    .with(csrf().asHeader())
+                    .contentType("multipart/form-data; boundary=unparsed")
+                    .content("Not a multipart body"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(cookie().doesNotExist(WorkspaceCookie.NAME))
+                .andReturn();
+
+            assertEquals("", refused.getResponse().getContentAsString());
+            RequestContextHolder.resetRequestAttributes();
+            assertFalse(tenantContext.isResolved());
+        }
+        assertEquals(0, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM business_card_import_request WHERE workspace_id IN (?, ?)",
+            Integer.class, browser.revoked().getId(), browser.remaining().getId()));
+    }
+
     @Test
     void pinlessRequestsAfterRevocationRejectNoteWritesAndRecoverOnGet() throws Exception {
         Workspace workspaceA = newWorkspaceInNewOrganization();
@@ -307,6 +385,17 @@ class StaleWorkspaceRecoveryIntegrationTest {
         assertEquals(1, workspaceMapper.removeMember(workspace.getId(), member.getId()));
         assertEquals(workspace.getId(), workspaceMapper.getLastActiveWorkspaceId(member.getId()));
 
+        mockMvc.perform(get("/api/workspaces")
+                .cookie(new Cookie(WorkspaceCookie.NAME, Integer.toString(workspace.getId())))
+                .session(memberSession))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.workspaces").isEmpty())
+            .andExpect(jsonPath("$.activeWorkspaceId").doesNotHaveJsonPath())
+            .andExpect(cookie().maxAge(WorkspaceCookie.NAME, 0));
+
+        RequestContextHolder.resetRequestAttributes();
+        assertNull(workspaceMapper.getLastActiveWorkspaceId(member.getId()));
+
         mockMvc.perform(post("/api/workspaces")
                 .cookie(new Cookie(WorkspaceCookie.NAME, Integer.toString(workspace.getId())))
                 .session(memberSession)
@@ -325,6 +414,101 @@ class StaleWorkspaceRecoveryIntegrationTest {
         mockMvc.perform(get("/api/workspaces").session(memberSession))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.activeWorkspaceId").value(recovered));
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "false, false, false", "false, false, true", "false, true, false", "false, true, true",
+        "true, false, false", "true, false, true", "true, true, false", "true, true, true"
+    })
+    void workspaceCreationRefusesForeignOrRevokedPinsWithoutProvisioning(
+            boolean revoked, boolean remainingMembership, boolean matchingCookie) throws Exception {
+        Workspace origin = newWorkspaceInNewOrganization();
+        Workspace remaining = newWorkspaceInNewOrganization();
+        User creator = newUser();
+        if (remainingMembership) {
+            workspaceMapper.addMember(remaining.getId(), creator.getId(), "owner");
+        }
+        if (revoked) {
+            workspaceMapper.addMember(origin.getId(), creator.getId(), "owner");
+        }
+        MockHttpSession session = loginWithApprovedPasskey(creator);
+        RequestContextHolder.resetRequestAttributes();
+        if (revoked) {
+            assertEquals(1, workspaceMapper.removeMember(origin.getId(), creator.getId()));
+        }
+        String name = "Refused creation " + UUID.randomUUID();
+        int cookieWorkspace = matchingCookie ? origin.getId() : remaining.getId();
+        Integer remembered = workspaceMapper.getLastActiveWorkspaceId(creator.getId());
+
+        mockMvc.perform(post("/api/workspaces")
+                .header("X-Workspace-Id", origin.getId())
+                .cookie(new Cookie(WorkspaceCookie.NAME, Integer.toString(cookieWorkspace)))
+                .session(session)
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(java.util.Map.of("name", name))))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+            .andExpect(jsonPath("$.message").value("Not a member of workspace " + origin.getId()))
+            .andExpect(cookie().doesNotExist(WorkspaceCookie.NAME));
+
+        RequestContextHolder.resetRequestAttributes();
+        assertEquals(0, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM workspace WHERE name = ?", Integer.class, name));
+        assertEquals(0, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM organization WHERE name = ?", Integer.class, name));
+        assertEquals(remainingMembership ? 1 : 0, workspaceMapper.getMembershipsForUser(creator.getId()).size());
+        assertEquals(remembered, workspaceMapper.getLastActiveWorkspaceId(creator.getId()));
+    }
+
+    @Test
+    void workspaceCreationUsesTheValidPinnedOriginsOrganizationInsteadOfTheCookie() throws Exception {
+        Workspace origin = newWorkspaceInNewOrganization();
+        Workspace cookieWorkspace = newWorkspaceInNewOrganization();
+        User creator = newUser();
+        workspaceMapper.addMember(origin.getId(), creator.getId(), "owner");
+        workspaceMapper.addMember(cookieWorkspace.getId(), creator.getId(), "owner");
+        MockHttpSession session = loginWithApprovedPasskey(creator);
+
+        MvcResult result = mockMvc.perform(post("/api/workspaces")
+                .header("X-Workspace-Id", origin.getId())
+                .cookie(new Cookie(WorkspaceCookie.NAME, Integer.toString(cookieWorkspace.getId())))
+                .session(session)
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"Pinned organization\"}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.orgId").value(origin.getOrgId()))
+            .andReturn();
+
+        int created = objectMapper.readTree(result.getResponse().getContentAsString()).path("id").asInt();
+        RequestContextHolder.resetRequestAttributes();
+        trackProvisionedWorkspace(created);
+        assertEquals(origin.getOrgId(), workspaceMapper.getOrgId(created));
+        assertEquals("owner", workspaceMapper.getRole(created, creator.getId()));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"9, 9", "not-an-id", ""})
+    void malformedExplicitPinCannotWriteIntoTheCookieWorkspace(String header) throws Exception {
+        Workspace cookieWorkspace = newWorkspaceInNewOrganization();
+        User author = newUser();
+        workspaceMapper.addMember(cookieWorkspace.getId(), author.getId(), "owner");
+        MockHttpSession session = loginWithApprovedPasskey(author);
+
+        mockMvc.perform(post("/api/notes")
+                .header("X-Workspace-Id", header)
+                .cookie(new Cookie(WorkspaceCookie.NAME, Integer.toString(cookieWorkspace.getId())))
+                .session(session)
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"content\":\"Pinned draft\",\"visibility\":\"workspace\"}"))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+            .andExpect(jsonPath("$.message").value("Not a member of workspace " + header))
+            .andExpect(cookie().doesNotExist(WorkspaceCookie.NAME));
+
+        RequestContextHolder.resetRequestAttributes();
+        assertTrue(noteMapper.getAllNotes(cookieWorkspace.getId()).isEmpty());
     }
 
     @ParameterizedTest
@@ -532,6 +716,14 @@ class StaleWorkspaceRecoveryIntegrationTest {
             .andExpect(status().isOk())
             .andReturn();
         return assertInstanceOf(MockHttpSession.class, result.getRequest().getSession(false));
+    }
+
+    /** Satisfies the incidental owner's MFA prerequisites so requests reach tenant resolution. */
+    private MockHttpSession loginWithApprovedPasskey(User user) throws Exception {
+        int credential = OwnershipOfferTestFixtures.approvedPasskey(jdbcTemplate, user);
+        MockHttpSession session = login(user);
+        OwnershipOfferTestFixtures.stepUp(jdbcTemplate, user, session, credential);
+        return session;
     }
 
     private Workspace newWorkspaceInNewOrganization() {

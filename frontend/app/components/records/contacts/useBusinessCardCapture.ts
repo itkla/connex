@@ -9,6 +9,7 @@ import {
     useRef,
     useState,
 } from 'react';
+import { useTranslations } from 'next-intl';
 
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import {
@@ -17,8 +18,10 @@ import {
     clientRecoveryContext,
     getBusinessCardAvailability,
     getEffectivePermissions,
+    isWorkspaceUnavailableError,
     scanBusinessCard,
 } from '@/app/lib/api';
+import { workspaceUnavailableDescription } from '@/app/lib/errorMessages';
 import {
     BusinessCardRecoveryStorageUnavailableError,
     clearBusinessCardImportRecovery,
@@ -87,6 +90,7 @@ export function useBusinessCardCapture({
     onImportRetryRequiredChange?: (required: boolean) => void;
 }) {
     const { activeWorkspaceId } = useWorkspace();
+    const t = useTranslations();
     const [availabilityState, setAvailabilityState] = useState<BusinessCardAvailabilityState | null>(null);
     const currentAvailability = availabilityState?.workspaceId === activeWorkspaceId
         ? availabilityState
@@ -101,6 +105,7 @@ export function useBusinessCardCapture({
     const [status, setStatus] = useState<BusinessCardScanStatus>('idle');
     const [requestError, setRequestError] = useState<BusinessCardRequestErrorKind | null>(null);
     const [importError, setImportError] = useState<BusinessCardRequestErrorKind | null>(null);
+    const [workspaceRefusal, setWorkspaceRefusal] = useState<ApiError | null>(null);
     const [requiresExactImportRetry, setRequiresExactImportRetry] = useState(false);
     const [companyMode, setCompanyMode] = useState<BusinessCardCompanyActionMode>(null);
     const [companyName, setCompanyName] = useState('');
@@ -258,6 +263,7 @@ export function useBusinessCardCapture({
             setStatus('idle');
             setRequestError(null);
             setImportError(null);
+            setWorkspaceRefusal(null);
             setRequiresExactImportRetry(false);
             setCompanyMode(null);
             setCompanyName('');
@@ -336,6 +342,7 @@ export function useBusinessCardCapture({
         setStatus('scanning');
         setRequestError(null);
         setImportError(null);
+        setWorkspaceRefusal(null);
         setResult(null);
 
         const canCommit = () => activeRef.current
@@ -422,6 +429,11 @@ export function useBusinessCardCapture({
         } catch (error) {
             if (!canCommit()) return;
             controllerRef.current = null;
+            if (isWorkspaceUnavailableError(error)) {
+                setWorkspaceRefusal(error);
+                setStatus('error');
+                return;
+            }
             const kind = businessCardRequestErrorKind(error);
             if (kind === 'aborted') return;
             setRequestError(kind);
@@ -524,6 +536,7 @@ export function useBusinessCardCapture({
         setStatus('idle');
         setRequestError(null);
         setImportError(null);
+        setWorkspaceRefusal(null);
         setRequiresExactImportRetry(false);
         companyModeRef.current = null;
         suggestedCompanyIdRef.current = null;
@@ -576,6 +589,7 @@ export function useBusinessCardCapture({
         personAction: BusinessCardPersonAction = { type: 'create' },
     ): Promise<BusinessCardImportDraft | undefined> => {
         setImportError(null);
+        setWorkspaceRefusal(null);
         if (!file) return undefined;
         try {
             await recoveryResetPromiseRef.current;
@@ -631,6 +645,10 @@ export function useBusinessCardCapture({
             );
         } catch (error) {
             if (controller.signal.aborted) return undefined;
+            if (isWorkspaceUnavailableError(error)) {
+                setWorkspaceRefusal(error);
+                return undefined;
+            }
             setImportError(
                 error instanceof BusinessCardRecoveryStorageUnavailableError
                     ? 'recoveryStorage'
@@ -657,6 +675,10 @@ export function useBusinessCardCapture({
     };
 
     const captureImportError = (error: unknown) => {
+        if (isWorkspaceUnavailableError(error)) {
+            setWorkspaceRefusal(error);
+            return;
+        }
         const kind = businessCardRequestErrorKind(error);
         setImportError(kind);
         const retryRequired = requiresExactImportRetryRef.current || requiresLockedImportOutcome(kind);
@@ -758,6 +780,7 @@ export function useBusinessCardCapture({
         status,
         requestError,
         importError,
+        workspaceUnavailableMessage: workspaceUnavailableDescription(workspaceRefusal, t),
         requiresExactImportRetry,
         companyMode,
         companyName,

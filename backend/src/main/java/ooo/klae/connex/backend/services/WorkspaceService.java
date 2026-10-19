@@ -433,7 +433,9 @@ public class WorkspaceService {
      * The active workspace's organization when the resolved tenant context belongs
      * to {@code creatorUserId} and their effective permissions there include
      * {@link Permission#WORKSPACE_SETTINGS}, or null when no such administrative
-     * context applies.
+     * context applies. Revalidates membership under the creator's already-held shared account
+     * lock, which membership removal acquires exclusively, so revocation after request resolution
+     * refuses provisioning instead of falling through to a fresh organization.
      */
     private Integer activeOrgIdIfAdministrator(int creatorUserId) {
         if (!tenantContext.isResolved()) {
@@ -444,8 +446,13 @@ public class WorkspaceService {
             return null;
         }
         Integer workspaceId = tenantContext.getWorkspaceId();
-        if (workspaceId == null
-                || !permissionsFor(workspaceId, creatorUserId).contains(Permission.WORKSPACE_SETTINGS)) {
+        if (workspaceId == null) {
+            return null;
+        }
+        if (getRole(workspaceId, creatorUserId) == null) {
+            throw new ForbiddenException("Not a member of workspace " + workspaceId);
+        }
+        if (!permissionsFor(workspaceId, creatorUserId).contains(Permission.WORKSPACE_SETTINGS)) {
             return null;
         }
         return tenantContext.getOrgId();

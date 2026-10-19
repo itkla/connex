@@ -172,6 +172,8 @@ import { AiGenerationError } from '@/app/lib/aiGeneration';
 import { LEAD_SOURCES } from '@/app/lib/contactProvenance';
 import { proposalReviewNow } from '@/app/lib/proposalReviewClock';
 import { createAiChatSocket } from '@/app/lib/realtime';
+import { workspaceUnavailableDescription } from '@/app/lib/errorMessages';
+import { workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { formatDate, formatRelativeTime, formatUtcDateTime } from '@/app/lib/utils';
 import type {
@@ -389,6 +391,7 @@ export function useAskConnexMount(): AskConnexMountValue {
 /** Owns Ask Connex continuity, transcript, accepted-turn reconciliation, and responsive surfaces. */
 export default function AskConnexProvider({ children }: { children: ReactNode }) {
     const t = useTranslations('AskConnex');
+    const tRoot = useTranslations();
     const showApiError = useApiErrorToast('AskConnex');
     const deferApiError = useCallback(
         (error: unknown, fallbackKey?: string) => {
@@ -1931,7 +1934,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         const creation = createAiChatSession(
             t('newChatTitle'),
             true,
-            { signal },
+            workspacePinnedRequest(activeWorkspaceId, { signal }),
         ).then((createdSession) => {
             if (signal.aborted) throw signal.reason;
             setActiveSession(createdSession);
@@ -1949,15 +1952,17 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         });
         sessionCreationRef.current = creation;
         return creation;
-    }, [canPersist, activeSession, router, sessionKey, t, workspaceMode]);
+    }, [canPersist, activeSession, activeWorkspaceId, router, sessionKey, t, workspaceMode]);
 
     const uploadErrorMessage = useCallback((error: unknown): string => {
+        const workspaceMessage = workspaceUnavailableDescription(error, tRoot);
+        if (workspaceMessage !== null) return workspaceMessage;
         if (!(error instanceof ApiError)) return t('upload.failed');
         if (error.status === 413) return t('upload.tooLarge');
         if (error.status === 415) return t('upload.unsupported');
         if (error.status === 409) return t('upload.limit');
         return t('upload.failed');
-    }, [t]);
+    }, [t, tRoot]);
 
     const attachFiles = useCallback(async (files: File[]) => {
         const signal = identityControllerRef.current?.signal;
@@ -1968,6 +1973,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             || permission !== 'granted'
             || attachmentCreatePermission !== 'granted'
         ) return;
+        const originWorkspaceId = activeWorkspaceId;
         for (const file of files) {
             const operationEpoch = sessionEpochRef.current;
             const clientId = crypto.randomUUID();
@@ -1992,7 +1998,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                         attachment.clientId === clientId
                             ? { ...attachment, progress }
                             : attachment)),
-                    { signal },
+                    workspacePinnedRequest(originWorkspaceId, { signal }),
                 );
                 if (signal.aborted || operationEpoch !== sessionEpochRef.current) continue;
                 setFileAttachments((current) => completeAskConnexFileUpload(
@@ -2013,7 +2019,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                         : attachment));
             }
         }
-    }, [attachmentCreatePermission, ensureSession, permission, uploadErrorMessage, working]);
+    }, [activeWorkspaceId, attachmentCreatePermission, ensureSession, permission, uploadErrorMessage, working]);
 
     const removeFileAttachment = useCallback(async (attachment: AskConnexFileAttachment) => {
         if (fileOperationPending) return;
@@ -2244,6 +2250,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         setSubmitting(true);
         setTurnRecovery(null);
         resetStream();
+        const originWorkspaceId = activeWorkspaceId;
         const precedingMessageSeq = messagesRef.current.at(-1)?.seq ?? 0;
         let session = activeSession;
         try {
@@ -2252,7 +2259,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                     const createdSession = await createAiChatSession(
                         t('newChatTitle'),
                         true,
-                        { signal: activeSignal },
+                        workspacePinnedRequest(originWorkspaceId, { signal: activeSignal }),
                     );
                     if (activeSignal.aborted) return;
                     session = createdSession;
@@ -2277,7 +2284,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 content,
                 pageContext: requestContext.pageContext,
                 ...(scopeRequest === null ? {} : { scope: scopeRequest }),
-            });
+            }, workspacePinnedRequest(originWorkspaceId));
             if (activeSignal.aborted) return;
             const acceptedScope = accepted.scope;
             if (userId !== null) {
@@ -2360,7 +2367,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             submittingRef.current = false;
             setSubmitting(false);
         }
-    }, [canPersist, activeSession, composer, corrections, featureUnavailable, fileContextCount, fileOperationPending, followTurn, permission, refreshTranscript, resetStream, router, scopeBlocked, scopePreviewKey, scopeRequest, sessionKey, showApiError, sourceRecord, sourceSelection, submissionBlocked, t, turn.phase, turnKey, userDisplayName, userId, workspaceMode]);
+    }, [canPersist, activeSession, activeWorkspaceId, composer, corrections, featureUnavailable, fileContextCount, fileOperationPending, followTurn, permission, refreshTranscript, resetStream, router, scopeBlocked, scopePreviewKey, scopeRequest, sessionKey, showApiError, sourceRecord, sourceSelection, submissionBlocked, t, turn.phase, turnKey, userDisplayName, userId, workspaceMode]);
 
     const retryPrompt = askConnexBoundRetryPrompt(turnRecovery?.target ?? null, turn, messages, toolCalls);
     const turnWriteState = askConnexTurnWriteState(turn, toolCalls,
