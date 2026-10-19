@@ -21,7 +21,7 @@ type ForwardingId = Extract<
 
 /**
  * The forwards whose target a page has to look up at request time, so `next.config.ts` cannot
- * forward them and their stub pages stay.
+ * forward them and their resolver pages stay.
  *
  * `account.capture-reviews` picks the provider with the most pending reviews among the reader's own
  * connections, and `legacy.settings-workflow` resolves a legacy rule id to the workflow that replaced
@@ -53,8 +53,8 @@ export function isConfigForwarded(entry: SettingsEntry): entry is ConfigForwarde
  * streamed payload (#1440). The destination is the manifest's, fragment included. Next.js carries
  * the reader's query string through and places it before the fragment.
  *
- * `next.config.ts` imports this module, and Next loads that file without the app's `@/` path alias,
- * so this module imports the manifest relatively and the manifest's own imports are type-only.
+ * This module imports the manifest relatively so `next.config.ts` loads under either the default
+ * SWC loader or `--experimental-next-config-strip-types`. The manifest's own imports are type-only.
  *
  * @returns one permanent redirect per config-forwarded manifest entry, in manifest order
  */

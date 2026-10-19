@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { unstable_getResponseFromNextConfig } from "next/experimental/testing/server";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -681,7 +682,7 @@ function unbackedForwards(candidates: readonly SettingsEntry[]): readonly Settin
  * runs.
  */
 describe("settings manifest forwards only to destinations that exist", () => {
-    it("declares no capability forward at all (the manifest's set is empty; redirect stubs that resolve addresses are outside this property)", () => {
+    it("declares no capability forward at all (the manifest's set is empty; page-resolved forwards are outside this property)", () => {
         const forwards = entries
             .filter((entry) => entry.conditionalForward !== null)
             .map((entry) => `${entry.id} -> ${entry.conditionalForward?.to}`);
@@ -835,6 +836,7 @@ describe("the redirect gates refuse a matrix that has drifted from the manifest"
 describe("every retired address forwards from the manifest before routing", () => {
     const configForwarded = entries.filter(isConfigForwarded);
     const generated = settingsConfigRedirects();
+    const nextConfig = { redirects: async () => [...settingsConfigRedirects()] };
 
     function hasPage(entry: SettingsEntry): boolean {
         return existsSync(path.join(APP_DIRECTORY, entry.currentRoute, "page.tsx"));
@@ -853,6 +855,38 @@ describe("every retired address forwards from the manifest before routing", () =
                 permanent: true,
             })),
         );
+    });
+
+    /**
+     * Drives Next's own redirect matcher. Its testing helper serializes the forwarded query
+     * differently from the production router — it joins repeated keys and appends the query after
+     * a destination fragment — so this pins what both agree on, a `308` to the destination's route.
+     * The production server emits `/route?x=1&x=2#section`, which a built server was checked for.
+     */
+    it.each(generated)("$source answers 308 to its destination route", async ({ source, destination }) => {
+        const response = await unstable_getResponseFromNextConfig({
+            url: `https://example.com${source}?x=1&x=2`,
+            nextConfig,
+        });
+
+        expect(response.status).toBe(308);
+        const location = response.headers.get("location");
+        if (location === null) throw new Error(`No Location header for ${source}`);
+        expect(new URL(location).pathname).toBe(destination.split("#")[0]);
+    });
+
+    it.each([
+        "/account/connections/reviews",
+        "/settings/workflows/42",
+        "/users/42",
+    ])("%s matches no config redirect", async (source) => {
+        const response = await unstable_getResponseFromNextConfig({
+            url: `https://example.com${source}?x=1&x=2`,
+            nextConfig,
+        });
+
+        expect(response.status).toBe(200);
+        expect(response.headers.get("location")).toBeNull();
     });
 
     it("forwards no dynamic address from config, because its target has to be looked up", () => {

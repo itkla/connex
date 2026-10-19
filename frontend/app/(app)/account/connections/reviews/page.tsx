@@ -47,10 +47,10 @@ function providerWithMostPendingReviewsAmongUserConnections(
  * it can forward (#1340 WS4.6).
  *
  * The queue is a panel of the Connected accounts destination and its canonical URL needs a provider,
- * so this address cannot become an ordinary manifest-driven stub: it reads the reader's own
- * connection state, picks the provider with the most pending items, and forwards to that queue. That
- * is why it is one of the two exemptions from the redirect-stub shape, and it never lands a reader
- * in a queue for a provider they have not connected.
+ * so this address reads the reader's own connection state, picks the provider with the most pending
+ * items, and forwards to that queue. It is one of the two page-resolved forwards declared in
+ * `PAGE_RESOLVED_FORWARDS`; every other forward is a config redirect. It never lands a reader in a
+ * queue for a provider they have not connected.
  *
  * It forwards to `/settings/personal/connected-accounts` now rather than to `/account/connections`,
  * because the destination moved; the route half is read from the section module so this file spells
