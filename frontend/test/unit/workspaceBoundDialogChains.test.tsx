@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { webcrypto } from "node:crypto";
-import { act, type ReactNode } from "react";
+import { act, type ReactNode, StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -47,7 +47,11 @@ vi.mock("@/components/ui/combobox", () => {
 });
 let root: Root;
 let locks: PropertyDescriptor | undefined;
-async function render(child: ReactNode): Promise<void> { await act(async () => root.render(<TooltipProvider>{child}</TooltipProvider>)); }
+async function render(child: ReactNode, strict = false): Promise<void> {
+    await act(async () => root.render(strict
+        ? <StrictMode><TooltipProvider>{child}</TooltipProvider></StrictMode>
+        : <TooltipProvider>{child}</TooltipProvider>));
+}
 function button(label: string): HTMLButtonElement {
     const found = [...document.querySelectorAll("button")].find((item) => item.textContent?.trim() === label);
     if (!found) throw new Error("Missing button " + label);
@@ -162,23 +166,24 @@ describe("dialog chain origins", () => {
         expectWrites(backend, ["/api/deals/41/owner", "/api/deals/41/collaborators"]);
     });
 
-    it.each(["/api/approval-policies/41/impact"])("keeps approval preview and policy save in the origin while %s is pending", async (heldPath) => {
+    it.each([false, true])("keeps approval preview and policy save in the origin with StrictMode=%s", async (strict) => {
+        const heldPath = "/api/approval-policies/41/impact";
         const backend = stubBackend(heldPath);
         const policy: ApprovalPolicy = { id: 41, name: "Origin policy", active: true, mode: "sequential", separationOfDuties: "strict", steps: [], createdAt: "", updatedAt: "" };
-        await render(<ApprovalPolicyDialog open onOpenChange={noop} policy={policy} onSaved={noop} />);
+        await render(<ApprovalPolicyDialog open onOpenChange={noop} policy={policy} onSaved={noop} />, strict);
         await act(async () => { button("save").click(); await backend.started.promise; });
         switchWorkspace();
         await act(async () => backend.held.resolve(backend.response(heldPath)));
         expectWrites(backend, ["/api/approval-policies/41/impact", "/api/approval-policies/41"]);
     });
 
-    it("retains the approval preview origin through invalidation confirmation", async () => {
+    it.each([false, true])("retains the approval preview origin through invalidation confirmation with StrictMode=%s", async (strict) => {
         const previewPath = "/api/approval-policies/41/impact";
         const backend = stubBackend(undefined, (path) => path === previewPath
             ? json({ changeClass: "TIGHTEN", pendingApprovalCount: 1, affected: [], impactFingerprint: "origin-impact" })
             : undefined);
         const policy: ApprovalPolicy = { id: 41, name: "Origin policy", active: true, mode: "sequential", separationOfDuties: "strict", steps: [], createdAt: "", updatedAt: "" };
-        await render(<ApprovalPolicyDialog open onOpenChange={noop} policy={policy} onSaved={noop} />);
+        await render(<ApprovalPolicyDialog open onOpenChange={noop} policy={policy} onSaved={noop} />, strict);
         await act(async () => button("save").click());
         expectWrites(backend, [previewPath]);
         expect(button("impactConfirm").disabled).toBe(false);
@@ -194,6 +199,41 @@ describe("dialog chain origins", () => {
         });
     });
 
+    it.each([false, true].flatMap((strict) => ["preview", "save"].map((step) => ({ strict, step }))))("keeps an equivalent policy in the same session during $step with StrictMode=$strict", async ({ strict, step }) => {
+        const previewPath = "/api/approval-policies/41/impact";
+        const savePath = "/api/approval-policies/41";
+        const heldPath = step === "preview" ? previewPath : savePath;
+        const policy: ApprovalPolicy = { id: 41, name: "Origin policy", active: true, mode: "sequential", separationOfDuties: "strict", steps: [], createdAt: "", updatedAt: "" };
+        const saved = { ...policy, name: "Edited policy" };
+        const backend = stubBackend(heldPath, (path) => path === savePath ? json(saved) : undefined);
+        const onSaved = vi.fn();
+        const onOpenChange = vi.fn();
+        const memberReads = () => vi.mocked(fetch).mock.calls.filter(([input]) =>
+            new URL(input instanceof Request ? input.url : String(input), "http://localhost").pathname.endsWith("/members")).length;
+        await render(<ApprovalPolicyDialog open onOpenChange={onOpenChange} policy={policy} onSaved={onSaved} />, strict);
+        await changeInput("policy-name", "Edited policy");
+        const saveButton = button("save");
+        await act(async () => { saveButton.click(); await backend.started.promise; });
+        const readsBeforeRerender = memberReads();
+        switchWorkspace();
+        await render(<ApprovalPolicyDialog open onOpenChange={onOpenChange} policy={{ ...policy }} onSaved={onSaved} />, strict);
+
+        expect(saveButton.isConnected).toBe(true);
+        if (step === "save") expect(saveButton.disabled).toBe(true);
+        expect(document.querySelector<HTMLInputElement>("#policy-name")?.value).toBe("Edited policy");
+        expect(saveButton.disabled).toBe(true);
+        expect(memberReads()).toBe(readsBeforeRerender);
+        await act(async () => backend.held.resolve(backend.response(heldPath)));
+
+        expectWrites(backend, [previewPath, savePath]);
+        const body = backend.requests.at(-1)?.init.body;
+        expect(typeof body === "string" ? JSON.parse(body) : null).toMatchObject({ name: "Edited policy" });
+        expect(onSaved).toHaveBeenCalledExactlyOnceWith(saved, false);
+        expect(onOpenChange).toHaveBeenCalledExactlyOnceWith(false);
+        expect(toastSuccess).toHaveBeenCalledExactlyOnceWith("updated", undefined);
+        expect(toastError).not.toHaveBeenCalled();
+    });
+
     it.each([
         { boundary: "reopen", outcome: "tightening" },
         { boundary: "reopen", outcome: "unchanged" },
@@ -201,18 +241,18 @@ describe("dialog chain origins", () => {
         { boundary: "policy change", outcome: "tightening" },
         { boundary: "policy change", outcome: "unchanged" },
         { boundary: "unmount", outcome: "unchanged" },
-    ])("discards a late $outcome approval preview after $boundary", async ({ boundary, outcome }) => {
+    ].flatMap((scenario) => [false, true].map((strict) => ({ ...scenario, strict }))))("discards a late $outcome approval preview after $boundary with StrictMode=$strict", async ({ boundary, outcome, strict }) => {
         const previewPath = "/api/approval-policies/41/impact";
         const backend = stubBackend(previewPath);
         const policy: ApprovalPolicy = { id: 41, name: "Origin policy", active: true, mode: "sequential", separationOfDuties: "strict", steps: [], createdAt: "", updatedAt: "" };
         const reopened = boundary === "policy change" ? { ...policy, id: 52, name: "Reopened policy" } : policy;
         const onSaved = vi.fn();
-        await render(<ApprovalPolicyDialog open onOpenChange={noop} policy={policy} onSaved={onSaved} />);
+        await render(<ApprovalPolicyDialog open onOpenChange={noop} policy={policy} onSaved={onSaved} />, strict);
         await act(async () => { button("save").click(); await backend.started.promise; });
-        if (boundary === "reopen") await render(<ApprovalPolicyDialog open={false} onOpenChange={noop} policy={policy} onSaved={onSaved} />);
-        if (boundary === "unmount") await render(null);
+        if (boundary === "reopen") await render(<ApprovalPolicyDialog open={false} onOpenChange={noop} policy={policy} onSaved={onSaved} />, strict);
+        if (boundary === "unmount") await render(null, strict);
         switchWorkspace();
-        await render(<ApprovalPolicyDialog open onOpenChange={noop} policy={reopened} onSaved={onSaved} />);
+        await render(<ApprovalPolicyDialog open onOpenChange={noop} policy={reopened} onSaved={onSaved} />, strict);
         await changeInput("policy-name", "Reopened policy");
         await act(async () => backend.held.resolve(outcome === "failure"
             ? json({ error: "Preview unavailable" }, 500)
@@ -238,7 +278,7 @@ describe("dialog chain origins", () => {
         expect(onSaved).toHaveBeenCalledTimes(1);
     });
 
-    it.each(["closed", "reopened"].flatMap((boundary) => ["success", "failure"].map((outcome) => ({ boundary, outcome }))))("reports a late approval save $outcome while $boundary", async ({ boundary, outcome }) => {
+    it.each(["closed", "reopened"].flatMap((boundary) => ["success", "failure"].flatMap((outcome) => [false, true].map((strict) => ({ boundary, outcome, strict })))))("reports a late approval save $outcome while $boundary with StrictMode=$strict", async ({ boundary, outcome, strict }) => {
         const savePath = "/api/approval-policies/41";
         const backend = stubBackend(savePath, (path) => path.endsWith("/impact")
             ? json({ changeClass: "UNCHANGED", pendingApprovalCount: 1 })
@@ -246,13 +286,13 @@ describe("dialog chain origins", () => {
         const policy: ApprovalPolicy = { id: 41, name: "Origin policy", active: true, mode: "sequential", separationOfDuties: "strict", steps: [], createdAt: "", updatedAt: "" };
         const onSaved = vi.fn();
         const onOpenChange = vi.fn();
-        await render(<ApprovalPolicyDialog open onOpenChange={onOpenChange} policy={policy} onSaved={onSaved} />);
+        await render(<ApprovalPolicyDialog open onOpenChange={onOpenChange} policy={policy} onSaved={onSaved} />, strict);
         await act(async () => { button("save").click(); await backend.started.promise; });
         onOpenChange(false);
-        await render(<ApprovalPolicyDialog open={false} onOpenChange={onOpenChange} policy={policy} onSaved={onSaved} />);
+        await render(<ApprovalPolicyDialog open={false} onOpenChange={onOpenChange} policy={policy} onSaved={onSaved} />, strict);
         if (boundary === "reopened") {
             switchWorkspace();
-            await render(<ApprovalPolicyDialog open onOpenChange={onOpenChange} policy={policy} onSaved={onSaved} />);
+            await render(<ApprovalPolicyDialog open onOpenChange={onOpenChange} policy={policy} onSaved={onSaved} />, strict);
             await changeInput("policy-name", "Reopened policy");
         }
         await act(async () => backend.held.resolve(outcome === "success"

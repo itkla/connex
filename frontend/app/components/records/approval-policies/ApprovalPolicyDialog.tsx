@@ -127,15 +127,16 @@ const toStepPayload = (step: ChainStepDraft): ApprovalPolicyStep => ({
 export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSaved }: Props) {
     const t = useTranslations('ApprovalPolicyDialog');
     const showApiError = useApiErrorToast('ApprovalPolicyDialog');
+    const sessionKey = policy?.id ?? null;
     const [draft, setDraft] = useState<Draft>(() => toDraft(policy));
     const [saving, setSaving] = useState(false);
-    const [renderedSession, setRenderedSession] = useState({ open, policy });
+    const [renderedSession, setRenderedSession] = useState({ open, sessionKey });
     const [members, setMembers] = useState<WorkspaceMember[]>([]);
     const [impact, setImpact] = useState<PendingImpact | null>(null);
     const sessionGenerationRef = useRef(0);
 
-    if (open !== renderedSession.open || policy !== renderedSession.policy) {
-        setRenderedSession({ open, policy });
+    if (open !== renderedSession.open || sessionKey !== renderedSession.sessionKey) {
+        setRenderedSession({ open, sessionKey });
         setSaving(false);
         setImpact(null);
         setMembers([]);
@@ -149,7 +150,7 @@ export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSav
         return () => {
             sessionGenerationRef.current += 1;
         };
-    }, [open, policy]);
+    }, [open, sessionKey]);
 
     useEffect(() => {
         if (!open) return;
@@ -167,7 +168,7 @@ export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSav
         return () => {
             cancelled = true;
         };
-    }, [open, policy]);
+    }, [open, sessionKey]);
 
     const set = <K extends keyof Draft>(key: K, value: Draft[K]) =>
         setDraft((prev) => ({ ...prev, [key]: value }));
