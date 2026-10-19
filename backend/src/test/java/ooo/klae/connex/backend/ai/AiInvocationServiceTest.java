@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -38,6 +39,7 @@ import java.util.concurrent.locks.LockSupport;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
@@ -2256,6 +2258,59 @@ class AiInvocationServiceTest {
         order.verify(budgetLease).markDispatched();
         order.verify(budgetLease).settle(12, 4);
         order.verify(budgetLease).close();
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {400, 422, 503})
+    void definiteFallbackRejectionSettlesTheActualMissionDispatchWhileServerFailureStaysUncertain(int status) {
+        var persistence = mock(ooo.klae.connex.backend.ai.mission.AiAgentRunPersistenceService.class);
+        var capability = mock(ooo.klae.connex.backend.ai.mission.AiAgentCapabilityGate.class);
+        var mission = new ooo.klae.connex.backend.ai.mission.AiAgentExecutionPolicy(31, 37, 1, null, null,
+                new ooo.klae.connex.backend.ai.mission.AiAgentScopePolicy("person", 41), 4,
+                Instant.parse("2030-01-01T00:00:00Z"), null, null, persistence, capability);
+        var reservations = new java.util.ArrayList<ooo.klae.connex.backend.ai.mission.AiAgentBudgetService.AiAgentDispatchReservation>();
+        when(persistence.reserveDispatch(eq(mission), anyLong())).thenAnswer(call -> {
+            var dispatch = new ooo.klae.connex.backend.ai.mission.AiAgentBudgetService.AiAgentDispatchReservation(
+                    31, 37, 1, reservations.size() + 1, call.getArgument(1));
+            reservations.add(dispatch);
+            return dispatch;
+        });
+        if (status != 503) {
+            when(aiInvocationAdmissionService.acquireDirect()).thenReturn(fallbackAdmission);
+        }
+        when(aiProvider.complete(any(AiCompletionRequest.class))).thenAnswer(call -> {
+            AiCompletionRequest request = call.getArgument(0);
+            try {
+                request.providerAttemptExecutor().execute(() -> {
+                    request.providerAttemptExecutor().beforeSend();
+                    throw new AiProviderRequestRejectedException("provider", status);
+                });
+            } catch (AiProviderRequestRejectedException exception) {
+                if (!exception.permitsStructuredOutputFallback()) {
+                    throw exception;
+                }
+            }
+            request.providerAttemptExecutor().execute(() -> {
+                request.providerAttemptExecutor().beforeSend();
+                return "fallback";
+            });
+            return new AiCompletionResult("done", 1, 1, "stop");
+        });
+        if (status == 503) {
+            assertThrows(AiProviderRequestRejectedException.class,
+                    () -> mission.execute(() -> service.complete(invocation("Summarize"))));
+            verify(persistence, never()).recordUsage(any(), any(), anyInt(), anyInt());
+            assertEquals(1, reservations.size());
+        } else {
+            mission.execute(() -> service.complete(invocation("Summarize")));
+            assertEquals(2, reservations.size());
+            var order = inOrder(persistence);
+            order.verify(persistence).reserveDispatch(eq(mission), anyLong());
+            order.verify(persistence).recordUsage(mission, reservations.getFirst(), 0, 0);
+            order.verify(persistence).reserveDispatch(eq(mission), anyLong());
+            order.verify(persistence).recordUsage(mission, reservations.getLast(), 1, 1);
+        }
+        verify(budgetLease).close();
     }
 
     @Test

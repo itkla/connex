@@ -64,14 +64,20 @@ public class AiAgentEvidenceService {
         var scope = observations.policy.scope();
         EvidenceReference reference = observations.service.reference(scope.kind(), scope.id(),
                 source, limit, result);
-        observations.references.removeIf(existing -> existing.kind().equals(reference.kind())
-                && existing.id() == reference.id()
-                && existing.version().source().equals(source)
-                && existing.version().limit() == limit);
+        if (observations.references.stream().anyMatch(existing -> existing.kind().equals(reference.kind())
+                && existing.id() == reference.id() && existing.version().source().equals(source)
+                && existing.version().limit() == limit && !existing.equals(reference))) {
+            throw refused("source_changed");
+        }
         observations.references.add(reference);
         if (observations.references.size() > 64) {
             throw refused("mission_evidence_overflow");
         }
+    }
+
+    /** Binds carried text to every authorized source that could have supplied its identifiers. */
+    public List<EvidenceReference> observed(AiAgentExecutionPolicy policy) {
+        return List.copyOf(requireObservations(policy).references);
     }
 
     /** Returns canonical versions for handles actually read during this attempt. */

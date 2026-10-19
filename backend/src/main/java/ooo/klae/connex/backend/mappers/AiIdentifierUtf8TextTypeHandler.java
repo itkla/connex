@@ -9,7 +9,7 @@ import java.sql.SQLException;
 import org.apache.ibatis.type.BaseTypeHandler;
 import org.apache.ibatis.type.JdbcType;
 
-/** Lossless UTF-8 parameter transport; SQL must explicitly CONVERT the bytes USING utf8mb4. */
+/** Lossless UTF-8 byte transport; writes require CONVERT USING utf8mb4 and reads binary columns. */
 public class AiIdentifierUtf8TextTypeHandler extends BaseTypeHandler<String> {
     @Override
     public void setNonNullParameter(
@@ -19,16 +19,30 @@ public class AiIdentifierUtf8TextTypeHandler extends BaseTypeHandler<String> {
 
     @Override
     public String getNullableResult(ResultSet resultSet, String columnName) throws SQLException {
-        return resultSet.getString(columnName);
+        return decode(resultSet.getBytes(columnName));
     }
 
     @Override
     public String getNullableResult(ResultSet resultSet, int columnIndex) throws SQLException {
-        return resultSet.getString(columnIndex);
+        return decode(resultSet.getBytes(columnIndex));
     }
 
     @Override
     public String getNullableResult(CallableStatement statement, int columnIndex) throws SQLException {
-        return statement.getString(columnIndex);
+        return decode(statement.getBytes(columnIndex));
+    }
+    /** Decodes binary UTF-8 payloads independently of the JDBC connection charset. */
+    public static String decode(byte[] bytes) throws SQLException {
+        if (bytes == null) {
+            return null;
+        }
+        try {
+            return StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                    .decode(java.nio.ByteBuffer.wrap(bytes)).toString();
+        } catch (java.nio.charset.CharacterCodingException exception) {
+            throw new SQLException("Invalid UTF-8 payload", exception);
+        }
     }
 }

@@ -1472,13 +1472,29 @@ public class AiChatAgentLoopService {
                 throw AiAssistantLoopException.refusedArguments("invalid_tool_arguments");
             }
             requireCurrentToolExecution(context.turn());
-            var screen = (java.util.function.Function<String,
+            Map<String, List<String>> argumentMembers = state.argumentMembers;
+            if (call.providerCall().isPresent()) {
+                Map<String, List<String>> nativeMembers = new LinkedHashMap<>();
+                JsonNode original = objectMapper.readTree(call.providerCall().orElseThrow().arguments());
+                int warnings = Demasker.demaskTree(original, context.maskingContext(), (path, label) -> {
+                    var labels = new LinkedHashSet<>(nativeMembers.getOrDefault(path, List.of()));
+                    labels.add(label);
+                    nativeMembers.put(path, List.copyOf(labels));
+                });
+                if (warnings != 0 || !original.equals(call.tool().args())) {
+                    throw AiAssistantLoopException.malformed("invented_placeholder");
+                }
+                argumentMembers = Map.copyOf(nativeMembers);
+            }
+            Map<String, List<String>> parsedMembers = argumentMembers;
+            var screen = (java.util.function.BiFunction<String, String,
                     ooo.klae.connex.backend.ai.mission.AiAgentMemory.DurableText>)
-                    text -> missionContentScreen.screen(text, context.maskingContext(), policy);
+                    (path, text) -> missionContentScreen.screen(text, context.maskingContext(), policy,
+                            parsedMembers.getOrDefault(path, List.of()));
             var citations = (java.util.function.Function<List<String>, List<
                     ooo.klae.connex.backend.ai.mission.AiAgentMemory.EvidenceReference>>)
                     handles -> missionEvidenceService.resolveCitations(policy, handles, context.resources());
-            JsonNode canonicalArguments = missionPlanService.canonicalArguments(
+            JsonNode canonicalArguments = missionPlanService.canonicalArgumentsWithProvenance(
                     tool, call.tool().args(), screen, citations);
             String arguments = serialize(canonicalArguments);
             String replay = policy.persistence().replayBookkeeping(
@@ -1486,14 +1502,16 @@ public class AiChatAgentLoopService {
             var prepared = replay == null
                     ? "checkpoint_segment".equals(tool)
                             ? missionPlanService.prepareCheckpoint(policy.persistence().snapshot(policy),
-                                    call.tool().args(), policy.segmentNo(), screen, citations)
+                                    call.tool().args(), policy.segmentNo(), screen, citations, missionEvidenceService.observed(policy))
                             : missionPlanService.prepare(policy.persistence().snapshot(policy),
-                                    call.tool().args(), policy.segmentNo(), screen, citations)
+                                    call.tool().args(), policy.segmentNo(), screen, citations, missionEvidenceService.observed(policy))
                     : null;
-            JsonNode result = replay == null ? prepared.result() : objectMapper.readTree(replay);
+            JsonNode storedResult = replay == null ? prepared.result() : objectMapper.readTree(replay);
+            JsonNode result = missionPlanService.providerResult(storedResult,
+                    text -> missionContentScreen.authorize(text, context.maskingContext(), policy));
             Map<String, Object> data = objectMapper.convertValue(result,
                     new tools.jackson.core.type.TypeReference<Map<String, Object>>() { });
-            AiAssistantToolResult toolResult = new AiAssistantToolResult(data, List.of());
+            AiAssistantToolResult toolResult = new AiAssistantToolResult(data, missionPlanService.resultIdentifiers(storedResult));
             AiAssistantToolCallRef callRef = new AiAssistantToolCallRef(stepNumber, call.ordinal());
             recordNativeCall(nativeTools, state.nativeCalls, callRef, call.providerCall());
             ToolTurn toolTurn = new ToolTurn(stepNumber, call.ordinal(), tool, toolResult);
@@ -1533,7 +1551,12 @@ public class AiChatAgentLoopService {
         data.put("segmentEvidence", turns.stream().map(turn -> Map.of(
                 "tool", turn.tool(), "result", turn.result().data())).toList());
         List<AiAssistantToolResult.Identifier> identifiers = new ArrayList<>(initial.identifiers());
-        turns.forEach(turn -> identifiers.addAll(turn.result().identifiers()));
+        for (int index = 0; index < turns.size(); index++) {
+            String prefix = "/segmentEvidence/" + index + "/result";
+            turns.get(index).result().identifiers().stream().map(identifier ->
+                    new AiAssistantToolResult.Identifier(identifier.kind(), identifier.value(),
+                            identifier.path() == null ? null : prefix + identifier.path())).forEach(identifiers::add);
+        }
         return new AiAssistantToolResult(data, List.copyOf(identifiers));
     }
 

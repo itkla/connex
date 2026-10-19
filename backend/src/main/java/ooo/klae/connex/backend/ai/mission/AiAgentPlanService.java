@@ -7,6 +7,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 
 import org.springframework.stereotype.Component;
@@ -30,7 +31,7 @@ public final class AiAgentPlanService {
         this.codec = Objects.requireNonNull(codec);
     }
 
-    /** Screened values admitted before persistence; arguments remain server-side canonical data. */
+    /** Screened values admitted before persistence; arguments and results retain server-side provenance. */
     public record Prepared(Snapshot snapshot, JsonNode arguments, JsonNode result) {
         public Prepared {
             Objects.requireNonNull(snapshot);
@@ -65,8 +66,13 @@ public final class AiAgentPlanService {
     /** Projects all allocated identities while exposing only freshly masked prose. */
     public ModelPlan modelPlan(AiAgentPlan plan, Function<String, String> mask) {
         Objects.requireNonNull(mask);
+        return modelPlanText(plan, text -> mask.apply(text.text()));
+    }
+
+    /** Projects each durable field with its own validated provenance. */
+    public ModelPlan modelPlanText(AiAgentPlan plan, Function<DurableText, String> mask) {
         List<ModelItem> items = plan.items().stream().map(item -> new ModelItem(item.key(),
-                Objects.requireNonNull(mask.apply(item.label().text())), item.status())).toList();
+                Objects.requireNonNull(mask.apply(item.label())), item.status())).toList();
         return new ModelPlan(plan.schemaVersion(), plan.revision(), plan.nextItemOrdinal(), items, plan.displayOrder());
     }
 
@@ -74,6 +80,13 @@ public final class AiAgentPlanService {
     public Prepared prepare(Snapshot current, JsonNode arguments, int segmentNo,
             Function<String, DurableText> screen,
             Function<List<String>, List<EvidenceReference>> citations) {
+        return prepare(current, arguments, segmentNo, (path, text) -> screen.apply(text), citations, List.of());
+    }
+
+    /** Preserves field-scoped parser provenance and binds all carried prose to observed sources. */
+    public Prepared prepare(Snapshot current, JsonNode arguments, int segmentNo,
+            BiFunction<String, String, DurableText> screen,
+            Function<List<String>, List<EvidenceReference>> citations, List<EvidenceReference> observed) {
         Objects.requireNonNull(current);
         Objects.requireNonNull(screen);
         Objects.requireNonNull(citations);
@@ -87,12 +100,14 @@ public final class AiAgentPlanService {
         LinkedHashMap<String, CompletedFact> facts = new LinkedHashMap<>();
         oldCheckpoint.completedFacts().forEach(fact -> facts.put(fact.planItemKey(), fact));
         Set<EvidenceReference> inventory = new LinkedHashSet<>(oldCheckpoint.evidenceReferences());
+        inventory.addAll(observed);
         List<String> order = new ArrayList<>();
         List<JsonNode> canonicalItems = new ArrayList<>();
         int next = oldPlan.nextItemOrdinal();
         var requestedItems = AiAgentContinuationCodec.array(arguments, "items");
         AiAgentContinuationCodec.require(requestedItems.size() <= AiAgentContinuationCodec.MAX_ITEMS);
-        for (var requested : requestedItems) {
+        for (int index = 0; index < requestedItems.size(); index++) {
+            var requested = requestedItems.get(index);
             AiAgentContinuationCodec.fields(requested, "key", "label", "status", "completion");
             String key = AiAgentContinuationCodec.nullableString(requested, "key");
             boolean created = key == null;
@@ -107,7 +122,7 @@ public final class AiAgentPlanService {
             order.add(key);
             String status = AiAgentContinuationCodec.string(requested, "status");
             AiAgentContinuationCodec.require(Set.of("pending", "active", "done").contains(status));
-            DurableText label = Objects.requireNonNull(screen.apply(AiAgentContinuationCodec.string(requested, "label")));
+            DurableText label = Objects.requireNonNull(screen.apply("/items/" + index + "/label", AiAgentContinuationCodec.string(requested, "label")));
             AiAgentContinuationCodec.require(!label.text().isBlank());
             var previous = items.get(key);
             if (!created && "done".equals(previous.status())) {
@@ -119,7 +134,7 @@ public final class AiAgentPlanService {
             if (!completion.isNull()) {
                 AiAgentContinuationCodec.fields(completion, "summary", "citations");
                 AiAgentContinuationCodec.require("done".equals(status));
-                DurableText summary = Objects.requireNonNull(screen.apply(AiAgentContinuationCodec.string(completion, "summary")));
+                DurableText summary = Objects.requireNonNull(screen.apply("/items/" + index + "/completion/summary", AiAgentContinuationCodec.string(completion, "summary")));
                 AiAgentContinuationCodec.require(!summary.text().isBlank());
                 List<EvidenceReference> references = List.copyOf(Objects.requireNonNull(citations.apply(
                         AiAgentContinuationCodec.strings(completion, "citations"))));
@@ -174,7 +189,7 @@ public final class AiAgentPlanService {
         var result = json.createObjectNode();
         result.put("planRevision", plan.revision());
         result.put("checkpointRevision", checkpoint.revision());
-        result.set("plan", json.valueToTree(modelPlan(plan, Function.identity())));
+        result.set("plan", json.valueToTree(plan));
         return new Prepared(snapshot, canonicalArguments, result);
     }
 
@@ -182,6 +197,13 @@ public final class AiAgentPlanService {
     public Prepared prepareCheckpoint(Snapshot current, JsonNode arguments, int segmentNo,
             Function<String, DurableText> screen,
             Function<List<String>, List<EvidenceReference>> citations) {
+        return prepareCheckpoint(current, arguments, segmentNo, (path, text) -> screen.apply(text), citations, List.of());
+    }
+
+    /** Preserves field-scoped parser provenance and binds all carried prose to observed sources. */
+    public Prepared prepareCheckpoint(Snapshot current, JsonNode arguments, int segmentNo,
+            BiFunction<String, String, DurableText> screen,
+            Function<List<String>, List<EvidenceReference>> citations, List<EvidenceReference> observed) {
         Objects.requireNonNull(current);
         Objects.requireNonNull(screen);
         Objects.requireNonNull(citations);
@@ -201,12 +223,13 @@ public final class AiAgentPlanService {
         AiAgentContinuationCodec.require(Set.of("reading", "reporting").contains(phase));
         var requestedMemory = arguments.get("memory");
         AiAgentContinuationCodec.fields(requestedMemory, "summary", "citations");
-        DurableText summary = Objects.requireNonNull(screen.apply(AiAgentContinuationCodec.string(requestedMemory, "summary")));
+        DurableText summary = Objects.requireNonNull(screen.apply("/memory/summary", AiAgentContinuationCodec.string(requestedMemory, "summary")));
         List<EvidenceReference> references = List.copyOf(Objects.requireNonNull(citations.apply(
                 AiAgentContinuationCodec.strings(requestedMemory, "citations"))));
         var memory = new AiAgentMemory(1, summary, references);
         var inventory = new LinkedHashSet<>(current.checkpoint().evidenceReferences());
         inventory.addAll(references);
+        inventory.addAll(observed);
         var oldCheckpoint = current.checkpoint();
         var checkpoint = checkpoint(oldCheckpoint,
                 Long.toString(AiAgentContinuationCodec.nextRevision(AiAgentContinuationCodec.decimal(oldCheckpoint.revision()))),
@@ -230,13 +253,20 @@ public final class AiAgentPlanService {
         result.put("checkpointRevision", checkpoint.revision());
         result.put("nextPlanItemKey", nextKey);
         result.put("phase", phase);
-        result.put("memory", summary.text());
+        result.set("memory", json.valueToTree(summary));
         return new Prepared(snapshot, canonicalArguments, result);
     }
 
     /** Screens a request identity before replay lookup without applying stale revision checks. */
     public JsonNode canonicalArguments(String tool, JsonNode arguments,
             Function<String, DurableText> screen,
+            Function<List<String>, List<EvidenceReference>> citations) {
+        return canonicalArgumentsWithProvenance(tool, arguments, (path, text) -> screen.apply(text), citations);
+    }
+
+    /** Screens each argument at its original parser pointer before replay comparison. */
+    public JsonNode canonicalArgumentsWithProvenance(String tool, JsonNode arguments,
+            BiFunction<String, String, DurableText> screen,
             Function<List<String>, List<EvidenceReference>> citations) {
         Objects.requireNonNull(screen);
         Objects.requireNonNull(citations);
@@ -261,7 +291,8 @@ public final class AiAgentPlanService {
             var requested = AiAgentContinuationCodec.array(arguments, "items");
             AiAgentContinuationCodec.require(requested.size() <= AiAgentContinuationCodec.MAX_ITEMS);
             int active = 0;
-            for (var item : requested) {
+            for (int index = 0; index < requested.size(); index++) {
+                var item = requested.get(index);
                 AiAgentContinuationCodec.fields(item, "key", "label", "status", "completion");
                 String key = AiAgentContinuationCodec.nullableString(item, "key");
                 if (key != null) {
@@ -272,7 +303,7 @@ public final class AiAgentPlanService {
                 AiAgentContinuationCodec.require(Set.of("pending", "active", "done").contains(status));
                 active += "active".equals(status) ? 1 : 0;
                 AiAgentContinuationCodec.require(active <= 1);
-                DurableText label = screened(AiAgentContinuationCodec.string(item, "label"), 400, screen);
+                DurableText label = screened("/items/" + index + "/label", AiAgentContinuationCodec.string(item, "label"), 400, screen);
                 AiAgentContinuationCodec.require(!label.text().isBlank());
                 var result = array.addObject();
                 result.put("key", key);
@@ -286,7 +317,7 @@ public final class AiAgentPlanService {
                     AiAgentContinuationCodec.require("done".equals(status));
                     AiAgentContinuationCodec.fields(completion, "summary", "citations");
                     var screenedCompletion = result.putObject("completion");
-                    DurableText summary = screened(AiAgentContinuationCodec.string(completion, "summary"), 1000, screen);
+                    DurableText summary = screened("/items/" + index + "/completion/summary", AiAgentContinuationCodec.string(completion, "summary"), 1000, screen);
                     AiAgentContinuationCodec.require(!summary.text().isBlank());
                     var references = List.copyOf(Objects.requireNonNull(citations.apply(
                             AiAgentContinuationCodec.strings(completion, "citations"))));
@@ -305,7 +336,7 @@ public final class AiAgentPlanService {
             AiAgentContinuationCodec.require(Set.of("reading", "reporting").contains(phase));
             var memory = arguments.get("memory");
             AiAgentContinuationCodec.fields(memory, "summary", "citations");
-            DurableText summary = screened(AiAgentContinuationCodec.string(memory, "summary"), 8000, screen);
+            DurableText summary = screened("/memory/summary", AiAgentContinuationCodec.string(memory, "summary"), 8000, screen);
             var references = List.copyOf(Objects.requireNonNull(citations.apply(
                     AiAgentContinuationCodec.strings(memory, "citations"))));
             codec.encodeMemory(new AiAgentMemory(1, summary, references));
@@ -318,8 +349,45 @@ public final class AiAgentPlanService {
         return canonical;
     }
 
-    private DurableText screened(String value, int maximum, Function<String, DurableText> screen) {
-        DurableText result = Objects.requireNonNull(screen.apply(value));
+    /** Projects a canonical stored result through freshly authorized text masking on every replay. */
+    public JsonNode providerResult(JsonNode stored, Function<DurableText, String> mask) {
+        var result = json.createObjectNode();
+        result.put("planRevision", AiAgentContinuationCodec.string(stored, "planRevision"));
+        result.put("checkpointRevision", AiAgentContinuationCodec.string(stored, "checkpointRevision"));
+        if (stored.has("plan")) {
+            var plan = json.treeToValue(stored.get("plan"), AiAgentPlan.class);
+            codec.encodePlan(plan);
+            result.set("plan", json.valueToTree(modelPlanText(plan, mask)));
+        } else {
+            result.put("nextPlanItemKey", AiAgentContinuationCodec.nullableString(stored, "nextPlanItemKey"));
+            result.put("phase", AiAgentContinuationCodec.string(stored, "phase"));
+            var memory = json.treeToValue(stored.get("memory"), DurableText.class);
+            codec.encodeMemory(new AiAgentMemory(1, memory, List.of()));
+            result.put("memory", Objects.requireNonNull(mask.apply(memory)));
+        }
+        return result;
+    }
+
+    /** Restores precise result-field metadata for the prompt assembler without exposing canonical IDs. */
+    public List<ooo.klae.connex.backend.ai.assistant.AiAssistantToolResult.Identifier> resultIdentifiers(JsonNode stored) {
+        List<ooo.klae.connex.backend.ai.assistant.AiAssistantToolResult.Identifier> identifiers = new ArrayList<>();
+        if (stored.has("plan")) {
+            var plan = json.treeToValue(stored.get("plan"), AiAgentPlan.class);
+            codec.encodePlan(plan);
+            for (int index = 0; index < plan.items().size(); index++) {
+                identifiers.addAll(AiAgentContentScreen.identifiers(plan.items().get(index).label(),
+                        "/plan/items/" + index + "/label"));
+            }
+        } else {
+            var memory = json.treeToValue(stored.get("memory"), DurableText.class);
+            codec.encodeMemory(new AiAgentMemory(1, memory, List.of()));
+            identifiers.addAll(AiAgentContentScreen.identifiers(memory, "/memory"));
+        }
+        return List.copyOf(identifiers);
+    }
+
+    private DurableText screened(String path, String value, int maximum, BiFunction<String, String, DurableText> screen) {
+        DurableText result = Objects.requireNonNull(screen.apply(path, value));
         AiAgentContinuationCodec.text(result.text(), maximum);
         codec.encodeMemory(new AiAgentMemory(1, result, List.of()));
         return result;

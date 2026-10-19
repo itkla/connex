@@ -43,11 +43,21 @@ import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 
 import ooo.klae.connex.backend.ai.AiFeature;
 import ooo.klae.connex.backend.ai.AiGenerationTaskResult;
+import ooo.klae.connex.backend.ai.mission.AiAgentContinuationCodec;
+import ooo.klae.connex.backend.ai.mission.AiAgentPlanService;
+import ooo.klae.connex.backend.ai.mission.AiAgentContentScreen;
+import ooo.klae.connex.backend.ai.mission.AiAgentEvidenceService;
+import ooo.klae.connex.backend.ai.mission.AiAgentExecutionPolicy;
+import ooo.klae.connex.backend.ai.mission.AiAgentRunPersistenceService;
+import ooo.klae.connex.backend.ai.mission.AiAgentScopePolicy;
+import ooo.klae.connex.backend.ai.mission.AiAgentMemory;
+import ooo.klae.connex.backend.beans.AiAgentRun;
 import ooo.klae.connex.backend.ai.AiInvocation;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.DirectAdmissionRejectedException;
@@ -267,8 +277,9 @@ class AiChatAgentLoopServiceTest {
             items.addObject().put("key", String.format(java.util.Locale.ROOT, "p%04d", index + 1))
                     .put("label", "A screened canonical label ".repeat(12)).put("status", "pending");
         }
-        when(plans.canonicalArguments(eq("set_todos"), any(), any(), any())).thenReturn(canonical);
-        when(plans.prepare(eq(snapshot), any(), eq(1), any(), any()))
+        when(plans.providerResult(any(), any())).thenAnswer(call -> call.getArgument(0));
+        when(plans.canonicalArgumentsWithProvenance(eq("set_todos"), any(), any(), any())).thenReturn(canonical);
+        when(plans.prepare(eq(snapshot), any(), eq(1), any(), any(), any()))
                 .thenReturn(new ooo.klae.connex.backend.ai.mission.AiAgentPlanService.Prepared(
                         snapshot, canonical, result));
         when(invocationService.completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantStep.class),
@@ -283,6 +294,124 @@ class AiChatAgentLoopServiceTest {
         verify(missionPersistence, never()).commitCheckpoint(any(), anyInt(), anyInt(), any(), any(), any());
         verify(persistenceService, never()).proposeTool(any(), anyInt(), anyInt(), any(), any());
         verify(toolExecutor, never()).execute(any(), any(), any(), anyBoolean(), any());
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+            "0,さん,false", "0,様,false", "0,氏,false", "1,さん,false", "1,様,false", "1,氏,false",
+            "2,さん,false", "2,様,false", "2,氏,false", "0,さん,true", "0,様,true", "0,氏,true",
+            "1,さん,true", "1,様,true", "1,氏,true", "2,さん,true", "2,様,true", "2,氏,true"})
+    void missionMemberSuffixNeverReachesJsonOrNativeProviderRequests(int nativeCalls, String suffix, boolean closing) {
+        String name = "Former Member";
+        var codec = new AiAgentContinuationCodec();
+        var plans = new AiAgentPlanService(codec);
+        var missionPersistence = mock(AiAgentRunPersistenceService.class);
+        var evidence = mock(AiAgentEvidenceService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "missionPlanService", plans);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "missionContentScreen", new AiAgentContentScreen(workspaceService));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "missionEvidenceService", evidence);
+        var member = new ooo.klae.connex.backend.beans.User();
+        member.setId(883742);
+        member.setDisplayName(name);
+        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(member));
+        var run = new AiAgentRun();
+        run.setId(31);
+        run.setWorkspaceId(TURN.workspaceId());
+        run.setMissionType("record_review_v1");
+        run.setDefinitionVersion(1);
+        run.setRuntimeContractVersion(2);
+        run.setPrivacyGeneration(1);
+        run.setScopeFingerprint(new byte[32]);
+        run.setScopeJson("{\"kind\":\"record\",\"recordKind\":\"person\",\"recordId\":41}");
+        var stored = new java.util.concurrent.atomic.AtomicReference<>(codec.initialize(run));
+        var goal = message(TURN.userMessageId(), "Review with " + name);
+        var policy = new AiAgentExecutionPolicy(31, 37, 1, TURN, goal, new AiAgentScopePolicy("person", 41),
+                4, NOW.plusSeconds(180), LEASE, new AiRunLeaseGuard(java.time.Duration.ofSeconds(60)),
+                missionPersistence, null, 2, 1, 1, stored.get(), true, 65536);
+        when(missionPersistence.remainingDispatches(policy)).thenReturn(closing ? 2 : 4, closing ? 1 : 4);
+        when(missionPersistence.resolve(eq(policy), any(), any())).thenReturn(true);
+        when(missionPersistence.snapshot(policy)).thenAnswer(call -> stored.get());
+        var reference = new AiAgentMemory.EvidenceReference("person", 41,
+                new AiAgentMemory.EvidenceVersion("record", 0, "a".repeat(64)));
+        when(evidence.observed(policy)).thenReturn(List.of(reference));
+        when(missionPersistence.commitPlan(eq(policy), anyInt(), anyInt(), any(), any(), any())).thenAnswer(call -> {
+            var snapshot = (AiAgentContinuationCodec.Snapshot) call.getArgument(5);
+            codec.apply(run, snapshot);
+            stored.set(codec.decode(run));
+            return call.getArgument(4);
+        });
+        when(memoryService.prepare(eq(TURN), any(), any(Instant.class), any(), any())).thenReturn(
+                new AiChatMemory(List.of(goal), new AiAssistantPromptBudget(64, 64000, 16000, 16000, 30000, 112000),
+                        0, 0, nativeCalls > 0, Math.max(1, nativeCalls),
+                        new AiAssistantToolResult(Map.of("missionContext", Map.of()), List.of())));
+        var requests = new ArrayList<String>();
+        java.util.function.Consumer<AiInvocation> inspect = invocation -> {
+            String outbound = invocation.prompt().getSystemPrompt() + invocation.prompt().getMessages().stream()
+                    .map(value -> value.getContent()).collect(java.util.stream.Collectors.joining());
+            requests.add(outbound);
+            assertFalse(outbound.contains(name));
+            assertFalse(outbound.contains("883742"));
+            String token = invocation.context().tokenFor(ooo.klae.connex.backend.ai.masking.EntityKind.MEMBER, name);
+            invocation.context().exposeDispatchedTokens(java.util.Set.of(token));
+        };
+        var answer = new AiAssistantStep.FinalAnswer("Review complete", List.of(), List.of(), null);
+        if (nativeCalls > 0) {
+            when(invocationService.completeNativeToolsRepairable(any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                    any(AiRawOutputGuard.class), any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                    any(AiNativeToolRequest.class), eq(directAdmission), any(Runnable.class))).thenAnswer(call -> {
+                AiInvocation invocation = call.getArgument(0);
+                inspect.accept(invocation);
+                AiNativeToolRequest nativeRequest = call.getArgument(5);
+                String replay = nativeRequest.exchanges().stream().map(value -> value.maskedResult())
+                        .collect(java.util.stream.Collectors.joining());
+                assertFalse(replay.contains(name));
+                assertFalse(replay.contains("883742"));
+                requests.set(requests.size() - 1, requests.getLast() + replay);
+                if (requests.size() > 1) {
+                    return nativeFinal(answer);
+                }
+                var calls = new ArrayList<AiToolCall>();
+                var args = new ArrayList<JsonNode>();
+                for (int index = 0; index < nativeCalls; index++) {
+                    var arguments = missionSuffixArguments(index + 1, "Confirm with {{M1}}" + suffix);
+                    calls.add(new AiToolCall("mission_" + index, "set_todos", objectMapper.writeValueAsString(arguments)));
+                    ooo.klae.connex.backend.ai.masking.Demasker.demaskTree(arguments, invocation.context());
+                    args.add(arguments);
+                }
+                return new AiNativeToolCompletion.Tool<AiAssistantStep.FinalAnswer>(calls, args, 0, 3, 5,
+                        "tool_calls", Optional.empty(), Optional.empty());
+            });
+        } else {
+            when(invocationService.completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantStep.class),
+                    any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class))).thenAnswer(call -> {
+                AiInvocation invocation = call.getArgument(0);
+                inspect.accept(invocation);
+                if (requests.size() > 1) {
+                    return parsed(new AiAssistantStep(null, answer));
+                }
+                var args = missionSuffixArguments(1, "Confirm with {{M1}}" + suffix);
+                Map<String, List<String>> members = new java.util.LinkedHashMap<>();
+                ooo.klae.connex.backend.ai.masking.Demasker.demaskTree(args, invocation.context(),
+                        (path, label) -> members.put("/tool/args" + path, List.of(label)));
+                return new AiStructuredRepairAttempt<>(new AiStructuredOutcome.Parsed<>(
+                        new AiAssistantStep(new AiAssistantStep.Tool("set_todos", args), null), 0, 3, 5, "stop", members), Optional.empty());
+            });
+        }
+        var outcome = policy.execute(() -> service.run(TURN));
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, outcome.outcome());
+        assertEquals(2, requests.size());
+        assertTrue(requests.getLast().contains(suffix));
+        assertTrue(requests.getLast().contains("{{M"));
+        assertEquals(List.of(new AiAgentMemory.MemberProvenance(883742, name)),
+                stored.get().plan().items().getLast().label().memberProvenance());
+        verify(missionPersistence, times(Math.max(1, nativeCalls))).commitPlan(eq(policy), anyInt(), anyInt(), any(), any(), any());
+    }
+
+    private JsonNode missionSuffixArguments(int revision, String label) {
+        var args = objectMapper.createObjectNode().put("expectedPlanRevision", Integer.toString(revision))
+                .put("expectedCheckpointRevision", Integer.toString(revision));
+        args.putArray("items").addObject().putNull("key").put("label", label).put("status", "pending").putNull("completion");
+        return args;
     }
 
     /** A closing attempt that still calls a tool preserves the original no-progress reason. */

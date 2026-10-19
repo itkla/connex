@@ -151,6 +151,7 @@ public class TenantExportSnapshotTransaction {
                     zip.putNextEntry(new ZipEntry("data/" + registered.table() + ".jsonl"));
                     entryOpen = true;
                 }
+                restoreUtf8Payloads(row);
                 if ("ai_agent_run".equals(registered.table())) {
                     validateMission(row);
                 }
@@ -169,6 +170,23 @@ public class TenantExportSnapshotTransaction {
                 registered.table(),
                 "data/" + registered.table() + ".jsonl",
                 rows);
+    }
+
+    private void restoreUtf8Payloads(Map<String, Object> row) throws IOException {
+        for (String column : List.of("plan_json", "checkpoint_json", "memory_json", "arguments_json", "result_json")) {
+            String transportColumn = "utf8_" + column;
+            if (row.containsKey(transportColumn)) {
+                Object bytes = row.remove(transportColumn);
+                if (bytes != null && !(bytes instanceof byte[])) {
+                    throw new IOException("Invalid mission export transport");
+                }
+                try {
+                    row.put(column, ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler.decode((byte[]) bytes));
+                } catch (java.sql.SQLException exception) {
+                    throw new IOException("Invalid mission export encoding", exception);
+                }
+            }
+        }
     }
 
     private void validateMission(Map<String, Object> row) {

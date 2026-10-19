@@ -86,9 +86,9 @@
     <result property="requestedByUserId" column="requested_by_user_id"/>
     <result property="toolName" column="tool_name"/>
     <result property="status" column="status"/>
-    <result property="argumentsJson" column="arguments_json"/>
+    <result property="argumentsJson" column="arguments_json" typeHandler="ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler"/>
     <result property="thoughtSignature" column="thought_signature"/>
-    <result property="resultJson" column="result_json"/>
+    <result property="resultJson" column="result_json" typeHandler="ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler"/>
     <result property="executedByUserId" column="executed_by_user_id"/>
     <result property="executedAt" column="executed_at"/>
     <result property="idempotencyKey" column="idempotency_key"/>
@@ -1016,7 +1016,7 @@
   <select id="getToolCallByIdempotencyKey" resultMap="toolCallResult">
     SELECT tc.id, tc.workspace_id, tc.message_id, m.session_id,
            m.author_user_id AS requested_by_user_id, tc.tool_name, tc.status,
-           tc.arguments_json, tc.thought_signature, tc.result_json,
+           CAST(tc.arguments_json AS BINARY) AS arguments_json, tc.thought_signature, CAST(tc.result_json AS BINARY) AS result_json,
            tc.executed_by_user_id, tc.executed_at,
            tc.idempotency_key, tc.server_proposal, tc.mission_run_id, tc.artifact_origin,
            tc.privacy_generation, tc.created_at, tc.updated_at
@@ -1031,7 +1031,7 @@
   <select id="getToolCallBySession" resultMap="toolCallResult">
     SELECT tc.id, tc.workspace_id, tc.message_id, m.session_id,
            m.author_user_id AS requested_by_user_id, tc.tool_name, tc.status,
-           tc.arguments_json, tc.thought_signature, tc.result_json,
+           CAST(tc.arguments_json AS BINARY) AS arguments_json, tc.thought_signature, CAST(tc.result_json AS BINARY) AS result_json,
            tc.executed_by_user_id, tc.executed_at,
            tc.idempotency_key, tc.server_proposal, tc.mission_run_id, tc.artifact_origin,
            tc.privacy_generation, tc.created_at, tc.updated_at
@@ -1054,7 +1054,7 @@
   <select id="listToolCallsBySession" resultMap="toolCallResult">
     SELECT tc.id, tc.workspace_id, tc.message_id, m.session_id,
            m.author_user_id AS requested_by_user_id, tc.tool_name, tc.status,
-           tc.arguments_json, tc.thought_signature, tc.result_json,
+           CAST(tc.arguments_json AS BINARY) AS arguments_json, tc.thought_signature, CAST(tc.result_json AS BINARY) AS result_json,
            tc.executed_by_user_id, tc.executed_at,
            tc.idempotency_key, tc.server_proposal, tc.mission_run_id, tc.artifact_origin,
            tc.privacy_generation, tc.created_at, tc.updated_at
@@ -1076,7 +1076,7 @@
   <select id="listUndecidedToolCallsAfterHistory" resultMap="toolCallResult">
     SELECT tc.id, tc.workspace_id, tc.message_id, m.session_id,
            m.author_user_id AS requested_by_user_id, tc.tool_name, tc.status,
-           tc.arguments_json, tc.thought_signature, tc.result_json,
+           CAST(tc.arguments_json AS BINARY) AS arguments_json, tc.thought_signature, CAST(tc.result_json AS BINARY) AS result_json,
            tc.executed_by_user_id, tc.executed_at,
            tc.idempotency_key, tc.server_proposal, tc.created_at, tc.updated_at
     FROM ai_chat_tool_call tc
@@ -1097,7 +1097,7 @@
   <select id="listToolCallsByTurn" resultMap="toolCallResult">
     SELECT tc.id, tc.workspace_id, tc.message_id, m.session_id,
            m.author_user_id AS requested_by_user_id, tc.tool_name, tc.status,
-           tc.arguments_json, tc.thought_signature, tc.result_json,
+           CAST(tc.arguments_json AS BINARY) AS arguments_json, tc.thought_signature, CAST(tc.result_json AS BINARY) AS result_json,
            tc.executed_by_user_id, tc.executed_at,
            tc.idempotency_key, tc.server_proposal, tc.mission_run_id, tc.artifact_origin,
            tc.privacy_generation, tc.created_at, tc.updated_at
@@ -1115,7 +1115,7 @@
   <select id="getToolCallBySessionForUpdate" resultMap="toolCallResult" flushCache="true" useCache="false">
     SELECT tc.id, tc.workspace_id, tc.message_id, m.session_id,
            m.author_user_id AS requested_by_user_id, tc.tool_name, tc.status,
-           tc.arguments_json, tc.thought_signature, tc.result_json,
+           CAST(tc.arguments_json AS BINARY) AS arguments_json, tc.thought_signature, CAST(tc.result_json AS BINARY) AS result_json,
            tc.executed_by_user_id, tc.executed_at,
            tc.idempotency_key, tc.server_proposal, tc.mission_run_id, tc.artifact_origin,
            tc.privacy_generation, tc.created_at, tc.updated_at

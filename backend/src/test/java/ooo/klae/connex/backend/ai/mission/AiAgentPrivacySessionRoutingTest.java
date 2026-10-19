@@ -108,7 +108,7 @@ class AiAgentPrivacySessionRoutingTest {
         for (String statement : List.of("WorkspaceMapper.getOrgId", "AiAgentPrivacyMapper.lockBarrier",
                 "AiAgentPrivacyMapper.countIncompleteWork", "AiAgentPrivacyMapper.legacyActiveTurns",
                 "AiAgentRunMapper.countInconsistentActiveRuns", "AiRunLeaseMapper.findExpiredLeases",
-                "AiAgentRunMapper.orphanedRuns", "AiAgentRunMapper.getRun", "AiAgentDsrControlMapper.pendingAcceptances",
+                "AiAgentRunMapper.orphanedRuns", "AiAgentRunMapper.dueRuns", "AiAgentRunMapper.interruptedReadRuns", "AiAgentRunMapper.getRun", "AiAgentDsrControlMapper.pendingAcceptances",
                 "AiAgentDsrControlMapper.findCompletion", "AiAgentPrivacyMapper.getWork")) {
             String id = "ooo.klae.connex.backend.mappers." + statement;
             configuration.addMappedStatement(new MappedStatement.Builder(configuration, id,
@@ -184,7 +184,7 @@ class AiAgentPrivacySessionRoutingTest {
         initializer.initialize(7);
 
         assertTrue(queries.tenantReads.containsAll(List.of("lockBarrier", "legacyActiveTurns",
-                "countInconsistentActiveRuns", "findExpiredLeases", "orphanedRuns")));
+                "countInconsistentActiveRuns", "findExpiredLeases", "orphanedRuns", "dueRuns", "interruptedReadRuns")));
         verify(persistence).settleOrphan(org.mockito.ArgumentMatchers.eq(orphan), any(),
                 org.mockito.ArgumentMatchers.eq(4L));
         assertFalse(context.isResolved());

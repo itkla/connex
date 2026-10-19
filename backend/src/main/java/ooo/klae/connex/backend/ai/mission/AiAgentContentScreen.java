@@ -39,6 +39,12 @@ public class AiAgentContentScreen {
 
     /** Demasks only exposed bindings and resolves bounded member provenance by current authority. */
     public DurableText screen(String raw, MaskingContext context, AiAgentExecutionPolicy policy) {
+        return screen(raw, context, policy, List.of());
+    }
+
+    /** Retains exact token-derived labels only at their originating argument field. */
+    public DurableText screen(String raw, MaskingContext context, AiAgentExecutionPolicy policy,
+            List<String> parsedMembers) {
         if (raw == null || AiGeneratedContentScreen.rejectionReason(raw) != null
                 || AiGeneratedContentScreen.containsBarePlaceholder(raw)) {
             throw refused();
@@ -82,7 +88,11 @@ public class AiAgentContentScreen {
             }
         }
         List<MemberProvenance> provenance = new ArrayList<>();
-        for (String label : context.memberCandidatesIn(text)) {
+        List<String> labels = context.memberCandidatesIn(text, parsedMembers);
+        if (!labels.containsAll(parsedMembers)) {
+            throw refused();
+        }
+        for (String label : labels) {
             Integer id = members.get(label);
             if (id == null || id <= 0 || label.length() > 200
                     || AiGeneratedContentScreen.rejectionReason(label) != null
@@ -96,6 +106,25 @@ public class AiAgentContentScreen {
             throw refused();
         }
         return new DurableText(text, List.copyOf(provenance));
+    }
+
+    /** Reauthorizes provenance without masking before the prompt assembler's single masking pass. */
+    public String authorize(DurableText text, MaskingContext context, AiAgentExecutionPolicy policy) {
+        var members = workspaceService.getMembers(policy.turn().workspaceId());
+        if (text.memberProvenance().stream().anyMatch(provenance -> members.stream()
+                .noneMatch(member -> member != null && member.getId() == provenance.userId()))) {
+            throw new AiAssistantLoopException("access_lost", "access_lost");
+        }
+        text.memberProvenance().forEach(provenance -> context.registerMemberCandidate(provenance.originalLabel()));
+        return text.text();
+    }
+
+    /** Carries exact member labels to one provider-facing textual field without serializing metadata. */
+    public static List<ooo.klae.connex.backend.ai.assistant.AiAssistantToolResult.Identifier> identifiers(
+            DurableText text, String path) {
+        return text.memberProvenance().stream().map(provenance ->
+                new ooo.klae.connex.backend.ai.assistant.AiAssistantToolResult.Identifier(
+                        "member", provenance.originalLabel(), path)).toList();
     }
 
     /** Returns every persisted prose holding whose provenance must be freshly authorized. */

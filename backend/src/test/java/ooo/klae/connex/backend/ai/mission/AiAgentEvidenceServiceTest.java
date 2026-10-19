@@ -43,6 +43,30 @@ class AiAgentEvidenceServiceTest {
     }
 
     @Test
+    void renameAndRereadWithinSegmentCannotReplaceTheOriginalIdentifierBinding() {
+        var policy = new AiAgentExecutionPolicy(31, 37, 1, null, null,
+                new AiAgentScopePolicy("person", 7), 4, java.time.Instant.parse("2030-01-01T00:00:00Z"),
+                null, null, null, null);
+        service.begin(policy);
+        try {
+            policy.execute(() -> {
+                var args = new ObjectMapper().createObjectNode().put("handle", "r1");
+                var resources = new ooo.klae.connex.backend.ai.assistant.AiChatResourceRegistry();
+                AiAgentEvidenceService.capture("get_record", args,
+                        new AiAssistantToolResult(Map.of("name", "Original Name"), List.of()), resources);
+                assertEquals(1, service.observed(policy).size());
+                assertEquals("source_changed", assertThrows(AiAssistantLoopException.class,
+                        () -> AiAgentEvidenceService.capture("get_record", args,
+                                new AiAssistantToolResult(Map.of("name", "Renamed"), List.of()), resources)).terminalReason());
+                assertEquals(1, service.observed(policy).size());
+                return null;
+            });
+        } finally {
+            service.clear();
+        }
+    }
+
+    @Test
     void changedAndInaccessibleEvidenceStopBeforeContextCanDispatch() {
         var first = new AiAssistantToolResult(Map.of("name", "Original"), List.of());
         var reference = service.reference("person", 7, "record", 0, first);

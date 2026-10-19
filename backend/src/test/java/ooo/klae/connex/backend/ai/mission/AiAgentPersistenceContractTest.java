@@ -69,6 +69,29 @@ class AiAgentPersistenceContractTest {
     }
 
     @Test
+    void utf8TransportNeverUsesConnectionStringEncodingAndRejectsMalformedBytes() throws Exception {
+        var handler = new ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler();
+        String text = "日本語😀 担当者様";
+        byte[] bytes = text.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        var statement = org.mockito.Mockito.mock(java.sql.PreparedStatement.class);
+        handler.setNonNullParameter(statement, 1, text, org.apache.ibatis.type.JdbcType.VARBINARY);
+        org.mockito.Mockito.verify(statement).setBytes(1, bytes);
+        var result = org.mockito.Mockito.mock(java.sql.ResultSet.class);
+        org.mockito.Mockito.when(result.getBytes("payload")).thenReturn(bytes);
+        org.mockito.Mockito.when(result.getBytes(1)).thenReturn(bytes);
+        assertEquals(text, handler.getNullableResult(result, "payload"));
+        assertEquals(text, handler.getNullableResult(result, 1));
+        org.mockito.Mockito.verify(result, org.mockito.Mockito.never()).getString(org.mockito.ArgumentMatchers.anyString());
+        org.mockito.Mockito.verify(result, org.mockito.Mockito.never()).getString(org.mockito.ArgumentMatchers.anyInt());
+        var callable = org.mockito.Mockito.mock(java.sql.CallableStatement.class);
+        org.mockito.Mockito.when(callable.getBytes(1)).thenReturn(bytes);
+        assertEquals(text, handler.getNullableResult(callable, 1));
+        org.junit.jupiter.api.Assertions.assertNull(handler.getNullableResult(result, "missing"));
+        org.junit.jupiter.api.Assertions.assertThrows(java.sql.SQLException.class,
+                () -> ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler.decode(new byte[] {(byte) 0xc3, 0x28}));
+    }
+
+    @Test
     void purgeAndResidualShareTheImmutableMessageBoundary() throws Exception {
         String mapper = Files.readString(Path.of("src/main/resources/mappers/AiAgentPrivacyMapper.xml"));
         String residual = mapper.substring(mapper.indexOf("<sql id=\"sessionResidual\">"));

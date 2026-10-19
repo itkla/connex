@@ -45,6 +45,7 @@ import tools.jackson.databind.ObjectMapper;
 
 /** Real transactions exercise continuation commits and refusals without provider I/O. */
 class AiAgentContinuationIntegrationTest extends AbstractAiAgentPrivacyIntegrationTest {
+    @Autowired private org.mybatis.spring.SqlSessionTemplate sqlSessions;
     @Autowired private AiAgentRunPersistenceService persistence;
     @MockitoSpyBean private AiAgentRunMapper runs;
     @MockitoSpyBean private AiChatMapper chat;
@@ -149,6 +150,28 @@ class AiAgentContinuationIntegrationTest extends AbstractAiAgentPrivacyIntegrati
     }
 
     @Test
+    void exhaustedDiscoveryPageCannotStarveEligibleTwentySixthRun() {
+        for (int index = 0; index < 25; index++) {
+            var run = create();
+            for (int attempt = 1; attempt <= 3; attempt++) {
+                claim(stored(run));
+                persistence.interrupt(stored(run), "interrupted");
+                if (attempt < 3) {
+                    assertTrue(persistence.requeueInterrupted(stored(run)));
+                }
+            }
+        }
+        var eligible = create();
+        claim(eligible);
+        persistence.interrupt(stored(eligible), "interrupted");
+        var discovered = runs.interruptedReadRuns(workspace.getId(), 25);
+        assertEquals(List.of(eligible.getId()), discovered.stream().map(AiAgentRun::getId).toList());
+        assertTrue(persistence.requeueInterrupted(discovered.getFirst()));
+        assertEquals(2, claim(stored(eligible)).attemptNo());
+        assertTrue(runs.interruptedReadRuns(workspace.getId(), 25).isEmpty());
+    }
+
+    @Test
     void unknownVersionsCannotClaimResumePublishOrExport() {
         var run = create();
         jdbc.update("UPDATE ai_agent_run SET checkpoint_schema_version=99 WHERE workspace_id=? AND id=?", workspace.getId(), run.getId());
@@ -175,12 +198,13 @@ class AiAgentContinuationIntegrationTest extends AbstractAiAgentPrivacyIntegrati
         var policy = claim(run);
         var prepared = plan(policy);
         var before = persistence.snapshot(policy);
+        AiAgentRunMapper delegate = sqlSessions.getMapper(AiAgentRunMapper.class);
         AtomicBoolean fail = new AtomicBoolean(true);
         doAnswer(call -> {
             if (fail.compareAndSet(true, false)) {
                 throw new IllegalStateException("Injected bookkeeping rollback");
             }
-            return call.callRealMethod();
+            return delegate.insertMissionBookkeepingCall(call.getArgument(0));
         }).when(runs).insertMissionBookkeepingCall(any());
         assertThrows(IllegalStateException.class, () -> commitPlan(policy, prepared));
         assertEquals(before, persistence.snapshot(policy));

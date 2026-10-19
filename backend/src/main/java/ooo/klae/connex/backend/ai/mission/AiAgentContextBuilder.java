@@ -35,6 +35,11 @@ public class AiAgentContextBuilder {
     public AiAssistantToolResult build(AiAgentExecutionPolicy policy, MaskingContext context,
             AiChatResourceRegistry resources) {
         var snapshot = policy.persistence().snapshot(policy);
+        if (AiAgentContentScreen.texts(snapshot).stream().anyMatch(text -> !text.text().isBlank())
+                && snapshot.checkpoint().evidenceReferences().stream()
+                        .noneMatch(reference -> "record".equals(reference.version().source()))) {
+            throw new AiAssistantLoopException("source_changed", "source_changed");
+        }
         var members = workspaceService.getMembers(policy.turn().workspaceId());
         Set<Integer> memberIds = members.stream().filter(java.util.Objects::nonNull)
                 .map(ooo.klae.connex.backend.beans.User::getId)
@@ -58,8 +63,13 @@ public class AiAgentContextBuilder {
             reads.add(toolExecutor.execute("get_record", primaryArgs, resources,
                     false, policy.turn().scope()));
         }
-        List<AiAssistantToolResult.Identifier> identifiers = reads.stream()
-                .flatMap(read -> read.identifiers().stream()).distinct().toList();
+        List<AiAssistantToolResult.Identifier> identifiers = new ArrayList<>();
+        for (int index = 0; index < reads.size(); index++) {
+            String prefix = "/missionContext/evidence/" + index;
+            reads.get(index).identifiers().stream().map(identifier ->
+                    new AiAssistantToolResult.Identifier(identifier.kind(), identifier.value(),
+                            identifier.path() == null ? null : prefix + identifier.path())).forEach(identifiers::add);
+        }
         for (var identifier : identifiers) {
             switch (identifier.kind()) {
                 case "person" -> MaskingEngine.maskField(
@@ -73,7 +83,7 @@ public class AiAgentContextBuilder {
             }
         }
         Map<String, Object> continuation = new LinkedHashMap<>();
-        continuation.put("plan", planService.modelPlan(snapshot.plan(), java.util.function.Function.identity()));
+        continuation.put("plan", planService.modelPlanText(snapshot.plan(), text -> text.text()));
         Map<String, Object> checkpoint = new LinkedHashMap<>();
         checkpoint.put("revision", snapshot.checkpoint().revision());
         checkpoint.put("planRevision", snapshot.checkpoint().planRevision());
@@ -88,6 +98,15 @@ public class AiAgentContextBuilder {
         continuation.put("memory", Map.of("summary",
                 snapshot.memory().summary().text(),
                 "citations", citations(snapshot.memory().evidenceReferences(), resources)));
+        for (int index = 0; index < snapshot.plan().items().size(); index++) {
+            identifiers.addAll(AiAgentContentScreen.identifiers(snapshot.plan().items().get(index).label(),
+                    "/missionContext/plan/items/" + index + "/label"));
+        }
+        for (int index = 0; index < snapshot.checkpoint().completedFacts().size(); index++) {
+            identifiers.addAll(AiAgentContentScreen.identifiers(snapshot.checkpoint().completedFacts().get(index).summary(),
+                    "/missionContext/checkpoint/completedFacts/" + index + "/summary"));
+        }
+        identifiers.addAll(AiAgentContentScreen.identifiers(snapshot.memory().summary(), "/missionContext/memory/summary"));
         continuation.put("evidence", reads.stream().map(AiAssistantToolResult::data).toList());
         return new AiAssistantToolResult(Map.of("missionContext", continuation), identifiers);
     }

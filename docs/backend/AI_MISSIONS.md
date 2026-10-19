@@ -48,6 +48,8 @@ Revisions and generations are positive signed longs and refuse overflow.
 Every continuation writer, including insert and general state update, binds UTF-8 bytes
 with explicit `CONVERT(... USING utf8mb4)`; later control, claim and settlement cannot
 corrupt previously committed Japanese or supplementary text under Cp1252 connections.
+All run, bookkeeping, chat and export readers select binary payloads and decode UTF-8
+explicitly, including JSON columns whose JDBC string reader would use the connection charset.
 Screened bookkeeping arguments/results use the same byte transport through a dedicated
 mission insert. Replay compares strict JSON values because MySQL JSON normalizes object
 formatting and property order.
@@ -70,7 +72,13 @@ Bookkeeping is not new evidence and does not reset the loop's no-progress guard.
 Canonical member IDs, original-label provenance, fingerprints and evidence bindings stay
 server-side. Provider-facing plan/results carry only plan keys, revisions, statuses and
 freshly masked prose. Reconstructed context uses that same explicit projection, never
-serializing the canonical plan or completed-fact ledger directly into a request.
+serializing the canonical plan or completed-fact ledger directly into a request. Stored bookkeeping results
+retain their original durable text provenance; every replay uses the same explicit provider
+projection with fresh member authorization and field-scoped containment masking. Server-only
+identifier pointers survive evidence nesting, tool replay and closing-context projection until
+the prompt assembler's single masking and leak-scan pass. Parser
+provenance stays tied to each argument pointer, including individual native batch calls, so
+Japanese honorific suffixes cannot discard a demasked member's provenance.
 
 ## Reconstruction and evidence
 
@@ -85,7 +93,11 @@ read plus identifier provenance before masking and handle serialization. `get_re
 single-primary `get_records` normalize to `record/0`; activities/tasks bind their actual
 bounded limit. Revalidation repeats that exact closed read. Lost authority pauses with
 `access_lost`; changed evidence pauses with `source_changed` before prompt assembly/egress.
-Stored facts remain intact. Original member-label provenance must still authorize its
+Stored facts remain intact. Every plan and checkpoint mutation binds carried prose to all
+validated sources observed in that segment, including the primary record when citations are
+empty. A conflicting reread in the same segment refuses `source_changed` before it can replace
+the original source binding. Nonblank carried prose without a primary-record binding also
+refuses before reconstruction. Original member-label provenance must still authorize its
 member before seeding fresh masking. Complete context is assembled through PromptAssembly;
 overflow refuses `mission_context_overflow` without truncation or history fallback.
 
@@ -101,7 +113,11 @@ continuation-capable segment, or only final report in a terminal-only segment.
 
 Dispatch reservation increments a durable ordinal and sets uncertainty before egress.
 Usage callbacks bind that exact ordinal/generation and clear it once. Duplicates cannot
-charge twice or clear a successor. Observed overrun stops with `usage_overrun` and retains
+charge twice or clear a successor. An explicit 400/422 protocol rejection settles that exact
+mission dispatch as one decision and zero tokens before fallback or repair can reserve again.
+Transport failures, timeouts and server errors retain uncertainty. Organization reservations
+remain independently conservative and charge their dispatched ceiling for rejected requests.
+Observed overrun stops with `usage_overrun` and retains
 truthful totals. Certain settlement charges known decisions/tokens; uncertain settlement
 charges at least the full attempt allowance and any observed overrun. Proven-unused
 allowance alone is refunded. Organization accounting and invocation audits remain independent.
@@ -117,7 +133,8 @@ Orphan settlement preserves continuation/cursor and original caps/deadlines, set
 attempt and changes the run to `paused/interrupted`, with lease takeover/release last.
 A separate freshly authorized transaction may queue only supported, unexpired runtime-2
 interrupted READ work with allowance and fewer than three attempts for the next logical
-segment. It spends no attempt and touches no lease. Member/content/schema/access/source/
+segment. Discovery excludes exhausted next-segment attempts before applying its page limit,
+so stopped exhausted runs cannot starve later eligible work. It spends no attempt and touches no lease. Member/content/schema/access/source/
 budget/provider/deadline stops never automatically retry. The runner preserves actual
 failure classification. Explicit pause over `paused/interrupted` records `reason=member`
 and increments state version under session/run locks; only an existing member pause is

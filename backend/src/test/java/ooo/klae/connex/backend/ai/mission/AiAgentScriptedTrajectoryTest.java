@@ -258,7 +258,7 @@ class AiAgentScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
         assertNoEffects(run);
     }
 
-    /** The fallback fixture explicitly settles known zero usage so capability alone decides admission. */
+    /** Repairs and real provider fallbacks must recheck their capability gate before dispatch. */
     @ParameterizedTest
     @CsvSource({"mission_repair_gate,true", "mission_repair_gate,false", "mission_fallback_gate,true", "mission_fallback_gate,false"})
     void secondaryAttemptDependsOnlyOnItsCapabilityGate(String fixture, boolean disable) {
@@ -275,13 +275,6 @@ class AiAgentScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
         }).when(capability).requireTarget(any());
         onScriptedStep((script, completed) -> {
             if (journal().recorded().size() == 2) {
-                if ("mission_fallback_gate".equals(fixture)) {
-                    var policy = Objects.requireNonNull(AiAgentExecutionPolicy.current());
-                    var attempt = onlyAttempt(run);
-                    persistence.recordUsage(policy, new AiAgentBudgetService.AiAgentDispatchReservation(run.getId(),
-                            attempt.getId(), attempt.getExecutionGeneration(), attempt.getKnownSteps(), 1), 0, 0);
-                    assertFalse(onlyAttempt(run).isUsageUncertain());
-                }
                 properties.setMissionsEnabled(!disable);
             }
         });
@@ -546,15 +539,6 @@ class AiAgentScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
     void continuationRepairAndFallbackUseRemainingRootAllowance() {
         Person selected = person("Beatrice Hazelbrook", "beatrice.hazelbrook@example.invalid", null);
         AiAgentRun run = createRuntimeTwo(selected, "mission_continuation_secondary_calls", 4, true);
-        onScriptedStep((script, completed) -> {
-            if (journal().recorded().size() == 2) {
-                var policy = Objects.requireNonNull(AiAgentExecutionPolicy.current());
-                var segment = onlyAttempt(run);
-                persistence.recordUsage(policy, new AiAgentBudgetService.AiAgentDispatchReservation(
-                        run.getId(), segment.getId(), segment.getExecutionGeneration(),
-                        segment.getKnownSteps(), 1), 0, 0);
-            }
-        });
         execute(run);
         AiAgentRun checkpointed = runs.getRun(workspaceId(), run.getId());
         assertEquals("queued", checkpointed.getStatus());
@@ -562,6 +546,12 @@ class AiAgentScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
         execute(checkpointed);
         assertCompletedContinuation(run, 4);
         assertEquals(6, runs.getRun(workspaceId(), run.getId()).getConsumedTokens());
+        long rejectedReservation = Objects.requireNonNull(jdbc.queryForObject(
+                "SELECT MAX(reserved_tokens) FROM organization_ai_budget_reservation WHERE org_id=? AND consumed_tokens > 2",
+                Long.class, organizationId()));
+        assertEquals(rejectedReservation + 6, organizationUsage());
+        assertEquals(4, count("SELECT COUNT(*) FROM organization_ai_budget_reservation WHERE org_id=? AND state='settled'", organizationId()));
+        assertTrue(runs.listSegments(workspaceId(), run.getId()).stream().noneMatch(AiAgentSegment::isUsageUncertain));
     }
 
     private void assertCompletedContinuation(AiAgentRun run, int decisions) {

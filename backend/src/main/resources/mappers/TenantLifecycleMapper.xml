@@ -6,6 +6,15 @@
   <select id="streamRows" resultType="map" resultSetType="FORWARD_ONLY"
           fetchSize="-2147483648" useCache="false">
     SELECT t0.*
+    <if test="declaration.table == 'ai_agent_run'">
+      , CAST(t0.plan_json AS BINARY) AS utf8_plan_json
+      , CAST(t0.checkpoint_json AS BINARY) AS utf8_checkpoint_json
+      , CAST(t0.memory_json AS BINARY) AS utf8_memory_json
+    </if>
+    <if test="declaration.table == 'ai_chat_tool_call'">
+      , CAST(t0.arguments_json AS BINARY) AS utf8_arguments_json
+      , CAST(t0.result_json AS BINARY) AS utf8_result_json
+    </if>
     FROM ${declaration.route.fromClause}
     WHERE ${declaration.route.workspacePredicate} = #{workspaceId}
 

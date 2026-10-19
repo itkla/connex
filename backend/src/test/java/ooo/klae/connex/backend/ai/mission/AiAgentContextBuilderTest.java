@@ -19,6 +19,8 @@ import java.util.Map;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import ooo.klae.connex.backend.ai.AiPrivacyMode;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantLoopException;
@@ -85,6 +87,122 @@ class AiAgentContextBuilderTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"さん", "様", "氏"})
+    void parsedMemberProvenanceSurvivesStorageReplayAndFreshProviderContext(String suffix) {
+        String name = "Former Member";
+        var initial = codec.initialize(contextRun());
+        var policy = policy(initial);
+        User member = new User();
+        member.setId(883742);
+        member.setDisplayName(name);
+        when(workspace.getMembers(7)).thenReturn(List.of(member));
+        when(persistence.snapshot(policy)).thenReturn(initial);
+        var context = new MaskingContext();
+        context.registerMemberCandidate(name);
+        String token = context.tokenFor(ooo.klae.connex.backend.ai.masking.EntityKind.MEMBER, name);
+        context.exposeDispatchedTokens(java.util.Set.of(token));
+        var arguments = json.createObjectNode().put("expectedPlanRevision", "1").put("expectedCheckpointRevision", "1");
+        arguments.putArray("items").addObject().putNull("key").put("label", "Confirm with " + token + suffix)
+                .put("status", "pending").putNull("completion");
+        Map<String, List<String>> parsed = new java.util.LinkedHashMap<>();
+        ooo.klae.connex.backend.ai.masking.Demasker.demaskTree(arguments, context,
+                (path, label) -> parsed.put(path, List.of(label)));
+        assertEquals(List.of(name), parsed.get("/items/0/label"));
+        assertTrue(context.memberCandidatesIn(arguments.at("/items/0/label").asString()).isEmpty());
+        var content = new AiAgentContentScreen(workspace);
+        var read = new AiAssistantToolResult(Map.of("name", "Primary Record", "handle", "r1"),
+                List.of(new AiAssistantToolResult.Identifier("person", "Primary Record")));
+        var reference = evidence.reference("person", 9, "record", 0, read);
+        var prepared = plans.prepare(initial, arguments, 1,
+                (path, text) -> content.screen(text, context, policy, parsed.getOrDefault(path, List.of())),
+                ignored -> List.of(), List.of(reference));
+        var run = contextRun();
+        codec.apply(run, prepared.snapshot());
+        var restored = codec.decode(run);
+        assertEquals(List.of(new MemberProvenance(883742, name)), restored.plan().items().getFirst().label().memberProvenance());
+        var storedResult = json.readTree(json.writeValueAsString(prepared.result()));
+        var replayContext = new MaskingContext();
+        var replay = plans.providerResult(storedResult, text -> content.authorize(text, replayContext, policy));
+        var toolResult = new AiAssistantToolResult(json.convertValue(replay,
+                new tools.jackson.core.type.TypeReference<Map<String, Object>>() { }), plans.resultIdentifiers(storedResult));
+        var assembler = new AiAssistantPromptAssembler(json, new AiAssistantToolCatalog());
+        String request = json.writeValueAsString(assembler.assemble(List.of(),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(new AiAssistantPromptAssembler.ToolTurn(1, 0, "set_todos", toolResult)),
+                replayContext, new AiChatResourceRegistry(), AiAssistantToolCatalog.CORE));
+        assertFalse(request.contains(name));
+        assertFalse(request.contains("883742"));
+        assertTrue(request.contains(suffix));
+        assertTrue(request.contains("{{M"));
+        var next = policy(restored);
+        when(persistence.snapshot(next)).thenReturn(restored);
+        when(tools.execute(eq("get_record"), any(), any(), anyBoolean(), any())).thenReturn(read);
+        assertFalse(outbound(next, new MaskingContext(), new AiChatResourceRegistry()).contains(name));
+    }
+
+    @Test
+    void evidenceMemberFieldsKeepTheirPointerWithoutPromotingUnrelatedSiblingWords() {
+        var snapshot = codec.initialize(contextRun());
+        var policy = policy(snapshot);
+        when(persistence.snapshot(policy)).thenReturn(snapshot);
+        User member = new User();
+        member.setId(883742);
+        member.setDisplayName("Bob");
+        when(workspace.getMembers(7)).thenReturn(List.of(member));
+        when(tools.execute(eq("get_record"), any(), any(), anyBoolean(), any())).thenReturn(
+                new AiAssistantToolResult(Map.of("note", "Bobさん", "unrelated", "xBob"),
+                        List.of(new AiAssistantToolResult.Identifier("member", "Bob", "/note"))));
+        String request = outbound(policy, new MaskingContext(), new AiChatResourceRegistry());
+        assertFalse(request.contains("Bobさん"));
+        assertTrue(request.contains("xBob"));
+        assertTrue(request.contains("{{M"));
+    }
+
+    @Test
+    void pendingRecordLabelAndUncitedCheckpointRefuseRenamedSourceBeforeNextProviderRequest() {
+        var initial = codec.initialize(contextRun());
+        var original = new AiAssistantToolResult(Map.of("name", "Former Record", "handle", "r1"),
+                List.of(new AiAssistantToolResult.Identifier("person", "Former Record")));
+        var reference = evidence.reference("person", 9, "record", 0, original);
+        var arguments = json.createObjectNode().put("expectedPlanRevision", "1").put("expectedCheckpointRevision", "1");
+        arguments.putArray("items").addObject().putNull("key").put("label", "Review Former Record")
+                .put("status", "pending").putNull("completion");
+        var prepared = plans.prepare(initial, arguments, 1,
+                (path, text) -> new DurableText(text, List.of()), ignored -> List.of(), List.of(reference));
+        var checkpointArgs = json.createObjectNode().put("expectedPlanRevision", "2")
+                .put("expectedCheckpointRevision", "2").put("nextPlanItemKey", "p0001").put("phase", "reading");
+        checkpointArgs.putObject("memory").put("summary", "Continue review").putArray("citations");
+        var checkpoint = plans.prepareCheckpoint(prepared.snapshot(), checkpointArgs, 1,
+                (path, text) -> new DurableText(text, List.of()), ignored -> List.of(), List.of(reference));
+        assertEquals(List.of(reference), checkpoint.snapshot().checkpoint().evidenceReferences());
+        var policy = policy(checkpoint.snapshot());
+        when(persistence.snapshot(policy)).thenReturn(checkpoint.snapshot());
+        when(workspace.getMembers(7)).thenReturn(List.of());
+        when(tools.execute(eq("get_record"), any(), any(), anyBoolean(), any())).thenReturn(
+                new AiAssistantToolResult(Map.of("name", "Renamed Record", "handle", "r1"),
+                        List.of(new AiAssistantToolResult.Identifier("person", "Renamed Record"))));
+        assertEquals("source_changed", assertThrows(AiAssistantLoopException.class,
+                () -> outbound(policy, new MaskingContext(), new AiChatResourceRegistry())).terminalReason());
+    }
+
+    @Test
+    void carriedTextWithoutSourceBindingRefusesBeforeRetrieval() {
+        var snapshot = snapshot();
+        var checkpoint = snapshot.checkpoint();
+        var unbound = new AiAgentContinuationCodec.Snapshot(snapshot.plan(),
+                new AiAgentCheckpoint(checkpoint.schemaVersion(), checkpoint.definitionVersion(), checkpoint.workspaceId(),
+                        checkpoint.runId(), checkpoint.scopeFingerprint(), checkpoint.privacyGeneration(), checkpoint.revision(),
+                        checkpoint.planRevision(), checkpoint.completedPlanItemKeys(), checkpoint.nextPlanItemKey(),
+                        checkpoint.lastCommittedSegmentNo(), checkpoint.completedFacts(), checkpoint.actionSlotReferences(),
+                        List.of(), checkpoint.coverage(), checkpoint.continuation()), snapshot.memory());
+        var policy = policy(unbound);
+        when(persistence.snapshot(policy)).thenReturn(unbound);
+        assertEquals("source_changed", assertThrows(AiAssistantLoopException.class,
+                () -> outbound(policy, new MaskingContext(), new AiChatResourceRegistry())).terminalReason());
+        verify(tools, never()).execute(any(), any(), any(), anyBoolean(), any());
+    }
+
     @Test
     void outboundPlanToolResultNeverSerializesMemberOrEvidenceBindings() {
         var snapshot = snapshot();
@@ -116,7 +234,8 @@ class AiAgentContextBuilderTest {
         when(workspace.getMembers(7)).thenReturn(List.of(member));
         when(persistence.snapshot(policy)).thenReturn(snapshot);
         when(tools.execute(eq("get_record"), any(), any(), anyBoolean(), any()))
-                .thenReturn(new AiAssistantToolResult(Map.of("handle", "r1"), List.of()));
+                .thenReturn(new AiAssistantToolResult(Map.of("name", "Primary Record", "handle", "r1"),
+                        List.of(new AiAssistantToolResult.Identifier("person", "Primary Record"))));
         policy.execute(() -> builder.build(policy, new MaskingContext(), new AiChatResourceRegistry()));
         verify(persistence).snapshot(policy);
         org.mockito.Mockito.verifyNoMoreInteractions(persistence);
@@ -214,19 +333,30 @@ class AiAgentContextBuilderTest {
         });
     }
 
+    private static ooo.klae.connex.backend.beans.AiAgentRun contextRun() {
+        var run = AiAgentContinuationCodecTest.run();
+        run.setId(971852);
+        run.setWorkspaceId(7);
+        run.setScopeJson("{\"kind\":\"record\",\"recordKind\":\"person\",\"recordId\":9}");
+        return run;
+    }
+
     private static AiAgentContinuationCodec.Snapshot snapshot() {
         var label = new DurableText("Review with Former Member", List.of(new MemberProvenance(883742,
                 "Former Member")));
         var summary = new DurableText("Former Member reviewed Primary Record", label.memberProvenance());
         var plan = new AiAgentPlan(1, "2", 2, List.of(new AiAgentPlan.Item("p0001", label, "done")),
                 List.of("p0001"));
+        var record = new AiAssistantToolResult(Map.of("name", "Primary Record", "handle", "r1"),
+                List.of(new AiAssistantToolResult.Identifier("person", "Primary Record")));
+        var reference = new AiAgentEvidenceService(new ObjectMapper()).reference("person", 9, "record", 0, record);
         var checkpoint = new AiAgentCheckpoint(1, 1, 7, 971852, "a".repeat(64), "1", "2", "2",
                 List.of("p0001"), null, 0, List.of(new AiAgentCheckpoint.CompletedFact("p0001", summary,
-                        List.of(), 1)), List.of(), List.of(),
+                        List.of(reference), 1)), List.of(), List.of(reference),
                 new AiAgentCheckpoint.Coverage(1, 0, 0, 0, List.of()),
                 new AiAgentCheckpoint.Continuation("record_review_v1", 1, "reading"));
         return new AiAgentContinuationCodec.Snapshot(plan, checkpoint,
-                new AiAgentMemory(1, summary, List.of()));
+                new AiAgentMemory(1, summary, List.of(reference)));
     }
 
     private AiAgentExecutionPolicy policy(AiAgentContinuationCodec.Snapshot snapshot) {

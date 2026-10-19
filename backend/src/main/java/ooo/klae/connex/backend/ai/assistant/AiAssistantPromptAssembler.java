@@ -414,7 +414,7 @@ public class AiAssistantPromptAssembler {
         }
         if (!pageContext.data().isEmpty()) {
             prompt.userTurn(boundedCrmData(
-                    "page_context", pageContext.data(), context, budget.pageContextBytes()));
+                    "page_context", pageContext, context, budget.pageContextBytes()));
         }
         appendSkillContext(prompt, skill, context, budget);
         List<OutboundSegment> repairSegments = repair == null ? List.of() : repairRequest(repair, context);
@@ -500,7 +500,7 @@ public class AiAssistantPromptAssembler {
         }
         if (!pageContext.data().isEmpty()) {
             prompt.userTurn(boundedCrmData(
-                    "page_context", pageContext.data(), context, budget.pageContextBytes()));
+                    "page_context", pageContext, context, budget.pageContextBytes()));
         }
         appendSkillContext(prompt, skill, context, budget);
         return prompt.build();
@@ -2148,6 +2148,22 @@ public class AiAssistantPromptAssembler {
         return CRM_DATA_BEGIN + "\n"
                 + serialize(Map.of("type", type, "data", masked))
                 + "\n" + CRM_DATA_END;
+    }
+
+    /** Masks precise member fields once, retaining their containment scope through the leak scan. */
+    private String boundedCrmData(String type, AiAssistantToolResult result, MaskingContext context, int budgetBytes) {
+        if (!result.data().containsKey("missionContext")) {
+            return boundedCrmData(type, result.data(), context, budgetBytes);
+        }
+        JsonNode masked = maskToolStrings(objectMapper.valueToTree(result.data()), context,
+                result.identifiers().stream().filter(identifier -> "member".equals(identifier.kind())).toList(),
+                "/result", false);
+        String serialized = crmDataMasked(type, masked);
+        if (result.data().containsKey("missionContext") && utf8Bytes(serialized) > budgetBytes) {
+            throw new AiAssistantLoopException("mission_context_overflow", "mission_context_overflow");
+        }
+        return utf8Bytes(serialized) <= budgetBytes
+                ? serialized : crmData(type, Map.of("status", BUDGET_EXCEEDED), context);
     }
 
     private String boundedCrmData(

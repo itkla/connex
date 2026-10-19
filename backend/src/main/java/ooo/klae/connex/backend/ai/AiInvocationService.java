@@ -1572,6 +1572,10 @@ public class AiInvocationService {
                         outputTokensClamped);
                 throw exception;
             } catch (RuntimeException exception) {
+                if (exception instanceof AiProviderRequestRejectedException rejected
+                        && rejected.permitsStructuredOutputFallback()) {
+                    settleRejectedMissionDispatch();
+                }
                 closeBudget();
                 failureAudited = true;
                 String reason = exception instanceof AiProviderException
@@ -1667,6 +1671,15 @@ public class AiInvocationService {
                 missionDispatch = null;
             }
             budgetLease = null;
+        }
+
+        /** A definite protocol rejection consumed a decision but no generated tokens. */
+        private void settleRejectedMissionDispatch() {
+            var mission = ooo.klae.connex.backend.ai.mission.AiAgentExecutionPolicy.current();
+            if (mission != null && missionDispatch != null) {
+                mission.persistence().recordUsage(mission, missionDispatch, 0, 0);
+                missionDispatch = null;
+            }
         }
 
         private synchronized void closeBudget() {
