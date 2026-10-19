@@ -3284,8 +3284,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                         problem={missions.problem} onCreate={async (goal) => {
                             const signal = identityControllerRef.current?.signal;
                             if (!signal || signal.aborted) return false;
+                            const origin = workspacePinnedRequest(renderedWorkspaceId(), { signal });
                             try {
-                                const session = await ensureSession(signal);
+                                const session = await ensureSession(signal, origin);
                                 if (signal.aborted) return false;
                                 return await missions.create(session.id, goal, {
                                     kind: 'record', recordKind: missionRecord.kind, recordId: missionRecord.id,
