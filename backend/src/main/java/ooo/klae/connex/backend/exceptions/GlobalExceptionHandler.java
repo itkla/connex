@@ -29,6 +29,7 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 import tools.jackson.core.exc.StreamConstraintsException;
 
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.ConstraintViolationException;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantProposalExpiredException;
@@ -246,6 +247,22 @@ public class GlobalExceptionHandler {
         log.warn("Encrypted secret unavailable: exception={} detail={}",
                 ex.getClass().getName(), stackDetail(ex));
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body("Encrypted secret is unavailable");
+    }
+
+    /** Never appends an error suffix or closing delimiters to an interrupted committed export. */
+    @ExceptionHandler(DataSubjectDisclosureStreamException.class)
+    public ResponseEntity<String> disclosureStream(DataSubjectDisclosureStreamException ex,
+            HttpServletResponse response) {
+        if (response.isCommitted()) {
+            return null;
+        }
+        response.resetBuffer();
+        for (String header : java.util.List.of("X-Disclosure-Note-Count", "X-Disclosure-Notes-SHA256",
+                "X-Disclosure-Byte-Length", "X-Disclosure-SHA256")) {
+            response.setHeader(header, null);
+        }
+        response.setContentType(null);
+        return serviceUnavailable(new ServiceUnavailableException("Disclosure release failed", ex));
     }
 
     @ExceptionHandler(ServiceUnavailableException.class)

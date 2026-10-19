@@ -180,14 +180,6 @@ public class DataSubjectRequestControlOperations {
         return new DisclosureControlData(request, workspaces, auditTrail, auditTrailTotal);
     }
 
-    @Transactional
-    public void recordDisclosureAudit(int orgId, long requestId, int personId, int workspaceId) {
-        auditService.recordStrict("appi.subject_request.disclosure", "organization", orgId,
-            requestLabel(requestId), "Subject-scoped disclosure export assembled",
-            Map.of("requestId", requestId, "subjectPersonId", personId,
-                "subjectWorkspaceId", workspaceId));
-    }
-
     private void lockMutationRoots(int orgId, int actorId, Set<Integer> workspaceIds) {
         if (userMapper.lockByIdForShare(actorId) == null) {
             throw new ForbiddenException("Authenticated user is unavailable");

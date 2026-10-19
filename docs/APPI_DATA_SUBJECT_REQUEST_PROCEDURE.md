@@ -67,12 +67,57 @@ against the response DTO; changes to disclosure sections must update both.
 
 The `notes` section is complete and is never filtered by note visibility class: private notes are
 disclosed to the handling operator as raw assembly material and must be reviewed for statutory
-redaction (Art. 33(2)) like every other section. It carries no row cap and holds the largest
-free-text material in the response. Note bodies are read in pages, but the assembled response is
-held in memory in full, so a subject with a very large note corpus produces a correspondingly large
-response and a matching peak heap on the serving instance. Run such an export off-peak and expect
-a slow response; there is no operator-facing continuation or page parameter, and the export is
-never silently truncated.
+redaction (Art. 33(2)) like every other section. It carries no row or aggregate-byte cap. Note IDs
+and bodies are read in ascending pages of at most 100, with only one page retained at a time.
+Two synchronous serialization passes share one explicit REPEATABLE READ tenant snapshot: the first
+counts and fingerprints the complete JSON while discarding bytes; a strict control audit commits
+independently before the second pass writes the same JSON directly to the response. Other disclosure
+sections remain materialized, and an individual note/page can still be large. Large exports may be
+slow. There is no continuation or page parameter, and exports are never silently shortened.
+
+Each serving instance admits at most two concurrent disclosures, with at most one per organization.
+Requests never wait for admission; excess requests receive the existing 503 response before opening a
+snapshot. Placement discovery finishes in a separate short control read first. One disclosure
+uses at most two connections (snapshot plus independent audit); provision four for both slots,
+plus capacity for ordinary traffic. Pools of two or three admit only one disclosure, retaining
+audit capacity; a pool smaller than two is refused before the snapshot. For single-slot pools,
+the instance remembers at most 128 other organizations refused for capacity, with first-refusal
+timestamps (`MAX_REFUSED_DISCLOSURE_ORGANIZATIONS`); saturation evicts the oldest entry. When the
+holder releases, including after a deadline, the oldest retained organization receives an
+exclusive 30-second reservation (`DISCLOSURE_TURNOVER_RESERVATION`). The former holder and any
+other non-reserved organization receive the same 503 before a snapshot. The reservation is
+consumed by admission or lapses unused after 30 seconds. Other refusals are cleared at turnover,
+so unused reservations cannot chain. Pools of at least four keep the two-slot behavior.
+
+Pass-two delivery has an absolute 120-second deadline, configured by
+`connex.data-subject-disclosure.delivery-timeout-ms`
+(`CONNEX_DSR_DISCLOSURE_DELIVERY_TIMEOUT_MS`, default `120000`). Page boundaries and every 8 KiB
+of output check it; a deadline task closes the request's socket even when the client trickles
+bytes. The deployed Tomcat NIO connector explicitly sets `server.tomcat.connection-timeout`
+(`CONNEX_TOMCAT_CONNECTION_TIMEOUT`, default `30s`), which also initializes its blocking write
+timeout. The delivery bound is the deadline plus one connector blocking-write timeout: 150 seconds
+with defaults, before normal cleanup completes. On expiry the read transaction rolls back, the
+note source is invalidated, context is restored and admission is released. This is a delivery
+bound; preparation and preflight precede it. The supported deployment uses HTTP/1.1 from Caddy
+to Tomcat; disclosure fails closed on a live server without its cancellation hook.
+
+Retain the raw response and the `X-Disclosure-Note-Count`, `X-Disclosure-Notes-SHA256`,
+`X-Disclosure-Byte-Length`, and `X-Disclosure-SHA256` headers when checking completeness. Version-one
+SHA-256 values cover exact compact UTF-8 JSON before HTTP content coding; the notes hash covers the
+ordinary array from `[` through `]`. Check the received byte length and complete-document hash,
+then parse JSON and check note count (and the notes hash using the original array bytes). The SPA
+reformats downloaded JSON, so its reformatted copy cannot verify these raw-byte hashes.
+
+Reject incomplete HTTP framing, invalid JSON, byte-length mismatch, or digest/count mismatch. A
+committed interrupted response is left truncated: writer cleanup does not append closing delimiters
+or an error suffix. A durable audit records assembly and an authorized release attempt, not confirmed
+client receipt. Discard an incomplete download and retry explicitly; each retry assembles and audits
+again. For overload, wait for the organization's active download to finish or expire before
+retrying. In a single-slot pool, a refused organization should retry during its turnover reservation;
+other organizations must wait for the reservation to be used or its 30-second window to lapse.
+For deadline expiry, use a connection that can finish within the configured limit; an
+operator may adjust the limit with its resource budget in mind. There is no automatic network/503
+retry or continuation token.
 
 Audience-export evidence includes exports by other workspaces in the request's organization that
 held a shared subject, even after the standing share is revoked. Audience-export member lists are

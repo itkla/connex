@@ -49,6 +49,8 @@ management:
                 exclude: "*"
 
 connex:
+    data-subject-disclosure:
+        delivery-timeout-ms: ${CONNEX_DSR_DISCLOSURE_DELIVERY_TIMEOUT_MS:120000}
     account:
         assignment-sweep:
             delay-ms: ${CONNEX_ACCOUNT_ASSIGNMENT_SWEEP_DELAY_MS:300000}
@@ -588,6 +590,9 @@ mybatis:
         map-underscore-to-camel-case: true
 
 server:
+    tomcat:
+        # NIO initializes its blocking write timeout from this connector setting.
+        connection-timeout: ${CONNEX_TOMCAT_CONNECTION_TIMEOUT:30s}
     servlet:
         session:
             timeout: ${CONNEX_SESSION_IDLE_TIMEOUT:30m}

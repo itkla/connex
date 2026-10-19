@@ -20,6 +20,7 @@ import {
     SETTINGS_GROUPS,
     type SettingsGroup,
 } from "@/app/lib/settingsManifest";
+import { settingsConfigRedirects } from "@/app/lib/settingsRedirects";
 
 /**
  * Gate over the three consolidated scope destinations of #1340 WS4.4 — Communications, CRM
@@ -451,14 +452,13 @@ describe("the shipped panels render from the destination that absorbed them", ()
         { route: "/settings/qualification", section: "qualification" },
         { route: "/settings/diagnostics", section: "diagnostics" },
     ])("retires $route into a forward at its $section section", ({ route, section }) => {
-        const page = source(path.join(routeDir(route), "page.tsx"));
         const entry = SETTINGS_ENTRIES.find((candidate) => candidate.currentRoute === route);
 
-        expect(page).toContain("permanentRedirect(settingsRedirectTarget(");
+        expect(settingsConfigRedirects().map((redirect) => redirect.source)).toContain(route);
         expect(
-            page,
-            "a stub renders nothing; a panel left here would be a second copy of the section",
-        ).not.toContain("Panel />");
+            existsSync(path.join(routeDir(route), "page.tsx")),
+            "a forwarded address keeps no page; a panel left here would be a second copy of the section",
+        ).toBe(false);
         expect(entry?.canonicalSection).toBe(section);
         expect(entry?.redirectsTo).toBe(`${entry?.canonicalRoute}#${section}`);
     });
