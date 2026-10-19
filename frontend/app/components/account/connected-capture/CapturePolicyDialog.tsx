@@ -104,7 +104,7 @@ export default function CapturePolicyDialog({
     return (
         <ResponsiveDialog open={open} onOpenChange={onOpenChange}>
             <ResponsiveDialogContent
-                className="md:max-h-[calc(100dvh-4rem)] md:overflow-y-auto sm:max-w-2xl"
+                className="data-[slot=dialog-content]:max-h-[calc(100dvh-4rem)] data-[slot=dialog-content]:overflow-y-auto sm:max-w-2xl"
                 showCloseButton={!saving}
             >
                 <ResponsiveDialogHeader className="px-4 pt-4 sm:px-0 sm:pt-0">

@@ -767,13 +767,15 @@ describe("reviews absorbed into the journey", () => {
 });
 
 describe("capture policy scroll boundary", () => {
-    it("bounds desktop scrolling while leaving mobile scrolling to the drawer", () => {
+    it("bounds the rendered desktop dialog at any width while leaving mobile scrolling to the drawer", () => {
         const policy = source("app/components/account/connected-capture/CapturePolicyDialog.tsx");
         const content = policy.match(/<ResponsiveDialogContent\b[^>]*>/)?.[0] ?? "";
         const classes = content.match(/className="([^"]*)"/)?.[1].split(/\s+/) ?? [];
 
-        expect(classes).toContain("md:max-h-[calc(100dvh-4rem)]");
-        expect(classes).toContain("md:overflow-y-auto");
+        expect(classes).toContain("data-[slot=dialog-content]:max-h-[calc(100dvh-4rem)]");
+        expect(classes).toContain("data-[slot=dialog-content]:overflow-y-auto");
+        expect(classes).not.toContain("md:max-h-[calc(100dvh-4rem)]");
+        expect(classes).not.toContain("md:overflow-y-auto");
         expect(classes).not.toContain("overflow-y-auto");
         expect(content).not.toContain("scrollable={false}");
     });

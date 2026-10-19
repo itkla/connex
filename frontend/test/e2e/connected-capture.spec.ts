@@ -132,7 +132,8 @@ for (const captureEnabled of [true, false]) {
         test.use({ captureEnabled });
 
         for (const locale of ['en', 'ja'] as const) {
-            test(`connected capture policy and review flow in ${locale} @mobile`, async ({ page, captureAppURL }) => {
+            test(`connected capture policy and review flow in ${locale} @mobile`, async ({ page, captureAppURL, isMobile }) => {
+                if (!isMobile) await page.setViewportSize({ width: 1280, height: 720 });
                 let captureRequests = 0;
                 let overview = BASE_OVERVIEW;
                 let reviews = REVIEW_PAGE;
@@ -264,9 +265,19 @@ for (const captureEnabled of [true, false]) {
                 const policyDialog = page.getByRole('dialog');
                 await expect(policyDialog).toHaveCount(1);
                 await expect(policyDialog).toBeInViewport({ ratio: 1 });
-                await page.getByLabel(
+                if (!isMobile) {
+                    await test.step('open desktop policy keeps its scroll boundary after resizing below md', async () => {
+                        await expect(policyDialog).toHaveAttribute('data-slot', 'dialog-content');
+                        await page.setViewportSize({ width: 700, height: 720 });
+                        await expect(policyDialog).toHaveAttribute('data-slot', 'dialog-content');
+                        await expect(policyDialog).toBeInViewport({ ratio: 1 });
+                    });
+                }
+                const enabledSwitch = page.getByLabel(
                     message(locale, 'account', 'AccountCapturePolicy.enabled'),
-                ).click();
+                );
+                await enabledSwitch.click();
+                await expect(enabledSwitch).toBeChecked();
                 await page.getByLabel(
                     message(locale, 'account', 'AccountCapturePolicy.streams.calendar'),
                 ).click();
@@ -279,6 +290,7 @@ for (const captureEnabled of [true, false]) {
                 await expect(page.getByText(
                     message(locale, 'account', 'AccountCapturePolicy.saved'),
                 )).toBeVisible();
+                if (!isMobile) await page.setViewportSize({ width: 1280, height: 720 });
 
                 await page.goto('/account/connections?provider=google&panel=reviews');
                 await expect(page.getByText('Evaluator review meeting')).toBeVisible();
