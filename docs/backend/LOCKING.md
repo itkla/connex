@@ -547,10 +547,11 @@ service-level cleanup.
 #### Ordering rules recorded here so round 17 does not reopen them
 
 - **No path may take an `organization` root EXCLUSIVELY and then lock a `workspace_member` row.**
-  The historical carve-out for the final `app_user` cascade remains tracked under #1582 pending
-  the real-MySQL boundary proof that every cascaded membership is already retained. The prelock
-  implementation above is invisible to this file-scoped grep's cross-service analysis; remove
-  the documented exception only after that drill passes.
+  Final account deletion has no carve-out: it retains every membership of the deleting account
+  before its organization, credential and audit-head phases, so the `app_user` cascade meets only
+  retained rows (#2156). `AccountDeletionMembershipTailConcurrencyIntegrationTest` proves that
+  runtime footprint against real MySQL, including pending, suspended, inactive-scope and
+  concurrently inserted memberships; the file-scoped grep cannot see it across services.
   Management takes the organization root before the membership row, while removal and owner leave
   already retain memberships before organization S. `OrganizationRootLockOrderArchTest` enforces
   the explicit exclusive-root rule; it does not prove safety against queued exclusive requesters
