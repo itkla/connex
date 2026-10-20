@@ -1783,6 +1783,41 @@ call bypasses the memo entirely: routed reads are served by the memory-only prep
 (#2165), with the boundary validating workspace, organization, and catalog on every read. A missing
 or stale prepared payload must fail even after an earlier successful read in the same transaction.
 
+Pipeline visibility uses the same unfiltered record scope. PipelineService passes one scope through
+owned-parent, sibling and replacement validation; full pipeline nesting carries that scope in a
+private projected SQL column without changing the owning workspace parameter. Template mutations
+prepare it before membership authorization and set/root locks, then reuse it for stage, pipeline
+and share locks and the final availability check. Augmentation keeps the stage → pipeline → share
+order and its submitted-stage validation remains owned-only. Guided creation prepares the scope
+before authorization; deal creation prepares it before duplicate-review mutex admission, deal
+updates/reopen before authorization and row locks, and deal imports before authorization and
+template fences. Assistant write admission and workflow step/outbox execution prepare it before
+their outer authorization locks so nested Pipeline reads reuse the transaction memo or #2165's
+prepared routed snapshot. No authorization or `FOR UPDATE` lock moves off its original connection,
+and no transaction boundary or isolation level changes.
+
+Bulk stage changes carry one unfiltered scope into every independently committed Deal mutation and
+its stage-history write. Ordinary creation, reviewed/guided creation, update, reopen and move also
+pass their pre-lock scope to history instead of loading it again after mutation. Deal imports pass
+one scope through name resolution and both initial and transition history writes within their
+existing import transaction.
+
+Workflow traversal, immediate workflow dispatch, legacy rule dispatch and scheduler workspace sweeps use the explicit
+`RecordVisibilityScopeControlAccess.withWorkspaceScope` operation boundary. In `single-database`
+mode it reuses the caller's immutable snapshot across nested calls and independent step/outbox
+transactions on that thread. It restores an enclosing operation on every exit, clears the binding
+after the outermost operation, and rejects workspace, organization or catalog drift. It does not
+propagate into asynchronous work. A scheduler or legacy listener may enter with only a catalog pin;
+installing an automation identity later reuses that scope only for the same workspace, organization
+and catalog. An identity resolved at operation entry must remain resolved. Transaction propagation,
+per-record commits and authorization locks remain unchanged. This is explicit operation reuse,
+separate from the default transaction memo: ordinary `REQUIRES_NEW`, completion callbacks and
+nontransactional reads outside that boundary
+retain their fresh-read contract. In routed mode every boundary read still validates the prepared
+context payload before considering any memo, so a missing or stale payload still fails inside an
+open transaction without a control query. Assistant parallel tool batches reject writes; one
+auto/approved write is one transaction, and its nested Pipeline reads share the existing memo.
+
 Restriction-driven AI output-cache erasure uses `getFreshForWorkspace` immediately before its one
 set-based `AiOutputCacheMapper.deleteForPerson` call, after the existing authority/person locks and
 ordinary domain/identity work. `invalidateAssistantOrganization` retains the restriction write fences
@@ -1806,6 +1841,8 @@ cache can escape erasure, while a deleted workspace can remain in the set. A rac
 scope contract is the routing flag-enable prerequisite **#2172**. This cache conversion does not
 implement that fence or enable catalog routing; operation-level freshness must not be claimed as
 complete erasure coverage until #2172 is resolved.
+
+`getFreshForWorkspace` also never consults the explicit `withWorkspaceScope` operation boundary, so a restriction purge reached inside a workflow or scheduler operation still reads the current organization workspace set rather than the operation's reused snapshot.
 
 The locked call chains are:
 

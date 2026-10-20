@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import static ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -184,7 +185,7 @@ class AiAssistantToolCallReadServiceTest {
                 personMapper,
                 companyMapper,
                 dealMapper,
-                pipelineMapper,
+                pipelineMapper, unfiltered(),
                 tagMapper,
                 documentTemplateMapper,
                 documentService,
@@ -1324,7 +1325,7 @@ class AiAssistantToolCallReadServiceTest {
         when(chatMapper.listAssistantMessagesBySessionAndTurnIds(
                 WORKSPACE_ID, SESSION_ID, List.of(58), 100, 1L)).thenReturn(List.of());
         when(dealMapper.getByIds(WORKSPACE_ID, List.of(41))).thenReturn(List.of(deal));
-        when(pipelineMapper.getAllStages(WORKSPACE_ID)).thenReturn(List.of(
+        when(pipelineMapper.getAllStages(WORKSPACE_ID, "[7,8,9]")).thenReturn(List.of(
                 stage(9, 3, "Negotiation"), stage(10, 3, "Won")));
 
         AiAssistantToolCallReadDto.Change change =
@@ -1464,7 +1465,7 @@ class AiAssistantToolCallReadServiceTest {
         when(chatMapper.listAssistantMessagesBySessionAndTurnIds(
                 WORKSPACE_ID, SESSION_ID, List.of(65), 100, 1L)).thenReturn(List.of());
         when(dealMapper.getByIds(WORKSPACE_ID, List.of(41))).thenReturn(List.of(deal));
-        when(pipelineMapper.getAllStages(WORKSPACE_ID)).thenReturn(List.of(
+        when(pipelineMapper.getAllStages(WORKSPACE_ID, "[7,8,9]")).thenReturn(List.of(
                 stage(9, 3, "Negotiation"), stage(10, 3, "Won")));
 
         AiAssistantToolCallReadDto.Change change =
@@ -1745,7 +1746,7 @@ class AiAssistantToolCallReadServiceTest {
             assertNull(review.pinnedPrincipalIds());
             assertTrue(review.pinned().isEmpty());
         }
-        verify(pipelineMapper, never()).getAllStages(WORKSPACE_ID);
+        verify(pipelineMapper, never()).getAllStages(WORKSPACE_ID, "[7,8,9]");
         verifyNoInteractions(tagMapper);
     }
 
@@ -1939,12 +1940,12 @@ class AiAssistantToolCallReadServiceTest {
         stubVisibleDeal();
         when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100, null, 1L))
                 .thenReturn(List.of(reviewed));
-        when(pipelineMapper.getAllStages(WORKSPACE_ID)).thenReturn(List.of(
+        when(pipelineMapper.getAllStages(WORKSPACE_ID, "[7,8,9]")).thenReturn(List.of(
                 stage(9, 3, "Negotiation"), stage(10, 3, "Won")));
 
         AiAssistantToolCallReadDto ready = service.list(SESSION_ID, false).getFirst();
 
-        when(pipelineMapper.getAllStages(WORKSPACE_ID)).thenReturn(List.of(
+        when(pipelineMapper.getAllStages(WORKSPACE_ID, "[7,8,9]")).thenReturn(List.of(
                 stage(9, 3, "Won"), stage(10, 3, "Closed")));
         AiAssistantToolCallReadDto drifted = service.list(SESSION_ID, false).getFirst();
 
@@ -2272,7 +2273,7 @@ class AiAssistantToolCallReadServiceTest {
     @Test
     void aPinnedProposalWhoseApprovalCanOnlyRefuseIsUnresolved() {
         stubVisibleDeal();
-        when(pipelineMapper.getAllStages(WORKSPACE_ID)).thenReturn(List.of(
+        when(pipelineMapper.getAllStages(WORKSPACE_ID, "[7,8,9]")).thenReturn(List.of(
                 stage(9, 3, "Negotiation"), stage(10, 3, "Won")));
         for (String pins : List.of(",\"principals\":[]",
                 ",\"resolution\":{\"field\":\"stage\",\"id\":10},\"principals\":[55]")) {
@@ -2329,7 +2330,7 @@ class AiAssistantToolCallReadServiceTest {
                 66, USER_ID, "change_deal_stage", "confirm", "proposed", "deal", 41, 66, null);
         toolCall.setArgumentsJson(toolCall.getArgumentsJson().replace("Won", "Diagnosis"));
         stubVisibleDeal();
-        when(pipelineMapper.getAllStages(WORKSPACE_ID)).thenReturn(List.of(
+        when(pipelineMapper.getAllStages(WORKSPACE_ID, "[7,8,9]")).thenReturn(List.of(
                 stage(9, 3, "Negotiation"), stage(11, 3, "Diagnosis")));
         when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100, null, 1L))
                 .thenReturn(List.of(toolCall));
@@ -2467,7 +2468,7 @@ class AiAssistantToolCallReadServiceTest {
                 new AiAssistantDraftDocumentWriteTool(null, null),
                 ownerTool()));
         stubVisibleDeal();
-        when(pipelineMapper.getAllStages(WORKSPACE_ID)).thenReturn(List.of(
+        when(pipelineMapper.getAllStages(WORKSPACE_ID, "[7,8,9]")).thenReturn(List.of(
                 stage(9, 3, "Negotiation"), stage(10, 3, "Won")));
         when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100, null, 1L))
                 .thenReturn(List.of(toolCall(
@@ -2509,7 +2510,7 @@ class AiAssistantToolCallReadServiceTest {
                 new AiAssistantDraftDocumentWriteTool(null, null),
                 ownerTool()));
         stubVisibleDeal();
-        when(pipelineMapper.getAllStages(WORKSPACE_ID)).thenReturn(List.of(
+        when(pipelineMapper.getAllStages(WORKSPACE_ID, "[7,8,9]")).thenReturn(List.of(
                 stage(9, 3, "Negotiation"), stage(10, 3, "Won")));
         when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100, null, 1L))
                 .thenReturn(List.of(toolCall(
@@ -2520,7 +2521,7 @@ class AiAssistantToolCallReadServiceTest {
                 undeclared.list(SESSION_ID, false).getFirst().change();
 
         assertEquals("unresolved", change.state());
-        verify(pipelineMapper, never()).getAllStages(WORKSPACE_ID);
+        verify(pipelineMapper, never()).getAllStages(WORKSPACE_ID, "[7,8,9]");
         verify(workspaceService, never()).getMembers(WORKSPACE_ID);
     }
 

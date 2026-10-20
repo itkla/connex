@@ -33,6 +33,7 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class PipelineService {
     private final PipelineMapper pipelineMapper;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
     private final DealMapper dealMapper;
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
@@ -45,11 +46,15 @@ public class PipelineService {
         Set.of("name", "position", "success", "failure");
 
     public List<Pipeline> getAllPipelines() {
-        return pipelineMapper.getAllPipelines(workspaceService.getCurrentWorkspaceId());
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        return pipelineMapper.getAllPipelines(workspaceId, orgWorkspaceIdsJson);
     }
 
     public Pipeline getPipelineById(int id) {
-        Pipeline pipeline = pipelineMapper.getPipelineById(workspaceService.getCurrentWorkspaceId(), id);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        Pipeline pipeline = pipelineMapper.getPipelineById(workspaceId, orgWorkspaceIdsJson, id);
         if (pipeline == null) throw new ResourceNotFoundException("Pipeline not found with id: " + id);
         hydrateStageDeals(pipeline.getStages());
         return pipeline;
@@ -68,7 +73,8 @@ public class PipelineService {
     @RequirePermission(Permission.PIPELINE_MANAGE)
     public Pipeline updatePipeline(int id, Pipeline pipeline) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Pipeline before = requireOwnedPipeline(workspaceId, id);
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        Pipeline before = requireOwnedPipeline(workspaceId, orgWorkspaceIdsJson, id);
         pipeline.setId(id);
         pipeline.setWorkspaceId(workspaceId);
         pipelineMapper.updatePipeline(pipeline);
@@ -81,7 +87,8 @@ public class PipelineService {
     @RequirePermission(Permission.PIPELINE_MANAGE)
     public void deletePipeline(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Pipeline before = requireOwnedPipeline(workspaceId, id);
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        Pipeline before = requireOwnedPipeline(workspaceId, orgWorkspaceIdsJson, id);
         pipelineMapper.deletePipeline(workspaceId, id);
         auditService.record("pipeline.delete", "pipeline", id, before.getName(),
             "Deleted pipeline " + before.getName(),
@@ -92,19 +99,23 @@ public class PipelineService {
 
     public List<Stage> getStagesByPipelineId(int pipelineId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        requirePipeline(workspaceId, pipelineId);
-        List<Stage> stages = pipelineMapper.getStagesByPipelineId(workspaceId, pipelineId);
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        requirePipeline(workspaceId, orgWorkspaceIdsJson, pipelineId);
+        List<Stage> stages = pipelineMapper.getStagesByPipelineId(workspaceId, orgWorkspaceIdsJson, pipelineId);
         hydrateStageDeals(stages.toArray(Stage[]::new));
         return stages;
     }
 
     public List<Stage> getAllStages() {
-        return pipelineMapper.getAllStages(workspaceService.getCurrentWorkspaceId());
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        return pipelineMapper.getAllStages(workspaceId, orgWorkspaceIdsJson);
     }
 
     public Stage getStageById(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Stage stage = pipelineMapper.getVisibleStageById(workspaceId, id);
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        Stage stage = pipelineMapper.getVisibleStageById(workspaceId, orgWorkspaceIdsJson, id);
         if (stage == null) throw new ResourceNotFoundException("Stage not found with id: " + id);
         stage.setDeals(referenceService.hydrateDeals(
             workspaceId, dealMapper.getDealsByStageId(workspaceId, id)).toArray(Deal[]::new));
@@ -114,11 +125,12 @@ public class PipelineService {
     @RequirePermission(Permission.PIPELINE_MANAGE)
     public Stage createStage(int pipelineId, Stage stage) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Pipeline pipeline = requireOwnedPipeline(workspaceId, pipelineId);
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        Pipeline pipeline = requireOwnedPipeline(workspaceId, orgWorkspaceIdsJson, pipelineId);
         stage.setPipeline(pipeline);
         stage.setWorkspaceId(workspaceId);
-        assertSingleTerminalOfType(workspaceId, pipelineId, stage);
-        assertUniqueName(workspaceId, pipelineId, stage);
+        assertSingleTerminalOfType(workspaceId, orgWorkspaceIdsJson, pipelineId, stage);
+        assertUniqueName(workspaceId, orgWorkspaceIdsJson, pipelineId, stage);
         pipelineMapper.insertStage(stage);
         auditService.record("stage.create", "stage", stage.getId(), stage.getName(),
             "Created stage " + stage.getName(),
@@ -129,13 +141,14 @@ public class PipelineService {
     @RequirePermission(Permission.PIPELINE_MANAGE)
     public Stage updateStage(int id, Stage stage) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         Stage existing = pipelineMapper.getStageById(workspaceId, id);
         if (existing == null) throw new ResourceNotFoundException("Stage not found with id: " + id);
         stage.setId(id);
         stage.setWorkspaceId(workspaceId);
         stage.setPipeline(existing.getPipeline());
-        assertSingleTerminalOfType(workspaceId, existing.getPipeline().getId(), stage);
-        assertUniqueName(workspaceId, existing.getPipeline().getId(), stage);
+        assertSingleTerminalOfType(workspaceId, orgWorkspaceIdsJson, existing.getPipeline().getId(), stage);
+        assertUniqueName(workspaceId, orgWorkspaceIdsJson, existing.getPipeline().getId(), stage);
         pipelineMapper.updateStage(stage);
         auditService.record("stage.update", "stage", id, stage.getName(),
             "Updated stage " + stage.getName(),
@@ -166,14 +179,15 @@ public class PipelineService {
     @RequirePermission(Permission.PIPELINE_MANAGE)
     public List<Stage> replaceStages(int pipelineId, List<Integer> knownStageIds, List<Stage> requested) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Pipeline pipeline = requireOwnedPipeline(workspaceId, pipelineId);
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        Pipeline pipeline = requireOwnedPipeline(workspaceId, orgWorkspaceIdsJson, pipelineId);
         List<Stage> incoming = requested == null ? List.of() : requested;
         Set<Integer> known = new HashSet<>(knownStageIds == null ? List.of() : knownStageIds);
 
         assertNamesDistinct(incoming);
         assertAtMostOneTerminalPerType(incoming);
 
-        List<Stage> existing = pipelineMapper.getStagesByPipelineId(workspaceId, pipelineId);
+        List<Stage> existing = pipelineMapper.getStagesByPipelineId(workspaceId, orgWorkspaceIdsJson, pipelineId);
         Map<Integer, Stage> existingById = new HashMap<>();
         for (Stage stage : existing) existingById.put(stage.getId(), stage);
 
@@ -295,19 +309,19 @@ public class PipelineService {
         }
     }
 
-    private void assertUniqueName(int workspaceId, int pipelineId, Stage stage) {
+    private void assertUniqueName(int workspaceId, String orgWorkspaceIdsJson, int pipelineId, Stage stage) {
         String name = stage.getName() == null ? "" : stage.getName().trim();
         if (name.isEmpty()) return;
-        for (Stage sibling : pipelineMapper.getStagesByPipelineId(workspaceId, pipelineId)) {
+        for (Stage sibling : pipelineMapper.getStagesByPipelineId(workspaceId, orgWorkspaceIdsJson, pipelineId)) {
             if (sibling.getId() == stage.getId()) continue;
             if (sibling.getName() != null && name.equalsIgnoreCase(sibling.getName().trim()))
                 throw new DuplicateResourceException("name", "A stage with this name already exists in this pipeline");
         }
     }
 
-    private void assertSingleTerminalOfType(int workspaceId, int pipelineId, Stage stage) {
+    private void assertSingleTerminalOfType(int workspaceId, String orgWorkspaceIdsJson, int pipelineId, Stage stage) {
         if (!stage.isSuccess() && !stage.isFailure()) return;
-        for (Stage sibling : pipelineMapper.getStagesByPipelineId(workspaceId, pipelineId)) {
+        for (Stage sibling : pipelineMapper.getStagesByPipelineId(workspaceId, orgWorkspaceIdsJson, pipelineId)) {
             if (sibling.getId() == stage.getId()) continue; // skip self on update
             if (stage.isSuccess() && sibling.isSuccess())
                 throw new DuplicateResourceException("This pipeline already has a Won stage");
@@ -332,7 +346,8 @@ public class PipelineService {
      */
     public List<Deal> getDealsByPipelineId(int pipelineId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        requirePipeline(workspaceId, pipelineId);
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        requirePipeline(workspaceId, orgWorkspaceIdsJson, pipelineId);
         return referenceService.hydrateDeals(
             workspaceId, dealMapper.getDealsByPipelineId(workspaceId, pipelineId));
     }
@@ -342,20 +357,21 @@ public class PipelineService {
      */
     public List<Deal> getDealsByStageId(int stageId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        if (pipelineMapper.getVisibleStageById(workspaceId, stageId) == null)
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        if (pipelineMapper.getVisibleStageById(workspaceId, orgWorkspaceIdsJson, stageId) == null)
             throw new ResourceNotFoundException("Stage not found with id: " + stageId);
         return referenceService.hydrateDeals(
             workspaceId, dealMapper.getDealsByStageId(workspaceId, stageId));
     }
 
-    private Pipeline requirePipeline(int workspaceId, int pipelineId) {
-        Pipeline pipeline = pipelineMapper.getPipelineById(workspaceId, pipelineId);
+    private Pipeline requirePipeline(int workspaceId, String orgWorkspaceIdsJson, int pipelineId) {
+        Pipeline pipeline = pipelineMapper.getPipelineById(workspaceId, orgWorkspaceIdsJson, pipelineId);
         if (pipeline == null) throw new ResourceNotFoundException("Pipeline not found with id: " + pipelineId);
         return pipeline;
     }
 
-    private Pipeline requireOwnedPipeline(int workspaceId, int pipelineId) {
-        Pipeline pipeline = pipelineMapper.getOwnedPipelineById(workspaceId, pipelineId);
+    private Pipeline requireOwnedPipeline(int workspaceId, String orgWorkspaceIdsJson, int pipelineId) {
+        Pipeline pipeline = pipelineMapper.getOwnedPipelineById(workspaceId, orgWorkspaceIdsJson, pipelineId);
         if (pipeline == null) throw new ResourceNotFoundException("Pipeline not found with id: " + pipelineId);
         return pipeline;
     }

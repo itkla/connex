@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import static ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -44,8 +45,9 @@ class AiChatCitationProjectorTest {
             companyMapper,
             dealMapper,
             pipelineMapper,
-            privacyGuard, chatMapper);
-
+            privacyGuard,
+            unfiltered(),
+            chatMapper);
 
     @org.junit.jupiter.api.BeforeEach
     void initializePrivacyAuthority() {
@@ -228,7 +230,7 @@ class AiChatCitationProjectorTest {
         when(personMapper.getByIds(3, List.of(11))).thenReturn(List.of(person));
         when(companyMapper.getByIds(3, List.of(21))).thenReturn(List.of(employer));
         when(dealMapper.getByIds(3, List.of(31))).thenReturn(List.of(deal));
-        when(pipelineMapper.getAllStages(3)).thenReturn(List.of(stage));
+        when(pipelineMapper.getAllStages(3, "[7,8,9]")).thenReturn(List.of(stage));
 
         List<AiChatCitationDto> citations = projector.project(3, List.of(message))
                 .citationsByMessage().get(23);
@@ -264,7 +266,7 @@ class AiChatCitationProjectorTest {
         stage.setId(5);
         stage.setName("Negotiation");
         when(dealMapper.getByIds(3, List.of(31))).thenReturn(List.of(deal));
-        when(pipelineMapper.getAllStages(3)).thenReturn(List.of(stage));
+        when(pipelineMapper.getAllStages(3, "[7,8,9]")).thenReturn(List.of(stage));
 
         AiChatCitationDto citation = projector.project(3, List.of(message))
                 .citationsByMessage().get(23).getFirst();

@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import static ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
@@ -77,6 +78,8 @@ abstract class AbstractAiAssistantWriteToolTest {
     private AiAssistantPrivacyService organizationAuthority;
     AiChatPrivacyGuard privacyGuard;
     WorkspaceService workspaceService;
+    final ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess recordScopes =
+        unfiltered();
     ActivityService activityService;
     NoteService noteService;
     PersonService personService;
@@ -275,7 +278,7 @@ abstract class AbstractAiAssistantWriteToolTest {
                 readExecutor,
                 privacyGuard,
                 chatMapper,
-                workspaceService,
+                workspaceService, recordScopes,
                 taskService,
                 personService,
                 companyService,

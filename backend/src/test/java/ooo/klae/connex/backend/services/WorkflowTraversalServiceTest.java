@@ -37,7 +37,7 @@ class WorkflowTraversalServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new WorkflowTraversalService(
+        service = new WorkflowTraversalService(ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered(),
             workflowRunMapper,
             workflowVersionMapper,
             canonicalizer,

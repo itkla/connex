@@ -28,7 +28,8 @@ import org.w3c.dom.NodeList;
  * which: every write grant now receives a trusted control-derived workspace
  * allowlist instead of joining the control table (#811), while on the read path
  * {@code AiAssistantIdentifierMapper}, {@code IdentityMapper}, {@code PersonEdgeMapper},
- * {@code IntroductionMapper}, {@code DuplicateReviewMapper} and {@code SegmentMapper} bind that allowlist — the remaining four mappers in
+ * {@code IntroductionMapper}, {@code DuplicateReviewMapper}, {@code SegmentMapper} and
+ * {@code PipelineMapper} bind that allowlist — the remaining three mappers in
  * {@code SHARE_READERS} still join the control-plane {@code workspace} table and
  * match {@code ows.org_id = vws.org_id}.
  * Note fragments are checked separately because their legacy unfiltered record ceilings and
@@ -85,6 +86,7 @@ class OrgShareCeilingArchTest {
                     || entry.getKey().equals("mappers/IntroductionMapper.xml")
                     || entry.getKey().equals("mappers/DuplicateReviewMapper.xml")
                     || entry.getKey().equals("mappers/SegmentMapper.xml")
+                    || entry.getKey().equals("mappers/PipelineMapper.xml")
                 ? CONTROL_DERIVED_READ_CEILING
                 : READ_CEILING;
             int ceilings = count(ceiling, xml);
@@ -246,6 +248,37 @@ class OrgShareCeilingArchTest {
         assertEquals(5, shareReads);
         assertEquals(owners.size(), fragments);
         assertEquals(0, count(CONTROL_PLANE_WORKSPACE_TABLE, loadMapperText("mappers/SegmentMapper.xml")));
+    }
+
+    @Test
+    void every_pipeline_share_ceiling_binds_its_legacy_owning_workspace() throws Exception {
+        Document document = loadMapper("mappers/PipelineMapper.xml");
+        Map<String, String> owners = Map.of(
+            "visible", "pipeline",
+            "getVisibleStageById", "pipeline",
+            "getVisibleStageByIdForUpdate", "pipeline",
+            "getAllStages", "stage",
+            "getStagesByPipelineId", "pipeline");
+        int checked = 0;
+        NodeList children = document.getDocumentElement().getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            if (!(children.item(i) instanceof Element element)) {
+                continue;
+            }
+            String id = element.getAttribute("id");
+            if (!owners.containsKey(id)) {
+                continue;
+            }
+            String sql = element.getTextContent().replaceAll("\\s+", " ").trim();
+            assertEquals(1, count(Pattern.compile("FROM pipeline_share"), sql), id);
+            assertEquals(1, count(CONTROL_DERIVED_READ_CEILING, sql), id);
+            assertTrue(sql.contains("ON org_workspace.id = " + owners.get(id) + ".workspace_id"), id);
+            assertTrue(sql.contains("ps.workspace_id = #{workspaceId}"), id);
+            assertEquals(0, count(CONTROL_PLANE_WORKSPACE_TABLE, sql), id);
+            checked++;
+        }
+        assertEquals(5, checked);
+        assertEquals(0, count(CONTROL_PLANE_WORKSPACE_TABLE, loadMapperText("mappers/PipelineMapper.xml")));
     }
 
     private int count(Pattern pattern, String text) {

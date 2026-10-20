@@ -72,7 +72,8 @@ class AiAssistantWriteToolLockOrderTest extends AbstractAiAssistantWriteToolTest
         service.executeAuto(TURN, TOOL_CALL_ID, result -> { });
 
         InOrder order = inOrder(
-                workspaceService, chatMapper, taskService, personService, restrictionEpoch);
+                recordScopes, workspaceService, chatMapper, taskService, personService, restrictionEpoch);
+        order.verify(recordScopes).getForWorkspace(TURN.workspaceId());
         order.verify(workspaceService).lockAndRequirePermissionsSnapshot(
                 TURN.workspaceId(), Map.of(TURN.userId(), Set.of(Permission.AI_USE)));
         order.verify(chatMapper).getSessionByIdForUpdate(

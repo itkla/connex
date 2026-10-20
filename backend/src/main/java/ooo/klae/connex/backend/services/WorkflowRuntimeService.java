@@ -25,6 +25,7 @@ public class WorkflowRuntimeService {
     private static final int MAX_SCHEDULE_ENROLLMENTS = 128;
 
     private final WorkflowRuntimeProperties properties;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
     private final WorkflowMapper workflowMapper;
     private final WorkflowRunMapper workflowRunMapper;
     private final WorkflowRuntimeClaimService claimService;
@@ -36,6 +37,11 @@ public class WorkflowRuntimeService {
     private final AuditService auditService;
 
     public WorkflowDispatchResult dispatch(WorkflowTriggerDispatch dispatch) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            dispatch.workspaceId(), () -> dispatchWithinScope(dispatch));
+    }
+
+    private WorkflowDispatchResult dispatchWithinScope(WorkflowTriggerDispatch dispatch) {
         if (dispatch instanceof WorkflowTriggerDispatch.EntityChange entityChange) {
             if (!properties.enabled()) {
                 ruleEngineService.onEntityChange(entityChange);
