@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Objects;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
@@ -118,7 +119,7 @@ public class DeliveryUnsubscribeService {
         if (delivery.getPersonId() != null) {
             consentService.setForPerson(delivery.getPersonId(), new ContactChannelConsentRequest(
                     send.getChannel(), send.getPurpose(), "revoked", "unsubscribe", null,
-                    LocalDateTime.now()));
+                    LocalDateTime.now(ZoneOffset.UTC)));
         }
         CampaignDeliveryEvent event = new CampaignDeliveryEvent();
         event.setWorkspaceId(workspaceId);

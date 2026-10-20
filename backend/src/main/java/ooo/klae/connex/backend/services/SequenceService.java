@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import java.time.DateTimeException;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -123,7 +124,7 @@ public class SequenceService {
         if (sequence.getArchivedAt() != null) {
             return;
         }
-        if (sequenceMapper.archiveSequence(workspaceId, id, actorId, LocalDateTime.now()) == 0) {
+        if (sequenceMapper.archiveSequence(workspaceId, id, actorId, LocalDateTime.now(ZoneOffset.UTC)) == 0) {
             throw SequenceException.notFound("Sequence not found");
         }
         auditService.record(

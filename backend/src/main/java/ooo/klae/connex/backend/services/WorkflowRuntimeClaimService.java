@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -362,7 +363,7 @@ public class WorkflowRuntimeClaimService {
         run.setActorUserId(actorUserId(version));
         run.setAttributionUserId(conditionActorId(version));
         run.setCurrentNodeId(compiled.entryNodeId());
-        run.setStartedAt(LocalDateTime.now());
+        run.setStartedAt(LocalDateTime.now(ZoneOffset.UTC));
         try {
             workflowRunMapper.insertRun(run);
             return new CanonicalClaim(run, true, false, false);

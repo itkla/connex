@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -706,7 +707,7 @@ public class WorkflowService {
             throw new ConflictException("Workflow archive state changed");
         }
         workflow.setEnabled(false);
-        workflow.setArchivedAt(archived ? LocalDateTime.now() : null);
+        workflow.setArchivedAt(archived ? LocalDateTime.now(ZoneOffset.UTC) : null);
         workflow.setUpdatedById(actorId);
         auditService.record(
             archived ? "workflow.archive" : "workflow.restore",

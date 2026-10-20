@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -43,7 +44,7 @@ public class WorkflowManualRunConfirmationTransaction {
                 || invocation.getRequestedById() != requesterId) {
             throw new ResourceNotFoundException("Manual workflow scope not found");
         }
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         if (invocation.getExpiresAt().isBefore(now)
                 && "prepared".equals(invocation.getStatus())) {
             operationsMapper.updateInvocationStatus(

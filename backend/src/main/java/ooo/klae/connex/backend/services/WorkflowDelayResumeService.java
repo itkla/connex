@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Objects;
 
 import org.springframework.stereotype.Service;
@@ -71,7 +72,7 @@ public class WorkflowDelayResumeService {
                 "The pinned Delay transition is unavailable.",
                 true);
         }
-        LocalDateTime finishedAt = LocalDateTime.now();
+        LocalDateTime finishedAt = LocalDateTime.now(ZoneOffset.UTC);
         if (runMapper.succeedWaitingDelayStep(
                 workspaceId,
                 runId,

@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import java.time.LocalDateTime;
 import java.time.Duration;
+import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -225,7 +226,7 @@ public class DataSubjectRequestService {
         disclosure.setSubjectPersonId(personId);
         disclosure.setAuditTrail(control.auditTrail());
         disclosure.setAuditTrailTotal(control.auditTrailTotal());
-        disclosure.setGeneratedAt(LocalDateTime.now());
+        disclosure.setGeneratedAt(LocalDateTime.now(ZoneOffset.UTC));
     }
 
 
@@ -261,7 +262,7 @@ public class DataSubjectRequestService {
             DataSubjectRequestUpsertRequest request, boolean create) {
         validateRequestShape(request);
         LocalDateTime receivedAt = mysqlPrecision(request.getReceivedAt() == null
-            ? create ? LocalDateTime.now() : target.getReceivedAt()
+            ? create ? LocalDateTime.now(ZoneOffset.UTC) : target.getReceivedAt()
             : request.getReceivedAt());
         Integer subjectWorkspaceId = merge(create, request.getSubjectWorkspaceId(), target.getSubjectWorkspaceId());
         Integer subjectPersonId = merge(create, request.getSubjectPersonId(), target.getSubjectPersonId());

@@ -1,6 +1,9 @@
 package ooo.klae.connex.backend.services;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -102,6 +105,27 @@ class DealDocumentServiceTest extends AbstractServiceTest {
         assertTrue(doc.content().sections().intro().contains(currentUser.getDisplayName()));
         assertEquals(1, doc.content().lineItems().size());
         assertEquals(0, new BigDecimal("220.00").compareTo(doc.content().totals().grandTotal()));
+    }
+
+    @Test
+    void templateDateUsesWorkspaceZoneWhileGenerationTimestampStaysUtc() {
+        ZoneId workspaceZone = ZoneId.of(LocalDateTime.now(ZoneOffset.UTC).getHour() < 12
+            ? "Etc/GMT+12" : "Pacific/Kiritimati");
+        jdbcTemplate.update("UPDATE workspace SET timezone = ? WHERE id = ?",
+            workspaceZone.getId(), workspace.getId());
+        Deal deal = jpyDeal();
+        DocumentTemplate tpl = template();
+        LocalDateTime before = LocalDateTime.now(ZoneOffset.UTC);
+
+        DealDocumentDto doc = documentService.generate(deal.getId(), tpl.getId());
+
+        LocalDateTime generatedAt = LocalDateTime.parse(doc.content().generatedAt());
+        assertFalse(generatedAt.isBefore(before));
+        assertFalse(generatedAt.isAfter(LocalDateTime.now(ZoneOffset.UTC)));
+        String localDate = generatedAt.atZone(ZoneOffset.UTC).withZoneSameInstant(workspaceZone)
+            .toLocalDate().toString();
+        assertFalse(localDate.equals(generatedAt.toLocalDate().toString()));
+        assertTrue(doc.content().sections().intro().contains(" on " + localDate + "."));
     }
 
     /**

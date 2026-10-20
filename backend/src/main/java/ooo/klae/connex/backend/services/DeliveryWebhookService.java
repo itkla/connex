@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -191,7 +192,7 @@ public class DeliveryWebhookService {
                 reason, "Recorded from a delivery provider " + reason + " event"));
         if (delivery.getPersonId() != null) {
             consentService.setForPerson(delivery.getPersonId(), new ContactChannelConsentRequest(
-                    send.getChannel(), send.getPurpose(), "revoked", reason, null, LocalDateTime.now()));
+                    send.getChannel(), send.getPurpose(), "revoked", reason, null, LocalDateTime.now(ZoneOffset.UTC)));
         }
     }
 

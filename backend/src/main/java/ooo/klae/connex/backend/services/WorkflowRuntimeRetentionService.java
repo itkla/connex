@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -20,7 +21,7 @@ public class WorkflowRuntimeRetentionService {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public int purge(int workspaceId) {
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         int limit = properties.maxRetentionDeletesPerWorkspace();
         int completed = outboxMapper.purgeCompletedBefore(
             workspaceId,

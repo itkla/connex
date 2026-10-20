@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -659,7 +660,7 @@ public class SegmentService {
                 switch (op) {
                     case "before", "after" -> params.put("value", requireDate(condition));
                     case "within_days" -> {
-                        LocalDate today = LocalDate.now();
+                        LocalDate today = LocalDate.now(ZoneOffset.UTC);
                         params.put("dateFrom", today.toString());
                         params.put("dateTo", today.plusDays(catalog.clampDays(condition.getDays())).toString());
                     }

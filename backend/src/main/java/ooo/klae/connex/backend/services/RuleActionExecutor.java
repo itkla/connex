@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 
 import org.springframework.stereotype.Component;
@@ -110,7 +111,7 @@ public class RuleActionExecutor {
         Task task = new Task();
         task.setDescription(action.getTitle());
         int dueDays = action.getDueInDays() != null && action.getDueInDays() > 0 ? action.getDueInDays() : DEFAULT_DUE_DAYS;
-        task.setDueDate(LocalDateTime.now().toLocalDate().plusDays(dueDays).format(DATE));
+        task.setDueDate(LocalDateTime.now(ZoneOffset.UTC).toLocalDate().plusDays(dueDays).format(DATE));
         User assignee = new User();
         assignee.setId(ctx.targetUserId());
         task.setAssignedTo(assignee);
@@ -183,7 +184,7 @@ public class RuleActionExecutor {
         notification.setSourceType(ctx.recordType());
         notification.setSourceId(ctx.entityId());
         notification.setDedupeKey(ctx.notificationDedupeKey());
-        notification.setTriggeredAt(LocalDateTime.now().format(TIMESTAMP));
+        notification.setTriggeredAt(LocalDateTime.now(ZoneOffset.UTC).format(TIMESTAMP));
         notificationDelivery.deliver(notification);
     }
 

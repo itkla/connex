@@ -778,7 +778,7 @@ public class AiProviderConfigService implements AiProviderReadiness {
         if (existing != null && existing.isNoTrainingAttested() && existing.getAttestedAt() != null) {
             return existing.getAttestedAt();
         }
-        return LocalDateTime.now();
+        return LocalDateTime.now(ZoneOffset.UTC);
     }
 
     private AiProviderConfigDto providerDto(AiProviderConfig config) {

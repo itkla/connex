@@ -1,7 +1,10 @@
 package ooo.klae.connex.backend.services;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -207,7 +210,7 @@ public class DealDocumentService {
         tokens.put("deal.name", nz(deal.getName()));
         tokens.put("deal.currency", currency);
         tokens.put("owner.name", owner == null ? "" : nz(owner.getDisplayName()));
-        tokens.put("date", LocalDateTime.now().toLocalDate().toString());
+        tokens.put("date", LocalDate.now(ZoneId.of(workspaceService.getCurrentAnalyticsTimezone())).toString());
         tokens.put("total", totals.grandTotal() == null
             ? "" : currency + " " + totals.grandTotal().toPlainString());
 
@@ -220,7 +223,7 @@ public class DealDocumentService {
             ? template.getName() : sections.title();
 
         DocumentContent content = new DocumentContent(
-            LocalDateTime.now().toString(),
+            LocalDateTime.now(ZoneOffset.UTC).toString(),
             new DocumentContent.PartyRef(tokens.get("workspace.name"), null),
             company == null ? null : new DocumentContent.PartyRef(nz(company.getName()), company.getAddress()),
             owner == null ? null : new DocumentContent.PartyRef(nz(owner.getDisplayName()), null),
