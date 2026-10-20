@@ -104,6 +104,7 @@ public class ImportService {
     private final TagMapper tagMapper;
     private final TagService tagService;
     private final PipelineMapper pipelineMapper;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
     private final EmploymentService employmentService;
     private final DealStageHistoryService dealStageHistoryService;
     private final CustomFieldDefinitionMapper customFieldDefinitionMapper;
@@ -1047,6 +1048,7 @@ public class ImportService {
         DuplicatePreflightService.ImportCommitAdmission admission =
             duplicatePreflightService.claimImportCommit(
                 request.getDuplicateReviewProof(), reviewContext);
+        recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         lockImportPermission(workspaceId, Permission.DEAL_CREATE);
         duplicateDecisionLockService.lockCurrentOrganization();
         int actorId = authService.getCurrentUser().getId();
@@ -1402,14 +1404,15 @@ public class ImportService {
     }
 
     private void resolveStages(int workspaceId, List<PlanRow> plan) {
-        var pipelines = pipelineMapper.getAllPipelines(workspaceId);
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        var pipelines = pipelineMapper.getAllPipelines(workspaceId, orgWorkspaceIdsJson);
         Map<String, Integer> pipelineByName = new HashMap<>();
         Map<Integer, Map<String, Integer>> stageByName = new HashMap<>();
         Map<Integer, Integer> firstStage = new HashMap<>();
         for (var pipeline : pipelines) {
             pipelineByName.put(pipeline.getName().toLowerCase(), pipeline.getId());
             Map<String, Integer> stages = new HashMap<>();
-            List<Stage> list = pipelineMapper.getStagesByPipelineId(workspaceId, pipeline.getId());
+            List<Stage> list = pipelineMapper.getStagesByPipelineId(workspaceId, orgWorkspaceIdsJson, pipeline.getId());
             for (Stage stage : list) stages.put(stage.getName().toLowerCase(), stage.getId());
             stageByName.put(pipeline.getId(), stages);
             if (!list.isEmpty()) firstStage.put(pipeline.getId(), list.get(0).getId());

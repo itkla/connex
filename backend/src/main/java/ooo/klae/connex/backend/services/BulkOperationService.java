@@ -50,6 +50,7 @@ public class BulkOperationService {
     private final DealMapper dealMapper;
     private final TagMapper tagMapper;
     private final PipelineMapper pipelineMapper;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     @RequirePermission(Permission.PERSON_UPDATE)
     public BulkOperationResult addTagToPersons(List<Integer> ids, int tagId) {
@@ -150,7 +151,8 @@ public class BulkOperationService {
     @RequirePermission(Permission.DEAL_UPDATE)
     public BulkOperationResult changeStageForDeals(List<Integer> ids, int stageId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        if (pipelineMapper.getVisibleStageById(workspaceId, stageId) == null) {
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        if (pipelineMapper.getVisibleStageById(workspaceId, orgWorkspaceIdsJson, stageId) == null) {
             throw new ResourceNotFoundException("Stage not found with id: " + stageId);
         }
         return apply(ids, id -> dealMapper.existsOwned(workspaceId, id), id -> dealService.changeStage(id, stageId));

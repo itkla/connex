@@ -27,6 +27,7 @@ import ooo.klae.connex.backend.mappers.PipelineMapper;
 public class DealStageHistoryService {
     private final DealStageHistoryMapper historyMapper;
     private final PipelineMapper pipelineMapper;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
     private final WorkspaceService workspaceService;
     private final Clock clock;
 
@@ -60,7 +61,8 @@ public class DealStageHistoryService {
     }
 
     private void recordAt(int workspaceId, int dealId, int stageId, boolean conversionEligible) {
-        Stage stage = pipelineMapper.getVisibleStageById(workspaceId, stageId);
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        Stage stage = pipelineMapper.getVisibleStageById(workspaceId, orgWorkspaceIdsJson, stageId);
         DealStageHistory history = new DealStageHistory();
         history.setWorkspaceId(workspaceId);
         history.setDealId(dealId);

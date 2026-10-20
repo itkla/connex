@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.mappers;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -229,10 +230,10 @@ class ShareReadIsolationMapperTest extends AbstractMapperTest {
         Stage stage = newStageIn(foreign, pipeline);
         insertShare("pipeline_share", "pipeline_id", pipeline.getId(), workspace.getId());
 
-        assertFalse(pipelineMapper.pipelineExists(workspace.getId(), pipeline.getId()));
-        assertTrue(pipelineMapper.getAllPipelines(workspace.getId()).stream()
+        assertFalse(pipelineMapper.pipelineExists(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), pipeline.getId()));
+        assertTrue(pipelineMapper.getAllPipelines(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId())).stream()
             .noneMatch(p -> p.getId() == pipeline.getId()));
-        assertTrue(pipelineMapper.getAllStages(workspace.getId()).stream()
+        assertTrue(pipelineMapper.getAllStages(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId())).stream()
             .noneMatch(candidate -> candidate.getId() == stage.getId()));
     }
 
@@ -243,7 +244,7 @@ class ShareReadIsolationMapperTest extends AbstractMapperTest {
         Stage stage = newStageIn(sibling, pipeline);
         insertShare("pipeline_share", "pipeline_id", pipeline.getId(), workspace.getId());
 
-        assertTrue(pipelineMapper.getAllStages(workspace.getId()).stream()
+        assertTrue(pipelineMapper.getAllStages(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId())).stream()
             .anyMatch(candidate -> candidate.getId() == stage.getId()));
     }
 

@@ -40,6 +40,7 @@ public class GuidedRecordCreationService {
     private final DealService dealService;
     private final RecordCreationAugmentationService augmentationService;
     private final WorkspaceService workspaceService;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_CREATE)
@@ -134,6 +135,7 @@ public class GuidedRecordCreationService {
     private void lockPermission(Permission permission) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = workspaceService.getCurrentUserId();
+        recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         workspaceService.lockAndRequirePermissions(
             workspaceId,
             Map.of(actorId, Set.of(permission)));

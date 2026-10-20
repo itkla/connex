@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import static ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -266,7 +267,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 registry,
                 readExecutor,
                 chatMapper,
-                workspaceService,
+                workspaceService, unfiltered(),
                 taskService,
                 personService,
                 companyService,
@@ -541,7 +542,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         deal.setStageId(5);
         deal.setUpdatedAt("2026-03-06 14:00:00.000000");
         when(dealMapper.getByIds(TURN.workspaceId(), List.of(44))).thenReturn(List.of(deal));
-        when(pipelineMapper.getAllStages(TURN.workspaceId())).thenReturn(List.of(
+        when(pipelineMapper.getAllStages(TURN.workspaceId(), "[7,8,9]")).thenReturn(List.of(
                 stage(5, "Qualified"), stage(6, "Proposal")));
         when(taskMapper.getVisibleIdsIn(TURN.workspaceId(), List.of(74))).thenReturn(List.of(74));
         AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
@@ -574,7 +575,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 personMapper,
                 mock(CompanyMapper.class),
                 dealMapper,
-                pipelineMapper,
+                pipelineMapper, unfiltered(),
                 mock(TagMapper.class),
                 mock(DocumentTemplateMapper.class),
                 AiAssistantAdmissionTestSupport.admittingMock(DealDocumentService.class),
@@ -1042,7 +1043,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 readPersonMapper,
                 mock(CompanyMapper.class),
                 dealMapper,
-                mock(PipelineMapper.class),
+                mock(PipelineMapper.class), unfiltered(),
                 mock(TagMapper.class),
                 mock(DocumentTemplateMapper.class),
                 AiAssistantAdmissionTestSupport.admittingMock(DealDocumentService.class),
@@ -1313,7 +1314,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 readPersonMapper,
                 companyMapper,
                 dealMapper,
-                mock(PipelineMapper.class),
+                mock(PipelineMapper.class), unfiltered(),
                 mock(TagMapper.class),
                 mock(DocumentTemplateMapper.class),
                 AiAssistantAdmissionTestSupport.admittingMock(DealDocumentService.class),
@@ -1636,7 +1637,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 readPersonMapper,
                 companyMapper,
                 dealMapper,
-                pipelineMapper,
+                pipelineMapper, unfiltered(),
                 mock(TagMapper.class),
                 mock(DocumentTemplateMapper.class),
                 AiAssistantAdmissionTestSupport.admittingMock(DealDocumentService.class),
@@ -1748,7 +1749,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 + "\"outcomeSummary\":\"Request failed\",\"change\":null,"
                                 + "\"outcomeValues\":[]," + noUndo + TIMES + "}")) + "]",
                 legacyCardJson(readService.list(TURN.sessionId(), false)));
-        verify(pipelineMapper, never()).getAllStages(anyInt());
+        verify(pipelineMapper, never()).getAllStages(anyInt(), org.mockito.ArgumentMatchers.anyString());
     }
 
     /**
@@ -1821,7 +1822,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 mock(PersonMapper.class),
                 companyMapper,
                 mock(DealMapper.class),
-                pipelineMapper,
+                pipelineMapper, unfiltered(),
                 mock(TagMapper.class),
                 mock(DocumentTemplateMapper.class),
                 AiAssistantAdmissionTestSupport.admittingMock(DealDocumentService.class),

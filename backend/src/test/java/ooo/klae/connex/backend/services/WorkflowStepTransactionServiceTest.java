@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -50,6 +51,9 @@ class WorkflowStepTransactionServiceTest {
     @Mock private WorkflowRecordGuard recordGuard;
     @Mock private WorkflowNodeExecutor nodeExecutor;
 
+    private final RecordVisibilityScopeControlAccess scopes =
+        unfiltered();
+
     private WorkflowStepTransactionService service;
     private WorkflowRun run;
     private WorkflowVersion version;
@@ -62,7 +66,7 @@ class WorkflowStepTransactionServiceTest {
             workflowVersionMapper,
             principalService,
             recordGuard,
-            nodeExecutor);
+            nodeExecutor, scopes);
         run = new WorkflowRun();
         run.setId(31L);
         run.setWorkspaceId(7);
@@ -110,6 +114,7 @@ class WorkflowStepTransactionServiceTest {
 
         assertTrue(result.executed());
         InOrder order = inOrder(
+            scopes,
             workflowRunMapper,
             workflowVersionMapper,
             principalService,
@@ -117,6 +122,7 @@ class WorkflowStepTransactionServiceTest {
             nodeExecutor);
         order.verify(workflowRunMapper).getByIdInWorkspace(7, 31L);
         order.verify(workflowVersionMapper).getById(7, 11, 19L);
+        order.verify(scopes).getForWorkspace(7);
         order.verify(principalService).resolveLocked(7, version);
         order.verify(workflowRunMapper).getByIdForUpdate(7, 31L);
         order.verify(recordGuard).requireAccessible(run);

@@ -116,6 +116,7 @@ public class DealService {
     private final DealLineItemMapper dealLineItemMapper;
     private final PersonMapper personMapper;
     private final PipelineMapper pipelineMapper;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
     private final TagMapper tagMapper;
     private final ActivityMapper activityMapper;
     private final NoteMapper noteMapper;
@@ -764,11 +765,12 @@ public class DealService {
 
     public DealTopDto getTopDeals(String currency, MemberScope memberScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         List<DealSummaryDto> topOpen = dealMapper.topOpenDeals(workspaceId, currency, memberScope).stream()
-            .map(deal -> toDealSummary(workspaceId, deal))
+            .map(deal -> toDealSummary(workspaceId, orgWorkspaceIdsJson, deal))
             .toList();
         List<DealSummaryDto> topWon = dealMapper.topWonDeals(workspaceId, currency, memberScope).stream()
-            .map(deal -> toDealSummary(workspaceId, deal))
+            .map(deal -> toDealSummary(workspaceId, orgWorkspaceIdsJson, deal))
             .toList();
         return new DealTopDto(topOpen, topWon);
     }
@@ -982,19 +984,20 @@ public class DealService {
         Deal deal = dealMapper.getDealById(workspaceId, id);
         if (deal == null) throw new ResourceNotFoundException("Deal not found");
 
-        return toDealSummary(workspaceId, deal);
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        return toDealSummary(workspaceId, orgWorkspaceIdsJson, deal);
     }
 
-    private DealSummaryDto toDealSummary(int workspaceId, Deal deal) {
+    private DealSummaryDto toDealSummary(int workspaceId, String orgWorkspaceIdsJson, Deal deal) {
         String status = deal.getWon() == null ? "open" : deal.getWon() ? "won" : "lost";
         String pipelineName = null;
         if (deal.getPipelineId() != null) {
-            Pipeline pipeline = pipelineMapper.getPipelineById(workspaceId, deal.getPipelineId());
+            Pipeline pipeline = pipelineMapper.getPipelineById(workspaceId, orgWorkspaceIdsJson, deal.getPipelineId());
             if (pipeline != null) pipelineName = pipeline.getName();
         }
         String stageName = null;
         if (deal.getStageId() != null) {
-            Stage stage = pipelineMapper.getVisibleStageById(workspaceId, deal.getStageId());
+            Stage stage = pipelineMapper.getVisibleStageById(workspaceId, orgWorkspaceIdsJson, deal.getStageId());
             if (stage != null) stageName = stage.getName();
         }
         String companyName = null;
@@ -1020,6 +1023,7 @@ public class DealService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DEAL_CREATE)
     public Deal create(Deal deal) {
+        recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         lockCreatePermission();
         duplicateDecisionLockService.lockCurrentOrganization();
         return createAfterDuplicateDecisionLock(deal, null);
@@ -1035,6 +1039,7 @@ public class DealService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DEAL_CREATE)
     public Deal createReviewed(Deal deal, String duplicateReviewToken) {
+        recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         lockCreatePermission();
         duplicatePreflightService.requireReviewedDealCreation(
             new DealDuplicatePreflightRequest(
@@ -1057,6 +1062,7 @@ public class DealService {
             Deal deal,
             String duplicateReviewToken,
             RecordCreationAugmentation augmentation, MutationAdmission admission) {
+        recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         duplicatePreflightService.requireReviewedDealCreation(
             new DealDuplicatePreflightRequest(
                 deal.getName(),
@@ -1083,9 +1089,10 @@ public class DealService {
             Deal deal,
             RecordCreationAugmentationService.PreparedAugmentation prepared, MutationAdmission admission) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         deal.setWorkspaceId(workspaceId);
         deal.setOwnerId(authService.getCurrentUser().getId());
-        requireVisibleRelations(workspaceId, deal);
+        requireVisibleRelations(workspaceId, orgWorkspaceIdsJson, deal);
         BigDecimal requestedActualValue = deal.getActualValue();
         String stageOutcome = dealOutcomeWriter.stageOutcome(workspaceId, deal.getStageId());
         if (deal.getStageId() != null) {
@@ -1143,6 +1150,7 @@ public class DealService {
     @RequirePermission(Permission.DEAL_UPDATE)
     public Deal update(int id, Deal deal) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         duplicateDecisionLockService.lockCurrentOrganization();
         Deal before = requireDealForUpdate(workspaceId, id);
         boolean currencyChanged = deal.getCurrency() != null
@@ -1162,7 +1170,7 @@ public class DealService {
         deal.setOwnerId(before.getOwnerId());
         deal.setActualValue(before.getActualValue());
         deal.setValueSource(valueChanged ? "manual" : before.getValueSource());
-        requireVisibleRelations(workspaceId, deal);
+        requireVisibleRelations(workspaceId, orgWorkspaceIdsJson, deal);
         Integer beforeStage = before.getStageId();
         Integer newStage = deal.getStageId();
         boolean stageChanged = newStage != null && (beforeStage == null || !beforeStage.equals(newStage));
@@ -1251,14 +1259,14 @@ public class DealService {
         return hydrateReferences(workspaceId, after);
     }
 
-    private void requireVisibleRelations(int workspaceId, Deal deal) {
+    private void requireVisibleRelations(int workspaceId, String orgWorkspaceIdsJson, Deal deal) {
         Integer pipelineId = deal.getPipelineId();
-        if (pipelineId == null || !pipelineMapper.pipelineExists(workspaceId, pipelineId)) {
+        if (pipelineId == null || !pipelineMapper.pipelineExists(workspaceId, orgWorkspaceIdsJson, pipelineId)) {
             throw new BadRequestException("Deal pipeline is not visible in this workspace");
         }
         Stage stage = deal.getStageId() == null
             ? null
-            : pipelineMapper.getVisibleStageById(workspaceId, deal.getStageId());
+            : pipelineMapper.getVisibleStageById(workspaceId, orgWorkspaceIdsJson, deal.getStageId());
         Integer stagePipelineId = stage == null || stage.getPipeline() == null
             ? null
             : stage.getPipeline().getId();
@@ -1349,6 +1357,7 @@ public class DealService {
     @RequirePermission(Permission.DEAL_UPDATE)
     public Deal reopen(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         int actorId = workspaceService.getCurrentUserId();
         WorkspaceService.LockedPermissionSnapshot permissions =
             workspaceService.lockAndRequirePermissionsSnapshot(
@@ -1807,8 +1816,9 @@ public class DealService {
 
     private LockedStageChange lockStageChangeRows(
             int workspaceId, int dealId, int stageId, boolean requireStableSourceStage) {
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         Deal discovered = requireDeal(workspaceId, dealId);
-        Stage stage = pipelineMapper.getVisibleStageById(workspaceId, stageId);
+        Stage stage = pipelineMapper.getVisibleStageById(workspaceId, orgWorkspaceIdsJson, stageId);
         if (stage == null) throw new ResourceNotFoundException("Stage not found");
         List<Deal> lockedDeals = lockDealMoveRows(
             workspaceId, dealId, discovered.getStageId(), stageId);

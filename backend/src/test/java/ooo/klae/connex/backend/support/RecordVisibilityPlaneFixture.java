@@ -32,6 +32,7 @@ import ooo.klae.connex.backend.config.TenantRoutingConfig;
 import ooo.klae.connex.backend.mappers.DuplicateReviewMapper;
 import ooo.klae.connex.backend.mappers.IntroductionMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
+import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.SegmentMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
@@ -55,8 +56,11 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
     public final DuplicateReviewMapper duplicateReviewMapper;
     public final NoteMapper noteMapper;
     public final SegmentMapper segmentMapper;
+    public final PipelineMapper pipelineMapper;
     public final RecordVisibilityScopeControlAccess scopeAccess;
     public final LegacyRecordVisibilitySql legacy;
+    public final List<Integer> pipelineIds = new ArrayList<>();
+    public final List<Integer> stageIds = new ArrayList<>();
     public final List<Integer> workspaceIds = new ArrayList<>();
     public final List<Integer> companyIds = new ArrayList<>();
     public final List<Integer> personIds = new ArrayList<>();
@@ -80,7 +84,7 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
 
     /** Selects one mapper's minimal tenant-table fixture without changing the pilot fixtures. */
     public enum Records {
-        INTRODUCTIONS, DUPLICATE_REVIEW, NOTES, SEGMENTS
+        INTRODUCTIONS, DUPLICATE_REVIEW, NOTES, SEGMENTS, PIPELINES
     }
 
     /** Clones only the tables referenced by the selected mapper's visibility statements. */
@@ -112,6 +116,7 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
         tenantCatalog = split ? "cnx_record_plane_" + UUID.randomUUID().toString().replace("-", "")
             : defaultCatalog;
         tables = switch (records) {
+            case PIPELINES -> List.of("pipeline", "pipeline_share", "stage");
             case INTRODUCTIONS -> List.of("company", "person", "company_share", "activity", "note", "task", "person_edge");
             case DUPLICATE_REVIEW -> List.of("company", "person", "company_share", "person_identity", "company_identity",
                 "duplicate_review_decision");
@@ -138,7 +143,7 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
         configuration.setMapUnderscoreToCamelCase(true);
         configuration.getTypeAliasRegistry().registerAliases("ooo.klae.connex.backend.beans");
         for (String resource : List.of("mappers/IntroductionMapper.xml", "mappers/DuplicateReviewMapper.xml",
-                "mappers/WorkspaceMapper.xml", "mappers/NoteMapper.xml", "mappers/SegmentMapper.xml")) {
+                "mappers/WorkspaceMapper.xml", "mappers/NoteMapper.xml", "mappers/SegmentMapper.xml", "mappers/PipelineMapper.xml")) {
             try (InputStream input = getClass().getClassLoader().getResourceAsStream(resource)) {
                 if (input == null) {
                     throw new IllegalStateException("Missing mapper resource " + resource);
@@ -151,6 +156,7 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
         duplicateReviewMapper = sessions.getMapper(DuplicateReviewMapper.class);
         noteMapper = sessions.getMapper(NoteMapper.class);
         segmentMapper = sessions.getMapper(SegmentMapper.class);
+        pipelineMapper = sessions.getMapper(PipelineMapper.class);
         TenantWorkScope workScope = new TenantWorkScope(
             tenantContext, mock(TenantCatalogResolver.class), mock(WorkspaceMapper.class));
         scopeAccess = new RecordVisibilityScopeControlAccess(new ShareWorkspaceControlAccess(
@@ -158,7 +164,9 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
         legacy = new LegacyRecordVisibilitySql(pool, defaultCatalog);
         try {
             seedControl();
-            if (records == Records.NOTES || records == Records.SEGMENTS) {
+            if (records == Records.PIPELINES) {
+                seedPipelines();
+            } else if (records == Records.NOTES || records == Records.SEGMENTS) {
                 seedNotes();
                 if (records == Records.SEGMENTS) {
                     seedSegments();
@@ -274,6 +282,29 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
             + "VALUES (?, ?, ?, ?, 'UTC')", unique(), "Visibility Member", unique() + "@example.com", "test-hash");
         controlJdbc.update("INSERT INTO workspace_member (workspace_id, user_id, role) VALUES (?, ?, 'member')",
             workspaceId, userId);
+    }
+
+    private void seedPipelines() throws SQLException {
+        for (int index = 0; index < workspaceIds.size(); index++) {
+            int owner = workspaceIds.get(index);
+            int pipeline = addPipeline(owner, "Pipeline Needle " + index);
+            stageIds.add(insert("INSERT INTO stage (workspace_id, pipeline_id, name, position, is_success) "
+                + "VALUES (?, ?, ?, 2, TRUE)", owner, pipeline, "Later Stage " + index));
+            stageIds.add(insert("INSERT INTO stage (workspace_id, pipeline_id, name, position) "
+                + "VALUES (?, ?, ?, 0)", owner, pipeline, "First Stage " + index));
+            if (List.of(1, 3, 4).contains(index)) {
+                controlJdbc.update("INSERT INTO pipeline_share (pipeline_id, workspace_id, granted_by) VALUES (?, ?, ?)",
+                    pipeline, workspaceId, userId);
+            }
+        }
+        addPipeline(workspaceId, "Empty Pipeline");
+    }
+
+    /** Adds a pipeline to the frozen default-catalog fixture before any optional scratch clone. */
+    public int addPipeline(int ownerWorkspaceId, String name) throws SQLException {
+        int pipeline = insert("INSERT INTO pipeline (workspace_id, name) VALUES (?, ?)", ownerWorkspaceId, name);
+        pipelineIds.add(pipeline);
+        return pipeline;
     }
 
     private void seedRecords(boolean introductions) throws SQLException {

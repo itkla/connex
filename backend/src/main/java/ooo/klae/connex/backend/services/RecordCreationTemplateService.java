@@ -88,6 +88,7 @@ public class RecordCreationTemplateService {
     private final CustomFieldDefinitionMapper customFieldMapper;
     private final TagMapper tagMapper;
     private final PipelineMapper pipelineMapper;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
     private final CompanyMapper companyMapper;
     private final PersonMapper personMapper;
     private final ShareMapper shareMapper;
@@ -103,8 +104,16 @@ public class RecordCreationTemplateService {
     public RecordCreationTemplateListDto list(
         RecordCreationRecordType recordType,
         boolean includeArchived) {
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(
+            workspaceService.getCurrentWorkspaceId()).workspaceIdsJson();
+        return list(recordType, includeArchived, orgWorkspaceIdsJson);
+    }
+
+    private RecordCreationTemplateListDto list(
+        RecordCreationRecordType recordType,
+        boolean includeArchived, String orgWorkspaceIdsJson) {
         RecordCreationPresetService.ResolutionSnapshot snapshot =
-            presetService.snapshot(recordType, null, includeArchived, null);
+            presetService.snapshot(recordType, null, includeArchived, null, orgWorkspaceIdsJson);
         List<RecordCreationTemplate> roots = snapshot.roots();
         String selectedId = snapshot.selectedTemplateId();
         List<RecordCreationTemplateSummaryDto> result = new ArrayList<>();
@@ -126,43 +135,51 @@ public class RecordCreationTemplateService {
 
     @RequirePermission(Permission.CUSTOM_FIELD_MANAGE)
     public RecordCreationTemplateDto get(String templateId) {
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(
+            workspaceService.getCurrentWorkspaceId()).workspaceIdsJson();
+        return get(templateId, orgWorkspaceIdsJson);
+    }
+
+    private RecordCreationTemplateDto get(String templateId, String orgWorkspaceIdsJson) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (fieldRegistry.isSystemId(templateId)) {
             RecordCreationRecordType recordType = systemRecordType(templateId);
-            String selectedId = presetService.selectedTemplateId(recordType, null, null);
-            return systemDto(recordType, selectedId.equals(templateId));
+            String selectedId = presetService.selectedTemplateId(recordType, null, null, orgWorkspaceIdsJson);
+            return systemDto(recordType, selectedId.equals(templateId), orgWorkspaceIdsJson);
         }
         RecordCreationTemplate root = requireRoot(workspaceId, templateId, false);
         RecordCreationTemplateVersion version = requireCurrentVersion(workspaceId, root);
         String selectedId = presetService.selectedTemplateId(
             RecordCreationRecordType.valueOf(root.getRecordType()),
             null,
-            null);
-        return dto(root, version, selectedId.equals(templateId));
+            null, orgWorkspaceIdsJson);
+        return dto(root, version, selectedId.equals(templateId), orgWorkspaceIdsJson);
     }
 
     @RequirePermission(Permission.CUSTOM_FIELD_MANAGE)
     public ResolvedCreationTemplateDto preview(RecordCreationTemplatePreviewRequestDto request) {
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(
+            workspaceService.getCurrentWorkspaceId()).workspaceIdsJson();
         if (request.templateId() != null && request.definition() == null) {
-            RecordCreationTemplateDto template = get(request.templateId());
+            RecordCreationTemplateDto template = get(request.templateId(), orgWorkspaceIdsJson);
             if (template.recordType() != request.recordType()) {
                 throw definitionInvalid("The preview record type does not match the template");
             }
             ResolvedCreationTemplateDto resolved = template.system()
-                ? resolver.resolveSystem(template.recordType(), request.context())
+                ? resolver.resolveSystem(template.recordType(), request.context(), orgWorkspaceIdsJson)
                 : resolver.resolvePreview(
                     template.id(),
                     template.recordType(),
                     template.name(),
                     template.description(),
                     template.definition(),
-                    request.context());
+                    request.context(), orgWorkspaceIdsJson);
             requirePreviewAvailable(resolved);
             return resolved;
         }
         RecordCreationTemplateValidator.ValidatedTemplate validated =
             validator.validateAndCanonicalize(
-                request.recordType(), request.name(), request.description(), request.definition());
+                request.recordType(), request.name(), request.description(), request.definition(), orgWorkspaceIdsJson);
         String previewId = request.templateId() == null ? "workspace:preview" : request.templateId();
         ResolvedCreationTemplateDto resolved = resolver.resolvePreview(
             previewId,
@@ -170,7 +187,7 @@ public class RecordCreationTemplateService {
             validated.name(),
             validated.description(),
             validated.definition(),
-            request.context());
+            request.context(), orgWorkspaceIdsJson);
         requirePreviewAvailable(resolved);
         return resolved;
     }
@@ -178,6 +195,7 @@ public class RecordCreationTemplateService {
     @RequirePermission(Permission.CUSTOM_FIELD_MANAGE)
     public RecordCreationImpactDto impact(RecordCreationImpactRequestDto request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         RecordCreationTemplateSet set = readSet(workspaceId, request.recordType());
         requireSetRevision(set, request.expectedSetRevision());
         if (request.operation() == RecordCreationImpactOperation.reset) {
@@ -214,9 +232,9 @@ public class RecordCreationTemplateService {
         List<String> blocked = blockedRequiredFields(
             workspaceId, request.recordType(), removed);
         String currentSelected = presetService.selectedTemplateId(
-            request.recordType(), null, null);
+            request.recordType(), null, null, orgWorkspaceIdsJson);
         String nextSelected = request.operation() == RecordCreationImpactOperation.archive
-            ? selectedExcluding(workspaceId, request.recordType(), root.getId())
+            ? selectedExcluding(workspaceId, request.recordType(), root.getId(), orgWorkspaceIdsJson)
             : currentSelected;
         boolean defaultTemplate = wireId(root).equals(currentSelected);
         boolean enabled = RecordCreationTemplateStatus.enabled.name().equals(root.getStatus());
@@ -240,13 +258,14 @@ public class RecordCreationTemplateService {
     @RequirePermission(Permission.CUSTOM_FIELD_MANAGE)
     public RecordCreationTemplateDto create(RecordCreationTemplateCreateRequestDto request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         int actorId = workspaceService.getCurrentUserId();
         lockMutationPermissions(workspaceId, actorId);
         RecordCreationTemplateSet set = lockSet(workspaceId, request.recordType());
         requireSetRevision(set, request.expectedSetRevision());
         RecordCreationTemplateValidator.ValidatedTemplate validated =
             validator.validateAndCanonicalize(
-                request.recordType(), request.name(), request.description(), request.definition());
+                request.recordType(), request.name(), request.description(), request.definition(), orgWorkspaceIdsJson);
         int position = templateMapper.listRootsForUpdate(workspaceId, request.recordType().name()).stream()
             .mapToInt(RecordCreationTemplate::getPosition)
             .max()
@@ -284,7 +303,7 @@ public class RecordCreationTemplateService {
                 wireDefault(set.getDefaultTemplateId()),
                 null));
         RecordCreationTemplate stored = requireRootById(workspaceId, root.getId());
-        return dto(stored, requireCurrentVersion(workspaceId, stored), false);
+        return dto(stored, requireCurrentVersion(workspaceId, stored), false, orgWorkspaceIdsJson);
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -294,6 +313,7 @@ public class RecordCreationTemplateService {
             RecordCreationTemplateUpdateRequestDto request) {
         rejectSystemMutation(templateId);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         int actorId = workspaceService.getCurrentUserId();
         lockMutationPermissions(workspaceId, actorId);
         int id = workspaceId(templateId);
@@ -310,7 +330,7 @@ public class RecordCreationTemplateService {
         }
         RecordCreationTemplateValidator.ValidatedTemplate validated =
             validator.validateAndCanonicalize(
-                recordType, request.name(), request.description(), request.definition());
+                recordType, request.name(), request.description(), request.definition(), orgWorkspaceIdsJson);
         RecordCreationTemplateDefinitionDto currentDefinition =
             validator.parseDefinition(current.getDefinitionJson());
         List<String> removed = removedFields(currentDefinition, validated.definition());
@@ -319,11 +339,11 @@ public class RecordCreationTemplateService {
                 RecordCreationImpactOperation.remove_fields,
                 recordType,
                 templateId,
-                templateId.equals(presetService.selectedTemplateId(recordType, null, null)),
+                templateId.equals(presetService.selectedTemplateId(recordType, null, null, orgWorkspaceIdsJson)),
                 RecordCreationTemplateStatus.enabled.name().equals(root.getStatus()),
                 removed,
                 blockedRequiredFields(workspaceId, recordType, removed),
-                presetService.selectedTemplateId(recordType, null, null),
+                presetService.selectedTemplateId(recordType, null, null, orgWorkspaceIdsJson),
                 0,
                 true));
         }
@@ -336,8 +356,8 @@ public class RecordCreationTemplateService {
             String updatedSelectedId = presetService.selectedTemplateId(
                 RecordCreationRecordType.valueOf(root.getRecordType()),
                 null,
-                null);
-            return dto(root, current, updatedSelectedId.equals(wireId(root)));
+                null, orgWorkspaceIdsJson);
+            return dto(root, current, updatedSelectedId.equals(wireId(root)), orgWorkspaceIdsJson);
         }
         int expectedRootRevision = root.getRevision();
         RecordCreationTemplateVersion published = current;
@@ -392,7 +412,7 @@ public class RecordCreationTemplateService {
         return dto(
             stored,
             requireCurrentVersion(workspaceId, stored),
-            Objects.equals(set.getDefaultTemplateId(), root.getId()));
+            Objects.equals(set.getDefaultTemplateId(), root.getId()), orgWorkspaceIdsJson);
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -401,6 +421,7 @@ public class RecordCreationTemplateService {
             String templateId,
             RecordCreationTemplateDuplicateRequestDto request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         int actorId = workspaceService.getCurrentUserId();
         lockMutationPermissions(workspaceId, actorId);
         RecordCreationRecordType recordType;
@@ -435,7 +456,7 @@ public class RecordCreationTemplateService {
         }
         RecordCreationTemplateValidator.ValidatedTemplate validated =
             validator.validateAndCanonicalize(
-                recordType, request.name(), request.description(), sourceDefinition);
+                recordType, request.name(), request.description(), sourceDefinition, orgWorkspaceIdsJson);
         int position = templateMapper.listRootsForUpdate(workspaceId, recordType.name()).stream()
             .mapToInt(RecordCreationTemplate::getPosition)
             .max()
@@ -468,7 +489,7 @@ public class RecordCreationTemplateService {
                 wireDefault(set.getDefaultTemplateId()),
                 null));
         RecordCreationTemplate stored = requireRootById(workspaceId, root.getId());
-        return dto(stored, requireCurrentVersion(workspaceId, stored), false);
+        return dto(stored, requireCurrentVersion(workspaceId, stored), false, orgWorkspaceIdsJson);
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -476,6 +497,7 @@ public class RecordCreationTemplateService {
     public RecordCreationTemplateListDto reorder(
             RecordCreationTemplateReorderRequestDto request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         int actorId = workspaceService.getCurrentUserId();
         lockMutationPermissions(workspaceId, actorId);
         RecordCreationTemplateSet set = lockSet(workspaceId, request.recordType());
@@ -523,7 +545,7 @@ public class RecordCreationTemplateService {
             request.recordType().name(),
             "Reordered record creation templates",
             changes);
-        return list(request.recordType(), false);
+        return list(request.recordType(), false, orgWorkspaceIdsJson);
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -531,6 +553,7 @@ public class RecordCreationTemplateService {
     public RecordCreationPresetCatalogDto setDefault(RecordCreationTemplateDefaultRequestDto request) {
         rejectSystemMutation(request.templateId());
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         int actorId = workspaceService.getCurrentUserId();
         lockMutationPermissions(workspaceId, actorId);
         RecordCreationTemplateSet set = lockSet(workspaceId, request.recordType());
@@ -544,11 +567,11 @@ public class RecordCreationTemplateService {
                 HttpStatus.CONFLICT, "TEMPLATE_NOT_ENABLED", "Only an enabled template can be the default");
         }
         RecordCreationTemplateVersion version = requireCurrentVersion(workspaceId, root);
-        ResolvedCreationTemplateDto preliminary = resolver.resolveWorkspace(root, version, null);
+        ResolvedCreationTemplateDto preliminary = resolver.resolveWorkspace(root, version, null, orgWorkspaceIdsJson);
         requireAvailableForDefault(preliminary);
         DependencyIds dependencies = dependencyIds(preliminary);
-        lockDependencies(workspaceId, dependencies);
-        ResolvedCreationTemplateDto resolved = resolver.resolveWorkspace(root, version, null);
+        lockDependencies(workspaceId, dependencies, orgWorkspaceIdsJson);
+        ResolvedCreationTemplateDto resolved = resolver.resolveWorkspace(root, version, null, orgWorkspaceIdsJson);
         if (!dependencies.equals(dependencyIds(resolved))) {
             throw templateUnavailable();
         }
@@ -576,7 +599,7 @@ public class RecordCreationTemplateService {
             request.templateId(),
             "Set record creation template default",
             changes);
-        return catalog(request.recordType());
+        return catalog(request.recordType(), orgWorkspaceIdsJson);
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -601,6 +624,7 @@ public class RecordCreationTemplateService {
     @RequirePermission(Permission.CUSTOM_FIELD_MANAGE)
     public RecordCreationPresetCatalogDto reset(RecordCreationTemplateResetRequestDto request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         int actorId = workspaceService.getCurrentUserId();
         lockMutationPermissions(workspaceId, actorId);
         RecordCreationTemplateSet set = lockSet(workspaceId, request.recordType());
@@ -656,15 +680,21 @@ public class RecordCreationTemplateService {
             request.recordType().name(),
             "Reset record creation templates",
             changes);
-        return catalog(request.recordType());
+        return catalog(request.recordType(), orgWorkspaceIdsJson);
     }
 
     @RequirePermission(Permission.CUSTOM_FIELD_MANAGE)
     public RecordCreationPresetCatalogDto catalog(RecordCreationRecordType recordType) {
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(
+            workspaceService.getCurrentWorkspaceId()).workspaceIdsJson();
+        return catalog(recordType, orgWorkspaceIdsJson);
+    }
+
+    private RecordCreationPresetCatalogDto catalog(RecordCreationRecordType recordType, String orgWorkspaceIdsJson) {
         return presetService.catalog(
             recordType,
             RecordCreationEntryPoint.quick_create,
-            null);
+            null, orgWorkspaceIdsJson);
     }
 
     private RecordCreationTemplateDto changeState(
@@ -672,6 +702,7 @@ public class RecordCreationTemplateService {
             RecordCreationTemplateStateRequestDto request,
             RecordCreationTemplateStatus target) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         int actorId = workspaceService.getCurrentUserId();
         lockMutationPermissions(workspaceId, actorId);
         int id = workspaceId(templateId);
@@ -689,18 +720,18 @@ public class RecordCreationTemplateService {
             current.getVersionNumber());
         if (target == RecordCreationTemplateStatus.archived) {
             if (RecordCreationTemplateStatus.archived.name().equals(root.getStatus())) {
-                return dto(root, current, false);
+                return dto(root, current, false, orgWorkspaceIdsJson);
             }
             if (!request.confirmImpact()) {
                 throw RecordCreationTemplateException.impact(new RecordCreationImpactDto(
                     RecordCreationImpactOperation.archive,
                     recordType,
                     templateId,
-                    templateId.equals(presetService.selectedTemplateId(recordType, null, null)),
+                    templateId.equals(presetService.selectedTemplateId(recordType, null, null, orgWorkspaceIdsJson)),
                     RecordCreationTemplateStatus.enabled.name().equals(root.getStatus()),
                     List.of(),
                     List.of(),
-                    selectedExcluding(workspaceId, recordType, root.getId()),
+                    selectedExcluding(workspaceId, recordType, root.getId(), orgWorkspaceIdsJson),
                     0,
                     true));
             }
@@ -745,7 +776,7 @@ public class RecordCreationTemplateService {
                 wireDefault(set.getDefaultTemplateId()),
                 List.of()));
         RecordCreationTemplate stored = requireRootById(workspaceId, root.getId());
-        return dto(stored, requireCurrentVersion(workspaceId, stored), false);
+        return dto(stored, requireCurrentVersion(workspaceId, stored), false, orgWorkspaceIdsJson);
     }
 
     private void lockMutationPermissions(int workspaceId, int actorId) {
@@ -754,15 +785,15 @@ public class RecordCreationTemplateService {
             Map.of(actorId, Set.of(Permission.CUSTOM_FIELD_MANAGE)));
     }
 
-    private void lockDependencies(int workspaceId, DependencyIds dependencies) {
+    private void lockDependencies(int workspaceId, DependencyIds dependencies, String orgWorkspaceIdsJson) {
         dependencies.customFields().stream().sorted()
             .forEach(id -> customFieldMapper.getByIdForUpdate(workspaceId, id));
         dependencies.tags().stream().sorted()
             .forEach(id -> tagMapper.getTagByIdForUpdate(workspaceId, id));
         dependencies.stages().stream().sorted()
-            .forEach(id -> pipelineMapper.getVisibleStageByIdForUpdate(workspaceId, id));
+            .forEach(id -> pipelineMapper.getVisibleStageByIdForUpdate(workspaceId, orgWorkspaceIdsJson, id));
         dependencies.pipelines().stream().sorted()
-            .forEach(id -> pipelineMapper.getVisiblePipelineByIdForUpdate(workspaceId, id));
+            .forEach(id -> pipelineMapper.getVisiblePipelineByIdForUpdate(workspaceId, orgWorkspaceIdsJson, id));
         dependencies.pipelines().stream().sorted()
             .forEach(id -> shareMapper.lockPipelineShareForWorkspace(id, workspaceId));
         dependencies.persons().stream().sorted()
@@ -838,8 +869,8 @@ public class RecordCreationTemplateService {
     private String selectedExcluding(
             int workspaceId,
             RecordCreationRecordType recordType,
-            int excludedRootId) {
-        return presetService.selectedTemplateId(recordType, null, excludedRootId);
+            int excludedRootId, String orgWorkspaceIdsJson) {
+        return presetService.selectedTemplateId(recordType, null, excludedRootId, orgWorkspaceIdsJson);
     }
 
     private RecordCreationTemplateSummaryDto summary(
@@ -900,9 +931,9 @@ public class RecordCreationTemplateService {
     private RecordCreationTemplateDto dto(
             RecordCreationTemplate root,
             RecordCreationTemplateVersion version,
-            boolean defaultTemplate) {
+            boolean defaultTemplate, String orgWorkspaceIdsJson) {
         RecordCreationRecordType recordType = RecordCreationRecordType.valueOf(root.getRecordType());
-        ResolvedCreationTemplateDto resolved = resolver.resolveWorkspace(root, version, null);
+        ResolvedCreationTemplateDto resolved = resolver.resolveWorkspace(root, version, null, orgWorkspaceIdsJson);
         return new RecordCreationTemplateDto(
             wireId(root),
             recordType,
@@ -927,12 +958,12 @@ public class RecordCreationTemplateService {
 
     private RecordCreationTemplateDto systemDto(
             RecordCreationRecordType recordType,
-            boolean defaultTemplate) {
+            boolean defaultTemplate, String orgWorkspaceIdsJson) {
         SystemPreset preset = fieldRegistry.systemPreset(recordType);
         RecordCreationTemplateValidator.ValidatedTemplate validated =
             validator.validateAndCanonicalize(
-                recordType, preset.name(), preset.description(), preset.definition());
-        ResolvedCreationTemplateDto resolved = resolver.resolveSystem(recordType, null);
+                recordType, preset.name(), preset.description(), preset.definition(), orgWorkspaceIdsJson);
+        ResolvedCreationTemplateDto resolved = resolver.resolveSystem(recordType, null, orgWorkspaceIdsJson);
         return new RecordCreationTemplateDto(
             preset.id(),
             recordType,

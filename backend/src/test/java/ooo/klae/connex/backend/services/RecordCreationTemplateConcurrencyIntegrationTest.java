@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -243,9 +244,9 @@ class RecordCreationTemplateConcurrencyIntegrationTest extends AbstractServiceTe
         doAnswer(invocation -> {
             templateLockAttempted.countDown();
             return realPipelineMapper.getVisibleStageByIdForUpdate(
-                isolatedWorkspace.getId(), stage.getId());
+                isolatedWorkspace.getId(), invocation.getArgument(1), stage.getId());
         }).when(pipelineMapperSpy).getVisibleStageByIdForUpdate(
-            isolatedWorkspace.getId(), stage.getId());
+            isolatedWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, isolatedWorkspace.getId()), stage.getId());
         ExecutorService executor = Executors.newFixedThreadPool(2);
 
         try {

@@ -50,6 +50,7 @@ import ooo.klae.connex.backend.mappers.DocumentTemplateMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
 import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
@@ -88,6 +89,7 @@ public class AiAssistantToolCallReadService {
     private final CompanyMapper companyMapper;
     private final DealMapper dealMapper;
     private final PipelineMapper pipelineMapper;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
     private final TagMapper tagMapper;
     private final DocumentTemplateMapper documentTemplateMapper;
     private final DealDocumentService documentService;
@@ -199,7 +201,8 @@ public class AiAssistantToolCallReadService {
         List<Stage> stages = stored.stream().anyMatch(call ->
                 readsInput(call, ReviewInput.STAGES)
                         && detailsReadable(call, viewer.userId(), visibleTargets))
-                ? pipelineMapper.getAllStages(viewer.workspaceId())
+                ? pipelineMapper.getAllStages(viewer.workspaceId(),
+                    recordVisibilityScopeControlAccess.getForWorkspace(viewer.workspaceId()).workspaceIdsJson())
                 : List.of();
         List<DocumentTemplate> templates = stored.stream().anyMatch(call ->
                 readsInput(call, ReviewInput.TEMPLATES)

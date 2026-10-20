@@ -84,7 +84,7 @@ class SearchServiceUnitTest {
         verify(companies).search(7, "%needle%");
         verify(people).search(7, "%needle%");
         verify(deals).search(7, "%needle%");
-        verify(pipelines).search(7, "%needle%");
+        verify(pipelines).search(7, "[7,8]", "%needle%");
         verify(tags).search(7, "%needle%");
         verify(activities).search(7, "%needle%", 25, 0);
         verify(notes).searchVisible(7, "[7,8]", "%needle%", 11, 25, 0);

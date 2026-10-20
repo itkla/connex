@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -53,6 +54,7 @@ class ExportServiceTest {
     @Mock private CompanyMapper companyMapper;
     @Mock private ProductMapper productMapper;
     @Mock private PipelineMapper pipelineMapper;
+    @Mock private RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
     @Mock private TagMapper tagMapper;
     @Mock private CustomFieldDefinitionMapper customFieldDefinitionMapper;
     @Mock private CustomFieldValueService customFieldValueService;
@@ -68,7 +70,7 @@ class ExportServiceTest {
                 new SessionSecurityProperties(), policy, Clock.systemUTC(),
                 mock(UserMapper.class), mock(SpringSessionMapper.class), mock(PrivilegedAccountService.class));
         ExportService service = new ExportService(sessionSecurity, workspaceService, dealService,
-                personMapper, companyMapper, productMapper, pipelineMapper, tagMapper,
+                personMapper, companyMapper, productMapper, pipelineMapper, unfiltered(), tagMapper,
                 customFieldDefinitionMapper, customFieldValueService, mock(DisqualificationReasonService.class),
                 auditService);
         User user = new User();
@@ -133,7 +135,9 @@ class ExportServiceTest {
         when(customFieldValueService.getForEntities("deal", List.of(7))).thenReturn(Map.of());
         when(tagMapper.getDealTagNames(42)).thenReturn(List.of());
         when(companyMapper.getCompaniesForDedup(42)).thenReturn(List.of());
-        when(pipelineMapper.getAllPipelines(42)).thenReturn(List.of());
+        when(recordVisibilityScopeControlAccess.getForWorkspace(42)).thenReturn(
+            new RecordVisibilityScopeControlAccess.RecordVisibilityScope(90, List.of(7, 8, 9)));
+        when(pipelineMapper.getAllPipelines(42, "[7,8,9]")).thenReturn(List.of());
 
         String csv = exportService.exportDeals(
             null, null, List.of(), List.of(), List.of(), List.of(), false,

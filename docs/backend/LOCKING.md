@@ -1757,6 +1757,19 @@ call bypasses the memo entirely: routed reads are served by the memory-only prep
 (#2165), with the boundary validating workspace, organization, and catalog on every read. A missing
 or stale prepared payload must fail even after an earlier successful read in the same transaction.
 
+Pipeline visibility uses the same unfiltered record scope. PipelineService passes one scope through
+owned-parent, sibling and replacement validation; full pipeline nesting carries that scope in a
+private projected SQL column without changing the owning workspace parameter. Template mutations
+prepare it before membership authorization and set/root locks, then reuse it for stage, pipeline
+and share locks and the final availability check. Augmentation keeps the stage → pipeline → share
+order and its submitted-stage validation remains owned-only. Guided creation prepares the scope
+before authorization; deal creation prepares it before duplicate-review mutex admission, deal
+updates/reopen before authorization and row locks, and deal imports before authorization and
+template fences. Assistant write admission and workflow step/outbox execution prepare it before
+their outer authorization locks so nested Pipeline reads reuse the transaction memo or #2165's
+prepared routed snapshot. No authorization or `FOR UPDATE` lock moves off its original connection,
+and no transaction boundary or isolation level changes.
+
 The locked call chains are:
 
 - `NotificationReconciliationService.reconcileWorkspace`: preload the scope before opening its

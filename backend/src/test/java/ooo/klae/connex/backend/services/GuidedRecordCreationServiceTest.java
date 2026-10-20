@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
@@ -57,6 +58,9 @@ class GuidedRecordCreationServiceTest {
     private final WorkspaceService workspaceService = mock(WorkspaceService.class);
     private final JsonMapper objectMapper = JsonMapper.builder().findAndAddModules().build();
 
+    private final RecordVisibilityScopeControlAccess scopes =
+        unfiltered();
+
     private GuidedRecordCreationService service;
 
     @BeforeEach
@@ -64,7 +68,7 @@ class GuidedRecordCreationServiceTest {
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(workspaceService.getCurrentUserId()).thenReturn(11);
         service = new GuidedRecordCreationService(
-            personService, companyService, dealService, augmentationService, workspaceService);
+            personService, companyService, dealService, augmentationService, workspaceService, scopes);
     }
 
     @Test
@@ -96,8 +100,12 @@ class GuidedRecordCreationServiceTest {
             any(), eq("proof"), augmentation.capture(), eq(MutationAdmission.UNRESTRICTED));
         assertEquals("default", augmentation.getValue().customFields().get(9).textValue());
         assertEquals(List.of(6, 4), augmentation.getValue().tagIds());
-        verify(workspaceService).lockAndRequirePermissions(
+        var order = org.mockito.Mockito.inOrder(scopes, workspaceService, augmentationService);
+        order.verify(scopes).getForWorkspace(7);
+        order.verify(workspaceService).lockAndRequirePermissions(
             7, Map.of(11, Set.of(Permission.PERSON_CREATE)));
+        order.verify(augmentationService).resolvePreliminary(RecordCreationRecordType.person, use);
+        verify(scopes, org.mockito.Mockito.times(1)).getForWorkspace(7);
     }
 
     @Test

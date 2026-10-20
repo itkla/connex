@@ -22,7 +22,7 @@
     <result property="createdAt" column="created_at"/>
     <result property="updatedAt" column="updated_at"/>
     <collection property="stages" ofType="Stage"
-                column="{workspaceId=workspace_id,pipelineId=id}"
+                column="{workspaceId=workspace_id,pipelineId=id,orgWorkspaceIdsJson=org_workspace_ids_json}"
                 select="ooo.klae.connex.backend.mappers.PipelineMapper.getStagesByPipelineId"/>
   </resultMap>
 
@@ -34,8 +34,9 @@
   <sql id="visible">
     (pipeline.workspace_id = #{workspaceId}
      OR EXISTS (SELECT 1 FROM pipeline_share ps
-        JOIN workspace vws ON vws.id = ps.workspace_id
-        JOIN workspace ows ON ows.id = pipeline.workspace_id AND ows.org_id = vws.org_id
+        JOIN JSON_TABLE(
+          #{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')
+        ) org_workspace ON org_workspace.id = pipeline.workspace_id
         WHERE ps.pipeline_id = pipeline.id AND ps.workspace_id = #{workspaceId}))
   </sql>
 
@@ -44,7 +45,8 @@
   </select>
 
   <select id="getPipelineById" resultMap="PipelineFullResult">
-    SELECT id, workspace_id, name, created_at, updated_at FROM pipeline
+    SELECT id, workspace_id, name, created_at, updated_at,
+           #{orgWorkspaceIdsJson} AS org_workspace_ids_json FROM pipeline
     WHERE <include refid="visible"/> AND id = #{id}
   </select>
 
@@ -55,7 +57,8 @@
   </select>
 
   <select id="getOwnedPipelineById" resultMap="PipelineFullResult">
-    SELECT id, workspace_id, name, created_at, updated_at FROM pipeline
+    SELECT id, workspace_id, name, created_at, updated_at,
+           #{orgWorkspaceIdsJson} AS org_workspace_ids_json FROM pipeline
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </select>
 
@@ -98,8 +101,9 @@
     WHERE stage.id = #{id}
       AND (pipeline.workspace_id = #{workspaceId}
            OR EXISTS (SELECT 1 FROM pipeline_share ps
-              JOIN workspace vws ON vws.id = ps.workspace_id
-              JOIN workspace ows ON ows.id = pipeline.workspace_id AND ows.org_id = vws.org_id
+              JOIN JSON_TABLE(
+                #{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')
+              ) org_workspace ON org_workspace.id = pipeline.workspace_id
               WHERE ps.pipeline_id = pipeline.id AND ps.workspace_id = #{workspaceId}))
   </select>
 
@@ -111,8 +115,9 @@
     WHERE stage.id = #{id}
       AND (pipeline.workspace_id = #{workspaceId}
            OR EXISTS (SELECT 1 FROM pipeline_share ps
-              JOIN workspace vws ON vws.id = ps.workspace_id
-              JOIN workspace ows ON ows.id = pipeline.workspace_id AND ows.org_id = vws.org_id
+              JOIN JSON_TABLE(
+                #{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')
+              ) org_workspace ON org_workspace.id = pipeline.workspace_id
               WHERE ps.pipeline_id = pipeline.id AND ps.workspace_id = #{workspaceId}))
     FOR UPDATE
   </select>
@@ -121,8 +126,9 @@
     SELECT id, workspace_id, name, pipeline_id, position, is_success, is_failure FROM stage
     WHERE stage.workspace_id = #{workspaceId}
        OR EXISTS (SELECT 1 FROM pipeline_share ps
-          JOIN workspace vws ON vws.id = ps.workspace_id
-          JOIN workspace ows ON ows.id = stage.workspace_id AND ows.org_id = vws.org_id
+          JOIN JSON_TABLE(
+            #{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')
+          ) org_workspace ON org_workspace.id = stage.workspace_id
           WHERE ps.pipeline_id = stage.pipeline_id AND ps.workspace_id = #{workspaceId})
     ORDER BY pipeline_id, position
   </select>
@@ -135,8 +141,9 @@
     WHERE pipeline.id = #{pipelineId}
       AND (pipeline.workspace_id = #{workspaceId}
            OR EXISTS (SELECT 1 FROM pipeline_share ps
-              JOIN workspace vws ON vws.id = ps.workspace_id
-              JOIN workspace ows ON ows.id = pipeline.workspace_id AND ows.org_id = vws.org_id
+              JOIN JSON_TABLE(
+                #{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')
+              ) org_workspace ON org_workspace.id = pipeline.workspace_id
               WHERE ps.pipeline_id = pipeline.id AND ps.workspace_id = #{workspaceId}))
     ORDER BY stage.position
   </select>
