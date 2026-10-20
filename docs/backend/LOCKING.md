@@ -2452,7 +2452,7 @@ resources do not change the global order. The publication fence never follows or
 | Running cancel/fail | Authority/maintenance roots → session X → run X → all actions X → all calls X → turn X → segment X → withdrawal/accounting/state → applicable P → exact lease release last. |
 | Review expiry | Maintenance session X → run X → all actions X → all calls X → applicable P → conditional withdrawal/failed review_expired; independent of owner permission/provider and lease. |
 | Exact output/metadata | A → session S → run S → organization S → workspace barrier S; retain original authority through frozen membership/card projection. |
-| Mission page | A → all page sessions S ascending → all page runs S ascending → organization S → workspace barrier S; project locked revisions and canonical counts together. |
+| Mission page | Discover without a transaction; each item uses A → its session S → run S → organization S → workspace barrier S in an independent transaction; project locked revisions and canonical counts together, then release before the next item. |
 | Realtime enqueue | A → exact session S → run S → P; revalidate current requester, source version and both privacy generations through local broker enqueue after the mutation commits. |
 | Privacy pruning | Session/run → all actions → all calls → attempts only when settling → storage roots if needed → organization S → workspace barrier S → operation/placement rows for v2 → exact privacy-work X → bounded deletion/cursor revision; lease last only when settling. |
 | Privacy completion | Organization authority → workspace barrier X for v1, S for v2 → operation/placement rows for v2 → work X → unconditional fresh residual reads; no content roots/leases. |

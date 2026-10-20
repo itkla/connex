@@ -131,10 +131,6 @@ public class AiAgentRunService {
     @RequirePermission(Permission.AI_USE)
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public AiAgentRunPage list(int limit, Integer sessionId, String state, String cursor) {
-        return readTransaction(() -> listCurrent(limit, sessionId, state, cursor));
-    }
-
-    private AiAgentRunPage listCurrent(int limit, Integer sessionId, String state, String cursor) {
         if (limit < 1 || limit > 50 || (sessionId != null && sessionId <= 0)
                 || (state != null && !STATES.contains(state))) {
             throw new BadRequestException("Invalid mission page");
@@ -162,32 +158,18 @@ public class AiAgentRunService {
         List<AiAgentRun> found = runs.listRuns(workspaceId, owner, sessionId, state, before, limit + 1, privacyGuard.currentGeneration(workspaceId));
         boolean more = found.size() > limit;
         List<AiAgentRun> page = more ? found.subList(0, limit) : found;
-        readAudit.retainTranscriptAuditParents(workspaceId, owner);
-        workspaces.lockAndRequirePermissionsSnapshot(workspaceId, Map.of(owner, Set.of(Permission.AI_USE)));
-        var accessibleSessions = new java.util.HashSet<Integer>();
-        for (int pageSession : page.stream().map(AiAgentRun::getSessionId)
-                .filter(Objects::nonNull).distinct().sorted().toList()) {
-            if (chat.getMissionSessionForShare(workspaceId, owner, pageSession) != null) {
-                accessibleSessions.add(pageSession);
-            }
-        }
-        var lockedRuns = new java.util.HashMap<Integer, AiAgentRun>();
-        for (AiAgentRun candidate : page.stream().sorted(java.util.Comparator.comparingInt(AiAgentRun::getId)).toList()) {
-            AiAgentRun locked = runs.lockRunForShare(workspaceId, candidate.getId());
-            if (locked != null && Objects.equals(locked.getSessionId(), candidate.getSessionId())
-                    && Objects.equals(locked.getOwnerUserId(), owner)
-                    && (locked.getSessionId() == null || accessibleSessions.contains(locked.getSessionId()))
-                    && (state == null || state.equals(locked.getStatus()))) {
-                lockedRuns.put(locked.getId(), locked);
-            }
-        }
-        privacyGuard.retainCurrentOrganization(workspaceId);
-        requireBarrier(workspaceId);
         List<AiAgentRunDto> items = new ArrayList<>();
         for (AiAgentRun candidate : page) {
-            AiAgentRun run = lockedRuns.get(candidate.getId());
-            if (run != null && sessionAccessible(run, owner)) {
-                items.add(project(run));
+            if (!sessionAccessible(candidate, owner)) {
+                continue;
+            }
+            try {
+                AiAgentRunDto item = self.getObject().get(candidate.getId());
+                if (state == null || state.equals(item.state())) {
+                    items.add(item);
+                }
+            } catch (ResourceNotFoundException inaccessible) {
+                continue;
             }
         }
         String next = more ? Base64.getUrlEncoder().withoutPadding().encodeToString(json.writeValueAsString(
@@ -291,6 +273,7 @@ public class AiAgentRunService {
     private <T> T readTransaction(Supplier<T> projection) {
         TransactionTemplate transaction = new TransactionTemplate(transactionManager);
         transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+        transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         return transaction.execute(status -> projection.get());
     }
 

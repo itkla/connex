@@ -448,6 +448,7 @@ class AiAgentPrivacyLifecycleIntegrationTest extends AbstractAiAgentPrivacyInteg
         AiChatSession session = new AiChatSession();
         session.setWorkspaceId(workspace.getId());
         session.setCreatedByUserId(currentUser.getId());
+        session.setOrganizationPrivacyGeneration(organizationPrivacy.current(workspace.getOrgId()));
         session.setTitle("Preparation privacy fixture");
         session.setVisibility("private");
         session.setStatus("active");
@@ -459,10 +460,10 @@ class AiAgentPrivacyLifecycleIntegrationTest extends AbstractAiAgentPrivacyInteg
         int firstSegment = 0;
         for (int segment = 1; segment <= 8; segment++) {
             for (int attempt = 1; attempt <= 3; attempt++) {
-                jdbc.update("INSERT INTO ai_agent_segment (workspace_id,run_id,segment_no,attempt_no,execution_generation,privacy_generation,"
+                jdbc.update("INSERT INTO ai_agent_segment (workspace_id,run_id,segment_no,attempt_no,execution_generation,privacy_generation,organization_privacy_generation,"
                         + "status,reserved_steps,reserved_tokens,provider_declaration_fingerprint,deadline_at,settled_at) "
-                        + "VALUES (?,?,?,?,1,?,'completed',1,8192,UNHEX(REPEAT('ab',32)),UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))",
-                        workspace.getId(), run.getId(), segment, attempt, run.getPrivacyGeneration());
+                        + "VALUES (?,?,?,?,1,?,?,'completed',1,8192,UNHEX(REPEAT('ab',32)),UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))",
+                        workspace.getId(), run.getId(), segment, attempt, run.getPrivacyGeneration(), run.getOrganizationPrivacyGeneration());
             }
         }
         firstSegment = java.util.Objects.requireNonNull(jdbc.queryForObject(
@@ -480,9 +481,9 @@ class AiAgentPrivacyLifecycleIntegrationTest extends AbstractAiAgentPrivacyInteg
                     index, UUID.randomUUID().toString(), source.getBytes(java.nio.charset.StandardCharsets.UTF_8), firstSegment, run.getPrivacyGeneration());
         }
         jdbc.update("INSERT INTO ai_chat_tool_call (workspace_id,message_id,tool_name,status,arguments_json,server_proposal,mission_run_id,"
-                + "artifact_origin,privacy_generation,proposal_origin,mission_action_id) SELECT workspace_id,?,'assign_owner','proposed','{}',"
-                + "TRUE,root_run_id,'mission',privacy_generation,'mission',id FROM ai_agent_action WHERE workspace_id=? AND root_run_id=?",
-                messageId, workspace.getId(), run.getId());
+                + "artifact_origin,privacy_generation,organization_privacy_generation,proposal_origin,mission_action_id) SELECT workspace_id,?,'assign_owner','proposed','{}',"
+                + "TRUE,root_run_id,'mission',privacy_generation,?,'mission',id FROM ai_agent_action WHERE workspace_id=? AND root_run_id=?",
+                messageId, run.getOrganizationPrivacyGeneration(), workspace.getId(), run.getId());
         return run;
     }
 

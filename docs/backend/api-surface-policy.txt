@@ -86,7 +86,7 @@ src/main/java/ooo/klae/connex/backend/ai/mission/AiAgentProposalSetPort.java	1b3
 src/main/java/ooo/klae/connex/backend/ai/mission/AiAgentPurgeAcceptance.java	043ee6fd14d15d8fe813134df23d11f384d7df1c01092f0c3bef46d4df95d5ec
 src/main/java/ooo/klae/connex/backend/ai/mission/AiAgentRealtimePublisher.java	6caef4a298311d2098ed7fc84b7a08ad2f8174f152c3d066b91b19d813f557bc
 src/main/java/ooo/klae/connex/backend/ai/mission/AiAgentRunPersistenceService.java	db799f1c2daac21df6b8cde3fc340288edf33f85d8f75f38b10446caebfe4b6c
-src/main/java/ooo/klae/connex/backend/ai/mission/AiAgentRunService.java	c587a14e8de245f28f1156c6caba3b8a3090c4f8cb3212e0e90b0e23d9a4bef5
+src/main/java/ooo/klae/connex/backend/ai/mission/AiAgentRunService.java	a1993cd2b43f30f40ab446b2d016437e087d2b3e3edecbb73e4e407b2fe2ec39
 src/main/java/ooo/klae/connex/backend/ai/provider/bedrock/AwsSigV4Signer.java	894f734b5169eb9dd016c5f43bc554673a63db6986e86e1cf860b8b21448bc8c
 src/main/java/ooo/klae/connex/backend/ai/provider/bedrock/BedrockClient.java	49f0e7e7680c0cf65b4153a34faa2d6f15583814f06eafe2cb7d3e94c9ec17ff
 src/main/java/ooo/klae/connex/backend/ai/provider/openai/OpenAiCompatibleAdapter.java	8a85c849eccab59197b588de1727ece2d238b8cf16d5547e501d47877706d9a0

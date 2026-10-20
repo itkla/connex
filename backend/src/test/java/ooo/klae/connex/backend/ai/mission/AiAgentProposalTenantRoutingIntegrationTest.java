@@ -70,10 +70,12 @@ class AiAgentProposalTenantRoutingIntegrationTest extends AbstractAiAgentProposa
             jdbc.update("DELETE FROM org_placement WHERE org_id=?", foreignOrganization.getId());
         }
         if (foreignWorkspace != null) {
+            ooo.klae.connex.backend.support.TestEntityFixtures.deleteChatPrivacy(jdbc, foreignWorkspace.getId());
             jdbc.update("DELETE FROM workspace_member WHERE workspace_id=?", foreignWorkspace.getId());
             jdbc.update("DELETE FROM workspace WHERE id=?", foreignWorkspace.getId());
         }
         if (foreignOrganization != null) {
+            ooo.klae.connex.backend.support.TestEntityFixtures.deleteOrganizationPrivacy(jdbc, foreignOrganization.getId());
             jdbc.update("DELETE FROM organization WHERE id=?", foreignOrganization.getId());
         }
         if (catalog != null) {
@@ -95,6 +97,7 @@ class AiAgentProposalTenantRoutingIntegrationTest extends AbstractAiAgentProposa
         foreignWorkspace.setSlug("foreign-mission-" + UUID.randomUUID());
         workspaceMapper.insert(foreignWorkspace);
         workspaceMapper.addMember(foreignWorkspace.getId(), currentUser.getId(), "member");
+        ooo.klae.connex.backend.support.TestEntityFixtures.seedExistingWorkspacePrivacy(jdbc, foreignWorkspace.getId());
         grantAiUse(workspace.getId());
         grantAiUse(foreignWorkspace.getId());
         catalog = "cnx_mission_" + UUID.randomUUID().toString().replace("-", "");

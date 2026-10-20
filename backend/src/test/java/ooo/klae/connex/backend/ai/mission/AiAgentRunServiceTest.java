@@ -303,6 +303,61 @@ class AiAgentRunServiceTest {
         ordered.verify(chat).lockPrivacyBarrierForShare(7);
     }
 
+    @Test
+    void missionPageReleasesEachProjectionBeforeLockingTheNextSession() {
+        AiAgentRun second = new AiAgentRun();
+        org.springframework.beans.BeanUtils.copyProperties(run, second);
+        second.setId(32);
+        second.setSessionId(14);
+        AiChatSession secondSession = new AiChatSession();
+        org.springframework.beans.BeanUtils.copyProperties(session, secondSession);
+        secondSession.setId(14);
+        when(runs.listRuns(7, 11, null, null, null, 21, 1L)).thenReturn(List.of(second, run));
+        when(runs.getRun(7, 32)).thenReturn(second);
+        when(runs.lockRunForShare(7, 32)).thenReturn(second);
+        when(chat.getAccessibleSessionById(7, 11, 14, 1L)).thenReturn(secondSession);
+        when(chat.getMissionSessionForShare(7, 11, 14)).thenReturn(secondSession);
+        when(transactions.getTransaction(any())).thenAnswer(invocation -> {
+            org.springframework.transaction.TransactionDefinition definition = invocation.getArgument(0);
+            assertEquals(org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW,
+                    definition.getPropagationBehavior());
+            assertEquals(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED,
+                    definition.getIsolationLevel());
+            return new org.springframework.transaction.support.SimpleTransactionStatus();
+        });
+
+        assertEquals(List.of(32, 31), service.list(20, null, null, null).items().stream()
+                .map(ooo.klae.connex.backend.dto.AiAgentRunDto::id).toList());
+
+        var ordered = org.mockito.Mockito.inOrder(chat, runs, organizationAuthority, transactions);
+        ordered.verify(chat).getMissionSessionForShare(7, 11, 14);
+        ordered.verify(runs).lockRunForShare(7, 32);
+        ordered.verify(organizationAuthority).retain(1, 1L);
+        ordered.verify(chat).lockPrivacyBarrierForShare(7);
+        ordered.verify(transactions).commit(any());
+        ordered.verify(chat).getMissionSessionForShare(7, 11, 13);
+        ordered.verify(runs).lockRunForShare(7, 31);
+        ordered.verify(organizationAuthority).retain(1, 1L);
+        ordered.verify(chat).lockPrivacyBarrierForShare(7);
+        ordered.verify(transactions).commit(any());
+    }
+
+    @Test
+    void missionPageOmitsADeletedCandidateWithoutFailingThePage() {
+        when(runs.listRuns(7, 11, null, null, null, 21, 1L)).thenReturn(List.of(run));
+        when(runs.getRun(7, 31)).thenReturn(null);
+
+        assertTrue(service.list(20, null, null, null).items().isEmpty());
+    }
+
+    @Test
+    void missionPageRechecksTheStateFilterAfterDiscovery() {
+        when(runs.listRuns(7, 11, null, "queued", null, 21, 1L)).thenReturn(List.of(run));
+        run.setStatus("cancelled");
+
+        assertTrue(service.list(20, null, "queued", null).items().isEmpty());
+    }
+
     private AiChatMessage report() {
         run.setReportMessageId(43);
         run.setStatus("done");

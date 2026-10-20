@@ -58,6 +58,7 @@ class AiAgentProposalHttpIntegrationTest extends AbstractAiAgentProposalIntegrat
     private static final String PASSWORD = "Mission-Proposal-Http9!";
     private static final Duration TIMEOUT = Duration.ofSeconds(20);
     @LocalServerPort private int port;
+    @Autowired private ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService organizationPrivacy;
     @Autowired private PasswordEncoder passwords;
     @MockitoSpyBean private AiAgentProposalDecisionService decisionTransactions;
     @Autowired private FindByIndexNameSessionRepository<? extends Session> indexedSessions;
@@ -275,6 +276,7 @@ class AiAgentProposalHttpIntegrationTest extends AbstractAiAgentProposalIntegrat
         AiChatSession session = new AiChatSession();
         session.setWorkspaceId(workspace.getId());
         session.setCreatedByUserId(currentUser.getId());
+        session.setOrganizationPrivacyGeneration(organizationPrivacy.current(workspace.getOrgId()));
         session.setTitle("Person preparation without private notes");
         session.setVisibility("private");
         session.setStatus("active");
