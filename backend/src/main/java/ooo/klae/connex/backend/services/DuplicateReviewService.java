@@ -54,6 +54,7 @@ public class DuplicateReviewService {
     private final DuplicateDecisionLockService duplicateDecisionLockService;
     private final WorkspaceService workspaceService;
     private final Clock clock;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     /**
      * Returns a database-pageable current review queue. Lowercase query kinds use the
@@ -69,6 +70,8 @@ public class DuplicateReviewService {
         validateCompatibility(required.getRecordType(), required.getKind());
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         long offset = Math.multiplyExact((long) required.getPage() - 1L, required.getSize());
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId)
+            .workspaceIdsJson();
         long total = duplicateReviewMapper.countVisibleItems(
             workspaceId,
             required.getRecordType(),
@@ -77,6 +80,7 @@ public class DuplicateReviewService {
             MAX_GROUP_SIZE_FOR_PAIR_EXPANSION);
         List<DuplicateReviewItemDto> items = duplicateReviewMapper.findVisibleItems(
                 workspaceId,
+                orgWorkspaceIdsJson,
                 required.getRecordType(),
                 required.getKind(),
                 required.getState(),
@@ -258,6 +262,8 @@ public class DuplicateReviewService {
         Permission permission = mutationPermission(recordType);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = workspaceService.getCurrentUserId();
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId)
+            .workspaceIdsJson();
         workspaceService.lockAndRequirePermissions(
             workspaceId,
             Map.of(actorId, Set.of(Permission.REPORT_READ, permission)));
@@ -273,7 +279,7 @@ public class DuplicateReviewService {
             throw staleEvidence();
         }
         DuplicateReviewItemRow visible = duplicateReviewMapper.findVisibleItemById(
-            workspaceId, itemId, MAX_GROUP_SIZE_FOR_PAIR_EXPANSION);
+            workspaceId, orgWorkspaceIdsJson, itemId, MAX_GROUP_SIZE_FOR_PAIR_EXPANSION);
         if (visible == null || !"pair".equals(visible.getItemType())) {
             throw staleEvidence();
         }
@@ -285,7 +291,7 @@ public class DuplicateReviewService {
             throw staleEvidence();
         }
         DuplicateReviewItemRow result = duplicateReviewMapper.findVisibleItemById(
-            workspaceId, itemId, MAX_GROUP_SIZE_FOR_PAIR_EXPANSION);
+            workspaceId, orgWorkspaceIdsJson, itemId, MAX_GROUP_SIZE_FOR_PAIR_EXPANSION);
         if (result == null) {
             throw staleEvidence();
         }

@@ -58,6 +58,8 @@ class DuplicateReviewServiceTest {
     @Mock private DuplicateDecisionLockService duplicateDecisionLockService;
     @Mock private WorkspaceService workspaceService;
 
+    @Mock private RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     private DuplicateReviewService service;
 
     @BeforeEach
@@ -67,7 +69,53 @@ class DuplicateReviewServiceTest {
             identityCollisionMapper,
             duplicateDecisionLockService,
             workspaceService,
-            CLOCK);
+            CLOCK,
+            recordVisibilityScopeControlAccess);
+    }
+
+    @Test
+    void listResolvesCompanyScopeOnceBeforeCountAndPage() {
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
+        when(recordVisibilityScopeControlAccess.getForWorkspace(7)).thenReturn(
+            new RecordVisibilityScopeControlAccess.RecordVisibilityScope(1, List.of(7, 11)));
+        service.list(new DuplicateReviewQuery());
+        InOrder order = inOrder(recordVisibilityScopeControlAccess, duplicateReviewMapper);
+        order.verify(recordVisibilityScopeControlAccess).getForWorkspace(7);
+        order.verify(duplicateReviewMapper).countVisibleItems(7, null, null, "open", 20);
+        order.verify(duplicateReviewMapper).findVisibleItems(7, "[7,11]", null, null, "open", 50, 0L, 20);
+        verify(recordVisibilityScopeControlAccess).getForWorkspace(7);
+    }
+
+    @Test
+    void summaryDoesNotResolveCompanyScope() {
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
+        service.summary();
+        verify(duplicateReviewMapper).countVisibleItems(7, "person", null, "open", 20);
+        verify(duplicateReviewMapper).countVisibleItems(7, "company", null, "open", 20);
+        org.mockito.Mockito.verifyNoInteractions(recordVisibilityScopeControlAccess);
+    }
+
+    @Test
+    void decisionsResolveScopeBeforeAuthorizationLocksAndReuseIt() {
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
+        when(workspaceService.getCurrentUserId()).thenReturn(5);
+        when(recordVisibilityScopeControlAccess.getForWorkspace(7)).thenReturn(
+            new RecordVisibilityScopeControlAccess.RecordVisibilityScope(1, List.of(7, 11)));
+        when(duplicateReviewMapper.lockCurrentPair(7, "person", "email", 11, 19, EMAIL_FINGERPRINT))
+            .thenReturn(91L);
+        when(duplicateReviewMapper.findVisibleItemById(7, "[7,11]", 91L, 20))
+            .thenReturn(row("open", EMAIL_FINGERPRINT), row("dismissed", EMAIL_FINGERPRINT));
+        when(duplicateReviewMapper.dismiss(7, 91L, 5, null, LocalDateTime.of(2026, 9, 2, 12, 0))).thenReturn(1);
+        service.dismiss(new DuplicateReviewDecisionRequest("person", "email", 11, 19, EMAIL_FINGERPRINT, null));
+        InOrder order = inOrder(recordVisibilityScopeControlAccess, workspaceService,
+            duplicateDecisionLockService, duplicateReviewMapper);
+        order.verify(recordVisibilityScopeControlAccess).getForWorkspace(7);
+        order.verify(workspaceService).lockAndRequirePermissions(
+            7, Map.of(5, Set.of(Permission.REPORT_READ, Permission.PERSON_UPDATE)));
+        order.verify(duplicateDecisionLockService).lockCurrentOrganization();
+        order.verify(duplicateReviewMapper).lockCurrentPair(7, "person", "email", 11, 19, EMAIL_FINGERPRINT);
+        verify(duplicateReviewMapper, times(2)).findVisibleItemById(7, "[7,11]", 91L, 20);
+        verify(recordVisibilityScopeControlAccess).getForWorkspace(7);
     }
 
     @Test
@@ -89,6 +137,8 @@ class DuplicateReviewServiceTest {
 
     @Test
     void listProjectsStoredStateAndUsesDatabasePagination() {
+        when(recordVisibilityScopeControlAccess.getForWorkspace(7)).thenReturn(
+            new RecordVisibilityScopeControlAccess.RecordVisibilityScope(1, List.of(7)));
         DuplicateReviewQuery query = new DuplicateReviewQuery();
         query.setRecordType("person");
         query.setKind("email");
@@ -100,7 +150,7 @@ class DuplicateReviewServiceTest {
                 7, "person", "email", "dismissed", 20))
             .thenReturn(52L);
         when(duplicateReviewMapper.findVisibleItems(
-                7, "person", "email", "dismissed", 25, 50L, 20))
+                7, "[7]", "person", "email", "dismissed", 25, 50L, 20))
             .thenReturn(List.of(row("dismissed", EMAIL_FINGERPRINT)));
 
         PageResponse<DuplicateReviewItemDto> result = service.list(query);
@@ -201,6 +251,8 @@ class DuplicateReviewServiceTest {
 
     @Test
     void dismissNormalizesPairAndLocksReadAndUpdatePermissionsBeforeOrganizationAndDecision() {
+        when(recordVisibilityScopeControlAccess.getForWorkspace(7)).thenReturn(
+            new RecordVisibilityScopeControlAccess.RecordVisibilityScope(1, List.of(7)));
         DuplicateReviewDecisionRequest request = new DuplicateReviewDecisionRequest(
             "person", "email", 19, 11, EMAIL_FINGERPRINT, " reviewed ");
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
@@ -208,7 +260,7 @@ class DuplicateReviewServiceTest {
         when(duplicateReviewMapper.lockCurrentPair(
                 7, "person", "email", 11, 19, EMAIL_FINGERPRINT))
             .thenReturn(91L);
-        when(duplicateReviewMapper.findVisibleItemById(7, 91L, 20))
+        when(duplicateReviewMapper.findVisibleItemById(7, "[7]", 91L, 20))
             .thenReturn(row("open", EMAIL_FINGERPRINT), row("dismissed", EMAIL_FINGERPRINT));
         when(duplicateReviewMapper.dismiss(
                 7, 91L, 5, "reviewed", LocalDateTime.of(2026, 9, 2, 12, 0)))
@@ -230,6 +282,8 @@ class DuplicateReviewServiceTest {
 
     @Test
     void reopenDispatchesCompanyPermissionAndClearsOnlyExactEvidence() {
+        when(recordVisibilityScopeControlAccess.getForWorkspace(7)).thenReturn(
+            new RecordVisibilityScopeControlAccess.RecordVisibilityScope(1, List.of(7)));
         String fingerprint = DuplicateReviewService.evidenceFingerprint(
             "company", "domain", "example.com");
         DuplicateReviewDecisionRequest request = new DuplicateReviewDecisionRequest(
@@ -241,7 +295,7 @@ class DuplicateReviewServiceTest {
             .thenReturn(101L);
         DuplicateReviewItemRow dismissed = companyRow("dismissed", fingerprint);
         DuplicateReviewItemRow open = companyRow("open", fingerprint);
-        when(duplicateReviewMapper.findVisibleItemById(7, 101L, 20))
+        when(duplicateReviewMapper.findVisibleItemById(7, "[7]", 101L, 20))
             .thenReturn(dismissed, open);
         when(duplicateReviewMapper.reopen(7, 101L)).thenReturn(1);
 
@@ -255,6 +309,8 @@ class DuplicateReviewServiceTest {
 
     @Test
     void staleFingerprintFailsWithConflictWithoutWriting() {
+        when(recordVisibilityScopeControlAccess.getForWorkspace(7)).thenReturn(
+            new RecordVisibilityScopeControlAccess.RecordVisibilityScope(1, List.of(7)));
         DuplicateReviewDecisionRequest request = new DuplicateReviewDecisionRequest(
             "person", "email", 11, 19, "a".repeat(64), null);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);

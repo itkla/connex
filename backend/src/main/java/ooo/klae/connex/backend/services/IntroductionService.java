@@ -80,6 +80,7 @@ public class IntroductionService {
     private final NotificationPreferenceService notificationPreferenceService;
     private final ObjectMapper objectMapper;
     private final TenantWorkScope tenantWorkScope;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     private static final String MENTION_TYPE = "introduction.mention";
     private static final String MENTION_CATEGORY = "introduction";
@@ -136,6 +137,8 @@ public class IntroductionService {
     public IntroOverviewDto getOverview(int suggestionLimit, int pathLimit) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Instant asOf = clock.instant();
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId)
+            .workspaceIdsJson();
         int resolvedSuggestions = suggestionLimit <= 0
             ? DEFAULT_SUGGESTION_LIMIT
             : Math.min(suggestionLimit, MAX_SUGGESTION_LIMIT);
@@ -149,13 +152,13 @@ public class IntroductionService {
         List<PersonEdge> edges = eligibleEdges(allEdges, excludedPersonIds);
         List<IntroEmploymentRow> employment = introductionMapper.findWorkspaceEmployment(workspaceId);
         List<IntroCandidatePerson> suggestionCandidates =
-            introductionMapper.findCandidatePersons(workspaceId);
+            introductionMapper.findCandidatePersons(workspaceId, orgWorkspaceIdsJson);
         Set<Long> existingPairs =
             existingPairKeys(introductionMapper.findExistingPairs(workspaceId));
         List<IntroSuggestionDto> suggestions = rankSuggestions(
             suggestionCandidates, edges, employment, existingPairs, warmth, resolvedSuggestions);
         List<IntroCandidatePerson> pathCandidates =
-            introductionMapper.findWarmPathCandidates(workspaceId);
+            introductionMapper.findWarmPathCandidates(workspaceId, orgWorkspaceIdsJson);
         List<WarmPathDismissal> pathDismissals =
             introductionMapper.findWarmPathDismissals(workspaceId);
         List<WarmPathDto> paths = WarmPathService.rankPaths(
@@ -231,7 +234,10 @@ public class IntroductionService {
         if (limit <= 0) {
             return List.of();
         }
-        List<IntroCandidatePerson> candidates = introductionMapper.findCandidatePersons(workspaceId);
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId)
+            .workspaceIdsJson();
+        List<IntroCandidatePerson> candidates =
+            introductionMapper.findCandidatePersons(workspaceId, orgWorkspaceIdsJson);
         cancellationCheckpoint.run();
         if (candidates.size() < 2) {
             return List.of();

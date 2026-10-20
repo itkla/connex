@@ -6,8 +6,8 @@
   <sql id="visibleCandidateCompany">
     (c.workspace_id = #{workspaceId}
      OR EXISTS (SELECT 1 FROM company_share cs
-        JOIN workspace vws ON vws.id = cs.workspace_id
-        JOIN workspace ows ON ows.id = c.workspace_id AND ows.org_id = vws.org_id
+        JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) org_workspace
+          ON org_workspace.id = c.workspace_id
         WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
     AND c.archived_at IS NULL
   </sql>

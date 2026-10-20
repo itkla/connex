@@ -389,7 +389,7 @@ class RelationshipSignalDetectorServiceTest {
             List.of(bridgePerson, targetPerson), List.of(touch));
         IntroductionMapper introductionMapper = mock(IntroductionMapper.class);
         PersonEdgeReadService edgeReader = mock(PersonEdgeReadService.class);
-        when(introductionMapper.findWarmPathCandidates(WORKSPACE_ID)).thenReturn(List.of(
+        when(introductionMapper.findWarmPathCandidates(WORKSPACE_ID, "[7]")).thenReturn(List.of(
             introCandidate(bridgePerson.getId(), "Bridge"),
             introCandidate(targetPerson.getId(), "Target")));
         when(introductionMapper.findIntroExcludedPersonIds(WORKSPACE_ID)).thenReturn(List.of());
@@ -644,6 +644,9 @@ class RelationshipSignalDetectorServiceTest {
             PersonMapper personMapper,
             ScoringService sourceScoringService,
             Instant evaluationInstant) {
+        RecordVisibilityScopeControlAccess scopeAccess = mock(RecordVisibilityScopeControlAccess.class);
+        when(scopeAccess.getForWorkspace(WORKSPACE_ID)).thenReturn(
+            new RecordVisibilityScopeControlAccess.RecordVisibilityScope(1, List.of(WORKSPACE_ID)));
         return new WarmPathService(
             introductionMapper,
             edgeReader,
@@ -652,7 +655,8 @@ class RelationshipSignalDetectorServiceTest {
             mock(WorkspaceService.class),
             mock(AuthService.class),
             mock(TaskService.class),
-            Clock.fixed(evaluationInstant, ZoneOffset.UTC));
+            Clock.fixed(evaluationInstant, ZoneOffset.UTC),
+            scopeAccess);
     }
 
     private record SourceScoringFixture(

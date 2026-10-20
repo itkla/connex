@@ -55,10 +55,14 @@ class IntroductionSuggestionCancellationTest {
     @Mock private ObjectMapper objectMapper;
     @Mock private TenantWorkScope tenantWorkScope;
 
+    @Mock private RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     private IntroductionService service;
 
     @BeforeEach
     void setUp() {
+        when(recordVisibilityScopeControlAccess.getForWorkspace(WORKSPACE_ID)).thenReturn(
+            new RecordVisibilityScopeControlAccess.RecordVisibilityScope(1, List.of(WORKSPACE_ID)));
         service = new IntroductionService(
             introductionMapper,
             userMapper,
@@ -74,12 +78,13 @@ class IntroductionSuggestionCancellationTest {
             notificationDelivery,
             notificationPreferenceService,
             objectMapper,
-            tenantWorkScope);
+            tenantWorkScope,
+            recordVisibilityScopeControlAccess);
     }
 
     @Test
     void interruptDuringCandidateLoadStopsBeforeTheEdgeGraphIsLoaded() {
-        when(introductionMapper.findCandidatePersons(WORKSPACE_ID))
+        when(introductionMapper.findCandidatePersons(WORKSPACE_ID, "[17]"))
             .thenAnswer(interruptingWith(List.of(candidate(1), candidate(2))));
 
         assertRankingCancelled();
@@ -89,7 +94,7 @@ class IntroductionSuggestionCancellationTest {
 
     @Test
     void interruptDuringExclusionLoadStopsBeforeTheEdgeGraphIsLoaded() {
-        when(introductionMapper.findCandidatePersons(WORKSPACE_ID))
+        when(introductionMapper.findCandidatePersons(WORKSPACE_ID, "[17]"))
             .thenReturn(List.of(candidate(1), candidate(2)));
         when(introductionMapper.findIntroExcludedPersonIds(WORKSPACE_ID))
             .thenAnswer(interruptingWith(List.of()));
@@ -100,7 +105,7 @@ class IntroductionSuggestionCancellationTest {
 
     @Test
     void interruptDuringEdgeLoadStopsBeforeEmploymentIsLoaded() {
-        when(introductionMapper.findCandidatePersons(WORKSPACE_ID))
+        when(introductionMapper.findCandidatePersons(WORKSPACE_ID, "[17]"))
             .thenReturn(List.of(candidate(1), candidate(2)));
         when(edgeReader.getAllEdges(WORKSPACE_ID)).thenAnswer(interruptingWith(List.of()));
 
@@ -110,7 +115,7 @@ class IntroductionSuggestionCancellationTest {
 
     @Test
     void interruptDuringEmploymentLoadStopsBeforeExistingPairsAreLoaded() {
-        when(introductionMapper.findCandidatePersons(WORKSPACE_ID))
+        when(introductionMapper.findCandidatePersons(WORKSPACE_ID, "[17]"))
             .thenReturn(List.of(candidate(1), candidate(2)));
         when(introductionMapper.findWorkspaceEmployment(WORKSPACE_ID))
             .thenAnswer(interruptingWith(List.of()));
@@ -121,7 +126,7 @@ class IntroductionSuggestionCancellationTest {
 
     @Test
     void interruptDuringExistingPairLoadStopsBeforeTheWorkspaceIsRescored() {
-        when(introductionMapper.findCandidatePersons(WORKSPACE_ID))
+        when(introductionMapper.findCandidatePersons(WORKSPACE_ID, "[17]"))
             .thenReturn(List.of(candidate(1), candidate(2)));
         when(introductionMapper.findExistingPairs(WORKSPACE_ID)).thenAnswer(interruptingWith(List.of()));
 
@@ -131,7 +136,7 @@ class IntroductionSuggestionCancellationTest {
 
     @Test
     void interruptDuringTheRescoreStopsBeforeSuggestionsAreRanked() {
-        when(introductionMapper.findCandidatePersons(WORKSPACE_ID))
+        when(introductionMapper.findCandidatePersons(WORKSPACE_ID, "[17]"))
             .thenReturn(List.of(candidate(1), candidate(2)));
         when(scoringService.scoreContacts(WORKSPACE_ID)).thenAnswer(interruptingWith(List.of()));
 
@@ -141,7 +146,7 @@ class IntroductionSuggestionCancellationTest {
 
     @Test
     void requestAndScheduledRankingIgnoresAnInterruptedThread() {
-        when(introductionMapper.findCandidatePersons(WORKSPACE_ID))
+        when(introductionMapper.findCandidatePersons(WORKSPACE_ID, "[17]"))
             .thenReturn(List.of(candidate(1), candidate(2)));
         when(clock.instant()).thenReturn(Instant.parse("2026-09-19T00:00:00Z"));
 
