@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -151,7 +151,10 @@ class AutomationRecordVisibilityScopeTest {
             return null;
         }));
         verify(workspaceMapper).findOrganizationWorkspacesForShare(7);
-        verify(workspaceMapper, never()).findOrganizationWorkspacesForShare(11);
+        verify(workspaceMapper).findOrganizationWorkspacesForShare(11);
+        var order = inOrder(workspaceMapper);
+        order.verify(workspaceMapper).findOrganizationWorkspacesForShare(7);
+        order.verify(workspaceMapper).findOrganizationWorkspacesForShare(11);
     }
 
     @Test

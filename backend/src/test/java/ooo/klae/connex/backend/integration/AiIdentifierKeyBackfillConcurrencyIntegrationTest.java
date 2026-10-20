@@ -112,6 +112,7 @@ class AiIdentifierKeyBackfillConcurrencyIntegrationTest {
         context = new TenantContext();
         var routing = new TenantRoutingDataSource(pool, context, controlCatalog.name(), connection -> { });
         var configuration = new Configuration(new Environment("identifier-worker-routing", new SpringManagedTransactionFactory(), routing));
+        configuration.setMapUnderscoreToCamelCase(true);
         configuration.getTypeAliasRegistry().registerAliases("ooo.klae.connex.backend.beans");
         configuration.addInterceptor(new ControlCatalogRoutingInterceptor(context, true));
         configuration.addInterceptor(new TenantScopeInterceptor(context, true, true));

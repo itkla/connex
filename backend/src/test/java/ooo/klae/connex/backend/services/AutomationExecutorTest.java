@@ -3,6 +3,8 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -56,19 +58,24 @@ class AutomationExecutorTest {
         when(principal.getId()).thenReturn(9);
         when(principal.getAuthorities()).thenReturn(List.of());
 
-        String during = tenantWorkScope.inWorkspace(7,
-            () -> executor.runAs(7, principal, "member", () -> {
+        String during = tenantWorkScope.inWorkspace(7, () -> {
+            var prepared = tenantContext.getWorkspaceScopes();
+            assertNotNull(prepared);
+            return executor.runAs(7, principal, "member", () -> {
+                assertSame(prepared, tenantContext.getWorkspaceScopes());
                 assertTrue(automationScope.isActive());
                 assertEquals(AutomationScope.Origin.task(AutomationScope.Source.BACKGROUND_TASK, "user"),
                     automationScope.origin());
                 assertEquals(7, tenantContext.getWorkspaceId());
                 assertEquals(42, tenantContext.getOrgId());
                 return tenantContext.getCatalog();
-            }));
+            });
+        });
 
         assertEquals("cnx_before", during);
         assertFalse(tenantContext.isResolved());
         assertNull(tenantContext.getCatalog());
+        assertNull(tenantContext.getWorkspaceScopes());
         verify(tenantCatalogResolver, times(1)).resolveCatalog(42);
         assertFalse(automationScope.isActive());
         assertNull(automationScope.origin());

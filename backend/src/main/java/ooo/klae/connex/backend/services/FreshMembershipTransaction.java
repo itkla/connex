@@ -36,15 +36,12 @@ public class FreshMembershipTransaction {
     }
 
     /**
-     * Prepares a routed membership target before its transaction. Single-database callers keep
-     * their original transaction and lazy placement reads, without an additional route lookup.
-     * The callback may return null, as the existing membership primitives permit.
+     * Prepares the membership target before its transaction in either mode. An enclosing actual
+     * single-database transaction retains lazy scope reads. The callback may return null, as the
+     * existing membership primitives permit.
      */
     public <T> T executeWithPreparedScopes(int workspaceId, Supplier<T> work) {
-        if (tenantWorkScope.isCatalogPerPlacement()) {
-            return tenantWorkScope.inWorkspace(workspaceId, () -> inTransaction(work));
-        }
-        return inTransaction(work);
+        return tenantWorkScope.inWorkspace(workspaceId, () -> inTransaction(work));
     }
 
     private <T> T inTransaction(Supplier<T> work) {

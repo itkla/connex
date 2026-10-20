@@ -32,6 +32,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -719,15 +720,15 @@ class ApiCredentialAuthenticationFilterTest {
     }
 
     @ParameterizedTest
-    @EnumSource(RouteTransactionMode.class)
-    void preparesWorkspaceScopesBeforeCredentialTransactionsAndClearsThemAfterward(RouteTransactionMode mode) throws Exception {
+    @MethodSource("scopePreparationCases")
+    void preparesWorkspaceScopesBeforeCredentialTransactionsAndClearsThemAfterward(RouteTransactionMode mode, String catalog) throws Exception {
         TenantContext context = new TenantContext();
         var scopes = new ooo.klae.connex.backend.tenant.TenantWorkspaceScopeSnapshot(
-            11, 13, "connexdb", Optional.empty(),
+            11, 13, catalog, Optional.empty(),
             new ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlOperations.WorkspaceScope(
                 13, List.of(11), "[11]"));
         var workScope = mock(ooo.klae.connex.backend.tenant.TenantWorkScope.class);
-        when(workScope.prepareWorkspaceScopes(11, 13, "connexdb")).thenAnswer(call -> {
+        when(workScope.prepareWorkspaceScopes(11, 13, catalog)).thenAnswer(call -> {
             assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
             assertFalse(context.isResolved());
             return scopes;
@@ -735,7 +736,7 @@ class ApiCredentialAuthenticationFilterTest {
         var transaction = new TransactionTemplate(new TestTransactionManager());
         transaction.setReadOnly(true);
         transaction.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
-        var filter = authenticatedFilter(mode, transaction, workScope, context);
+        var filter = authenticatedFilter(mode, transaction, workScope, context, catalog);
         var response = new MockHttpServletResponse();
         filter.doFilter(authenticatedRequest(mode == RouteTransactionMode.READ ? "GET" : "POST"), response,
             (request, servletResponse) -> {
@@ -747,9 +748,21 @@ class ApiCredentialAuthenticationFilterTest {
         assertNull(context.getWorkspaceScopes());
     }
 
+    private static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> scopePreparationCases() {
+        return java.util.Arrays.stream(RouteTransactionMode.values()).flatMap(mode ->
+            java.util.stream.Stream.of((String) null, "connexdb").map(catalog ->
+                org.junit.jupiter.params.provider.Arguments.of(mode, catalog)));
+    }
+
     private ApiCredentialAuthenticationFilter authenticatedFilter(
             RouteTransactionMode transactionMode, TransactionTemplate transactionTemplate,
             ooo.klae.connex.backend.tenant.TenantWorkScope workScope, TenantContext context) {
+        return authenticatedFilter(transactionMode, transactionTemplate, workScope, context, "connexdb");
+    }
+
+    private ApiCredentialAuthenticationFilter authenticatedFilter(
+            RouteTransactionMode transactionMode, TransactionTemplate transactionTemplate,
+            ooo.klae.connex.backend.tenant.TenantWorkScope workScope, TenantContext context, String catalog) {
         String token = token();
         RoutingBinding binding = new RoutingBinding(7, 11, 13, 17, "a".repeat(64));
         User user = new User();
@@ -775,7 +788,7 @@ class ApiCredentialAuthenticationFilterTest {
             .thenReturn(new ApiRateLimiter.Decision(true, 10, 9, 60, 0));
         when(service.resolveRoutingBinding(token)).thenReturn(Optional.of(binding));
         when(tenantCatalogResolver.resolveCatalog(binding.organizationId()))
-            .thenReturn("connexdb");
+            .thenReturn(catalog);
         when(service.authenticate(binding)).thenAnswer(invocation -> {
             assertTrue(TransactionSynchronizationManager.isActualTransactionActive());
             return Optional.of(new AuthenticatedCredential(user, principal));

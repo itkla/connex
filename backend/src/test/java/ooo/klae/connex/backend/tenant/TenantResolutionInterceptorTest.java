@@ -98,16 +98,16 @@ class TenantResolutionInterceptorTest {
     }
 
     @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    void routedSnapshotIsPreparedBeforeIdentityAndReleasedOnCompletionOrAsyncHandoff(boolean async) throws Exception {
-        var scopes = new TenantWorkspaceScopeSnapshot(11, 3, "cnx_tenant", java.util.Optional.empty(),
+    @CsvSource(value = {"false,SHARED", "true,SHARED", "false,cnx_tenant", "true,cnx_tenant"}, nullValues = "SHARED")
+    void workspaceSnapshotIsPreparedBeforeIdentityAndReleasedOnCompletionOrAsyncHandoff(boolean async, String catalog) throws Exception {
+        var scopes = new TenantWorkspaceScopeSnapshot(11, 3, catalog, java.util.Optional.empty(),
             new ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlOperations.WorkspaceScope(
                 3, java.util.List.of(11), "[11]"));
         when(requestResolver.resolve(any(), eq(7))).thenReturn(11);
         when(workspaceService.getRole(11, 7)).thenReturn("member");
         when(workspaceService.getOrgId(11)).thenReturn(3);
-        when(catalogResolver.resolveCatalog(3)).thenReturn("cnx_tenant");
-        when(workspaceService.prepareWorkspaceScopes(11, 3, "cnx_tenant")).thenAnswer(call -> {
+        when(catalogResolver.resolveCatalog(3)).thenReturn(catalog);
+        when(workspaceService.prepareWorkspaceScopes(11, 3, catalog)).thenAnswer(call -> {
             assertFalse(liveContext.isResolved());
             assertFalse(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
             return scopes;
@@ -118,6 +118,9 @@ class TenantResolutionInterceptorTest {
 
         assertTrue(resolver.preHandle(request, response, handler));
         assertSame(scopes, liveContext.getWorkspaceScopes());
+        verify(workspaceService).getOrgId(11);
+        verify(catalogResolver).resolveCatalog(3);
+        verify(workspaceService).prepareWorkspaceScopes(11, 3, catalog);
         if (async) {
             resolver.afterConcurrentHandlingStarted(request, response, handler);
         } else {

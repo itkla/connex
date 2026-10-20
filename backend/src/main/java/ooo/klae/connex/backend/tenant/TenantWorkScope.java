@@ -144,33 +144,42 @@ public class TenantWorkScope {
         this.routingEnabled = () -> false;
     }
 
-    /** Whether preparation and the transaction-time scope invariant apply on this deployment. */
+    /** Whether missing prepared scopes must be refused inside tenant transactions. */
     public boolean isCatalogPerPlacement() {
         return routingEnabled.getAsBoolean();
     }
 
     /**
-     * Prepares a validated route before tenant transactions. Single-database mode performs no reads.
-     * A transactional caller may reuse an exact installed payload, but may never load a replacement.
+     * Prepares a validated route before tenant transactions in either mode. A transactional caller
+     * may reuse an exact installed payload but never loads a replacement: single-database entries
+     * skip preparation and retain lazy boundary reads; routed entries refuse the missing payload.
      */
     public TenantWorkspaceScopeSnapshot prepareWorkspaceScopes(int workspaceId, int orgId, String catalog) {
-        if (!isCatalogPerPlacement()) {
-            return null;
-        }
+        return prepareWorkspaceScopes(workspaceId, orgId, catalog, null);
+    }
+
+    private TenantWorkspaceScopeSnapshot prepareWorkspaceScopes(
+            int workspaceId, int orgId, String catalog, WorkspaceScope knownActiveScope) {
         TenantWorkspaceScopeSnapshot existing = tenantContext.getWorkspaceScopes();
         if (existing != null && existing.matches(workspaceId, orgId, catalog)) {
             return existing;
         }
         requireScopePreparationAllowed("workspace " + workspaceId);
-        return unroutedRead(() -> scopeControlOperations.load(workspaceId, orgId, catalog, null));
-    }
-
-    /** Resolves a trusted lifecycle placement and scopes in one short control transaction. */
-    public TenantWorkspaceScopeSnapshot prepareLifecycleWorkspace(int workspaceId, int orgId) {
-        if (!isCatalogPerPlacement()) {
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
             return null;
         }
+        return unroutedRead(() -> scopeControlOperations.load(workspaceId, orgId, catalog, knownActiveScope));
+    }
+
+    /**
+     * Resolves a trusted lifecycle placement and scopes before tenant work. Single-database entries
+     * inside an actual transaction skip preparation; routed entries retain their refusal.
+     */
+    public TenantWorkspaceScopeSnapshot prepareLifecycleWorkspace(int workspaceId, int orgId) {
         requireScopePreparationAllowed("lifecycle workspace " + workspaceId);
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            return null;
+        }
         return unroutedRead(() -> scopeControlOperations.forLifecycleWorkspace(workspaceId, orgId));
     }
 
@@ -269,14 +278,17 @@ public class TenantWorkScope {
     /**
      * Installs an explicitly captured route and its payload without rereading a lifecycle root.
      * The payload may record an unavailable anchor; only a subsequent boundary read refuses it.
+     * An uncaptured single-database payload is prepared here only outside an actual transaction.
      */
     public <T> T withPreparedWorkspace(int workspaceId, int orgId, String catalog,
             TenantWorkspaceScopeSnapshot scopes, Supplier<T> work) {
         if (scopes != null && !scopes.matches(workspaceId, orgId, catalog)) {
             throw new IllegalArgumentException("Prepared workspace scopes do not match the captured route");
         }
+        TenantWorkspaceScopeSnapshot prepared = scopes == null && !isCatalogPerPlacement()
+            ? prepareWorkspaceScopes(workspaceId, orgId, catalog) : scopes;
         return withCatalog(catalog, () -> {
-            TenantWorkspaceScopeSnapshot previousScopes = tenantContext.swapWorkspaceScopes(scopes);
+            TenantWorkspaceScopeSnapshot previousScopes = tenantContext.swapWorkspaceScopes(prepared);
             try {
                 return work.get();
             } finally {
@@ -395,9 +407,9 @@ public class TenantWorkScope {
         WorkspaceRoute existing = routes.routes.get(workspaceId);
         if (existing != null
                 && (lifecycle || !routes.lifecycleResolved.contains(workspaceId))) {
-            if (isCatalogPerPlacement() && existing.scopes() == null) {
+            if (existing.scopes() == null) {
                 existing = new WorkspaceRoute(existing.orgId(), existing.catalog(),
-                    prepareWorkspaceScopes(workspaceId, existing.orgId(), existing.catalog()));
+                    prepareWorkspaceScopes(workspaceId, existing.orgId(), existing.catalog(), knownActiveScope));
                 routes.routes.put(workspaceId, existing);
             }
             return existing;
@@ -409,9 +421,11 @@ public class TenantWorkScope {
                 scopeControlOperations.forWorkspace(workspaceId, lifecycle, knownActiveScope));
             resolved = new WorkspaceRoute(prepared.orgId(), prepared.catalog(), prepared);
         } else {
-            resolved = lifecycle
+            WorkspaceRoute route = lifecycle
                 ? resolveLifecycleRouteForWorkspace(workspaceId)
                 : resolveRouteForWorkspace(workspaceId);
+            resolved = new WorkspaceRoute(route.orgId(), route.catalog(),
+                prepareWorkspaceScopes(workspaceId, route.orgId(), route.catalog(), knownActiveScope));
         }
         routes.routes.put(workspaceId, resolved);
         if (lifecycle) {

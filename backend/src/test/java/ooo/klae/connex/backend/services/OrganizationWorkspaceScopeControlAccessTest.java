@@ -48,7 +48,7 @@ import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
-/** Verifies prepared routed reads never borrow and default-mode transaction behavior is unchanged. */
+/** Verifies prepared reads in both modes and the independent single-database fallback. */
 @ExtendWith(MockitoExtension.class)
 class OrganizationWorkspaceScopeControlAccessTest {
     @Mock private WorkspaceMapper workspaceMapper;
@@ -199,31 +199,73 @@ class OrganizationWorkspaceScopeControlAccessTest {
     }
 
     @Test
-    void singleDatabasePreparationIsInertAndRepeatedBoundaryCallsRetainTheirLazyQueryCounts() {
+    void singleDatabasePreparationUsesTwoReadsWhileOrdinarySharingStaysLazy() {
         TenantWorkScope workScope = new TenantWorkScope(tenantContext, tenantCatalogResolver, workspaceMapper);
         TestTransactionManager manager = new TestTransactionManager();
-        when(workspaceMapper.getOrgId(7)).thenReturn(900);
         when(workspaceMapper.findByOrgId(900)).thenReturn(List.of(workspace(7, 900), workspace(11, 900)));
         when(workspaceMapper.findOrganizationWorkspacesForShare(7)).thenReturn(
             List.of(workspace(11, 900), workspace(7, 900)));
-        assertNull(workScope.prepareWorkspaceScopes(7, 900, null));
-        verifyNoInteractions(workspaceMapper);
+        var prepared = workScope.prepareWorkspaceScopes(7, 900, null);
+        tenantContext.setWithWorkspaceScopes(7, 900, 42, "member", null, prepared);
         var sharing = new ShareWorkspaceControlAccess(workspaceMapper, workScope, tenantContext, manager);
         var visibility = new RecordVisibilityScopeControlAccess(sharing, tenantContext);
-        try (AnnotationConfigApplicationContext context = controlContext(manager)) {
-            var active = new OrganizationWorkspaceScopeControlAccess(
-                context.getBean(OrganizationWorkspaceScopeControlOperations.class), workScope, tenantContext, manager);
+        var operations = mock(OrganizationWorkspaceScopeControlOperations.class);
+        var active = new OrganizationWorkspaceScopeControlAccess(operations, workScope, tenantContext, manager);
+        new TransactionTemplate(manager).executeWithoutResult(status -> {
             for (int repeat = 0; repeat < 2; repeat++) {
-                assertEquals("[7,11]", active.getForWorkspace(7).workspaceIdsJson());
+                assertSame(prepared.active(), active.getForWorkspace(7));
+                assertSame(prepared.active(), active.getForOrg(900));
+                assertSame(prepared.requireSharing().recordVisibilityScope(), visibility.getForWorkspace(7));
                 assertEquals("[11,7]", sharing.getForWorkspace(7).workspaceIdsJson());
-                assertEquals("[7,11]", visibility.getForWorkspace(7).workspaceIdsJson());
-                assertNull(tenantContext.getWorkspaceScopes());
             }
-            assertEquals(2, manager.beginCount());
+        });
+        assertEquals(1, manager.beginCount());
+        assertEquals(0, manager.suspendCount());
+        verifyNoInteractions(operations, tenantCatalogResolver);
+        verify(workspaceMapper, org.mockito.Mockito.never()).getOrgId(7);
+        verify(workspaceMapper).findByOrgId(900);
+        verify(workspaceMapper, times(3)).findOrganizationWorkspacesForShare(7);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"workspace", "organization", "catalog"})
+    void singleDatabasePreparedMismatchesUseTheExistingValidatedFallback(String mismatch) {
+        var workScope = new TenantWorkScope(tenantContext, tenantCatalogResolver, workspaceMapper);
+        var manager = new TestTransactionManager();
+        var operations = mock(OrganizationWorkspaceScopeControlOperations.class);
+        var expected = new WorkspaceScope(900, List.of(7), "[7]");
+        when(operations.getForWorkspace(7)).thenReturn(expected);
+        int preparedWorkspace = "workspace".equals(mismatch) ? 11 : 7;
+        var prepared = new ooo.klae.connex.backend.tenant.TenantWorkspaceScopeSnapshot(
+            preparedWorkspace, 900, null, java.util.Optional.empty(),
+            new WorkspaceScope(900, List.of(preparedWorkspace), "[" + preparedWorkspace + "]"));
+        tenantContext.setWithWorkspaceScopes(preparedWorkspace, 900, 42, "member", null, prepared);
+        if ("organization".equals(mismatch)) {
+            tenantContext.set(7, 901, 42, "member", null);
+        } else if ("catalog".equals(mismatch)) {
+            tenantContext.set(7, 900, 42, "member", "different_catalog");
         }
-        verify(workspaceMapper, times(2)).getOrgId(7);
-        verify(workspaceMapper, times(2)).findByOrgId(900);
-        verify(workspaceMapper, times(4)).findOrganizationWorkspacesForShare(7);
+        var active = new OrganizationWorkspaceScopeControlAccess(operations, workScope, tenantContext, manager);
+        if ("catalog".equals(mismatch)) {
+            assertSame(expected, active.getForWorkspace(7));
+        } else {
+            assertThrows(IllegalStateException.class, () -> active.getForWorkspace(7));
+        }
+        verify(operations).getForWorkspace(7);
+    }
+
+    @Test
+    void singleDatabasePreparedOrganizationMismatchRetainsTheOrganizationRefusal() {
+        var workScope = new TenantWorkScope(tenantContext, tenantCatalogResolver, workspaceMapper);
+        var manager = new TestTransactionManager();
+        var operations = mock(OrganizationWorkspaceScopeControlOperations.class);
+        var prepared = new ooo.klae.connex.backend.tenant.TenantWorkspaceScopeSnapshot(7, 900, null,
+            java.util.Optional.empty(), new WorkspaceScope(900, List.of(7), "[7]"));
+        tenantContext.setWithWorkspaceScopes(7, 900, 42, "member", null, prepared);
+        when(operations.getForOrg(901)).thenReturn(new WorkspaceScope(901, List.of(11), "[11]"));
+        var active = new OrganizationWorkspaceScopeControlAccess(operations, workScope, tenantContext, manager);
+        assertThrows(ResourceNotFoundException.class, () -> active.getForOrg(901));
+        verify(operations).getForOrg(901);
     }
 
     @ParameterizedTest
