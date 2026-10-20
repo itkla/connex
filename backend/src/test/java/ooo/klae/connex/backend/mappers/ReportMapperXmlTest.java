@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.mappers;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.InputStream;
@@ -11,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 import org.apache.ibatis.builder.xml.XMLMapperBuilder;
 import org.apache.ibatis.session.Configuration;
@@ -29,6 +31,83 @@ import ooo.klae.connex.backend.warmth.RelationshipWarmthModel;
 
 /** Verifies the report mapper XML and every dynamic aggregate branch can be resolved. */
 class ReportMapperXmlTest {
+
+    @Test
+    void groupByClausesNeverUseBareUnit() throws Exception {
+        assertNoBareUnitGrouping(resourceText("mappers/ReportMapper.xml"));
+    }
+
+    @Test
+    void bareUnitGuardInspectsMultilineGroupingAfterIncludesAndInsideChoices() {
+        for (String grouping : new String[] {
+                "group_key,\n group_label,\n unit",
+                "group_key, group_label, <include refid=\"forecastUnit\"/>, unit",
+                "group_key, <choose><when test=\"value\">unit</when><otherwise>'count'</otherwise></choose>"}) {
+            assertThrows(AssertionError.class,
+                    () -> assertNoBareUnitGrouping("GROUP BY " + grouping + " ORDER BY group_key"));
+        }
+        assertNoBareUnitGrouping("GROUP BY group_key, group_label, COALESCE(d.currency, '') ORDER BY group_key");
+        assertNoBareUnitGrouping("GROUP BY product.unit, 'unit' ORDER BY product.unit");
+    }
+
+    private static void assertNoBareUnitGrouping(String mapper) {
+        String sqlText = mapper.replaceAll("(?s)<!--.*?-->", "").replaceAll("(?s)<[^>]+>", " ");
+        var clauses = Pattern.compile(
+                "(?is)\\bGROUP\\s+BY\\b(.*?)(?=\\b(?:ORDER\\s+BY|HAVING|LIMIT|SELECT|FROM|WHERE|JOIN|GROUP\\s+BY)\\b|;|$)")
+                .matcher(sqlText);
+        Pattern bareUnit = Pattern.compile("(?i)(?<![\\w.`])(?:unit|`unit`)(?![\\w`])");
+        int clauseCount = 0;
+        while (clauses.find()) {
+            clauseCount++;
+            String clause = clauses.group(1).replaceAll("'(?:''|[^'])*'", "");
+            assertFalse(bareUnit.matcher(clause).find(),
+                    "MySQL GROUP BY binds bare unit to FROM columns before select aliases; "
+                            + "use an explicit expression in ReportMapper.xml (#1313): " + clauses.group());
+        }
+        assertTrue(clauseCount > 0);
+    }
+
+    @Test
+    void aggregateUnitsRenderIdenticallyInSelectAndExplicitGroupingAcrossBranches() throws Exception {
+        Configuration configuration = reportMapperConfiguration();
+        Map<String, Map<String, String>> cases = Map.of(
+                "aggregateDeals", Map.of(
+                        "won_revenue", "COALESCE(d.currency, '')",
+                        "new_pipeline_value", "COALESCE(d.currency, '')",
+                        "open_pipeline_value", "COALESCE(d.currency, '')",
+                        "win_rate", "'percent'",
+                        "avg_cycle_days", "'days'",
+                        "open_deal_count", "'count'"),
+                "aggregateForecast", Map.of(
+                        "forecast_best", "COALESCE(d.currency, '')",
+                        "forecast_weighted", "COALESCE(d.currency, '')",
+                        "forecast_worst", "COALESCE(d.currency, '')"),
+                "aggregateCoverageGaps", Map.of(
+                        "coverage_gap_open_pipeline_value", "COALESCE(open_deal.currency, '')",
+                        "coverage_gap_count", "'count'"),
+                "aggregateSingleThreadedDeals", Map.of(
+                        "single_threaded_deal_value", "single_deal.currency",
+                        "single_threaded_deal_count", "'count'"),
+                "aggregateDocuments", Map.of("quote_issue_rate", "'percent'", "quote_count", "'count'"),
+                "aggregateDocumentOutcomes", Map.of("document_to_win_rate", "'percent'"),
+                "aggregateDocumentApprovals", Map.of(
+                        "approval_cycle_days", "'days'", "approval_decision_count", "'count'"));
+        for (var statement : cases.entrySet()) {
+            boolean documentStatement = statement.getKey().startsWith("aggregateDocument");
+            for (var measure : statement.getValue().entrySet()) {
+                for (String group : new String[] {"none", "date", "pipeline", "stage", "owner", "company", "deal"}) {
+                    for (String bucket : new String[] {"day", "week", "month"}) {
+                        String sql = aggregateSql(configuration, statement.getKey(), measure.getKey(), group, bucket);
+                        String context = statement.getKey() + "/" + measure.getKey() + "/" + group + "/" + bucket;
+                        assertTrue(sql.contains(measure.getValue() + " AS unit"), context);
+                        String grouping = "GROUP BY group_key, group_label"
+                                + (documentStatement ? "" : ", " + measure.getValue());
+                        assertTrue(sql.contains(grouping + " ORDER BY"), context + ": " + sql);
+                    }
+                }
+            }
+        }
+    }
 
     @Test
     void createdDefinitionLivenessIsTenantScopedBoundedAndEmptySafe() throws Exception {
@@ -567,7 +646,10 @@ class ReportMapperXmlTest {
     private static String aggregateSql(
             Configuration configuration, String statement, String measure, String group, String bucket) {
         String sql = configuration.getMappedStatement(ReportMapper.class.getName() + "." + statement)
-                .getBoundSql(Map.of("query", query(measure, group, bucket, null, null, null, null)))
+                .getBoundSql(Map.of(
+                        "query", query(measure, group, bucket, null, null, null, null),
+                        "warmthReference", LocalDateTime.of(2026, 2, 1, 0, 0),
+                        "model", RelationshipWarmthModel.current().sqlParameters()))
                 .getSql();
         assertNotNull(sql);
         return sql.replaceAll("\\s+", " ");
