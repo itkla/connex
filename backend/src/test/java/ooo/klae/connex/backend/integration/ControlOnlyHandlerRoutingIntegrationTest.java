@@ -18,7 +18,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.sql.Connection;
 import java.sql.DriverManager;
-import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
@@ -39,6 +38,11 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.boot.flyway.autoconfigure.FlywayMigrationStrategy;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.flywaydb.core.Flyway;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -76,14 +80,15 @@ import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 /**
  * Runs real security, handlers, services and mappers against a minimal control catalog with no
  * tenant tables. Only the unrelated startup rule backfill is replaced: it enumerates tenant rules
- * before any HTTP request. The remaining startup readers require the listed control tables.
+ * before any HTTP request. The normal Flyway initializer migrates the source schema before the listed control tables are copied,
+ * so selecting this class alone does not depend on any earlier test.
  */
 @SpringBootTest(properties = {
-    "spring.flyway.enabled=false",
     "connex.tenancy.routing.mode=catalog-per-placement",
     "connex.workflows.runtime.scheduling-enabled=false",
     "connex.signature.enabled=false"
 })
+@Import(ControlOnlyHandlerRoutingIntegrationTest.ScratchControlConfiguration.class)
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class ControlOnlyHandlerRoutingIntegrationTest {
     private static final List<String> CONTROL_TABLES = List.of(
@@ -108,6 +113,7 @@ class ControlOnlyHandlerRoutingIntegrationTest {
     @Autowired private TenantCatalogResolver catalogs;
     @Autowired private TenantContext tenantContext;
     @Autowired private JdbcTemplate jdbc;
+    @Autowired private Flyway flyway;
     @Autowired private TagMapper tags;
     @MockitoSpyBean private WorkspaceService workspaceService;
     @MockitoBean private LegacyWorkflowBackfillRunner startupRuleBackfill;
@@ -128,34 +134,40 @@ class ControlOnlyHandlerRoutingIntegrationTest {
         assertNotNull(username, "CONNEX_DB_USERNAME is required for control-only HTTP routing tests");
         assertNotNull(password, "CONNEX_DB_PASSWORD is required for control-only HTTP routing tests");
         sourceCatalog = TenantRoutingConfig.databaseFromJdbcUrl(sourceUrl);
-        assertNotNull(sourceCatalog, "The prepared test database must name a catalog");
+        assertNotNull(sourceCatalog, "The source JDBC URL must name a catalog");
         controlCatalog = "connexdb_routing_control_it_" + UUID.randomUUID().toString().replace("-", "");
         try (Connection connection = DriverManager.getConnection(sourceUrl, username, password);
                 Statement statement = connection.createStatement()) {
-            try (ResultSet tables = connection.getMetaData().getTables(sourceCatalog, null, "workspace", null)) {
-                assertTrue(tables.next(), "The source schema must be prepared before creating scratch tables");
-            }
             statement.execute("CREATE DATABASE " + controlCatalog);
             controlCatalogCreated = true;
-            try {
-                for (String table : CONTROL_TABLES) {
-                    assertTrue(TablePlaneRegistry.CONTROL_PLANE_TABLES.contains(table), table);
-                    statement.execute("CREATE TABLE " + controlCatalog + "." + table
-                        + " LIKE " + sourceCatalog + "." + table);
-                }
-            } catch (SQLException | RuntimeException | Error failure) {
-                try {
-                    statement.execute("DROP DATABASE " + controlCatalog);
-                    controlCatalogCreated = false;
-                } catch (SQLException cleanupFailure) {
-                    failure.addSuppressed(cleanupFailure);
-                }
-                throw failure;
-            }
         }
         properties.add("spring.datasource.url", () -> sourceUrl.replace(
             "/" + sourceCatalog, "/" + controlCatalog));
         properties.add("connex.tenancy.routing.default-catalog", () -> controlCatalog);
+        properties.add("spring.flyway.url", () -> sourceUrl);
+        properties.add("spring.flyway.user", () -> username);
+        properties.add("spring.flyway.password", () -> password);
+    }
+
+    /** Migrates the CI schema normally before copying only control tables into the HTTP catalog. */
+    @TestConfiguration(proxyBeanMethods = false)
+    static class ScratchControlConfiguration {
+        @Bean
+        FlywayMigrationStrategy migrateThenCloneControlTables() {
+            return flyway -> {
+                flyway.migrate();
+                try (Connection connection = DriverManager.getConnection(sourceUrl, username, password);
+                        Statement statement = connection.createStatement()) {
+                    for (String table : CONTROL_TABLES) {
+                        assertTrue(TablePlaneRegistry.CONTROL_PLANE_TABLES.contains(table), table);
+                        statement.execute("CREATE TABLE " + controlCatalog + "." + table
+                            + " LIKE " + sourceCatalog + "." + table);
+                    }
+                } catch (SQLException failure) {
+                    throw new IllegalStateException("Cannot prepare the control-only scratch catalog", failure);
+                }
+            };
+        }
     }
 
     @AfterAll
@@ -195,6 +207,12 @@ class ControlOnlyHandlerRoutingIntegrationTest {
             jdbc.execute("DROP DATABASE " + catalog);
         }
         tenantCatalogs.clear();
+    }
+
+    @Test
+    void normalFlywayPreparesTheSourceBeforeTheScratchCatalogIsUsed() {
+        assertNotNull(flyway.info().current());
+        assertNoTenantTables();
     }
 
     @ParameterizedTest

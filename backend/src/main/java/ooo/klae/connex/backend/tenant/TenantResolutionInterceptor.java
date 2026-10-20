@@ -161,7 +161,6 @@ public class TenantResolutionInterceptor implements AsyncHandlerInterceptor {
     private final WorkspaceRequestResolver workspaceRequestResolver;
     private final WorkspaceCookie workspaceCookie;
     private final ClientAssertedCorrelationPseudonymizer correlationPseudonymizer;
-    private final TenantRoutingProperties routingProperties;
 
     /**
      * Retains a validated public credential scope or discards any scope left on
@@ -170,6 +169,15 @@ public class TenantResolutionInterceptor implements AsyncHandlerInterceptor {
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
         ControlOnlyHandlerPolicy.clear(request);
+        try {
+            return resolveRequest(request, response, handler);
+        } catch (RuntimeException | Error failure) {
+            ControlOnlyHandlerPolicy.clear(request);
+            throw failure;
+        }
+    }
+
+    private boolean resolveRequest(HttpServletRequest request, HttpServletResponse response, Object handler) {
         request.removeAttribute(ORGANIZATION_ID_ATTRIBUTE);
         if (isLifecycleRequest(request)) {
             tenantContext.clear();
@@ -190,8 +198,8 @@ public class TenantResolutionInterceptor implements AsyncHandlerInterceptor {
             return true;
         }
 
-        boolean controlOnly = routingProperties.isCatalogPerPlacement()
-            && ControlOnlyHandlerPolicy.allows(request.getMethod(), handler);
+        boolean controlOnly = ControlOnlyHandlerPolicy.allows(request.getMethod(), handler)
+            && tenantCatalogResolver.isCatalogPerPlacement();
         if (controlOnly) {
             ControlOnlyHandlerPolicy.activate(request);
         }

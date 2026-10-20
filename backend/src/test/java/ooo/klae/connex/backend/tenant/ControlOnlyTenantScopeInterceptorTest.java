@@ -45,6 +45,7 @@ class ControlOnlyTenantScopeInterceptorTest {
 
     @AfterEach
     void clearContext() {
+        ControlOnlyHandlerPolicy.clear(request);
         context.clear();
         RequestContextHolder.resetRequestAttributes();
     }

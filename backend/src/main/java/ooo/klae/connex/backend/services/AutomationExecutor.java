@@ -94,12 +94,7 @@ public class AutomationExecutor {
             User principal, String role, Supplier<T> work, AutomationScope.Origin origin,
             boolean suppressTriggers) {
         SecurityContext previousSecurity = SecurityContextHolder.getContext();
-        boolean hadTenant = tenantContext.isResolved();
-        Integer previousWorkspace = hadTenant ? tenantContext.getWorkspaceId() : null;
-        Integer previousUser = hadTenant ? tenantContext.getUserId() : null;
-        String previousRole = hadTenant ? tenantContext.getRole() : null;
-        Integer previousOrg = hadTenant ? tenantContext.getOrgId() : null;
-        String previousCatalog = hadTenant ? tenantContext.getScopeCatalog() : null;
+        TenantContext.IdentitySnapshot previousIdentity = tenantContext.snapshotIdentity();
 
         SecurityContext context = SecurityContextHolder.createEmptyContext();
         context.setAuthentication(new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
@@ -112,11 +107,7 @@ public class AutomationExecutor {
             return work.get();
         } finally {
             automationScope.restore(previousScope);
-            if (hadTenant) {
-                tenantContext.set(previousWorkspace, previousOrg, previousUser, previousRole, previousCatalog);
-            } else {
-                tenantContext.clear();
-            }
+            tenantContext.restoreIdentity(previousIdentity);
             SecurityContextHolder.setContext(previousSecurity);
         }
     }

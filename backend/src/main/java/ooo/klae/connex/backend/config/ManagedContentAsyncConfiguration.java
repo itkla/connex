@@ -9,6 +9,7 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import ooo.klae.connex.backend.storage.ObjectStorageProperties;
+import ooo.klae.connex.backend.tenant.ControlOnlyHandlerPolicy;
 
 /**
  * Provides bounded asynchronous execution and a hard lifecycle timeout for streamed objects.
@@ -31,6 +32,7 @@ public class ManagedContentAsyncConfiguration implements WebMvcConfigurer {
         executor.setQueueCapacity(concurrency);
         executor.setThreadNamePrefix("managed-content-");
         executor.setWaitForTasksToCompleteOnShutdown(false);
+        executor.setTaskDecorator(ControlOnlyHandlerPolicy::decorate);
         executor.initialize();
     }
 

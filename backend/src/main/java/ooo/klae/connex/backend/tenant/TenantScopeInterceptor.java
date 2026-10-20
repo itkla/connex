@@ -33,7 +33,10 @@ import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
  *
  * <p>A control-only request capability is stricter than ordinary workspace enforcement: only the
  * physical-control registry may execute, including when scope enforcement is disabled. Existing
- * tenant-statement exemptions and temporary tenant scopes cannot override that restriction.
+ * tenant-statement exemptions, manually installed identities and catalog-only overrides cannot
+ * override that restriction.
+ * Descendants carry the restriction independently of servlet attributes and tenant identity;
+ * only their own placement-validated TenantWorkScope span can admit tenant statements.
  *
  * <p>The signatures below must cover <em>every</em> statement-executing method
  * on {@link Executor}, including {@code queryCursor} — the streaming reads

@@ -10,6 +10,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import java.lang.reflect.Method;
@@ -46,15 +47,14 @@ class TenantControlOnlyResolutionTest {
     private final TenantCatalogResolver catalogs = mock(TenantCatalogResolver.class);
     private final WorkspaceCookie cookie = mock(WorkspaceCookie.class);
     private final TenantContext context = new TenantContext();
-    private final TenantRoutingProperties properties = new TenantRoutingProperties();
     private final HttpServletResponse response = mock(HttpServletResponse.class);
     private final TenantResolutionInterceptor interceptor = new TenantResolutionInterceptor(
         workspaces, context, catalogs, new WorkspaceRequestResolver(workspaces), cookie,
-        mock(ClientAssertedCorrelationPseudonymizer.class), properties);
+        mock(ClientAssertedCorrelationPseudonymizer.class));
 
     @BeforeEach
     void authenticateMember() {
-        properties.setMode(TenantRoutingProperties.MODE_CATALOG_PER_PLACEMENT);
+        when(catalogs.isCatalogPerPlacement()).thenReturn(true);
         User user = new User();
         user.setId(7);
         SecurityContextHolder.getContext().setAuthentication(
@@ -67,6 +67,9 @@ class TenantControlOnlyResolutionTest {
 
     @AfterEach
     void clearContext() {
+        if (RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attributes) {
+            ControlOnlyHandlerPolicy.clear(attributes.getRequest());
+        }
         context.clear();
         SecurityContextHolder.clearContext();
         RequestContextHolder.resetRequestAttributes();
@@ -88,14 +91,16 @@ class TenantControlOnlyResolutionTest {
         assertNull(context.getCatalog());
         assertTrue(ControlOnlyHandlerPolicy.isActive());
         assertEquals(3, request.getAttribute(TenantResolutionInterceptor.ORGANIZATION_ID_ATTRIBUTE));
-        verifyNoInteractions(catalogs, cookie);
+        verify(catalogs).isCatalogPerPlacement();
+        verifyNoMoreInteractions(catalogs);
+        verifyNoInteractions(cookie);
         verify(workspaces, never()).rememberActive(anyInt(), anyInt());
     }
 
     @ParameterizedTest
     @MethodSource("handlers")
     void singleDatabaseStillInstallsTheOrdinarySharedScope(String httpMethod, Method handler) {
-        properties.setMode(TenantRoutingProperties.MODE_SINGLE_DATABASE);
+        when(catalogs.isCatalogPerPlacement()).thenReturn(false);
         org.mockito.Mockito.doReturn(null).when(catalogs).resolveCatalog(3);
         MockHttpServletRequest request = request(httpMethod);
 
@@ -112,7 +117,7 @@ class TenantControlOnlyResolutionTest {
     @ParameterizedTest
     @MethodSource("handlers")
     void singleDatabaseStillRefusesTheSameUnservablePlacement(String httpMethod, Method handler) {
-        properties.setMode(TenantRoutingProperties.MODE_SINGLE_DATABASE);
+        when(catalogs.isCatalogPerPlacement()).thenReturn(false);
         MockHttpServletRequest request = request(httpMethod);
 
         assertThrows(ServiceUnavailableException.class,
@@ -139,7 +144,9 @@ class TenantControlOnlyResolutionTest {
         assertEquals(19, context.getWorkspaceId());
         assertEquals(5, context.getOrgId());
         verify(workspaces, never()).rememberedWorkspaceIdFor(anyInt());
-        verifyNoInteractions(catalogs, cookie);
+        verify(catalogs).isCatalogPerPlacement();
+        verifyNoMoreInteractions(catalogs);
+        verifyNoInteractions(cookie);
     }
 
     @Test
@@ -173,6 +180,7 @@ class TenantControlOnlyResolutionTest {
         verify(workspaces).rememberActive(7, 19);
         verify(cookie).set(response, 19);
         assertFalse(context.hasControlSelection());
+        assertFalse(ControlOnlyHandlerPolicy.isActive());
     }
 
     @Test
@@ -188,7 +196,9 @@ class TenantControlOnlyResolutionTest {
 
         assertEquals("Not a member of workspace 11", failure.getMessage());
         verify(workspaces, never()).rememberActive(anyInt(), anyInt());
-        verifyNoInteractions(catalogs, cookie);
+        verify(catalogs).isCatalogPerPlacement();
+        verifyNoMoreInteractions(catalogs);
+        verifyNoInteractions(cookie);
     }
 
     @Test
@@ -200,7 +210,9 @@ class TenantControlOnlyResolutionTest {
             () -> interceptor.preHandle(request, response, workspaceListing()));
 
         assertEquals("Not a member of workspace 23", failure.getMessage());
-        verifyNoInteractions(catalogs, cookie);
+        verify(catalogs).isCatalogPerPlacement();
+        verifyNoMoreInteractions(catalogs);
+        verifyNoInteractions(cookie);
         assertFalse(context.hasControlSelection());
     }
 
@@ -213,7 +225,9 @@ class TenantControlOnlyResolutionTest {
         assertThrows(ForbiddenException.class,
             () -> interceptor.preHandle(request, response, workspaceListing()));
 
-        verifyNoInteractions(catalogs, cookie);
+        verify(catalogs).isCatalogPerPlacement();
+        verifyNoMoreInteractions(catalogs);
+        verifyNoInteractions(cookie);
         assertFalse(context.hasControlSelection());
     }
 
@@ -225,7 +239,9 @@ class TenantControlOnlyResolutionTest {
 
         assertThrows(ForbiddenException.class,
             () -> interceptor.preHandle(request, response, workspaceListing()));
-        verifyNoInteractions(catalogs, cookie);
+        verify(catalogs).isCatalogPerPlacement();
+        verifyNoMoreInteractions(catalogs);
+        verifyNoInteractions(cookie);
     }
 
     @Test

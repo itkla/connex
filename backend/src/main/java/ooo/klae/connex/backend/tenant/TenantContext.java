@@ -20,9 +20,39 @@ public class TenantContext {
     private record Scope(int workspaceId, int orgId, int userId, String role, String catalog) {}
     private record ValidatedControlSelection(int workspaceId, int orgId, int userId, String role) {}
 
+    /** Opaque identity snapshot; catalog overrides belong to their enclosing TenantWorkScope. */
+    public static final class IdentitySnapshot {
+        private final Scope scope;
+        private final ValidatedControlSelection selection;
+
+        private IdentitySnapshot(Scope scope, ValidatedControlSelection selection) {
+            this.scope = scope;
+            this.selection = selection;
+        }
+    }
+
     private static final ThreadLocal<Scope> CURRENT = new ThreadLocal<>();
     private static final ThreadLocal<ValidatedControlSelection> CONTROL_SELECTION = new ThreadLocal<>();
     private static final ThreadLocal<Optional<String>> CATALOG_OVERRIDE = new ThreadLocal<>();
+
+    /** Captures ordinary identity or the validated control selection before an explicit runAs span. */
+    public IdentitySnapshot snapshotIdentity() {
+        return new IdentitySnapshot(CURRENT.get(), CONTROL_SELECTION.get());
+    }
+
+    /** Restores identity without replacing a still-active placement override or SQL restriction. */
+    public void restoreIdentity(IdentitySnapshot snapshot) {
+        if (snapshot.scope == null) {
+            CURRENT.remove();
+        } else {
+            CURRENT.set(snapshot.scope);
+        }
+        if (snapshot.selection == null) {
+            CONTROL_SELECTION.remove();
+        } else {
+            CONTROL_SELECTION.set(snapshot.selection);
+        }
+    }
 
     /**
      * Installs the scope for the current thread. The catalog must come from

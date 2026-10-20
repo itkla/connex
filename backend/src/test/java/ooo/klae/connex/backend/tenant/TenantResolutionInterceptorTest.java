@@ -66,16 +66,14 @@ class TenantResolutionInterceptorTest {
             catalogResolver,
             requestResolver,
             workspaceCookie,
-            correlationPseudonymizer,
-            new TenantRoutingProperties());
+            correlationPseudonymizer);
         liveInterceptor = new TenantResolutionInterceptor(
             workspaceService,
             liveContext,
             catalogResolver,
             requestResolver,
             workspaceCookie,
-            correlationPseudonymizer,
-            new TenantRoutingProperties());
+            correlationPseudonymizer);
         User member = new User();
         member.setId(7);
         authenticateAs(member);
@@ -666,8 +664,7 @@ class TenantResolutionInterceptorTest {
             catalogResolver,
             new WorkspaceRequestResolver(workspaceService),
             workspaceCookie,
-            correlationPseudonymizer,
-            new TenantRoutingProperties());
+            correlationPseudonymizer);
     }
 
     private void stubResolutionFor(int userId, int workspaceId) {

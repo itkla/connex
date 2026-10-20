@@ -10,6 +10,8 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.HashMap;
+import java.util.ArrayDeque;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -33,6 +35,8 @@ import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.IdentifierTree;
 import com.sun.source.tree.MemberSelectTree;
 import com.sun.source.tree.MethodInvocationTree;
+import com.sun.source.tree.MemberReferenceTree;
+import com.sun.source.tree.AssignmentTree;
 import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.VariableTree;
 import com.sun.source.util.JavacTask;
@@ -43,9 +47,10 @@ import ooo.klae.connex.backend.dto.MyWorkspacesDto;
 import ooo.klae.connex.backend.dto.UserDto;
 
 /**
- * Pins the reviewed handlers and their direct application dependencies. Real HTTP integration tests
- * run their production service paths against a catalog without tenant tables; this is deliberately
- * not a general transitive call-graph proof across framework callbacks and generic scope runners.
+ * A pinned-handler and direct-dependency tripwire, including simple aliases and method references.
+ * Selected dependency entries and their source-local helpers also reject event publication and
+ * async submission. This is not a transitive containment proof: the runtime SQL guard, inherited
+ * origin and executor task decoration enforce descendants' restrictions independently of this scan.
  */
 class ControlOnlyHandlerArchTest {
     private static final Path ROOT = Path.of("src/main/java/ooo/klae/connex/backend");
@@ -85,6 +90,15 @@ class ControlOnlyHandlerArchTest {
         Map.entry("WorkspaceService#requireMember", Set.of("this.isMember")),
         Map.entry("WorkspaceService#isMember", Set.of("workspaceMapper.isMember")),
         Map.entry("WorkspaceService#rememberActive", Set.of("workspaceMapper.setLastActiveWorkspaceId")));
+    private static final Map<String, Set<String>> DEPENDENCY_ENTRIES = Map.of(
+        "services/AuthService.java", Set.of("getCurrentUser"),
+        "services/AccountSessionRevocationService.java", Set.of("closeWebSocketsAfterRename"),
+        "notifications/WebSocketSessionRegistry.java", Set.of("closeByUser"),
+        "services/AuditService.java", Set.of("record", "diff", "singleChange"),
+        "tenant/WorkspaceCookie.java", Set.of("set"));
+    private static final Set<String> DELEGATION_METHODS = Set.of(
+        "publish", "publishEvent", "execute", "submit", "submitCompletable", "start", "startVirtualThread",
+        "parallel", "parallelStream");
 
     @Test
     void onlyTheExactReviewedSignaturesAndMappingsCanDeferPlacement() {
@@ -128,7 +142,11 @@ class ControlOnlyHandlerArchTest {
         "tenantMapper.read();",
         "helper.readTenant();",
         "events.publishEvent(new Object());",
-        "callbacks.run(() -> tenantMapper.read());"
+        "callbacks.run(() -> tenantMapper.read());",
+        "var alias = tenantMapper; alias.read();",
+        "var alias = this.tenantMapper; var second = alias; second.read();",
+        "Object read = tenantMapper::read;",
+        "var alias = tenantMapper; Object read = alias::read;"
     })
     void dependencyContractRejectsDirectHelperEventAndCallbackTenantWork(String body) throws IOException {
         String source = "class UserController { Object userService; Object tenantMapper; Object helper; "
@@ -138,6 +156,101 @@ class ControlOnlyHandlerArchTest {
 
         assertThrows(AssertionError.class, () -> assertEquals(
             DEPENDENCIES.get("UserController#getUserById"), actual.get("UserController#getUserById")));
+    }
+
+    @Test
+    void acceptedDependencyEntriesAndTheirLocalHelpersCannotDelegateWork() throws IOException {
+        for (var entry : DEPENDENCY_ENTRIES.entrySet()) {
+            assertNoDelegation(new SourceFile(ROOT.resolve(entry.getKey())), entry.getValue());
+        }
+        for (String source : List.of("controllers/WorkspaceController.java", "controllers/UserController.java",
+                "services/WorkspaceService.java", "services/UserService.java")) {
+            String type = Path.of(source).getFileName().toString().replace(".java", "");
+            Set<String> entries = DEPENDENCIES.keySet().stream().filter(key -> key.startsWith(type + "#"))
+                .map(key -> key.substring(key.indexOf('#') + 1)).collect(Collectors.toSet());
+            assertNoDelegation(new SourceFile(ROOT.resolve(source)), entries);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "events.publishEvent(new Object());",
+        "var alias = events; alias.publishEvent(new Object());",
+        "Object callback = events::publishEvent;",
+        "executor.execute(() -> tenantMapper.read());",
+        "java.util.concurrent.CompletableFuture.runAsync(() -> tenantMapper.read());"
+    })
+    void acceptedDependencyHelperCannotHideEventOrAsyncSubmission(String body) throws IOException {
+        String source = "class AccountSessionRevocationService { Object events; Object executor; Object tenantMapper; "
+            + "void closeWebSocketsAfterRename() { helper(); } void helper() { " + body + " } }";
+
+        assertThrows(AssertionError.class, () -> assertNoDelegation(new SourceText(source),
+            Set.of("closeWebSocketsAfterRename")));
+    }
+
+    private static void assertNoDelegation(JavaFileObject file, Set<String> entries) throws IOException {
+        var compiler = Objects.requireNonNull(ToolProvider.getSystemJavaCompiler());
+        try (var manager = compiler.getStandardFileManager(null, null, StandardCharsets.UTF_8)) {
+            JavacTask task = (JavacTask) compiler.getTask(null, manager, null,
+                List.of("-proc:none"), null, List.of(file));
+            Map<String, List<MethodTree>> methods = new HashMap<>();
+            for (var unit : task.parse()) {
+                for (var declaration : unit.getTypeDecls()) {
+                    if (declaration instanceof ClassTree type) {
+                        assertTrue(type.getModifiers().getAnnotations().stream().noneMatch(annotation ->
+                            annotation.getAnnotationType().toString().matches("(?:.*\\.)?Async")), file.getName());
+                        for (var member : type.getMembers()) {
+                            if (member instanceof MethodTree method) {
+                                methods.computeIfAbsent(method.getName().toString(),
+                                    ignored -> new java.util.ArrayList<>()).add(method);
+                            }
+                        }
+                    }
+                }
+            }
+            var pending = new ArrayDeque<>(entries);
+            Set<String> seen = new HashSet<>();
+            while (!pending.isEmpty()) {
+                String name = pending.removeFirst();
+                if (!seen.add(name)) {
+                    continue;
+                }
+                for (MethodTree method : Objects.requireNonNull(methods.get(name), "Missing reviewed entry " + name)) {
+                    assertTrue(method.getModifiers().getAnnotations().stream().noneMatch(annotation ->
+                        annotation.getAnnotationType().toString().matches("(?:.*\\.)?Async")), name);
+                    new TreeScanner<Void, Void>() {
+                        @Override
+                        public Void visitMethodInvocation(MethodInvocationTree call, Void unused) {
+                            String invoked = call.getMethodSelect() instanceof MemberSelectTree select
+                                ? select.getIdentifier().toString() : call.getMethodSelect().toString();
+                            refuseDelegation(invoked);
+                            String receiver = call.getMethodSelect() instanceof MemberSelectTree select
+                                ? select.getExpression().toString() : "this";
+                            if (receiver.equals("this") && methods.containsKey(invoked)) {
+                                pending.add(invoked);
+                            }
+                            return super.visitMethodInvocation(call, unused);
+                        }
+
+                        @Override
+                        public Void visitMemberReference(MemberReferenceTree reference, Void unused) {
+                            String invoked = reference.getName().toString();
+                            refuseDelegation(invoked);
+                            if (reference.getQualifierExpression().toString().equals("this")
+                                    && methods.containsKey(invoked)) {
+                                pending.add(invoked);
+                            }
+                            return super.visitMemberReference(reference, unused);
+                        }
+
+                        private void refuseDelegation(String invoked) {
+                            assertTrue(!DELEGATION_METHODS.contains(invoked) && !invoked.endsWith("Async"),
+                                file.getName() + "#" + name + " delegates work through " + invoked);
+                        }
+                    }.scan(method.getBody(), null);
+                }
+            }
+        }
     }
 
     private static void scan(List<? extends JavaFileObject> files, Map<String, Set<String>> calls)
@@ -151,6 +264,7 @@ class ControlOnlyHandlerArchTest {
                     private Set<String> fields = Set.of();
                     private String type;
                     private Set<String> current;
+                    private Map<String, String> aliases = new HashMap<>();
 
                     @Override
                     public Void visitClass(ClassTree tree, Void unused) {
@@ -171,6 +285,8 @@ class ControlOnlyHandlerArchTest {
                     @Override
                     public Void visitMethod(MethodTree tree, Void unused) {
                         Set<String> previous = current;
+                        Map<String, String> previousAliases = aliases;
+                        aliases = new HashMap<>();
                         String key = type + "#" + tree.getName();
                         current = DEPENDENCIES.containsKey(key)
                             ? calls.computeIfAbsent(key, ignored -> new TreeSet<>()) : null;
@@ -178,6 +294,7 @@ class ControlOnlyHandlerArchTest {
                             return super.visitMethod(tree, unused);
                         } finally {
                             current = previous;
+                            aliases = previousAliases;
                         }
                     }
 
@@ -187,13 +304,54 @@ class ControlOnlyHandlerArchTest {
                             if (tree.getMethodSelect() instanceof IdentifierTree identifier) {
                                 current.add("this." + identifier.getName());
                             } else if (tree.getMethodSelect() instanceof MemberSelectTree select) {
-                                String receiver = select.getExpression().toString().replaceFirst("^this\\.", "");
-                                if (fields.contains(receiver)) {
+                                String receiver = dependencyReceiver(select.getExpression().toString());
+                                if (receiver != null) {
                                     current.add(receiver + "." + select.getIdentifier());
                                 }
                             }
                         }
                         return super.visitMethodInvocation(tree, unused);
+                    }
+
+                    @Override
+                    public Void visitMemberReference(MemberReferenceTree reference, Void unused) {
+                        if (current != null) {
+                            String receiver = dependencyReceiver(reference.getQualifierExpression().toString());
+                            if (receiver != null) {
+                                current.add(receiver + "." + reference.getName());
+                            }
+                        }
+                        return super.visitMemberReference(reference, unused);
+                    }
+
+                    @Override
+                    public Void visitVariable(VariableTree variable, Void unused) {
+                        if (current != null && variable.getInitializer() != null) {
+                            recordAlias(variable.getName().toString(), variable.getInitializer().toString());
+                        }
+                        return super.visitVariable(variable, unused);
+                    }
+
+                    @Override
+                    public Void visitAssignment(AssignmentTree assignment, Void unused) {
+                        if (current != null) {
+                            recordAlias(assignment.getVariable().toString(), assignment.getExpression().toString());
+                        }
+                        return super.visitAssignment(assignment, unused);
+                    }
+
+                    private void recordAlias(String alias, String expression) {
+                        String receiver = dependencyReceiver(expression);
+                        if (receiver == null) {
+                            aliases.remove(alias);
+                        } else {
+                            aliases.put(alias, receiver);
+                        }
+                    }
+
+                    private String dependencyReceiver(String expression) {
+                        String receiver = expression.replaceFirst("^this\\.", "");
+                        return aliases.getOrDefault(receiver, fields.contains(receiver) ? receiver : null);
                     }
                 }.scan(unit, null);
             }

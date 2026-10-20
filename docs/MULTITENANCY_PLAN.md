@@ -191,15 +191,30 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   restricts MyBatis execution to `ControlCatalogRoutingInterceptor`'s physical-control registry before
   ordinary scope exemptions, including when general scope enforcement is disabled. Clearing or
   replacing the tenant context does not remove that request restriction. Completion and async handoff
-  release both the control selection and capability. Header parsing, membership refusals, selection-route
+  release both the control selection and capability; an interceptor refusal also releases its origin.
+  Child threads inherit the control-only origin, and the application `TaskDecorator` captures it for
+  pooled `@Async` helpers and event listeners. The explicit managed-content executor uses the same
+  decorator. This carries the restriction without granting a descendant the request's identity or
+  catalog. Even a propagated or manually installed tenant identity, a catalog-only override, or disabled
+  ordinary scope enforcement cannot admit tenant SQL. A descendant must enter its own
+  `TenantWorkScope.inWorkspace`/`AutomationExecutor.runAs` placement-validated span; that first entry
+  resolves placement afresh instead of trusting a propagated identity, and restores the restriction on
+  exit. That permission never propagates to further children. The HTTP handler itself remains restricted
+  even inside such a span. Header parsing, membership refusals, selection-route
   target authorization and revoked-selection recovery retain their existing behavior; a recovered
   fallback still resolves its placement. Single-database mode retains eager placement resolution and
-  its existing 503s. `GET /api/auth/me` keeps its existing MVC exclusion. Timezone updates, workspace
+  its existing 503s. `GET /api/auth/me` keeps its existing MVC exclusion. `PATCH /api/users/me` is excluded
+  because `UserService.updateTimezone` publishes a source-change event whose listener reconciles tenant
+  notifications. `PUT /api/users/{id}` may persist timezone through `UserService.update` but does not
+  publish that event; this existing distinction is pinned by tests and remains unchanged. Workspace
   creation/offboarding and the notification inbox are not allowlisted; the inbox remains 503 when its
   remembered placement is unservable until recipient-catalog routing is implemented. The handler
-  architecture contract pins signatures, mappings and direct dependencies; real-handler integration
-  tests use a control-only scratch catalog with no tenant tables. This is not a general static
-  transitive-call proof across framework callbacks.
+  architecture contract is a pinned-handler and direct-dependency tripwire, including simple local
+  aliases and method references. Reviewed dependency entries and their source-local helpers also
+  reject event publication or async submission. It is not a general transitive containment proof;
+  the runtime SQL guard and descendant propagation enforce that control. Real-handler integration
+  tests copy control tables into a scratch catalog with no tenant tables after the normal Flyway
+  initializer has migrated the source schema, so they can run alone against a fresh CI schema.
 - **Enforced seams:** (1) share grants are `INSERT..SELECT` with an ownership + same-org ceiling in SQL —
   0 affected rows means structurally refused (`ShareMapperTest`), and `ShareService` additionally throws;
   (2) **workspace→org placement**: a new workspace joins the active workspace's org only when its creator
