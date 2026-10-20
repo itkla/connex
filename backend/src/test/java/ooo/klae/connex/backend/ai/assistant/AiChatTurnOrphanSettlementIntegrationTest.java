@@ -428,6 +428,7 @@ class AiChatTurnOrphanSettlementIntegrationTest {
     private int insertSession() {
         AiChatSession session = new AiChatSession();
         session.setWorkspaceId(workspace.getId());
+        session.setOrganizationPrivacyGeneration(1L);
         session.setCreatedByUserId(member.getId());
         session.setTitle("Orphan settlement drill");
         session.setTitleUserSet(false);
@@ -445,6 +446,7 @@ class AiChatTurnOrphanSettlementIntegrationTest {
         turn.setStatus(status);
         turn.setPrivacyMode("masked");
         turn.setPrivacyGeneration(1L);
+        turn.setOrganizationPrivacyGeneration(1L);
         turn.setStreamed(false);
         chatMapper.insertTurn(turn);
         return turn.getId();

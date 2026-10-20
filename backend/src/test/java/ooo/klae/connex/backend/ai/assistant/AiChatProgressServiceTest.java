@@ -56,6 +56,35 @@ class AiChatProgressServiceTest {
     }
 
     @Test
+    void withdrawnV1TurnReturnsOnlyStatusMetadata() {
+        var session = chatMapper.getPrivacySession(3, 5);
+        session.setMissionTaintSeq(1);
+        var barrier = chatMapper.getPrivacyBarrier(3);
+        barrier.setBlocked(true);
+        barrier.setGeneration(2);
+        var source = turn();
+        source.setPrivacyTaintSeq(1);
+        source.setStreamed(true);
+        source.setPartialContent("Withdrawn evidence");
+        var projected = service.projectTurn(source, 11, null);
+        assertEquals(source.getStatus(), projected.status());
+        assertNull(projected.partialContent());
+        assertNull(projected.scope());
+        assertNull(projected.toolCalls());
+        assertTrue(projected.progress().isEmpty());
+        verify(chatMapper, org.mockito.Mockito.never()).listToolCallsByTurn(
+                org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyLong());
+    }
+
+    @Test
+    void organizationInvalidationStillRefusesTurnStatusProjection() {
+        when(authority.current(1)).thenReturn(2L);
+        org.junit.jupiter.api.Assertions.assertThrows(AiAssistantLoopException.class,
+                () -> service.projectTurn(turn(), 11, null));
+    }
+
+    @Test
     void turnEvidenceUsesCatalogTiersAndDurableStatesFromOneBoundedRead() {
         when(chatMapper.listToolCallsByTurn(3, 5, "turn-7-step-", ROW_LIMIT, 1L))
                 .thenReturn(List.of(

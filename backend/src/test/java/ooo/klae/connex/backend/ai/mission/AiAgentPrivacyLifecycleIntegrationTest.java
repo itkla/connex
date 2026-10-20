@@ -85,19 +85,19 @@ class AiAgentPrivacyLifecycleIntegrationTest extends AbstractAiAgentPrivacyInteg
         session.setVisibility("private");
         session.setStatus("active");
         chatMapper.insertSession(session);
-        assertNotNull(assistant.get(session.getId(), 0, 20));
+        assertNotNull(assistant.get(session.getId(), 1, 20));
         jdbc.update("INSERT INTO person (workspace_id,name) VALUES (?,'Hold clearing subject')", workspace.getId());
         Integer person = jdbc.queryForObject("SELECT MAX(id) FROM person WHERE workspace_id=?", Integer.class, workspace.getId());
         int personId = java.util.Objects.requireNonNull(person);
         try {
             people.updateProcessingRestrictions(personId, true, false);
             assertEquals(2, jdbc.queryForObject("SELECT generation FROM ai_assistant_privacy_fence WHERE organization_id=?", Long.class, workspace.getOrgId()));
-            assertThrows(RuntimeException.class, () -> assistant.get(session.getId(), 0, 20));
+            assertThrows(RuntimeException.class, () -> assistant.get(session.getId(), 1, 20));
             people.updateProcessingRestrictions(personId, false, false);
             assertEquals(2, jdbc.queryForObject("SELECT generation FROM ai_assistant_privacy_fence WHERE organization_id=?", Long.class, workspace.getOrgId()));
             assertNotNull(chatMapper.getPrivacySession(workspace.getId(), session.getId()));
-            assertThrows(RuntimeException.class, () -> assistant.get(session.getId(), 0, 20));
-            assertEquals(0, assistant.page(0, 20).total());
+            assertThrows(RuntimeException.class, () -> assistant.get(session.getId(), 1, 20));
+            assertEquals(0, assistant.page(1, 20).total());
         } finally {
             jdbc.update("DELETE FROM person WHERE id=?", personId);
         }
@@ -323,6 +323,7 @@ class AiAgentPrivacyLifecycleIntegrationTest extends AbstractAiAgentPrivacyInteg
     private AiAgentRun create() {
         AiChatSession session = new AiChatSession();
         session.setWorkspaceId(workspace.getId());
+        session.setOrganizationPrivacyGeneration(1L);
         session.setCreatedByUserId(currentUser.getId());
         session.setTitle("Lifecycle mission");
         session.setVisibility("private");

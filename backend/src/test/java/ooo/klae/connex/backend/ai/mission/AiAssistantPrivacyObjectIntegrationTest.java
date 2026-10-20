@@ -36,6 +36,39 @@ class AiAssistantPrivacyObjectIntegrationTest extends AbstractAiAgentPrivacyInte
     @MockitoSpyBean private ooo.klae.connex.backend.mappers.AiAgentPrivacyObjectMapper receipts;
 
     @Test
+    void stuckBootstrapObligationYieldsToLaterRestrictionDatabaseErasure() {
+        Holding historical = holding();
+        jdbc.update("UPDATE ai_chat_session SET organization_privacy_generation=0 WHERE workspace_id=?",
+                workspace.getId());
+        var bootstrap = organizationPrivacy.operations(workspace.getOrgId()).stream()
+                .filter(operation -> "bootstrap".equals(operation.getReason())).findFirst().orElseThrow();
+        drainReference(bootstrap);
+        doThrow(new ObjectStorageException("provider unavailable")).when(provider).delete(historical.objectKey());
+        deletion.processTenant(workspace.getId(), historical.objectKey(), LocalDateTime.now(ZoneOffset.UTC).plusDays(1));
+        holding();
+        var restriction = invalidateAll();
+        assertEquals(bootstrap.getOperationKey(), privacyMapper.dueWork(workspace.getId(), 1).getFirst().getOperationKey());
+        assertFalse(privacyService.batch(workspace.getId(), bootstrap.getOperationKey()));
+        assertEquals("verify", privacyMapper.getWork(workspace.getId(), bootstrap.getOperationKey()).getPhase());
+        assertTrue(privacyMapper.getWork(workspace.getId(), bootstrap.getOperationKey()).getNextAttemptAt()
+                .isAfter(privacyMapper.getWork(workspace.getId(), bootstrap.getOperationKey()).getVerifiedAt()));
+        for (int batch = 0; batch < 40; batch++) {
+            var selected = privacyMapper.dueWork(workspace.getId(), 1);
+            assertFalse(selected.isEmpty());
+            assertEquals(restriction.getOperationKey(), selected.getFirst().getOperationKey());
+            privacyService.batch(workspace.getId(), selected.getFirst().getOperationKey());
+            if (jdbc.queryForObject("SELECT COUNT(*) FROM ai_chat_session WHERE workspace_id=?",
+                    Integer.class, workspace.getId()) == 0) {
+                break;
+            }
+        }
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM ai_chat_session WHERE workspace_id=?",
+                Integer.class, workspace.getId()));
+        assertEquals("pending", disposition(bootstrap));
+        assertEquals("verify", privacyMapper.getWork(workspace.getId(), bootstrap.getOperationKey()).getPhase());
+    }
+
+    @Test
     void quarantineDeleteBeforeDiscoveryCannotLoseFailedObjectObligation() {
         Holding holding = holding();
         AiAssistantPrivacyOperation operation = invalidateAll();
@@ -102,7 +135,7 @@ class AiAssistantPrivacyObjectIntegrationTest extends AbstractAiAgentPrivacyInte
         assertThrows(IllegalStateException.class, () -> deletion.processTenant(workspace.getId(), holding.objectKey(), LocalDateTime.now(ZoneOffset.UTC).plusDays(1)));
         assertEquals("pending", disposition(operation));
         assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM object_deletion_queue WHERE workspace_id=? AND object_key=?", Integer.class, workspace.getId(), holding.objectKey()));
-        doCallRealMethod().when(receipts).acknowledgeDeleted(org.mockito.ArgumentMatchers.eq(workspace.getId()), org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.eq(holding.objectKey()));
+        org.mockito.Mockito.reset(receipts);
         privacyService.initialize(workspace.getId());
         deletion.processTenant(workspace.getId(), holding.objectKey(), LocalDateTime.now(ZoneOffset.UTC).plusDays(1));
         finish(operation.getOperationKey());

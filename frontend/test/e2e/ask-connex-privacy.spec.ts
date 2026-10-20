@@ -78,11 +78,11 @@ for (const locale of ['en', 'ja'] as const) {
             emit({ workspaceId, kind: 'privacy_invalidated', cutoffGeneration: '1' });
             await expect(page.getByText('Retained private browser text', { exact: true })).toHaveCount(0);
             const unavailable = message(locale, 'common', 'AskConnex.privacyUnavailable');
-            await expect(page.getByText(unavailable, { exact: true })).toBeVisible();
+            await expect(page.getByRole('status').filter({ hasText: unavailable })).toBeVisible();
             release.resolve();
             await expect(page.getByText('Retained private browser text', { exact: true })).toHaveCount(0);
             await page.goto(`/ask-connex/${await create()}`);
-            await expect(page.getByText(unavailable, { exact: true })).toHaveCount(0);
+            await expect(page.getByRole('status').filter({ hasText: unavailable })).toHaveCount(0);
         } finally {
             release.resolve();
         }

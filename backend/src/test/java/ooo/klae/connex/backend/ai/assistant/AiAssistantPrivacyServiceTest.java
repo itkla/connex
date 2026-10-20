@@ -31,6 +31,22 @@ class AiAssistantPrivacyServiceTest {
     private final AiAssistantPrivacyService authority = new AiAssistantPrivacyService(control, workspaces, events);
 
     @Test
+    void newOrganizationProvisioningDoesNotLockTheEmptyWorkspaceRange() {
+        authority.provision(7);
+        var accepted = org.mockito.ArgumentCaptor.forClass(AiAssistantPrivacyOperation.class);
+        verify(control).insertOperation(accepted.capture());
+        var operation = accepted.getValue();
+        verify(control).insertFence(7, operation.getOperationKey());
+        assertEquals(7, operation.getOrganizationId());
+        assertEquals("bootstrap", operation.getReason());
+        assertEquals(0, operation.getCutoffGeneration());
+        assertEquals(1, operation.getInvalidatedGeneration());
+        org.junit.jupiter.api.Assertions.assertArrayEquals(AiAssistantPrivacyService.fingerprint(
+                "assistant-bootstrap-v1|7|" + operation.getOperationKey()), operation.getOperationFingerprint());
+        verify(control, never()).reconcileWorkspaceIntents(org.mockito.ArgumentMatchers.anyInt(), any());
+    }
+
+    @Test
     void missingAuthorityCannotBeCreatedByReadAdmission() {
         assertThrows(ServiceUnavailableException.class, () -> authority.current(7));
         verify(control, never()).insertFence(eq(7), any());

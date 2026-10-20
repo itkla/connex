@@ -122,7 +122,7 @@
     SELECT * FROM ai_agent_privacy_work
     WHERE workspace_id = #{workspaceId} AND phase &lt;&gt; 'complete'
       AND next_attempt_at &lt;= CURRENT_TIMESTAMP(6)
-    ORDER BY id LIMIT #{limit}
+    ORDER BY next_attempt_at, id LIMIT #{limit}
   </select>
 
   <update id="updateWork">

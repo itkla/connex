@@ -290,7 +290,7 @@ public class AiChatTurnPersistenceService {
         workspaceService.lockAndRequireMember(workspaceId, userId);
         workspaceService.requirePermission(workspaceId, userId, Permission.AI_USE);
         List<Integer> activeMemberIds = activeMemberIds(workspaceId, userId);
-        AiChatSession session = requireAccessibleLocked(workspaceId, userId, sessionId);
+        AiChatSession session = requireVisibleLocked(workspaceId, userId, sessionId);
         requireActiveAuthor(session, activeMemberIds);
         AiChatTurn turn = chatMapper.getTurnByIdForUpdate(workspaceId, sessionId, turnId);
         if (turn == null) {
@@ -302,7 +302,7 @@ public class AiChatTurnPersistenceService {
         if (expired) {
             retainTerminalPrivacy(result);
         }
-        privacyGuard.retainOrganization(workspaceId, result.getOrganizationPrivacyGeneration());
+        privacyGuard.retainOrganization(workspaceId, session.getOrganizationPrivacyGeneration());
         chatMapper.lockPrivacyBarrierForShare(workspaceId);
         if (!turnTokenCurrent(result)) {
             result.setPartialContent(null);
@@ -1302,19 +1302,23 @@ public class AiChatTurnPersistenceService {
     }
 
     private AiChatSession requireAccessibleLocked(int workspaceId, int userId, int sessionId) {
+        AiChatSession session = requireVisibleLocked(workspaceId, userId, sessionId);
+        privacyGuard.capture(chatMapper, session);
+        return session;
+    }
+
+    private AiChatSession requireVisibleLocked(int workspaceId, int userId, int sessionId) {
         AiChatSession session = chatMapper.getSessionByIdForUpdate(workspaceId, userId, sessionId);
         if (session == null) {
             throw inaccessible();
         }
         if (Objects.equals(session.getCreatedByUserId(), userId)) {
-            privacyGuard.capture(chatMapper, session);
             return session;
         }
         if (!SHARED.equals(session.getVisibility())
                 || !chatMapper.isParticipant(workspaceId, sessionId, userId)) {
             throw inaccessible();
         }
-        privacyGuard.capture(chatMapper, session);
         return session;
     }
 

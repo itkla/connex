@@ -59,7 +59,9 @@ public class SimpAiChatRealtimePublisher implements AiChatRealtimePublisher {
                         frame.sessionId(), source.getPrivacyGeneration(), source.getPrivacyTaintSeq(), privacyGuard.organizationId(frame.workspaceId()), source.getOrganizationPrivacyGeneration()));
                 publicationGuard.publish(privacyGuard.organizationId(frame.workspaceId()),
                         source.getOrganizationPrivacyGeneration(), () -> messagingTemplate.convertAndSendToUser(
-                                routingIdentities.destinationFor(userId), AI_CHAT_QUEUE, frame));
+                                routingIdentities.destinationFor(userId), AI_CHAT_QUEUE, frame,
+                                AiChatPrivacyOutboundInterceptor.headers(privacyGuard.organizationId(frame.workspaceId()),
+                                        source.getOrganizationPrivacyGeneration())));
             });
         });
     }
@@ -83,7 +85,8 @@ public class SimpAiChatRealtimePublisher implements AiChatRealtimePublisher {
                     if (canReceive(userId, frame)) {
                         publicationGuard.publish(sourceToken.organizationId(), sourceToken.organizationPrivacyGeneration(),
                                 () -> messagingTemplate.convertAndSendToUser(
-                                        routingIdentities.destinationFor(userId), AI_CHAT_QUEUE, frame));
+                                        routingIdentities.destinationFor(userId), AI_CHAT_QUEUE, frame,
+                                        AiChatPrivacyOutboundInterceptor.headers(sourceToken.organizationId(), sourceToken.organizationPrivacyGeneration())));
                     }
                 }
             });

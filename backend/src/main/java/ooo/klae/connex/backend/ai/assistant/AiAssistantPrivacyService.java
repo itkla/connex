@@ -85,14 +85,13 @@ public class AiAssistantPrivacyService {
         provisionControl(controlMapper, organizationId);
     }
 
-    /** Shares provisioning semantics with the seeder's ordered batch mapper. */
+    /** Creates new-organization authority before its first workspace; the initializer enrolls placement after commit. */
     public static void provisionControl(AiAssistantPrivacyControlMapper controlMapper, int organizationId) {
         String key = UUID.randomUUID().toString();
         controlMapper.insertFence(organizationId, key);
         AiAssistantPrivacyOperation operation = operation(organizationId, key, 0, "bootstrap", null, null);
         operation.setOperationFingerprint(fingerprint("assistant-bootstrap-v1|" + organizationId + "|" + key));
         controlMapper.insertOperation(operation);
-        controlMapper.reconcileWorkspaceIntents(organizationId, key);
     }
 
     /** Reads the immutable accepted operation for replay and recovery. */

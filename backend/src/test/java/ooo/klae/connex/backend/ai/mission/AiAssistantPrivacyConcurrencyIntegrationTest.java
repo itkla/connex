@@ -38,6 +38,7 @@ import ooo.klae.connex.backend.support.MySqlLockWaitProbe;
 import tools.jackson.databind.ObjectMapper;
 
 class AiAssistantPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivacyIntegrationTest {
+    @Autowired private org.mybatis.spring.SqlSessionTemplate sqlSessions;
     @Autowired private AiAssistantPrivacyService organizationPrivacy;
     @Autowired private AiAgentRunPersistenceService missions;
     @MockitoSpyBean private AiAgentRunMapper runs;
@@ -100,15 +101,15 @@ class AiAssistantPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivac
     @Test
     void omittedWorkspaceIsWithheldBeforeEnrollment() {
         AiChatSession session = session();
-        assertNotNull(assistant.get(session.getId(), 0, 20));
+        assertNotNull(assistant.get(session.getId(), 1, 20));
         UUID operation = UUID.randomUUID();
         transaction().executeWithoutResult(status -> privacyService.invalidateAssistantOrganization(
                 workspace.getOrgId(), List.of(), operation, "restriction", null, null));
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM ai_agent_privacy_work WHERE workspace_id=? AND operation_key=?",
                 Integer.class, workspace.getId(), operation.toString()));
         assertNotNull(chatMapper.getPrivacySession(workspace.getId(), session.getId()));
-        assertEquals(0, assistant.page(0, 20).total());
-        assertThrows(RuntimeException.class, () -> assistant.get(session.getId(), 0, 20));
+        assertEquals(0, assistant.page(1, 20).total());
+        assertThrows(RuntimeException.class, () -> assistant.get(session.getId(), 1, 20));
         privacyService.initialize(workspace.getId());
         assertNotNull(privacyMapper.getWork(workspace.getId(), operation.toString()));
         finish(operation.toString());
@@ -183,7 +184,7 @@ class AiAssistantPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivac
                 connection.set(java.util.Objects.requireNonNull(jdbc.queryForObject("SELECT CONNECTION_ID()", Long.class)));
                 contending.countDown();
             }
-            return invocation.callRealMethod();
+            return sqlSessions.getMapper(ooo.klae.connex.backend.mappers.AiAssistantPrivacyControlMapper.class).lockOperation(invocation.getArgument(0), invocation.getArgument(1));
         }).when(control).lockOperation(workspace.getOrgId(), operation.getOperationKey());
         try (var workers = Executors.newFixedThreadPool(2)) {
             var owner = workers.submit(() -> scoped("assistant-v2-owner", () -> transaction().executeWithoutResult(status -> {
@@ -245,7 +246,7 @@ class AiAssistantPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivac
                 connection.set(java.util.Objects.requireNonNull(jdbc.queryForObject("SELECT CONNECTION_ID()", Long.class)));
                 contending.countDown();
             }
-            Object row = invocation.callRealMethod();
+            Object row = sqlSessions.getMapper(ooo.klae.connex.backend.mappers.AiAssistantPrivacyControlMapper.class).lockFence(invocation.getArgument(0));
             if (Thread.currentThread().getName().equals("assistant-org-holder")) {
                 held.countDown();
                 await(release);
@@ -257,7 +258,7 @@ class AiAssistantPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivac
                 connection.set(java.util.Objects.requireNonNull(jdbc.queryForObject("SELECT CONNECTION_ID()", Long.class)));
                 contending.countDown();
             }
-            return invocation.callRealMethod();
+            return sqlSessions.getMapper(ooo.klae.connex.backend.mappers.AiAssistantPrivacyControlMapper.class).lockFenceForShare(invocation.getArgument(0));
         }).when(control).lockFenceForShare(workspace.getOrgId());
         UUID newerKey = UUID.randomUUID();
         Runnable newer = () -> transaction().executeWithoutResult(status -> organizationPrivacy.invalidateOrganization(
@@ -289,7 +290,7 @@ class AiAssistantPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivac
                 connection.set(java.util.Objects.requireNonNull(jdbc.queryForObject("SELECT CONNECTION_ID()", Long.class)));
                 contending.countDown();
             }
-            Object row = invocation.callRealMethod();
+            Object row = sqlSessions.getMapper(ooo.klae.connex.backend.mappers.AiAssistantPrivacyControlMapper.class).lockFence(invocation.getArgument(0));
             if (Thread.currentThread().getName().equals("assistant-org-holder") && exclusiveFirst) {
                 held.countDown();
                 await(release);
@@ -301,7 +302,7 @@ class AiAssistantPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivac
                 connection.set(java.util.Objects.requireNonNull(jdbc.queryForObject("SELECT CONNECTION_ID()", Long.class)));
                 contending.countDown();
             }
-            Object row = invocation.callRealMethod();
+            Object row = sqlSessions.getMapper(ooo.klae.connex.backend.mappers.AiAssistantPrivacyControlMapper.class).lockFenceForShare(invocation.getArgument(0));
             if (Thread.currentThread().getName().equals("assistant-org-holder") && !exclusiveFirst) {
                 held.countDown();
                 await(release);
@@ -369,7 +370,7 @@ class AiAssistantPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivac
                 contenderConnection.set(java.util.Objects.requireNonNull(connection));
                 contenderCalling.countDown();
             }
-            Object row = invocation.callRealMethod();
+            Object row = sqlSessions.getMapper(ooo.klae.connex.backend.mappers.AiChatMapper.class).getSessionByIdForMaintenanceUpdate(invocation.getArgument(0), invocation.getArgument(1));
             if (name.equals("assistant-privacy-race-holder")) {
                 rootHeld.countDown();
                 assertTrue(releaseRoot.await(30, TimeUnit.SECONDS));
@@ -397,20 +398,20 @@ class AiAssistantPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivac
             }
             leaseReleased.set(true);
             return invocation.callRealMethod();
-        }).when(leases).releaseHeldInCurrentTransaction(org.mockito.ArgumentMatchers.any());
+        }).when(org.springframework.test.util.AopTestUtils.<ooo.klae.connex.backend.ai.lease.AiRunLeaseService>getUltimateTargetObject(leases)).releaseHeldInCurrentTransaction(org.mockito.ArgumentMatchers.any());
         doAnswer(invocation -> {
             assertFalse(leaseReleased.get(), "Run settlement must precede lease release");
-            return invocation.callRealMethod();
+            return sqlSessions.getMapper(ooo.klae.connex.backend.mappers.AiAgentRunMapper.class).updateRun(invocation.getArgument(0), invocation.getArgument(1), invocation.getArgument(2));
         }).when(runs).updateRun(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyLong());
         doAnswer(invocation -> {
             assertFalse(leaseReleased.get(), "Segment settlement must precede lease release");
-            return invocation.callRealMethod();
+            return sqlSessions.getMapper(ooo.klae.connex.backend.mappers.AiAgentRunMapper.class).updateSegment(invocation.getArgument(0), invocation.getArgument(1));
         }).when(runs).updateSegment(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString());
         doAnswer(invocation -> {
             if (Boolean.TRUE.equals(purging.get())) {
                 assertFalse(releaseObserved.get(), "Work changes must precede lease release");
             }
-            return invocation.callRealMethod();
+            return sqlSessions.getMapper(ooo.klae.connex.backend.mappers.AiAgentPrivacyMapper.class).updateWork(invocation.getArgument(0), invocation.getArgument(1));
         }).when(workRows).updateWork(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyLong());
         Runnable purge = () -> {
             purging.set(true);

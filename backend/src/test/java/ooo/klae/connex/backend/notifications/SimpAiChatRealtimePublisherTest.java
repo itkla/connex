@@ -95,7 +95,7 @@ class SimpAiChatRealtimePublisherTest {
         publisher.sendUser(17, frame);
 
         String destination = routingIdentities.destinationFor(17);
-        verify(messaging).convertAndSendToUser(destination, "/queue/ai-chat", frame);
+        verify(messaging).convertAndSendToUser(eq(destination), eq("/queue/ai-chat"), eq(frame), org.mockito.ArgumentMatchers.anyMap());
         assertNotEquals("initiator", destination);
         assertNotEquals("uid:17", destination);
         assertNotEquals("17", destination);
@@ -118,8 +118,8 @@ class SimpAiChatRealtimePublisherTest {
 
         publisher.sendSession(7, 13, frame);
 
-        verify(messaging).convertAndSendToUser(routingIdentities.destinationFor(17), "/queue/ai-chat", frame);
-        verify(messaging).convertAndSendToUser(routingIdentities.destinationFor(23), "/queue/ai-chat", frame);
+        verify(messaging).convertAndSendToUser(eq(routingIdentities.destinationFor(17)), eq("/queue/ai-chat"), eq(frame), org.mockito.ArgumentMatchers.anyMap());
+        verify(messaging).convertAndSendToUser(eq(routingIdentities.destinationFor(23)), eq("/queue/ai-chat"), eq(frame), org.mockito.ArgumentMatchers.anyMap());
     }
 
     @Test

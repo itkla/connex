@@ -794,8 +794,12 @@ Every transaction that combines these scoped resources uses this single acquisit
    and private inserts under that retained mutex do not acquire another independent root.
 2. Domain record/board roots and their enclosing duplicate mutex, in the domain's existing
    canonical order; attachment URL references/exact rows and deletion queues with subordinate receipts.
+   Brief schedules are domain roots: delivery releases the pending schedule and cleanup clears its
+   session projections before acquiring organization S, even when pending and delivered sessions differ.
    Delegated mutations must finish these root acquisitions too.
 3. Local restriction fences sorted by workspace stripe, then organization publication fences.
+   AI output-cache rows follow the retained restriction fence on both save and deletion paths;
+   restriction completes its ordinary domain/identity work before fencing and deleting cached outputs.
 4. Organization privacy fence S/X, ascending workspace barriers S/X, organization operation/placement
    rows, then exact tenant privacy-work rows.
 5. Workspace audit-integrity head (and the same trailing-head rule for scoped organization audits).
@@ -2239,9 +2243,17 @@ erasure retain terminal/lease settlement atomicity and conservative provider acc
 
 Control locks remain on the transaction-bound connection through control-catalog routing.
 Organization invalidation retains the local publication write fence through commit or rollback.
+New-organization provisioning creates only its fence and bootstrap operation before the first
+workspace insert. It must not enumerate the empty workspace range with `INSERT ... SELECT`:
+under REPEATABLE READ, concurrent registrations can retain shared next-key locks on the same gap
+and deadlock on their first workspace inserts. The after-commit initializer installs placement
+intents, and completion re-enumerates coverage. See [MySQL's statement locking rules](https://dev.mysql.com/doc/refman/8.4/en/innodb-locks-set.html).
 Actual realtime, export and chat-file output holds its read fence and performs a fresh control read
 on a separate READ COMMITTED transaction; an export snapshot is never that authority. Do not hold
 database privacy locks across an export or object transfer. One serving JVM remains mandatory.
+Realtime broker messages carry immutable internal organization authority through the outbound queue.
+The delivery executor checks it and retains the local publication read fence until the transport
+handler finishes; enqueue-time checks alone do not authorize delivery after invalidation.
 
 The committed invalidation listener runs after the earlier completion callbacks release local
 fences and suspends completed transaction resources before placement routing. Workspace withdrawal

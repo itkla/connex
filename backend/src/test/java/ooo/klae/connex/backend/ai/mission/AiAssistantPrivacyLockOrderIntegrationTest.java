@@ -240,6 +240,7 @@ class AiAssistantPrivacyLockOrderIntegrationTest extends AbstractAiAgentPrivacyI
                     () -> persons.updateProcessingRestrictions(restrictionTarget.getId(), true, false)));
             AtomicReference<Future<String>> decided = new AtomicReference<>();
             AtomicReference<Future<Person>> restricted = new AtomicReference<>();
+            transaction().executeWithoutResult(status -> realAudit.ensureHead("workspace", workspace.getId(), "0".repeat(64)));
             transaction().executeWithoutResult(status -> {
                 if (decisionFirst) {
                     assertNotNull(realAudit.lockHead("workspace", workspace.getId()));

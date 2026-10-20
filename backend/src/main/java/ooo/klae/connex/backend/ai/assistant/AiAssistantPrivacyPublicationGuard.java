@@ -35,6 +35,13 @@ public final class AiAssistantPrivacyPublicationGuard {
         void run() throws IOException;
     }
 
+    /** Delivery-executor authority held until its message handler finishes. */
+    @FunctionalInterface
+    public interface Publication extends AutoCloseable {
+        @Override
+        void close();
+    }
+
     /** Retains the local invalidation fence before durable organization X through completion. */
     public static void retainInvalidation(int organizationId) {
         if (!TransactionSynchronizationManager.isActualTransactionActive()
@@ -71,6 +78,13 @@ public final class AiAssistantPrivacyPublicationGuard {
     /** Checks fresh authority immediately around an actual output write, including ZIP completion. */
     public void withCurrent(int organizationId, long generation, IoAction action) throws IOException {
         Objects.requireNonNull(action);
+        try (var publication = retainCurrent(organizationId, generation)) {
+            action.run();
+        }
+    }
+
+    /** Checks original authority and keeps invalidation excluded through actual delivery. */
+    public Publication retainCurrent(int organizationId, long generation) throws IOException {
         var lock = lock(organizationId).readLock();
         lock.lock();
         try {
@@ -78,9 +92,10 @@ public final class AiAssistantPrivacyPublicationGuard {
             if (generation <= 0 || current == null || current != generation) {
                 throw new IOException("Assistant content is no longer available");
             }
-            action.run();
-        } finally {
+            return lock::unlock;
+        } catch (IOException | RuntimeException | Error failure) {
             lock.unlock();
+            throw failure;
         }
     }
 

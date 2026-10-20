@@ -269,7 +269,8 @@ class AiAgentDsrPurgeHttpIntegrationTest {
     @Test
     void allChatPurgePreservesAdminCsrfAndRecentAuthGates() throws Exception {
         String body = allChatBody();
-        mvc.perform(post(initiatePath()).contentType(MediaType.APPLICATION_JSON).content(body))
+        mvc.perform(post(initiatePath()).with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf())
+                .contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isUnauthorized());
         mvc.perform(post(initiatePath()).session(session.http()).contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isForbidden());

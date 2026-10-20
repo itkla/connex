@@ -99,10 +99,10 @@ class AiChatMapperTest extends AbstractMapperTest {
         Workspace foreign = newWorkspace();
         AiChatSession third = session(foreign, owner, "Foreign", "private");
         assertNull(chatMapper.getLatestAnswer(workspace.getId(), first.getId(), 1L));
-        jdbcTemplate.update("INSERT INTO ai_chat_message (workspace_id, session_id, seq, author_kind, content, structured_json) VALUES "
-                        + "(?, ?, 1, 'assistant', 'Old answer', '{}'), (?, ?, 2, 'assistant', 'Latest answer', ?), "
-                        + "(?, ?, 3, 'user', 'Failed request', NULL), (?, ?, 9, 'assistant', 'Other session', '{}'), "
-                        + "(?, ?, 99, 'assistant', 'Foreign workspace', '{}')",
+        jdbcTemplate.update("INSERT INTO ai_chat_message (workspace_id, session_id, seq, author_kind, content, structured_json, organization_privacy_generation) VALUES "
+                        + "(?, ?, 1, 'assistant', 'Old answer', '{}', 1), (?, ?, 2, 'assistant', 'Latest answer', ?, 1), "
+                        + "(?, ?, 3, 'user', 'Failed request', NULL, 1), (?, ?, 9, 'assistant', 'Other session', '{}', 1), "
+                        + "(?, ?, 99, 'assistant', 'Foreign workspace', '{}', 1)",
                 workspace.getId(), first.getId(), workspace.getId(), first.getId(),
                 "{\"suggestions\":[\"Ask Former Member\"],\"memberIdentifiers\":[{\"kind\":\"member\",\"value\":\"Former Member\"}]}",
                 workspace.getId(), first.getId(), workspace.getId(), second.getId(), foreign.getId(), third.getId());

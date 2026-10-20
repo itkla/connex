@@ -74,7 +74,7 @@ class AiProposalExpiryConcurrencyIntegrationTest extends AbstractAiProposalExpir
 
     @Test
     void organizationAuthorityWaitCrossingDeadlineRefusesWithoutGenerationChange() throws Exception {
-        Proposal proposal = proposal("update_record_fields", "company", Map.of("name", "Late name"));
+        Proposal proposal = proposal("update_record_fields", "company", Map.of("industry", "Late industry"));
         Long generation = jdbc.queryForObject(
                 "SELECT generation FROM ai_assistant_privacy_fence WHERE organization_id=?",
                 Long.class, organization.getId());

@@ -588,6 +588,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const identityControllerRef = useRef<AbortController | null>(null);
     const sessionControllerRef = useRef<AbortController | null>(null);
     const sessionContentControllerRef = useRef(new AbortController());
+    /** A v1 withdrawal stays hidden until the member explicitly reloads or selects the session. */
+    const withdrawnSessionsRef = useRef(new Set<string>());
     const retiredSessionsRef = useRef(new Set<string>());
     const tempMessageIdRef = useRef(-1);
     const sessionCreationRef = useRef<Promise<AiChatSession> | null>(null);
@@ -908,9 +910,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         streamStore.publish(null);
     }, [streamStore]);
 
-    /** Withdraws every local content projection and retires a privacy-invalidated session. */
-    const invalidateSessionContent = useCallback((sessionId: number) => {
-        retiredSessionsRef.current.add(`${activeWorkspaceId}:${sessionId}`);
+    /** Withdraws local content; only organization-generation invalidation retires the session. */
+    const invalidateSessionContent = useCallback((sessionId: number, retire = false) => {
+        withdrawnSessionsRef.current.add(`${activeWorkspaceId}:${sessionId}`);
+        if (retire) retiredSessionsRef.current.add(`${activeWorkspaceId}:${sessionId}`);
         sessionsRefreshVersionRef.current += 1;
         setSessions((current) => current.filter((session) => session.id !== sessionId));
         setInvitations((current) => current.filter((session) => session.id !== sessionId));
@@ -1389,7 +1392,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 || retiredSessionsRef.current.has(sessionIdentity)) return null;
         if (isInvalidatedAiChatSession(firstDetail.session,
                 workspacePrivacyCutoffsRef.current.get(firstDetail.session.workspaceId))) {
-            invalidateSessionContent(sessionId);
+            invalidateSessionContent(sessionId, true);
             setPrivacyUnavailable(true);
             setLoadState('ready');
             return null;
@@ -1740,6 +1743,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                     return;
                 }
                 selectionLoadStarted = true;
+                withdrawnSessionsRef.current.delete(`${activeWorkspaceId}:${selectedSessionId}`);
                 const detail = await refreshTranscript(selectedSessionId, controller.signal, false);
                 if (controller.signal.aborted) return;
                 if (detail === null) return;
@@ -1818,6 +1822,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         dispatchToolCalls({ type: 'reset' });
         setLoadState('loading');
         try {
+            withdrawnSessionsRef.current.delete(`${activeWorkspaceId}:${session.id}`);
             const detail = await refreshTranscript(session.id, signal, false);
             if (workspaceMode) router.replace(`/ask-connex/${session.id}`);
             if (detail?.activeTurn) void followDurableTurn(detail.activeTurn, signal);
@@ -1831,7 +1836,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 deferApiError(error, 'toast.requestFailed');
             }
         }
-    }, [canPersist, clearActiveSession, deferApiError, followDurableTurn, refreshTranscript, resetStream, router, sessionKey, t, turnKey, working, workspaceMode]);
+    }, [activeWorkspaceId, canPersist, clearActiveSession, deferApiError, followDurableTurn, refreshTranscript, resetStream, router, sessionKey, t, turnKey, working, workspaceMode]);
 
     const newChat = useCallback(() => {
         if (working) return;
@@ -1849,7 +1854,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             return;
         }
         if (workspaceSessionId === null
-                || activeSessionRef.current?.id === workspaceSessionId) return;
+                || activeSessionRef.current?.id === workspaceSessionId
+                || withdrawnSessionsRef.current.has(`${activeWorkspaceId}:${workspaceSessionId}`)) return;
         sessionEpochRef.current++;
         sessionControllerRef.current?.abort();
         const controller = new AbortController();
@@ -1887,7 +1893,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         };
         void load();
         return () => controller.abort();
-    }, [canPersist, activeTurn, clearActiveSession, deferApiError, followDurableTurn, identity, refreshTranscript, resetStream, router, sessionKey, stateIdentity, switching, t, turnKey, workspaceMode, workspaceSessionId]);
+    }, [canPersist, activeTurn, activeWorkspaceId, clearActiveSession, deferApiError, followDurableTurn, identity, refreshTranscript, resetStream, router, sessionKey, stateIdentity, switching, t, turnKey, workspaceMode, workspaceSessionId]);
 
     const runRealtimeRefresh = useCallback(async (sessionIds: ReadonlySet<number>, signal: AbortSignal) => {
         if (signal.aborted) return;
@@ -1951,7 +1957,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 const known = active === null ? knownSessionsRef.current : [...knownSessionsRef.current, active];
                 for (const session of known) {
                     if (isInvalidatedAiChatSession(session, cutoff)) {
-                        invalidateSessionContent(session.id);
+                        invalidateSessionContent(session.id, true);
                     }
                 }
             },
@@ -2176,7 +2182,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             if (signal.aborted) throw signal.reason;
             if (isInvalidatedAiChatSession(createdSession,
                     workspacePrivacyCutoffsRef.current.get(createdSession.workspaceId))) {
-                invalidateSessionContent(createdSession.id);
+                invalidateSessionContent(createdSession.id, true);
                 setPrivacyUnavailable(true);
                 throw new ApiError('assistant_privacy_unavailable', 409);
             }
@@ -2526,7 +2532,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                     if (activeSignal.aborted) return;
                     if (isInvalidatedAiChatSession(createdSession,
                             workspacePrivacyCutoffsRef.current.get(createdSession.workspaceId))) {
-                        invalidateSessionContent(createdSession.id);
+                        invalidateSessionContent(createdSession.id, true);
                         setPrivacyUnavailable(true);
                         return;
                     }

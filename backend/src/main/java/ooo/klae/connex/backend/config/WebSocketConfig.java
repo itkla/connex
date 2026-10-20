@@ -26,6 +26,7 @@ import org.springframework.web.socket.server.support.HttpSessionHandshakeInterce
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.notifications.RealtimeRoutingIdentityResolver;
+import ooo.klae.connex.backend.notifications.AiChatPrivacyOutboundInterceptor;
 import ooo.klae.connex.backend.notifications.WebSocketConnectionLimiter;
 import ooo.klae.connex.backend.notifications.WebSocketSessionExpiryInterceptor;
 import ooo.klae.connex.backend.notifications.WebSocketSessionRegistry;
@@ -77,6 +78,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     private final WebSocketSessionExpiryInterceptor sessionExpiryInterceptor;
     private final WebSocketConnectionLimiter connectionLimiter;
     private final RealtimeRoutingIdentityResolver routingIdentities;
+    private final AiChatPrivacyOutboundInterceptor privacyOutboundInterceptor;
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
@@ -116,7 +118,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
             public Message<?> beforeHandle(Message<?> message, MessageChannel channel, MessageHandler handler) {
                 return sessionExpiryInterceptor.beforeHandle(message, channel, handler);
             }
-        });
+        }, privacyOutboundInterceptor);
     }
 
     @Override

@@ -82,9 +82,13 @@ class TenantLifecycleHttpAuthorizationIntegrationTest {
             jdbcTemplate.update("DELETE FROM tenant_operation_lease WHERE org_id = ?", orgId);
         }
         for (int workspaceId : workspaceIds.reversed()) {
+            ooo.klae.connex.backend.support.TestEntityFixtures.deleteChatPrivacy(jdbcTemplate, workspaceId);
             jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", workspaceId);
         }
         for (int orgId : organizationIds.reversed()) {
+            jdbcTemplate.update("DELETE FROM ai_assistant_privacy_operation_workspace WHERE organization_id=?", orgId);
+            jdbcTemplate.update("DELETE FROM ai_assistant_privacy_operation WHERE organization_id=?", orgId);
+            jdbcTemplate.update("DELETE FROM ai_assistant_privacy_fence WHERE organization_id=?", orgId);
             jdbcTemplate.update("DELETE FROM organization WHERE id = ?", orgId);
         }
         for (int userId : userIds.reversed()) {
@@ -271,6 +275,7 @@ class TenantLifecycleHttpAuthorizationIntegrationTest {
         workspace.setName(slug);
         workspace.setSlug(slug);
         workspaceMapper.insert(workspace);
+        ooo.klae.connex.backend.support.TestEntityFixtures.seedExistingWorkspacePrivacy(jdbcTemplate, workspace.getId());
         workspaceIds.add(workspace.getId());
         return workspace;
     }

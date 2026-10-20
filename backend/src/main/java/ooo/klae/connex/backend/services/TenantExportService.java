@@ -251,6 +251,8 @@ public class TenantExportService {
             TenantExportExecution execution) throws IOException {
         Instant generatedAt = clock.instant();
         OutputStream ownedOutput = new FilterOutputStream(output) {
+            private boolean failed;
+
             @Override
             public void write(int value) throws IOException {
                 guardedWrite(() -> out.write(value));
@@ -267,11 +269,14 @@ public class TenantExportService {
             }
 
             private void guardedWrite(AiAssistantPrivacyPublicationGuard.IoAction action) throws IOException {
+                if (failed) {
+                    throw new IOException("Tenant export output is unavailable");
+                }
                 execution.checkActive();
                 try {
                     publicationGuard.withCurrent(orgId, execution.organizationPrivacyGeneration(), action);
                 } catch (IOException | RuntimeException failure) {
-                    execution.cancel();
+                    failed = true;
                     throw failure;
                 }
             }

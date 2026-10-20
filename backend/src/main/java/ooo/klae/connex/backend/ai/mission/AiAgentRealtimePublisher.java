@@ -84,7 +84,9 @@ public class AiAgentRealtimePublisher {
             if (template != null) {
                 publicationGuard.publish(privacyGuard.organizationId(workspaceId), source.getOrganizationPrivacyGeneration(),
                         () -> template.convertAndSendToUser(identities.destinationFor(owner), "/queue/ai-chat",
-                                new Frame(workspaceId, current.getSessionId(), id, Long.toString(version), kind, current.getStatus())));
+                                new Frame(workspaceId, current.getSessionId(), id, Long.toString(version), kind, current.getStatus()),
+                                ooo.klae.connex.backend.notifications.AiChatPrivacyOutboundInterceptor.headers(
+                                        privacyGuard.organizationId(workspaceId), source.getOrganizationPrivacyGeneration())));
             }
         });
     }

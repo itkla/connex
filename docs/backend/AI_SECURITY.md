@@ -1140,12 +1140,21 @@ Capture authority before admitting input and preserve that token through deferre
 provider attempts, summaries, proposals, decisions, replay and callbacks. Missing authority fails
 closed without lazy creation. Proposal-set production remains disabled.
 
+New-organization provisioning creates its fence and bootstrap operation before its first workspace,
+without scanning empty workspace ranges. The after-commit initializer enrolls placement evidence;
+periodic reconciliation recovers an interrupted callback. Completion still checks current coverage.
+
 Organization S precedes workspace S after existing content/domain roots. Public projection and
 decision paths cannot use a current token to relabel stale execution. Actual realtime, file and export
 output checks original authority under the organization-local publication read fence against fresh
 control metadata. Invalidation retains its write fence through transaction completion. Withdrawals
 contain only invalidation metadata and still require recipient access. These local fences require
 one serving JVM and do not solve distributed provider dispatch (#941).
+
+Realtime content and mission frames carry their original authority in internal broker headers.
+The outbound executor drops stale queued frames and retains the publication fence through transport
+delivery. Privacy refusal stops export writes immediately, including ZIP finalization; synchronous
+failures unwind the snapshot transaction before resource cancellation, preserving the original failure.
 
 Committed invalidation separately sends workspace ID, invalidation kind and decimal cutoff to
 current active members with `AI_USE` or `AI_SESSION_ADMIN`. It loads no session content or audience
@@ -1156,3 +1165,11 @@ responses while preserving newer chats. Missing provenance is withheld after a k
 Accepted v1 DSR authority remains unchanged. New all-chat requests require both explicit v2
 acknowledgments and all existing admin, recent-authentication, CSRF, subject-proof and snapshot gates.
 Erasure completion requires positive file-deletion receipts and current placement coverage.
+V1 polling may return content-free turn status while mission holdings are withheld; browser withdrawal
+clears cached content but keeps the session reloadable after cleanup. Permanent retirement requires
+v2 organization invalidation. V2 organization checks remain unconditional on every projection.
+
+Verification waiting only on residual obligations stays incomplete and backs off five seconds.
+Due work is selected by next-attempt time, then identity, so older object failures yield to later
+restriction erasure. Organization completion is retried for completed tenant work from both batch
+replay and initializer reconciliation, covering interruption after the placement receipt commits.

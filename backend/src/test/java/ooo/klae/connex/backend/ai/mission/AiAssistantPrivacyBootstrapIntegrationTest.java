@@ -29,7 +29,7 @@ class AiAssistantPrivacyBootstrapIntegrationTest extends AbstractAiAgentPrivacyI
     void preMigrationRestrictionCannotLeakAfterBootstrap() {
         int historical = historicalSession("Private user-set title", "archived", "Copied private summary without citations");
         int current = fixtureSession("Current user-set title", "archived", "Readable current free text", organizationPrivacy.current(workspace.getOrgId()));
-        assertNotNull(assistant.get(current, 0, 100));
+        assertNotNull(assistant.get(current, 1, 100));
         assertThrows(RuntimeException.class, () -> assistant.get(historical, 1, 100));
         assertEquals("Private user-set title", jdbc.queryForObject("SELECT title FROM ai_chat_session WHERE workspace_id=? AND id=?", String.class, workspace.getId(), historical));
         assertEquals(0, jdbc.queryForObject("SELECT organization_privacy_generation FROM ai_chat_session WHERE workspace_id=? AND id=?", Long.class, workspace.getId(), historical));
@@ -135,7 +135,7 @@ class AiAssistantPrivacyBootstrapIntegrationTest extends AbstractAiAgentPrivacyI
     void v2RetiresEntireSession() {
         int affected = fixtureSession("Retired shared chat", "active", "Uncited retained free text",
                 organizationPrivacy.current(workspace.getOrgId()));
-        assertNotNull(assistant.get(affected, 0, 100));
+        assertNotNull(assistant.get(affected, 1, 100));
         var operation = transaction().execute(status -> organizationPrivacy.invalidateOrganization(
                 workspace.getOrgId(), UUID.randomUUID(), "restriction", null, null));
         assertNotNull(operation);
@@ -146,7 +146,7 @@ class AiAssistantPrivacyBootstrapIntegrationTest extends AbstractAiAgentPrivacyI
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM ai_chat_session WHERE workspace_id=? AND id=?", Integer.class, workspace.getId(), affected));
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM ai_chat_message WHERE workspace_id=? AND session_id=?", Integer.class, workspace.getId(), affected));
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM ai_chat_session_participant WHERE workspace_id=? AND session_id=?", Integer.class, workspace.getId(), affected));
-        assertNotNull(assistant.get(current, 0, 100));
+        assertNotNull(assistant.get(current, 1, 100));
         assertFalse(privacyMapper.getBarrier(workspace.getId()).isBlocked());
     }
 

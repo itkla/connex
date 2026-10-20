@@ -42,6 +42,7 @@ import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry;
 
 /** Exercises member boundaries while invalidated rows are deliberately still physically retained. */
 class AiAssistantPrivacyAllChatIntegrationTest extends AbstractAiAgentPrivacyIntegrationTest {
+    @Autowired private org.mybatis.spring.SqlSessionTemplate sqlSessions;
     @Autowired private AiAssistantService assistant;
     @MockitoSpyBean private ooo.klae.connex.backend.notifications.AiChatRealtimeDispatcher withdrawals;
     @Autowired private AiChatTurnPersistenceService turns;
@@ -61,8 +62,8 @@ class AiAssistantPrivacyAllChatIntegrationTest extends AbstractAiAgentPrivacyInt
         AiChatMessageCreateRequest message = new AiChatMessageCreateRequest();
         message.setContent("Uncited copied private text");
         assistant.appendMessage(session.getId(), message);
-        assertEquals(1, assistant.page(0, 20).total());
-        assertEquals(1, assistant.get(session.getId(), 0, 20).messages().total());
+        assertEquals(1, assistant.page(1, 20).total());
+        assertEquals(1, assistant.get(session.getId(), 1, 20).messages().total());
 
         invalidateV2();
         org.mockito.Mockito.verify(withdrawals).workspacePrivacyNow(workspace.getId(), 1L);
@@ -70,11 +71,11 @@ class AiAssistantPrivacyAllChatIntegrationTest extends AbstractAiAgentPrivacyInt
         assertNotNull(chatMapper.getPrivacySession(workspace.getId(), session.getId()));
         assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM ai_chat_message WHERE workspace_id=?",
                 Integer.class, workspace.getId()));
-        assertEquals(0, assistant.page(0, 20).total());
-        assertThrows(RuntimeException.class, () -> assistant.get(session.getId(), 0, 20));
+        assertEquals(0, assistant.page(1, 20).total());
+        assertThrows(RuntimeException.class, () -> assistant.get(session.getId(), 1, 20));
         AiChatSession fresh = session();
         assertEquals(2, fresh.getOrganizationPrivacyGeneration());
-        assertNotNull(assistant.get(fresh.getId(), 0, 20));
+        assertNotNull(assistant.get(fresh.getId(), 1, 20));
     }
 
     @Test
@@ -270,7 +271,7 @@ class AiAssistantPrivacyAllChatIntegrationTest extends AbstractAiAgentPrivacyInt
                 connection.set(java.util.Objects.requireNonNull(jdbc.queryForObject("SELECT CONNECTION_ID()", Long.class)));
                 requestingParent.countDown();
             }
-            Object result = invocation.callRealMethod();
+            Object result = sqlSessions.getMapper(ooo.klae.connex.backend.mappers.AiAgentPrivacyMapper.class).lockProposalParent(invocation.getArgument(0), invocation.getArgument(1), invocation.getArgument(2));
             if (cleanup) {
                 parentAcquired.set(true);
             }
@@ -281,7 +282,7 @@ class AiAssistantPrivacyAllChatIntegrationTest extends AbstractAiAgentPrivacyInt
                 assertTrue(parentAcquired.get());
                 childAcquired.set(true);
             }
-            return invocation.callRealMethod();
+            return sqlSessions.getMapper(ooo.klae.connex.backend.mappers.AiChatMapper.class).getToolCallBySessionForUpdate(invocation.getArgument(0), invocation.getArgument(1), invocation.getArgument(2));
         }).when(lockedChats).getToolCallBySessionForUpdate(workspace.getId(), session.getId(), member.getId());
         org.mockito.Mockito.doAnswer(invocation -> {
             if (Thread.currentThread().getName().equals("assistant-parent-purge")) {
@@ -291,7 +292,7 @@ class AiAssistantPrivacyAllChatIntegrationTest extends AbstractAiAgentPrivacyInt
                         Integer.class, workspace.getId(), session.getId()));
                 turnAcquired.set(true);
             }
-            return invocation.callRealMethod();
+            return sqlSessions.getMapper(ooo.klae.connex.backend.mappers.AiChatMapper.class).getTurnByIdForUpdate(invocation.getArgument(0), invocation.getArgument(1), invocation.getArgument(2));
         }).when(lockedChats).getTurnByIdForUpdate(workspace.getId(), session.getId(), turn.turnId());
         try (var workers = Executors.newFixedThreadPool(2)) {
             var holder = workers.submit(() -> {

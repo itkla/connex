@@ -281,7 +281,13 @@ public class AiAgentPrivacyService {
             transaction().executeWithoutResult(status -> {
                 enrollOperation(workspaceId, operation);
             });
+            reconcileAssistantCompletion(workspaceId, operation.getOperationKey());
         }
+    }
+
+    private void reconcileAssistantCompletion(int workspaceId, String operationKey) {
+        transaction().executeWithoutResult(status -> assistantPrivacy.reconcileCompletion(
+                organizationId(workspaceId), operationKey));
     }
 
     /** Executes one bounded batch, with identity discovery outside its mutation transaction. */
@@ -291,6 +297,9 @@ public class AiAgentPrivacyService {
             throw new ConflictException("mission_privacy_operation_missing");
         }
         if ("complete".equals(discovered.getPhase())) {
+            if (isAllChat(discovered)) {
+                reconcileAssistantCompletion(workspaceId, operationKey);
+            }
             return true;
         }
         try {
@@ -522,6 +531,9 @@ public class AiAgentPrivacyService {
                     privacyMapper.lockMessage(workspaceId, sessionId, id);
                 }
             }
+            if ("title".equals(phase)) {
+                privacyMapper.clearSessionProjections(workspaceId, sessionId);
+            }
             AiAgentPrivacyWork work = lockBatch(discovery);
             boolean settled = false;
             if ("settle_turns".equals(phase)) {
@@ -569,7 +581,6 @@ public class AiAgentPrivacyService {
                     throw unavailable();
                 }
                 privacyMapper.resetAffectedTitle(workspaceId, sessionId, cutoff, "Ask Connex", barrier.getGeneration());
-                privacyMapper.clearSessionProjections(workspaceId, sessionId);
                 privacyMapper.updateSessionPreview(workspaceId, sessionId);
                 if (privacyMapper.deleteSessionNotifications(workspaceId, sessionId, BATCH_SIZE) == BATCH_SIZE) {
                     save(work);
@@ -753,6 +764,9 @@ public class AiAgentPrivacyService {
             String objectKey = null;
             Integer retainedId = null;
             ooo.klae.connex.backend.storage.ObjectDeletionTask queue = null;
+            if ("title".equals(phase)) {
+                privacyMapper.clearSessionProjections(workspaceId, sessionId);
+            }
             if (!attachments.isEmpty()) {
                 var observed = attachments.getFirst();
                 attachmentMapper.lockIdsByUrl(workspaceId, observed.getUrl());
@@ -808,7 +822,6 @@ public class AiAgentPrivacyService {
                     }
                 }
                 case "title" -> {
-                    privacyMapper.clearSessionProjections(workspaceId, sessionId);
                     if (privacyMapper.deleteSessionNotifications(workspaceId, sessionId, BATCH_SIZE) == BATCH_SIZE) {
                         save(work);
                         return;
@@ -863,13 +876,14 @@ public class AiAgentPrivacyService {
                 work.setPhase("runs");
             } else if (!privacyMapper.allChatSessionIds(work.getWorkspaceId(), work.getCutoffGeneration(), 1).isEmpty()) {
                 work.setPhase("sessions");
+            } else {
+                work.setNextAttemptAt(now().plusSeconds(5));
             }
             save(work);
             return residual == 0;
         }));
         if (completed) {
-            transaction().executeWithoutResult(status -> assistantPrivacy.reconcileCompletion(
-                    organizationId(discovery.getWorkspaceId()), discovery.getOperationKey()));
+            reconcileAssistantCompletion(discovery.getWorkspaceId(), discovery.getOperationKey());
         }
         return completed;
     }

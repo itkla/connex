@@ -52,12 +52,21 @@ public class AiChatProgressService {
      */
     public AiChatTurnDto projectTurn(
             AiChatTurn turn, Integer viewerUserId, AiChatQueryScopeDto scope) {
-        if (turn.getPrivacyGeneration() == null || turn.getOrganizationPrivacyGeneration() <= 0) {
+        if (turn.getPrivacyGeneration() == null || turn.getOrganizationPrivacyGeneration() <= 0
+                || privacyGuard.currentGeneration(turn.getWorkspaceId()) != turn.getOrganizationPrivacyGeneration()) {
             throw new AiAssistantLoopException("restrictions_changed", "restrictions_changed");
         }
-        privacyGuard.requireCurrent(chatMapper, new AiChatPrivacyToken(turn.getWorkspaceId(), turn.getSessionId(),
-                turn.getPrivacyGeneration(), turn.getPrivacyTaintSeq(), privacyGuard.organizationId(turn.getWorkspaceId()),
-                turn.getOrganizationPrivacyGeneration()));
+        try {
+            privacyGuard.requireCurrent(chatMapper, new AiChatPrivacyToken(turn.getWorkspaceId(), turn.getSessionId(),
+                    turn.getPrivacyGeneration(), turn.getPrivacyTaintSeq(), privacyGuard.organizationId(turn.getWorkspaceId()),
+                    turn.getOrganizationPrivacyGeneration()));
+        } catch (AiAssistantLoopException withdrawn) {
+            if (privacyGuard.currentGeneration(turn.getWorkspaceId()) != turn.getOrganizationPrivacyGeneration()) {
+                throw withdrawn;
+            }
+            return new AiChatTurnDto(turn.getId(), turn.getSessionId(), turn.getStatus(), turn.getTerminalReason(),
+                    null, List.of(), viewerUserId != null && Objects.equals(viewerUserId, turn.getRequestedByUserId()), null, null);
+        }
         List<AiChatToolCall> toolCalls = toolCalls(
                 turn.getWorkspaceId(), turn.getSessionId(), turn.getId());
         return AiChatTurnDto.from(

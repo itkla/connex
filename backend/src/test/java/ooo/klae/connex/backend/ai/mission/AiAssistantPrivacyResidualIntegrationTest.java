@@ -146,10 +146,10 @@ class AiAssistantPrivacyResidualIntegrationTest extends AbstractAiAgentPrivacyIn
         }
         assertNull(privacyMapper.getWork(workspace.getId(), operation.getOperationKey()).getCompletedAt());
         assertTrue(privacyMapper.allChatResidualCount(workspace.getId(), operation.getCutoffGeneration(), operation.getOperationKey()) > 0);
-        assertNotNull(assistant.get(sessionId, 0, 20));
+        assertNotNull(assistant.get(sessionId, 1, 20));
         jdbc.update("DELETE FROM ai_chat_tool_call WHERE workspace_id=? AND proposal_key='restored-inconsistent-parent'", workspace.getId());
         finish(operation.getOperationKey());
-        assertNotNull(assistant.get(sessionId, 0, 20));
+        assertNotNull(assistant.get(sessionId, 1, 20));
     }
 
     private AiAssistantPrivacyOperation invalidateAll() {

@@ -97,7 +97,8 @@ class PersonRestrictionEpochTest {
         InOrder fence = inOrder(personMapper, workspaceMapper, restrictionEpoch, aiOutputCacheMapper);
         fence.verify(personMapper).getOwnedPersonByIdForUpdate(WORKSPACE_ID, PERSON_ID);
         fence.verify(workspaceMapper).findByOrgId(ORG_ID);
-        fence.verify(restrictionEpoch).invalidateWorkspaces(
+        fence.verify(restrictionEpoch).invalidateAssistantOrganization(
+                org.mockito.ArgumentMatchers.eq(ORG_ID),
                 org.mockito.ArgumentMatchers.eq(List.of(WORKSPACE_ID, OTHER_WORKSPACE_ID)),
                 org.mockito.ArgumentMatchers.any(java.util.UUID.class),
                 org.mockito.ArgumentMatchers.eq("restriction"),

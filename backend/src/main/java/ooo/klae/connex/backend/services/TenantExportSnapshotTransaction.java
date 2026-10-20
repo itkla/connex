@@ -47,7 +47,8 @@ public class TenantExportSnapshotTransaction {
     @Transactional(
         readOnly = true,
         propagation = Propagation.REQUIRES_NEW,
-        isolation = Isolation.REPEATABLE_READ)
+        isolation = Isolation.REPEATABLE_READ,
+        rollbackFor = IOException.class)
     public Snapshot capture(
             int workspaceId,
             ZipOutputStream zip,
