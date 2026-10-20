@@ -15,6 +15,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import ooo.klae.connex.backend.beans.IntroCandidatePerson;
 import ooo.klae.connex.backend.support.RecordVisibilityPlaneFixture;
+import ooo.klae.connex.backend.support.RecordVisibilityPlaneFixture.Records;
 
 /** Pins employer masking, lifecycle parity, and candidate bounds against the original statements. */
 class IntroductionCompanyVisibilityMapperTest {
@@ -23,7 +24,7 @@ class IntroductionCompanyVisibilityMapperTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        fixture = new RecordVisibilityPlaneFixture(true, false);
+        fixture = new RecordVisibilityPlaneFixture(Records.INTRODUCTIONS, false);
         controlJdbc = fixture.controlJdbc;
         fixture.installTenant();
     }

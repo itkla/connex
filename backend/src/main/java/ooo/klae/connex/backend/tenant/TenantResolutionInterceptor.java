@@ -247,7 +247,12 @@ public class TenantResolutionInterceptor implements AsyncHandlerInterceptor {
             tenantContext.setControlSelection(candidate, orgId, user.getId(), role);
         } else {
             String catalog = tenantCatalogResolver.resolveCatalog(orgId);
-            tenantContext.set(candidate, orgId, user.getId(), role, catalog);
+            var scopes = workspaceService.prepareWorkspaceScopes(candidate, orgId, catalog);
+            if (scopes != null) {
+                tenantContext.setWithWorkspaceScopes(candidate, orgId, user.getId(), role, catalog, scopes);
+            } else {
+                tenantContext.set(candidate, orgId, user.getId(), role, catalog);
+            }
         }
         request.setAttribute(ORGANIZATION_ID_ATTRIBUTE, orgId);
         return true;

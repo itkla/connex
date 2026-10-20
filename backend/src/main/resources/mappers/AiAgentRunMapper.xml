@@ -29,6 +29,7 @@
     <result column="max_tokens" property="maxTokens" />
     <result column="reserved_tokens" property="reservedTokens" />
     <result column="consumed_tokens" property="consumedTokens" />
+    <result column="organization_privacy_generation" property="organizationPrivacyGeneration" />
     <result column="privacy_generation" property="privacyGeneration" />
     <result column="plan_schema_version" property="planSchemaVersion" />
     <result column="plan_revision" property="planRevision" />
@@ -58,9 +59,9 @@
 
   <insert id="insertRun" useGeneratedKeys="true" keyProperty="run.id">
     INSERT INTO ai_agent_run
-      (workspace_id, definition_version, runtime_contract_version, max_steps, reserved_steps, consumed_steps, session_id, owner_user_id, active_segment_id, report_message_id, client_request_key, mission_type, locale, goal, scope_json, status, reason_code, request_hash, scope_fingerprint, state_version, execution_generation, max_tokens, reserved_tokens, consumed_tokens, privacy_generation, execution_deadline_at, hard_deadline_at, next_attempt_at, withheld_at, purged_at, started_at, finished_at, plan_schema_version, plan_revision, plan_json, checkpoint_schema_version, checkpoint_revision, checkpoint_json, memory_schema_version, memory_json, last_committed_segment_no)
+      (workspace_id, definition_version, runtime_contract_version, max_steps, reserved_steps, consumed_steps, session_id, owner_user_id, active_segment_id, report_message_id, client_request_key, mission_type, locale, goal, scope_json, status, reason_code, request_hash, scope_fingerprint, state_version, execution_generation, max_tokens, reserved_tokens, consumed_tokens, privacy_generation, organization_privacy_generation, execution_deadline_at, hard_deadline_at, next_attempt_at, withheld_at, purged_at, started_at, finished_at, plan_schema_version, plan_revision, plan_json, checkpoint_schema_version, checkpoint_revision, checkpoint_json, memory_schema_version, memory_json, last_committed_segment_no)
     VALUES
-      (#{run.workspaceId}, #{run.definitionVersion}, #{run.runtimeContractVersion}, #{run.maxSteps}, #{run.reservedSteps}, #{run.consumedSteps}, #{run.sessionId,jdbcType=INTEGER}, #{run.ownerUserId,jdbcType=INTEGER}, #{run.activeSegmentId,jdbcType=INTEGER}, #{run.reportMessageId,jdbcType=INTEGER}, #{run.clientRequestKey,jdbcType=VARCHAR}, #{run.missionType,jdbcType=VARCHAR}, #{run.locale,jdbcType=VARCHAR}, #{run.goal,jdbcType=VARCHAR}, #{run.scopeJson,jdbcType=VARCHAR}, #{run.status,jdbcType=VARCHAR}, #{run.reasonCode,jdbcType=VARCHAR}, #{run.requestHash,jdbcType=VARBINARY}, #{run.scopeFingerprint,jdbcType=VARBINARY}, #{run.stateVersion}, #{run.executionGeneration}, #{run.maxTokens}, #{run.reservedTokens}, #{run.consumedTokens}, #{run.privacyGeneration}, #{run.executionDeadlineAt,jdbcType=TIMESTAMP}, #{run.hardDeadlineAt,jdbcType=TIMESTAMP}, #{run.nextAttemptAt,jdbcType=TIMESTAMP}, #{run.withheldAt,jdbcType=TIMESTAMP}, #{run.purgedAt,jdbcType=TIMESTAMP}, #{run.startedAt,jdbcType=TIMESTAMP}, #{run.finishedAt,jdbcType=TIMESTAMP}, #{run.planSchemaVersion,jdbcType=SMALLINT}, #{run.planRevision}, CONVERT(#{run.planJson,jdbcType=VARBINARY,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4), #{run.checkpointSchemaVersion,jdbcType=SMALLINT}, #{run.checkpointRevision}, CONVERT(#{run.checkpointJson,jdbcType=VARBINARY,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4), #{run.memorySchemaVersion,jdbcType=SMALLINT}, CONVERT(#{run.memoryJson,jdbcType=VARBINARY,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4), #{run.lastCommittedSegmentNo})
+      (#{run.workspaceId}, #{run.definitionVersion}, #{run.runtimeContractVersion}, #{run.maxSteps}, #{run.reservedSteps}, #{run.consumedSteps}, #{run.sessionId,jdbcType=INTEGER}, #{run.ownerUserId,jdbcType=INTEGER}, #{run.activeSegmentId,jdbcType=INTEGER}, #{run.reportMessageId,jdbcType=INTEGER}, #{run.clientRequestKey,jdbcType=VARCHAR}, #{run.missionType,jdbcType=VARCHAR}, #{run.locale,jdbcType=VARCHAR}, #{run.goal,jdbcType=VARCHAR}, #{run.scopeJson,jdbcType=VARCHAR}, #{run.status,jdbcType=VARCHAR}, #{run.reasonCode,jdbcType=VARCHAR}, #{run.requestHash,jdbcType=VARBINARY}, #{run.scopeFingerprint,jdbcType=VARBINARY}, #{run.stateVersion}, #{run.executionGeneration}, #{run.maxTokens}, #{run.reservedTokens}, #{run.consumedTokens}, #{run.privacyGeneration}, #{run.organizationPrivacyGeneration}, #{run.executionDeadlineAt,jdbcType=TIMESTAMP}, #{run.hardDeadlineAt,jdbcType=TIMESTAMP}, #{run.nextAttemptAt,jdbcType=TIMESTAMP}, #{run.withheldAt,jdbcType=TIMESTAMP}, #{run.purgedAt,jdbcType=TIMESTAMP}, #{run.startedAt,jdbcType=TIMESTAMP}, #{run.finishedAt,jdbcType=TIMESTAMP}, #{run.planSchemaVersion,jdbcType=SMALLINT}, #{run.planRevision}, CONVERT(#{run.planJson,jdbcType=VARBINARY,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4), #{run.checkpointSchemaVersion,jdbcType=SMALLINT}, #{run.checkpointRevision}, CONVERT(#{run.checkpointJson,jdbcType=VARBINARY,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4), #{run.memorySchemaVersion,jdbcType=SMALLINT}, CONVERT(#{run.memoryJson,jdbcType=VARBINARY,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4), #{run.lastCommittedSegmentNo})
   </insert>
 
   <select id="getRun" resultMap="runResult" useCache="false" flushCache="true">
@@ -84,6 +85,7 @@
     <result column="known_steps" property="knownSteps" />
     <result column="turn_id" property="turnId" />
     <result column="execution_generation" property="executionGeneration" />
+    <result column="organization_privacy_generation" property="organizationPrivacyGeneration" />
     <result column="privacy_generation" property="privacyGeneration" />
     <result column="reserved_tokens" property="reservedTokens" />
     <result column="known_input_tokens" property="knownInputTokens" />
@@ -101,9 +103,9 @@
 
   <insert id="insertSegment" useGeneratedKeys="true" keyProperty="segment.id">
     INSERT INTO ai_agent_segment
-      (workspace_id, run_id, segment_no, attempt_no, reserved_steps, known_steps, turn_id, execution_generation, privacy_generation, reserved_tokens, known_input_tokens, known_output_tokens, usage_uncertain, status, failure_reason, provider_declaration_fingerprint, deadline_at, started_at, settled_at)
+      (workspace_id, run_id, segment_no, attempt_no, reserved_steps, known_steps, turn_id, execution_generation, privacy_generation, organization_privacy_generation, reserved_tokens, known_input_tokens, known_output_tokens, usage_uncertain, status, failure_reason, provider_declaration_fingerprint, deadline_at, started_at, settled_at)
     VALUES
-      (#{segment.workspaceId}, #{segment.runId}, #{segment.segmentNo}, #{segment.attemptNo}, #{segment.reservedSteps}, #{segment.knownSteps}, #{segment.turnId,jdbcType=INTEGER}, #{segment.executionGeneration}, #{segment.privacyGeneration}, #{segment.reservedTokens}, #{segment.knownInputTokens}, #{segment.knownOutputTokens}, #{segment.usageUncertain}, #{segment.status,jdbcType=VARCHAR}, #{segment.failureReason,jdbcType=VARCHAR}, #{segment.providerDeclarationFingerprint,jdbcType=VARBINARY}, #{segment.deadlineAt,jdbcType=TIMESTAMP}, #{segment.startedAt,jdbcType=TIMESTAMP}, #{segment.settledAt,jdbcType=TIMESTAMP})
+      (#{segment.workspaceId}, #{segment.runId}, #{segment.segmentNo}, #{segment.attemptNo}, #{segment.reservedSteps}, #{segment.knownSteps}, #{segment.turnId,jdbcType=INTEGER}, #{segment.executionGeneration}, #{segment.privacyGeneration}, #{segment.organizationPrivacyGeneration}, #{segment.reservedTokens}, #{segment.knownInputTokens}, #{segment.knownOutputTokens}, #{segment.usageUncertain}, #{segment.status,jdbcType=VARCHAR}, #{segment.failureReason,jdbcType=VARCHAR}, #{segment.providerDeclarationFingerprint,jdbcType=VARBINARY}, #{segment.deadlineAt,jdbcType=TIMESTAMP}, #{segment.startedAt,jdbcType=TIMESTAMP}, #{segment.settledAt,jdbcType=TIMESTAMP})
   </insert>
 
   <select id="getSegment" resultMap="segmentResult" useCache="false" flushCache="true">
@@ -125,7 +127,7 @@
 
   <select id="listRuns" resultMap="runResult" useCache="false" flushCache="true">
     SELECT *, <include refid="continuationBytes" /> FROM ai_agent_run
-    WHERE workspace_id = #{workspaceId} AND owner_user_id = #{ownerUserId}
+    WHERE workspace_id = #{workspaceId} AND organization_privacy_generation = #{organizationPrivacyGeneration} AND owner_user_id = #{ownerUserId}
     <if test="sessionId != null">AND session_id = #{sessionId}</if>
     <if test="state != null">AND status = #{state}</if>
     <if test="beforeId != null">AND id &lt; #{beforeId}</if>
@@ -302,7 +304,7 @@
   </update>
 
   <select id="goalMessageIdentity" resultType="ooo.klae.connex.backend.beans.AiChatMessage" useCache="false" flushCache="true">
-    SELECT id, workspace_id, session_id, seq, privacy_generation, mission_run_id, mission_message_kind
+    SELECT id, workspace_id, session_id, seq, privacy_generation, organization_privacy_generation, mission_run_id, mission_message_kind
     FROM ai_chat_message WHERE workspace_id = #{workspaceId} AND mission_run_id = #{runId}
       AND mission_message_kind = 'goal'
   </select>
@@ -345,10 +347,10 @@
 
   <insert id="insertMissionBookkeepingCall" useGeneratedKeys="true" keyProperty="call.id">
     INSERT INTO ai_chat_tool_call
-      (workspace_id, message_id, mission_run_id, artifact_origin, privacy_generation,
+      (workspace_id, message_id, mission_run_id, artifact_origin, privacy_generation, organization_privacy_generation,
        tool_name, status, arguments_json, result_json, executed_by_user_id, executed_at, idempotency_key)
     VALUES
-      (#{call.workspaceId}, #{call.messageId}, #{call.missionRunId}, 'mission', #{call.privacyGeneration},
+      (#{call.workspaceId}, #{call.messageId}, #{call.missionRunId}, 'mission', #{call.privacyGeneration}, #{call.organizationPrivacyGeneration},
        #{call.toolName}, 'executed',
        CONVERT(#{call.argumentsJson,jdbcType=VARBINARY,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),
        CONVERT(#{call.resultJson,jdbcType=VARBINARY,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),

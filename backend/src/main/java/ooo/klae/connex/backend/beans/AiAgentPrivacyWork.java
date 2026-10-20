@@ -29,6 +29,7 @@ public class AiAgentPrivacyWork {
     private Long lastResidualCount;
     private Integer controlAcceptanceAuditId;
     private Integer currentSessionId;
+    private ContentScope contentScope = ContentScope.MISSION_V1;
     private String operationKey;
     private String reason;
     private String phase;
@@ -40,4 +41,28 @@ public class AiAgentPrivacyWork {
     private LocalDateTime completedAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+    /** Serializes the closed scope domain used by the existing mapper and receipt protocols. */
+    public String getContentScope() {
+        return contentScope.value;
+    }
+
+    /** Rejects unknown scopes before they can select generation semantics. */
+    public void setContentScope(String value) {
+        contentScope = switch (java.util.Objects.requireNonNull(value, "contentScope")) {
+            case "organization_mission_holdings_v1" -> ContentScope.MISSION_V1;
+            case "organization_assistant_holdings_v2" -> ContentScope.ASSISTANT_V2;
+            default -> throw new IllegalArgumentException("Unknown assistant privacy scope");
+        };
+    }
+
+    private enum ContentScope {
+        MISSION_V1("organization_mission_holdings_v1"),
+        ASSISTANT_V2("organization_assistant_holdings_v2");
+
+        private final String value;
+
+        ContentScope(String value) {
+            this.value = value;
+        }
+    }
 }

@@ -51,7 +51,7 @@ class AiAgentLegacyTurnIntegrationTest extends AbstractAiAgentPrivacyIntegration
         assertEquals("restrictions_changed", assertThrows(AiAssistantLoopException.class,
                 () -> turns.upsertHistorySummary(stale, null, 0,
                         "Captured summary", "{\"kind\":\"history_summary\",\"throughSeq\":1}", 1, 1)).detailReason());
-        assertNull(chatMapper.getHistorySummary(workspace.getId(), captured.sessionId()));
+        assertNull(chatMapper.getHistorySummary(workspace.getId(), captured.sessionId(), 1L));
         assertEquals(2, residuals(captured.sessionId()));
         assertDoesNotThrow(() -> turns.upsertHistorySummary(fresh, null, 0, "Current summary",
                 "{\"kind\":\"history_summary\",\"throughSeq\":1}", 1, 1));
@@ -66,7 +66,7 @@ class AiAgentLegacyTurnIntegrationTest extends AbstractAiAgentPrivacyIntegration
         AiChatQueuedTurn stale = withOriginalPrivacy(fresh, captured);
         assertEquals("restrictions_changed", assertThrows(AiAssistantLoopException.class,
                 () -> turns.resolve(stale, "Captured answer", "{}", 1, 1)).detailReason());
-        assertNull(chatMapper.getLatestAnswer(workspace.getId(), captured.sessionId()));
+        assertNull(chatMapper.getLatestAnswer(workspace.getId(), captured.sessionId(), 1L));
         assertEquals(2, residuals(captured.sessionId()));
         assertTrue(turns.resolve(fresh, "Current answer", "{}", 1, 1));
     }
@@ -96,7 +96,7 @@ class AiAgentLegacyTurnIntegrationTest extends AbstractAiAgentPrivacyIntegration
         assertEquals("restrictions_changed", assertThrows(AiAssistantLoopException.class,
                 () -> callback.accept(stale)).detailReason());
         assertEquals("proposed", chatMapper.getToolCallBySession(
-                workspace.getId(), captured.sessionId(), toolId).getStatus());
+                workspace.getId(), captured.sessionId(), toolId, 1L).getStatus());
         assertFalse(chatMapper.getPrivacySession(workspace.getId(), captured.sessionId()).getTitle()
                 .contains("Captured"));
         assertEquals("title".equals(writer) ? "Current answer" : null,
@@ -125,11 +125,11 @@ class AiAgentLegacyTurnIntegrationTest extends AbstractAiAgentPrivacyIntegration
         String operation = invalidate();
         privacyService.initialize(workspace.getId());
         assertTrue(privacyMapper.getBarrier(workspace.getId()).isBlocked());
-        assertTrue(chatMapper.listMessages(workspace.getId(), captured.sessionId(), 100, 0).isEmpty());
-        assertNull(chatMapper.getHistorySummary(workspace.getId(), captured.sessionId()));
-        assertNull(chatMapper.getLatestAnswer(workspace.getId(), captured.sessionId()));
-        assertNull(chatMapper.getToolCallById(workspace.getId(), captured.userMessageId(), toolId));
-        assertNull(chatMapper.getToolCallBySession(workspace.getId(), captured.sessionId(), toolId));
+        assertTrue(chatMapper.listMessages(workspace.getId(), captured.sessionId(), 100, 0, 1L).isEmpty());
+        assertNull(chatMapper.getHistorySummary(workspace.getId(), captured.sessionId(), 1L));
+        assertNull(chatMapper.getLatestAnswer(workspace.getId(), captured.sessionId(), 1L));
+        assertNull(chatMapper.getToolCallById(workspace.getId(), captured.userMessageId(), toolId, 1L));
+        assertNull(chatMapper.getToolCallBySession(workspace.getId(), captured.sessionId(), toolId, 1L));
         assertNull(sessions.get(captured.sessionId(), 1, 50).activeTurn());
         var turnProjection = turns.readTurn(captured.sessionId(), captured.turnId());
         assertNull(turnProjection.getPartialContent());
@@ -147,7 +147,7 @@ class AiAgentLegacyTurnIntegrationTest extends AbstractAiAgentPrivacyIntegration
         var appended = sessions.appendMessage(session, input);
         assertEquals(2, appended.getSeq());
         finish(invalidate());
-        assertTrue(chatMapper.listMessages(workspace.getId(), session, 100, 0).isEmpty());
+        assertTrue(chatMapper.listMessages(workspace.getId(), session, 100, 0, 1L).isEmpty());
         assertEquals(2, chatMapper.getPrivacySession(workspace.getId(), session).getMessageSeqHighWater());
     }
 
@@ -178,6 +178,7 @@ class AiAgentLegacyTurnIntegrationTest extends AbstractAiAgentPrivacyIntegration
     private int session() {
         AiChatSession session = new AiChatSession();
         session.setWorkspaceId(workspace.getId());
+        session.setOrganizationPrivacyGeneration(1L);
         session.setCreatedByUserId(currentUser.getId());
         session.setTitle("Original title");
         session.setTitleUserSet(false);

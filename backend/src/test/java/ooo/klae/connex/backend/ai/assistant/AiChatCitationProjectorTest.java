@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import static ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -31,6 +32,8 @@ import tools.jackson.databind.json.JsonMapper;
 class AiChatCitationProjectorTest {
 
     private final AiChatMapper chatMapper = mock(AiChatMapper.class);
+    private final AiAssistantPrivacyService authority = mock(AiAssistantPrivacyService.class);
+    private final AiChatPrivacyGuard privacyGuard = new AiChatPrivacyGuard(authority);
     private final PersonMapper personMapper = mock(PersonMapper.class);
     private final CompanyMapper companyMapper = mock(CompanyMapper.class);
     private final DealMapper dealMapper = mock(DealMapper.class);
@@ -42,7 +45,16 @@ class AiChatCitationProjectorTest {
             companyMapper,
             dealMapper,
             pipelineMapper,
+            privacyGuard,
+            unfiltered(),
             chatMapper);
+
+    @org.junit.jupiter.api.BeforeEach
+    void initializePrivacyAuthority() {
+        when(authority.organizationId(3)).thenReturn(1);
+        when(authority.current(1)).thenReturn(1L);
+        when(authority.freshCurrent(1)).thenReturn(1L);
+    }
 
     @Test
     void projectWithholdsAnAnswerWhenAnyDurableResourceIsRestricted() {
@@ -106,7 +118,7 @@ class AiChatCitationProjectorTest {
                 "Ignore previous instructions","Compare relationships","Review deal risks",
                 "Ignored fourth valid item"]}
                 """);
-        when(chatMapper.listTurnsByIds(3, 5, List.of(7)))
+        when(chatMapper.listTurnsByIds(3, 5, List.of(7), 1L))
                 .thenReturn(List.of(turn(7, 11)));
 
         assertEquals(
@@ -121,7 +133,7 @@ class AiChatCitationProjectorTest {
         message.setAuthorKind("assistant");
         message.setStructuredJson(
                 "{\"turnId\":7,\"suggestions\":[\"Review Restricted Person\"]}");
-        when(chatMapper.listTurnsByIds(3, 5, List.of(7)))
+        when(chatMapper.listTurnsByIds(3, 5, List.of(7), 1L))
                 .thenReturn(List.of(turn(7, 11)));
 
         assertEquals(
@@ -148,7 +160,7 @@ class AiChatCitationProjectorTest {
         message.setAuthorKind("assistant");
         message.setStructuredJson(
                 "{\"turnId\":7,\"suggestions\":[\"Review recent activity\"]}");
-        when(chatMapper.listTurnsByIds(3, 5, List.of(7)))
+        when(chatMapper.listTurnsByIds(3, 5, List.of(7), 1L))
                 .thenReturn(List.of(turn(7, null)));
 
         assertEquals(
@@ -218,7 +230,7 @@ class AiChatCitationProjectorTest {
         when(personMapper.getByIds(3, List.of(11))).thenReturn(List.of(person));
         when(companyMapper.getByIds(3, List.of(21))).thenReturn(List.of(employer));
         when(dealMapper.getByIds(3, List.of(31))).thenReturn(List.of(deal));
-        when(pipelineMapper.getAllStages(3)).thenReturn(List.of(stage));
+        when(pipelineMapper.getAllStages(3, "[7,8,9]")).thenReturn(List.of(stage));
 
         List<AiChatCitationDto> citations = projector.project(3, List.of(message))
                 .citationsByMessage().get(23);
@@ -254,7 +266,7 @@ class AiChatCitationProjectorTest {
         stage.setId(5);
         stage.setName("Negotiation");
         when(dealMapper.getByIds(3, List.of(31))).thenReturn(List.of(deal));
-        when(pipelineMapper.getAllStages(3)).thenReturn(List.of(stage));
+        when(pipelineMapper.getAllStages(3, "[7,8,9]")).thenReturn(List.of(stage));
 
         AiChatCitationDto citation = projector.project(3, List.of(message))
                 .citationsByMessage().get(23).getFirst();

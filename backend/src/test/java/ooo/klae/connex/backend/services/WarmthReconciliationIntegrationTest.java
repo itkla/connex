@@ -242,7 +242,8 @@ class WarmthReconciliationIntegrationTest {
             .map(Map.Entry::getKey)
             .collect(Collectors.toUnmodifiableSet());
         Set<Integer> actualGapIds = reportMapper.aggregateCoverageGaps(
-                reportQuery(), REPORT_END.minusNanos(1_000_000), MODEL.sqlParameters()).stream()
+                reportQuery(), recordVisibilityScopeControlAccess.getForWorkspace(workspace.getId()).workspaceIdsJson(),
+                REPORT_END.minusNanos(1_000_000), MODEL.sqlParameters()).stream()
             .map(ReportAggregateRow::groupKey)
             .map(Integer::valueOf)
             .collect(Collectors.toUnmodifiableSet());

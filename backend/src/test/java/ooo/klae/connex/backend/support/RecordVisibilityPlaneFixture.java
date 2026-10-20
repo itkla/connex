@@ -32,7 +32,12 @@ import ooo.klae.connex.backend.config.TenantRoutingConfig;
 import ooo.klae.connex.backend.mappers.DuplicateReviewMapper;
 import ooo.klae.connex.backend.mappers.IntroductionMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
+import ooo.klae.connex.backend.mappers.PipelineMapper;
+import ooo.klae.connex.backend.mappers.ReportMapper;
+import ooo.klae.connex.backend.mappers.SegmentMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.dto.ReportAggregateQuery;
+import ooo.klae.connex.backend.dto.ReportOffsetSegment;
 import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
 import ooo.klae.connex.backend.services.ShareWorkspaceControlAccess;
 import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
@@ -40,6 +45,7 @@ import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.tenant.TenantRoutingDataSource;
 import ooo.klae.connex.backend.tenant.TenantRoutingProperties;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
+import ooo.klae.connex.backend.warmth.RelationshipWarmthModel;
 
 /** Minimal real-MySQL fixtures for pre-#485 record-visibility matrices on either catalog layout. */
 public final class RecordVisibilityPlaneFixture implements AutoCloseable {
@@ -53,8 +59,13 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
     public final IntroductionMapper introductionMapper;
     public final DuplicateReviewMapper duplicateReviewMapper;
     public final NoteMapper noteMapper;
+    public final ReportMapper reportMapper;
+    public final SegmentMapper segmentMapper;
+    public final PipelineMapper pipelineMapper;
     public final RecordVisibilityScopeControlAccess scopeAccess;
     public final LegacyRecordVisibilitySql legacy;
+    public final List<Integer> pipelineIds = new ArrayList<>();
+    public final List<Integer> stageIds = new ArrayList<>();
     public final List<Integer> workspaceIds = new ArrayList<>();
     public final List<Integer> companyIds = new ArrayList<>();
     public final List<Integer> personIds = new ArrayList<>();
@@ -62,6 +73,12 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
     public final List<Integer> noteIds = new ArrayList<>();
     public final List<Integer> privateNoteIds = new ArrayList<>();
     public final List<Integer> dealIds = new ArrayList<>();
+    public final List<Integer> reportEvidencePersonIds = new ArrayList<>();
+    public int reportTagId;
+    public final List<Integer> candidateCompanyIds = new ArrayList<>();
+    public final List<Integer> candidatePersonIds = new ArrayList<>();
+    public final List<Integer> candidateDealIds = new ArrayList<>();
+    public final List<Integer> companyFieldPersonIds = new ArrayList<>();
     public int orgId;
     public int foreignOrgId;
     public int workspaceId;
@@ -71,19 +88,20 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
     private final List<String> tables;
     private final boolean split;
     private int pipelineId;
+    private int reportStageId;
 
     /** Selects one mapper's minimal tenant-table fixture without changing the pilot fixtures. */
     public enum Records {
-        INTRODUCTIONS, DUPLICATE_REVIEW, NOTES
-    }
-
-    /** Clones only the tables referenced by the selected mapper's visibility statements. */
-    public RecordVisibilityPlaneFixture(boolean introductions, boolean split) throws Exception {
-        this(introductions ? Records.INTRODUCTIONS : Records.DUPLICATE_REVIEW, split);
+        INTRODUCTIONS, DUPLICATE_REVIEW, NOTES, REPORTS, SEGMENTS, PIPELINES
     }
 
     /** Migrates the default schema and clones only the selected statements' tenant tables. */
     public RecordVisibilityPlaneFixture(Records records, boolean split) throws Exception {
+        this(records, split, 2);
+    }
+
+    /** Creates the same minimal fixture with an explicit connection budget. */
+    public RecordVisibilityPlaneFixture(Records records, boolean split, int maximumPoolSize) throws Exception {
         this.split = split;
         String url = System.getenv("CONNEX_DB_URL");
         String username = System.getenv("CONNEX_DB_USERNAME");
@@ -106,16 +124,21 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
         tenantCatalog = split ? "cnx_record_plane_" + UUID.randomUUID().toString().replace("-", "")
             : defaultCatalog;
         tables = switch (records) {
+            case PIPELINES -> List.of("pipeline", "pipeline_share", "stage");
             case INTRODUCTIONS -> List.of("company", "person", "company_share", "activity", "note", "task", "person_edge");
             case DUPLICATE_REVIEW -> List.of("company", "person", "company_share", "person_identity", "company_identity",
                 "duplicate_review_decision");
             case NOTES -> List.of("company", "company_share", "person", "person_share", "deal", "note");
+            case REPORTS -> List.of("company", "person", "company_share", "person_share", "deal", "tag",
+                "activity", "note", "task", "company_tag", "deal_person", "deal_tag");
+            case SEGMENTS -> List.of("company", "company_share", "person", "person_share", "deal", "note",
+                "activity", "person_edge", "task");
         };
         pool = new HikariDataSource();
         pool.setJdbcUrl(url);
         pool.setUsername(username);
         pool.setPassword(password);
-        pool.setMaximumPoolSize(2);
+        pool.setMaximumPoolSize(maximumPoolSize);
         pool.setConnectionTimeout(5_000);
         pool.setPoolName("record-visibility-plane");
         TenantRoutingProperties properties = new TenantRoutingProperties();
@@ -130,7 +153,8 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
         configuration.setMapUnderscoreToCamelCase(true);
         configuration.getTypeAliasRegistry().registerAliases("ooo.klae.connex.backend.beans");
         for (String resource : List.of("mappers/IntroductionMapper.xml", "mappers/DuplicateReviewMapper.xml",
-                "mappers/WorkspaceMapper.xml", "mappers/NoteMapper.xml")) {
+                "mappers/WorkspaceMapper.xml", "mappers/NoteMapper.xml", "mappers/ReportMapper.xml",
+                "mappers/SegmentMapper.xml", "mappers/PipelineMapper.xml")) {
             try (InputStream input = getClass().getClassLoader().getResourceAsStream(resource)) {
                 if (input == null) {
                     throw new IllegalStateException("Missing mapper resource " + resource);
@@ -142,15 +166,25 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
         introductionMapper = sessions.getMapper(IntroductionMapper.class);
         duplicateReviewMapper = sessions.getMapper(DuplicateReviewMapper.class);
         noteMapper = sessions.getMapper(NoteMapper.class);
+        reportMapper = sessions.getMapper(ReportMapper.class);
+        segmentMapper = sessions.getMapper(SegmentMapper.class);
+        pipelineMapper = sessions.getMapper(PipelineMapper.class);
         TenantWorkScope workScope = new TenantWorkScope(
             tenantContext, mock(TenantCatalogResolver.class), mock(WorkspaceMapper.class));
         scopeAccess = new RecordVisibilityScopeControlAccess(new ShareWorkspaceControlAccess(
-            sessions.getMapper(WorkspaceMapper.class), workScope, tenantContext, transactionManager));
+            sessions.getMapper(WorkspaceMapper.class), workScope, tenantContext, transactionManager), tenantContext);
         legacy = new LegacyRecordVisibilitySql(pool, defaultCatalog);
         try {
             seedControl();
-            if (records == Records.NOTES) {
+            if (records == Records.PIPELINES) {
+                seedPipelines();
+            } else if (records == Records.NOTES || records == Records.SEGMENTS) {
                 seedNotes();
+                if (records == Records.SEGMENTS) {
+                    seedSegments();
+                }
+            } else if (records == Records.REPORTS) {
+                seedReports();
             } else {
                 seedRecords(records == Records.INTRODUCTIONS);
             }
@@ -161,7 +195,7 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
                     controlJdbc.execute("CREATE TABLE " + tenantCatalog + "." + table
                         + " LIKE " + defaultCatalog + "." + table);
                     controlJdbc.update("INSERT INTO " + tenantCatalog + "." + table + " SELECT * FROM "
-                        + defaultCatalog + "." + table + " WHERE workspace_id IN (" + workspaceIdsSql() + ")");
+                        + defaultCatalog + "." + table + " WHERE " + fixtureRows(table));
                 }
                 controlJdbc.update("INSERT INTO org_placement (org_id, placement_mode, database_handle, "
                     + "storage_encryption_mode, key_controller, revocation_supported) "
@@ -211,6 +245,71 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
         return parameters;
     }
 
+    /** Builds deterministic report parameters also accepted by the frozen legacy statements. */
+    public Map<String, Object> reportParameters(String measure, String group, LocalDateTime end, int limit) {
+        return reportParameters(measure, group, end, limit, false);
+    }
+
+    /** Also exercises every optional tenant-side filter using the fixture's matching roots. */
+    public Map<String, Object> reportParameters(
+            String measure, String group, LocalDateTime end, int limit, boolean filtered) {
+        LocalDateTime start = end.minusMonths(1);
+        ReportAggregateQuery query = new ReportAggregateQuery(workspaceId, measure, group, "month", start, end,
+            start.toLocalDate(), end.toLocalDate(), filtered ? List.of(pipelineId) : null,
+            filtered ? List.of(userId) : null, filtered ? List.of("open") : null,
+            filtered ? List.of(reportTagId) : null, filtered ? List.copyOf(dealIds) : null, null, 10,
+            List.of(new ReportOffsetSegment(start, end, 0)));
+        Map<String, Object> parameters = parameters();
+        parameters.put("query", query);
+        parameters.put("warmthReference", end.minusNanos(1_000_000));
+        parameters.put("model", RelationshipWarmthModel.current().sqlParameters());
+        parameters.put("asOf", end);
+        parameters.put("limit", limit);
+        return parameters;
+    }
+
+    /** Adds a report stakeholder without changing the fixed owner/share matrix lists. */
+    public int addReportPerson(int ownerWorkspaceId, int companyId, String name, LocalDateTime createdAt)
+            throws SQLException {
+        return insert("INSERT INTO person (workspace_id, company_id, name, created_at) VALUES (?, ?, ?, ?)",
+            ownerWorkspaceId, companyId, name, createdAt);
+    }
+
+    /** Adds one viewer-owned meeting used to test eligible warmth before aggregation. */
+    public int addReportTouch(int personId, LocalDateTime timestamp) throws SQLException {
+        return insert("INSERT INTO activity (workspace_id, person_id, created_by_id, type, subject, timestamp) "
+            + "VALUES (?, ?, ?, 'meeting', 'Report warmth', ?)", workspaceId, personId, userId, timestamp);
+    }
+
+    /** Adds a workspace-owned open deal without a stakeholder link. */
+    public int addReportDeal(int companyId, String name, String value, String currency) throws SQLException {
+        return insert("INSERT INTO deal (workspace_id, pipeline_id, stage_id, company_id, name, value, currency, "
+            + "owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '2026-08-01 00:00:00')", workspaceId, pipelineId,
+            reportStageId, companyId, name, value, currency, userId);
+    }
+
+    /** Parameters for company predicates and their frozen Segment SQL oracle. */
+    public Map<String, Object> segmentParameters() {
+        Map<String, Object> parameters = parameters();
+        parameters.put("userId", userId);
+        parameters.put("days", 30);
+        parameters.put("personIds", candidatePersonIds);
+        parameters.put("candidateIds", candidateCompanyIds);
+        parameters.put("strongEdge", 2);
+        parameters.put("field", "company");
+        parameters.put("op", "in");
+        parameters.put("ids", companyIds);
+        parameters.put("id", companyIds.getFirst());
+        return parameters;
+    }
+
+    /** Adds attributed Segment evidence to the default catalog before any optional scratch clone. */
+    public int addActivity(int ownerWorkspaceId, int actorId, Integer personId, Integer dealId, String timestamp)
+            throws SQLException {
+        return insert("INSERT INTO activity (workspace_id, created_by_id, person_id, deal_id, type, subject, timestamp) "
+            + "VALUES (?, ?, ?, ?, 'call', 'Segment evidence', ?)", ownerWorkspaceId, actorId, personId, dealId, timestamp);
+    }
+
     /** Inserts deterministic note evidence in the default fixture before a scratch catalog is cloned. */
     public int addNote(int ownerWorkspaceId, int authorId, Integer personId, Integer dealId,
             String visibility, String title, String content, String timestamp) throws SQLException {
@@ -240,6 +339,29 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
             + "VALUES (?, ?, ?, ?, 'UTC')", unique(), "Visibility Member", unique() + "@example.com", "test-hash");
         controlJdbc.update("INSERT INTO workspace_member (workspace_id, user_id, role) VALUES (?, ?, 'member')",
             workspaceId, userId);
+    }
+
+    private void seedPipelines() throws SQLException {
+        for (int index = 0; index < workspaceIds.size(); index++) {
+            int owner = workspaceIds.get(index);
+            int pipeline = addPipeline(owner, "Pipeline Needle " + index);
+            stageIds.add(insert("INSERT INTO stage (workspace_id, pipeline_id, name, position, is_success) "
+                + "VALUES (?, ?, ?, 2, TRUE)", owner, pipeline, "Later Stage " + index));
+            stageIds.add(insert("INSERT INTO stage (workspace_id, pipeline_id, name, position) "
+                + "VALUES (?, ?, ?, 0)", owner, pipeline, "First Stage " + index));
+            if (List.of(1, 3, 4).contains(index)) {
+                controlJdbc.update("INSERT INTO pipeline_share (pipeline_id, workspace_id, granted_by) VALUES (?, ?, ?)",
+                    pipeline, workspaceId, userId);
+            }
+        }
+        addPipeline(workspaceId, "Empty Pipeline");
+    }
+
+    /** Adds a pipeline to the frozen default-catalog fixture before any optional scratch clone. */
+    public int addPipeline(int ownerWorkspaceId, String name) throws SQLException {
+        int pipeline = insert("INSERT INTO pipeline (workspace_id, name) VALUES (?, ?)", ownerWorkspaceId, name);
+        pipelineIds.add(pipeline);
+        return pipeline;
     }
 
     private void seedRecords(boolean introductions) throws SQLException {
@@ -289,6 +411,40 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
         }
     }
 
+    private void seedReports() throws SQLException {
+        int[] owners = {workspaceId, workspaceIds.get(1), workspaceIds.get(2), workspaceIds.get(3),
+            workspaceIds.get(4), workspaceId};
+        String[] names = {"A Owned", "B Shared", "0 Hidden Sibling", "0 Hidden Foreign", "C Winding", "D Archived"};
+        LocalDateTime created = LocalDateTime.of(2026, 8, 1, 0, 0);
+        pipelineId = insert("INSERT INTO pipeline (workspace_id, name) VALUES (?, 'Report Pipeline')", workspaceId);
+        reportStageId = insert("INSERT INTO stage (workspace_id, pipeline_id, name, position) "
+            + "VALUES (?, ?, 'Report Open', 0)", workspaceId, pipelineId);
+        reportTagId = insert("INSERT INTO tag (workspace_id, name) VALUES (?, 'Report Tag')", workspaceId);
+        for (int i = 0; i < owners.length; i++) {
+            int company = insert("INSERT INTO company (workspace_id, name, created_at) VALUES (?, ?, ?)",
+                owners[i], names[i], created);
+            companyIds.add(company);
+            int person = addReportPerson(owners[i], company, "Report Person " + i, created);
+            personIds.add(person);
+            int evidence = addReportPerson(owners[i], companyIds.getFirst(), "Report Evidence " + i, created);
+            reportEvidencePersonIds.add(evidence);
+            if (List.of(1, 3, 4).contains(i)) {
+                controlJdbc.update("INSERT INTO company_share (company_id, workspace_id, granted_by, created_at) "
+                    + "VALUES (?, ?, ?, '2026-08-02 00:00:00')", company, workspaceId, userId);
+                for (int sharedPerson : List.of(person, evidence)) {
+                    controlJdbc.update("INSERT INTO person_share (person_id, workspace_id, granted_by, created_at) "
+                        + "VALUES (?, ?, ?, '2026-08-02 00:00:00')", sharedPerson, workspaceId, userId);
+                }
+            }
+            int deal = addReportDeal(company, "Report Deal " + i, Integer.toString((i + 1) * 10), "USD");
+            dealIds.add(deal);
+            controlJdbc.update("INSERT INTO deal_person (deal_id, person_id) VALUES (?, ?)", deal, person);
+            controlJdbc.update("INSERT INTO company_tag (company_id, tag_id) VALUES (?, ?)", company, reportTagId);
+            controlJdbc.update("INSERT INTO deal_tag (deal_id, tag_id) VALUES (?, ?)", deal, reportTagId);
+        }
+        controlJdbc.update("UPDATE company SET archived_at = '2026-08-03' WHERE id = ?", companyIds.get(5));
+    }
+
     private void seedNotes() throws SQLException {
         otherUserId = insert("INSERT INTO app_user (username, display_name, email, password_hash, timezone) "
             + "VALUES (?, ?, ?, ?, 'UTC')", unique(), "Other Visibility Member", unique() + "@example.com", "test-hash");
@@ -335,6 +491,28 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
         controlJdbc.update("UPDATE person SET suspended_at = '2026-01-01' WHERE id = ?", personIds.get(7));
     }
 
+    private void seedSegments() throws SQLException {
+        int stageId = controlJdbc.queryForObject("SELECT id FROM stage WHERE pipeline_id = ?", Integer.class, pipelineId);
+        for (int i = 0; i < personIds.size(); i++) {
+            int company = insert("INSERT INTO company (workspace_id, name) VALUES (?, ?)",
+                workspaceId, "Segment Candidate Company " + i);
+            candidateCompanyIds.add(company);
+            int person = insert("INSERT INTO person (workspace_id, name, company_id) VALUES (?, ?, ?)",
+                workspaceId, "Segment Candidate " + i, company);
+            candidatePersonIds.add(person);
+            int deal = insert("INSERT INTO deal (workspace_id, pipeline_id, stage_id, company_id, name) "
+                + "VALUES (?, ?, ?, ?, 'Segment Evidence Deal')", workspaceId, pipelineId, stageId, company);
+            candidateDealIds.add(deal);
+            controlJdbc.update("INSERT INTO person_edge (workspace_id, source_person_id, target_person_id, type, strength) "
+                + "VALUES (?, ?, ?, 'knows', 2)", workspaceId, person, personIds.get(i));
+            addActivity(workspaceId, otherUserId, personIds.get(i), deal, "2999-01-01 00:00:00");
+        }
+        for (int company : companyIds) {
+            companyFieldPersonIds.add(insert("INSERT INTO person (workspace_id, name, company_id) VALUES (?, ?, ?)",
+                workspaceId, "Segment Company Field " + company, company));
+        }
+    }
+
     private int person(int employerCase) throws SQLException {
         int person = insert("INSERT INTO person (workspace_id, name, title, company_id) VALUES (?, ?, ?, ?)",
             workspaceId, "Candidate " + personIds.size(), "Director", employerCase == 6 ? null : companyIds.get(employerCase));
@@ -377,6 +555,14 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
         return workspaceIds.stream().map(String::valueOf).collect(java.util.stream.Collectors.joining(","));
     }
 
+    private String fixtureRows(String table) {
+        return switch (table) {
+            case "company_tag" -> "company_id IN (SELECT id FROM company WHERE workspace_id IN (" + workspaceIdsSql() + "))";
+            case "deal_person", "deal_tag" -> "deal_id IN (SELECT id FROM deal WHERE workspace_id IN (" + workspaceIdsSql() + "))";
+            default -> "workspace_id IN (" + workspaceIdsSql() + ")";
+        };
+    }
+
     private static String unique() {
         return "visibility-" + UUID.randomUUID().toString().replace("-", "");
     }
@@ -395,7 +581,7 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
             }
             if (!workspaceIds.isEmpty()) {
                 for (String table : tables.reversed()) {
-                    controlJdbc.update("DELETE FROM " + table + " WHERE workspace_id IN (" + workspaceIdsSql() + ")");
+                    controlJdbc.update("DELETE FROM " + table + " WHERE " + fixtureRows(table));
                 }
                 if (pipelineId != 0) {
                     controlJdbc.update("DELETE FROM stage WHERE pipeline_id = ?", pipelineId);

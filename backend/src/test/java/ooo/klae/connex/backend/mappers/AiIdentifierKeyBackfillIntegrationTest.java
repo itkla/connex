@@ -189,7 +189,7 @@ class AiIdentifierKeyBackfillIntegrationTest extends AbstractMapperTest {
         assertEquals(AiIdentifierLookupKeys.UNKEYED, AiIdentifierLookupKeys.fromName(company.getName()).literal());
         assertEquals(1, lookup(company.getName()).size());
         assertEquals(0L, backfill.pendingCount(workspace.getId()));
-        try (var rows = lifecycle.streamRows(workspace.getId(), TenantLifecycleRegistry.declarations().get("company"))) {
+        try (var rows = lifecycle.streamRows(workspace.getId(), TenantLifecycleRegistry.declarations().get("company"), 1L)) {
             var exported = rows.iterator().next();
             assertEquals(company.getName(), exported.get("ai_identifier_source_name"));
             assertEquals(AiIdentifierLookupKeys.fromName(company.getName()).literal(), exported.get("ai_identifier_literal_key"));

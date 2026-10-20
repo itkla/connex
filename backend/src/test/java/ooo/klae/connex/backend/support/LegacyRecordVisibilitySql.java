@@ -32,7 +32,7 @@ public final class LegacyRecordVisibilitySql {
             new Environment("pre-485-record-visibility", new JdbcTransactionFactory(), dataSource));
         configuration.setMapUnderscoreToCamelCase(true);
         configuration.getTypeAliasRegistry().registerAliases("ooo.klae.connex.backend.beans");
-        for (String xml : List.of(INTRODUCTION, DUPLICATE_REVIEW, NOTE)) {
+        for (String xml : List.of(INTRODUCTION, DUPLICATE_REVIEW, NOTE, REPORT, SEGMENT, PIPELINE)) {
             String resource = "pre-485-" + configuration.getMappedStatementNames().size();
             new XMLMapperBuilder(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)),
                 configuration, resource, configuration.getSqlFragments()).parse();
@@ -628,6 +628,840 @@ public final class LegacyRecordVisibilitySql {
             ORDER BY n.created_at DESC, n.id DESC
             LIMIT #{limit} OFFSET #{offset}
           </select>
+        </mapper>
+        """;
+    /** Frozen Report SQL from origin/main at 37497574b, including #2161's unit grouping fix. */
+    private static final String REPORT = """
+        <?xml version="1.0" encoding="UTF-8" ?>
+        <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+                "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+        <mapper namespace="ooo.klae.connex.backend.mappers.ReportMapper">
+          <sql id="dealFilters">
+            <if test="query.pipelineIds != null and !query.pipelineIds.isEmpty()">
+              AND d.pipeline_id IN
+              <foreach item="id" collection="query.pipelineIds" open="(" separator="," close=")">#{id}</foreach>
+            </if>
+            <if test="query.ownerIds != null and !query.ownerIds.isEmpty()">
+              AND d.owner_id IN
+              <foreach item="id" collection="query.ownerIds" open="(" separator="," close=")">#{id}</foreach>
+            </if>
+            <if test="query.statuses != null and !query.statuses.isEmpty()">
+              AND (CASE WHEN d.won = TRUE THEN 'won' WHEN d.won = FALSE THEN 'lost' ELSE 'open' END) IN
+              <foreach item="status" collection="query.statuses" open="(" separator="," close=")">#{status}</foreach>
+            </if>
+            <if test="query.tagIds != null and !query.tagIds.isEmpty()">
+              AND EXISTS (
+                SELECT 1 FROM deal_tag dt
+                JOIN tag filter_tag ON filter_tag.id = dt.tag_id AND filter_tag.workspace_id = #{query.workspaceId}
+                WHERE dt.deal_id = d.id AND dt.tag_id IN
+                <foreach item="id" collection="query.tagIds" open="(" separator="," close=")">#{id}</foreach>
+              )
+            </if>
+            <if test="query.riskIds != null and !query.riskIds.isEmpty()">
+              AND d.id IN
+              <foreach item="id" collection="query.riskIds" open="(" separator="," close=")">#{id}</foreach>
+            </if>
+          </sql>
+
+          <sql id="coverageGapUnit">
+            <choose>
+              <when test="query.measure == 'coverage_gap_open_pipeline_value'">COALESCE(open_deal.currency, '')</when>
+              <otherwise>'count'</otherwise>
+            </choose>
+          </sql>
+
+          <select id="aggregateCoverageGaps" resultType="ooo.klae.connex.backend.dto.ReportAggregateRow">
+            SELECT
+              <choose>
+                <when test="query.measure == 'coverage_gap_open_pipeline_value'">
+                  CONCAT(COALESCE(open_deal.currency, ''), ':',
+                    <choose>
+                      <when test="query.groupBy == 'company'">CAST(gap_company.id AS CHAR)</when>
+                      <otherwise>'total'</otherwise>
+                    </choose>)
+                </when>
+                <when test="query.groupBy == 'company'">CAST(gap_company.id AS CHAR)</when>
+                <otherwise>'total'</otherwise>
+              </choose> AS group_key,
+              <choose>
+                <when test="query.measure == 'coverage_gap_open_pipeline_value'">
+                  CONCAT(COALESCE(open_deal.currency, ''), ' · ',
+                    <choose>
+                      <when test="query.groupBy == 'company'">gap_company.name</when>
+                      <otherwise>'Total'</otherwise>
+                    </choose>)
+                </when>
+                <when test="query.groupBy == 'company'">gap_company.name</when>
+                <otherwise>'Total'</otherwise>
+              </choose> AS group_label,
+              <include refid="coverageGapUnit"/> AS unit,
+              <choose>
+                <when test="query.measure == 'coverage_gap_open_pipeline_value'">COALESCE(SUM(open_deal.value), 0)</when>
+                <otherwise>COUNT(DISTINCT gap_company.id)</otherwise>
+              </choose> AS value
+            FROM (
+              SELECT c.id, c.name
+              FROM company c
+              LEFT JOIN person gap_person ON gap_person.company_id = c.id
+                AND gap_person.created_at &lt; #{query.endUtc}
+                AND gap_person.suspended_at IS NULL
+                AND gap_person.archived_at IS NULL
+                AND (
+                  gap_person.workspace_id = #{query.workspaceId}
+                  OR EXISTS (
+                    SELECT 1
+                    FROM person_share gap_person_share
+                    JOIN workspace gap_person_viewer
+                      ON gap_person_viewer.id = gap_person_share.workspace_id
+                      AND gap_person_viewer.id = #{query.workspaceId}
+                    JOIN workspace gap_person_owner
+                      ON gap_person_owner.id = gap_person.workspace_id
+                      AND gap_person_owner.org_id = gap_person_viewer.org_id
+                    WHERE gap_person_share.person_id = gap_person.id
+                      AND gap_person_share.workspace_id = #{query.workspaceId}
+                      AND gap_person_share.created_at &lt; #{query.endUtc}
+                  )
+                )
+              LEFT JOIN (
+                SELECT warmth_touch.person_id,
+                       SUM(warmth_touch.weight
+                         * POW(#{model.decayBase}, -warmth_touch.age_days / #{model.halfLifeDays})) AS raw_weight
+                FROM (
+                  SELECT a.person_id,
+                         CASE LOWER(a.type)
+                           WHEN 'meeting' THEN #{model.meetingWeight}
+                           WHEN 'call' THEN #{model.callWeight}
+                           WHEN 'email' THEN #{model.emailWeight}
+                           ELSE #{model.otherActivityWeight}
+                         END AS weight,
+                         GREATEST(0.0,
+                           TIMESTAMPDIFF(MICROSECOND, a.timestamp, #{warmthReference})
+                             / #{model.microsecondsPerDay}) AS age_days
+                  FROM activity a
+                  WHERE a.workspace_id = #{query.workspaceId}
+                    AND a.person_id IS NOT NULL
+                    AND a.timestamp &lt; #{query.endUtc}
+                  UNION ALL
+                  SELECT n.person_id, #{model.noteWeight} AS weight,
+                         GREATEST(0.0,
+                           TIMESTAMPDIFF(MICROSECOND, n.created_at, #{warmthReference})
+                             / #{model.microsecondsPerDay}) AS age_days
+                  FROM note n
+                  WHERE n.workspace_id = #{query.workspaceId}
+                    AND n.visibility = 'workspace'
+                    AND n.person_id IS NOT NULL
+                    AND n.created_at &lt; #{query.endUtc}
+                  UNION ALL
+                  SELECT t.person_id, #{model.taskWeight} AS weight,
+                         GREATEST(0.0,
+                           TIMESTAMPDIFF(MICROSECOND, t.created_at, #{warmthReference})
+                             / #{model.microsecondsPerDay}) AS age_days
+                  FROM task t
+                  WHERE t.workspace_id = #{query.workspaceId}
+                    AND t.person_id IS NOT NULL
+                    AND t.created_at &lt; #{query.endUtc}
+                ) warmth_touch
+                GROUP BY warmth_touch.person_id
+              ) person_warmth ON person_warmth.person_id = gap_person.id
+              WHERE c.created_at &lt; #{query.endUtc}
+                AND (
+                  c.workspace_id = #{query.workspaceId}
+                  OR EXISTS (
+                    SELECT 1
+                    FROM company_share gap_company_share
+                    JOIN workspace gap_company_viewer
+                      ON gap_company_viewer.id = gap_company_share.workspace_id
+                      AND gap_company_viewer.id = #{query.workspaceId}
+                    JOIN workspace gap_company_owner
+                      ON gap_company_owner.id = c.workspace_id
+                      AND gap_company_owner.org_id = gap_company_viewer.org_id
+                    WHERE gap_company_share.company_id = c.id
+                      AND gap_company_share.workspace_id = #{query.workspaceId}
+                      AND gap_company_share.created_at &lt; #{query.endUtc}
+                  )
+                )
+                AND c.archived_at IS NULL
+              <if test="query.tagIds != null and !query.tagIds.isEmpty()">
+                AND EXISTS (
+                  SELECT 1
+                  FROM company_tag coverage_company_tag
+                  JOIN tag coverage_tag ON coverage_tag.id = coverage_company_tag.tag_id
+                    AND coverage_tag.workspace_id = #{query.workspaceId}
+                  WHERE coverage_company_tag.company_id = c.id
+                    AND coverage_company_tag.tag_id IN
+                    <foreach item="id" collection="query.tagIds" open="(" separator="," close=")">#{id}</foreach>
+                )
+              </if>
+              GROUP BY c.id, c.name
+              HAVING COUNT(DISTINCT CASE
+                WHEN COALESCE(person_warmth.raw_weight, 0.0) &gt;= #{model.warmMinimumRawWeight}
+                THEN gap_person.id
+                ELSE NULL
+              END) &lt;= 1
+            ) gap_company
+            LEFT JOIN deal open_deal ON open_deal.company_id = gap_company.id
+              AND open_deal.workspace_id = #{query.workspaceId}
+              AND open_deal.won IS NULL
+              <if test="query.pipelineIds != null and !query.pipelineIds.isEmpty()">
+                AND open_deal.pipeline_id IN
+                <foreach item="id" collection="query.pipelineIds" open="(" separator="," close=")">#{id}</foreach>
+              </if>
+              <if test="query.ownerIds != null and !query.ownerIds.isEmpty()">
+                AND open_deal.owner_id IN
+                <foreach item="id" collection="query.ownerIds" open="(" separator="," close=")">#{id}</foreach>
+              </if>
+              <if test="query.statuses != null and !query.statuses.isEmpty()">
+                AND 'open' IN
+                <foreach item="status" collection="query.statuses" open="(" separator="," close=")">#{status}</foreach>
+              </if>
+            <if test="query.measure == 'coverage_gap_open_pipeline_value'
+                or query.pipelineIds != null and !query.pipelineIds.isEmpty()
+                or query.ownerIds != null and !query.ownerIds.isEmpty()
+                or query.statuses != null and !query.statuses.isEmpty()">
+              WHERE open_deal.id IS NOT NULL
+            </if>
+            GROUP BY group_key, group_label, <include refid="coverageGapUnit"/>
+            ORDER BY value DESC, group_label, group_key
+          </select>
+
+          <sql id="singleThreadedDealUnit">
+            <choose>
+              <when test="query.measure == 'single_threaded_deal_value'">single_deal.currency</when>
+              <otherwise>'count'</otherwise>
+            </choose>
+          </sql>
+
+          <select id="aggregateSingleThreadedDeals" resultType="ooo.klae.connex.backend.dto.ReportAggregateRow">
+            SELECT
+              <choose>
+                <when test="query.measure == 'single_threaded_deal_value'">
+                  CONCAT(single_deal.currency, ':',
+                    <choose>
+                      <when test="query.groupBy == 'deal'">CAST(single_deal.id AS CHAR)</when>
+                      <when test="query.groupBy == 'company'">COALESCE(CAST(single_company.id AS CHAR), 'unassigned')</when>
+                      <otherwise>'total'</otherwise>
+                    </choose>)
+                </when>
+                <when test="query.groupBy == 'deal'">CAST(single_deal.id AS CHAR)</when>
+                <when test="query.groupBy == 'company'">COALESCE(CAST(single_company.id AS CHAR), 'unassigned')</when>
+                <otherwise>'total'</otherwise>
+              </choose> AS group_key,
+              <choose>
+                <when test="query.measure == 'single_threaded_deal_value'">
+                  CONCAT(single_deal.currency, ' · ',
+                    <choose>
+                      <when test="query.groupBy == 'deal'">single_deal.name</when>
+                      <when test="query.groupBy == 'company'">COALESCE(single_company.name, 'Unassigned')</when>
+                      <otherwise>'Total'</otherwise>
+                    </choose>)
+                </when>
+                <when test="query.groupBy == 'deal'">single_deal.name</when>
+                <when test="query.groupBy == 'company'">COALESCE(single_company.name, 'Unassigned')</when>
+                <otherwise>'Total'</otherwise>
+              </choose> AS group_label,
+              <include refid="singleThreadedDealUnit"/> AS unit,
+              <choose>
+                <when test="query.measure == 'single_threaded_deal_value'">SUM(single_deal.value)</when>
+                <otherwise>COUNT(*)</otherwise>
+              </choose> AS value
+            FROM (
+              SELECT d.id, d.name, d.value, d.currency, d.company_id
+              FROM deal d
+              JOIN deal_person single_link ON single_link.deal_id = d.id
+              JOIN person single_person ON single_person.id = single_link.person_id
+                AND single_person.suspended_at IS NULL
+                AND single_person.archived_at IS NULL
+              WHERE d.workspace_id = #{query.workspaceId}
+                AND d.won IS NULL
+                AND d.risk_excluded = FALSE
+              <include refid="dealFilters"/>
+              GROUP BY d.id, d.name, d.value, d.currency, d.company_id
+              HAVING COUNT(DISTINCT single_link.person_id) = 1
+            ) single_deal
+            LEFT JOIN company single_company ON single_company.id = single_deal.company_id
+              AND (
+                single_company.workspace_id = #{query.workspaceId}
+                OR EXISTS (
+                  SELECT 1
+                  FROM company_share single_company_share
+                  JOIN workspace single_company_viewer
+                    ON single_company_viewer.id = single_company_share.workspace_id
+                    AND single_company_viewer.id = #{query.workspaceId}
+                  JOIN workspace single_company_owner
+                    ON single_company_owner.id = single_company.workspace_id
+                    AND single_company_owner.org_id = single_company_viewer.org_id
+                  WHERE single_company_share.company_id = single_company.id
+                    AND single_company_share.workspace_id = #{query.workspaceId}
+                )
+              )
+              AND single_company.archived_at IS NULL
+            GROUP BY group_key, group_label, <include refid="singleThreadedDealUnit"/>
+            ORDER BY value DESC, group_label, group_key
+          </select>
+
+          <select id="getNetworkAccountValues"
+                  resultType="ooo.klae.connex.backend.dto.ReportNetworkAccountRow">
+            SELECT network_company.id AS company_id,
+                   network_company.name AS company_name,
+                   network_deal.currency AS currency,
+                   COALESCE(SUM(GREATEST(network_deal.value, 0)), 0) AS account_value
+            FROM deal network_deal
+            JOIN company network_company ON network_company.id = network_deal.company_id
+              AND (
+                network_company.workspace_id = #{query.workspaceId}
+                OR EXISTS (
+                  SELECT 1
+                  FROM company_share network_company_share
+                  JOIN workspace vws ON vws.id = network_company_share.workspace_id
+                    AND vws.id = #{query.workspaceId}
+                  JOIN workspace ows ON ows.id = network_company.workspace_id
+                    AND ows.org_id = vws.org_id
+                  WHERE network_company_share.company_id = network_company.id
+                    AND network_company_share.workspace_id = #{query.workspaceId}
+                )
+              )
+              AND network_company.archived_at IS NULL
+            WHERE network_deal.workspace_id = #{query.workspaceId}
+              AND network_deal.won IS NULL
+            <if test="query.pipelineIds != null and !query.pipelineIds.isEmpty()">
+              AND network_deal.pipeline_id IN
+              <foreach item="id" collection="query.pipelineIds" open="(" separator="," close=")">#{id}</foreach>
+            </if>
+            <if test="query.ownerIds != null and !query.ownerIds.isEmpty()">
+              AND network_deal.owner_id IN
+              <foreach item="id" collection="query.ownerIds" open="(" separator="," close=")">#{id}</foreach>
+            </if>
+            <if test="query.statuses != null and !query.statuses.isEmpty()">
+              AND 'open' IN
+              <foreach item="status" collection="query.statuses" open="(" separator="," close=")">#{status}</foreach>
+            </if>
+            <if test="query.tagIds != null and !query.tagIds.isEmpty()">
+              AND EXISTS (
+                SELECT 1
+                FROM company_tag network_company_tag
+                JOIN tag network_tag ON network_tag.id = network_company_tag.tag_id
+                  AND network_tag.workspace_id = #{query.workspaceId}
+                WHERE network_company_tag.company_id = network_company.id
+                  AND network_company_tag.tag_id IN
+                  <foreach item="id" collection="query.tagIds" open="(" separator="," close=")">#{id}</foreach>
+              )
+            </if>
+            GROUP BY network_company.id, network_company.name, network_deal.currency
+            ORDER BY network_deal.currency, network_company.name, network_company.id
+            LIMIT #{limit}
+          </select>
+
+          <select id="getVisiblePersonIdsAt" resultType="int">
+            SELECT p.id
+            FROM person p
+            WHERE p.created_at &lt;= #{asOf}
+              AND (
+                p.workspace_id = #{workspaceId}
+                OR EXISTS (
+                  SELECT 1
+                  FROM person_share ps
+                  JOIN workspace viewer_workspace ON viewer_workspace.id = ps.workspace_id
+                    AND viewer_workspace.id = #{workspaceId}
+                  JOIN workspace owner_workspace ON owner_workspace.id = p.workspace_id
+                    AND owner_workspace.org_id = viewer_workspace.org_id
+                  WHERE ps.person_id = p.id
+                    AND ps.workspace_id = #{workspaceId}
+                    AND ps.created_at &lt;= #{asOf}
+                )
+              )
+            ORDER BY p.id
+          </select>
+
+          <select id="getVisibleCompanyIdsAt" resultType="int">
+            SELECT c.id
+            FROM company c
+            WHERE c.created_at &lt;= #{asOf}
+              AND (
+                c.workspace_id = #{workspaceId}
+                OR EXISTS (
+                  SELECT 1
+                  FROM company_share cs
+                  JOIN workspace viewer_workspace ON viewer_workspace.id = cs.workspace_id
+                    AND viewer_workspace.id = #{workspaceId}
+                  JOIN workspace owner_workspace ON owner_workspace.id = c.workspace_id
+                    AND owner_workspace.org_id = viewer_workspace.org_id
+                  WHERE cs.company_id = c.id
+                    AND cs.workspace_id = #{workspaceId}
+                    AND cs.created_at &lt;= #{asOf}
+                )
+              )
+            ORDER BY c.id
+          </select>
+        </mapper>
+        """;
+
+    private static final String SEGMENT = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+        <mapper namespace="ooo.klae.connex.backend.mappers.SegmentMapper">
+
+            <select id="companyIdsNoActivitySince" resultType="int">
+                SELECT c.id
+                FROM company c
+                WHERE c.workspace_id = #{workspaceId}
+                  AND c.archived_at IS NULL
+                  <if test="candidateIds != null">
+                    AND c.id IN
+                    <foreach item="candidateId" collection="candidateIds" open="(" separator="," close=")">
+                      #{candidateId}
+                    </foreach>
+                  </if>
+                  AND NOT EXISTS (
+                      SELECT 1 FROM activity a
+                      WHERE a.workspace_id = #{workspaceId}
+                        AND a.timestamp &gt;= DATE_SUB(NOW(), INTERVAL #{days} DAY)
+                        AND (a.person_id IS NULL OR EXISTS (
+                            SELECT 1 FROM person processable
+                            WHERE processable.id = a.person_id
+                              AND processable.suspended_at IS NULL
+                              AND processable.provision_ceased_at IS NULL
+                              AND processable.archived_at IS NULL
+                              AND (processable.workspace_id = #{workspaceId}
+                                OR EXISTS (
+                                  SELECT 1 FROM person_share processable_share
+                                  JOIN workspace viewer_workspace
+                                    ON viewer_workspace.id = processable_share.workspace_id
+                                  JOIN workspace owner_workspace
+                                    ON owner_workspace.id = processable.workspace_id
+                                   AND owner_workspace.org_id = viewer_workspace.org_id
+                                  WHERE processable_share.person_id = processable.id
+                                    AND processable_share.workspace_id = #{workspaceId}
+                                ))
+                        ))
+                        AND (
+                            a.person_id IN (SELECT p.id FROM person p
+                                WHERE p.workspace_id = #{workspaceId} AND p.company_id = c.id
+                                  AND p.archived_at IS NULL)
+                            OR a.deal_id IN (SELECT d.id FROM deal d WHERE d.workspace_id = #{workspaceId} AND d.company_id = c.id)
+                        )
+                  )
+            </select>
+
+            <select id="companyIdsForPersonsWithoutUserActivity" resultType="int">
+                SELECT DISTINCT p.company_id
+                FROM person p
+                WHERE p.workspace_id = #{workspaceId}
+                  AND p.suspended_at IS NULL
+                  AND p.provision_ceased_at IS NULL
+                  AND p.archived_at IS NULL
+                  AND p.company_id IS NOT NULL
+                  <if test="candidateIds != null">
+                    AND p.company_id IN
+                    <foreach item="candidateId" collection="candidateIds" open="(" separator="," close=")">
+                      #{candidateId}
+                    </foreach>
+                  </if>
+                  AND p.id IN
+                  <foreach item="pid" collection="personIds" open="(" separator="," close=")">#{pid}</foreach>
+                  AND NOT EXISTS (
+                      SELECT 1 FROM activity a
+                      WHERE a.workspace_id = #{workspaceId}
+                        AND a.created_by_id = #{userId}
+                        AND (a.person_id IS NULL OR EXISTS (
+                            SELECT 1 FROM person processable
+                            WHERE processable.id = a.person_id
+                              AND processable.suspended_at IS NULL
+                              AND processable.provision_ceased_at IS NULL
+                              AND processable.archived_at IS NULL
+                              AND (processable.workspace_id = #{workspaceId}
+                                OR EXISTS (
+                                  SELECT 1 FROM person_share processable_share
+                                  JOIN workspace viewer_workspace
+                                    ON viewer_workspace.id = processable_share.workspace_id
+                                  JOIN workspace owner_workspace
+                                    ON owner_workspace.id = processable.workspace_id
+                                   AND owner_workspace.org_id = viewer_workspace.org_id
+                                  WHERE processable_share.person_id = processable.id
+                                    AND processable_share.workspace_id = #{workspaceId}
+                                ))
+                        ))
+                        AND (
+                            a.person_id IN (SELECT p2.id FROM person p2
+                                WHERE p2.workspace_id = #{workspaceId}
+                                  AND p2.company_id = p.company_id
+                                  AND p2.suspended_at IS NULL
+                                  AND p2.provision_ceased_at IS NULL
+                                  AND p2.archived_at IS NULL)
+                            OR a.deal_id IN (SELECT d.id FROM deal d WHERE d.workspace_id = #{workspaceId} AND d.company_id = p.company_id)
+                        )
+                  )
+            </select>
+
+            <select id="companyIdsWithWarmIntro" resultType="int">
+                SELECT DISTINCT candidate.company_id
+                FROM person_edge edge
+                JOIN person candidate
+                  ON (candidate.id = edge.source_person_id OR candidate.id = edge.target_person_id)
+                 AND candidate.workspace_id = #{workspaceId}
+                 AND candidate.suspended_at IS NULL
+                 AND candidate.provision_ceased_at IS NULL
+                 AND candidate.archived_at IS NULL
+                 AND candidate.company_id IN
+                  <foreach item="candidateId" collection="candidateIds" open="(" separator="," close=")">
+                    #{candidateId}
+                  </foreach>
+                JOIN person engaged
+                  ON engaged.id = IF(candidate.id = edge.source_person_id,
+                                     edge.target_person_id, edge.source_person_id)
+                 AND engaged.archived_at IS NULL
+                 AND engaged.suspended_at IS NULL
+                 AND (engaged.workspace_id = #{workspaceId}
+                   OR EXISTS (
+                     SELECT 1 FROM person_share engaged_share
+                     JOIN workspace viewer_workspace
+                       ON viewer_workspace.id = engaged_share.workspace_id
+                     JOIN workspace owner_workspace
+                       ON owner_workspace.id = engaged.workspace_id
+                      AND owner_workspace.org_id = viewer_workspace.org_id
+                     WHERE engaged_share.person_id = engaged.id
+                       AND engaged_share.workspace_id = #{workspaceId}
+                   ))
+                WHERE edge.workspace_id = #{workspaceId}
+                  AND edge.strength &gt;= #{strongEdge}
+                  AND edge.source_person_id &lt;&gt; edge.target_person_id
+                  AND EXISTS (
+                    SELECT 1 FROM activity engaged_activity
+                    WHERE engaged_activity.workspace_id = #{workspaceId}
+                      AND engaged_activity.person_id = engaged.id
+                    UNION ALL
+                    SELECT 1 FROM note engaged_note
+                    WHERE engaged_note.workspace_id = #{workspaceId}
+                      AND engaged_note.visibility = 'workspace'
+                      AND engaged_note.person_id = engaged.id
+                    UNION ALL
+                    SELECT 1 FROM task engaged_task
+                    WHERE engaged_task.workspace_id = #{workspaceId}
+                      AND engaged_task.person_id = engaged.id
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1 FROM activity user_activity
+                    WHERE user_activity.workspace_id = #{workspaceId}
+                      AND user_activity.created_by_id = #{userId}
+                      AND (user_activity.person_id IS NULL OR EXISTS (
+                        SELECT 1 FROM person processable
+                        WHERE processable.id = user_activity.person_id
+                          AND processable.suspended_at IS NULL
+                          AND processable.provision_ceased_at IS NULL
+                          AND processable.archived_at IS NULL
+                          AND (processable.workspace_id = #{workspaceId}
+                            OR EXISTS (
+                              SELECT 1 FROM person_share processable_share
+                              JOIN workspace processable_viewer_workspace
+                                ON processable_viewer_workspace.id = processable_share.workspace_id
+                              JOIN workspace processable_owner_workspace
+                                ON processable_owner_workspace.id = processable.workspace_id
+                               AND processable_owner_workspace.org_id = processable_viewer_workspace.org_id
+                              WHERE processable_share.person_id = processable.id
+                                AND processable_share.workspace_id = #{workspaceId}
+                            ))
+                      ))
+                      AND (
+                        user_activity.person_id IN (
+                          SELECT company_person.id FROM person company_person
+                          WHERE company_person.workspace_id = #{workspaceId}
+                            AND company_person.company_id = candidate.company_id
+                            AND company_person.suspended_at IS NULL
+                            AND company_person.provision_ceased_at IS NULL
+                            AND company_person.archived_at IS NULL
+                        )
+                        OR user_activity.deal_id IN (
+                          SELECT company_deal.id FROM deal company_deal
+                          WHERE company_deal.workspace_id = #{workspaceId}
+                            AND company_deal.company_id = candidate.company_id
+                        )
+                      )
+                  )
+            </select>
+
+            <sql id="stringOp">
+                <choose>
+                    <when test="op == 'equals'">AND ${col} = #{value}</when>
+                    <when test="op == 'contains' or op == 'starts_with'">AND ${col} LIKE #{pattern}</when>
+                    <when test="op == 'is_set'">AND ${col} IS NOT NULL AND ${col} &lt;&gt; ''</when>
+                    <otherwise>AND 1 = 0</otherwise>
+                </choose>
+            </sql>
+
+            <sql id="numberOp">
+                <choose>
+                    <when test="op == 'equals'">AND ${col} = #{number}</when>
+                    <when test="op == 'gt'">AND ${col} &gt; #{number}</when>
+                    <when test="op == 'gte'">AND ${col} &gt;= #{number}</when>
+                    <when test="op == 'lt'">AND ${col} &lt; #{number}</when>
+                    <when test="op == 'lte'">AND ${col} &lt;= #{number}</when>
+                    <otherwise>AND 1 = 0</otherwise>
+                </choose>
+            </sql>
+
+            <sql id="idOp">
+                <choose>
+                    <when test="op == 'is'">AND ${col} = #{id}</when>
+                    <when test="op == 'in'">
+                        AND ${col} IN
+                        <foreach item="v" collection="ids" open="(" separator="," close=")">#{v}</foreach>
+                    </when>
+                    <otherwise>AND 1 = 0</otherwise>
+                </choose>
+            </sql>
+
+            <sql id="dateOp">
+                <choose>
+                    <when test="op == 'before'">AND ${col} IS NOT NULL AND ${col} &lt; #{value}</when>
+                    <when test="op == 'after'">AND ${col} IS NOT NULL AND ${col} &gt; #{value}</when>
+                    <when test="op == 'within_days'">AND ${col} IS NOT NULL AND ${col} &gt;= #{dateFrom} AND ${col} &lt;= #{dateTo}</when>
+                    <when test="op == 'is_set'">AND ${col} IS NOT NULL</when>
+                    <otherwise>AND 1 = 0</otherwise>
+                </choose>
+            </sql>
+
+            <sql id="personCompanyOp">
+                <include refid="idOp"><property name="col" value="company_id"/></include>
+                AND EXISTS (
+                    SELECT 1 FROM company visible_company
+                    WHERE visible_company.id = person.company_id
+                      AND visible_company.archived_at IS NULL
+                      AND (visible_company.workspace_id = #{workspaceId}
+                        OR EXISTS (
+                            SELECT 1 FROM company_share visible_share
+                            JOIN workspace viewer_workspace ON viewer_workspace.id = visible_share.workspace_id
+                            JOIN workspace owner_workspace
+                              ON owner_workspace.id = visible_company.workspace_id
+                             AND owner_workspace.org_id = viewer_workspace.org_id
+                            WHERE visible_share.company_id = visible_company.id
+                              AND visible_share.workspace_id = #{workspaceId}
+                        ))
+                )
+            </sql>
+
+            <select id="personIdsMatching" resultType="int">
+                SELECT id FROM person
+                WHERE workspace_id = #{workspaceId} AND suspended_at IS NULL
+                  AND provision_ceased_at IS NULL AND archived_at IS NULL
+                <if test="candidateIds != null">
+                  AND id IN
+                  <foreach item="candidateId" collection="candidateIds" open="(" separator="," close=")">
+                    #{candidateId}
+                  </foreach>
+                </if>
+                <choose>
+                    <when test="field == 'name'"><include refid="stringOp"><property name="col" value="name"/></include></when>
+                    <when test="field == 'title'"><include refid="stringOp"><property name="col" value="title"/></include></when>
+                    <when test="field == 'email'"><include refid="stringOp"><property name="col" value="email"/></include></when>
+                    <when test="field == 'phone'"><include refid="stringOp"><property name="col" value="phone"/></include></when>
+                    <when test="field == 'company'"><include refid="personCompanyOp"/></when>
+                    <when test="field == 'owner'"><include refid="idOp"><property name="col" value="owner_id"/></include></when>
+                    <when test="field == 'created'"><include refid="dateOp"><property name="col" value="created_at"/></include></when>
+                    <when test="field == 'updated'"><include refid="dateOp"><property name="col" value="updated_at"/></include></when>
+                    <when test="field == 'tag'">
+                        AND id IN (
+                            SELECT person_tag.person_id
+                            FROM person_tag
+                            JOIN tag segment_tag
+                              ON segment_tag.id = person_tag.tag_id
+                             AND segment_tag.workspace_id = #{workspaceId}
+                            WHERE person_tag.tag_id = #{id}
+                        )
+                    </when>
+                    <otherwise>AND 1 = 0</otherwise>
+                </choose>
+            </select>
+
+            <select id="personIdsMatchingIncludingRestricted" resultType="int">
+                SELECT id FROM person
+                WHERE workspace_id = #{workspaceId} AND archived_at IS NULL
+                <if test="candidateIds != null">
+                  AND id IN
+                  <foreach item="candidateId" collection="candidateIds" open="(" separator="," close=")">
+                    #{candidateId}
+                  </foreach>
+                </if>
+                <choose>
+                    <when test="field == 'name'"><include refid="stringOp"><property name="col" value="name"/></include></when>
+                    <when test="field == 'title'"><include refid="stringOp"><property name="col" value="title"/></include></when>
+                    <when test="field == 'email'"><include refid="stringOp"><property name="col" value="email"/></include></when>
+                    <when test="field == 'phone'"><include refid="stringOp"><property name="col" value="phone"/></include></when>
+                    <when test="field == 'company'"><include refid="personCompanyOp"/></when>
+                    <when test="field == 'owner'"><include refid="idOp"><property name="col" value="owner_id"/></include></when>
+                    <when test="field == 'created'"><include refid="dateOp"><property name="col" value="created_at"/></include></when>
+                    <when test="field == 'updated'"><include refid="dateOp"><property name="col" value="updated_at"/></include></when>
+                    <when test="field == 'tag'">
+                        AND id IN (
+                            SELECT person_tag.person_id
+                            FROM person_tag
+                            JOIN tag segment_tag
+                              ON segment_tag.id = person_tag.tag_id
+                             AND segment_tag.workspace_id = #{workspaceId}
+                            WHERE person_tag.tag_id = #{id}
+                        )
+                    </when>
+                    <otherwise>AND 1 = 0</otherwise>
+                </choose>
+            </select>
+        </mapper>
+        """;
+
+    private static final String PIPELINE = """
+        <?xml version="1.0" encoding="UTF-8" ?>
+        <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+                "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+        <mapper namespace="ooo.klae.connex.backend.mappers.PipelineMapper">
+
+          <resultMap id="StageResult" type="Stage">
+            <id property="id" column="id"/>
+            <result property="workspaceId" column="workspace_id"/>
+            <result property="name" column="name"/>
+            <result property="position" column="position"/>
+            <result property="success" column="is_success"/>
+            <result property="failure" column="is_failure"/>
+            <association property="pipeline" javaType="Pipeline">
+              <id property="id" column="pipeline_id"/>
+            </association>
+          </resultMap>
+
+          <resultMap id="PipelineFullResult" type="Pipeline">
+            <id property="id" column="id"/>
+            <result property="workspaceId" column="workspace_id"/>
+            <result property="name" column="name"/>
+            <result property="createdAt" column="created_at"/>
+            <result property="updatedAt" column="updated_at"/>
+            <collection property="stages" ofType="Stage"
+                        column="{workspaceId=workspace_id,pipelineId=id}"
+                        select="ooo.klae.connex.backend.mappers.PipelineMapper.getStagesByPipelineId"/>
+          </resultMap>
+
+          <!-- Owned-or-shared visibility: a pipeline is visible to its owning workspace and any workspace it
+               has been shared with (pipeline_share). The share branch carries the same-org ceiling the write
+               path enforces (owner and grantee workspaces must share an organization), so a share row that
+               spans an org boundary grants no read visibility. Writes stay owned-only. Requires
+               `FROM pipeline` unaliased. -->
+          <sql id="visible">
+            (pipeline.workspace_id = #{workspaceId}
+             OR EXISTS (SELECT 1 FROM pipeline_share ps
+                JOIN workspace vws ON vws.id = ps.workspace_id
+                JOIN workspace ows ON ows.id = pipeline.workspace_id AND ows.org_id = vws.org_id
+                WHERE ps.pipeline_id = pipeline.id AND ps.workspace_id = #{workspaceId}))
+          </sql>
+
+          <select id="getAllPipelines" resultType="Pipeline">
+            SELECT id, workspace_id, name, created_at, updated_at FROM pipeline WHERE <include refid="visible"/>
+          </select>
+
+          <select id="getPipelineById" resultMap="PipelineFullResult">
+            SELECT id, workspace_id, name, created_at, updated_at FROM pipeline
+            WHERE <include refid="visible"/> AND id = #{id}
+          </select>
+
+          <select id="getVisiblePipelineByIdForUpdate" resultType="Pipeline">
+            SELECT id, workspace_id, name, created_at, updated_at FROM pipeline
+            WHERE <include refid="visible"/> AND id = #{id}
+            FOR UPDATE
+          </select>
+
+          <select id="getOwnedPipelineById" resultMap="PipelineFullResult">
+            SELECT id, workspace_id, name, created_at, updated_at FROM pipeline
+            WHERE workspace_id = #{workspaceId} AND id = #{id}
+          </select>
+
+          <select id="search" resultType="Pipeline">
+            SELECT id, workspace_id, name, created_at, updated_at FROM pipeline
+            WHERE <include refid="visible"/> AND name LIKE #{query}
+            ORDER BY name
+            LIMIT 10
+          </select>
+
+          <select id="pipelineExists" resultType="boolean">
+            SELECT EXISTS(
+              SELECT 1 FROM pipeline WHERE <include refid="visible"/> AND id = #{id}
+            )
+          </select>
+
+          <insert id="insertPipeline" useGeneratedKeys="true" keyProperty="id">
+            INSERT INTO pipeline (workspace_id, name) VALUES (#{workspaceId}, #{name})
+          </insert>
+
+          <update id="updatePipeline">
+            UPDATE pipeline SET name = #{name} WHERE workspace_id = #{workspaceId} AND id = #{id}
+          </update>
+
+          <delete id="deletePipeline">DELETE FROM pipeline WHERE workspace_id = #{workspaceId} AND id = #{id}</delete>
+
+          <select id="getStageById" resultMap="StageResult">
+            SELECT stage.id, stage.workspace_id, stage.name, stage.pipeline_id, stage.position,
+                   stage.is_success, stage.is_failure
+            FROM stage
+            JOIN pipeline ON pipeline.id = stage.pipeline_id AND pipeline.workspace_id = stage.workspace_id
+            WHERE pipeline.workspace_id = #{workspaceId} AND stage.id = #{id}
+          </select>
+
+          <select id="getVisibleStageById" resultMap="StageResult">
+            SELECT stage.id, stage.workspace_id, stage.name, stage.pipeline_id, stage.position,
+                   stage.is_success, stage.is_failure
+            FROM stage
+            JOIN pipeline ON pipeline.id = stage.pipeline_id AND pipeline.workspace_id = stage.workspace_id
+            WHERE stage.id = #{id}
+              AND (pipeline.workspace_id = #{workspaceId}
+                   OR EXISTS (SELECT 1 FROM pipeline_share ps
+                      JOIN workspace vws ON vws.id = ps.workspace_id
+                      JOIN workspace ows ON ows.id = pipeline.workspace_id AND ows.org_id = vws.org_id
+                      WHERE ps.pipeline_id = pipeline.id AND ps.workspace_id = #{workspaceId}))
+          </select>
+
+          <select id="getVisibleStageByIdForUpdate" resultMap="StageResult">
+            SELECT stage.id, stage.workspace_id, stage.name, stage.pipeline_id, stage.position,
+                   stage.is_success, stage.is_failure
+            FROM stage
+            JOIN pipeline ON pipeline.id = stage.pipeline_id AND pipeline.workspace_id = stage.workspace_id
+            WHERE stage.id = #{id}
+              AND (pipeline.workspace_id = #{workspaceId}
+                   OR EXISTS (SELECT 1 FROM pipeline_share ps
+                      JOIN workspace vws ON vws.id = ps.workspace_id
+                      JOIN workspace ows ON ows.id = pipeline.workspace_id AND ows.org_id = vws.org_id
+                      WHERE ps.pipeline_id = pipeline.id AND ps.workspace_id = #{workspaceId}))
+            FOR UPDATE
+          </select>
+
+          <select id="getAllStages" resultMap="StageResult">
+            SELECT id, workspace_id, name, pipeline_id, position, is_success, is_failure FROM stage
+            WHERE stage.workspace_id = #{workspaceId}
+               OR EXISTS (SELECT 1 FROM pipeline_share ps
+                  JOIN workspace vws ON vws.id = ps.workspace_id
+                  JOIN workspace ows ON ows.id = stage.workspace_id AND ows.org_id = vws.org_id
+                  WHERE ps.pipeline_id = stage.pipeline_id AND ps.workspace_id = #{workspaceId})
+            ORDER BY pipeline_id, position
+          </select>
+
+          <select id="getStagesByPipelineId" resultMap="StageResult">
+            SELECT stage.id, stage.workspace_id, stage.name, stage.pipeline_id, stage.position,
+                   stage.is_success, stage.is_failure
+            FROM stage
+            JOIN pipeline ON pipeline.id = stage.pipeline_id AND pipeline.workspace_id = stage.workspace_id
+            WHERE pipeline.id = #{pipelineId}
+              AND (pipeline.workspace_id = #{workspaceId}
+                   OR EXISTS (SELECT 1 FROM pipeline_share ps
+                      JOIN workspace vws ON vws.id = ps.workspace_id
+                      JOIN workspace ows ON ows.id = pipeline.workspace_id AND ows.org_id = vws.org_id
+                      WHERE ps.pipeline_id = pipeline.id AND ps.workspace_id = #{workspaceId}))
+            ORDER BY stage.position
+          </select>
+
+          <insert id="insertStage" useGeneratedKeys="true" keyProperty="id">
+            INSERT INTO stage (workspace_id, name, pipeline_id, position, is_success, is_failure)
+            VALUES (#{workspaceId}, #{name}, #{pipeline.id}, #{position}, #{success}, #{failure})
+          </insert>
+
+          <update id="updateStage">
+            UPDATE stage
+            SET name = #{name}, pipeline_id = #{pipeline.id}, position = #{position},
+                is_success = #{success}, is_failure = #{failure}
+            WHERE workspace_id = #{workspaceId} AND id = #{id}
+          </update>
+
+          <delete id="deleteStage">DELETE FROM stage WHERE workspace_id = #{workspaceId} AND id = #{id}</delete>
         </mapper>
         """;
 }

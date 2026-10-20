@@ -24,6 +24,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
 import ooo.klae.connex.backend.services.SavedViewService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import tools.jackson.databind.ObjectMapper;
@@ -56,6 +57,7 @@ public class AiChatQueryScopeResolver {
 
     private final WorkspaceService workspaceService;
     private final PipelineMapper pipelineMapper;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
     private final SavedViewService savedViewService;
     private final ObjectMapper objectMapper;
     private final Clock clock;
@@ -120,7 +122,9 @@ public class AiChatQueryScopeResolver {
                     workspaceService.getCurrentUserId());
         }
 
-        List<Stage> stages = authorizedStages(request.stageIds());
+        String orgWorkspaceIdsJson = request.stageIds().isEmpty() ? null
+            : recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId()).workspaceIdsJson();
+        List<Stage> stages = authorizedStages(request.stageIds(), orgWorkspaceIdsJson);
         SavedView savedView = request.savedViewId() == null
                 ? null
                 : authorizedSavedView(request.savedViewId());
@@ -157,7 +161,7 @@ public class AiChatQueryScopeResolver {
                 savedViewFingerprint(savedView));
         return new Resolution(
                 scope,
-                interpreted(scope, owners, savedView, unavailable));
+                interpreted(scope, owners, savedView, unavailable, orgWorkspaceIdsJson));
     }
 
     /** Builds the exact interpreted echo for a resolved scope. */
@@ -166,6 +170,14 @@ public class AiChatQueryScopeResolver {
             List<User> owners,
             SavedView savedView,
             List<String> unavailable) {
+        String orgWorkspaceIdsJson = scope.stageIds().isEmpty() ? null
+            : recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId()).workspaceIdsJson();
+        return interpreted(scope, owners, savedView, unavailable, orgWorkspaceIdsJson);
+    }
+
+    private AiChatQueryScopeDto interpreted(
+            AiChatQueryScope scope, List<User> owners, SavedView savedView,
+            List<String> unavailable, String orgWorkspaceIdsJson) {
         return new AiChatQueryScopeDto(
                 scope.declared(),
                 scope.periodStart() == null ? null : scope.periodStart().toString(),
@@ -178,7 +190,7 @@ public class AiChatQueryScopeResolver {
                         .toList(),
                 scope.warmthBands(),
                 scope.recordKinds(),
-                stageReferences(scope.stageIds()),
+                stageReferences(scope.stageIds(), orgWorkspaceIdsJson),
                 scope.dealStatuses(),
                 scope.activityTypes(),
                 savedView == null
@@ -302,9 +314,10 @@ public class AiChatQueryScopeResolver {
             return List.of();
         }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         List<AiChatScopeReferenceDto> references = new ArrayList<>();
         for (AiChatScopeReferenceDto stored : stages) {
-            Stage stage = pipelineMapper.getVisibleStageById(workspaceId, stored.id());
+            Stage stage = pipelineMapper.getVisibleStageById(workspaceId, orgWorkspaceIdsJson, stored.id());
             references.add(new AiChatScopeReferenceDto(
                     stored.id(), stage == null ? "" : label(stage.getName())));
         }
@@ -356,14 +369,14 @@ public class AiChatQueryScopeResolver {
                 .toList();
     }
 
-    private List<Stage> authorizedStages(List<Integer> stageIds) {
+    private List<Stage> authorizedStages(List<Integer> stageIds, String orgWorkspaceIdsJson) {
         if (stageIds.isEmpty()) {
             return List.of();
         }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         List<Stage> stages = new ArrayList<>();
         for (Integer stageId : new LinkedHashSet<>(stageIds)) {
-            Stage stage = pipelineMapper.getVisibleStageById(workspaceId, stageId);
+            Stage stage = pipelineMapper.getVisibleStageById(workspaceId, orgWorkspaceIdsJson, stageId);
             if (stage == null) {
                 throw new BadRequestException(
                         "Assistant scope stages must exist in this workspace");
@@ -373,14 +386,14 @@ public class AiChatQueryScopeResolver {
         return List.copyOf(stages);
     }
 
-    private List<AiChatScopeReferenceDto> stageReferences(List<Integer> stageIds) {
+    private List<AiChatScopeReferenceDto> stageReferences(List<Integer> stageIds, String orgWorkspaceIdsJson) {
         if (stageIds.isEmpty()) {
             return List.of();
         }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         List<AiChatScopeReferenceDto> references = new ArrayList<>();
         for (Integer stageId : stageIds) {
-            Stage stage = pipelineMapper.getVisibleStageById(workspaceId, stageId);
+            Stage stage = pipelineMapper.getVisibleStageById(workspaceId, orgWorkspaceIdsJson, stageId);
             if (stage != null) {
                 references.add(new AiChatScopeReferenceDto(
                         stage.getId(), label(stage.getName())));

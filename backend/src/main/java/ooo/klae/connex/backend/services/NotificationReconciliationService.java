@@ -49,6 +49,7 @@ import ooo.klae.connex.backend.notifications.NotificationDelivery;
 import ooo.klae.connex.backend.notifications.NotificationProperties;
 import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
 import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
+import ooo.klae.connex.backend.exceptions.TenantScopeSnapshotMissingException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -763,6 +764,8 @@ public class NotificationReconciliationService {
     private RecordVisibilityScope preloadRecordVisibilityScope(int workspaceId) {
         try {
             return recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        } catch (TenantScopeSnapshotMissingException exception) {
+            throw exception;
         } catch (RuntimeException exception) {
             log.warn("Intro-opportunity reconciliation failed for workspace={}", workspaceId, exception);
             return null;

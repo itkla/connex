@@ -17,6 +17,8 @@ import ooo.klae.connex.backend.exceptions.AiPrivacyInitializationPendingExceptio
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 
 class AiChatPrivacyGuardTest {
+    private final AiAssistantPrivacyService authority = mock(AiAssistantPrivacyService.class);
+    private final AiChatPrivacyGuard guard = new AiChatPrivacyGuard(authority);
     private final AiChatMapper mapper = mock(AiChatMapper.class);
     private final AiChatSession session = new AiChatSession();
     private final AiAgentPrivacyBarrier barrier = new AiAgentPrivacyBarrier();
@@ -24,6 +26,10 @@ class AiChatPrivacyGuardTest {
     @BeforeEach
     void setUp() {
         session.setWorkspaceId(7);
+        session.setOrganizationPrivacyGeneration(1L);
+        when(authority.organizationId(7)).thenReturn(1);
+        when(authority.current(1)).thenReturn(1L);
+        when(authority.freshCurrent(1)).thenReturn(1L);
         session.setId(13);
         barrier.setWorkspaceId(7);
         barrier.setGeneration(4);
@@ -34,23 +40,23 @@ class AiChatPrivacyGuardTest {
 
     @Test
     void preTaintDerivedJobCannotPublishAfterTaint() {
-        AiChatPrivacyToken captured = AiChatPrivacyGuard.capture(mapper, session);
+        AiChatPrivacyToken captured = guard.capture(mapper, session);
         session.setMissionTaintSeq(9);
         session.setMissionTaintGeneration(4L);
 
-        assertStale(() -> AiChatPrivacyGuard.requireCurrent(mapper, captured));
-        assertStale(() -> AiChatPrivacyGuard.retain(mapper, captured));
+        assertStale(() -> guard.requireCurrent(mapper, captured));
+        assertStale(() -> guard.retain(mapper, captured));
     }
 
     @Test
     void staleGenerationRemainsRejectedAfterPurgeCompletesAndUnblocks() {
         session.setMissionTaintSeq(9);
-        AiChatPrivacyToken captured = AiChatPrivacyGuard.capture(mapper, session);
+        AiChatPrivacyToken captured = guard.capture(mapper, session);
         barrier.setGeneration(5);
         barrier.setBlocked(false);
 
-        assertStale(() -> AiChatPrivacyGuard.requireCurrent(mapper, captured));
-        assertStale(() -> AiChatPrivacyGuard.retain(mapper, captured));
+        assertStale(() -> guard.requireCurrent(mapper, captured));
+        assertStale(() -> guard.retain(mapper, captured));
         assertEquals(4, captured.privacyGeneration());
     }
 
@@ -59,18 +65,18 @@ class AiChatPrivacyGuardTest {
         session.setMissionTaintSeq(9);
         barrier.setBlocked(true);
 
-        assertStale(() -> AiChatPrivacyGuard.capture(mapper, session));
-        assertStale(() -> AiChatPrivacyGuard.requireCurrent(mapper, new AiChatPrivacyToken(7, 13, 4, 9)));
+        assertStale(() -> guard.capture(mapper, session));
+        assertStale(() -> guard.requireCurrent(mapper, new AiChatPrivacyToken(7, 13, 4, 9, 1, 1L)));
     }
 
     @Test
     void unrelatedUntaintedSessionRemainsUsableDuringCleanup() {
-        AiChatPrivacyToken captured = AiChatPrivacyGuard.capture(mapper, session);
+        AiChatPrivacyToken captured = guard.capture(mapper, session);
         barrier.setGeneration(5);
         barrier.setBlocked(true);
 
-        assertDoesNotThrow(() -> AiChatPrivacyGuard.requireCurrent(mapper, captured));
-        assertDoesNotThrow(() -> AiChatPrivacyGuard.retain(mapper, captured));
+        assertDoesNotThrow(() -> guard.requireCurrent(mapper, captured));
+        assertDoesNotThrow(() -> guard.retain(mapper, captured));
     }
 
     @Test
@@ -78,17 +84,17 @@ class AiChatPrivacyGuardTest {
         when(mapper.getPrivacyBarrier(7)).thenReturn(null);
 
         assertThrows(AiPrivacyInitializationPendingException.class,
-                () -> AiChatPrivacyGuard.capture(mapper, session));
-        assertStale(() -> AiChatPrivacyGuard.requireCurrent(mapper, new AiChatPrivacyToken(7, 13, 4, null)));
-        assertStale(() -> AiChatPrivacyGuard.requireCurrent(mapper, null));
+                () -> guard.capture(mapper, session));
+        assertStale(() -> guard.requireCurrent(mapper, new AiChatPrivacyToken(7, 13, 4, null, 1, 1L)));
+        assertStale(() -> guard.requireCurrent(mapper, null));
     }
 
     @Test
     void everySecondaryDispatchRechecksCapturedGenerationWithoutContentLocks() {
         session.setMissionTaintSeq(9);
-        AiChatPrivacyToken captured = AiChatPrivacyGuard.capture(mapper, session);
+        AiChatPrivacyToken captured = guard.capture(mapper, session);
 
-        AiChatPrivacyGuard.execute(mapper, captured, () -> {
+        guard.execute(mapper, captured, () -> {
             AiChatPrivacyGuard.requireEgressCurrent();
             barrier.setGeneration(5);
             barrier.setBlocked(false);
@@ -103,9 +109,9 @@ class AiChatPrivacyGuardTest {
 
     @Test
     void failedNestedExecutionRestoresOuterCapturedToken() {
-        AiChatPrivacyToken outer = AiChatPrivacyGuard.capture(mapper, session);
-        AiChatPrivacyGuard.execute(mapper, outer, () -> {
-            assertThrows(IllegalStateException.class, () -> AiChatPrivacyGuard.execute(mapper, outer, () -> {
+        AiChatPrivacyToken outer = guard.capture(mapper, session);
+        guard.execute(mapper, outer, () -> {
+            assertThrows(IllegalStateException.class, () -> guard.execute(mapper, outer, () -> {
                 throw new IllegalStateException("test interruption");
             }));
             session.setMissionTaintSeq(9);
@@ -113,6 +119,57 @@ class AiChatPrivacyGuardTest {
             return null;
         });
         assertDoesNotThrow(AiChatPrivacyGuard::requireEgressCurrent);
+    }
+
+    @Test
+    void rejectsOldOrganizationGenerationWithoutMissionTaint() {
+        AiChatPrivacyToken captured = guard.capture(mapper, session);
+        when(authority.current(1)).thenReturn(2L);
+        assertStale(() -> guard.requireCurrent(mapper, captured));
+        assertStale(() -> guard.capture(mapper, session));
+        assertEquals(1L, captured.organizationPrivacyGeneration());
+    }
+
+    @Test
+    void providerAttemptUsesFreshAuthorityInsteadOfAnInputSnapshot() {
+        AiChatPrivacyToken captured = guard.capture(mapper, session);
+        guard.execute(mapper, captured, () -> {
+            when(authority.freshCurrent(1)).thenReturn(2L);
+            java.util.concurrent.atomic.AtomicBoolean sent = new java.util.concurrent.atomic.AtomicBoolean();
+            assertStale(() -> AiChatPrivacyGuard.invokeAtEgress(() -> {
+                sent.set(true);
+                return true;
+            }));
+            org.junit.jupiter.api.Assertions.assertFalse(sent.get());
+            return null;
+        });
+    }
+
+    @Test
+    void deletedSessionRefusesOriginalTokensAndDeferredProviderCallbacks() {
+        AiChatPrivacyToken captured = guard.capture(mapper, session);
+        when(mapper.getPrivacySession(7, 13)).thenReturn(null);
+
+        assertStale(() -> guard.requireCurrent(mapper, captured));
+        assertStale(() -> guard.retain(mapper, captured));
+        java.util.concurrent.atomic.AtomicBoolean invoked = new java.util.concurrent.atomic.AtomicBoolean();
+        assertStale(() -> guard.execute(mapper, captured, () -> invoked.compareAndSet(false, true)));
+        org.junit.jupiter.api.Assertions.assertFalse(invoked.get());
+    }
+
+    @Test
+    void metadataReadRetainsTheOriginalOrganizationGeneration() {
+        guard.retainOrganization(7, 1L);
+        verify(authority).retain(1, 1L);
+    }
+
+    @Test
+    void historicalZeroNeverAcquiresRuntimeAuthority() {
+        session.setOrganizationPrivacyGeneration(0L);
+        assertStale(() -> guard.capture(mapper, session));
+        assertStale(() -> guard.retainOrganization(7, 0L));
+        assertThrows(IllegalArgumentException.class,
+                () -> new AiChatPrivacyToken(7, 13, 4, null, 1, 0L));
     }
 
     private static void assertStale(org.junit.jupiter.api.function.Executable action) {

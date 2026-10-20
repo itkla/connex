@@ -41,7 +41,8 @@ public interface AiAgentRunMapper {
             @Param("sessionId") Integer sessionId,
             @Param("state") String state,
             @Param("beforeId") Integer beforeId,
-            @Param("limit") int limit);
+            @Param("limit") int limit,
+            @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     /** Executes the tenant-scoped dueRuns persistence operation. */
     List<AiAgentRun> dueRuns(

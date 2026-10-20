@@ -46,6 +46,8 @@ class AiAssistantProposalSetMapperTest extends AbstractMapperTest {
         AiAssistantProposalSet bulk = proposalSet(workspace, newUser(), "bulk", 1);
         AiAssistantProposalSet scalar = proposalSet(workspace, newUser(), "scalar", 1);
         scalar.setPrivacyGeneration(11);
+        jdbc.update("UPDATE ai_chat_turn SET privacy_generation=11 WHERE workspace_id=? AND id=?",
+                scalar.getWorkspaceId(), scalar.getOriginTurnId());
         insert(bulk);
         insert(scalar);
         AiChatToolCall bulkMember = member(bulk, 1);
@@ -64,9 +66,9 @@ class AiAssistantProposalSetMapperTest extends AbstractMapperTest {
                 configuration.newExecutor(new ManagedTransaction(sqlSession.getConnection(), false)), false)) {
             AiAssistantProposalSetMapper reloaded = freshSession.getMapper(AiAssistantProposalSetMapper.class);
             AiAssistantProposalSet storedBulk = reloaded.findByKey(
-                    bulk.getWorkspaceId(), bulk.getSessionId(), bulk.getProposalKey());
+                    bulk.getWorkspaceId(), bulk.getSessionId(), bulk.getProposalKey(), 1L);
             AiAssistantProposalSet storedScalar = reloaded.findByKey(
-                    scalar.getWorkspaceId(), scalar.getSessionId(), scalar.getProposalKey());
+                    scalar.getWorkspaceId(), scalar.getSessionId(), scalar.getProposalKey(), 1L);
             assertNotNull(storedBulk);
             assertNotNull(storedScalar);
             assertEquals("bulk", storedBulk.getInvocationMode());
@@ -78,9 +80,9 @@ class AiAssistantProposalSetMapperTest extends AbstractMapperTest {
             assertEquals("scalar", storedScalar.getInvocationMode());
             assertNull(storedScalar.getBulkTurnSlot());
             List<AiChatToolCall> bulkRows = reloaded.listMembers(
-                    bulk.getWorkspaceId(), bulk.getSessionId(), bulk.getProposalKey());
+                    bulk.getWorkspaceId(), bulk.getSessionId(), bulk.getProposalKey(), 1L);
             List<AiChatToolCall> scalarRows = reloaded.listMembers(
-                    scalar.getWorkspaceId(), scalar.getSessionId(), scalar.getProposalKey());
+                    scalar.getWorkspaceId(), scalar.getSessionId(), scalar.getProposalKey(), 1L);
             assertEquals(1, bulkRows.size());
             assertEquals(1, scalarRows.size());
             AiChatToolCall storedMember = bulkRows.getFirst();
@@ -115,19 +117,19 @@ class AiAssistantProposalSetMapperTest extends AbstractMapperTest {
         assertEquals(1, mapper.insertMember(member(first, 1)));
         assertEquals(1, mapper.insertMember(member(foreign, 1)));
 
-        assertNull(mapper.findByKey(first.getWorkspaceId(), foreign.getSessionId(), first.getProposalKey()));
-        assertNull(mapper.findByKey(foreign.getWorkspaceId(), first.getSessionId(), first.getProposalKey()));
-        assertTrue(mapper.listMembers(first.getWorkspaceId(), foreign.getSessionId(), first.getProposalKey()).isEmpty());
-        assertFalse(mapper.hasCompleteMembership(first.getWorkspaceId(), foreign.getSessionId(), first.getProposalKey()));
+        assertNull(mapper.findByKey(first.getWorkspaceId(), foreign.getSessionId(), first.getProposalKey(), 1L));
+        assertNull(mapper.findByKey(foreign.getWorkspaceId(), first.getSessionId(), first.getProposalKey(), 1L));
+        assertTrue(mapper.listMembers(first.getWorkspaceId(), foreign.getSessionId(), first.getProposalKey(), 1L).isEmpty());
+        assertFalse(mapper.hasCompleteMembership(first.getWorkspaceId(), foreign.getSessionId(), first.getProposalKey(), 1L));
         AiAssistantProposalSet original = mapper.findByCallIdentity(first.getWorkspaceId(), first.getSessionId(),
-                first.getOriginTurnId(), first.getStepNumber(), first.getCallOrdinal());
+                first.getOriginTurnId(), first.getStepNumber(), first.getCallOrdinal(), 1L);
         assertNotNull(original);
         assertEquals(first.getProposalKey(), original.getProposalKey());
         assertEquals(first.getIntentFingerprint(), original.getIntentFingerprint());
         assertNull(mapper.findByCallIdentity(foreign.getWorkspaceId(), first.getSessionId(),
-                first.getOriginTurnId(), first.getStepNumber(), first.getCallOrdinal()));
+                first.getOriginTurnId(), first.getStepNumber(), first.getCallOrdinal(), 1L));
         assertNull(mapper.findByCallIdentity(first.getWorkspaceId(), foreign.getSessionId(),
-                first.getOriginTurnId(), first.getStepNumber(), first.getCallOrdinal()));
+                first.getOriginTurnId(), first.getStepNumber(), first.getCallOrdinal(), 1L));
         assertEquals(1, members(first).size());
         assertEquals(1, members(foreign).size());
     }
@@ -262,7 +264,7 @@ class AiAssistantProposalSetMapperTest extends AbstractMapperTest {
                 }
             }));
             sqlSession.clearCache();
-            assertNull(mapper.findByKey(set.getWorkspaceId(), set.getSessionId(), set.getProposalKey()));
+            assertNull(mapper.findByKey(set.getWorkspaceId(), set.getSessionId(), set.getProposalKey(), 1L));
             assertEquals(0, jdbc.queryForObject(
                     "SELECT COUNT(*) FROM ai_chat_tool_call WHERE workspace_id = ? AND proposal_key = ?",
                     Integer.class, set.getWorkspaceId(), set.getProposalKey()));
@@ -301,12 +303,14 @@ class AiAssistantProposalSetMapperTest extends AbstractMapperTest {
                 set -> set.setCallOrdinal(-1),
                 set -> set.setCallOrdinal(5),
                 set -> set.setScopeRevision(""),
-                set -> set.setIntentFingerprint("short"),
-                set -> set.setPrivacyGeneration(-1))) {
+                set -> set.setIntentFingerprint("short"))) {
             AiAssistantProposalSet set = proposalSet(workspace, newUser(), "bulk", 1);
             corrupt.accept(set);
             assertThrows(DataAccessException.class, () -> mapper.insert(set));
         }
+        AiAssistantProposalSet invalidGeneration = proposalSet(workspace, newUser(), "scalar", 1);
+        invalidGeneration.setPrivacyGeneration(-1);
+        assertEquals(0, mapper.insert(invalidGeneration));
         AiAssistantProposalSet set = proposalSet(workspace, newUser(), "scalar", 1);
         insert(set);
         assertThrows(DataAccessException.class, () -> jdbc.update(
@@ -382,6 +386,7 @@ class AiAssistantProposalSetMapperTest extends AbstractMapperTest {
                 row -> row.setProposalPreparedAt("2099-01-01 00:00:00"),
                 row -> row.setIdempotencyKey(null))) {
             AiChatToolCall row = member(set, 1);
+ row.setOrganizationPrivacyGeneration(1L);
             corrupt.accept(row);
             assertEquals(0, mapper.insertMember(row));
         }
@@ -393,7 +398,7 @@ class AiAssistantProposalSetMapperTest extends AbstractMapperTest {
                     set.getWorkspaceId(), set.getProposalKey());
             assertEquals(0, mapper.insertMember(member(set, 1)));
             sqlSession.clearCache();
-            AiAssistantProposalSet reloaded = mapper.findByKey(set.getWorkspaceId(), set.getSessionId(), set.getProposalKey());
+            AiAssistantProposalSet reloaded = mapper.findByKey(set.getWorkspaceId(), set.getSessionId(), set.getProposalKey(), 1L);
             assertNotNull(reloaded);
             assertEquals(state, reloaded.getPublicationState());
             assertEquals(state.equals("failed") ? "call_failed" : null, reloaded.getFailureReason());
@@ -440,11 +445,11 @@ class AiAssistantProposalSetMapperTest extends AbstractMapperTest {
     }
 
     private List<AiChatToolCall> members(AiAssistantProposalSet set) {
-        return mapper.listMembers(set.getWorkspaceId(), set.getSessionId(), set.getProposalKey());
+        return mapper.listMembers(set.getWorkspaceId(), set.getSessionId(), set.getProposalKey(), 1L);
     }
 
     private boolean complete(AiAssistantProposalSet set) {
-        return mapper.hasCompleteMembership(set.getWorkspaceId(), set.getSessionId(), set.getProposalKey());
+        return mapper.hasCompleteMembership(set.getWorkspaceId(), set.getSessionId(), set.getProposalKey(), 1L);
     }
 
     private Workspace newWorkspace() {
@@ -458,6 +463,7 @@ class AiAssistantProposalSetMapperTest extends AbstractMapperTest {
     private AiAssistantProposalSet proposalSet(Workspace scope, User actor, String mode, int count) {
         AiChatSession session = new AiChatSession();
         session.setWorkspaceId(scope.getId());
+        session.setOrganizationPrivacyGeneration(1L);
         session.setCreatedByUserId(actor.getId());
         session.setTitle("Storage fixture");
         session.setVisibility("private");
@@ -465,6 +471,7 @@ class AiAssistantProposalSetMapperTest extends AbstractMapperTest {
         assertEquals(1, chatMapper.insertSession(session));
         AiChatMessage message = new AiChatMessage();
         message.setWorkspaceId(scope.getId());
+        message.setOrganizationPrivacyGeneration(1L);
         message.setSessionId(session.getId());
         message.setSeq(1);
         message.setAuthorKind("user");
@@ -473,13 +480,16 @@ class AiAssistantProposalSetMapperTest extends AbstractMapperTest {
         assertEquals(1, chatMapper.insertMessage(message));
         AiChatTurn turn = new AiChatTurn();
         turn.setWorkspaceId(scope.getId());
+        turn.setOrganizationPrivacyGeneration(1L);
         turn.setSessionId(session.getId());
         turn.setRequestedByUserId(actor.getId());
         turn.setStatus("running");
         turn.setPrivacyMode("masked");
+        turn.setPrivacyGeneration(7L);
         assertEquals(1, chatMapper.insertTurn(turn));
         AiAssistantProposalSet set = new AiAssistantProposalSet();
         set.setWorkspaceId(scope.getId());
+        set.setOrganizationPrivacyGeneration(1L);
         set.setProposalKey(UUID.randomUUID().toString());
         set.setSessionId(session.getId());
         set.setMessageId(message.getId());
@@ -499,6 +509,7 @@ class AiAssistantProposalSetMapperTest extends AbstractMapperTest {
     private AiChatToolCall member(AiAssistantProposalSet set, int ordinal) {
         AiChatToolCall row = new AiChatToolCall();
         row.setWorkspaceId(set.getWorkspaceId());
+        row.setOrganizationPrivacyGeneration(1L);
         row.setSessionId(set.getSessionId());
         row.setMessageId(set.getMessageId());
         row.setRequestedByUserId(set.getRequestedByUserId());

@@ -45,6 +45,7 @@ import ooo.klae.connex.backend.mappers.WorkflowMapper;
 public class RuleEngineService {
 
     private final RuleMapper ruleMapper;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
     private final DealMapper dealMapper;
     private final PersonMapper personMapper;
     private final SegmentService segmentService;
@@ -77,6 +78,13 @@ public class RuleEngineService {
 
     /** Runs legacy-owned entity-change rules for one replay-stable dispatch. */
     public void onEntityChange(WorkflowTriggerDispatch.EntityChange dispatch) {
+        recordVisibilityScopeControlAccess.withWorkspaceScope(dispatch.workspaceId(), () -> {
+            onEntityChangeWithinScope(dispatch);
+            return null;
+        });
+    }
+
+    private void onEntityChangeWithinScope(WorkflowTriggerDispatch.EntityChange dispatch) {
         int workspaceId = dispatch.workspaceId();
         String recordType = dispatch.recordType();
         int entityId = dispatch.recordId();
@@ -117,6 +125,13 @@ public class RuleEngineService {
 
     /** Runs legacy-owned schedule rules for one deterministic cadence bucket. */
     public void runSchedule(WorkflowTriggerDispatch.ScheduleTick dispatch) {
+        recordVisibilityScopeControlAccess.withWorkspaceScope(dispatch.workspaceId(), () -> {
+            runScheduleWithinScope(dispatch);
+            return null;
+        });
+    }
+
+    private void runScheduleWithinScope(WorkflowTriggerDispatch.ScheduleTick dispatch) {
         int workspaceId = dispatch.workspaceId();
         String cadence = dispatch.cadence();
         for (Rule rule : ruleMapper.getEnabledByTrigger(workspaceId, "schedule")) {

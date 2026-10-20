@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -320,12 +321,12 @@ class PipelineStageReplacementTest extends AbstractServiceTest {
         foreignStage.setName("Foreign stage " + unique());
         foreignStage.setPosition(0);
         pipelineMapper.insertStage(foreignStage);
-        List<Stage> before = pipelineMapper.getStagesByPipelineId(other.getId(), foreignPipeline.getId());
+        List<Stage> before = pipelineMapper.getStagesByPipelineId(other.getId(), orgWorkspaceIdsJson(workspaceMapper, other.getId()), foreignPipeline.getId());
         assertEquals(List.of(foreignStage.getId()), before.stream().map(Stage::getId).toList());
 
         assertThrows(ResourceNotFoundException.class, () -> pipelineService.replaceStages(
             foreignPipeline.getId(), List.of(foreignStage.getId()), List.of()));
 
-        assertEquals(before, pipelineMapper.getStagesByPipelineId(other.getId(), foreignPipeline.getId()));
+        assertEquals(before, pipelineMapper.getStagesByPipelineId(other.getId(), orgWorkspaceIdsJson(workspaceMapper, other.getId()), foreignPipeline.getId()));
     }
 }

@@ -16,12 +16,13 @@ import ooo.klae.connex.backend.beans.IntroCandidatePerson;
 import ooo.klae.connex.backend.beans.PersonEdge;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
 import ooo.klae.connex.backend.support.RecordVisibilityPlaneFixture;
+import ooo.klae.connex.backend.support.RecordVisibilityPlaneFixture.Records;
 
 /** Compares report ranking, scores, and tie ordering using original and converted SQL inputs. */
 class IntroductionCompanyRankingIntegrationTest {
     @Test
     void companyMaskingPreservesReportRankingScoresAndTieBreaks() throws Exception {
-        try (var fixture = new RecordVisibilityPlaneFixture(true, false)) {
+        try (var fixture = new RecordVisibilityPlaneFixture(Records.INTRODUCTIONS, false)) {
             fixture.installTenant();
             JdbcTemplate jdbc = fixture.controlJdbc;
             assertEquals(7, jdbc.queryForObject("SELECT COUNT(*) FROM person WHERE workspace_id = ?",

@@ -7,6 +7,10 @@ migration-discipline part of #87 §9 / #102).
 > The specific support window below is a **proposed** policy; confirm it before it is published to
 > customers.
 
+The active rollback floor for this release is tenant V237, including with AI and missions disabled.
+Earlier floors in version-specific sections below describe historical component contracts and do not
+permit rollback after V237. Follow [the retained-chat cutover](#v236v237-retained-ask-connex-privacy-cutover).
+
 ## Dormant assistant proposal-set storage (tenant V233)
 
 V233 adds the chat-owned proposal-set parent, nullable membership/preparation columns on tool
@@ -1121,4 +1125,43 @@ Column additions and the default change require `ALGORITHM=INSTANT, LOCK=DEFAULT
 
 DDL auto-commits. If migration fails, keep writers disabled, inspect the applied statements and Flyway failure record, and recover through the normal migration procedure. Do not bypass the algorithm guards.
 
-The rollback floor is `tenant/V235__ai_agent_continuation.sql`, including when missions are disabled. Earlier binaries cannot safely clean up runtime-2 holdings. Returning below the floor requires an explicit reviewed drain, settlement, privacy-purge, and residual-verification procedure.
+V235 established the continuation compatibility minimum; V237 is now the overall rollback floor, including when AI and missions are disabled. Earlier binaries cannot safely clean up runtime-2 holdings. Returning below the floor requires an explicit reviewed drain, settlement, privacy-purge, and residual-verification procedure.
+
+## V236/V237: retained Ask Connex privacy cutover
+
+This release invalidates every retained Ask Connex chat created before the privacy cutover,
+including archived chats and chats retained after their author left. Their messages, summaries,
+proposals, titles, and chat-owned files become unavailable immediately and are erased by resumable
+background cleanup. Saved CRM changes and ordinary domain audit history remain.
+
+Drain every incompatible serving backend, scheduled worker, and in-flight chat writer before
+applying `control/V236__ai_assistant_privacy_coordination.sql` and
+`tenant/V237__ai_assistant_privacy_cutover.sql`. Start only the compatible release, with one
+serving JVM. Proposal-set production remains disabled.
+
+The rollback floor is tenant V237, including when AI and missions are disabled. Earlier binaries can
+disclose or republish invalidated content despite accepting the additive schema. Recovery below this
+floor requires a separately reviewed procedure; normal recovery is a forward fix.
+
+Inaccessible placements and incomplete managed-object deletion keep cleanup pending. Restore
+procedures must reconcile privacy authority and old-generation holdings before enabling service.
+Restart and restore never relabel old holdings as current.
+
+Startup and scheduled privacy reconciliation include an organization-level control-plane pass.
+It completes V236 bootstrap operations for organizations with no workspaces and retries operations
+after their last workspace is removed. V236 is repaired by this runtime follow-up; no migration
+checksum changes are required. Historical pending workspace receipts remain blockers.
+
+V2 DSR recovery can finish after an already-verified non-subject workspace is deleted: recovery,
+progress and final C2 accept its durable verified control receipt only while its root is absent.
+Active/restored workspaces retain routed residual verification. Missing verification evidence continues
+to refuse completion. Ask Connex refreshes session metadata and transcript on the first successful
+socket subscription as well as reconnects, covering cutoffs missed during connection establishment.
+Notification reads scope authority hydration to candidate workspaces and refuse results when a
+cutoff races their query rather than returning stale assistant-derived content.
+
+Reconciliation preserves an exact verified receipt while its workspace is terminally
+`tearing_down`, even after the tenant sweep removes local work. Teardown retries skip that
+operation's tenant batch and still run full local lifecycle cleanup and residual verification.
+V2 C2 refuses a surviving terminal workspace root; only root deletion enables receipt-only
+completion. Active workspace restoration still reopens stale local evidence.

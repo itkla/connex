@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from '@/components/ui/label';
 import type { AiAgentHoldingsPurge, DataSubjectRequest } from '@/app/lib/types';
 
-type Recovery = { idempotencyKey: string; operationId: string | null };
+type Recovery = { idempotencyKey: string; operationId: string | null; schemaVersion: 1 | 2 };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 function readRecovery(key: string): Recovery | null {
@@ -22,7 +22,9 @@ function readRecovery(key: string): Recovery | null {
         if (typeof saved !== 'object' || saved === null || !('idempotencyKey' in saved) || !('operationId' in saved)) return null;
         if (typeof saved.idempotencyKey !== 'string' || !UUID.test(saved.idempotencyKey)
             || (saved.operationId !== null && (typeof saved.operationId !== 'string' || !UUID.test(saved.operationId)))) return null;
-        return { idempotencyKey: saved.idempotencyKey, operationId: saved.operationId };
+        if ('schemaVersion' in saved && saved.schemaVersion !== 1 && saved.schemaVersion !== 2) return null;
+        return { idempotencyKey: saved.idempotencyKey, operationId: saved.operationId,
+            schemaVersion: 'schemaVersion' in saved && saved.schemaVersion === 2 ? 2 : 1 };
     } catch { return null; }
 }
 
@@ -33,7 +35,8 @@ export default function MissionHoldingsPurgeDialog({ orgId, request, onClose, on
     onClose: () => void;
     onStale: () => void;
 }) {
-    const t = useTranslations('OrgDataRequests.missionPurge');
+    const legacy = useTranslations('OrgDataRequests.missionPurge');
+    const assistant = useTranslations('OrgDataRequests.assistantPurge');
     const showApiError = useApiErrorToast('OrgDataRequests.missionPurge');
     const id = useId();
     const [acknowledged, setAcknowledged] = useState(false);
@@ -44,6 +47,8 @@ export default function MissionHoldingsPurgeDialog({ orgId, request, onClose, on
     const [hasAcceptedOperation, setHasAcceptedOperation] = useState(false);
     const [stale, setStale] = useState(false);
     const [reload, setReload] = useState(0);
+    const [recoveryVersion, setRecoveryVersion] = useState<1 | 2>(2);
+    const t = operation?.schemaVersion === 1 || recoveryVersion === 1 ? legacy : assistant;
     const controllerRef = useRef<AbortController | null>(null);
     const recoveryRef = useRef<Recovery | null>(null);
     const storageKeyRef = useRef<string | null>(null);
@@ -60,6 +65,7 @@ export default function MissionHoldingsPurgeDialog({ orgId, request, onClose, on
         const key = account === null ? null : `connex:mission-purge:${account}:${orgId}:${request.id}`;
         storageKeyRef.current = key;
         recoveryRef.current = key === null ? null : readRecovery(key);
+        setRecoveryVersion(recoveryRef.current?.schemaVersion ?? 2);
         const operationId = recoveryRef.current?.operationId;
         setHasAcceptedOperation(operationId != null);
         if (operationId) {
@@ -97,14 +103,16 @@ export default function MissionHoldingsPurgeDialog({ orgId, request, onClose, on
         submittingRef.current = true;
         setBusy(true);
         setFailed(false);
-        const recovery = recoveryRef.current ?? { idempotencyKey: crypto.randomUUID(), operationId: null };
+        const recovery = recoveryRef.current ?? { idempotencyKey: crypto.randomUUID(), operationId: null, schemaVersion: 2 as const };
         remember(recovery);
         try {
             const accepted = await purgeAiAgentHoldings(orgId, request.id, {
                 idempotencyKey: recovery.idempotencyKey,
                 snapshotToken: request.snapshotToken,
-                scopeAcknowledgement: 'organization_mission_holdings_v1',
-                cutoffPolicyAcknowledgement: 'contents_at_each_workspace_first_invalidation_v1',
+                scopeAcknowledgement: recovery.schemaVersion === 1
+                    ? 'organization_mission_holdings_v1' : 'organization_assistant_holdings_v2',
+                cutoffPolicyAcknowledgement: recovery.schemaVersion === 1
+                    ? 'contents_at_each_workspace_first_invalidation_v1' : 'organization_generation_at_acceptance_v2',
             }, { signal });
             if (signal.aborted || !canPersist()) return;
             remember({ ...recovery, operationId: accepted.operationId });

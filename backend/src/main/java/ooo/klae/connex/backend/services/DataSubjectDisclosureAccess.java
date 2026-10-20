@@ -70,7 +70,7 @@ public class DataSubjectDisclosureAccess {
     public <T> T withSnapshot(int orgId, int actorId, int workspaceId, int personId,
             List<Integer> workspaceIds, Function<DataSubjectDisclosureDto, T> work) {
         var placement = tenantWorkScope.unroutedRead(() -> placementRead.resolve(orgId, workspaceId));
-        return tenantWorkScope.withCatalog(placement.catalog(),
+        return tenantWorkScope.withPreparedWorkspace(workspaceId, placement.orgId(), placement.catalog(), placement.scopes(),
             () -> withTenantContext(workspaceId, placement.orgId(), actorId, placement.catalog(),
                 () -> readTransaction.withSnapshot(workspaceId, personId, workspaceIds, work)));
     }
@@ -85,21 +85,12 @@ public class DataSubjectDisclosureAccess {
     }
 
     private <T> T withTenantContext(int workspaceId, int orgId, int actorId, String catalog, Supplier<T> work) {
-        boolean hadTenant = tenantContext.isResolved();
-        Integer previousWorkspace = hadTenant ? tenantContext.getWorkspaceId() : null;
-        Integer previousOrg = hadTenant ? tenantContext.getOrgId() : null;
-        Integer previousUser = hadTenant ? tenantContext.getUserId() : null;
-        String previousRole = hadTenant ? tenantContext.getRole() : null;
-        String previousCatalog = hadTenant ? tenantContext.getScopeCatalog() : null;
+        TenantContext.State previousTenant = tenantContext.snapshot();
         tenantContext.set(workspaceId, orgId, actorId, "org_admin", catalog);
         try {
             return work.get();
         } finally {
-            if (hadTenant) {
-                tenantContext.set(previousWorkspace, previousOrg, previousUser, previousRole, previousCatalog);
-            } else {
-                tenantContext.clear();
-            }
+            tenantContext.restore(previousTenant);
         }
     }
 

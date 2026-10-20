@@ -193,28 +193,20 @@ public class OwnershipOfferService {
             var root = tenantWorkScope.unroutedRead(() -> lifecycleMapper.findWorkspaceOrCleanupInOrg(offer.getOrgId(), destination));
             if (root == null) { return tenantWorkScope.unrouted(() -> retryFresh(work)); }
             var route = lifecycleAccess.capture(root, offer.getOrgId());
-            return tenantWorkScope.withCatalog(route.catalog(), () -> withIdentity(destination, route.orgId(), actorId, route.catalog(), work));
+            return tenantWorkScope.withPreparedWorkspace(destination, route.orgId(), route.catalog(),
+                route.scopes(), () -> withIdentity(destination, route.orgId(), actorId, route.catalog(), work));
         }
         return tenantWorkScope.withWorkspacePlacement(destination, (orgId, catalog) ->
             withIdentity(destination, orgId, actorId, catalog, work));
     }
 
     private <T> T withIdentity(int destination, int orgId, int actorId, String catalog, Supplier<T> work) {
-        boolean resolved = tenantContext.isResolved();
-        Integer oldWorkspace = tenantContext.getWorkspaceId();
-        Integer oldOrg = tenantContext.getOrgId();
-        Integer oldUser = tenantContext.getUserId();
-        String oldRole = tenantContext.getRole();
-        String oldCatalog = tenantContext.getScopeCatalog();
+        TenantContext.State previousTenant = tenantContext.snapshot();
         tenantContext.set(destination, orgId, actorId, "member", catalog);
         try {
             return retryFresh(work);
         } finally {
-            if (resolved) {
-                tenantContext.set(oldWorkspace, oldOrg, oldUser, oldRole, oldCatalog);
-            } else {
-                tenantContext.clear();
-            }
+            tenantContext.restore(previousTenant);
         }
     }
 

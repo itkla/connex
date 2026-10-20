@@ -23,7 +23,7 @@ Read the relevant section before adding/changing `FOR UPDATE`, transaction isola
     - cursor iteration in `TenantExportSnapshotTransaction`;
     - a failure swallowed inside another synchronization's `beforeCommit` or `beforeCompletion`, which registers too late for the commit it occurs in.
   - A lock failure that also crossed a participating `@Transactional` proxy has already marked the transaction rollback-only. Its commit therefore rolls back before any callback runs and fails with a cause-less `UnexpectedRollbackException`. Nothing is lost, but both engines classify that as permanent.
-- Read control-plane data that a tenant write needs only for its response — deal-collaborator profile hydration, for example — after that write's transaction has completed. Suspending a routed tenant transaction to read the control catalog borrows a second pooled connection while the write still holds its row locks and the workspace audit-chain head, so under `catalog-per-placement` enough concurrent requests exhaust the pool and hold those locks for a whole connection timeout. Control-plane state a write must consult before it commits keeps the suspend-and-read shape, and those paths budget two pooled connections per concurrent request — except control-plane **locks** the write relies on until it commits, which must be taken on the transaction's own connection through the control-catalog scope (`ControlCatalogRoutingInterceptor`), never by suspending and reading, or the lock is released before the tenant write commits. Deal-collaborator replacement locks its members' rows that way. The suspend-and-read paths are quiet-hours evaluation, `ShareService.share()`, and the pre-lock record-visibility snapshot for duplicate-review decisions described below. The sharing snapshot is the ceiling the tenant grant statement enforces and so must be read before the grant. Both sharing and duplicate-review decisions take their snapshot before acquiring any row lock. `ShareService.listShares()` reads it after the tenant listing and skips it entirely when there is nothing to hydrate.
+- Read control-plane data needed only for a response after the tenant write commits. Organization workspace scope reads are different: in `catalog-per-placement`, `TenantResolutionInterceptor`, public API authentication, and workspace job scopes prepare their immutable scopes before the first tenant transaction (#2159). `ShareWorkspaceControlAccess`, `RecordVisibilityScopeControlAccess` and `OrganizationWorkspaceScopeControlAccess` serve that exact workspace/organization/catalog payload without suspending the transaction or borrowing another connection. Without a matching prepared payload, an active-transaction lookup throws `TenantScopeSnapshotMissingException` before any query or checkout, including for shared placements with a null catalog. Never hold a tenant connection while waiting for one of these control scope reads. Existing `single-database` lazy branches remain unchanged; the active-only boundary still uses its independent control transaction there. Other control operations, including quiet-hours evaluation and the bounded disclosure audit, retain their separately documented connection budgets. Control-plane **locks** needed through commit stay on the tenant transaction's own connection through `ControlCatalogRoutingInterceptor`; snapshots never replace authorization locks.
 - Changes to lock order or transaction isolation are Tier 3/high-risk and receive focused concurrency/correctness review.
 
 Interactive and public API requests return HTTP 409 for Spring pessimistic lock failures and exact
@@ -312,6 +312,19 @@ placement resolution, then installs that path workspace's tenant identity and ca
 transaction. The locked authorization recheck remains inside the transaction. Active removal,
 pending-invitation decline, and leave all use this boundary so audit attribution and tenant-plane
 cleanup cannot inherit the active-header workspace.
+
+Fresh membership follows the same route-before-transaction rule. `InviteService` creation,
+existing-user grants and both acceptance entries, `InviteLinkService` redemption entries, and
+`SsoLoginService.resolve` use `FreshMembershipTransaction.execute` before their `READ_COMMITTED`
+unit. `WorkspaceService.addPendingMember` and `ensureActiveMember` are also public transaction
+entries: `executeWithPreparedScopes` prepares their target before opening or joining the unit in
+routed mode, including when it differs from the request workspace. Their residual-cleanup call to
+`UserOffboardingService.prepareFreshMembership` then reuses that prepared route under the locks.
+Single-database member primitives open the same `READ_COMMITTED` transaction directly and retain
+their existing lazy placement reads; token and SSO entries retain their existing routing behavior.
+An already-open routed transaction may only reuse an exact prepared target. It cannot discover a
+different target or suspend to prepare one. Nested provisioning restores the caller's identity,
+catalog and prepared data.
 
 ### Bounded goal and approval departure cleanup (#1953)
 
@@ -776,7 +789,7 @@ Ordinary turn/join/leave/sharing/presence-authorizing mutations:
 
 Invitation/participant-removal paths lock caller/target active memberships ascending by user id before the session root; never acquire another membership after the session root.
 
-The session row is the per-session mutex. V232 allocates every ordinary or mission message from its durable `message_seq_high_water`: lock the session, reject overflow, advance the counter, insert, and commit together. Never recompute from surviving messages; privacy deletion retains the counter and immutable first-mission taint boundary. Summary updates and request replays do not allocate a sequence.
+The session row is the per-session mutex. V232 allocates every ordinary or mission message from its durable `message_seq_high_water`: lock the session, reject overflow, advance the counter, insert, and commit together. Never recompute from surviving messages; v1 privacy cleanup retains the counter and immutable first-mission taint boundary, while v2 erasure deletes the affected session. Summary updates and request replays do not allocate a sequence.
 
 Account erasure retains all session roots in the routed catalog with one locking read ordered by
 `(workspace_id, id)`, covering sessions created by the account and sessions containing its message,
@@ -789,13 +802,19 @@ the same roots remain held through domain cleanup and trailing mission privacy i
 
 Every transaction that combines these scoped resources uses this single acquisition order:
 
-1. Content roots: exact session → run (missions) → existing tool call → turn → segment.
+1. Content roots: exact session → run (missions) → Java-sorted proposal parents → ordered tool children → turn → segment.
    The session mutex serializes message/summary children and child-set discovery; their writes
    and private inserts under that retained mutex do not acquire another independent root.
 2. Domain record/board roots and their enclosing duplicate mutex, in the domain's existing
-   canonical order. Delegated mutations must finish these root acquisitions too.
-3. Local restriction read/write fences, with multiple write fences sorted by workspace stripe.
-4. Workspace privacy barriers S or X, ascending workspace id; then exact privacy-work rows.
+   canonical order; attachment URL references/exact rows and deletion queues with subordinate receipts.
+   Brief schedules are domain roots: delivery releases the pending schedule and cleanup clears its
+   session projections before acquiring organization S, even when pending and delivered sessions differ.
+   Delegated mutations must finish these root acquisitions too.
+3. Local restriction fences sorted by workspace stripe, then organization publication fences.
+   AI output-cache rows follow the retained restriction fence on both save and deletion paths;
+   restriction completes its ordinary domain/identity work before fencing and deleting cached outputs.
+4. Organization privacy fence S/X, ascending workspace barriers S/X, organization operation/placement
+   rows, then exact tenant privacy-work rows.
 5. Workspace audit-integrity head (and the same trailing-head rule for scoped organization audits).
 6. Run lease rows, including release, takeover and settlement.
 
@@ -810,21 +829,22 @@ later-ranked resource in this scoped hierarchy.
 Authority/account/workspace/organization and audit foreign-key parents retain their existing owning
 contracts: the assistant principal snapshot precedes chat roots, while the duplicate-decision
 helper and audit appender retain their established shared-parent acquisitions. Those authority
-classes are not a new rank in this scoped hierarchy. This change authorizes no new authority
-lookup, lock or upgrade; domain-specific prerequisite ordering also remains unchanged.
+classes are not a new rank in this hierarchy. Organization privacy authority is distinct from the
+organization authorization row. Domain-specific prerequisite ordering remains unchanged.
 
-In particular, **an audit-head or lease holder must never subsequently request privacy barrier S
-or a restriction fence**. Barrier X initialization, invalidation and completion must never acquire
+In particular, **an audit-head or lease holder must never subsequently request organization or
+workspace privacy authority, or a local restriction/publication fence**. Barrier X initialization, invalidation and completion must never acquire
 new session/domain roots after the barrier. Thus a queued X request cannot sit between a holder's
 initial S acquisition and a later S request while that holder retains a resource the first reader
-needs. Initialization takes only X; invalidation takes domain roots and write fences before X and
-never locks chat roots; cleanup batches take their content roots before S, while residual completion
-takes X and work rows only. Do not combine those transactions or upgrade a batch's S to X.
+needs. Combined initialization and completion take organization authority before workspace/work locks.
+Independent v1 barrier installation takes only workspace X; v1 completion also retains organization S; v2 verification uses workspace S and exact
+operation/work rows. Invalidation takes domain roots and local write fences before organization X,
+and never locks chat roots. Cleanup takes content/storage roots before organization/workspace S. Do not combine those transactions or upgrade a batch's S to X.
 
-Write execution and approval acquire their restriction fence and barrier at the canonical
+Write execution and approval retain original organization authority and workspace S after the local restriction fence at the canonical
 `MutationAdmission.beforeMutation` checkpoint, after **all** delegate record/board roots and before its
 first audited mutation or successful no-op. Earlier epoch checks are non-retaining prechecks.
-Proposal expiry is checked after fence/barrier contention. Admission runs once for a multi-effect
+Approval and undo recheck their original expiry after fence/barrier contention; waits never extend a deadline. Admission runs once for a multi-effect
 write, so subsequent effects cannot reacquire S behind an initializer. Undo uses the same checkpoint
 inside the inverse's locked fingerprint predicate, before deletion/audit, and refuses a delegate
 that skips admission. Replays and discard retain privacy directly without domain acquisition.
@@ -832,9 +852,12 @@ No successful write decision acquires either fence after the audited delegate re
 
 ### Durable record-review missions (V232/V235)
 
-The complete privacy and rollout contract is [AI_MISSIONS.md](AI_MISSIONS.md). Mission claim, resume and publication use `READ_COMMITTED`: authorization roots in existing order, session X, run X, existing tool X if any, turn X, segment X, domain roots if applicable, local restriction read fence, privacy barrier S, audit head if needed, lease last. Slice 1 admits read tools only. Root re-reads after locks flush MyBatis's transaction cache. Every execution write compares the exact active attempt and execution generation; a stale callback cannot settle or release its successor.
+The complete privacy and rollout contract is [AI_MISSIONS.md](AI_MISSIONS.md). Mission claim, resume and publication use `READ_COMMITTED`: authorization roots in existing order, session X, run X, existing tool X if any, turn X, segment X, domain roots if applicable, local restriction fence, organization S, workspace barrier S, audit head if needed, lease last. Slice 1 admits read tools only. Root re-reads after locks flush MyBatis's transaction cache. Every execution write compares the exact active attempt and execution generation; a stale callback cannot settle or release its successor.
 
-V235 retains this order for every runtime-2 transaction:
+V235 retains this order for every runtime-2 transaction. At V237, every fence → barrier S entry
+below includes organization S between the local fence and workspace barrier. Workspace-X privacy
+work entries describe v1; v2 uses organization authority, workspace S and operation/work rows as
+specified in [organization assistant privacy](#organization-assistant-privacy-v236v237).
 
 | Transaction | Ordered atomic contents and ending |
 |---|---|
@@ -1734,16 +1757,92 @@ after obtaining it, the service rechecks the evidence fingerprint and current vi
 writing. This places the decision row after the organization mutex without introducing an ordering
 edge against record targets or identity groups.
 
-Record-visibility scopes must be resolved before any authorization, organization mutex, provider
-connection, or tenant record lock. A routed scope lookup suspends the tenant transaction and borrows
-a second pooled connection; doing that while holding a mutex can exhaust the pool with waiters and
-leave the mutex owner waiting for its own second connection. Thread the same immutable
-`RecordVisibilityScope` through the locked operation instead of resolving it again in a nested read.
+Routed record-visibility and active-org scopes are prepared with the workspace route, before any
+tenant transaction or authorization, organization mutex, provider connection, or record lock.
+Preparation uses a short read-only control transaction: one unfiltered sharing statement also backs
+the separately typed record-visibility scope, and one active-only statement backs read ceilings.
+The connection and session are released before tenant work, including when an enclosing suspended
+operation has empty synchronization. `DuplicateReviewService.list` retains its count/page transaction;
+`WarmPathService` signal detection, queue-time identifier resolution and nested workflow actions can
+read the prepared payload inside their existing transactions without borrowing.
 
-In `catalog-per-placement` mode, a scope read inside an open tenant transaction borrows a second
-connection. `DuplicateReviewService.list` resolves its scope before opening the repeatable-read
-transaction shared by count and page. The general guarantee of a context-installed scope snapshot
-and a fail-fast guard is tracked in #485 as lane L-scope and must land before the flag can be enabled.
+Same-workspace `runAs` nesting reuses preparation; identity-only switches never load it. A switch to
+another identity retains usable data only when the prepared workspace, organization and catalog all
+match. Otherwise a later transactional scope lookup fails fast. Missing snapshot invariant failures
+escape notification preload degradation; ordinary preload failures retain existing pass isolation.
+
+The lazy `RecordVisibilityScopeControlAccess` path memoizes one successful snapshot per workspace
+within an actual synchronized transaction in `single-database` mode only. A durable outbox delivery
+page is one `REQUIRES_NEW`, `READ_COMMITTED` transaction, so its per-record segment checks and repeated
+legacy checks share one control read; simulation conditions likewise share their read-only
+transaction's snapshot. The memo is unbound on transaction suspension, restored only on resume, and
+discarded on commit or rollback before deferred completion callbacks can open independent work.
+`REQUIRES_NEW` and nontransactional work cannot reuse a suspended transaction's memo. Cached scopes
+still enforce the resolved workspace/organization identity. In `catalog-per-placement` mode, every
+call bypasses the memo entirely: routed reads are served by the memory-only prepared snapshot
+(#2165), with the boundary validating workspace, organization, and catalog on every read. A missing
+or stale prepared payload must fail even after an earlier successful read in the same transaction.
+
+Pipeline visibility uses the same unfiltered record scope. PipelineService passes one scope through
+owned-parent, sibling and replacement validation; full pipeline nesting carries that scope in a
+private projected SQL column without changing the owning workspace parameter. Template mutations
+prepare it before membership authorization and set/root locks, then reuse it for stage, pipeline
+and share locks and the final availability check. Augmentation keeps the stage → pipeline → share
+order and its submitted-stage validation remains owned-only. Guided creation prepares the scope
+before authorization; deal creation prepares it before duplicate-review mutex admission, deal
+updates/reopen before authorization and row locks, and deal imports before authorization and
+template fences. Assistant write admission and workflow step/outbox execution prepare it before
+their outer authorization locks so nested Pipeline reads reuse the transaction memo or #2165's
+prepared routed snapshot. No authorization or `FOR UPDATE` lock moves off its original connection,
+and no transaction boundary or isolation level changes.
+
+Bulk stage changes carry one unfiltered scope into every independently committed Deal mutation and
+its stage-history write. Ordinary creation, reviewed/guided creation, update, reopen and move also
+pass their pre-lock scope to history instead of loading it again after mutation. Deal imports pass
+one scope through name resolution and both initial and transition history writes within their
+existing import transaction.
+
+Workflow traversal, immediate workflow dispatch, legacy rule dispatch and scheduler workspace sweeps use the explicit
+`RecordVisibilityScopeControlAccess.withWorkspaceScope` operation boundary. In `single-database`
+mode it reuses the caller's immutable snapshot across nested calls and independent step/outbox
+transactions on that thread. It restores an enclosing operation on every exit, clears the binding
+after the outermost operation, and rejects workspace, organization or catalog drift. It does not
+propagate into asynchronous work. A scheduler or legacy listener may enter with only a catalog pin;
+installing an automation identity later reuses that scope only for the same workspace, organization
+and catalog. An identity resolved at operation entry must remain resolved. Transaction propagation,
+per-record commits and authorization locks remain unchanged. This is explicit operation reuse,
+separate from the default transaction memo: ordinary `REQUIRES_NEW`, completion callbacks and
+nontransactional reads outside that boundary
+retain their fresh-read contract. In routed mode every boundary read still validates the prepared
+context payload before considering any memo, so a missing or stale payload still fails inside an
+open transaction without a control query. Assistant parallel tool batches reject writes; one
+auto/approved write is one transaction, and its nested Pipeline reads share the existing memo.
+
+Restriction-driven AI output-cache erasure uses `getFreshForWorkspace` immediately before its one
+set-based `AiOutputCacheMapper.deleteForPerson` call, after the existing authority/person locks and
+ordinary domain/identity work. `invalidateAssistantOrganization` retains the restriction write fences
+before advancing organization privacy authority; the fresh scope lookup and cache DELETE follow,
+with those fences held through transaction completion. In `single-database`, this is an explicit
+exception to scope-before-locks: the unfiltered lookup runs on the same default-catalog transaction
+connection, without suspension or another checkout, and neither reads nor replaces the transaction
+memo (#2162). Its dedicated
+control statement also flushes MyBatis's local cache, without changing ordinary sharing reads. At
+`READ_COMMITTED` it sees workspace creation committed since an earlier memoized read. The only
+remaining discovery gap is between this adjacent control SELECT and tenant DELETE; it is not an
+atomic statement-level workspace snapshot. The active-only workspace list used for restriction epoch
+fencing stays unchanged and is not the cache ceiling. Person-row-backed saves still lock contributors
+ascending before cache writes; restriction invalidation retains its local write fences before cache deletion
+through transaction completion. No authorization or person lock moves off the transaction connection.
+
+In routed mode the fresh method requires the exact #2165 prepared payload, even outside a
+transaction, and performs memory-only validation with no suspension or checkout. Workspace creation
+or deletion after preparation can make a destructive ceiling stale: a newly created workspace's
+cache can escape erasure, while a deleted workspace can remain in the set. A race-safe destructive
+scope contract is the routing flag-enable prerequisite **#2172**. This cache conversion does not
+implement that fence or enable catalog routing; operation-level freshness must not be claimed as
+complete erasure coverage until #2172 is resolved.
+
+`getFreshForWorkspace` also never consults the explicit `withWorkspaceScope` operation boundary, so a restriction purge reached inside a workflow or scheduler operation still reads the current organization workspace set rather than the operation's reused snapshot.
 
 The locked call chains are:
 
@@ -1771,26 +1870,48 @@ detection completes before signal replacement acquires write locks. Reverse-intr
 are generated before manual or delivery snapshot persistence locks; the scheduled occurrence claim
 commits before generation. Neither read chain inherits those subsequent write locks.
 
+Report generation and KPI reads resolve one unfiltered record-visibility scope before collecting
+inputs. Full generation resolves before the restriction-epoch read's brief JVM lock, then reuses
+the scope across every widget, both periods, network accounts and reverse-introduction candidates.
+Cached, synchronous and asynchronous narratives consume the already-frozen figures. Manual and
+delivery snapshot persistence retain their existing definition/schedule locks after generation;
+the scheduled occurrence claim still commits first. No Report transaction boundary or lock
+connection changes for the mapper separation. In routed mode, scope reads use the context-installed
+snapshot and fail-fast guard described above (#2159 / #2165).
+
 Note page/count, global note search, and relationship-evidence reads resolve one unfiltered snapshot
-per operation. The page/count pair also reuses its author-ID snapshot; both note-search candidate
+per operation. In routed mode these scope reads are memory-only from the prepared context snapshot.
+The page/count pair also reuses its author-ID snapshot; both note-search candidate
 streams share the scope across all batches. Evidence resolves only after the existing subject
 visibility check. These read paths hold no authorization, record, or organization lock. Note
 mutation authorization and `getVisibleNoteByIdForUpdate` locks do not reach these visibility reads
 and stay on their existing transaction connection; no transaction boundary is split for Note reads.
 
-Before any authorization or duplicate-decision lock, dismissal and reopen resolve one unfiltered
-`RecordVisibilityScopeControlAccess` snapshot for both their pre-decision visibility projection and
-their returned projection (#485). The boundary delegates to the existing sharing snapshot: a routed
-transaction is suspended for the control read and then restored, while a default-catalog transaction
-keeps the read in its existing snapshot. Budget two pooled connections per concurrent routed decision
-during this pre-lock read; the same two-connection budget applies to routed history-import and
-provider-page transactions during their pre-lock lookup. Notification reconciliation and provider
-review preload before opening their own transaction and need only the control-read connection at
-that point. Never defer that read
-until a lock is held, and never move authorization
-locks or `lockCurrentPair` to the suspended connection. Those locks remain on the tenant transaction's
-own connection until commit. Duplicate queue count and page retain one repeatable-read transaction;
-the count has no employer-label joins and summary counts need no control snapshot.
+Before authorization or duplicate-decision locks, dismissal and reopen obtain one unfiltered
+`RecordVisibilityScopeControlAccess` view for their visibility projections. In routed mode this is a
+memory-only read of the context-installed sharing snapshot, as are history-import and provider-page
+lookups. No scope read suspends their tenant transaction. Single-database sharing and record
+visibility keep their existing default-catalog transaction snapshot. Authorization locks and
+`lockCurrentPair` remain on the tenant transaction's own connection until commit. Count/page retain
+one repeatable-read transaction; summary counts need no control snapshot.
+
+Prepared data lasts for one workspace operation and is never refreshed under tenant locks. Workspace
+creation, deletion, renaming and lifecycle changes after preparation become visible on the next
+operation. Inactive or missing anchors are recorded without blocking trusted lifecycle/tombstone
+cleanup; `getForWorkspace` enforces the original refusal when that kind is actually requested.
+Captured lifecycle routes carry their payload across control-root deletion without another lookup.
+All identity, selection, override and payload state is restored together; root job spans discard their
+route cache and request completion/async handoff clears the thread. Plain `ThreadLocal` state is never
+inherited or copied to executors. Validated control-only selections have no usable snapshot.
+
+Routed provisioning's `AFTER_COMMIT` callback submits initialization without waiting, because that
+callback still retains the provisioning connection. The worker resolves its own route before tenant
+transactions. Its dedicated managed executor has one worker and a bounded queue; saturation and
+shutdown reject rather than running initialization on the callback thread. Rejection is logged and
+periodic reconciliation rediscovers the committed workspace. Handoff or initialization failure keeps
+global mission readiness closed until reconciliation succeeds. Accepted work drains at shutdown with
+a 30-second termination wait.
+Single-database provisioning stays synchronous.
 
 CSV commits claim their one-use review proof first, then lock and revalidate the actor's create
 permission before entering the duplicate-decision hierarchy. This retains the actor's custom-role
@@ -2224,3 +2345,82 @@ catalog commits retain their existing behavior. Routed offer closure
 accepts an already-deleted tenant notice, because catalog erasure may have removed it first; it
 never recreates that notice or releases the reservation. Per-catalog erasure keeps its existing
 isolation.
+
+## Organization assistant privacy (V236/V237)
+
+Organization privacy and workspace mission privacy use separate generations. The scoped acquisition
+order is content roots (session, mission, Java-sorted proposal parents, ordered tool children, turns,
+segments), domain/storage roots (including URL references and exact attachments), existing local
+restriction stripes, organization publication fence, organization database fence S/X, ascending
+workspace barriers, operation/placement rows, tenant work rows, audit heads, then run leases last.
+Never acquire content/domain roots after privacy authority. Cleanup discovers identities before
+opening its ordered transaction. Read projection retains current authority through DTO construction.
+Mutation admission retains it only after delegate roots, then rechecks deadlines. Approval waiting
+past its 72-hour deadline must refuse even if generation did not change. Cancellation, expiry and
+erasure retain terminal/lease settlement atomicity and conservative provider accounting.
+
+Control locks remain on the transaction-bound connection through control-catalog routing.
+Organization invalidation retains the local publication write fence through commit or rollback.
+New-organization provisioning creates only its fence and bootstrap operation before the first
+workspace insert. It must not enumerate the empty workspace range with `INSERT ... SELECT`:
+under REPEATABLE READ, concurrent registrations can retain shared next-key locks on the same gap
+and deadlock on their first workspace inserts. The after-commit initializer installs placement
+intents, and completion re-enumerates coverage. See [MySQL's statement locking rules](https://dev.mysql.com/doc/refman/8.4/en/innodb-locks-set.html).
+Startup and periodic reconciliation also page incomplete organizations independently of workspace
+roots. Organization completion runs on the control plane under READ COMMITTED and organization X,
+re-enumerates current workspaces and retains all historical pending receipts. This completes empty
+V236 bootstraps and retries completion after the last workspace disappears without inventing evidence.
+
+Notification source predicates hydrate only active recipient memberships, optionally the exact
+requested workspace; workspace maintenance hydrates that workspace alone. Suspend any tenant
+transaction before installing the control route for each fresh authority read. Notification reads
+and updates acquire no publication stripes: brief delivery already retains database organization S,
+and acquiring publication S there would invert invalidation's publication X → database organization
+X order. The SQL generation predicate still hides pointers invalidated at the captured generation.
+Brief notifications contain only fixed titles, `{kind, sessionId}` data and a session action link;
+they carry no assistant-derived text. A read racing invalidation can reveal only that a brief
+existed, including temporary page/count skew. Session/transcript content reads retain their full
+privacy authority through projection. The brief payload guard test must change before any content
+can be copied into notifications, and such a change requires revisiting this bounded guarantee.
+
+Actual realtime, export and chat-file output holds its read fence and performs a fresh control read
+on a separate READ COMMITTED transaction; an export snapshot is never that authority. Do not hold
+database privacy locks across an export or object transfer. One serving JVM remains mandatory.
+Realtime broker messages carry immutable internal organization authority through the outbound queue.
+The delivery executor checks it and captures it on each encoded frame before Spring's concurrent
+session buffer. The factory-installed concurrent session preserves Spring's limits and overflow
+behavior. Its delegate below the buffer takes the local publication read fence, performs the fresh
+authority check, and retains the fence through the actual socket write. Stale or unavailable frames
+are dropped at this boundary even when another thread flushes them after the encoding handler has
+returned. No publication fence spans a handler or a buffer drain; each assistant write has its own
+fence, and heartbeats/non-assistant frames acquire none. Thread-local encoding provenance is never
+the authority for a frame flushed on another thread.
+
+The committed invalidation listener runs after the earlier completion callbacks release local
+fences and suspends completed transaction resources before placement routing. Workspace withdrawal
+fanout pages control-plane member IDs and rechecks live recipient access. It carries only cutoff
+metadata and depends on no session roots or content locks; ordinary content publication keeps the
+full source guard.
+
+Object receipts are subordinate to the exact deletion queue row. Preserve queue → quota → audit
+order; receipts never acquire privacy/work/content roots. Every chat-reference removal either
+transfers responsibility atomically to accepted erasure work or defers to privacy cleanup, including
+quarantine administration. Queue absence never proves final deletion.
+
+A workspace already fenced as `tearing_down` reuses v1 offboarding work for lifecycle-authorized
+full local cleanup. It retains the existing mission cutoff and uses bounded full-workspace discovery
+and uncapped local residual/object checks. It does not advance organization authority or create
+a competing v2 generation. Accepted organization operations finish and record evidence first.
+
+V2 DSR recovery, progress projection and C2 may replace tenant work evidence with the exact durable
+verified control receipt only when the workspace root is absent. The receipt must retain verification
+time and work revision. Active workspaces still route through enrollment and residual checks,
+including restoration recovery. Missing or pending receipts remain blocking. C2 takes live workspace
+roots in ascending order, uses READ COMMITTED, and reconciles complete operation coverage under
+organization X before appending its strict audit; deleted roots require their receipt at that boundary.
+
+Reconciliation preserves an exact verified receipt while its workspace is terminally
+`tearing_down`, even after the tenant sweep removes local work. Teardown retries skip that
+operation's tenant batch and still run full local lifecycle cleanup and residual verification.
+V2 C2 refuses a surviving terminal workspace root; only root deletion enables receipt-only
+completion. Active workspace restoration still reopens stale local evidence.

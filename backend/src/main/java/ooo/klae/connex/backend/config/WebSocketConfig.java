@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.MessageHandler;
@@ -17,7 +18,6 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.security.messaging.web.socket.server.CsrfTokenHandshakeInterceptor;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.WebSocketSession;
-import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
 import org.springframework.web.socket.config.annotation.WebSocketTransportRegistration;
@@ -26,6 +26,7 @@ import org.springframework.web.socket.server.support.HttpSessionHandshakeInterce
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.notifications.RealtimeRoutingIdentityResolver;
+import ooo.klae.connex.backend.notifications.AiChatPrivacyOutboundInterceptor;
 import ooo.klae.connex.backend.notifications.WebSocketConnectionLimiter;
 import ooo.klae.connex.backend.notifications.WebSocketSessionExpiryInterceptor;
 import ooo.klae.connex.backend.notifications.WebSocketSessionRegistry;
@@ -57,7 +58,7 @@ import ooo.klae.connex.backend.notifications.WebSocketSessionRegistry;
  * {@code MissingCsrfTokenException} and no client can subscribe — do not remove it.
  */
 @Configuration
-@EnableWebSocketMessageBroker
+@Import(AiChatWebSocketMessageBrokerConfiguration.class)
 @RequiredArgsConstructor
 @ConditionalOnProperty(
     prefix = "connex.maintenance",
@@ -77,6 +78,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     private final WebSocketSessionExpiryInterceptor sessionExpiryInterceptor;
     private final WebSocketConnectionLimiter connectionLimiter;
     private final RealtimeRoutingIdentityResolver routingIdentities;
+    private final AiChatPrivacyOutboundInterceptor privacyOutboundInterceptor;
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
@@ -116,7 +118,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
             public Message<?> beforeHandle(Message<?> message, MessageChannel channel, MessageHandler handler) {
                 return sessionExpiryInterceptor.beforeHandle(message, channel, handler);
             }
-        });
+        }, privacyOutboundInterceptor);
     }
 
     @Override

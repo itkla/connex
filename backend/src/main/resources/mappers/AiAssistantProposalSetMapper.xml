@@ -20,6 +20,7 @@
     <result property="scopeRevision" column="scope_revision"/>
     <result property="publicationState" column="publication_state"/>
     <result property="failureReason" column="failure_reason"/>
+    <result property="organizationPrivacyGeneration" column="organization_privacy_generation"/>
     <result property="privacyGeneration" column="privacy_generation"/>
     <result property="createdAt" column="created_at"/>
   </resultMap>
@@ -33,16 +34,30 @@
     <result property="publicationState" column="publication_state"/>
   </resultMap>
 
+  <sql id="eligibleProvenance">
+    EXISTS (SELECT 1 FROM ai_chat_session privacy_session
+      JOIN ai_chat_turn privacy_turn ON privacy_turn.workspace_id = privacy_session.workspace_id
+        AND privacy_turn.session_id = privacy_session.id AND privacy_turn.id = p.origin_turn_id
+      JOIN ai_chat_message privacy_message ON privacy_message.workspace_id = privacy_session.workspace_id
+        AND privacy_message.session_id = privacy_session.id AND privacy_message.id = p.message_id
+      WHERE privacy_session.workspace_id = p.workspace_id AND privacy_session.id = p.session_id
+        AND privacy_session.organization_privacy_generation = p.organization_privacy_generation
+        AND privacy_turn.organization_privacy_generation = p.organization_privacy_generation
+        AND privacy_message.organization_privacy_generation = p.organization_privacy_generation
+        AND privacy_turn.privacy_generation = p.privacy_generation)
+  </sql>
+
   <insert id="insert">
     INSERT INTO ai_assistant_proposal_set
       (workspace_id, proposal_key, session_id, origin_turn_id, message_id, requested_by_user_id,
        step_number, call_ordinal, tool_name, invocation_mode, row_count, intent_fingerprint,
-       scope_revision, privacy_generation)
+       scope_revision, privacy_generation, organization_privacy_generation)
     SELECT #{workspaceId}, #{proposalKey}, #{sessionId}, #{originTurnId}, #{messageId},
            #{requestedByUserId}, #{stepNumber}, #{callOrdinal}, #{toolName}, #{invocationMode},
-           #{rowCount}, #{intentFingerprint}, #{scopeRevision}, #{privacyGeneration}
+           #{rowCount}, #{intentFingerprint}, #{scopeRevision}, #{privacyGeneration}, #{organizationPrivacyGeneration}
     FROM ai_chat_message m
     JOIN ai_chat_turn t ON t.workspace_id = m.workspace_id AND t.session_id = m.session_id
+    JOIN ai_chat_session s ON s.workspace_id = m.workspace_id AND s.id = m.session_id
     WHERE m.workspace_id = #{workspaceId}
       AND m.session_id = #{sessionId}
       AND m.id = #{messageId}
@@ -50,18 +65,27 @@
       AND m.author_user_id = #{requestedByUserId}
       AND t.id = #{originTurnId}
       AND t.requested_by_user_id = #{requestedByUserId}
+      AND s.organization_privacy_generation = #{organizationPrivacyGeneration}
+      AND m.organization_privacy_generation = s.organization_privacy_generation
+      AND t.organization_privacy_generation = s.organization_privacy_generation
+      AND t.privacy_generation = #{privacyGeneration}
   </insert>
 
   <insert id="insertMember" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO ai_chat_tool_call
       (workspace_id, message_id, tool_name, status, arguments_json, thought_signature,
        idempotency_key, server_proposal, proposal_key, proposal_ordinal, proposal_prepared_at,
-       privacy_generation, created_at, updated_at)
+       privacy_generation, organization_privacy_generation, created_at, updated_at)
     SELECT p.workspace_id, p.message_id, p.tool_name, 'proposed', #{argumentsJson,jdbcType=VARCHAR},
            #{thoughtSignature,jdbcType=LONGVARCHAR}, #{idempotencyKey}, TRUE, p.proposal_key,
-           #{proposalOrdinal}, #{proposalPreparedAt}, p.privacy_generation, p.created_at, p.created_at
+           #{proposalOrdinal}, #{proposalPreparedAt}, p.privacy_generation, p.organization_privacy_generation, p.created_at, p.created_at
     FROM ai_assistant_proposal_set p
-    WHERE p.workspace_id = #{workspaceId}
+    JOIN ai_chat_session privacy_session ON privacy_session.workspace_id = p.workspace_id
+      AND privacy_session.id = p.session_id
+    WHERE p.organization_privacy_generation = #{organizationPrivacyGeneration}
+      AND p.organization_privacy_generation = privacy_session.organization_privacy_generation
+      AND <include refid="eligibleProvenance" />
+      AND p.workspace_id = #{workspaceId}
       AND p.session_id = #{sessionId}
       AND p.proposal_key = #{proposalKey}
       AND p.message_id = #{messageId}
@@ -77,13 +101,26 @@
 
   <select id="findByKey" resultMap="proposalSetResult">
     SELECT p.* FROM ai_assistant_proposal_set p
-    WHERE p.workspace_id = #{workspaceId} AND p.session_id = #{sessionId}
+    WHERE p.organization_privacy_generation = #{organizationPrivacyGeneration}
+      AND <include refid="eligibleProvenance" />
+      AND p.workspace_id = #{workspaceId} AND p.session_id = #{sessionId}
       AND p.proposal_key = #{proposalKey}
+  </select>
+
+  <select id="lockByKey" resultMap="proposalSetResult" flushCache="true" useCache="false">
+    SELECT p.* FROM ai_assistant_proposal_set p
+    WHERE p.organization_privacy_generation = #{organizationPrivacyGeneration}
+      AND <include refid="eligibleProvenance" />
+      AND p.workspace_id = #{workspaceId} AND p.session_id = #{sessionId}
+      AND p.proposal_key = #{proposalKey}
+    FOR UPDATE
   </select>
 
   <select id="findByCallIdentity" resultMap="proposalSetResult">
     SELECT p.* FROM ai_assistant_proposal_set p
-    WHERE p.workspace_id = #{workspaceId} AND p.session_id = #{sessionId}
+    WHERE p.organization_privacy_generation = #{organizationPrivacyGeneration}
+      AND <include refid="eligibleProvenance" />
+      AND p.workspace_id = #{workspaceId} AND p.session_id = #{sessionId}
       AND p.origin_turn_id = #{originTurnId} AND p.step_number = #{stepNumber}
       AND p.call_ordinal = #{callOrdinal}
   </select>
@@ -93,7 +130,11 @@
     FROM ai_chat_tool_call tc
     JOIN ai_assistant_proposal_set p
       ON p.workspace_id = tc.workspace_id AND p.proposal_key = tc.proposal_key
-    WHERE tc.workspace_id = #{workspaceId} AND p.session_id = #{sessionId}
+    WHERE p.organization_privacy_generation = #{organizationPrivacyGeneration}
+      AND tc.organization_privacy_generation = p.organization_privacy_generation
+      AND tc.privacy_generation = p.privacy_generation
+      AND <include refid="eligibleProvenance" />
+      AND tc.workspace_id = #{workspaceId} AND p.session_id = #{sessionId}
       AND tc.proposal_key = #{proposalKey}
     ORDER BY tc.proposal_ordinal
   </select>
@@ -105,8 +146,13 @@
         ON m.workspace_id = p.workspace_id AND m.session_id = p.session_id AND m.id = p.message_id
       JOIN ai_chat_turn t
         ON t.workspace_id = p.workspace_id AND t.session_id = p.session_id AND t.id = p.origin_turn_id
-      WHERE p.workspace_id = #{workspaceId} AND p.session_id = #{sessionId}
+      WHERE p.organization_privacy_generation = #{organizationPrivacyGeneration}
+      AND <include refid="eligibleProvenance" />
+      AND p.workspace_id = #{workspaceId} AND p.session_id = #{sessionId}
         AND p.proposal_key = #{proposalKey}
+        AND m.organization_privacy_generation = p.organization_privacy_generation
+        AND t.organization_privacy_generation = p.organization_privacy_generation
+        AND t.privacy_generation = p.privacy_generation
         AND m.author_kind = 'user'
         AND m.author_user_id &lt;=> p.requested_by_user_id
         AND t.requested_by_user_id &lt;=> p.requested_by_user_id
@@ -116,6 +162,8 @@
           SELECT 1 FROM ai_chat_tool_call tc
           WHERE tc.workspace_id = p.workspace_id AND tc.proposal_key = p.proposal_key
             AND (tc.proposal_ordinal NOT BETWEEN 1 AND p.row_count
+              OR tc.organization_privacy_generation != p.organization_privacy_generation
+              OR tc.privacy_generation != p.privacy_generation
               OR tc.message_id != p.message_id
               OR CAST(tc.tool_name AS BINARY) != CAST(p.tool_name AS BINARY)
               OR tc.server_proposal != TRUE OR tc.created_at != p.created_at

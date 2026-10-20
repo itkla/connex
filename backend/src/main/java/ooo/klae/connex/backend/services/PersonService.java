@@ -87,6 +87,7 @@ public class PersonService {
     private final RecordCreationAugmentationService recordCreationAugmentationService;
     private final ProviderCaptureMapper providerCaptureMapper;
     private final ooo.klae.connex.backend.ai.mission.AiAgentPrivacyService aiAgentPrivacyService;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "email", "phone", "title", "imageUrl");
@@ -739,12 +740,6 @@ public class PersonService {
             withdrawProviderCapture(workspaceId, id);
         }
         int revokedShares = provisionCeased ? shareMapper.revokePersonShares(id, workspaceId) : 0;
-        int purgedAiOutputs = 0;
-        if (suspended || provisionCeased) {
-            aiAgentPrivacyService.invalidateWorkspaces(
-                    restrictionWorkspaceIds, java.util.UUID.randomUUID(), "restriction", null, null);
-            purgedAiOutputs = aiOutputCacheMapper.deleteForPerson(workspaceId, id);
-        }
         Person after = requireOwnedPerson(workspaceId, id);
         boolean wasVisible = before.getSuspendedAt() == null && before.getProvisionCeasedAt() == null;
         boolean isVisible = after.getSuspendedAt() == null && after.getProvisionCeasedAt() == null;
@@ -758,6 +753,13 @@ public class PersonService {
         }
         if (after.getSuspendedAt() == null && after.getProvisionCeasedAt() == null) {
             providerCaptureMapper.releaseRestoredParticipantReviews(workspaceId, id);
+        }
+        int purgedAiOutputs = 0;
+        if (suspended || provisionCeased) {
+            aiAgentPrivacyService.invalidateAssistantOrganization(
+                    orgId, restrictionWorkspaceIds, java.util.UUID.randomUUID(), "restriction", null, null);
+            var purgeScope = recordVisibilityScopeControlAccess.getFreshForWorkspace(workspaceId);
+            purgedAiOutputs = aiOutputCacheMapper.deleteForPerson(workspaceId, purgeScope.workspaceIdsJson(), id);
         }
         Map<String, Object> diff = auditService.diff(before, after, RESTRICTION_AUDIT_FIELDS);
         if (diff != null || revokedShares > 0 || purgedAiOutputs > 0) {

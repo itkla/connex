@@ -22,6 +22,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -46,10 +47,17 @@ class SegmentServiceTimeZoneTest {
     private final AuthService authService = mock(AuthService.class);
     private final SegmentMapper segmentMapper = mock(SegmentMapper.class);
     private final TenantContext tenantContext = new TenantContext();
+    private final RecordVisibilityScopeControlAccess scopes = mock(RecordVisibilityScopeControlAccess.class);
     private final SegmentService service = new SegmentService(
         workspaceService, authService, mock(ScoringService.class), mock(DealRiskService.class),
         segmentMapper, mock(PersonEdgeReadService.class), mock(PersonMapper.class), mock(TagMapper.class),
-        new SegmentCatalog());
+        new SegmentCatalog(), scopes);
+
+    @BeforeEach
+    void resolveVisibilityScope() {
+        when(scopes.getForWorkspace(7)).thenReturn(
+            new RecordVisibilityScopeControlAccess.RecordVisibilityScope(42, List.of(7)));
+    }
 
     @AfterEach
     void clearContext() {

@@ -91,6 +91,7 @@ class AiAgentRunHttpIntegrationTest extends AbstractAiAgentPrivacyIntegrationTes
             jdbc.update("DELETE FROM company WHERE workspace_id=? AND id=?", workspace.getId(), primary.getId());
         }
         if (otherWorkspace != null) {
+            ooo.klae.connex.backend.support.TestEntityFixtures.deleteChatPrivacy(jdbc, otherWorkspace.getId());
             jdbc.update("DELETE FROM workspace_member WHERE workspace_id=?", otherWorkspace.getId());
             jdbc.update("DELETE FROM workspace WHERE id=?", otherWorkspace.getId());
         }
@@ -125,6 +126,7 @@ class AiAgentRunHttpIntegrationTest extends AbstractAiAgentPrivacyIntegrationTes
         otherWorkspace.setName("Other HTTP workspace");
         otherWorkspace.setSlug("mission-other-http-" + UUID.randomUUID());
         workspaceMapper.insert(otherWorkspace);
+        ooo.klae.connex.backend.support.TestEntityFixtures.seedExistingWorkspacePrivacy(jdbc, otherWorkspace.getId());
         workspaceMapper.addMember(otherWorkspace.getId(), currentUser.getId(), "owner");
         mvc.perform(get(BASE + "/" + id).session(http).header("X-Workspace-Id", otherWorkspace.getId()))
                 .andExpect(status().isNotFound());
@@ -229,6 +231,7 @@ class AiAgentRunHttpIntegrationTest extends AbstractAiAgentPrivacyIntegrationTes
         otherWorkspace.setName("Continuation foreign workspace");
         otherWorkspace.setSlug("continuation-foreign-" + UUID.randomUUID());
         workspaceMapper.insert(otherWorkspace);
+        ooo.klae.connex.backend.support.TestEntityFixtures.seedExistingWorkspacePrivacy(jdbc, otherWorkspace.getId());
         workspaceMapper.addMember(otherWorkspace.getId(), currentUser.getId(), "owner");
         mvc.perform(post(BASE + "/" + id + "/resume").session(http).header("X-Workspace-Id", otherWorkspace.getId())
                 .header(csrfHeader, csrfToken).contentType(MediaType.APPLICATION_JSON)

@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import static ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -89,10 +90,12 @@ class AiAssistantWriteToolServiceTest {
     private static final AiChatQueuedTurn TURN = new AiChatQueuedTurn(
             7, 11, 13, 17, 19, 1, 23L, true, List.of(), List.of(),
             AiPrivacyMode.MASKED, false, AiChatQueryScope.none(),
-            new AiChatPrivacyToken(7, 13, 1, null));
+            new AiChatPrivacyToken(7, 13, 1, null, 1, 1L));
 
     private final ObjectMapper objectMapper = JsonMapper.builder().build();
     private AiChatMapper chatMapper;
+    private AiAssistantPrivacyService organizationAuthority;
+    private AiChatPrivacyGuard privacyGuard;
     private WorkspaceService workspaceService;
     private ActivityService activityService;
     private PersonService personService;
@@ -126,6 +129,11 @@ class AiAssistantWriteToolServiceTest {
     void setUp() {
         AiAssistantAdmissionTestSupport.beginTransaction();
         chatMapper = mock(AiChatMapper.class);
+        organizationAuthority = mock(AiAssistantPrivacyService.class);
+        when(organizationAuthority.organizationId(org.mockito.ArgumentMatchers.anyInt())).thenReturn(1);
+        when(organizationAuthority.current(1)).thenReturn(1L);
+        when(organizationAuthority.freshCurrent(1)).thenReturn(1L);
+        privacyGuard = new AiChatPrivacyGuard(organizationAuthority);
         workspaceService = mock(WorkspaceService.class);
         activityService = AiAssistantAdmissionTestSupport.admittingMock(ActivityService.class);
         personService = AiAssistantAdmissionTestSupport.admittingMock(PersonService.class);
@@ -203,8 +211,9 @@ class AiAssistantWriteToolServiceTest {
                 catalog,
                 registry,
                 readExecutor,
+                privacyGuard,
                 chatMapper,
-                workspaceService,
+                workspaceService, unfiltered(),
                 taskService,
                 personService,
                 companyService,
@@ -217,6 +226,7 @@ class AiAssistantWriteToolServiceTest {
                 VALIDATORS.getValidator(),
                 CLOCK, tagService);
         session = new AiChatSession();
+        session.setOrganizationPrivacyGeneration(1L);
         session.setId(TURN.sessionId());
         session.setWorkspaceId(TURN.workspaceId());
         session.setCreatedByUserId(TURN.userId());
@@ -232,6 +242,7 @@ class AiAssistantWriteToolServiceTest {
         AiChatTurn turn = new AiChatTurn();
         turn.setId(TURN.turnId());
         turn.setWorkspaceId(TURN.workspaceId());
+        turn.setOrganizationPrivacyGeneration(1L);
         turn.setSessionId(TURN.sessionId());
         turn.setPrivacyGeneration(1L);
         turn.setRequestedByUserId(TURN.userId());
@@ -239,10 +250,11 @@ class AiAssistantWriteToolServiceTest {
         when(chatMapper.getSessionByIdForUpdate(
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
         when(chatMapper.getAccessibleSessionById(
-                TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId(), 1L)).thenReturn(session);
         when(chatMapper.getTurnByIdForUpdate(
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId())).thenReturn(turn);
         storedToolCall = new AiChatToolCall();
+        storedToolCall.setOrganizationPrivacyGeneration(1L);
         storedToolCall.setServerProposal(true);
         storedToolCall.setWorkspaceId(TURN.workspaceId());
         storedToolCall.setMessageId(TURN.userMessageId());
@@ -254,7 +266,7 @@ class AiAssistantWriteToolServiceTest {
         when(chatMapper.getToolCallBySessionForUpdate(
                 TURN.workspaceId(), TURN.sessionId(), 29)).thenReturn(storedToolCall);
         when(chatMapper.getToolCallBySession(
-                TURN.workspaceId(), TURN.sessionId(), 29)).thenReturn(storedToolCall);
+                TURN.workspaceId(), TURN.sessionId(), 29, 1L)).thenReturn(storedToolCall);
         when(chatMapper.updateToolCall(
                 eq(TURN.workspaceId()), eq(TURN.userMessageId()), eq(29),
                 eq("executed"), any(), eq(TURN.userId()))).thenReturn(1);
@@ -327,6 +339,52 @@ class AiAssistantWriteToolServiceTest {
 
         assertEquals("undone", service.undo(TURN.sessionId(), 29).status());
         verify(activityService).deleteIf(eq(73), any());
+    }
+
+    @Test
+    void organizationAuthorityWaitCannotExtendTheOriginalUndoWindow() throws Exception {
+        AtomicReference<Task> createdTask = new AtomicReference<>();
+        doAnswer(invocation -> {
+            Task created = invocation.getArgument(0);
+            created.setId(74);
+            created.setStatus("todo");
+            createdTask.set(created);
+            return created;
+        }).when(taskService).create(any(Task.class));
+        AiAssistantPreparedWrite write = prepared("create_task",
+                "{\"handle\":\"r1\",\"description\":\"Send the renewal deck\"}", "person", 31);
+        stored(write, 29);
+        service.executeAuto(TURN, 29, result -> { });
+        String originalResult = capturedResultJson();
+        storedToolCall.setResultJson(originalResult);
+        Instant deadline = Instant.parse(objectMapper.readTree(originalResult).path("undo").path("expiresAt").asString());
+        AtomicReference<Instant> now = new AtomicReference<>(deadline.minusNanos(1));
+        Clock waitingClock = mock(Clock.class);
+        when(waitingClock.instant()).thenAnswer(invocation -> now.get());
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "clock", waitingClock);
+        when(organizationAuthority.retain(1, 1L)).thenAnswer(invocation -> {
+            now.set(deadline.plusNanos(1));
+            return 1L;
+        });
+        AtomicBoolean inverseApplied = new AtomicBoolean();
+        doAnswer(invocation -> {
+            java.util.function.Predicate<Task> inverseGuard = invocation.getArgument(1);
+            if (inverseGuard.test(createdTask.get())) {
+                inverseApplied.set(true);
+            }
+            return null;
+        }).when(taskService).deleteIf(eq(74), any());
+        clearInvocations(chatMapper, organizationAuthority);
+
+        ConflictException refused = assertThrows(ConflictException.class,
+                () -> service.undo(TURN.sessionId(), 29));
+
+        assertEquals("Assistant tool undo window has expired", refused.getMessage());
+        assertFalse(inverseApplied.get());
+        assertEquals(originalResult, storedToolCall.getResultJson());
+        assertEquals("available", objectMapper.readTree(originalResult).path("undo").path("status").asString());
+        verify(organizationAuthority).retain(1, 1L);
+        verify(chatMapper, never()).updateExecutedToolResult(anyInt(), anyInt(), any(), anyInt());
     }
 
     @Test
@@ -939,6 +997,7 @@ class AiAssistantWriteToolServiceTest {
                 TURN.restrictionEpoch(), TURN.includePrivateNotes(), List.of(), List.of(),
                 AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), TURN.privacyToken());
         AiChatTurn secondStoredTurn = new AiChatTurn();
+        secondStoredTurn.setOrganizationPrivacyGeneration(1L);
         secondStoredTurn.setId(secondTurn.turnId());
         secondStoredTurn.setRequestedByUserId(secondTurn.userId());
         secondStoredTurn.setStatus("running");
@@ -947,6 +1006,7 @@ class AiAssistantWriteToolServiceTest {
         secondToolCall.setCreatedAt(storedToolCall.getCreatedAt());
         secondToolCall.setId(30);
         secondToolCall.setWorkspaceId(secondTurn.workspaceId());
+        secondToolCall.setOrganizationPrivacyGeneration(1L);
         secondToolCall.setMessageId(secondTurn.userMessageId());
         secondToolCall.setSessionId(secondTurn.sessionId());
         secondToolCall.setRequestedByUserId(secondTurn.userId());

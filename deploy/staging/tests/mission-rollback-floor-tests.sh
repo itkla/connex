@@ -33,9 +33,11 @@ import zipfile
 root, releases = map(pathlib.Path, sys.argv[1:])
 floor = [line.strip() for line in (root / "deploy/staging/rollback-floor").read_text().splitlines()
          if line.strip() and not line.lstrip().startswith("#")]
-assert floor == ["tenant/V235__ai_agent_continuation.sql"]
+assert floor == ["tenant/V237__ai_assistant_privacy_cutover.sql"]
 for name, migrations in (
-    ("compatible", ["tenant/V232__ai_agent_runs.sql", "tenant/V233__ai_assistant_proposal_set_storage.sql", "tenant/V234__deal_document_recency_index.sql", floor[0]]),
+    ("compatible", ["control/V236__ai_assistant_privacy_coordination.sql", "tenant/V235__ai_agent_continuation.sql", "tenant/V232__ai_agent_runs.sql", "tenant/V233__ai_assistant_proposal_set_storage.sql", "tenant/V234__deal_document_recency_index.sql", floor[0]]),
+    ("expiry-only", ["tenant/V231__ai_proposal_review_expiry_cutover.sql"]),
+    ("current-main-v235", ["tenant/V235__ai_agent_continuation.sql"]),
     ("slice-one", ["tenant/V232__ai_agent_runs.sql"]),
     ("slice-one-v233", ["tenant/V232__ai_agent_runs.sql", "tenant/V233__ai_assistant_proposal_set_storage.sql"]),
     ("slice-one-v234", ["tenant/V232__ai_agent_runs.sql", "tenant/V233__ai_assistant_proposal_set_storage.sql", "tenant/V234__deal_document_recency_index.sql"]),
@@ -47,11 +49,11 @@ for name, migrations in (
             archive.writestr("BOOT-INF/classes/db/migration/" + migration, "SELECT 1;")
 PY
 
-for predecessor in slice-one slice-one-v233 slice-one-v234; do
+for predecessor in expiry-only current-main-v235 slice-one slice-one-v233 slice-one-v234; do
     if rollback_floor_allows_release "$predecessor"; then
-        printf '%s\n' "FAIL: $predecessor binary passed the V235 rollback floor" >&2
+        printf '%s\n' "FAIL: $predecessor binary passed the V237 rollback floor" >&2
         exit 1
     fi
 done
 rollback_floor_allows_release compatible
-printf '%s\n' 'PASS: sliceTwoRollbackFloorRejectsSliceOneBinary'
+printf '%s\n' 'PASS: assistantPrivacyRollbackFloorRejectsOlderBinaries'

@@ -67,9 +67,9 @@ class AiChatRestrictionEpochCommitTest extends AbstractServiceTest {
                         5));
 
         List<AiChatMessage> messages = chatMapper.listMessages(
-                workspace.getId(), session.getId(), 100, 0);
+                workspace.getId(), session.getId(), 100, 0, 1L);
         AiChatTurn stored = chatMapper.getTurnById(
-                workspace.getId(), session.getId(), turn.turnId());
+                workspace.getId(), session.getId(), turn.turnId(), 1L);
         assertEquals("restrictions_changed", failure.detailReason());
         assertEquals(1, messages.size());
         assertEquals("user", messages.getFirst().getAuthorKind());
@@ -93,7 +93,7 @@ class AiChatRestrictionEpochCommitTest extends AbstractServiceTest {
                         turn, toolCallId, "executed", "{\"restricted\":\"text\"}"));
 
         AiChatToolCall stored = chatMapper.getToolCallById(
-                workspace.getId(), turn.userMessageId(), toolCallId);
+                workspace.getId(), turn.userMessageId(), toolCallId, 1L);
         assertEquals("restrictions_changed", failure.detailReason());
         assertEquals("proposed", stored.getStatus());
         assertNull(stored.getResultJson());
@@ -102,6 +102,7 @@ class AiChatRestrictionEpochCommitTest extends AbstractServiceTest {
     private AiChatSession session(String title) {
         AiChatSession session = new AiChatSession();
         session.setWorkspaceId(workspace.getId());
+        session.setOrganizationPrivacyGeneration(1L);
         session.setCreatedByUserId(currentUser.getId());
         session.setTitle(title + " " + unique());
         session.setVisibility("private");

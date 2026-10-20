@@ -460,6 +460,8 @@ public class AiChatMemoryService {
         AiChatMessage omitted = new AiChatMessage();
         omitted.setId(source.getId());
         omitted.setWorkspaceId(source.getWorkspaceId());
+        omitted.setOrganizationPrivacyGeneration(source.getOrganizationPrivacyGeneration());
+        omitted.setPrivacyGeneration(source.getPrivacyGeneration());
         omitted.setSessionId(source.getSessionId());
         omitted.setSeq(source.getSeq());
         omitted.setAuthorKind(source.getAuthorKind());

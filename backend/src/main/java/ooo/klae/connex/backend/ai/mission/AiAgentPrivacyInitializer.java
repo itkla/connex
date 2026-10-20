@@ -5,9 +5,12 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.event.EventListener;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.core.task.TaskExecutor;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -16,7 +19,7 @@ import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.observability.JobRunRecorder;
 import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunDetail;
@@ -27,17 +30,38 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /** Placement-aware reconciliation that never invents a replacement privacy generation. */
 @Component
-@RequiredArgsConstructor
+@Slf4j
 public class AiAgentPrivacyInitializer {
     private final WorkspaceMapper workspaceMapper;
     private final TenantWorkScope tenantWorkScope;
     private final AiAgentPrivacyService privacyService;
     private final AiAgentStartupRecoveryService startupRecovery;
+    private final ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService assistantPrivacy;
     private final JobRunRecorder jobRunRecorder;
     private final PlatformTransactionManager transactionManager;
     private final AutomationExecutor automationExecutor;
     private final SystemActor systemActor;
+    private final ObjectProvider<TaskExecutor> initializationExecutor;
     private final AtomicBoolean ready = new AtomicBoolean();
+
+    /** Creates initialization with its bounded, managed, non-propagating provisioning executor. */
+    public AiAgentPrivacyInitializer(WorkspaceMapper workspaceMapper, TenantWorkScope tenantWorkScope,
+            AiAgentPrivacyService privacyService, AiAgentStartupRecoveryService startupRecovery,
+            ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService assistantPrivacy,
+            JobRunRecorder jobRunRecorder, PlatformTransactionManager transactionManager,
+            AutomationExecutor automationExecutor, SystemActor systemActor,
+            @Qualifier("aiAgentPrivacyInitializationExecutor") ObjectProvider<TaskExecutor> initializationExecutor) {
+        this.workspaceMapper = workspaceMapper;
+        this.tenantWorkScope = tenantWorkScope;
+        this.privacyService = privacyService;
+        this.startupRecovery = startupRecovery;
+        this.assistantPrivacy = assistantPrivacy;
+        this.jobRunRecorder = jobRunRecorder;
+        this.transactionManager = transactionManager;
+        this.automationExecutor = automationExecutor;
+        this.systemActor = systemActor;
+        this.initializationExecutor = initializationExecutor;
+    }
 
     /** Signals a committed control-plane workspace whose tenant barrier can now be initialized. */
     public record WorkspaceProvisioned(int workspaceId) {}
@@ -64,12 +88,32 @@ public class AiAgentPrivacyInitializer {
             int cursor = after;
             List<Integer> ids = tenantWorkScope.unroutedRead(() -> workspaceMapper.findWorkspaceIdsPage(cursor, 100));
             if (ids.isEmpty()) {
-                ready.set(successful);
-                return;
+                break;
             }
             for (int workspaceId : ids) {
                 try {
                     initialize(workspaceId);
+                } catch (RuntimeException failure) {
+                    successful = false;
+                }
+            }
+            after = ids.getLast();
+        }
+        after = 0;
+        while (true) {
+            int cursor = after;
+            List<Integer> ids = tenantWorkScope.unroutedRead(
+                    () -> assistantPrivacy.incompleteOrganizationIdsPage(cursor, 100));
+            if (ids.isEmpty()) {
+                ready.set(successful);
+                return;
+            }
+            for (int organizationId : ids) {
+                try {
+                    tenantWorkScope.unrouted(() -> {
+                        assistantPrivacy.reconcileOrganizationCompletion(organizationId);
+                        return null;
+                    });
                 } catch (RuntimeException failure) {
                     successful = false;
                 }
@@ -104,11 +148,31 @@ public class AiAgentPrivacyInitializer {
         }));
     }
 
-    /** Runs after self-service, bootstrap, or seeder provisioning commits on the control plane. */
+    /**
+     * Routed provisioning hands off without waiting: AFTER_COMMIT retains the provisioning
+     * connection until this callback returns. Workers install their own route and prepared scopes.
+     * Single-database provisioning retains synchronous initialization and scheduled recovery.
+     * A rejected handoff or failed initialization keeps global mission readiness closed until a
+     * successful scheduled reconciliation, without affecting the committed workspace provision.
+     */
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void provisioned(WorkspaceProvisioned event) {
+        if (tenantWorkScope.isCatalogPerPlacement()) {
+            try {
+                initializationExecutor.getObject().execute(() -> initializeProvisioned(event.workspaceId()));
+            } catch (RuntimeException failure) {
+                ready.set(false);
+                log.warn("AI privacy initialization handoff failed for workspace {}; scheduled reconciliation will retry",
+                    event.workspaceId());
+            }
+            return;
+        }
+        initializeProvisioned(event.workspaceId());
+    }
+
+    private void initializeProvisioned(int workspaceId) {
         try {
-            initialize(event.workspaceId());
+            initialize(workspaceId);
         } catch (RuntimeException failure) {
             ready.set(false);
         }

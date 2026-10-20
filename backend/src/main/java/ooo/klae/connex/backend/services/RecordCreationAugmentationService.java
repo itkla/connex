@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.CustomFieldDefinition;
 import ooo.klae.connex.backend.beans.Person;
@@ -55,6 +56,7 @@ public class RecordCreationAugmentationService {
     private final CustomFieldValueService customFieldValueService;
     private final TagMapper tagMapper;
     private final PipelineMapper pipelineMapper;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
     private final PersonMapper personMapper;
     private final CompanyMapper companyMapper;
     private final DealMapper dealMapper;
@@ -64,6 +66,13 @@ public class RecordCreationAugmentationService {
     ResolvedCreationTemplateDto resolvePreliminary(
             RecordCreationRecordType recordType,
             RecordCreationTemplateUseDto templateUse) {
+        return resolvePreliminary(recordType, templateUse, recordVisibilityScopeControlAccess.getForWorkspace(
+            workspaceService.getCurrentWorkspaceId()));
+    }
+
+    ResolvedCreationTemplateDto resolvePreliminary(
+            RecordCreationRecordType recordType, RecordCreationTemplateUseDto templateUse,
+            RecordVisibilityScope scope) {
         if (recordType == RecordCreationRecordType.company
                 && templateUse.context().relatedCompanyId() != null) {
             throw RecordCreationTemplateException.of(
@@ -72,9 +81,10 @@ public class RecordCreationAugmentationService {
                 "Company creation does not accept related-company context");
         }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String orgWorkspaceIdsJson = scope.workspaceIdsJson();
         RecordCreationTemplateSet set = templateMapper.getSet(workspaceId, recordType.name());
         int currentSetRevision = set == null ? 0 : set.getRevision();
-        ExactTemplate exact = resolveExact(workspaceId, recordType, templateUse, false);
+        ExactTemplate exact = resolveExact(workspaceId, recordType, templateUse, false, orgWorkspaceIdsJson);
         requireSetRevision(templateUse, currentSetRevision, exact);
         return requireAvailable(exact.resolved());
     }
@@ -89,11 +99,12 @@ public class RecordCreationAugmentationService {
         }
     }
 
-    void validateDealReferences(Integer pipelineId, Integer stageId, Integer companyId) {
+    void validateDealReferences(Integer pipelineId, Integer stageId, Integer companyId, RecordVisibilityScope scope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String orgWorkspaceIdsJson = scope.workspaceIdsJson();
         Pipeline pipeline = pipelineId == null
             ? null
-            : pipelineMapper.getPipelineById(workspaceId, pipelineId);
+            : pipelineMapper.getPipelineById(workspaceId, orgWorkspaceIdsJson, pipelineId);
         Stage stage = stageId == null
             ? null
             : pipelineMapper.getStageById(workspaceId, stageId);
@@ -123,7 +134,7 @@ public class RecordCreationAugmentationService {
             List.of(),
             List.of(),
             nullable(referrerPersonId),
-            companies(companyId, augmentation));
+            companies(companyId, augmentation), null);
     }
 
     PreparedAugmentation prepareCompany(RecordCreationAugmentation augmentation) {
@@ -133,21 +144,21 @@ public class RecordCreationAugmentationService {
             List.of(),
             List.of(),
             List.of(),
-            List.of());
+            List.of(), null);
     }
 
     PreparedAugmentation prepareDeal(
             Integer pipelineId,
             Integer stageId,
             Integer companyId,
-            RecordCreationAugmentation augmentation) {
+            RecordCreationAugmentation augmentation, RecordVisibilityScope scope) {
         return prepare(
             RecordCreationRecordType.deal,
             augmentation,
             nullable(pipelineId),
             nullable(stageId),
             List.of(),
-            companies(companyId, augmentation));
+            companies(companyId, augmentation), scope);
     }
 
     Map<String, Object> applyPerson(int personId, PreparedAugmentation prepared) {
@@ -189,8 +200,11 @@ public class RecordCreationAugmentationService {
             List<Integer> pipelineIds,
             List<Integer> stageIds,
             List<Integer> personIds,
-            List<Integer> companyIds) {
+            List<Integer> companyIds, RecordVisibilityScope suppliedScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        RecordVisibilityScope scope = suppliedScope == null
+            ? recordVisibilityScopeControlAccess.getForWorkspace(workspaceId) : suppliedScope;
+        String orgWorkspaceIdsJson = scope.workspaceIdsJson();
         templateMapper.insertSetIfAbsent(workspaceId, recordType.name());
         RecordCreationTemplateSet set = templateMapper.getSetForUpdate(workspaceId, recordType.name());
         if (set == null) {
@@ -202,14 +216,14 @@ public class RecordCreationAugmentationService {
             augmentation.templateSetRevision(),
             augmentation.entryPoint(),
             augmentation.context());
-        ExactTemplate exact = resolveExact(workspaceId, recordType, templateUse, true);
+        ExactTemplate exact = resolveExact(workspaceId, recordType, templateUse, true, orgWorkspaceIdsJson);
         requireSetRevision(templateUse, set.getRevision(), exact);
         ResolvedCreationTemplateDto preliminaryLocked = requireAvailable(exact.resolved());
         Map<Integer, CustomFieldDefinition> lockedCustomFields =
             lockCustomFields(workspaceId, preliminaryLocked);
         lockTags(workspaceId, augmentation.tagIds());
-        lockReferences(workspaceId, pipelineIds, stageIds, personIds, companyIds, augmentation.reviewedStageName());
-        ResolvedCreationTemplateDto resolved = requireAvailable(resolveAgain(exact, augmentation));
+        lockReferences(workspaceId, pipelineIds, stageIds, personIds, companyIds, augmentation.reviewedStageName(), orgWorkspaceIdsJson);
+        ResolvedCreationTemplateDto resolved = requireAvailable(resolveAgain(exact, augmentation, orgWorkspaceIdsJson));
         validatePayload(recordType, resolved, augmentation);
         return new PreparedAugmentation(recordType, augmentation, lockedCustomFields);
     }
@@ -250,7 +264,8 @@ public class RecordCreationAugmentationService {
             int workspaceId,
             RecordCreationRecordType recordType,
             RecordCreationTemplateUseDto templateUse,
-            boolean forUpdate) {
+            boolean forUpdate,
+            String orgWorkspaceIdsJson) {
         RecordCreationFieldRegistry.SystemPreset preset = fieldRegistry.systemPreset(recordType);
         if (preset.id().equals(templateUse.templateId())) {
             if (preset.version() != templateUse.templateVersion()) {
@@ -264,7 +279,7 @@ public class RecordCreationAugmentationService {
             return new ExactTemplate(
                 null,
                 null,
-                resolver.resolveSystem(recordType, templateUse.context()));
+                resolver.resolveSystem(recordType, templateUse.context(), orgWorkspaceIdsJson));
         }
         int templateId = workspaceTemplateId(templateUse.templateId());
         RecordCreationTemplate root = forUpdate
@@ -295,18 +310,19 @@ public class RecordCreationAugmentationService {
         return new ExactTemplate(
             root,
             version,
-            resolver.resolveWorkspace(root, version, templateUse.context()));
+            resolver.resolveWorkspace(root, version, templateUse.context(), orgWorkspaceIdsJson));
     }
 
     private ResolvedCreationTemplateDto resolveAgain(
             ExactTemplate exact,
-            RecordCreationAugmentation augmentation) {
+            RecordCreationAugmentation augmentation,
+            String orgWorkspaceIdsJson) {
         if (exact.root() == null) {
             return resolver.resolveSystem(
-                exact.resolved().recordType(), augmentation.context());
+                exact.resolved().recordType(), augmentation.context(), orgWorkspaceIdsJson);
         }
         return resolver.resolveWorkspace(
-            exact.root(), exact.version(), augmentation.context());
+            exact.root(), exact.version(), augmentation.context(), orgWorkspaceIdsJson);
     }
 
     private Map<Integer, CustomFieldDefinition> lockCustomFields(
@@ -341,10 +357,10 @@ public class RecordCreationAugmentationService {
             List<Integer> stageIds,
             List<Integer> personIds,
             List<Integer> companyIds,
-            String reviewedStageName) {
+            String reviewedStageName, String orgWorkspaceIdsJson) {
         Map<Integer, Stage> stages = new LinkedHashMap<>();
         for (int stageId : sortedUnique(stageIds)) {
-            Stage stage = pipelineMapper.getVisibleStageByIdForUpdate(workspaceId, stageId);
+            Stage stage = pipelineMapper.getVisibleStageByIdForUpdate(workspaceId, orgWorkspaceIdsJson, stageId);
             if (stage == null) {
                 throw relatedRecordNotFound();
             }
@@ -355,7 +371,7 @@ public class RecordCreationAugmentationService {
         }
         Map<Integer, Pipeline> pipelines = new LinkedHashMap<>();
         for (int pipelineId : sortedUnique(pipelineIds)) {
-            Pipeline pipeline = pipelineMapper.getVisiblePipelineByIdForUpdate(workspaceId, pipelineId);
+            Pipeline pipeline = pipelineMapper.getVisiblePipelineByIdForUpdate(workspaceId, orgWorkspaceIdsJson, pipelineId);
             if (pipeline == null) {
                 throw relatedRecordNotFound();
             }

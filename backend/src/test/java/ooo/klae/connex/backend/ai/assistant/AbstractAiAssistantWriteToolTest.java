@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import static ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
@@ -69,12 +70,16 @@ abstract class AbstractAiAssistantWriteToolTest {
     static final AiChatQueuedTurn TURN = new AiChatQueuedTurn(
             7, 11, 13, 17, 19, 1, 23L, true, List.of(), List.of(),
             AiPrivacyMode.MASKED, false, AiChatQueryScope.none(),
-            new AiChatPrivacyToken(7, 13, 1, null));
+            new AiChatPrivacyToken(7, 13, 1, null, 1, 1L));
     static final int TOOL_CALL_ID = 29;
 
     final ObjectMapper objectMapper = JsonMapper.builder().build();
     AiChatMapper chatMapper;
+    private AiAssistantPrivacyService organizationAuthority;
+    AiChatPrivacyGuard privacyGuard;
     WorkspaceService workspaceService;
+    final ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess recordScopes =
+        unfiltered();
     ActivityService activityService;
     NoteService noteService;
     PersonService personService;
@@ -114,6 +119,11 @@ abstract class AbstractAiAssistantWriteToolTest {
     void setUpFramework() {
         AiAssistantAdmissionTestSupport.beginTransaction();
         chatMapper = mock(AiChatMapper.class);
+        organizationAuthority = mock(AiAssistantPrivacyService.class);
+        when(organizationAuthority.organizationId(org.mockito.ArgumentMatchers.anyInt())).thenReturn(1);
+        when(organizationAuthority.current(1)).thenReturn(1L);
+        when(organizationAuthority.freshCurrent(1)).thenReturn(1L);
+        privacyGuard = new AiChatPrivacyGuard(organizationAuthority);
         workspaceService = mock(WorkspaceService.class);
         activityService = AiAssistantAdmissionTestSupport.admittingMock(ActivityService.class);
         noteService = AiAssistantAdmissionTestSupport.admittingMock(NoteService.class);
@@ -157,6 +167,7 @@ abstract class AbstractAiAssistantWriteToolTest {
         AiChatSession session = new AiChatSession();
         session.setId(TURN.sessionId());
         session.setWorkspaceId(TURN.workspaceId());
+        session.setOrganizationPrivacyGeneration(1L);
         session.setCreatedByUserId(TURN.userId());
         session.setVisibility("private");
         session.setStatus("active");
@@ -167,16 +178,18 @@ abstract class AbstractAiAssistantWriteToolTest {
         when(chatMapper.lockPrivacyBarrierForShare(TURN.workspaceId())).thenReturn(barrier);
         when(chatMapper.getPrivacySession(TURN.workspaceId(), TURN.sessionId())).thenReturn(session);
         AiChatTurn turn = new AiChatTurn();
+        turn.setOrganizationPrivacyGeneration(1L);
         turn.setId(TURN.turnId());
         turn.setRequestedByUserId(TURN.userId());
         turn.setStatus("running");
         when(chatMapper.getSessionByIdForUpdate(
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
         when(chatMapper.getAccessibleSessionById(
-                TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId(), 1L)).thenReturn(session);
         when(chatMapper.getTurnByIdForUpdate(
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId())).thenReturn(turn);
         storedToolCall = new AiChatToolCall();
+        storedToolCall.setOrganizationPrivacyGeneration(1L);
         storedToolCall.setServerProposal(true);
         storedToolCall.setId(TOOL_CALL_ID);
         storedToolCall.setWorkspaceId(TURN.workspaceId());
@@ -189,7 +202,7 @@ abstract class AbstractAiAssistantWriteToolTest {
         when(chatMapper.getToolCallBySessionForUpdate(
                 TURN.workspaceId(), TURN.sessionId(), TOOL_CALL_ID)).thenReturn(storedToolCall);
         when(chatMapper.getToolCallBySession(
-                TURN.workspaceId(), TURN.sessionId(), TOOL_CALL_ID)).thenReturn(storedToolCall);
+                TURN.workspaceId(), TURN.sessionId(), TOOL_CALL_ID, 1L)).thenReturn(storedToolCall);
         when(chatMapper.updateToolCall(
                 eq(TURN.workspaceId()), eq(TURN.userMessageId()), eq(TOOL_CALL_ID),
                 any(), any(), eq(TURN.userId()))).thenReturn(1);
@@ -263,8 +276,9 @@ abstract class AbstractAiAssistantWriteToolTest {
                 catalog,
                 registry,
                 readExecutor,
+                privacyGuard,
                 chatMapper,
-                workspaceService,
+                workspaceService, recordScopes,
                 taskService,
                 personService,
                 companyService,

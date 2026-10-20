@@ -31,6 +31,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.mappers.IntroductionMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 
 /** Computes deterministic, current-state network figures for report widgets. */
 @Service
@@ -67,17 +68,19 @@ public class ReportNetworkService {
     private final PersonEdgeReadService personEdgeReader;
     private final IntroductionMapper introductionMapper;
     private final ScoringService scoringService;
-    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
-    NetworkSnapshot snapshot(ReportAggregateQuery query, boolean includeReverseIntros) {
+    /** Reuses the report operation's unfiltered scope for account values and reverse candidates. */
+    NetworkSnapshot snapshot(
+            ReportAggregateQuery query, boolean includeReverseIntros, RecordVisibilityScope scope) {
         int workspaceId = query.workspaceId();
+        String orgWorkspaceIdsJson = scope.workspaceIdsJson();
         List<Person> people = personMapper.getPersonsForNetworkReport(workspaceId, MAX_VISIBLE_PEOPLE + 1);
         List<PersonEdge> edges = personEdgeReader.getEdgesForNetworkReport(
                 workspaceId, MAX_VISIBLE_EDGES + 1);
         List<Introduction> existingPairs = introductionMapper.findExistingPairsForReport(
                 workspaceId, MAX_NETWORK_EXISTING_PAIRS + 1);
         List<ReportNetworkAccountRow> accountValues = reportMapper.getNetworkAccountValues(
-                query, MAX_NETWORK_ACCOUNT_ROWS + 1);
+                query, orgWorkspaceIdsJson, MAX_NETWORK_ACCOUNT_ROWS + 1);
         requireWarmIntroSourceBounds(people, edges, existingPairs, accountValues);
         List<RelationshipTemperatureDto> temperatures = scoringService.scoreContacts(workspaceId);
         List<WarmIntroOpportunity> warmIntroOpportunities = rankWarmIntroOpportunities(
@@ -87,14 +90,14 @@ public class ReportNetworkService {
                 existingPairs,
                 accountValues);
         List<IntroSuggestionDto> reverseIntroSuggestions = includeReverseIntros
-                ? reverseIntroSuggestions(workspaceId, temperatures, edges, existingPairs)
+                ? reverseIntroSuggestions(workspaceId, orgWorkspaceIdsJson, temperatures, edges, existingPairs)
                 : List.of();
         return new NetworkSnapshot(warmIntroOpportunities, reverseIntroSuggestions);
     }
 
-    List<IntroSuggestionDto> reverseIntroSuggestions(int workspaceId) {
-        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId)
-            .workspaceIdsJson();
+    /** Uses the same preloaded ceiling as every other widget in the report operation. */
+    List<IntroSuggestionDto> reverseIntroSuggestions(int workspaceId, RecordVisibilityScope scope) {
+        String orgWorkspaceIdsJson = scope.workspaceIdsJson();
         List<IntroCandidatePerson> candidates = introductionMapper.findCandidatePersonsForReport(
                 workspaceId, orgWorkspaceIdsJson, MAX_REVERSE_CANDIDATES + 1);
         requireReverseCandidateBounds(candidates);
@@ -279,11 +282,10 @@ public class ReportNetworkService {
 
     private List<IntroSuggestionDto> reverseIntroSuggestions(
             int workspaceId,
+            String orgWorkspaceIdsJson,
             List<RelationshipTemperatureDto> temperatures,
             List<PersonEdge> edges,
             List<Introduction> existingPairs) {
-        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId)
-            .workspaceIdsJson();
         List<IntroCandidatePerson> candidates = introductionMapper.findCandidatePersonsForReport(
                 workspaceId, orgWorkspaceIdsJson, MAX_REVERSE_CANDIDATES + 1);
         requireReverseCandidateBounds(candidates);

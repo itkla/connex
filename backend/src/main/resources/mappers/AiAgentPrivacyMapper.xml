@@ -34,6 +34,7 @@
     <result column="control_acceptance_audit_id" property="controlAcceptanceAuditId" />
     <result column="current_session_id" property="currentSessionId" />
     <result column="operation_key" property="operationKey" />
+    <result column="content_scope" property="contentScope" />
     <result column="reason" property="reason" />
     <result column="phase" property="phase" />
     <result column="session_phase" property="sessionPhase" />
@@ -81,7 +82,7 @@
     UPDATE ai_agent_privacy_barrier b SET blocked = FALSE
     WHERE b.workspace_id = #{workspaceId} AND b.generation = #{expectedGeneration}
       AND NOT EXISTS (SELECT 1 FROM ai_agent_privacy_work w
-        WHERE w.workspace_id = #{workspaceId} AND w.phase &lt;&gt; 'complete')
+        WHERE w.workspace_id = #{workspaceId} AND w.content_scope = 'organization_mission_holdings_v1' AND w.phase &lt;&gt; 'complete')
   </update>
 
   <select id="countInitializationEvidence" resultType="long" useCache="false" flushCache="true">
@@ -102,9 +103,9 @@
 
   <insert id="insertWork" useGeneratedKeys="true" keyProperty="work.id">
     INSERT INTO ai_agent_privacy_work
-      (cutoff_generation, invalidated_generation, revision, workspace_id, max_run_id, max_session_id, max_turn_id, max_message_id, max_tool_call_id, last_run_id, last_session_id, last_turn_id, last_tool_call_id, last_message_id, retry_count, dsr_request_id, last_residual_count, control_acceptance_audit_id, current_session_id, operation_key, reason, phase, session_phase, last_error_code, operation_fingerprint, next_attempt_at, verified_at, completed_at)
+      (content_scope, cutoff_generation, invalidated_generation, revision, workspace_id, max_run_id, max_session_id, max_turn_id, max_message_id, max_tool_call_id, last_run_id, last_session_id, last_turn_id, last_tool_call_id, last_message_id, retry_count, dsr_request_id, last_residual_count, control_acceptance_audit_id, current_session_id, operation_key, reason, phase, session_phase, last_error_code, operation_fingerprint, next_attempt_at, verified_at, completed_at)
     VALUES
-      (#{work.cutoffGeneration}, #{work.invalidatedGeneration}, #{work.revision}, #{work.workspaceId}, #{work.maxRunId}, #{work.maxSessionId}, #{work.maxTurnId}, #{work.maxMessageId}, #{work.maxToolCallId}, #{work.lastRunId}, #{work.lastSessionId}, #{work.lastTurnId}, #{work.lastToolCallId}, #{work.lastMessageId}, #{work.retryCount}, #{work.dsrRequestId,jdbcType=BIGINT}, #{work.lastResidualCount,jdbcType=BIGINT}, #{work.controlAcceptanceAuditId,jdbcType=INTEGER}, #{work.currentSessionId,jdbcType=INTEGER}, #{work.operationKey,jdbcType=VARCHAR}, #{work.reason,jdbcType=VARCHAR}, #{work.phase,jdbcType=VARCHAR}, #{work.sessionPhase,jdbcType=VARCHAR}, #{work.lastErrorCode,jdbcType=VARCHAR}, #{work.operationFingerprint,jdbcType=VARBINARY}, #{work.nextAttemptAt,jdbcType=TIMESTAMP}, #{work.verifiedAt,jdbcType=TIMESTAMP}, #{work.completedAt,jdbcType=TIMESTAMP})
+      (#{work.contentScope}, #{work.cutoffGeneration}, #{work.invalidatedGeneration}, #{work.revision}, #{work.workspaceId}, #{work.maxRunId}, #{work.maxSessionId}, #{work.maxTurnId}, #{work.maxMessageId}, #{work.maxToolCallId}, #{work.lastRunId}, #{work.lastSessionId}, #{work.lastTurnId}, #{work.lastToolCallId}, #{work.lastMessageId}, #{work.retryCount}, #{work.dsrRequestId,jdbcType=BIGINT}, #{work.lastResidualCount,jdbcType=BIGINT}, #{work.controlAcceptanceAuditId,jdbcType=INTEGER}, #{work.currentSessionId,jdbcType=INTEGER}, #{work.operationKey,jdbcType=VARCHAR}, #{work.reason,jdbcType=VARCHAR}, #{work.phase,jdbcType=VARCHAR}, #{work.sessionPhase,jdbcType=VARCHAR}, #{work.lastErrorCode,jdbcType=VARCHAR}, #{work.operationFingerprint,jdbcType=VARBINARY}, #{work.nextAttemptAt,jdbcType=TIMESTAMP}, #{work.verifiedAt,jdbcType=TIMESTAMP}, #{work.completedAt,jdbcType=TIMESTAMP})
   </insert>
 
   <select id="getWork" resultMap="workResult" useCache="false" flushCache="true">
@@ -121,7 +122,7 @@
     SELECT * FROM ai_agent_privacy_work
     WHERE workspace_id = #{workspaceId} AND phase &lt;&gt; 'complete'
       AND next_attempt_at &lt;= CURRENT_TIMESTAMP(6)
-    ORDER BY id LIMIT #{limit}
+    ORDER BY next_attempt_at, id LIMIT #{limit}
   </select>
 
   <update id="updateWork">
@@ -187,7 +188,7 @@
     SELECT t.id FROM ai_chat_turn t
     JOIN ai_chat_session s ON s.workspace_id = t.workspace_id AND s.id = t.session_id
     WHERE t.workspace_id = #{workspaceId} AND t.session_id = #{sessionId}
-      AND t.id &gt; #{afterId} AND t.id &lt;= #{maxId} AND t.mission_run_id IS NULL
+      AND t.id &gt; #{afterId} AND t.id &lt;= #{maxId}
       AND <include refid="affectedTurn" />
     <if test="activeOnly">AND t.status IN ('queued', 'running')</if>
     ORDER BY t.id LIMIT #{limit}
@@ -229,14 +230,16 @@
     DELETE t FROM ai_chat_turn t
     JOIN ai_chat_session s ON s.workspace_id = t.workspace_id AND s.id = t.session_id
     WHERE t.workspace_id = #{workspaceId} AND t.session_id = #{sessionId}
-      AND t.mission_run_id IS NULL AND t.status NOT IN ('queued', 'running')
+      AND t.status NOT IN ('queued', 'running')
       AND <include refid="affectedTurn" />
       AND t.id IN <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
   </delete>
-  <delete id="deleteMissionTurns">
-    DELETE FROM ai_chat_turn WHERE workspace_id = #{workspaceId} AND mission_run_id = #{runId}
+  <update id="detachMissionTurns">
+    UPDATE ai_chat_turn SET mission_run_id = NULL, mission_segment_id = NULL
+    WHERE workspace_id = #{workspaceId} AND mission_run_id = #{runId}
       AND status NOT IN ('queued', 'running')
-  </delete>
+      AND id IN <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+  </update>
   <update id="settleAffectedTurn">
     UPDATE ai_chat_turn t
     JOIN ai_chat_session s ON s.workspace_id = t.workspace_id AND s.id = t.session_id
@@ -254,12 +257,20 @@
       AND COALESCE(title_privacy_generation, mission_taint_generation) &lt;= #{cutoffGeneration}
   </update>
   <update id="clearSessionProjections">
-    UPDATE ai_brief_schedule SET pending_kind = NULL, pending_session_id = NULL, pending_turn_id = NULL
-    WHERE workspace_id = #{workspaceId} AND pending_session_id = #{sessionId}
+    UPDATE ai_brief_schedule
+    SET pending_kind = IF(pending_session_id = #{sessionId}, NULL, pending_kind),
+      pending_turn_id = IF(pending_session_id = #{sessionId}, NULL, pending_turn_id),
+      pending_started_at = IF(pending_session_id = #{sessionId}, NULL, pending_started_at),
+      pending_session_id = IF(pending_session_id = #{sessionId}, NULL, pending_session_id),
+      last_delivered_kind = IF(last_delivered_session_id = #{sessionId}, NULL, last_delivered_kind),
+      last_delivered_at = IF(last_delivered_session_id = #{sessionId}, NULL, last_delivered_at),
+      last_delivered_session_id = IF(last_delivered_session_id = #{sessionId}, NULL, last_delivered_session_id)
+    WHERE workspace_id = #{workspaceId}
+      AND (pending_session_id = #{sessionId} OR last_delivered_session_id = #{sessionId})
   </update>
   <select id="countIncompleteWork" resultType="int" useCache="false" flushCache="true">
     SELECT COUNT(*) FROM ai_agent_privacy_work
-    WHERE workspace_id = #{workspaceId} AND phase &lt;&gt; 'complete'
+    WHERE workspace_id = #{workspaceId} AND content_scope = 'organization_mission_holdings_v1' AND phase &lt;&gt; 'complete'
   </select>
 
   <delete id="deleteSessionNotifications">
@@ -276,6 +287,9 @@
       AND id = #{id} FOR UPDATE
   </select>
   <sql id="sessionResidual">
+    (SELECT COUNT(*) FROM ai_assistant_proposal_set p
+     WHERE p.workspace_id = #{workspaceId} AND p.privacy_generation &lt;= #{cutoffGeneration}
+     <if test="sessionId != null">AND p.session_id = #{sessionId}</if>) +
     (SELECT COUNT(*) FROM ai_chat_message m
      JOIN ai_chat_session s ON s.workspace_id = m.workspace_id AND s.id = m.session_id
      WHERE m.workspace_id = #{workspaceId}
@@ -345,4 +359,154 @@
     WHERE workspace_id = #{workspaceId} AND session_id = #{sessionId} AND id = #{turnId}
       AND mission_run_id IS NULL AND privacy_generation IS NULL AND status IN ('queued', 'running')
   </update>
+
+  <select id="allChatRunIds" resultType="int" useCache="false" flushCache="true">
+    SELECT r.id FROM ai_agent_run r WHERE r.workspace_id = #{workspaceId}
+      AND r.organization_privacy_generation &lt;= #{cutoffGeneration} AND <include refid="runHasResidualPayload" />
+    ORDER BY r.id LIMIT #{limit}
+  </select>
+  <select id="allChatSessionIds" resultType="int" useCache="false" flushCache="true">
+    SELECT id FROM ai_chat_session WHERE workspace_id = #{workspaceId}
+      AND organization_privacy_generation &lt;= #{cutoffGeneration} ORDER BY id LIMIT #{limit}
+  </select>
+  <select id="workspaceTeardownRunIds" resultType="int" useCache="false" flushCache="true">
+    SELECT r.id FROM ai_agent_run r WHERE r.workspace_id = #{workspaceId}
+      AND <include refid="runHasResidualPayload" /> ORDER BY r.id LIMIT #{limit}
+  </select>
+  <select id="workspaceTeardownSessionIds" resultType="int" useCache="false" flushCache="true">
+    SELECT id FROM ai_chat_session WHERE workspace_id = #{workspaceId} ORDER BY id LIMIT #{limit}
+  </select>
+  <select id="allChatTurnIds" resultType="int" useCache="false" flushCache="true">
+    SELECT id FROM ai_chat_turn WHERE workspace_id = #{workspaceId} AND session_id = #{sessionId}
+    <if test="activeOnly">AND (status IN ('queued', 'running') OR EXISTS (
+      SELECT 1 FROM ai_run_lease l WHERE l.workspace_id = #{workspaceId} AND l.subject_kind = 'chat_turn'
+        AND l.subject_id = ai_chat_turn.id AND l.owner IS NOT NULL))</if>
+    ORDER BY id LIMIT #{limit}
+  </select>
+  <select id="allChatToolIds" resultType="int" useCache="false" flushCache="true">
+    SELECT t.id FROM ai_chat_tool_call t JOIN ai_chat_message m ON m.workspace_id = t.workspace_id AND m.id = t.message_id
+    WHERE t.workspace_id = #{workspaceId} AND m.session_id = #{sessionId} ORDER BY t.id LIMIT #{limit}
+  </select>
+  <select id="allChatMessageIds" resultType="int" useCache="false" flushCache="true">
+    SELECT id FROM ai_chat_message WHERE workspace_id = #{workspaceId} AND session_id = #{sessionId} ORDER BY id LIMIT #{limit}
+  </select>
+  <select id="proposalParentKeys" resultType="string" useCache="false" flushCache="true">
+    SELECT proposal_key FROM ai_assistant_proposal_set WHERE workspace_id = #{workspaceId} AND session_id = #{sessionId}
+    <if test="!allChat">AND privacy_generation &lt;= #{cutoffGeneration}</if>
+    ORDER BY proposal_key LIMIT #{limit}
+  </select>
+  <select id="toolParentKeys" resultType="string" useCache="false" flushCache="true">
+    SELECT DISTINCT proposal_key FROM ai_chat_tool_call WHERE workspace_id = #{workspaceId}
+      AND proposal_key IS NOT NULL
+      AND id IN <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+    ORDER BY proposal_key
+  </select>
+  <select id="lockProposalParent" resultType="string" useCache="false" flushCache="true">
+    SELECT proposal_key FROM ai_assistant_proposal_set WHERE workspace_id = #{workspaceId}
+      AND session_id = #{sessionId} AND proposal_key = #{proposalKey} FOR UPDATE
+  </select>
+  <delete id="deleteProposalParent">
+    DELETE FROM ai_assistant_proposal_set WHERE workspace_id = #{workspaceId}
+      AND session_id = #{sessionId} AND proposal_key = #{proposalKey}
+      AND NOT EXISTS (SELECT 1 FROM ai_chat_tool_call t WHERE t.workspace_id = #{workspaceId} AND t.proposal_key = #{proposalKey})
+  </delete>
+  <select id="chatAttachments" resultMap="ooo.klae.connex.backend.mappers.AttachmentMapper.AttachmentResult" useCache="false" flushCache="true">
+    SELECT * FROM attachment WHERE workspace_id = #{workspaceId} AND entity_type = 'ai_chat_session'
+      AND entity_id = #{sessionId} ORDER BY BINARY url, id LIMIT #{limit}
+  </select>
+  <select id="retainedCrmReference" resultType="int" useCache="false" flushCache="true">
+    SELECT a.id FROM attachment a WHERE a.workspace_id = #{workspaceId} AND BINARY a.url = BINARY #{url}
+      AND ((a.entity_type = 'person' AND EXISTS (SELECT 1 FROM person p WHERE p.workspace_id = a.workspace_id AND p.id = a.entity_id))
+        OR (a.entity_type = 'company' AND EXISTS (SELECT 1 FROM company c WHERE c.workspace_id = a.workspace_id AND c.id = a.entity_id))
+        OR (a.entity_type = 'deal' AND EXISTS (SELECT 1 FROM deal d WHERE d.workspace_id = a.workspace_id AND d.id = a.entity_id))
+        OR (a.entity_type = 'note' AND EXISTS (SELECT 1 FROM note n WHERE n.workspace_id = a.workspace_id AND n.id = a.entity_id)))
+    ORDER BY a.id LIMIT 1
+  </select>
+  <update id="settleAllChatTurn">
+    UPDATE ai_chat_turn SET status = 'cancelled', terminal_reason = 'privacy_invalidated',
+      partial_content = NULL, partial_content_utf16_offset = 0, scope_json = NULL
+    WHERE workspace_id = #{workspaceId} AND session_id = #{sessionId} AND id = #{turnId} AND status IN ('queued', 'running')
+  </update>
+  <delete id="deleteAllChatTools">
+    DELETE t FROM ai_chat_tool_call t JOIN ai_chat_message m ON m.workspace_id = t.workspace_id AND m.id = t.message_id
+    WHERE t.workspace_id = #{workspaceId} AND m.session_id = #{sessionId}
+      AND t.id IN <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+  </delete>
+  <delete id="deleteAllChatMessages">
+    DELETE FROM ai_chat_message WHERE workspace_id = #{workspaceId} AND session_id = #{sessionId}
+      AND id IN <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+  </delete>
+  <delete id="deleteAllChatTurns">
+    DELETE FROM ai_chat_turn WHERE workspace_id = #{workspaceId} AND session_id = #{sessionId}
+      AND status NOT IN ('queued', 'running')
+      AND NOT EXISTS (SELECT 1 FROM ai_run_lease l WHERE l.workspace_id = #{workspaceId}
+        AND l.subject_kind = 'chat_turn' AND l.subject_id = ai_chat_turn.id AND l.owner IS NOT NULL)
+      AND id IN <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+  </delete>
+  <delete id="deleteAllChatParticipants">
+    DELETE FROM ai_chat_session_participant WHERE workspace_id = #{workspaceId} AND session_id = #{sessionId} LIMIT #{limit}
+  </delete>
+  <delete id="deleteAllChatSession">
+    DELETE FROM ai_chat_session WHERE workspace_id = #{workspaceId} AND id = #{sessionId}
+  </delete>
+  <select id="allChatSessionResidualCount" resultType="long" useCache="false" flushCache="true">
+    SELECT (SELECT COUNT(*) FROM ai_chat_message WHERE workspace_id = #{workspaceId} AND session_id = #{sessionId})
+      + (SELECT COUNT(*) FROM ai_chat_turn WHERE workspace_id = #{workspaceId} AND session_id = #{sessionId})
+      + (SELECT COUNT(*) FROM ai_assistant_proposal_set WHERE workspace_id = #{workspaceId} AND session_id = #{sessionId})
+      + (SELECT COUNT(*) FROM attachment WHERE workspace_id = #{workspaceId} AND entity_type = 'ai_chat_session' AND entity_id = #{sessionId})
+      + (SELECT COUNT(*) FROM notification WHERE workspace_id = #{workspaceId} AND source_type = 'ai_chat_session' AND source_id = #{sessionId})
+      + (SELECT COUNT(*) FROM ai_brief_schedule WHERE workspace_id = #{workspaceId}
+          AND (pending_session_id = #{sessionId} OR last_delivered_session_id = #{sessionId}))
+      + (SELECT COUNT(*) FROM ai_chat_session_participant WHERE workspace_id = #{workspaceId} AND session_id = #{sessionId})
+      + (SELECT COUNT(*) FROM ai_run_lease l WHERE l.workspace_id = #{workspaceId} AND l.subject_kind = 'chat_turn' AND l.owner IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM ai_chat_turn t WHERE t.workspace_id = l.workspace_id AND t.id = l.subject_id))
+  </select>
+  <select id="allChatResidualCount" resultType="long" useCache="false" flushCache="true">
+    SELECT (SELECT COUNT(*) FROM ai_chat_session WHERE workspace_id = #{workspaceId} AND organization_privacy_generation &lt;= #{cutoffGeneration})
+      + (SELECT COUNT(*) FROM ai_chat_message WHERE workspace_id = #{workspaceId} AND organization_privacy_generation &lt;= #{cutoffGeneration})
+      + (SELECT COUNT(*) FROM ai_chat_turn WHERE workspace_id = #{workspaceId} AND organization_privacy_generation &lt;= #{cutoffGeneration})
+      + (SELECT COUNT(*) FROM ai_chat_tool_call t WHERE t.workspace_id = #{workspaceId}
+          AND (t.organization_privacy_generation &lt;= #{cutoffGeneration}
+            OR (t.proposal_key IS NOT NULL AND NOT EXISTS (SELECT 1 FROM ai_assistant_proposal_set p
+              WHERE p.workspace_id = t.workspace_id AND p.proposal_key = t.proposal_key
+                AND p.organization_privacy_generation = t.organization_privacy_generation AND p.privacy_generation = t.privacy_generation))))
+      + (SELECT COUNT(*) FROM ai_assistant_proposal_set WHERE workspace_id = #{workspaceId} AND organization_privacy_generation &lt;= #{cutoffGeneration})
+      + (SELECT COUNT(*) FROM ai_agent_run r WHERE r.workspace_id = #{workspaceId}
+          AND r.organization_privacy_generation &lt;= #{cutoffGeneration} AND <include refid="runHasResidualPayload" />)
+      + (SELECT COUNT(*) FROM ai_agent_segment WHERE workspace_id = #{workspaceId} AND organization_privacy_generation &lt;= #{cutoffGeneration})
+      + (SELECT COUNT(*) FROM ai_agent_privacy_object WHERE workspace_id = #{workspaceId} AND disposition = 'pending'
+          AND EXISTS (SELECT 1 FROM ai_agent_privacy_work w WHERE w.workspace_id = ai_agent_privacy_object.workspace_id
+            AND w.operation_key = ai_agent_privacy_object.operation_key
+            AND (w.content_scope = 'organization_mission_holdings_v1'
+              OR (w.content_scope = 'organization_assistant_holdings_v2' AND w.cutoff_generation &lt;= #{cutoffGeneration}))))
+      + (SELECT COUNT(*) FROM attachment a WHERE a.workspace_id = #{workspaceId} AND a.entity_type = 'ai_chat_session'
+          AND NOT EXISTS (SELECT 1 FROM ai_chat_session s WHERE s.workspace_id = a.workspace_id AND s.id = a.entity_id))
+      + (SELECT COUNT(*) FROM notification n WHERE n.workspace_id = #{workspaceId} AND n.source_type = 'ai_chat_session'
+          AND NOT EXISTS (SELECT 1 FROM ai_chat_session s WHERE s.workspace_id = n.workspace_id AND s.id = n.source_id))
+      + (SELECT COUNT(*) FROM ai_brief_schedule b WHERE b.workspace_id = #{workspaceId}
+          AND ((b.pending_session_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM ai_chat_session s
+            WHERE s.workspace_id = b.workspace_id AND s.id = b.pending_session_id))
+          OR (b.last_delivered_session_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM ai_chat_session s
+            WHERE s.workspace_id = b.workspace_id AND s.id = b.last_delivered_session_id))))
+      + (SELECT COUNT(*) FROM ai_run_lease l WHERE l.workspace_id = #{workspaceId} AND l.owner IS NOT NULL
+          AND ((l.subject_kind = 'chat_turn' AND NOT EXISTS (SELECT 1 FROM ai_chat_turn t WHERE t.workspace_id = l.workspace_id AND t.id = l.subject_id))
+            OR (l.subject_kind = 'agent_run' AND NOT EXISTS (SELECT 1 FROM ai_agent_run r WHERE r.workspace_id = l.workspace_id AND r.id = l.subject_id))
+            OR (l.subject_kind = 'chat_turn' AND EXISTS (SELECT 1 FROM ai_chat_turn t WHERE t.workspace_id = l.workspace_id AND t.id = l.subject_id AND t.organization_privacy_generation &lt;= #{cutoffGeneration}))
+            OR (l.subject_kind = 'agent_run' AND EXISTS (SELECT 1 FROM ai_agent_run r WHERE r.workspace_id = l.workspace_id AND r.id = l.subject_id AND r.organization_privacy_generation &lt;= #{cutoffGeneration}))))
+  </select>
+  <select id="workspaceTeardownResidualCount" resultType="long" useCache="false" flushCache="true">
+    SELECT (SELECT COUNT(*) FROM ai_chat_session WHERE workspace_id = #{workspaceId})
+      + (SELECT COUNT(*) FROM ai_chat_message WHERE workspace_id = #{workspaceId})
+      + (SELECT COUNT(*) FROM ai_chat_turn WHERE workspace_id = #{workspaceId})
+      + (SELECT COUNT(*) FROM ai_chat_tool_call WHERE workspace_id = #{workspaceId})
+      + (SELECT COUNT(*) FROM ai_assistant_proposal_set WHERE workspace_id = #{workspaceId})
+      + (SELECT COUNT(*) FROM ai_agent_run r WHERE r.workspace_id = #{workspaceId} AND <include refid="runHasResidualPayload" />)
+      + (SELECT COUNT(*) FROM ai_agent_segment WHERE workspace_id = #{workspaceId})
+      + (SELECT COUNT(*) FROM ai_agent_privacy_object WHERE workspace_id = #{workspaceId} AND disposition = 'pending')
+      + (SELECT COUNT(*) FROM attachment WHERE workspace_id = #{workspaceId} AND entity_type = 'ai_chat_session')
+      + (SELECT COUNT(*) FROM notification WHERE workspace_id = #{workspaceId} AND source_type = 'ai_chat_session')
+      + (SELECT COUNT(*) FROM ai_brief_schedule WHERE workspace_id = #{workspaceId}
+          AND (pending_session_id IS NOT NULL OR last_delivered_session_id IS NOT NULL))
+      + (SELECT COUNT(*) FROM ai_run_lease WHERE workspace_id = #{workspaceId} AND owner IS NOT NULL)
+  </select>
 </mapper>

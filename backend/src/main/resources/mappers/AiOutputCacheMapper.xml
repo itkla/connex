@@ -26,9 +26,10 @@
 
   <delete id="deleteForPerson">
     DELETE c FROM ai_output_cache c
-    JOIN workspace owner_workspace ON owner_workspace.id = #{workspaceId}
-    JOIN workspace cache_workspace
-      ON cache_workspace.id = c.workspace_id AND cache_workspace.org_id = owner_workspace.org_id
+    JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) owner_workspace
+      ON owner_workspace.id = #{workspaceId}
+    JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) org_workspace
+      ON org_workspace.id = c.workspace_id
     WHERE (
       c.feature LIKE 'report.narrative:%'
       OR (c.feature LIKE 'intro.rationale:%'
