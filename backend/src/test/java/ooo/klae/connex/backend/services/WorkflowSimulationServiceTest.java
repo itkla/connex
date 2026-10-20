@@ -2,9 +2,13 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -13,16 +17,23 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.aop.framework.ProxyFactory;
+import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource;
+import org.springframework.transaction.interceptor.TransactionInterceptor;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.beans.Workflow;
 import ooo.klae.connex.backend.dto.RuleTrigger;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
+import ooo.klae.connex.backend.dto.SegmentCondition;
 import ooo.klae.connex.backend.dto.WorkflowDelayConfig;
 import ooo.klae.connex.backend.dto.WorkflowDefinition;
 import ooo.klae.connex.backend.dto.WorkflowDiagnosticCode;
@@ -32,11 +43,19 @@ import ooo.klae.connex.backend.dto.WorkflowSimulateRequest;
 import ooo.klae.connex.backend.dto.WorkflowSimulationDto;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.PersonMapper;
+import ooo.klae.connex.backend.mappers.SegmentMapper;
+import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
+import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.WorkflowDefinitionValidator.CompiledWorkflow;
 import ooo.klae.connex.backend.services.WorkflowDefinitionValidator.NodeType;
 import ooo.klae.connex.backend.services.WorkflowDefinitionValidator.ValidatedWorkflow;
 import ooo.klae.connex.backend.services.WorkflowDraftCanonicalizer.CanonicalDraft;
+import ooo.klae.connex.backend.support.TestTransactionManager;
+import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
+import ooo.klae.connex.backend.tenant.TenantContext;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 @ExtendWith(MockitoExtension.class)
 class WorkflowSimulationServiceTest {
@@ -55,6 +74,13 @@ class WorkflowSimulationServiceTest {
     private Workflow workflow;
     private CanonicalDraft draft;
     private WorkflowDefinition definition;
+    private final TenantContext tenantContext = new TenantContext();
+
+    @AfterEach
+    void tearDown() {
+        tenantContext.clear();
+        assertTrue(TransactionSynchronizationManager.getResourceMap().isEmpty());
+    }
 
     @BeforeEach
     void setUp() {
@@ -190,6 +216,69 @@ class WorkflowSimulationServiceTest {
             () -> service.simulate(42, new WorkflowSimulateRequest(3, 91)));
 
         verify(canonicalizer, never()).parseDefinition(any());
+    }
+
+    @Test
+    void simulatedConditionsReuseOneScopeForTheWholeTraversal() {
+        SegmentCondition field = new SegmentCondition();
+        field.setType("field");
+        field.setField("name");
+        field.setOp("is_set");
+        SegmentDefinition condition = new SegmentDefinition();
+        condition.setMatch("all");
+        condition.setConditions(List.of(field));
+        RuleTrigger triggerConfig = new RuleTrigger();
+        triggerConfig.setType("entity_change");
+        triggerConfig.setEvents(List.of("deal.updated"));
+        CompiledWorkflow compiled = compiled(
+            Map.of(
+                "trigger", new WorkflowNode.Trigger("trigger", triggerConfig),
+                "first", new WorkflowNode.Condition("first", condition),
+                "second", new WorkflowNode.Condition("second", condition),
+                "end", new WorkflowNode.End("end")),
+            Map.of(
+                "trigger", Map.of(WorkflowEdge.Outcome.NEXT, edge("start", "trigger", "first")),
+                "first", Map.of(WorkflowEdge.Outcome.YES,
+                    new WorkflowEdge("next", "first", "second", WorkflowEdge.Outcome.YES)),
+                "second", Map.of(WorkflowEdge.Outcome.YES,
+                    new WorkflowEdge("finish", "second", "end", WorkflowEdge.Outcome.YES)),
+                "end", Map.of()),
+            Map.of("trigger", NodeType.TRIGGER, "first", NodeType.CONDITION, "second", NodeType.CONDITION, "end", NodeType.END),
+            null);
+        when(definitionValidator.validateForMutationAndCompile("deal", "user", definition))
+            .thenReturn(new ValidatedWorkflow(compiled, Set.of()));
+        WorkspaceMapper workspaces = mock(WorkspaceMapper.class);
+        Workspace anchor = new Workspace();
+        anchor.setId(7);
+        anchor.setOrgId(900);
+        anchor.setName("Anchor");
+        when(workspaces.findOrganizationWorkspacesForShare(7)).thenReturn(List.of(anchor));
+        TestTransactionManager manager = new TestTransactionManager();
+        tenantContext.set(7, 900, 41, "owner", null);
+        RecordVisibilityScopeControlAccess scopes = new RecordVisibilityScopeControlAccess(
+            new ShareWorkspaceControlAccess(workspaces,
+                new TenantWorkScope(tenantContext, mock(TenantCatalogResolver.class), workspaces), tenantContext, manager),
+            tenantContext);
+        SegmentMapper segments = mock(SegmentMapper.class);
+        when(segments.entityIdInWorkspace(7, "deal", 91)).thenReturn(true);
+        when(segments.dealIdsMatching(anyMap())).thenReturn(List.of(91));
+        SegmentService evaluator = new SegmentService(workspaceService, mock(AuthService.class), mock(ScoringService.class),
+            mock(DealRiskService.class), segments, mock(PersonEdgeReadService.class), mock(PersonMapper.class),
+            mock(TagMapper.class), new SegmentCatalog(), scopes);
+        WorkflowSimulationService target = new WorkflowSimulationService(workflowMapper, dealMapper, workspaceService,
+            canonicalizer, definitionValidator, principalService, recordGuard, new WorkflowNodeDecisionService(evaluator), actionGuard);
+        ProxyFactory proxy = new ProxyFactory(target);
+        proxy.addAdvice(new TransactionInterceptor(manager, new AnnotationTransactionAttributeSource()));
+
+        WorkflowSimulationDto result = ((WorkflowSimulationService) proxy.getProxy()).simulate(
+            42, new WorkflowSimulateRequest(3, 91));
+
+        assertEquals(WorkflowSimulationDto.Result.WOULD_COMPLETE, result.result());
+        assertEquals(List.of("trigger", "first", "second", "end"),
+            result.path().stream().map(WorkflowSimulationDto.PathStep::nodeId).toList());
+        assertEquals(1, manager.beginCount());
+        verify(segments, times(2)).dealIdsMatching(anyMap());
+        verify(workspaces).findOrganizationWorkspacesForShare(7);
     }
 
     private static CompiledWorkflow compiled(

@@ -22,12 +22,15 @@ import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.SegmentMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 
 class SegmentServiceBoundedTest {
 
     @Test
     void evaluatesOnlyCeilingPlusOneSqlCandidates() {
         SegmentMapper segmentMapper = mock(SegmentMapper.class);
+        RecordVisibilityScopeControlAccess scopes = mock(RecordVisibilityScopeControlAccess.class);
+        when(scopes.getForWorkspace(7)).thenReturn(new RecordVisibilityScope(9, List.of(7, 8)));
         SegmentService service = new SegmentService(
             mock(WorkspaceService.class),
             mock(AuthService.class),
@@ -37,7 +40,7 @@ class SegmentServiceBoundedTest {
             mock(PersonEdgeReadService.class),
             mock(PersonMapper.class),
             mock(TagMapper.class),
-            new SegmentCatalog());
+            new SegmentCatalog(), scopes);
         List<Integer> firstPage = IntStream.rangeClosed(1, 201).boxed().toList();
         when(segmentMapper.maximumEntityId(7, "company")).thenReturn(202);
         when(segmentMapper.entityIdsPage(7, "company", 0, 202, 201))
@@ -66,6 +69,8 @@ class SegmentServiceBoundedTest {
     @Test
     void warmIntroScopesPeopleAndEdgesToTheCandidatePage() {
         SegmentMapper segmentMapper = mock(SegmentMapper.class);
+        RecordVisibilityScopeControlAccess scopes = mock(RecordVisibilityScopeControlAccess.class);
+        when(scopes.getForWorkspace(7)).thenReturn(new RecordVisibilityScope(9, List.of(7, 8)));
         PersonMapper personMapper = mock(PersonMapper.class);
         PersonEdgeReadService edgeReader = mock(PersonEdgeReadService.class);
         SegmentService service = new SegmentService(
@@ -77,12 +82,12 @@ class SegmentServiceBoundedTest {
             edgeReader,
             personMapper,
             mock(TagMapper.class),
-            new SegmentCatalog());
+            new SegmentCatalog(), scopes);
         when(segmentMapper.maximumEntityId(7, "company")).thenReturn(3);
         when(segmentMapper.entityIdsPage(7, "company", 0, 3, 3))
             .thenReturn(List.of(1, 2, 3));
         when(segmentMapper.companyIdsWithWarmIntro(
-                eq(7), eq(17), argThat(ids -> new HashSet<>(ids).equals(Set.of(1, 2, 3))), eq(2)))
+                eq(7), eq("[7,8]"), eq(17), argThat(ids -> new HashSet<>(ids).equals(Set.of(1, 2, 3))), eq(2)))
             .thenReturn(List.of(2));
         SegmentCondition condition = new SegmentCondition();
         condition.setType("predicate");
@@ -94,7 +99,7 @@ class SegmentServiceBoundedTest {
         assertEquals(List.of(2), service.evaluate(7, 17, "company", definition, 3));
 
         verify(segmentMapper).companyIdsWithWarmIntro(
-            eq(7), eq(17), argThat(ids -> new HashSet<>(ids).equals(Set.of(1, 2, 3))), eq(2));
+            eq(7), eq("[7,8]"), eq(17), argThat(ids -> new HashSet<>(ids).equals(Set.of(1, 2, 3))), eq(2));
         verifyNoInteractions(personMapper, edgeReader);
     }
 }

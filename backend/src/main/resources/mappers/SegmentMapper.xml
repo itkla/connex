@@ -138,11 +138,9 @@
                       AND (processable.workspace_id = #{workspaceId}
                         OR EXISTS (
                           SELECT 1 FROM person_share processable_share
-                          JOIN workspace viewer_workspace
-                            ON viewer_workspace.id = processable_share.workspace_id
-                          JOIN workspace owner_workspace
-                            ON owner_workspace.id = processable.workspace_id
-                           AND owner_workspace.org_id = viewer_workspace.org_id
+                          JOIN JSON_TABLE(
+                            #{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')
+                          ) org_workspace ON org_workspace.id = processable.workspace_id
                           WHERE processable_share.person_id = processable.id
                             AND processable_share.workspace_id = #{workspaceId}
                         ))
@@ -185,11 +183,9 @@
                       AND (processable.workspace_id = #{workspaceId}
                         OR EXISTS (
                           SELECT 1 FROM person_share processable_share
-                          JOIN workspace viewer_workspace
-                            ON viewer_workspace.id = processable_share.workspace_id
-                          JOIN workspace owner_workspace
-                            ON owner_workspace.id = processable.workspace_id
-                           AND owner_workspace.org_id = viewer_workspace.org_id
+                          JOIN JSON_TABLE(
+                            #{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')
+                          ) org_workspace ON org_workspace.id = processable.workspace_id
                           WHERE processable_share.person_id = processable.id
                             AND processable_share.workspace_id = #{workspaceId}
                         ))
@@ -227,11 +223,9 @@
          AND (engaged.workspace_id = #{workspaceId}
            OR EXISTS (
              SELECT 1 FROM person_share engaged_share
-             JOIN workspace viewer_workspace
-               ON viewer_workspace.id = engaged_share.workspace_id
-             JOIN workspace owner_workspace
-               ON owner_workspace.id = engaged.workspace_id
-              AND owner_workspace.org_id = viewer_workspace.org_id
+             JOIN JSON_TABLE(
+               #{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')
+             ) org_workspace ON org_workspace.id = engaged.workspace_id
              WHERE engaged_share.person_id = engaged.id
                AND engaged_share.workspace_id = #{workspaceId}
            ))
@@ -265,11 +259,9 @@
                   AND (processable.workspace_id = #{workspaceId}
                     OR EXISTS (
                       SELECT 1 FROM person_share processable_share
-                      JOIN workspace processable_viewer_workspace
-                        ON processable_viewer_workspace.id = processable_share.workspace_id
-                      JOIN workspace processable_owner_workspace
-                        ON processable_owner_workspace.id = processable.workspace_id
-                       AND processable_owner_workspace.org_id = processable_viewer_workspace.org_id
+                      JOIN JSON_TABLE(
+                        #{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')
+                      ) org_workspace ON org_workspace.id = processable.workspace_id
                       WHERE processable_share.person_id = processable.id
                         AND processable_share.workspace_id = #{workspaceId}
                     ))
@@ -342,10 +334,9 @@
               AND (visible_company.workspace_id = #{workspaceId}
                 OR EXISTS (
                     SELECT 1 FROM company_share visible_share
-                    JOIN workspace viewer_workspace ON viewer_workspace.id = visible_share.workspace_id
-                    JOIN workspace owner_workspace
-                      ON owner_workspace.id = visible_company.workspace_id
-                     AND owner_workspace.org_id = viewer_workspace.org_id
+                    JOIN JSON_TABLE(
+                      #{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')
+                    ) org_workspace ON org_workspace.id = visible_company.workspace_id
                     WHERE visible_share.company_id = visible_company.id
                       AND visible_share.workspace_id = #{workspaceId}
                 ))

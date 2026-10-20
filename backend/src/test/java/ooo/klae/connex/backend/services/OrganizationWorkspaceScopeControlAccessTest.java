@@ -119,7 +119,7 @@ class OrganizationWorkspaceScopeControlAccessTest {
         var controlOperations = mock(OrganizationWorkspaceScopeControlOperations.class);
         var active = new OrganizationWorkspaceScopeControlAccess(controlOperations, workScope, tenantContext, manager);
         var sharing = new ShareWorkspaceControlAccess(workspaceMapper, workScope, tenantContext, manager);
-        var visibility = new RecordVisibilityScopeControlAccess(sharing);
+        var visibility = new RecordVisibilityScopeControlAccess(sharing, tenantContext);
 
         workScope.inWorkspace(7, () -> {
             tenantContext.set(7, 900, 42, "member", "cnx_tenant");
@@ -209,7 +209,7 @@ class OrganizationWorkspaceScopeControlAccessTest {
         assertNull(workScope.prepareWorkspaceScopes(7, 900, null));
         verifyNoInteractions(workspaceMapper);
         var sharing = new ShareWorkspaceControlAccess(workspaceMapper, workScope, tenantContext, manager);
-        var visibility = new RecordVisibilityScopeControlAccess(sharing);
+        var visibility = new RecordVisibilityScopeControlAccess(sharing, tenantContext);
         try (AnnotationConfigApplicationContext context = controlContext(manager)) {
             var active = new OrganizationWorkspaceScopeControlAccess(
                 context.getBean(OrganizationWorkspaceScopeControlOperations.class), workScope, tenantContext, manager);
@@ -244,7 +244,7 @@ class OrganizationWorkspaceScopeControlAccessTest {
         assertThrows(TenantScopeSnapshotMissingException.class, () -> active.getForWorkspace(7));
         assertThrows(TenantScopeSnapshotMissingException.class, () -> active.getForOrg(900));
         assertThrows(TenantScopeSnapshotMissingException.class,
-            () -> new RecordVisibilityScopeControlAccess(sharing).getForWorkspace(7));
+            () -> new RecordVisibilityScopeControlAccess(sharing, tenantContext).getForWorkspace(7));
         verifyNoInteractions(workspaceMapper, manager, operations);
     }
 

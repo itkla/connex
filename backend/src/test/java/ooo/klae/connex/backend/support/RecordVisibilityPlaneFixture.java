@@ -32,6 +32,7 @@ import ooo.klae.connex.backend.config.TenantRoutingConfig;
 import ooo.klae.connex.backend.mappers.DuplicateReviewMapper;
 import ooo.klae.connex.backend.mappers.IntroductionMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
+import ooo.klae.connex.backend.mappers.SegmentMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
 import ooo.klae.connex.backend.services.ShareWorkspaceControlAccess;
@@ -53,6 +54,7 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
     public final IntroductionMapper introductionMapper;
     public final DuplicateReviewMapper duplicateReviewMapper;
     public final NoteMapper noteMapper;
+    public final SegmentMapper segmentMapper;
     public final RecordVisibilityScopeControlAccess scopeAccess;
     public final LegacyRecordVisibilitySql legacy;
     public final List<Integer> workspaceIds = new ArrayList<>();
@@ -62,6 +64,10 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
     public final List<Integer> noteIds = new ArrayList<>();
     public final List<Integer> privateNoteIds = new ArrayList<>();
     public final List<Integer> dealIds = new ArrayList<>();
+    public final List<Integer> candidateCompanyIds = new ArrayList<>();
+    public final List<Integer> candidatePersonIds = new ArrayList<>();
+    public final List<Integer> candidateDealIds = new ArrayList<>();
+    public final List<Integer> companyFieldPersonIds = new ArrayList<>();
     public int orgId;
     public int foreignOrgId;
     public int workspaceId;
@@ -74,7 +80,7 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
 
     /** Selects one mapper's minimal tenant-table fixture without changing the pilot fixtures. */
     public enum Records {
-        INTRODUCTIONS, DUPLICATE_REVIEW, NOTES
+        INTRODUCTIONS, DUPLICATE_REVIEW, NOTES, SEGMENTS
     }
 
     /** Migrates the default schema and clones only the selected statements' tenant tables. */
@@ -110,6 +116,8 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
             case DUPLICATE_REVIEW -> List.of("company", "person", "company_share", "person_identity", "company_identity",
                 "duplicate_review_decision");
             case NOTES -> List.of("company", "company_share", "person", "person_share", "deal", "note");
+            case SEGMENTS -> List.of("company", "company_share", "person", "person_share", "deal", "note",
+                "activity", "person_edge", "task");
         };
         pool = new HikariDataSource();
         pool.setJdbcUrl(url);
@@ -130,7 +138,7 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
         configuration.setMapUnderscoreToCamelCase(true);
         configuration.getTypeAliasRegistry().registerAliases("ooo.klae.connex.backend.beans");
         for (String resource : List.of("mappers/IntroductionMapper.xml", "mappers/DuplicateReviewMapper.xml",
-                "mappers/WorkspaceMapper.xml", "mappers/NoteMapper.xml")) {
+                "mappers/WorkspaceMapper.xml", "mappers/NoteMapper.xml", "mappers/SegmentMapper.xml")) {
             try (InputStream input = getClass().getClassLoader().getResourceAsStream(resource)) {
                 if (input == null) {
                     throw new IllegalStateException("Missing mapper resource " + resource);
@@ -142,15 +150,19 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
         introductionMapper = sessions.getMapper(IntroductionMapper.class);
         duplicateReviewMapper = sessions.getMapper(DuplicateReviewMapper.class);
         noteMapper = sessions.getMapper(NoteMapper.class);
+        segmentMapper = sessions.getMapper(SegmentMapper.class);
         TenantWorkScope workScope = new TenantWorkScope(
             tenantContext, mock(TenantCatalogResolver.class), mock(WorkspaceMapper.class));
         scopeAccess = new RecordVisibilityScopeControlAccess(new ShareWorkspaceControlAccess(
-            sessions.getMapper(WorkspaceMapper.class), workScope, tenantContext, transactionManager));
+            sessions.getMapper(WorkspaceMapper.class), workScope, tenantContext, transactionManager), tenantContext);
         legacy = new LegacyRecordVisibilitySql(pool, defaultCatalog);
         try {
             seedControl();
-            if (records == Records.NOTES) {
+            if (records == Records.NOTES || records == Records.SEGMENTS) {
                 seedNotes();
+                if (records == Records.SEGMENTS) {
+                    seedSegments();
+                }
             } else {
                 seedRecords(records == Records.INTRODUCTIONS);
             }
@@ -209,6 +221,28 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
         parameters.put("reference", LocalDateTime.of(2026, 10, 1, 0, 0));
         parameters.put("sourceLimit", 100);
         return parameters;
+    }
+
+    /** Parameters for company predicates and their frozen Segment SQL oracle. */
+    public Map<String, Object> segmentParameters() {
+        Map<String, Object> parameters = parameters();
+        parameters.put("userId", userId);
+        parameters.put("days", 30);
+        parameters.put("personIds", candidatePersonIds);
+        parameters.put("candidateIds", candidateCompanyIds);
+        parameters.put("strongEdge", 2);
+        parameters.put("field", "company");
+        parameters.put("op", "in");
+        parameters.put("ids", companyIds);
+        parameters.put("id", companyIds.getFirst());
+        return parameters;
+    }
+
+    /** Adds attributed Segment evidence to the default catalog before any optional scratch clone. */
+    public int addActivity(int ownerWorkspaceId, int actorId, Integer personId, Integer dealId, String timestamp)
+            throws SQLException {
+        return insert("INSERT INTO activity (workspace_id, created_by_id, person_id, deal_id, type, subject, timestamp) "
+            + "VALUES (?, ?, ?, ?, 'call', 'Segment evidence', ?)", ownerWorkspaceId, actorId, personId, dealId, timestamp);
     }
 
     /** Inserts deterministic note evidence in the default fixture before a scratch catalog is cloned. */
@@ -333,6 +367,28 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
         controlJdbc.update("UPDATE person SET archived_at = '2026-01-01' WHERE id = ?", personIds.get(5));
         controlJdbc.update("UPDATE person SET provision_ceased_at = '2026-01-01' WHERE id = ?", personIds.get(6));
         controlJdbc.update("UPDATE person SET suspended_at = '2026-01-01' WHERE id = ?", personIds.get(7));
+    }
+
+    private void seedSegments() throws SQLException {
+        int stageId = controlJdbc.queryForObject("SELECT id FROM stage WHERE pipeline_id = ?", Integer.class, pipelineId);
+        for (int i = 0; i < personIds.size(); i++) {
+            int company = insert("INSERT INTO company (workspace_id, name) VALUES (?, ?)",
+                workspaceId, "Segment Candidate Company " + i);
+            candidateCompanyIds.add(company);
+            int person = insert("INSERT INTO person (workspace_id, name, company_id) VALUES (?, ?, ?)",
+                workspaceId, "Segment Candidate " + i, company);
+            candidatePersonIds.add(person);
+            int deal = insert("INSERT INTO deal (workspace_id, pipeline_id, stage_id, company_id, name) "
+                + "VALUES (?, ?, ?, ?, 'Segment Evidence Deal')", workspaceId, pipelineId, stageId, company);
+            candidateDealIds.add(deal);
+            controlJdbc.update("INSERT INTO person_edge (workspace_id, source_person_id, target_person_id, type, strength) "
+                + "VALUES (?, ?, ?, 'knows', 2)", workspaceId, person, personIds.get(i));
+            addActivity(workspaceId, otherUserId, personIds.get(i), deal, "2999-01-01 00:00:00");
+        }
+        for (int company : companyIds) {
+            companyFieldPersonIds.add(insert("INSERT INTO person (workspace_id, name, company_id) VALUES (?, ?, ?)",
+                workspaceId, "Segment Company Field " + company, company));
+        }
     }
 
     private int person(int employerCase) throws SQLException {

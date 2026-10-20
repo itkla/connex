@@ -109,7 +109,7 @@ class TenantScopeSnapshotPlaneRoutingIntegrationTest {
         scope = new TenantWorkScope(fixture.tenantContext, catalogs, workspaces, lifecycle,
             controlContext.getBean(TenantWorkspaceScopeControlOperations.class));
         sharing = new ShareWorkspaceControlAccess(workspaces, scope, fixture.tenantContext, transactions);
-        visibility = new RecordVisibilityScopeControlAccess(sharing);
+        visibility = new RecordVisibilityScopeControlAccess(sharing, fixture.tenantContext);
         active = new OrganizationWorkspaceScopeControlAccess(
             new OrganizationWorkspaceScopeControlOperations(workspaces), scope, fixture.tenantContext, transactions);
         introductions = sessions.getMapper(IntroductionMapper.class);

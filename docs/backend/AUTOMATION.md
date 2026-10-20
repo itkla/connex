@@ -13,6 +13,25 @@ Smart-segment evaluation is the shared state-matching language used by automatio
 
 Evaluation returns workspace- and current-user-scoped record ids through `SegmentService`/`SegmentMapper`. Segments describe current state; automation adds a trigger/transition plus actions. Do not create a second condition language for workflows, campaigns, or adjacent features.
 
+Each evaluation resolves one unfiltered organization workspace scope through
+`RecordVisibilityScopeControlAccess` for Segment SQL's shared-person and related-company ceilings
+(#485). Nested groups, condition/group negation, and every bounded keyset page reuse that snapshot.
+In `single-database` mode only, an actual transaction also memoizes that scope per workspace: every
+record in one durable outbox page, repeated entity-delivery condition checks, and all simulated
+condition nodes share one lazy control read. Suspension removes the memo until the same transaction
+resumes; commit and rollback discard it. Independent transactions and nontransactional evaluations
+read fresh scopes. In `catalog-per-placement` mode, every call bypasses the memo; routed reads are
+served by the memory-only prepared snapshot (#2165), validated against the current workspace,
+organization, and catalog on every boundary call.
+The existing candidate universe, upper watermark, result limit, and per-context signal caching remain
+unchanged. Campaign/workflow callers that already hold locks retain their transaction shape; #2159
+owns the context-installed snapshot and fail-fast guard required before enabling catalog routing.
+
+The bounded warm-intro query keeps its legacy engaged-person archived/suspended filters without a
+`provision_ceased_at` filter. The unbounded warm-intro company projection still returns an owned
+person's `company_id` without a company visibility join, so it can differ from bounded owned-company
+candidates and label projection. Changing either behavior requires a separate decision.
+
 ## Catalog is the vocabulary
 
 `SegmentCatalog` declares the supported record types, field kinds/value sources/operators, predicate applicability/bounds, enum options, and definition shape limits.
