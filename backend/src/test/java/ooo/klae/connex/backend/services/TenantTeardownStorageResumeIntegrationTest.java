@@ -26,6 +26,7 @@ import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.storage.ObjectStorage;
 import ooo.klae.connex.backend.storage.ObjectStorageException;
+import ooo.klae.connex.backend.support.TestEntityFixtures;
 
 @SpringBootTest(properties = {
     "connex.tenant-lifecycle.teardown-settle-delay=0s",
@@ -63,9 +64,11 @@ class TenantTeardownStorageResumeIntegrationTest extends AbstractServiceTest {
             jdbcTemplate.update(
                 "DELETE FROM tenant_operation_lease WHERE workspace_id = ?",
                 workspaceId);
+            TestEntityFixtures.deleteChatPrivacy(jdbcTemplate, workspaceId);
             jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", workspaceId);
         }
         if (organization != null) {
+            TestEntityFixtures.deleteOrganizationPrivacy(jdbcTemplate, organization.getId());
             jdbcTemplate.update(
                 "DELETE FROM organization WHERE id = ?",
                 organization.getId());
@@ -137,6 +140,7 @@ class TenantTeardownStorageResumeIntegrationTest extends AbstractServiceTest {
         lifecycleWorkspace.setName("Lifecycle retry " + unique());
         lifecycleWorkspace.setSlug("lifecycle-retry-" + unique());
         workspaceMapper.insert(lifecycleWorkspace);
+        TestEntityFixtures.seedExistingWorkspacePrivacy(jdbcTemplate, lifecycleWorkspace.getId());
         workspaceMapper.addMember(
             lifecycleWorkspace.getId(),
             currentUser.getId(),

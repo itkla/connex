@@ -28,6 +28,7 @@ import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.OrgMemberMapper;
+import ooo.klae.connex.backend.support.TestEntityFixtures;
 
 @SpringBootTest(properties = "connex.tenant-lifecycle.teardown-settle-delay=0s")
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -50,9 +51,11 @@ class TenantLifecycleAuthorizationIntegrationTest extends AbstractServiceTest {
             jdbcTemplate.update(
                 "DELETE FROM tenant_operation_lease WHERE workspace_id = ?",
                 workspaceId);
+            TestEntityFixtures.deleteChatPrivacy(jdbcTemplate, workspaceId);
             jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", workspaceId);
         }
         for (int organizationId : organizationIds.reversed()) {
+            TestEntityFixtures.deleteOrganizationPrivacy(jdbcTemplate, organizationId);
             jdbcTemplate.update("DELETE FROM organization WHERE id = ?", organizationId);
         }
         for (int userId : additionalUserIds.reversed()) {
@@ -471,6 +474,7 @@ class TenantLifecycleAuthorizationIntegrationTest extends AbstractServiceTest {
         created.setName("Lifecycle authorization " + unique());
         created.setSlug("lifecycle-authorization-" + unique());
         workspaceMapper.insert(created);
+        TestEntityFixtures.seedExistingWorkspacePrivacy(jdbcTemplate, created.getId());
         workspaceMapper.addMember(created.getId(), owner.getId(), "owner");
         workspaceIds.add(created.getId());
         return created;

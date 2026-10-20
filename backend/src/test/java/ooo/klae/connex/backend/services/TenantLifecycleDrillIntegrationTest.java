@@ -58,6 +58,7 @@ import ooo.klae.connex.backend.beans.AiOutputCache;
 import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.beans.AuditLog;
 import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.support.TestEntityFixtures;
 import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 import ooo.klae.connex.backend.delivery.CampaignDispatchService;
 import ooo.klae.connex.backend.delivery.DeliveryProviderConfigService;
@@ -465,6 +466,7 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
                 } catch (RuntimeException ignored) {
                 }
             }
+            TestEntityFixtures.deleteOrganizationPrivacy(jdbcTemplate, drillOrganization.getId());
             jdbcTemplate.update(
                 "DELETE FROM organization WHERE id = ?",
                 drillOrganization.getId());
@@ -939,6 +941,7 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         drillWorkspace.setName("Lifecycle Workspace " + unique());
         drillWorkspace.setSlug("lifecycle-workspace-" + unique());
         workspaceMapper.insert(drillWorkspace);
+        TestEntityFixtures.seedExistingWorkspacePrivacy(jdbcTemplate, drillWorkspace.getId());
         workspaceMapper.addMember(
             drillWorkspace.getId(),
             currentUser.getId(),
@@ -1010,8 +1013,8 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         jdbcTemplate.update(connection -> {
             PreparedStatement statement = connection.prepareStatement(
                 "INSERT INTO ai_chat_session"
-                    + " (workspace_id, created_by_user_id, title, visibility, status)"
-                    + " VALUES (?, ?, ?, 'shared', 'active')",
+                    + " (workspace_id, organization_privacy_generation, created_by_user_id, title, visibility, status)"
+                    + " VALUES (?, 1, ?, ?, 'shared', 'active')",
                 Statement.RETURN_GENERATED_KEYS);
             statement.setInt(1, drillWorkspace.getId());
             statement.setInt(2, currentUser.getId());
@@ -1031,8 +1034,8 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         jdbcTemplate.update(connection -> {
             PreparedStatement statement = connection.prepareStatement(
                 "INSERT INTO ai_chat_message"
-                    + " (workspace_id, session_id, seq, author_kind, author_user_id, content)"
-                    + " VALUES (?, ?, 1, 'user', ?, ?)",
+                    + " (workspace_id, organization_privacy_generation, privacy_generation, session_id, seq, author_kind, author_user_id, content)"
+                    + " VALUES (?, 1, 1, ?, 1, 'user', ?, ?)",
                 Statement.RETURN_GENERATED_KEYS);
             statement.setInt(1, drillWorkspace.getId());
             statement.setInt(2, chatSessionId);
@@ -1045,16 +1048,16 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         int chatMessageId = chatMessageKey.intValue();
         jdbcTemplate.update(
             "INSERT INTO ai_chat_tool_call"
-                + " (workspace_id, message_id, tool_name, status, arguments_json, result_json)"
-                + " VALUES (?, ?, ?, 'executed', JSON_OBJECT('recognizable', true),"
+                + " (workspace_id, organization_privacy_generation, privacy_generation, message_id, tool_name, status, arguments_json, result_json)"
+                + " VALUES (?, 1, 1, ?, ?, 'executed', JSON_OBJECT('recognizable', true),"
                 + " JSON_OBJECT('retained', true))",
             drillWorkspace.getId(),
             chatMessageId,
             toolName);
         jdbcTemplate.update(
             "INSERT INTO ai_chat_turn"
-                + " (workspace_id, session_id, requested_by_user_id, status, terminal_reason)"
-                + " VALUES (?, ?, ?, 'timed_out', ?)",
+                + " (workspace_id, organization_privacy_generation, privacy_generation, session_id, requested_by_user_id, status, terminal_reason)"
+                + " VALUES (?, 1, 1, ?, ?, 'timed_out', ?)",
             drillWorkspace.getId(),
             chatSessionId,
             currentUser.getId(),

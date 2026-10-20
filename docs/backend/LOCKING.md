@@ -2252,8 +2252,14 @@ Actual realtime, export and chat-file output holds its read fence and performs a
 on a separate READ COMMITTED transaction; an export snapshot is never that authority. Do not hold
 database privacy locks across an export or object transfer. One serving JVM remains mandatory.
 Realtime broker messages carry immutable internal organization authority through the outbound queue.
-The delivery executor checks it and retains the local publication read fence until the transport
-handler finishes; enqueue-time checks alone do not authorize delivery after invalidation.
+The delivery executor checks it and captures it on each encoded frame before Spring's concurrent
+session buffer. The factory-installed concurrent session preserves Spring's limits and overflow
+behavior. Its delegate below the buffer takes the local publication read fence, performs the fresh
+authority check, and retains the fence through the actual socket write. Stale or unavailable frames
+are dropped at this boundary even when another thread flushes them after the encoding handler has
+returned. No publication fence spans a handler or a buffer drain; each assistant write has its own
+fence, and heartbeats/non-assistant frames acquire none. Thread-local encoding provenance is never
+the authority for a frame flushed on another thread.
 
 The committed invalidation listener runs after the earlier completion callbacks release local
 fences and suspends completed transaction resources before placement routing. Workspace withdrawal

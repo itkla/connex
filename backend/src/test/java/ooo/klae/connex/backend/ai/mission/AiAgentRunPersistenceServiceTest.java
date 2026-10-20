@@ -211,12 +211,14 @@ class AiAgentRunPersistenceServiceTest {
     void purgedCreateKeyCannotCreateAgainAfterRequestHashErasure() {
         run.setPurgedAt(now());
         run.setRequestHash(null);
+        barrier.setGeneration(GENERATION + 1);
         when(runs.findByRequestKey(WORKSPACE, OWNER, REQUEST_KEY)).thenReturn(run);
 
         assertThrows(AiAgentGoneException.class, () -> service.create(SESSION, request(), "en",
                 AiAgentCapabilityGate.hash("request"), SCOPE, EPOCH));
         verify(chat, never()).nextMessageSequence(anyInt(), anyInt());
         verify(runs, never()).insertRun(any());
+        verify(chat, never()).lockPrivacyBarrierForShare(WORKSPACE);
     }
 
     @Test

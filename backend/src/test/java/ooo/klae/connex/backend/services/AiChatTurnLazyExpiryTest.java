@@ -164,6 +164,7 @@ class AiChatTurnLazyExpiryTest extends AbstractServiceTest {
         turn.setSessionId(session.getId());
         turn.setRequestedByUserId(requester.getId());
         turn.setStatus(status);
+        turn.setPrivacyGeneration(1L);
         chatMapper.insertTurn(turn);
         return turn;
     }

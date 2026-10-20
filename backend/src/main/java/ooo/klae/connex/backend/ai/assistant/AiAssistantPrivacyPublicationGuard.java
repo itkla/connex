@@ -35,7 +35,7 @@ public final class AiAssistantPrivacyPublicationGuard {
         void run() throws IOException;
     }
 
-    /** Delivery-executor authority held until its message handler finishes. */
+    /** Publication authority held through one actual output write. */
     @FunctionalInterface
     public interface Publication extends AutoCloseable {
         @Override

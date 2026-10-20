@@ -56,6 +56,13 @@ public final class TestEntityFixtures {
         jdbc.update("DELETE FROM ai_agent_privacy_barrier WHERE workspace_id = ?", workspaceId);
     }
 
+    /** Removes fixture-owned control coordination after its workspaces and tenant holdings are gone. */
+    public static void deleteOrganizationPrivacy(JdbcTemplate jdbc, int organizationId) {
+        jdbc.update("DELETE FROM ai_assistant_privacy_operation_workspace WHERE organization_id = ?", organizationId);
+        jdbc.update("DELETE FROM ai_assistant_privacy_operation WHERE organization_id = ?", organizationId);
+        jdbc.update("DELETE FROM ai_assistant_privacy_fence WHERE organization_id = ?", organizationId);
+    }
+
     /** Inserts a fresh user in the caller's workspace and transaction. */
     public static User newUser(UserMapper userMapper, WorkspaceMapper workspaceMapper, Workspace workspace) {
         String s = unique();

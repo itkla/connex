@@ -183,7 +183,7 @@ class AiAgentContinuationV235MigrationIntegrationTest {
     @Test
     void canonicalJsonRoundTripsThroughNonUtf8Connection() throws Exception {
         try (var transport = MySqlScratchCatalog.create(url, username, password,
-                "connex_continuation_transport_it_", "utf8mb4", "utf8mb4_unicode_ci")) {
+                "connex_cont_transport_it_", "utf8mb4", "utf8mb4_unicode_ci")) {
             Flyway.configure().dataSource(transport.url(), username, password).locations("classpath:db/migration")
                     .callbacks(new AuditLogV126MigrationCallback()).load().migrate();
             assertCanonicalTransport(transport.url());

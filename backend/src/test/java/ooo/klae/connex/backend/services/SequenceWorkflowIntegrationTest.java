@@ -92,6 +92,7 @@ import ooo.klae.connex.backend.mappers.SequenceMapper;
 import ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.support.TestEntityFixtures;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.support.OwnershipOfferTestFixtures;
@@ -198,11 +199,13 @@ class SequenceWorkflowIntegrationTest {
                         + " WHERE wr.workspace_id = ?",
                     workspaceId);
                 jdbcTemplate.update("DELETE FROM workspace_role WHERE workspace_id = ?", workspaceId);
+                TestEntityFixtures.deleteChatPrivacy(jdbcTemplate, workspaceId);
                 jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", workspaceId);
             }
         }
         if (organization != null) {
             jdbcTemplate.update("DELETE FROM org_member WHERE org_id = ?", organization.getId());
+            TestEntityFixtures.deleteOrganizationPrivacy(jdbcTemplate, organization.getId());
             jdbcTemplate.update("DELETE FROM organization WHERE id = ?", organization.getId());
         }
         if (manager != null && viewer != null && otherManager != null) {
@@ -797,6 +800,7 @@ class SequenceWorkflowIntegrationTest {
         created.setName(name + " " + suffix);
         created.setSlug(name.toLowerCase(Locale.ROOT).replace(' ', '-') + "-" + suffix);
         workspaceMapper.insert(created);
+        TestEntityFixtures.seedExistingWorkspacePrivacy(jdbcTemplate, created.getId());
         return created;
     }
 

@@ -31,6 +31,7 @@ import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.TenantLifecycleMapper;
+import ooo.klae.connex.backend.support.TestEntityFixtures;
 import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry.NullifyReference;
 import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry.TableLifecycle;
 
@@ -65,6 +66,7 @@ class TenantTeardownLateResidualIntegrationTest extends AbstractServiceTest {
         lifecycleWorkspace.setName("Late template residual " + suffix);
         lifecycleWorkspace.setSlug("late-template-residual-" + suffix);
         workspaceMapper.insert(lifecycleWorkspace);
+        TestEntityFixtures.seedExistingWorkspacePrivacy(jdbcTemplate, lifecycleWorkspace.getId());
         workspaceMapper.addMember(lifecycleWorkspace.getId(), currentUser.getId(), "owner");
         workspace = lifecycleWorkspace;
         authenticateAs(currentUser, lifecycleWorkspace.getId());
@@ -90,9 +92,11 @@ class TenantTeardownLateResidualIntegrationTest extends AbstractServiceTest {
             jdbcTemplate.update("DELETE FROM tenant_operation_lease WHERE workspace_id = ?", workspaceId);
             jdbcTemplate.update("DELETE FROM tenant_cleanup_tombstone WHERE workspace_id = ?", workspaceId);
             jdbcTemplate.update("DELETE FROM workspace_member WHERE workspace_id = ?", workspaceId);
+            TestEntityFixtures.deleteChatPrivacy(jdbcTemplate, workspaceId);
             jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", workspaceId);
         }
         if (organization != null) {
+            TestEntityFixtures.deleteOrganizationPrivacy(jdbcTemplate, organization.getId());
             jdbcTemplate.update("DELETE FROM organization WHERE id = ?", organization.getId());
         }
         if (currentUser != null) {

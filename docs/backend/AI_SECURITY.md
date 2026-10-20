@@ -745,6 +745,14 @@ Missions use the existing invocation, masking, leak scan, organization budget, a
 
 Mission realtime sends only requester-authorized metadata invalidations, with fresh membership, permission, session and generation checks inside the local fence. Ordinary content frames revalidate their immutable stored turn provenance and source state at send time. Output is fetched through the canonical owner-only report API; no mission model prose is broadcast.
 
+Ordinary content carries internal organization provenance through the broker executor and into each
+encoded WebSocket frame. The broker session factory retains Spring's concurrent send buffer, limits
+and overflow behavior. A wrapper below that buffer checks fresh control authority under the local
+publication read fence immediately around the delegate socket write. Buffered stale or unavailable
+frames are dropped, including when a different thread later flushes them. Executor admission alone
+cannot authorize a buffered write. Heartbeats and frames without assistant provenance use the
+ordinary transport path. Provenance never becomes a native STOMP header or browser payload.
+
 ## Assistant tools and collaboration
 
 Native assistant tools are capability-declared transport choices, not a second authorization model.
@@ -1152,8 +1160,9 @@ contain only invalidation metadata and still require recipient access. These loc
 one serving JVM and do not solve distributed provider dispatch (#941).
 
 Realtime content and mission frames carry their original authority in internal broker headers.
-The outbound executor drops stale queued frames and retains the publication fence through transport
-delivery. Privacy refusal stops export writes immediately, including ZIP finalization; synchronous
+The outbound executor drops stale queued frames; encoded frames retain their provenance through
+Spring's send buffer and reacquire the publication fence at the final socket write. Privacy refusal
+stops export writes immediately, including ZIP finalization; synchronous
 failures unwind the snapshot transaction before resource cancellation, preserving the original failure.
 
 Committed invalidation separately sends workspace ID, invalidation kind and decimal cutoff to

@@ -4,9 +4,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.when;
 
 import java.util.ArrayDeque;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.List;
 import java.util.Queue;
 import java.util.Set;
@@ -29,6 +31,10 @@ import org.springframework.messaging.simp.user.SimpUserRegistry;
 import org.springframework.messaging.simp.user.UserDestinationMessageHandler;
 import org.springframework.messaging.support.ExecutorSubscribableChannel;
 import org.springframework.messaging.support.MessageBuilder;
+import org.springframework.web.socket.TextMessage;
+import org.springframework.web.socket.WebSocketSession;
+import org.springframework.web.socket.WebSocketMessage;
+import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorator;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -95,17 +101,29 @@ class AiChatPrivacyOutboundInterceptorTest {
     }
 
     @Test
-    void invalidationWaitsUntilTransportHandlerFinishes() throws Exception {
+    void invalidationWaitsUntilActualSocketWriteFinishes() throws Exception {
         var outbound = new ExecutorSubscribableChannel();
-        outbound.addInterceptor(new AiChatPrivacyOutboundInterceptor(guard()));
+        var guard = guard();
+        var interceptor = new AiChatPrivacyOutboundInterceptor(guard);
+        outbound.addInterceptor(interceptor);
         var entered = new CountDownLatch(1);
         var release = new CountDownLatch(1);
         var invalidating = new CountDownLatch(1);
         var invalidator = new AtomicReference<Thread>();
-        outbound.subscribe(message -> {
+        var socket = mock(WebSocketSession.class);
+        doAnswer(call -> {
             entered.countDown();
             await(release);
             assertEquals(1, generation.get());
+            return null;
+        }).when(socket).sendMessage(any());
+        var buffered = new AiChatPrivacyWebSocketSession(socket, 10_000, 512_000, interceptor, guard);
+        outbound.subscribe(message -> {
+            try {
+                buffered.sendMessage(new TextMessage("assistant delta"));
+            } catch (java.io.IOException exception) {
+                throw new java.io.UncheckedIOException(exception);
+            }
         });
         try (var workers = Executors.newFixedThreadPool(2)) {
             var delivering = workers.submit(() -> outbound.send(MessageBuilder.createMessage(
@@ -126,6 +144,68 @@ class AiChatPrivacyOutboundInterceptorTest {
             assertTrue(delivering.get(10, TimeUnit.SECONDS));
             invalidation.get(10, TimeUnit.SECONDS);
             assertEquals(2, generation.get());
+        }
+    }
+
+    @Test
+    void bufferedAssistantFrameIsDroppedAfterInvalidationWhileOtherFramesStillFlush() throws Exception {
+        var guard = guard();
+        var interceptor = new AiChatPrivacyOutboundInterceptor(guard);
+        var outbound = new ExecutorSubscribableChannel();
+        outbound.addInterceptor(interceptor);
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        List<WebSocketMessage<?>> written = new CopyOnWriteArrayList<>();
+        var socket = mock(WebSocketSession.class);
+        var stalled = new TextMessage("stalled notification");
+        doAnswer(call -> {
+            WebSocketMessage<?> frame = call.getArgument(0);
+            if (frame == stalled) {
+                entered.countDown();
+                await(release);
+            }
+            written.add(frame);
+            return null;
+        }).when(socket).sendMessage(any());
+        ConcurrentWebSocketSessionDecorator buffered = new AiChatPrivacyWebSocketSession(
+                socket, 10_000, 512_000, interceptor, guard);
+        var assistant = new TextMessage("withdrawn assistant delta");
+        outbound.subscribe(message -> {
+            try {
+                buffered.sendMessage(assistant);
+            } catch (java.io.IOException exception) {
+                throw new java.io.UncheckedIOException(exception);
+            }
+        });
+        try (var worker = Executors.newSingleThreadExecutor()) {
+            var sending = worker.submit(() -> {
+                buffered.sendMessage(stalled);
+                return null;
+            });
+            try {
+                assertTrue(entered.await(10, TimeUnit.SECONDS));
+                assertTrue(outbound.send(MessageBuilder.createMessage(
+                        new byte[0], AiChatPrivacyOutboundInterceptor.headers(7, 1))));
+                assertEquals(assistant.getPayloadLength(), buffered.getBufferSize());
+                var heartbeat = new TextMessage("\n");
+                var notification = new TextMessage("ordinary notification");
+                buffered.sendMessage(heartbeat);
+                buffered.sendMessage(notification);
+                invalidate();
+                assertEquals(2, generation.get());
+                release.countDown();
+                sending.get(10, TimeUnit.SECONDS);
+                assertEquals(List.of(stalled, heartbeat, notification), written);
+                assertEquals(0, buffered.getBufferSize());
+                assertEquals(10_000, buffered.getSendTimeLimit());
+                assertEquals(512_000, buffered.getBufferSizeLimit());
+                assertEquals(ConcurrentWebSocketSessionDecorator.OverflowStrategy.TERMINATE, buffered.getOverflowStrategy());
+                assertTrue(outbound.send(MessageBuilder.createMessage(
+                        new byte[0], AiChatPrivacyOutboundInterceptor.headers(7, 2))));
+                assertEquals(assistant, written.getLast());
+            } finally {
+                release.countDown();
+            }
         }
     }
 

@@ -75,12 +75,12 @@ public class AiAgentRunPersistenceService {
         AiChatSession session = lockSession(workspaceId, owner, sessionId);
         AiAgentRun existing = runs.findByRequestKey(workspaceId, owner, request.clientRequestKey());
         if (existing != null) {
-            privacyGuard.retain(chat, new AiChatPrivacyToken(workspaceId, sessionId,
-                    existing.getPrivacyGeneration(), session.getMissionTaintSeq(),
-                    privacyGuard.organizationId(workspaceId), existing.getOrganizationPrivacyGeneration()));
             if (existing.getPurgedAt() != null) {
                 throw new AiAgentGoneException("mission_purged");
             }
+            privacyGuard.retain(chat, new AiChatPrivacyToken(workspaceId, sessionId,
+                    existing.getPrivacyGeneration(), session.getMissionTaintSeq(),
+                    privacyGuard.organizationId(workspaceId), existing.getOrganizationPrivacyGeneration()));
             if (!Arrays.equals(existing.getRequestHash(), requestHash)) {
                 throw new ConflictException("mission_request_conflict");
             }
