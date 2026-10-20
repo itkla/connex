@@ -17,15 +17,13 @@ import org.springframework.transaction.TransactionSystemException;
 
 /** Classifies database failures without relying on exception messages or SQL text. */
 public final class DatabaseFailureClassifier {
-    private static final int MAX_FAILURES = 64;
-
     private DatabaseFailureClassifier() {
     }
 
     /**
      * Recognizes Spring pessimistic lock failures and MySQL deadlock (1213), lock-wait timeout
      * (1205), and NOWAIT (3572/HY000) failures. Causes and transaction application exceptions are
-     * inspected by identity, up to 64 distinct failures; an unclassified rollback is not retryable.
+     * inspected by identity to terminate cycles; an unclassified rollback is not retryable.
      */
     public static boolean isLockContention(Throwable failure) {
         return anyFailure(failure, DatabaseFailureClassifier::lockContention);
@@ -59,7 +57,7 @@ public final class DatabaseFailureClassifier {
         if (failure != null) {
             pending.push(failure);
         }
-        while (!pending.isEmpty() && seen.size() < MAX_FAILURES) {
+        while (!pending.isEmpty()) {
             Throwable current = pending.pop();
             if (!seen.add(current)) {
                 continue;
@@ -67,12 +65,12 @@ public final class DatabaseFailureClassifier {
             if (predicate.test(current)) {
                 return true;
             }
-            if (current.getCause() != null) {
-                pending.push(current.getCause());
-            }
             if (current instanceof TransactionSystemException transaction
                     && transaction.getApplicationException() != null) {
                 pending.push(transaction.getApplicationException());
+            }
+            if (current.getCause() != null) {
+                pending.push(current.getCause());
             }
         }
         return false;

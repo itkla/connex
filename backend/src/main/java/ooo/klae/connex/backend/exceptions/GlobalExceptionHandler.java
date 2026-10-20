@@ -34,6 +34,7 @@ import jakarta.validation.ConstraintViolationException;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantProposalExpiredException;
 import ooo.klae.connex.backend.connectedaccounts.nativeflow.NativeConnectException;
+import ooo.klae.connex.backend.config.RequestTransactionCommitListener;
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationErrorDto;
 import ooo.klae.connex.backend.observability.CorrelationIds;
 import ooo.klae.connex.backend.observability.ErrorReporter;
@@ -441,7 +442,8 @@ public class GlobalExceptionHandler {
     /** Maps exact lock contention to a retryable conflict, preserving all other internal errors. */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, String>> unexpectedFailure(Exception ex, HttpServletRequest request) {
-        if (!DatabaseFailureClassifier.isLockContention(ex)) {
+        if (!DatabaseFailureClassifier.isLockContention(ex)
+                || RequestTransactionCommitListener.committedDuringRequest()) {
             return internalError(ex, request);
         }
         log.warn("Request conflict: exception={} detail={}", ex.getClass().getName(), stackDetail(ex));

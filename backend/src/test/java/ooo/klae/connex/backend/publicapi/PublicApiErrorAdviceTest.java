@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import java.util.List;
 
@@ -15,6 +17,10 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.web.method.annotation.ExceptionHandlerMethodResolver;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.transaction.TransactionExecution;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.Level;
@@ -22,6 +28,7 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.config.RequestTransactionCommitListener;
 import ooo.klae.connex.backend.exceptions.PrivilegedMfaAttestationRequiredException;
 import ooo.klae.connex.backend.exceptions.PrivilegedMfaEnrollmentRequiredException;
 import ooo.klae.connex.backend.observability.CorrelationIds;
@@ -30,11 +37,13 @@ class PublicApiErrorAdviceTest {
     @BeforeEach
     void bindRequestCorrelationId() {
         MDC.put(CorrelationIds.MDC_KEY, "locked-mfa-request-123");
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(new MockHttpServletRequest()));
     }
 
     @AfterEach
     void clearRequestCorrelationId() {
         MDC.remove(CorrelationIds.MDC_KEY);
+        RequestContextHolder.resetRequestAttributes();
     }
 
     @ParameterizedTest
@@ -103,5 +112,26 @@ class PublicApiErrorAdviceTest {
             logger.detachAppender(appender);
             appender.stop();
         }
+    }
+
+    @ParameterizedTest
+    @MethodSource("ooo.klae.connex.backend.support.LockContentionTestCases#retryable")
+    void contentionAfterAnEarlierCommitKeepsTheExact500EnvelopeAndLogging(Exception failure) {
+        TransactionExecution committed = mock(TransactionExecution.class);
+        when(committed.isNewTransaction()).thenReturn(true);
+        new RequestTransactionCommitListener().afterCommit(committed, null);
+
+        var response = new PublicApiErrorAdvice().unexpectedFailure(failure);
+        List<ILoggingEvent> events = captureAdviceLogs(
+            () -> new PublicApiErrorAdvice().unexpectedFailure(failure));
+
+        assertEquals(500, response.getStatusCode().value());
+        assertEquals(PublicApiErrorAdvice.envelope("internal_error", "An unexpected error occurred"),
+            response.getBody());
+        assertEquals(1, events.size());
+        assertEquals(Level.ERROR, events.getFirst().getLevel());
+        assertNull(events.getFirst().getThrowableProxy());
+        assertEquals("Public API request failed: exception=" + failure.getClass().getName(),
+            events.getFirst().getFormattedMessage());
     }
 }

@@ -30,6 +30,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.ConstraintViolationException;
 import ooo.klae.connex.backend.config.SecurityResponseHeaders;
+import ooo.klae.connex.backend.config.RequestTransactionCommitListener;
 import ooo.klae.connex.backend.controllers.v1.PublicApiIdentityController;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.DatabaseFailureClassifier;
@@ -100,7 +101,8 @@ public class PublicApiErrorAdvice {
     /** Maps exact lock contention to a retryable conflict, preserving all other internal errors. */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorEnvelope> unexpectedFailure(Exception exception) {
-        if (!DatabaseFailureClassifier.isLockContention(exception)) {
+        if (!DatabaseFailureClassifier.isLockContention(exception)
+                || RequestTransactionCommitListener.committedDuringRequest()) {
             return internalError(exception);
         }
         log.warn("Public API request conflict: exception={}", exception.getClass().getName());

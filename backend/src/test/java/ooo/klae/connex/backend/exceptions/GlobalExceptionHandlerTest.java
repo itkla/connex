@@ -10,6 +10,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 import java.sql.SQLTimeoutException;
 import java.util.List;
@@ -45,11 +46,15 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.web.method.annotation.ExceptionHandlerMethodResolver;
+import org.springframework.transaction.TransactionExecution;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import ooo.klae.connex.backend.observability.CorrelationIds;
+import ooo.klae.connex.backend.config.RequestTransactionCommitListener;
 import ooo.klae.connex.backend.observability.ErrorReporter;
 import ooo.klae.connex.backend.observability.ReportedError;
 import ooo.klae.connex.backend.observability.ReportedError.Source;
@@ -73,6 +78,7 @@ class GlobalExceptionHandlerTest {
         errorReporter = mock(ErrorReporter.class);
         tenantContext = new TenantContext();
         handler = new GlobalExceptionHandler(errorReporter, tenantContext);
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(new MockHttpServletRequest()));
     }
 
     @AfterEach
@@ -80,6 +86,7 @@ class GlobalExceptionHandlerTest {
         tenantContext.clear();
         LocaleContextHolder.resetLocaleContext();
         MDC.clear();
+        RequestContextHolder.resetRequestAttributes();
     }
 
     @Test
@@ -561,6 +568,27 @@ class GlobalExceptionHandlerTest {
         assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, response.getStatusCode());
         assertEquals(Map.of("message", "An unexpected error occurred",
             "correlationId", "transaction-error-123"), response.getBody());
+        ArgumentCaptor<ReportedError> captor = ArgumentCaptor.forClass(ReportedError.class);
+        verify(errorReporter).report(captor.capture());
+        assertEquals(failure.getClass().getName(), captor.getValue().message());
+        assertFalse(captor.getValue().detail().contains("private"));
+    }
+
+    @ParameterizedTest
+    @MethodSource("ooo.klae.connex.backend.support.LockContentionTestCases#retryable")
+    void contentionAfterAnEarlierCommitKeepsTheExact500EnvelopeAndReporting(Exception failure) {
+        MDC.put(CorrelationIds.MDC_KEY, "earlier-commit-123");
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/fail");
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        TransactionExecution committed = mock(TransactionExecution.class);
+        when(committed.isNewTransaction()).thenReturn(true);
+        new RequestTransactionCommitListener().afterCommit(committed, null);
+
+        var response = handler.unexpectedFailure(failure, request);
+
+        assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, response.getStatusCode());
+        assertEquals(Map.of("message", "An unexpected error occurred",
+            "correlationId", "earlier-commit-123"), response.getBody());
         ArgumentCaptor<ReportedError> captor = ArgumentCaptor.forClass(ReportedError.class);
         verify(errorReporter).report(captor.capture());
         assertEquals(failure.getClass().getName(), captor.getValue().message());

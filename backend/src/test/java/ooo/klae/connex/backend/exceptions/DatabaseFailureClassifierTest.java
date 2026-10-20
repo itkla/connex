@@ -9,6 +9,7 @@ import java.time.Duration;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.dao.QueryTimeoutException;
 import org.springframework.transaction.TransactionSystemException;
@@ -50,20 +51,28 @@ class DatabaseFailureClassifierTest {
     }
 
     @Test
-    void causeTraversalHasAFixedBudget() {
+    void aMatchBeyond64CausesIsStillFound() {
         Throwable failure = new CannotAcquireLockException("lock");
         for (int depth = 0; depth < 100; depth++) {
             failure = new RuntimeException("wrapper", failure);
         }
 
-        assertFalse(DatabaseFailureClassifier.isLockContention(failure));
+        assertTrue(DatabaseFailureClassifier.isLockContention(failure));
+        assertTrue(DatabaseFailureClassifier.isTransientDatabaseFailure(failure));
     }
 
-    @Test
-    void bothTransactionExceptionBranchesAreInspected() {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void bothTransactionExceptionBranchOrdersFindDeepMatches(boolean matchInApplicationException) {
+        Throwable match = new CannotAcquireLockException("lock");
+        Throwable unrelated = new RuntimeException("unrelated");
+        for (int depth = 0; depth < 100; depth++) {
+            match = new RuntimeException("wrapper", match);
+            unrelated = new RuntimeException("wrapper", unrelated);
+        }
         TransactionSystemException failure = new TransactionSystemException("commit",
-            new CannotAcquireLockException("lock"));
-        failure.initApplicationException(new RuntimeException("unrelated"));
+            matchInApplicationException ? unrelated : match);
+        failure.initApplicationException(matchInApplicationException ? match : unrelated);
 
         assertTrue(DatabaseFailureClassifier.isLockContention(failure));
         assertTrue(DatabaseFailureClassifier.isTransientDatabaseFailure(failure));
