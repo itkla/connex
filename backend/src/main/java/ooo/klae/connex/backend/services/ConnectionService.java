@@ -33,6 +33,8 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
 @Service
 @RequiredArgsConstructor
 public class ConnectionService {
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     private static final int MAX_TOP_CONNECTIONS = 5;
 
     private final PersonEdgeMapper edgeMapper;
@@ -46,14 +48,16 @@ public class ConnectionService {
     /** A contact's direct connections. */
     public List<PersonConnectionDto> getConnections(int personId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        requirePerson(workspaceId, personId);
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        requirePerson(workspaceId, personId, personWorkspaceIdsJson);
         return edgeReader.getConnections(workspaceId, personId);
     }
 
     /** A contact's strongest processable direct connections, capped for bounded context assembly. */
     public List<PersonConnectionDto> getTopConnections(int personId, int limit) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        requirePerson(workspaceId, personId);
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        requirePerson(workspaceId, personId, personWorkspaceIdsJson);
         if (limit <= 0) {
             return List.of();
         }
@@ -68,8 +72,9 @@ public class ConnectionService {
         if (personId == targetPersonId) {
             throw new BadRequestException("A contact cannot be connected to itself");
         }
-        requirePerson(workspaceId, personId);
-        requirePerson(workspaceId, targetPersonId);
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        requirePerson(workspaceId, personId, personWorkspaceIdsJson);
+        requirePerson(workspaceId, targetPersonId, personWorkspaceIdsJson);
 
         PersonEdge edge = new PersonEdge();
         edge.setWorkspaceId(workspaceId);
@@ -95,11 +100,12 @@ public class ConnectionService {
      */
     public IntroPathDto findIntroPath(int targetPersonId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        requirePerson(workspaceId, targetPersonId);
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        requirePerson(workspaceId, targetPersonId, personWorkspaceIdsJson);
 
-        Set<Integer> engaged = new HashSet<>(personMapper.getEngagedPersonIds(workspaceId));
+        Set<Integer> engaged = new HashSet<>(personMapper.getEngagedPersonIds(workspaceId, personWorkspaceIdsJson));
         if (engaged.contains(targetPersonId)) {
-            return new IntroPathDto(true, true, List.of(personStep(workspaceId, targetPersonId, null, engaged)));
+            return new IntroPathDto(true, true, List.of(personStep(workspaceId, targetPersonId, null, engaged, personWorkspaceIdsJson)));
         }
 
         Map<Integer, List<Neighbor>> adjacency = buildAdjacency(workspaceId);
@@ -141,7 +147,7 @@ public class ConnectionService {
         for (int i = 0; i < order.size(); i++) {
             int id = order.get(i);
             String connectionType = i == 0 ? null : previousType.get(id);
-            steps.add(personStep(workspaceId, id, connectionType, engaged));
+            steps.add(personStep(workspaceId, id, connectionType, engaged, personWorkspaceIdsJson));
         }
         return new IntroPathDto(true, false, steps);
     }
@@ -157,15 +163,15 @@ public class ConnectionService {
         return adjacency;
     }
 
-    private IntroPathStepDto personStep(int workspaceId, int personId, String connectionType, Set<Integer> engaged) {
-        Person person = personMapper.getPersonById(workspaceId, personId);
+    private IntroPathStepDto personStep(int workspaceId, int personId, String connectionType, Set<Integer> engaged, String personWorkspaceIdsJson) {
+        Person person = personMapper.getPersonById(workspaceId, personWorkspaceIdsJson, personId);
         String name = person == null ? null : person.getName();
         String companyName = (person == null || person.getCompany() == null) ? null : person.getCompany().getName();
         return new IntroPathStepDto(personId, name, companyName, connectionType, engaged.contains(personId));
     }
 
-    private Person requirePerson(int workspaceId, int personId) {
-        Person person = personMapper.getPersonById(workspaceId, personId);
+    private Person requirePerson(int workspaceId, int personId, String personWorkspaceIdsJson) {
+        Person person = personMapper.getPersonById(workspaceId, personWorkspaceIdsJson, personId);
         if (person == null) throw new ResourceNotFoundException("Contact not found");
         return person;
     }

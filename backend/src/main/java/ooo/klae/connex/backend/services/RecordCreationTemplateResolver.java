@@ -562,7 +562,7 @@ public class RecordCreationTemplateResolver {
         }
         return switch (fieldKey) {
             case "company" -> companyMapper.exists(context.workspaceId(), context.orgWorkspaceIdsJson(), id);
-            case "referrerPerson" -> personMapper.exists(context.workspaceId(), id);
+            case "referrerPerson" -> personMapper.exists(context.workspaceId(), context.orgWorkspaceIdsJson(), id);
             case "pipeline" -> findPipeline(context, id) != null;
             case "stage" -> findStage(context, id) != null;
             default -> false;

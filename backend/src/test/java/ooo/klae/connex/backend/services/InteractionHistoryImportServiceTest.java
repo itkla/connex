@@ -284,7 +284,7 @@ class InteractionHistoryImportServiceTest {
                 mapping("source", "sourceId")),
             Map.of(5, PERSON_ID, 6, PERSON_ID, 7, 999),
             null);
-        when(personMapper.getByIds(WORKSPACE_ID, List.of(PERSON_ID, 999)))
+        when(personMapper.getByIds(WORKSPACE_ID, "[7]", List.of(PERSON_ID, 999)))
             .thenReturn(List.of(person(PERSON_ID, WORKSPACE_ID)));
         queuePreview(List.of(
             strongResponse(PERSON_ID),
@@ -373,7 +373,7 @@ class InteractionHistoryImportServiceTest {
             first.getMapping(),
             Map.of(0, PERSON_ID, 1, PERSON_ID),
             null);
-        when(personMapper.getByIds(WORKSPACE_ID, List.of(PERSON_ID)))
+        when(personMapper.getByIds(WORKSPACE_ID, "[7]", List.of(PERSON_ID)))
             .thenReturn(List.of(person(PERSON_ID, WORKSPACE_ID)));
         queuePreview(List.of(
             response(List.of(
@@ -539,7 +539,7 @@ class InteractionHistoryImportServiceTest {
 
         HistoryImportRequest second = sourceLessDuplicateRequest();
         second.setLinks(Map.of(0, PERSON_ID));
-        when(personMapper.getByIds(WORKSPACE_ID, List.of(PERSON_ID)))
+        when(personMapper.getByIds(WORKSPACE_ID, "[7]", List.of(PERSON_ID)))
             .thenReturn(List.of(person(PERSON_ID, WORKSPACE_ID)));
         queuePreview(List.of(unresolved, matched), PROOF);
 

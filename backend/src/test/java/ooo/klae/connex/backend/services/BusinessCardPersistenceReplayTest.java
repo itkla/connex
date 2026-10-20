@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -248,7 +249,7 @@ class BusinessCardPersistenceReplayTest extends AbstractServiceTest {
         Tag tag = newTag();
         persistedTagId = tag.getId();
         personService.addTag(personId, tag.getId());
-        Person person = personMapper.getPersonById(workspace.getId(), personId);
+        Person person = personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), personId);
         newActivity(currentUser, person, null);
         newTask(currentUser, person, null);
         newNotification(workspace.getId(), currentUser.getId());

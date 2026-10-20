@@ -81,7 +81,7 @@ class RelationshipDashboardServiceTest {
         deal.setPipelineId(1);
         deal.setStageId(1);
         deal.setCompanyId(10);
-        when(personMapper.getByIds(workspaceId, List.of(1))).thenReturn(List.of(person));
+        when(personMapper.getByIds(workspaceId, "[7,8,9]", List.of(1))).thenReturn(List.of(person));
         when(dealMapper.getByIds(workspaceId, List.of(20))).thenReturn(List.of(deal));
         when(companyMapper.getByIds(workspaceId, "[7,8,9]", List.of(10))).thenReturn(List.of(company));
         RelationshipDashboardService service = new RelationshipDashboardService(

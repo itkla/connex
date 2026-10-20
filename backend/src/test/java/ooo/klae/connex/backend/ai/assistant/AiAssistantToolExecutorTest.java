@@ -313,7 +313,7 @@ class AiAssistantToolExecutorTest {
                 List.of(), List.of(), List.of(), List.of(), List.of(),
                 List.of(), List.of(), List.of(), List.of(), List.of(), List.of()));
         when(personService.getPersonById(17)).thenReturn(restricted);
-        when(personMapper.getPersonById(7, 17)).thenReturn(restricted);
+        when(personMapper.getPersonById(7, "[7,8,9]", 17)).thenReturn(restricted);
         AiChatResourceRegistry resources = new AiChatResourceRegistry();
         resources.register("person", 17);
 
@@ -351,7 +351,7 @@ class AiAssistantToolExecutorTest {
         deal.setId(8);
         Company company = new Company();
         company.setId(5);
-        when(personMapper.getPersonById(7, 17)).thenReturn(person);
+        when(personMapper.getPersonById(7, "[7,8,9]", 17)).thenReturn(person);
         when(dealService.getDealById(8)).thenReturn(deal);
         when(companyService.getCompanyById(5)).thenReturn(company);
         when(historyService.activitiesForPerson(17, null, null, 3)).thenReturn(List.of());
@@ -572,13 +572,13 @@ class AiAssistantToolExecutorTest {
                 .map(id -> new AiChatPageContextDto("person", id))
                 .toList();
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
-        when(personMapper.getByIds(7, ids)).thenReturn(List.of());
+        when(personMapper.getByIds(7, "[7,8,9]", ids)).thenReturn(List.of());
 
         AiAssistantToolResult result = executor.pageContext(
                 context, new AiChatResourceRegistry());
 
         assertEquals(List.of(), result.data().get("records"));
-        verify(personMapper).getByIds(7, ids);
+        verify(personMapper).getByIds(7, "[7,8,9]", ids);
         verifyNoInteractions(personService, companyService, dealService);
     }
 
@@ -588,7 +588,7 @@ class AiAssistantToolExecutorTest {
         Person restricted = new Person();
         restricted.setId(17);
         restricted.setSuspendedAt(LocalDateTime.parse("2026-08-01T00:00:00"));
-        when(personMapper.getByIds(7, List.of(17))).thenReturn(List.of(restricted));
+        when(personMapper.getByIds(7, "[7,8,9]", List.of(17))).thenReturn(List.of(restricted));
         Activity activity = new Activity();
         activity.setPerson(restricted);
         EntityReference restrictedReference = new EntityReference();
@@ -810,7 +810,7 @@ class AiAssistantToolExecutorTest {
         when(historyService.notesForPerson(eq(person.getId()), eq(10), org.mockito.ArgumentMatchers.anyBoolean())).thenReturn(List.of(note));
         when(personService.getPersonById(17)).thenReturn(person);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
-        when(personMapper.getByIds(7, List.of(18))).thenReturn(List.of(linkedPerson));
+        when(personMapper.getByIds(7, "[7,8,9]", List.of(18))).thenReturn(List.of(linkedPerson));
         AiChatResourceRegistry resources = new AiChatResourceRegistry(new MaskingContext());
         resources.register("person", 17);
 
@@ -834,7 +834,7 @@ class AiAssistantToolExecutorTest {
         Person person = new Person();
         person.setId(17);
         person.setName("Ada Lovelace");
-        when(personMapper.getPersonById(7, 17)).thenReturn(person);
+        when(personMapper.getPersonById(7, "[7,8,9]", 17)).thenReturn(person);
         Activity activity = new Activity();
         activity.setSubject("x".repeat(500) + " Ada Lovelace " + "tail".repeat(20));
         when(activityService.getActivitiesByPersonIdInWindow(
@@ -870,7 +870,7 @@ class AiAssistantToolExecutorTest {
     void scheduleConflictResultsBoundCountAndTextBeforePromptSerialization() {
         Person person = new Person();
         person.setId(17);
-        when(personMapper.getPersonById(7, 17)).thenReturn(person);
+        when(personMapper.getPersonById(7, "[7,8,9]", 17)).thenReturn(person);
         List<Activity> activities = IntStream.range(0, 25)
                 .mapToObj(index -> {
                     Activity activity = new Activity();
@@ -958,7 +958,7 @@ class AiAssistantToolExecutorTest {
         when(workspaceService.getCurrentAnalyticsTimezone()).thenReturn("America/Los_Angeles");
         Person person = new Person();
         person.setId(17);
-        when(personMapper.getPersonById(7, 17)).thenReturn(person);
+        when(personMapper.getPersonById(7, "[7,8,9]", 17)).thenReturn(person);
         when(historyService.activitiesForPerson(
                 eq(17), any(LocalDateTime.class), any(LocalDateTime.class), eq(5)))
                 .thenReturn(List.of());

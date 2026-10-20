@@ -281,11 +281,11 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         offboardingService.eraseOrgDataReferences(target.getId());
 
         assertNull(companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), company.getId()).getOwnerId());
-        assertNull(personMapper.getPersonById(workspace.getId(), person.getId()).getOwnerId());
+        assertNull(personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId()).getOwnerId());
         assertNull(companyMapper.getCompanyById(
             otherWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, otherWorkspace.getId()), otherCompany.getId()).getOwnerId());
         assertNull(personMapper.getPersonById(
-            otherWorkspace.getId(), otherPerson.getId()).getOwnerId());
+            otherWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, otherWorkspace.getId()), otherPerson.getId()).getOwnerId());
         assertTemplateActorsCleared(workspace.getId(), templateRoot);
         assertTemplateActorsCleared(otherWorkspace.getId(), otherTemplateRoot);
         assertSequenceActorsCleared(sequence.getId());
@@ -428,12 +428,12 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         offboardingService.detachMemberContent(workspace.getId(), member.getId());
 
         assertNull(companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), company.getId()).getOwnerId());
-        assertNull(personMapper.getPersonById(workspace.getId(), person.getId()).getOwnerId());
+        assertNull(personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId()).getOwnerId());
         assertNull(dealMapper.getDealById(workspace.getId(), deal.getId()).getOwnerId());
         assertEquals(member.getId(),
             companyMapper.getCompanyById(otherWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, otherWorkspace.getId()), otherCompany.getId()).getOwnerId());
         assertEquals(member.getId(),
-            personMapper.getPersonById(otherWorkspace.getId(), otherPerson.getId()).getOwnerId());
+            personMapper.getPersonById(otherWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, otherWorkspace.getId()), otherPerson.getId()).getOwnerId());
         assertTrue(dealMapper.getCollaboratorIds(workspace.getId(), deal.getId()).isEmpty());
         assertEquals(0, notificationMapper.countPage(member.getId(), null, null, null, null));
         assertNull(taskMapper.getTaskById(workspace.getId(), task.getId()).getAssignedTo());

@@ -73,8 +73,8 @@
     LEFT JOIN company c ON c.id = p.company_id
       AND (c.workspace_id = #{workspaceId}
         OR EXISTS (SELECT 1 FROM company_share cs
-          JOIN workspace vws ON vws.id = cs.workspace_id
-          JOIN workspace ows ON ows.id = c.workspace_id AND ows.org_id = vws.org_id
+          JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) org_workspace
+            ON org_workspace.id = c.workspace_id
           WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
       AND c.archived_at IS NULL
   </sql>
@@ -82,8 +82,8 @@
   <sql id="visibleAny">
     (p.workspace_id = #{workspaceId}
      OR EXISTS (SELECT 1 FROM person_share ps
-        JOIN workspace vws ON vws.id = ps.workspace_id
-        JOIN workspace ows ON ows.id = p.workspace_id AND ows.org_id = vws.org_id
+        JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) org_workspace
+          ON org_workspace.id = p.workspace_id
         WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId}))
   </sql>
 
@@ -598,8 +598,8 @@
       SELECT 1 FROM person
       WHERE (person.workspace_id = #{workspaceId}
              OR EXISTS (SELECT 1 FROM person_share ps
-                JOIN workspace vws ON vws.id = ps.workspace_id
-                JOIN workspace ows ON ows.id = person.workspace_id AND ows.org_id = vws.org_id
+                JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) org_workspace
+                  ON org_workspace.id = person.workspace_id
                 WHERE ps.person_id = person.id AND ps.workspace_id = #{workspaceId}))
         AND id = #{id}
         AND person.archived_at IS NULL

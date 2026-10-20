@@ -181,9 +181,9 @@ class RecordCreationTemplateConcurrencyIntegrationTest extends AbstractServiceTe
         doAnswer(invocation -> {
             templateLockAttempted.countDown();
             return realPersonMapper.getVisiblePersonByIdForUpdate(
-                isolatedWorkspace.getId(), person.getId());
+                isolatedWorkspace.getId(), invocation.getArgument(1), person.getId());
         }).when(personMapperSpy).getVisiblePersonByIdForUpdate(
-            isolatedWorkspace.getId(), person.getId());
+            isolatedWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, isolatedWorkspace.getId()), person.getId());
         ExecutorService executor = Executors.newFixedThreadPool(2);
 
         try {
@@ -456,9 +456,9 @@ class RecordCreationTemplateConcurrencyIntegrationTest extends AbstractServiceTe
             writerPersonDependencyAttempted.countDown();
             await(releaseWriter);
             return realPersonMapper.getVisiblePersonByIdForUpdate(
-                isolatedWorkspace.getId(), target.getId());
+                isolatedWorkspace.getId(), invocation.getArgument(1), target.getId());
         }).when(personMapperSpy).getVisiblePersonByIdForUpdate(
-            isolatedWorkspace.getId(), target.getId());
+            isolatedWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, isolatedWorkspace.getId()), target.getId());
         doAnswer(invocation -> {
             importPersonLockAttempted.countDown();
             return realPersonMapper.getOwnedPersonByIdForUpdate(

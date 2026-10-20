@@ -462,7 +462,7 @@ class RuleEngineServiceTest extends AbstractServiceTest {
     @Test
     void assignOwner_action_routesContact() {
         Person person = newPerson(newCompany());
-        assertNull(personMapper.getPersonById(workspace.getId(), person.getId()).getOwnerId());
+        assertNull(personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId()).getOwnerId());
         User router = newUser();
         RuleAction assign = new RuleAction();
         assign.setType("assign_owner");
@@ -474,13 +474,13 @@ class RuleEngineServiceTest extends AbstractServiceTest {
 
         assertEquals(1, matchedExecutions(rule.getId()));
         assertEquals(router.getId(),
-            personMapper.getPersonById(workspace.getId(), person.getId()).getOwnerId());
+            personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId()).getOwnerId());
     }
 
     @Test
     void setResponseDue_action_startsTheFirstResponseClock() {
         Person person = newPerson(newCompany());
-        assertNull(personMapper.getPersonById(workspace.getId(), person.getId())
+        assertNull(personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId())
             .getFirstResponseDueAt());
         RuleAction sla = new RuleAction();
         sla.setType("set_response_due");
@@ -491,7 +491,7 @@ class RuleEngineServiceTest extends AbstractServiceTest {
             workspace.getId(), "person", person.getId(), "person.lifecycle_changed");
 
         assertEquals(1, matchedExecutions(rule.getId()));
-        assertNotNull(personMapper.getPersonById(workspace.getId(), person.getId())
+        assertNotNull(personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId())
             .getFirstResponseDueAt());
     }
 

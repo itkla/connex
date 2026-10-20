@@ -300,7 +300,6 @@ public class DealService {
     }
 
 
-
     public long countDeals(String query, String currency, Integer pipelineId, Integer stageId,
             Integer companyId, String status) {
         return dealMapper.countDeals(workspaceService.getCurrentWorkspaceId(), query, currency,
@@ -1734,7 +1733,6 @@ public class DealService {
     }
 
 
-
     /**
      * Adds a person to a deal.
      * @param dealId
@@ -1746,9 +1744,9 @@ public class DealService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
         if (deal == null) throw new ResourceNotFoundException("Deal not found");
-        Person person = personMapper.getPersonById(workspaceId, personId);
-        if (person == null) throw new ResourceNotFoundException("Contact not found");
         RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        Person person = personMapper.getPersonById(workspaceId, scope.workspaceIdsJson(), personId);
+        if (person == null) throw new ResourceNotFoundException("Contact not found");
         dealMapper.addPerson(workspaceId, scope.workspaceIdsJson(), dealId, personId, role);
         String label = contactLabel(person.getName(), role);
         auditService.record("deal.addPerson", "deal", dealId, deal.getName(),
@@ -1790,7 +1788,8 @@ public class DealService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
         if (deal == null) throw new ResourceNotFoundException("Deal not found");
-        Person person = personMapper.getPersonById(workspaceId, personId);
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        Person person = personMapper.getPersonById(workspaceId, personWorkspaceIdsJson, personId);
         dealMapper.removePerson(workspaceId, dealId, personId);
         String name = person != null ? person.getName() : "#" + personId;
         auditService.record("deal.removePerson", "deal", dealId, deal.getName(),
@@ -1845,7 +1844,7 @@ public class DealService {
                 if (dealPerson == null || dealPerson.getPerson() == null) {
                     throw new BadRequestException("Each deal contact must include a person");
                 }
-                if (personMapper.getPersonById(workspaceId, dealPerson.getPerson().getId()) == null) {
+                if (personMapper.getPersonById(workspaceId, scope.workspaceIdsJson(), dealPerson.getPerson().getId()) == null) {
                     throw new ResourceNotFoundException("Contact not found");
                 }
                 dealMapper.addPerson(

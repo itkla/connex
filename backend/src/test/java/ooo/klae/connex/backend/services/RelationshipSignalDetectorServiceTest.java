@@ -75,9 +75,9 @@ class RelationshipSignalDetectorServiceTest {
             dealMapper,
             new ObjectMapper(),
             Clock.fixed(AS_OF, java.time.ZoneOffset.UTC), ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
-        when(personMapper.getByIds(eq(WORKSPACE_ID), anyList()))
+        when(personMapper.getByIds(eq(WORKSPACE_ID), org.mockito.ArgumentMatchers.anyString(), anyList()))
             .thenAnswer(invocation -> {
-                List<Integer> ids = invocation.getArgument(1);
+                List<Integer> ids = invocation.getArgument(2);
                 return ids.stream().map(RelationshipSignalDetectorServiceTest::person).toList();
             });
         when(companyMapper.getByIds(eq(WORKSPACE_ID), org.mockito.ArgumentMatchers.anyString(), anyList())).thenReturn(List.of());
@@ -357,7 +357,7 @@ class RelationshipSignalDetectorServiceTest {
         Activity touch = activity(71, subject, "meeting", "2026-07-09 12:00:00");
         SourceScoringFixture fixture = sourceScoringFixture(List.of(subject), List.of(touch));
         when(fixture.personMapper().getRelationshipScoreAggregates(
-                eq(WORKSPACE_ID), any(), any()))
+                eq(WORKSPACE_ID), org.mockito.ArgumentMatchers.anyString(), any(), any()))
             .thenReturn(List.of(new RelationshipScoreAggregateDto(
                 subject.getId(), 0.5, 0.0, 1.0, touch.getTimestamp(), 0)));
         ScoringService beforeScoring = fixture.serviceAt(AS_OF);
@@ -570,10 +570,10 @@ class RelationshipSignalDetectorServiceTest {
         ActivityMapper activityMapper = mock(ActivityMapper.class);
         NoteMapper noteMapper = mock(NoteMapper.class);
         TaskMapper taskMapper = mock(TaskMapper.class);
-        when(personMapper.getProcessablePersons(WORKSPACE_ID)).thenReturn(people);
-        when(personMapper.getRelationshipScoreAggregates(eq(WORKSPACE_ID), any(), any()))
-            .thenAnswer(invocation -> activityAggregates(people, activities, invocation.getArgument(1)));
-        when(personMapper.getByIds(eq(WORKSPACE_ID), anyList())).thenReturn(people);
+        when(personMapper.getProcessablePersons(WORKSPACE_ID, "[7,8,9]")).thenReturn(people);
+        when(personMapper.getRelationshipScoreAggregates(eq(WORKSPACE_ID), org.mockito.ArgumentMatchers.anyString(), any(), any()))
+            .thenAnswer(invocation -> activityAggregates(people, activities, invocation.getArgument(2)));
+        when(personMapper.getByIds(eq(WORKSPACE_ID), org.mockito.ArgumentMatchers.anyString(), anyList())).thenReturn(people);
         when(companyMapper.getRelationshipScoreAggregates(eq(WORKSPACE_ID), org.mockito.ArgumentMatchers.anyString(), any(), any()))
             .thenReturn(List.of());
         when(companyMapper.getByIds(eq(WORKSPACE_ID), org.mockito.ArgumentMatchers.anyString(), anyList())).thenReturn(List.of());

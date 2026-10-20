@@ -241,7 +241,7 @@ public class AttachmentWriteOperations {
                     || Objects.equals(shareMapper.lockCompanyShareForWorkspace(entityId, workspaceId), entityId));
             }
             case "person" -> {
-                Person person = personMapper.getVisiblePersonByIdForUpdate(workspaceId, entityId);
+                Person person = personMapper.getVisiblePersonByIdForUpdate(workspaceId, operationVisibilityScope.workspaceIdsJson(), entityId);
                 yield person != null && (person.getWorkspaceId() == workspaceId
                     || Objects.equals(shareMapper.lockPersonShareForWorkspace(entityId, workspaceId), entityId));
             }
@@ -258,7 +258,7 @@ public class AttachmentWriteOperations {
     private void requireTenantTarget(int workspaceId, String entityType, int entityId, RecordVisibilityScope operationVisibilityScope) {
         boolean exists = switch (entityType) {
             case "company" -> companyMapper.exists(workspaceId, operationVisibilityScope.workspaceIdsJson(), entityId);
-            case "person" -> personMapper.exists(workspaceId, entityId);
+            case "person" -> personMapper.exists(workspaceId, operationVisibilityScope.workspaceIdsJson(), entityId);
             case "deal" -> dealMapper.exists(workspaceId, entityId);
             case "note" -> noteMapper.exists(workspaceId, entityId);
             case "user" -> true;

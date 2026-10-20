@@ -107,7 +107,7 @@ class AttachmentWriteOperationsTest {
     @Test
     void createExternalRejectsMissingTargetsBeforeInsert() {
         Attachment missing = attachment("person", 42, "https://example.com/missing.pdf");
-        when(personMapper.exists(5, 42)).thenReturn(false);
+        when(personMapper.exists(5, "[7,8,9]", 42)).thenReturn(false);
 
         assertThrows(ResourceNotFoundException.class,
             () -> operations.createExternal(5, missing));
@@ -258,7 +258,7 @@ class AttachmentWriteOperationsTest {
         stubLockedAuthority(Map.of(7, Set.of(Permission.ATTACHMENT_CREATE)));
         switch (type) {
             case "company" -> when(companyMapper.exists(5, "[7,8,9]", 43)).thenReturn(true);
-            case "person" -> when(personMapper.exists(5, 43)).thenReturn(true);
+            case "person" -> when(personMapper.exists(5, "[7,8,9]", 43)).thenReturn(true);
             case "deal" -> when(dealMapper.exists(5, 43)).thenReturn(true);
             default -> throw new IllegalArgumentException(type);
         }
@@ -283,8 +283,8 @@ class AttachmentWriteOperationsTest {
         } else {
             Person shared = new Person();
             shared.setWorkspaceId(6);
-            when(personMapper.exists(5, 43)).thenReturn(true);
-            when(personMapper.getVisiblePersonByIdForUpdate(5, 43)).thenReturn(shared);
+            when(personMapper.exists(5, "[7,8,9]", 43)).thenReturn(true);
+            when(personMapper.getVisiblePersonByIdForUpdate(5, "[7,8,9]", 43)).thenReturn(shared);
         }
         ScannedUpload scanned = mock(ScannedUpload.class);
         stubAdmittedStorage(scanned);
@@ -299,7 +299,7 @@ class AttachmentWriteOperationsTest {
         } else {
             var order = inOrder(managedObjectService, personMapper, shareMapper);
             order.verify(managedObjectService).storeInspectedAttachment(eq(5), eq(scanned), any(Runnable.class));
-            order.verify(personMapper).getVisiblePersonByIdForUpdate(5, 43);
+            order.verify(personMapper).getVisiblePersonByIdForUpdate(5, "[7,8,9]", 43);
             order.verify(shareMapper).lockPersonShareForWorkspace(43, 5);
         }
         verify(attachmentMapper, never()).insert(any(Attachment.class));

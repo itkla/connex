@@ -820,7 +820,7 @@ public class RecordCommentService {
 
     private boolean isTargetVisible(int workspaceId, TargetType targetType, int targetId, RecordVisibilityScope operationVisibilityScope) {
         return switch (targetType) {
-            case PERSON -> personMapper.exists(workspaceId, targetId);
+            case PERSON -> personMapper.exists(workspaceId, operationVisibilityScope.workspaceIdsJson(), targetId);
             case COMPANY -> companyMapper.exists(workspaceId, operationVisibilityScope.workspaceIdsJson(), targetId);
             case DEAL -> dealMapper.exists(workspaceId, targetId);
         };
@@ -831,7 +831,7 @@ public class RecordCommentService {
             TargetType targetType,
             List<Integer> targetIds, RecordVisibilityScope operationVisibilityScope) {
         return switch (targetType) {
-            case PERSON -> personMapper.getByIds(workspaceId, targetIds).stream()
+            case PERSON -> personMapper.getByIds(workspaceId, operationVisibilityScope.workspaceIdsJson(), targetIds).stream()
                 .map(Person::getId)
                 .toList();
             case COMPANY -> companyMapper.getByIds(workspaceId, operationVisibilityScope.workspaceIdsJson(), targetIds).stream()

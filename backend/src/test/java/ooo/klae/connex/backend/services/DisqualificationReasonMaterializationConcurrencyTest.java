@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -213,7 +214,7 @@ class DisqualificationReasonMaterializationConcurrencyTest {
             releaseAndShutDown(executor, releaseArchive);
         }
 
-        assertNull(personMapper.getPersonById(workspace.getId(), person.getId())
+        assertNull(personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId())
             .getLifecycleStage());
     }
 
@@ -322,9 +323,9 @@ class DisqualificationReasonMaterializationConcurrencyTest {
         }
 
         assertEquals(PersonLifecycleStage.DISQUALIFIED,
-            personMapper.getPersonById(workspace.getId(), person.getId()).getLifecycleStage());
+            personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId()).getLifecycleStage());
         assertEquals(PersonDisqualificationReason.NO_FIT,
-            personMapper.getPersonById(workspace.getId(), person.getId()).getDisqualifiedReason());
+            personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId()).getDisqualifiedReason());
         assertEquals(9, jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM disqualification_reason WHERE workspace_id = ?",
             Integer.class, workspace.getId()));

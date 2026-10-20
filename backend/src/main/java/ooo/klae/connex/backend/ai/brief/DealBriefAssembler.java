@@ -264,9 +264,10 @@ public class DealBriefAssembler {
         if (requested.isEmpty()) return Set.of();
         List<Integer> ids = List.copyOf(requested);
         Set<Integer> allowed = new LinkedHashSet<>();
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         for (int from = 0; from < ids.size(); from += MAX_PERSON_LOOKUP_BATCH) {
             int to = Math.min(ids.size(), from + MAX_PERSON_LOOKUP_BATCH);
-            List<Person> batch = personMapper.getByIds(workspaceId, ids.subList(from, to));
+            List<Person> batch = personMapper.getByIds(workspaceId, personWorkspaceIdsJson, ids.subList(from, to));
             AiCancellation.throwIfInterrupted();
             for (Person person : batch) {
                 if (person != null && person.getSuspendedAt() == null && person.getProvisionCeasedAt() == null) {

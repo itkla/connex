@@ -107,6 +107,8 @@ import tools.jackson.databind.ObjectMapper;
  */
 @Service
 public class AudienceExportService {
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
 
     private static final Logger log = LoggerFactory.getLogger(AudienceExportService.class);
     private static final String CHANNEL = "email";
@@ -169,11 +171,11 @@ public class AudienceExportService {
             PlatformTransactionManager transactionManager,
             ObjectMapper objectMapper,
             SmartValidator validator,
-            MeterRegistry meterRegistry) {
+            MeterRegistry meterRegistry, RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess) {
         this(sessionSecurityService, campaignMapper, campaignAudienceExportMapper, personMapper, audienceEligibilityService,
                 connectorConfigService, deliveryProviderRouter, deliveryProperties, capabilityRegistry,
                 workspaceService, tenantContext, auditService, transactionManager, objectMapper, validator,
-                meterRegistry, System::nanoTime);
+                meterRegistry, System::nanoTime, recordVisibilityScopeControlAccess);
     }
 
     AudienceExportService(
@@ -193,7 +195,8 @@ public class AudienceExportService {
             ObjectMapper objectMapper,
             SmartValidator validator,
             MeterRegistry meterRegistry,
-            LongSupplier nanoTimeSource) {
+            LongSupplier nanoTimeSource, RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess) {
+        this.recordVisibilityScopeControlAccess = Objects.requireNonNull(recordVisibilityScopeControlAccess, "recordVisibilityScopeControlAccess");
         this.sessionSecurityService = Objects.requireNonNull(sessionSecurityService, "sessionSecurityService");
         this.campaignMapper = Objects.requireNonNull(campaignMapper, "campaignMapper");
         this.campaignAudienceExportMapper = Objects.requireNonNull(
@@ -234,6 +237,14 @@ public class AudienceExportService {
             throw new ForbiddenException("Campaign delivery is not enabled on this instance");
         }
         String connector = normalizeConnector(request.connector());
+        var personVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(workspaceId, personVisibilityScope,
+            () -> createExportWithinPersonScope(campaignId, request, workspaceId, actorId, connector, personVisibilityScope.workspaceIdsJson()));
+    }
+
+    private CampaignAudienceExportDto createExportWithinPersonScope(
+            int campaignId, CampaignAudienceExportRequest request, int workspaceId, int actorId,
+            String connector, String personWorkspaceIdsJson) {
         PreparedExport prepared = inNewTransaction(() -> prepareExport(
                 workspaceId, actorId, campaignId, request.snapshotVersion(), connector))
                 .orElseThrow(() -> new BadRequestException(
@@ -261,7 +272,7 @@ public class AudienceExportService {
         FinalAudience finalAudience;
         try {
             finalAudience = inNewTransaction(() -> finalRevalidation(
-                    workspaceId, actorId, campaignId, prepared, target));
+                    workspaceId, actorId, campaignId, prepared, target, personWorkspaceIdsJson));
         } catch (ForbiddenException exception) {
             inNewTransaction(() -> recordFailedBeforePush(
                     workspaceId, actorId, campaignId, prepared, null));
@@ -405,7 +416,7 @@ public class AudienceExportService {
             int actorId,
             int campaignId,
             PreparedExport prepared,
-            ResolvedAudienceTarget target) {
+            ResolvedAudienceTarget target, String personWorkspaceIdsJson) {
         requireExportPermissions(workspaceService.lockedMemberPermissionsFor(workspaceId, actorId));
         requireCampaignForUpdate(workspaceId, campaignId);
         CampaignAudienceSnapshot snapshot = campaignMapper.getSnapshotForShare(
@@ -427,7 +438,7 @@ public class AudienceExportService {
         List<Integer> frozenMemberIds = parseMemberIds(export);
         AudienceClassification classification = audienceEligibilityService.classify(
                 workspaceId, frozenMemberIds, snapshot.getChannel(), snapshot.getPurpose());
-        MaterializedAudience audience = audienceMembers(workspaceId, classification.includedIds());
+        MaterializedAudience audience = audienceMembers(workspaceId, classification.includedIds(), personWorkspaceIdsJson);
         int excludedCount = frozenMemberIds.size() - audience.memberIds().size();
         export.setExternalListId(target.externalListId());
         export.setPushedMemberIdsJson(serializeMemberIds(audience.memberIds()));
@@ -524,12 +535,12 @@ public class AudienceExportService {
         return classification.includedIds();
     }
 
-    private MaterializedAudience audienceMembers(int workspaceId, List<Integer> eligibleIds) {
+    private MaterializedAudience audienceMembers(int workspaceId, List<Integer> eligibleIds, String personWorkspaceIdsJson) {
         if (eligibleIds.isEmpty()) {
             return new MaterializedAudience(List.of(), List.of());
         }
         Map<Integer, Person> byId = new HashMap<>();
-        for (Person person : personMapper.getByIds(workspaceId, eligibleIds)) {
+        for (Person person : personMapper.getByIds(workspaceId, personWorkspaceIdsJson, eligibleIds)) {
             byId.put(person.getId(), person);
         }
         List<Integer> memberIds = new ArrayList<>(eligibleIds.size());

@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -224,7 +225,7 @@ class RelationshipSignalMapperTest extends AbstractServiceTest {
                 workspace.getId(), java.util.Set.of(), java.util.Set.of(), java.util.Set.of()))
             .thenReturn(Map.of(subject.getId(), persistedSourceHash));
         when(scoringService.companySourceStateHashes(workspace.getId())).thenReturn(Map.of());
-        when(detectorPersonMapper.getByIds(workspace.getId(), List.of(subject.getId())))
+        when(detectorPersonMapper.getByIds(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), List.of(subject.getId())))
             .thenReturn(List.of(subject));
         RelationshipSignalDetectorService detector = new RelationshipSignalDetectorService(
             scoringService,

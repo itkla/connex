@@ -248,7 +248,7 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   tightening requires a separate explicit decision. It deliberately differs from the active-only
   `OrganizationWorkspaceScopeControlAccess` used by Identity, PersonEdge and assistant ceilings.
   `IntroductionMapper`, `DuplicateReviewMapper`, `NoteMapper`, `ReportMapper`, `SegmentMapper`,
-  `PipelineMapper`, `CompanyMapper` and `DealMapper` now bind this set through `JSON_TABLE` and read tenant tables only;
+  `PipelineMapper`, `CompanyMapper`, `DealMapper` and `PersonMapper` now bind this set through `JSON_TABLE` and read tenant tables only;
   duplicate counts omit the optional employer-label joins.
   Note pages and their counts reuse one scope and author-ID snapshot, and global note search reuses
   one scope across both bounded candidate streams. Company evidence resolves its scope before the
@@ -294,6 +294,12 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   fresh reads bypass both memos. The Company
   parity corpus extends the shared frozen oracle and minimal tenant-catalog fixture without changing
   existing corpora, and its scratch catalog contains only the ten tenant tables used by these statements.
+  Person's 29 statements retain separate person visibility and employer masking ceilings, including
+  assistant-primary reads, owned archived detail and visible-person locks. Employer filters, facets,
+  counts, evidence aggregation and limits remain in tenant SQL. Compound browser reads and operation
+  loops reuse one unfiltered snapshot; skipped work retains deferred boundaries, while mutations
+  capture before their original authorization and record locks. The Person frozen corpus and minimal
+  eleven-table tenant catalog cover every statement without control tables.
   These mappers' crossing baseline entries are removed. Segment calls already inside campaign and
   workflow locks retain their transaction shape; #2159 (L-scope) owns the context-installed snapshot
   and fail-fast guard required before catalog routing can be enabled. The routing default
@@ -319,9 +325,8 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   the exact #2165 prepared snapshot, with no lookup or suspension. Its destructive-operation
   staleness remains the flag-enable prerequisite **#2172**, including newly created workspaces missed
   by erasure and deleted workspaces still present in the prepared set. No fence is implemented here.
-  Full restriction-service split-catalog coverage additionally depends on converting PersonMapper's
-  remaining visibility/company joins; the isolated cache restriction/purge transaction has its own
-  minimal tenant-catalog coverage. Routing remains disabled.
+  Person visibility/company joins now execute without control tables; the isolated cache
+  restriction/purge transaction retains its own minimal tenant-catalog coverage. Routing remains disabled.
 
 - **Context-installed workspace scopes (#2159 / #2176 / #485 P5b).** In both modes, request
   resolution, public API authentication and workspace job entries prepare immutable unfiltered and

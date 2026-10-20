@@ -396,7 +396,7 @@ public class RecordCreationTemplateValidator {
         }
         boolean exists = switch (fieldKey) {
             case "company" -> companyMapper.exists(workspaceId, orgWorkspaceIdsJson, id);
-            case "referrerPerson" -> personMapper.exists(workspaceId, id);
+            case "referrerPerson" -> personMapper.exists(workspaceId, orgWorkspaceIdsJson, id);
             case "pipeline" -> pipelineMapper.pipelineExists(workspaceId, orgWorkspaceIdsJson, id);
             case "stage" -> pipelineMapper.getVisibleStageById(workspaceId, orgWorkspaceIdsJson, id) != null;
             default -> false;

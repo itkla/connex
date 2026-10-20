@@ -89,12 +89,16 @@ public class RecordCreationAugmentationService {
         return requireAvailable(exact.resolved());
     }
 
-    void validatePersonReferences(Integer companyId, Integer referrerPersonId) {
+    void validatePersonReferences(Integer companyId, Integer referrerPersonId, RecordVisibilityScope scope) {
+        if (companyId == null && referrerPersonId == null) {
+            return;
+        }
+        String personWorkspaceIdsJson = scope.workspaceIdsJson();
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        if (companyId != null && !companyMapper.exists(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), companyId)) {
+        if (companyId != null && !companyMapper.exists(workspaceId, personWorkspaceIdsJson, companyId)) {
             throw relatedRecordNotFound();
         }
-        if (referrerPersonId != null && !personMapper.exists(workspaceId, referrerPersonId)) {
+        if (referrerPersonId != null && !personMapper.exists(workspaceId, personWorkspaceIdsJson, referrerPersonId)) {
             throw relatedRecordNotFound();
         }
     }
@@ -127,14 +131,14 @@ public class RecordCreationAugmentationService {
     PreparedAugmentation preparePerson(
             Integer companyId,
             Integer referrerPersonId,
-            RecordCreationAugmentation augmentation) {
+            RecordCreationAugmentation augmentation, RecordVisibilityScope scope) {
         return prepare(
             RecordCreationRecordType.person,
             augmentation,
             List.of(),
             List.of(),
             nullable(referrerPersonId),
-            companies(companyId, augmentation), null);
+            companies(companyId, augmentation), scope);
     }
 
     PreparedAugmentation prepareCompany(RecordCreationAugmentation augmentation) {
@@ -390,7 +394,7 @@ public class RecordCreationAugmentationService {
             }
         }
         for (int personId : sortedUnique(personIds)) {
-            Person person = personMapper.getVisiblePersonByIdForUpdate(workspaceId, personId);
+            Person person = personMapper.getVisiblePersonByIdForUpdate(workspaceId, orgWorkspaceIdsJson, personId);
             if (person == null) {
                 throw relatedRecordNotFound();
             }

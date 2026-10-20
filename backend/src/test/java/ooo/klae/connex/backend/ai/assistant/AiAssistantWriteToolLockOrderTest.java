@@ -83,7 +83,7 @@ class AiAssistantWriteToolLockOrderTest extends AbstractAiAssistantWriteToolTest
         order.verify(chatMapper).getTurnByIdForUpdate(
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId());
         order.verify(taskService).lockBoardForCreation();
-        order.verify(personService).lockProcessablePersonForShare(31);
+        order.verify(personService).lockProcessablePersonForShare(org.mockito.ArgumentMatchers.eq(31), org.mockito.ArgumentMatchers.anyString());
         order.verify(personService).getPersonById(31);
         order.verify(restrictionEpoch).retainReadFenceUntilTransactionCompletionIfCurrent(
                 TURN.workspaceId(), TURN.restrictionEpoch());
@@ -92,7 +92,7 @@ class AiAssistantWriteToolLockOrderTest extends AbstractAiAssistantWriteToolTest
         verify(chatMapper, times(1)).lockPrivacyBarrierForShare(TURN.workspaceId());
         verify(restrictionEpoch, times(1)).retainReadFenceUntilTransactionCompletionIfCurrent(
                 TURN.workspaceId(), TURN.restrictionEpoch());
-        verify(personService, never()).lockProcessablePersonForUpdate(anyInt());
+        verify(personService, never()).lockProcessablePersonForUpdate(anyInt(), org.mockito.ArgumentMatchers.anyString());
     }
 
     @Test
@@ -247,7 +247,7 @@ class AiAssistantWriteToolLockOrderTest extends AbstractAiAssistantWriteToolTest
 
         assertEquals("An immediate assistant tool cannot name a principal", refused.getMessage());
         verify(taskService, never()).lockBoardForCreation();
-        verify(personService, never()).lockProcessablePersonForShare(anyInt());
+        verify(personService, never()).lockProcessablePersonForShare(anyInt(), org.mockito.ArgumentMatchers.anyString());
         verify(taskService, never()).create(any(Task.class));
     }
 
@@ -266,7 +266,7 @@ class AiAssistantWriteToolLockOrderTest extends AbstractAiAssistantWriteToolTest
         order.verify(dealService).lockDealForUpdate(44);
         order.verify(dealService).getDealById(44);
         order.verify(taskService).create(any(Task.class));
-        verify(personService, never()).lockProcessablePersonForShare(anyInt());
+        verify(personService, never()).lockProcessablePersonForShare(anyInt(), org.mockito.ArgumentMatchers.anyString());
     }
 
     @Test
@@ -292,7 +292,7 @@ class AiAssistantWriteToolLockOrderTest extends AbstractAiAssistantWriteToolTest
                 TURN.workspaceId(), TURN.sessionId(), TOOL_CALL_ID);
         order.verify(chatMapper).getTurnByIdForUpdate(
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId());
-        order.verify(personService).lockProcessablePersonForUpdate(31);
+        order.verify(personService).lockProcessablePersonForUpdate(org.mockito.ArgumentMatchers.eq(31), org.mockito.ArgumentMatchers.anyString());
         order.verify(personService).getPersonById(31);
         order.verify(activityService).getActivitiesByPersonIdInWindow(
                 eq(31), any(), any(), eq(101));
@@ -301,7 +301,7 @@ class AiAssistantWriteToolLockOrderTest extends AbstractAiAssistantWriteToolTest
         order.verify(chatMapper).lockPrivacyBarrierForShare(TURN.workspaceId());
         order.verify(activityService).create(any(Activity.class));
         verify(taskService, never()).lockBoardForCreation();
-        verify(personService, never()).lockProcessablePersonForShare(anyInt());
+        verify(personService, never()).lockProcessablePersonForShare(anyInt(), org.mockito.ArgumentMatchers.anyString());
     }
 
     @Test
@@ -392,7 +392,7 @@ class AiAssistantWriteToolLockOrderTest extends AbstractAiAssistantWriteToolTest
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId());
         order.verify(chatMapper).getToolCallBySessionForUpdate(
                 TURN.workspaceId(), TURN.sessionId(), TOOL_CALL_ID);
-        order.verify(personService).lockProcessablePersonForUpdate(31);
+        order.verify(personService).lockProcessablePersonForUpdate(org.mockito.ArgumentMatchers.eq(31), org.mockito.ArgumentMatchers.anyString());
         order.verify(personService).getPersonById(31);
         order.verify(restrictionEpoch).retainReadFenceUntilTransactionCompletionIfCurrent(
                 TURN.workspaceId(), TURN.restrictionEpoch());

@@ -54,6 +54,8 @@ import ooo.klae.connex.backend.tenant.TenantContext;
 @Service
 @RequiredArgsConstructor
 public class CampaignSendService {
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
 
     private static final String DEFAULT_CHANNEL = "email";
     private static final Set<String> DISPATCHABLE_CHANNELS = Set.of("email", "sms");
@@ -165,6 +167,7 @@ public class CampaignSendService {
         if (request == null) {
             throw new BadRequestException("Campaign send is required");
         }
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         Set<Permission> permissions = workspaceService.lockedMemberPermissionsFor(
                 workspaceId, workspaceService.getCurrentUserId());
         Campaign campaign = campaignMapper.getCampaignForUpdate(workspaceId, campaignId);
@@ -219,7 +222,7 @@ public class CampaignSendService {
         send.setStatus("draft");
         send.setScheduledAt(request.scheduledAt());
         send.setCreatedById(authService.getCurrentUser().getId());
-        List<CampaignDelivery> deliveries = materialize(workspaceId, snapshot.getId(), channel);
+        List<CampaignDelivery> deliveries = materialize(workspaceId, snapshot.getId(), channel, personWorkspaceIdsJson);
         send.setTotalRecipients(deliveries.size());
         campaignSendMapper.insertSend(send);
         for (CampaignDelivery delivery : deliveries) {
@@ -325,7 +328,7 @@ public class CampaignSendService {
         }
     }
 
-    private List<CampaignDelivery> materialize(int workspaceId, int snapshotId, DeliveryChannel channel) {
+    private List<CampaignDelivery> materialize(int workspaceId, int snapshotId, DeliveryChannel channel, String personWorkspaceIdsJson) {
         List<Integer> personIds = campaignMapper.getSnapshotMembersForShare(workspaceId, snapshotId).stream()
                 .filter(member -> "included".equals(member.getStatus()))
                 .map(CampaignAudienceMember::getRecordId)
@@ -334,7 +337,7 @@ public class CampaignSendService {
             return List.of();
         }
         Map<Integer, String> addresses = new HashMap<>();
-        for (Person person : personMapper.getByIds(workspaceId, personIds)) {
+        for (Person person : personMapper.getByIds(workspaceId, personWorkspaceIdsJson, personIds)) {
             String address = ChannelAddressNormalizer.addressFor(channel, person);
             if (address != null) {
                 addresses.put(person.getId(), address);

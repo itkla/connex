@@ -803,19 +803,19 @@ class CoreRecordSecurityIntegrationTest {
         if ("activities:POST".equals(operation)) {
             doAnswer(invocation -> {
                 writeAtPerson.countDown();
-                return realMapper.getVisiblePersonByIdForUpdate(workspace.getId(), person.getId());
-            }).when(personMapper).getVisiblePersonByIdForUpdate(workspace.getId(), person.getId());
+                return realMapper.getVisiblePersonByIdForUpdate(workspace.getId(), invocation.getArgument(1), person.getId());
+            }).when(personMapper).getVisiblePersonByIdForUpdate(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId());
         } else {
             doAnswer(invocation -> {
                 writeAtPerson.countDown();
-                return realMapper.getVisiblePersonByIdForShare(workspace.getId(), person.getId());
-            }).when(personMapper).getVisiblePersonByIdForShare(workspace.getId(), person.getId());
+                return realMapper.getVisiblePersonByIdForShare(workspace.getId(), invocation.getArgument(1), person.getId());
+            }).when(personMapper).getVisiblePersonByIdForShare(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId());
         }
         doAnswer(invocation -> {
-            boolean visible = realMapper.exists(workspace.getId(), person.getId());
+            boolean visible = realMapper.exists(workspace.getId(), invocation.getArgument(1), person.getId());
             writeAtPerson.countDown();
             return visible;
-        }).when(personMapper).exists(workspace.getId(), person.getId());
+        }).when(personMapper).exists(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId());
         try (var executor = Executors.newFixedThreadPool(2)) {
             var revocation = executor.submit(() -> new TransactionTemplate(transactionManager).executeWithoutResult(tx -> {
                 assertNotNull(realMapper.getOwnedPersonByIdForUpdate(owner.getId(), person.getId()));

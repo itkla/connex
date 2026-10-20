@@ -68,6 +68,8 @@ import ooo.klae.connex.backend.util.DocumentBodySchema;
 @Service
 @RequiredArgsConstructor
 public class DocumentDeliveryService {
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     private static final String SENT = "sent";
     private static final String VIEWED = "viewed";
     private static final Set<String> LIVE = Set.of(SENT, VIEWED);
@@ -101,6 +103,7 @@ public class DocumentDeliveryService {
         String requestId = DocumentDeliveryIdempotencyKey.canonicalize(idempotencyKey);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = workspaceService.getCurrentUserId();
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         requireLockedPermission(workspaceId, actorId);
         Deal deal = lockDeal(workspaceId, dealId);
         DealDocument document = lockDocument(workspaceId, dealId, documentId);
@@ -122,7 +125,7 @@ public class DocumentDeliveryService {
         if (deliveryMapper.findActiveByDocument(workspaceId, documentId) != null) {
             throw new BadRequestException("This document already has a live delivery");
         }
-        requireRecipientPeople(workspaceId, recipients);
+        requireRecipientPeople(workspaceId, recipients, personWorkspaceIdsJson);
         DocumentSignatureProvider provider = providerRouter.adapterFor(request.getProvider());
         requireOutboundProvider(provider);
         emailService.requireTransport(workspaceId);
@@ -438,10 +441,10 @@ public class DocumentDeliveryService {
     }
 
     private void requireRecipientPeople(
-            int workspaceId, List<NormalizedRecipient> recipients) {
+            int workspaceId, List<NormalizedRecipient> recipients, String personWorkspaceIdsJson) {
         for (NormalizedRecipient recipient : recipients) {
             if (recipient.personId() != null
-                    && !personMapper.exists(workspaceId, recipient.personId())) {
+                    && !personMapper.exists(workspaceId, personWorkspaceIdsJson, recipient.personId())) {
                 throw new ResourceNotFoundException("Recipient person was not found");
             }
         }

@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyMap;
@@ -270,7 +271,7 @@ class RelationshipSignalDetectorSnapshotIntegrationTest {
                 detection.get(20, TimeUnit.SECONDS).candidates().getFirst().getSubjectLabel());
             assertEquals(
                 "Warm target after mutation",
-                personMapper.getPersonById(workspace.getId(), target.getId()).getName());
+                personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), target.getId()).getName());
         } finally {
             releaseDetector.countDown();
             executor.shutdownNow();

@@ -95,7 +95,7 @@ public class InteractionHistoryImportService {
     @Transactional(readOnly = true)
     @RequirePermission(Permission.ACTIVITY_CREATE)
     public HistoryImportPreviewResult previewActivities(HistoryImportRequest request) {
-        return preview(Kind.ACTIVITY, request);
+        return preview(Kind.ACTIVITY, request, null);
     }
 
     /** Commits an activity-history import using {@code ACTIVITY_CREATE}. */
@@ -109,7 +109,7 @@ public class InteractionHistoryImportService {
     @Transactional(readOnly = true)
     @RequirePermission(Permission.NOTE_CREATE)
     public HistoryImportPreviewResult previewNotes(HistoryImportRequest request) {
-        return preview(Kind.NOTE, request);
+        return preview(Kind.NOTE, request, null);
     }
 
     /** Commits a note-history import using {@code NOTE_CREATE}. */
@@ -123,7 +123,7 @@ public class InteractionHistoryImportService {
     @Transactional(readOnly = true)
     @RequirePermission(Permission.TASK_CREATE)
     public HistoryImportPreviewResult previewTasks(HistoryImportRequest request) {
-        return preview(Kind.TASK, request);
+        return preview(Kind.TASK, request, null);
     }
 
     /** Commits a task-history import using {@code TASK_CREATE}. */
@@ -135,7 +135,7 @@ public class InteractionHistoryImportService {
 
     private HistoryImportPreviewResult preview(
             Kind kind,
-            HistoryImportRequest request) {
+            HistoryImportRequest request, String personWorkspaceIdsJson) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Mapping mapping = validateRequest(kind, request);
         String reviewContext = reviewContext(kind, workspaceId, request);
@@ -149,7 +149,7 @@ public class InteractionHistoryImportService {
                 workspaceId,
                 request.getLinks(),
                 matchable,
-                session.responses());
+                session.responses(), personWorkspaceIdsJson);
             applyProvenance(kind, workspaceId, plan);
             duplicatePreflightService.completeImportPreview(
                 session, decisionFingerprint(plan));
@@ -180,7 +180,7 @@ public class InteractionHistoryImportService {
             workspaceId,
             request.getLinks(),
             matchable,
-            session.responses());
+            session.responses(), recordVisibilityScope.workspaceIdsJson());
         applyProvenance(kind, workspaceId, plan);
         duplicatePreflightService.completeImportCommit(
             session, decisionFingerprint(plan));
@@ -549,14 +549,14 @@ public class InteractionHistoryImportService {
             int workspaceId,
             Map<Integer, Integer> requestedLinks,
             List<PlanRow> plan,
-            List<DuplicatePreflightResponse> responses) {
+            List<DuplicatePreflightResponse> responses, String personWorkspaceIdsJson) {
         if (plan.size() != responses.size()) {
             throw new IllegalStateException("Duplicate preflight response count changed");
         }
         Map<Integer, Integer> links =
             requestedLinks == null ? Map.of() : requestedLinks;
         Map<Integer, Person> manualTargets =
-            manualTargets(workspaceId, links.values());
+            manualTargets(workspaceId, links.values(), personWorkspaceIdsJson);
         for (int index = 0; index < plan.size(); index++) {
             PlanRow row = plan.get(index);
             DuplicatePreflightResponse response = responses.get(index);
@@ -572,13 +572,16 @@ public class InteractionHistoryImportService {
 
     private Map<Integer, Person> manualTargets(
             int workspaceId,
-            java.util.Collection<Integer> ids) {
+            java.util.Collection<Integer> ids, String personWorkspaceIdsJson) {
         if (ids.isEmpty()) {
             return Map.of();
         }
+        if (personWorkspaceIdsJson == null) {
+            personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        }
         List<Integer> distinct = ids.stream().distinct().sorted().toList();
         Map<Integer, Person> targets = new HashMap<>();
-        for (Person person : personMapper.getByIds(workspaceId, distinct)) {
+        for (Person person : personMapper.getByIds(workspaceId, personWorkspaceIdsJson, distinct)) {
             if (person.getWorkspaceId() == workspaceId && processable(person)) {
                 targets.put(person.getId(), person);
             }

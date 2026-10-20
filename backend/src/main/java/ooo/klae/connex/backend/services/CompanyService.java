@@ -1051,7 +1051,7 @@ public class CompanyService {
     private List<Person> getPersonsByCompanyIdWithinVisibilityScope(int companyId, int limit, RecordVisibilityScope operationVisibilityScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requireCompany(workspaceId, companyId, operationVisibilityScope);
-        return personMapper.getPersonsByCompanyId(workspaceId, companyId, limit);
+        return personMapper.getPersonsByCompanyId(workspaceId, operationVisibilityScope.workspaceIdsJson(), companyId, limit);
     }
 
     /**

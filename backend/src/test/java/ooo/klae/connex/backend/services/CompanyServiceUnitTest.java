@@ -139,7 +139,7 @@ class CompanyServiceUnitTest {
         assertEquals(12, engagement.personCount());
         assertEquals(12, engagement.weeklyEngagement().size());
         verify(personMapper).getCompanyEngagementPeople(7, 9, 5);
-        verify(personMapper, never()).getPersonsByCompanyId(7, 9, null);
+        verify(personMapper, never()).getPersonsByCompanyId(7, "[7,8,9]", 9, null);
         verify(dealMapper, never()).getDealsByCompanyIdPage(7, 9, 5);
     }
 

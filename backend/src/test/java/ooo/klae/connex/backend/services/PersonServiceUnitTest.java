@@ -52,11 +52,11 @@ class PersonServiceUnitTest {
             mock(RecordCreationAugmentationService.class),
             mock(ooo.klae.connex.backend.mappers.ProviderCaptureMapper.class),
             mock(ooo.klae.connex.backend.ai.mission.AiAgentPrivacyService.class),
-            mock(RecordVisibilityScopeControlAccess.class)
+            ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered()
         );
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(mapper.countPersons(
-            7, "Security", null, null, false, MemberScope.allTeam(),
+            7, "[7,8,9]", "Security", null, null, false, MemberScope.allTeam(),
             null, false, null, false, null, false, false, null)).thenReturn(1001L);
 
         assertThrows(BadRequestException.class,
@@ -65,7 +65,7 @@ class PersonServiceUnitTest {
                 null, false, false, null));
 
         verify(mapper, never()).getPersonIdsFiltered(
-            7, "Security", null, null, false, MemberScope.allTeam(), null, false, null, false,
+            7, "[7,8,9]", "Security", null, null, false, MemberScope.allTeam(), null, false, null, false,
             null, false, false, null, 1000);
     }
 }

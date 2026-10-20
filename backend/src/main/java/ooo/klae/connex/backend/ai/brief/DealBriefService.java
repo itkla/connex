@@ -27,6 +27,7 @@ import ooo.klae.connex.backend.ai.AiStructuredOutcome;
 import ooo.klae.connex.backend.beans.AiOutputCache;
 import ooo.klae.connex.backend.dto.DealBriefDto;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
 import ooo.klae.connex.backend.services.WorkspaceService;
 
 /**
@@ -36,6 +37,8 @@ import ooo.klae.connex.backend.services.WorkspaceService;
 @Service
 @RequiredArgsConstructor
 public class DealBriefService {
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     static final int MAX_TOKENS = 8192;
     static final int MIN_SECTIONS = 3;
     static final int MAX_SECTIONS = 4;
@@ -80,6 +83,11 @@ public class DealBriefService {
         }
 
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(workspaceId,
+            () -> generateWithinPersonScope(workspaceId, dealId, refresh, profile.get()));
+    }
+
+    private DealBriefDto generateWithinPersonScope(int workspaceId, int dealId, boolean refresh, AiGenerationProfile profile) {
         String cacheFeature = cacheFeature();
         CacheIdentity identity = CacheIdentity.forSubject(
                 workspaceId, AiFeature.DEAL_BRIEF, dealId, LocaleContextHolder.getLocale());
@@ -91,7 +99,7 @@ public class DealBriefService {
             return DealBriefDto.unavailable(dealId, INSUFFICIENT_DATA);
         }
         String contentHash = aiOutputCacheStore.contentHash(
-                profile.get(), assembly.prompt(), assembly.context(),
+                profile, assembly.prompt(), assembly.context(),
                 sourceRegistryHashMaterial(assembly.sourceRegistry()));
         if (!refresh) {
             DealBriefDto cached = cached(

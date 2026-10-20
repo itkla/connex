@@ -217,9 +217,9 @@ class AiOutputCacheRestrictionConcurrencyIntegrationTest {
         doAnswer(invocation -> {
             saveLockAttempted.countDown();
             return realPersonMapper.getVisiblePersonByIdForUpdate(
-                    granteeWorkspace.getId(), personId);
+                    granteeWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, granteeWorkspace.getId()), personId);
         }).when(personMapperSpy).getVisiblePersonByIdForUpdate(
-                granteeWorkspace.getId(), personId);
+                granteeWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, granteeWorkspace.getId()), personId);
         ExecutorService executor = Executors.newFixedThreadPool(2);
 
         try {
@@ -252,11 +252,11 @@ class AiOutputCacheRestrictionConcurrencyIntegrationTest {
         CountDownLatch restrictionLockAttempted = new CountDownLatch(1);
         PersonMapper realPersonMapper = sqlSessionTemplate.getMapper(PersonMapper.class);
         doAnswer(invocation -> {
-            Person locked = realPersonMapper.getVisiblePersonByIdForUpdate(granteeWorkspaceId, personId);
+            Person locked = realPersonMapper.getVisiblePersonByIdForUpdate(granteeWorkspaceId, orgWorkspaceIdsJson(workspaceMapper, granteeWorkspaceId), personId);
             saveLocked.countDown();
             assertTrue(releaseSave.await(30, TimeUnit.SECONDS));
             return locked;
-        }).when(personMapperSpy).getVisiblePersonByIdForUpdate(granteeWorkspaceId, personId);
+        }).when(personMapperSpy).getVisiblePersonByIdForUpdate(granteeWorkspaceId, orgWorkspaceIdsJson(workspaceMapper, granteeWorkspaceId), personId);
         doAnswer(invocation -> {
             restrictionLockAttempted.countDown();
             return realPersonMapper.getOwnedPersonByIdForUpdate(ownerWorkspaceId, personId);

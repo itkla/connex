@@ -68,8 +68,8 @@ class BulkOperationServiceTest extends AbstractServiceTest {
         assertEquals(1, result.getFailed());
         assertEquals(1, result.getErrors().size());
         assertEquals(2, result.getErrors().get(0).getRowIndex());
-        assertFalse(personMapper.exists(workspace.getId(), p1.getId()));
-        assertFalse(personMapper.exists(workspace.getId(), p2.getId()));
+        assertFalse(personMapper.exists(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), p1.getId()));
+        assertFalse(personMapper.exists(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), p2.getId()));
     }
 
     @Test
@@ -82,8 +82,8 @@ class BulkOperationServiceTest extends AbstractServiceTest {
 
         assertEquals(1, result.getSucceeded());
         assertEquals(1, result.getFailed());
-        assertFalse(personMapper.exists(workspace.getId(), local.getId()));
-        assertNotNull(personMapper.getPersonById(other.getId(), foreign.getId()),
+        assertFalse(personMapper.exists(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), local.getId()));
+        assertNotNull(personMapper.getPersonById(other.getId(), orgWorkspaceIdsJson(workspaceMapper, other.getId()), foreign.getId()),
             "a record in another workspace must never be touched by a bulk operation");
     }
 
@@ -94,7 +94,7 @@ class BulkOperationServiceTest extends AbstractServiceTest {
         shareMapper.sharePerson(foreign.getId(), other.getId(), workspace.getId(), currentUser.getId(), true,
             orgWorkspaceIdsJson(workspaceMapper, other.getId()));
 
-        assertTrue(personMapper.exists(workspace.getId(), foreign.getId()),
+        assertTrue(personMapper.exists(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), foreign.getId()),
             "a shared-in record is read-visible");
         assertFalse(personMapper.existsOwned(workspace.getId(), foreign.getId()),
             "but it is not owned by the workspace");
@@ -103,7 +103,7 @@ class BulkOperationServiceTest extends AbstractServiceTest {
 
         assertEquals(0, result.getSucceeded());
         assertEquals(1, result.getFailed());
-        assertNotNull(personMapper.getPersonById(other.getId(), foreign.getId()),
+        assertNotNull(personMapper.getPersonById(other.getId(), orgWorkspaceIdsJson(workspaceMapper, other.getId()), foreign.getId()),
             "a record only shared into the workspace must never be mutated by a bulk operation");
     }
 
@@ -221,8 +221,8 @@ class BulkOperationServiceTest extends AbstractServiceTest {
         assertEquals(1, result.getSucceeded());
         assertEquals(2, result.getFailed());
         assertEquals(owner.getId(),
-            personMapper.getPersonById(workspace.getId(), local.getId()).getOwnerId());
-        assertNull(personMapper.getPersonById(other.getId(), foreign.getId()).getOwnerId());
+            personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), local.getId()).getOwnerId());
+        assertNull(personMapper.getPersonById(other.getId(), orgWorkspaceIdsJson(workspaceMapper, other.getId()), foreign.getId()).getOwnerId());
     }
 
     @Test
@@ -237,7 +237,7 @@ class BulkOperationServiceTest extends AbstractServiceTest {
         assertThrows(ForbiddenException.class,
             () -> bulkOperationService.assignOwnerToPersons(List.of(person.getId()), outsider.getId()));
         assertNull(companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), company.getId()).getOwnerId());
-        assertNull(personMapper.getPersonById(workspace.getId(), person.getId()).getOwnerId());
+        assertNull(personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId()).getOwnerId());
     }
 
     @Test

@@ -50,6 +50,8 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
 @Service
 @RequiredArgsConstructor
 public class PersonQualificationService {
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
 
     private final PersonMapper personMapper;
     private final PersonQualificationMapper qualificationMapper;
@@ -67,7 +69,8 @@ public class PersonQualificationService {
      */
     public PersonQualificationDto getQualification(int personId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        requireOwnedPerson(workspaceId, personId);
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        requireOwnedPerson(workspaceId, personId, personWorkspaceIdsJson);
         return project(workspaceId, personId);
     }
 
@@ -248,8 +251,8 @@ public class PersonQualificationService {
         return person;
     }
 
-    private Person requireOwnedPerson(int workspaceId, int personId) {
-        Person person = personMapper.getPersonById(workspaceId, personId);
+    private Person requireOwnedPerson(int workspaceId, int personId, String personWorkspaceIdsJson) {
+        Person person = personMapper.getPersonById(workspaceId, personWorkspaceIdsJson, personId);
         if (person == null || person.getWorkspaceId() != workspaceId) {
             throw new ResourceNotFoundException("Contact not found");
         }

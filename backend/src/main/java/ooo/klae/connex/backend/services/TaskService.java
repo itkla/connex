@@ -178,23 +178,20 @@ public class TaskService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.TASK_CREATE)
     public Task create(Task task) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceService.getCurrentWorkspaceId(), () -> createWithinVisibilityScope(task));
+        return create(task, MutationAdmission.UNRESTRICTED);
     }
 
-    private Task createWithinVisibilityScope(Task task) {
-        return createWithinVisibilityScope(task, MutationAdmission.UNRESTRICTED);
-    }
 
     /** Performs the canonical action after its final under-lock mutation admission. */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.TASK_CREATE)
     public Task create(Task task, MutationAdmission admission) {
+        var personVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceService.getCurrentWorkspaceId(), () -> createWithinVisibilityScope(task, admission));
+            workspaceService.getCurrentWorkspaceId(), personVisibilityScope, () -> createWithinVisibilityScope(task, admission, personVisibilityScope.workspaceIdsJson()));
     }
 
-    private Task createWithinVisibilityScope(Task task, MutationAdmission admission) {
+    private Task createWithinVisibilityScope(Task task, MutationAdmission admission, String personWorkspaceIdsJson) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         User actor = currentActorOrNull();
         task.setWorkspaceId(workspaceId);
@@ -203,7 +200,7 @@ public class TaskService {
         task.setStatus(task.isCompleted() ? STATUS_DONE : STATUS_TODO);
         task.setPosition(taskMapper.nextTaskPosition(workspaceId, task.getStatus()));
         task.setCreatedAt(null);
-        validateLinkedRecords(task, workspaceId);
+        validateLinkedRecords(task, workspaceId, personWorkspaceIdsJson);
         workspaceService.requirePermission(Permission.TASK_CREATE);
         admission.beforeMutation();
         taskMapper.insert(task);
@@ -223,11 +220,12 @@ public class TaskService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.TASK_UPDATE)
     public Task update(int id, Task task) {
+        var personVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceService.getCurrentWorkspaceId(), () -> updateWithinVisibilityScope(id, task));
+            workspaceService.getCurrentWorkspaceId(), personVisibilityScope, () -> updateWithinVisibilityScope(id, task, personVisibilityScope.workspaceIdsJson()));
     }
 
-    private Task updateWithinVisibilityScope(int id, Task task) {
+    private Task updateWithinVisibilityScope(int id, Task task, String personWorkspaceIdsJson) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         lockAssignee(task, workspaceId);
         List<Task> lockedTasks = lockTaskBoardTasks(workspaceId, id);
@@ -249,7 +247,7 @@ public class TaskService {
         task.setPosition(resolved.equals(beforeStatus)
             ? before.getPosition()
             : taskMapper.nextTaskPosition(workspaceId, resolved));
-        validateLinkedRecords(task, workspaceId);
+        validateLinkedRecords(task, workspaceId, personWorkspaceIdsJson);
         workspaceService.requirePermission(Permission.TASK_UPDATE);
         if (taskMapper.update(task) != 1) {
             throw new ResourceNotFoundException("Task not found with id: " + id);
@@ -661,9 +659,9 @@ public class TaskService {
     }
 
     /** Retains the person and its exact visibility grant after the board lock until commit. */
-    private void validateLinkedRecords(Task task, int workspaceId) {
+    private void validateLinkedRecords(Task task, int workspaceId, String personWorkspaceIdsJson) {
         if (task.getPerson() != null) {
-            Person person = personMapper.getVisiblePersonByIdForShare(workspaceId, task.getPerson().getId());
+            Person person = personMapper.getVisiblePersonByIdForShare(workspaceId, personWorkspaceIdsJson, task.getPerson().getId());
             if (person == null || (person.getWorkspaceId() != workspaceId
                     && shareMapper.lockPersonShareForWorkspace(person.getId(), workspaceId) == null)) {
                 throw new ResourceNotFoundException("Contact not found");

@@ -149,7 +149,7 @@ class DealVisibilityScopeTest {
         List<DealPerson> links = IntStream.rangeClosed(11, 13).mapToObj(id -> {
             Person person = new Person();
             person.setId(id);
-            when(people.getPersonById(7, id)).thenReturn(person);
+            when(people.getPersonById(7, "[7,8,9]", id)).thenReturn(person);
             DealPerson link = new DealPerson();
             link.setPerson(person);
             link.setRole("champion");

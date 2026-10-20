@@ -114,21 +114,17 @@ class RecordListControllerTest {
         MemberScope memberScope = MemberScope.fromRequest(null, null, 7);
         when(workspaceService.getCurrentUserId()).thenReturn(7);
         when(memberScopeResolver.resolve(null, null, 7)).thenReturn(memberScope);
-        when(personService.getPersonsPage(
-            null, null, null, null, null, false, memberScope, null, false, null, false, null, false, false, null, 100, 0)).thenReturn(List.of());
-        when(personService.countPersons(
-            null, null, null, false, memberScope, null, false, null, false, null, false, false, null)).thenReturn(0L);
+        when(personService.queryPersonsPage(
+            null, null, null, null, null, false, memberScope, null, false, null, false, null, false, false, null, 100, 0)).thenReturn(new PageResponse<>(List.of(), 0L));
 
         var response = controller.getPersonsPage(
             0, 500, null, null, null, null, null, false, null, null, null, false, null, false, null, false,
             null, false, null, false);
 
         assertEquals(0, response.total());
-        verify(personService).getPersonsPage(
+        verify(personService).queryPersonsPage(
             null, null, null, null, null, false, memberScope, null, false, null, false,
             null, false, false, null, 100, 0);
-        verify(personService).countPersons(
-            null, null, null, false, memberScope, null, false, null, false, null, false, false, null);
     }
 
     @Test
@@ -140,23 +136,18 @@ class RecordListControllerTest {
         when(workspaceService.getCurrentUserId()).thenReturn(7);
         when(memberScopeResolver.resolve(null, null, 7)).thenReturn(memberScope);
         when(warmthFilterResolver.resolve(null, false, null, "warmth")).thenReturn(warmth);
-        when(personService.getPersonsPage(
+        when(personService.queryPersonsPage(
             null, "warmth", "desc", null, null, false, memberScope, null, false, null, false,
-            null, false, false, warmth, 25, 0)).thenReturn(List.of());
-        when(personService.countPersons(
-            null, null, null, false, memberScope, null, false, null, false, null, false, false,
-            warmth)).thenReturn(0L);
+            null, false, false, warmth, 25, 0)).thenReturn(new PageResponse<>(List.of(), 0L));
 
         var response = controller.getPersonsPage(
             1, 25, null, "warmth", "desc", null, null, false, null, null, null, false, null, false, null, false,
             null, false, null, false);
 
         assertEquals(0, response.total());
-        verify(personService).getPersonsPage(
+        verify(personService).queryPersonsPage(
             null, "warmth", "desc", null, null, false, memberScope, null, false, null, false,
             null, false, false, warmth, 25, 0);
-        verify(personService).countPersons(
-            null, null, null, false, memberScope, null, false, null, false, null, false, false, warmth);
     }
 
     @Test
@@ -168,19 +159,17 @@ class RecordListControllerTest {
         when(workspaceService.getCurrentUserId()).thenReturn(7);
         when(memberScopeResolver.resolve(null, null, 7)).thenReturn(memberScope);
         when(warmthFilterResolver.resolve(List.of("cool", "cold"), true, 30, null)).thenReturn(warmth);
-        when(personService.getPersonsPage(
+        when(personService.queryPersonsPage(
             null, null, null, null, null, false, memberScope, null, false, null, false,
-            null, false, false, warmth, 25, 0)).thenReturn(List.of());
+            null, false, false, warmth, 25, 0)).thenReturn(new PageResponse<>(List.of(), 0L));
 
         controller.getPersonsPage(
             1, 25, null, null, null, null, null, false, null, null, null, false, null, false, null, false,
             List.of("cool", "cold"), true, 30, false);
 
-        verify(personService).getPersonsPage(
+        verify(personService).queryPersonsPage(
             null, null, null, null, null, false, memberScope, null, false, null, false,
             null, false, false, warmth, 25, 0);
-        verify(personService).countPersons(
-            null, null, null, false, memberScope, null, false, null, false, null, false, false, warmth);
     }
 
     @Test
@@ -189,24 +178,18 @@ class RecordListControllerTest {
         MemberScope memberScope = MemberScope.fromRequest("members", List.of(3, 5), 7);
         when(workspaceService.getCurrentUserId()).thenReturn(7);
         when(memberScopeResolver.resolve("members", List.of(3, 5), 7)).thenReturn(memberScope);
-        when(personService.getPersonsPage(
+        when(personService.queryPersonsPage(
             "%Target%", "name", "desc", List.of("Acme"), List.of("Director"), true,
-            memberScope, null, false, null, false, null, false, false, null, 25, 25)).thenReturn(List.of());
-        when(personService.countPersons(
-            "%Target%", List.of("Acme"), List.of("Director"), true, memberScope,
-            null, false, null, false, null, false, false, null)).thenReturn(4L);
+            memberScope, null, false, null, false, null, false, false, null, 25, 25)).thenReturn(new PageResponse<>(List.of(), 4L));
 
         var response = controller.getPersonsPage(
             2, 25, "Target", "name", "desc", List.of("Acme"), List.of("Director"), true,
             "members", List.of(3, 5), null, false, null, false, null, false, null, false, null, false);
 
         assertEquals(4, response.total());
-        verify(personService).getPersonsPage(
+        verify(personService).queryPersonsPage(
             "%Target%", "name", "desc", List.of("Acme"), List.of("Director"), true,
             memberScope, null, false, null, false, null, false, false, null, 25, 25);
-        verify(personService).countPersons(
-            "%Target%", List.of("Acme"), List.of("Director"), true, memberScope,
-            null, false, null, false, null, false, false, null);
     }
 
     @Test
@@ -500,10 +483,9 @@ class RecordListControllerTest {
         List<String> companies = List.of("Acme");
         List<String> titles = List.of("Director");
         List<FacetCount> owners = List.of(new FacetCount("7", 2, null));
-        when(personService.distinctCompanies()).thenReturn(companies);
-        when(personService.distinctTitles()).thenReturn(titles);
-        when(personService.hasPersonWithoutCompany()).thenReturn(true);
-        when(personService.countsByOwner()).thenReturn(owners);
+        when(personService.getPersonFacets(null)).thenReturn(
+            new ooo.klae.connex.backend.dto.PersonFacets(companies, titles, true, owners, 0L,
+                List.of(), List.of(), List.of(), null));
 
         var facets = controller.getPersonFacets(false);
 

@@ -166,9 +166,9 @@ class AiAssistantWriteToolServiceTest {
         AiAssistantDateResolver dateResolver = new AiAssistantDateResolver(authService, CLOCK);
         AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
         PersonMapper personMapper = mock(PersonMapper.class);
-        when(personMapper.getPersonById(TURN.workspaceId(), 31))
+        when(personMapper.getPersonById(TURN.workspaceId(), "[7,8,9]", 31))
                 .thenReturn(person(31));
-        when(personMapper.getByIds(TURN.workspaceId(), List.of(31)))
+        when(personMapper.getByIds(TURN.workspaceId(), "[7,8,9]", List.of(31)))
                 .thenReturn(List.of(person(31)));
         addTagTool = spy(new AiAssistantAddTagWriteTool(
                 tagService, personService, companyService, dealService));
@@ -568,7 +568,7 @@ class AiAssistantWriteToolServiceTest {
         service.executeAuto(TURN, 29, result -> { });
 
         InOrder order = inOrder(personService, restrictionEpoch);
-        order.verify(personService).lockProcessablePersonForUpdate(31);
+        order.verify(personService).lockProcessablePersonForUpdate(org.mockito.ArgumentMatchers.eq(31), org.mockito.ArgumentMatchers.anyString());
         order.verify(restrictionEpoch)
                 .retainReadFenceUntilTransactionCompletionIfCurrent(
                         TURN.workspaceId(), TURN.restrictionEpoch());
@@ -775,7 +775,7 @@ class AiAssistantWriteToolServiceTest {
         assertThrows(ConflictException.class, () -> service.approve(TURN.sessionId(), 29));
 
         InOrder order = inOrder(personService, restrictionEpoch);
-        order.verify(personService).lockProcessablePersonForUpdate(31);
+        order.verify(personService).lockProcessablePersonForUpdate(org.mockito.ArgumentMatchers.eq(31), org.mockito.ArgumentMatchers.anyString());
         order.verify(restrictionEpoch)
                 .retainReadFenceUntilTransactionCompletionIfCurrent(
                         TURN.workspaceId(), TURN.restrictionEpoch());
@@ -794,7 +794,7 @@ class AiAssistantWriteToolServiceTest {
                 "person",
                 31);
         stored(write, 29);
-        when(personService.lockProcessablePersonForUpdate(31))
+        when(personService.lockProcessablePersonForUpdate(org.mockito.ArgumentMatchers.eq(31), org.mockito.ArgumentMatchers.anyString()))
                 .thenThrow(new ResourceNotFoundException("Person not found"));
 
         assertThrows(
@@ -827,7 +827,7 @@ class AiAssistantWriteToolServiceTest {
         storedToolCall.setCreatedAt(proposedAt);
         Person edited = person(31);
         edited.setUpdatedAt(updatedAt);
-        when(personService.lockProcessablePersonForUpdate(31)).thenReturn(edited);
+        when(personService.lockProcessablePersonForUpdate(org.mockito.ArgumentMatchers.eq(31), org.mockito.ArgumentMatchers.anyString())).thenReturn(edited);
 
         assertThrows(ConflictException.class, () -> service.approve(TURN.sessionId(), 29));
 
@@ -852,7 +852,7 @@ class AiAssistantWriteToolServiceTest {
         storedToolCall.setCreatedAt("2026-03-05 12:00:00.400000");
         Person edited = person(31);
         edited.setUpdatedAt("2026-03-05 11:59:59");
-        when(personService.lockProcessablePersonForUpdate(31)).thenReturn(edited);
+        when(personService.lockProcessablePersonForUpdate(org.mockito.ArgumentMatchers.eq(31), org.mockito.ArgumentMatchers.anyString())).thenReturn(edited);
         Person owned = person(31);
         owned.setOwnerId(21);
         when(personService.updateOwner(31, 21)).thenReturn(owned);
@@ -879,7 +879,7 @@ class AiAssistantWriteToolServiceTest {
         storedToolCall.setCreatedAt("2026-03-05 12:00:00.000000");
         Person edited = person(31);
         edited.setUpdatedAt("2026-03-05 12:00:30.000000");
-        when(personService.lockProcessablePersonForShare(31)).thenReturn(edited);
+        when(personService.lockProcessablePersonForShare(org.mockito.ArgumentMatchers.eq(31), org.mockito.ArgumentMatchers.anyString())).thenReturn(edited);
         when(personService.getPersonById(31)).thenReturn(edited);
 
         assertEquals(
@@ -888,7 +888,7 @@ class AiAssistantWriteToolServiceTest {
 
         InOrder order = inOrder(taskService, personService, restrictionEpoch);
         order.verify(taskService).lockBoardForCreation();
-        order.verify(personService).lockProcessablePersonForShare(31);
+        order.verify(personService).lockProcessablePersonForShare(org.mockito.ArgumentMatchers.eq(31), org.mockito.ArgumentMatchers.anyString());
         order.verify(restrictionEpoch).retainReadFenceUntilTransactionCompletionIfCurrent(
                 TURN.workspaceId(), TURN.restrictionEpoch());
         order.verify(taskService).create(any(Task.class));
@@ -1523,7 +1523,7 @@ class AiAssistantWriteToolServiceTest {
         storedToolCall.setCreatedAt("2026-03-06 14:59:00.000000");
         Person unchanged = person(31);
         unchanged.setUpdatedAt("2026-03-06 14:00:00.000000");
-        when(personService.lockProcessablePersonForUpdate(31)).thenReturn(unchanged);
+        when(personService.lockProcessablePersonForUpdate(org.mockito.ArgumentMatchers.eq(31), org.mockito.ArgumentMatchers.anyString())).thenReturn(unchanged);
         when(personService.getPersonById(31)).thenReturn(unchanged);
         when(personService.removeTag(31, 9)).thenReturn(true);
 
@@ -1557,7 +1557,7 @@ class AiAssistantWriteToolServiceTest {
                 ConflictException.class, () -> service.approve(TURN.sessionId(), 29));
 
         assertEquals("Assistant proposal target changed", refused.getMessage());
-        verify(personService, never()).lockProcessablePersonForUpdate(anyInt());
+        verify(personService, never()).lockProcessablePersonForUpdate(anyInt(), org.mockito.ArgumentMatchers.anyString());
         verify(personService, never()).removeTag(anyInt(), anyInt());
         verify(chatMapper, never()).updateToolCall(
                 anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
@@ -1589,7 +1589,7 @@ class AiAssistantWriteToolServiceTest {
 
         assertThrows(ConflictException.class, () -> service.approve(TURN.sessionId(), 29));
 
-        verify(personService, never()).lockProcessablePersonForUpdate(anyInt());
+        verify(personService, never()).lockProcessablePersonForUpdate(anyInt(), org.mockito.ArgumentMatchers.anyString());
         verify(personService, never()).removeTag(anyInt(), anyInt());
         verify(chatMapper, never()).updateToolCall(anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
     }
@@ -1655,7 +1655,7 @@ class AiAssistantWriteToolServiceTest {
         storedToolCall.setCreatedAt("2026-03-06 14:59:00.000000");
         Person unchanged = person(31);
         unchanged.setUpdatedAt("2026-03-06 14:00:00.000000");
-        when(personService.lockProcessablePersonForUpdate(31)).thenReturn(unchanged);
+        when(personService.lockProcessablePersonForUpdate(org.mockito.ArgumentMatchers.eq(31), org.mockito.ArgumentMatchers.anyString())).thenReturn(unchanged);
         when(personService.getPersonById(31)).thenReturn(unchanged);
         when(leadResponseSlaService.startFirstResponseClock(31, 48)).thenReturn(true);
 
@@ -1684,14 +1684,14 @@ class AiAssistantWriteToolServiceTest {
         storedToolCall.setCreatedAt("2026-03-06 14:59:00.000000");
         Person edited = person(31);
         edited.setUpdatedAt("2026-03-06 14:59:30.000000");
-        when(personService.lockProcessablePersonForUpdate(31)).thenReturn(edited);
+        when(personService.lockProcessablePersonForUpdate(org.mockito.ArgumentMatchers.eq(31), org.mockito.ArgumentMatchers.anyString())).thenReturn(edited);
         when(personService.getPersonById(31)).thenReturn(edited);
 
         ConflictException refused = assertThrows(
                 ConflictException.class, () -> service.approve(TURN.sessionId(), 29));
 
         assertEquals("Assistant proposal target changed", refused.getMessage());
-        verify(personService).lockProcessablePersonForUpdate(31);
+        verify(personService).lockProcessablePersonForUpdate(org.mockito.ArgumentMatchers.eq(31), org.mockito.ArgumentMatchers.anyString());
         verify(leadResponseSlaService, never()).startFirstResponseClock(anyInt(), any());
         verify(chatMapper, never()).updateToolCall(
                 anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
@@ -1714,7 +1714,7 @@ class AiAssistantWriteToolServiceTest {
 
         assertEquals(
                 "Requires the PERSON_UPDATE permission in this workspace", refused.getMessage());
-        verify(personService, never()).lockProcessablePersonForUpdate(anyInt());
+        verify(personService, never()).lockProcessablePersonForUpdate(anyInt(), org.mockito.ArgumentMatchers.anyString());
         verify(leadResponseSlaService, never()).startFirstResponseClock(anyInt(), any());
     }
 
@@ -1736,7 +1736,7 @@ class AiAssistantWriteToolServiceTest {
         assertTrue(refusal.recoverable());
         assertEquals("unresolved_reference", refusal.detailReason());
         verify(personService).isOwnedByCurrentWorkspace(31);
-        verify(personService, never()).lockProcessablePersonForUpdate(anyInt());
+        verify(personService, never()).lockProcessablePersonForUpdate(anyInt(), org.mockito.ArgumentMatchers.anyString());
         verify(leadResponseSlaService, never()).startFirstResponseClock(anyInt(), any());
     }
 

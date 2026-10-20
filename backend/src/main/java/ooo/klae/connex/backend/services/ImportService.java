@@ -205,15 +205,17 @@ public class ImportService {
      */
     @RequirePermission(Permission.PERSON_CREATE)
     public ImportPreviewResult previewPersons(ImportRequest request) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceService.getCurrentWorkspaceId(), () -> previewPersonsWithinVisibilityScope(request));
+            workspaceId, scope, () -> previewPersonsWithinVisibilityScope(request, scope));
     }
 
-    private ImportPreviewResult previewPersonsWithinVisibilityScope(ImportRequest request) {
+    private ImportPreviewResult previewPersonsWithinVisibilityScope(ImportRequest request, RecordVisibilityScope scope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         String action = resolveAction(request.getOnDuplicate());
         ImportAnalysis analysis =
-            analyzePersons(request, workspaceId, ImportPhase.PREVIEW, null);
+            analyzePersons(request, workspaceId, ImportPhase.PREVIEW, null, scope);
         List<PlanRow> plan = analysis.plan();
         try {
             preflightPreview(
@@ -254,7 +256,7 @@ public class ImportService {
             duplicateDecisionLockService.lockCurrentOrganization();
             int actorId = authService.getCurrentUser().getId();
             ImportAnalysis analysis = analyzePersons(
-                request, workspaceId, ImportPhase.COMMIT, admission, reviewContext);
+                request, workspaceId, ImportPhase.COMMIT, admission, reviewContext, scope);
             List<PlanRow> plan = analysis.plan();
             List<PlanRow> mutations = analysis.mutations();
             requireUpdatePermission(mutations, action, Permission.PERSON_UPDATE);
@@ -359,13 +361,13 @@ public class ImportService {
             ImportRequest request,
             int workspaceId,
             ImportPhase phase,
-            DuplicatePreflightService.ImportCommitAdmission admission) {
+            DuplicatePreflightService.ImportCommitAdmission admission, RecordVisibilityScope scope) {
         return analyzePersons(
             request,
             workspaceId,
             phase,
             admission,
-            importReviewContext("person", workspaceId, request));
+            importReviewContext("person", workspaceId, request), scope);
     }
 
     private ImportAnalysis analyzePersons(
@@ -373,7 +375,7 @@ public class ImportService {
             int workspaceId,
             ImportPhase phase,
             DuplicatePreflightService.ImportCommitAdmission admission,
-            String reviewContext) {
+            String reviewContext, RecordVisibilityScope scope) {
         Map<String, ColumnMapping> byColumn = mappingByColumn(request.getMapping(), PERSON_FIELDS);
         Map<String, CustomFieldDefinition> defs = customDefsByColumn("person", request.getMapping());
         List<PlanRow> plan = collectRows(request, byColumn, defs, "company", null, null, null);
@@ -390,7 +392,7 @@ public class ImportService {
                 if (INVALID.equals(row.status)) continue;
                 Integer linked = links.get(row.rowIndex);
                 if (linked != null) {
-                    Person existing = getOwnedPerson(workspaceId, linked);
+                    Person existing = getOwnedPerson(workspaceId, linked, scope.workspaceIdsJson());
                     if (existing == null) {
                         fail(row, "Linked contact #" + linked + " not found");
                         continue;
@@ -419,7 +421,7 @@ public class ImportService {
             applyCompanyDependencyFailures(
                 mutations,
                 row -> personCompanyDependencyRequired(
-                    workspaceId, row, action));
+                    workspaceId, row, action, scope.workspaceIdsJson()));
             return new ImportAnalysis(plan, mutations, reviewProof);
         } catch (RuntimeException exception) {
             cancelPreviewAnalysis(phase, reviewProof);
@@ -491,15 +493,15 @@ public class ImportService {
             || customChanged;
     }
 
-    private Person getOwnedPerson(int workspaceId, int personId) {
+    private Person getOwnedPerson(int workspaceId, int personId, String personWorkspaceIdsJson) {
         if (!personMapper.existsOwned(workspaceId, personId)) return null;
-        return personMapper.getPersonById(workspaceId, personId);
+        return personMapper.getPersonById(workspaceId, personWorkspaceIdsJson, personId);
     }
 
     private boolean personCompanyDependencyRequired(
             int workspaceId,
             PlanRow row,
-            String action) {
+            String action, String personWorkspaceIdsJson) {
         if (row.companyName == null || !willWrite(row, action)) {
             return false;
         }
@@ -509,7 +511,7 @@ public class ImportService {
         if (row.matchedId == null) {
             return true;
         }
-        Person existing = getOwnedPerson(workspaceId, row.matchedId);
+        Person existing = getOwnedPerson(workspaceId, row.matchedId, personWorkspaceIdsJson);
         return existing == null || existing.getCompany() == null;
     }
 

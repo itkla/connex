@@ -40,7 +40,7 @@ class SegmentVisibilityScopeTest {
     private final PersonMapper people = mock(PersonMapper.class);
     private final PersonEdgeReadService edges = mock(PersonEdgeReadService.class);
     private final ScoringService scoring = mock(ScoringService.class);
-    private final RecordVisibilityScopeControlAccess scopes = mock(RecordVisibilityScopeControlAccess.class);
+    private final RecordVisibilityScopeControlAccess scopes = ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
     private final SegmentService service = new SegmentService(
         mock(WorkspaceService.class), mock(AuthService.class), scoring, mock(DealRiskService.class),
         segments, edges, people, mock(TagMapper.class), new SegmentCatalog(), scopes);
@@ -78,6 +78,7 @@ class SegmentVisibilityScopeTest {
             verify(segments).companyIdsWithWarmIntro(7, "[7,8,9]", 17, candidates(after), 2);
         }
         verify(segments, never()).companyIdsInWorkspace(7);
+        verify(scopes).withDeferredWorkspaceScopeRead(eq(7), org.mockito.ArgumentMatchers.any());
         verifyNoMoreInteractions(scopes);
         verifyNoInteractions(people, edges);
     }
@@ -117,6 +118,7 @@ class SegmentVisibilityScopeTest {
         assertEquals(41, calls.getFirst().get("id"));
         assertEquals(List.of(41, 42), calls.getLast().get("ids"));
         verify(scopes).getForWorkspace(7);
+        verify(scopes).withDeferredWorkspaceScopeRead(eq(7), org.mockito.ArgumentMatchers.any());
         verifyNoMoreInteractions(scopes);
         if (restricted) {
             verify(segments, never()).personIdsMatching(anyMap());
@@ -138,6 +140,7 @@ class SegmentVisibilityScopeTest {
         assertTrue(service.matchesEntity(7, 17, "company", definition, 31));
 
         verify(scopes).getForWorkspace(7);
+        verify(scopes).withDeferredWorkspaceScopeRead(eq(7), org.mockito.ArgumentMatchers.any());
         verifyNoMoreInteractions(scopes);
         verify(segments).companyIdsNoActivitySince(7, "[7,8,9]", 30, List.of(31));
         verify(segments).companyIdsWithWarmIntro(7, "[7,8,9]", 17, List.of(31), 2);
@@ -151,7 +154,7 @@ class SegmentVisibilityScopeTest {
         edge.setSourcePersonId(21);
         edge.setTargetPersonId(22);
         edge.setStrength(2);
-        when(people.getEngagedPersonIds(7)).thenReturn(List.of(21));
+        when(people.getEngagedPersonIds(7, "[7,8,9]")).thenReturn(List.of(21));
         when(edges.getAllEdges(7)).thenReturn(List.of(edge));
         when(segments.companyIdsForPersonsWithoutUserActivity(7, "[7,8,9]", 17, List.of(22), null))
             .thenReturn(List.of(31));
@@ -163,9 +166,10 @@ class SegmentVisibilityScopeTest {
         var order = inOrder(scopes, people, edges, segments);
         order.verify(scopes).getForWorkspace(7);
         order.verify(segments).companyIdsNoActivitySince(7, "[7,8,9]", 30, null);
-        order.verify(people).getEngagedPersonIds(7);
+        order.verify(people).getEngagedPersonIds(7, "[7,8,9]");
         order.verify(edges).getAllEdges(7);
         order.verify(segments).companyIdsForPersonsWithoutUserActivity(7, "[7,8,9]", 17, List.of(22), null);
+        verify(scopes).withDeferredWorkspaceScopeRead(eq(7), org.mockito.ArgumentMatchers.any());
         verifyNoMoreInteractions(scopes);
     }
 
@@ -183,6 +187,7 @@ class SegmentVisibilityScopeTest {
         }
         verifyNoMoreInteractions(scoring);
         verify(scopes).getForWorkspace(7);
+        verify(scopes).withDeferredWorkspaceScopeRead(eq(7), org.mockito.ArgumentMatchers.any());
         verifyNoMoreInteractions(scopes);
     }
 
@@ -193,7 +198,9 @@ class SegmentVisibilityScopeTest {
         assertEquals(List.of(), service.evaluate(7, 17, "person", null, 2));
         assertFalse(service.matchesEntity(7, 17, "person", null, 31));
         assertFalse(service.matchesEntity(7, 17, "person", definition("all", company("is", "41")), 31));
-        verifyNoInteractions(scopes);
+        verify(scopes, org.mockito.Mockito.times(5)).withDeferredWorkspaceScopeRead(eq(7), org.mockito.ArgumentMatchers.any());
+        verify(scopes, never()).getForWorkspace(7);
+        verifyNoMoreInteractions(scopes);
     }
 
     private void pages() {

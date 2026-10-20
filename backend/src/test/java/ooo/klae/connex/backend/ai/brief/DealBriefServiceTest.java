@@ -84,7 +84,7 @@ class DealBriefServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new DealBriefService(
+        service = new DealBriefService(ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered(),
                 dealBriefAssembler,
                 aiInvocationService,
                 aiInvocationAdmissionService,
@@ -654,7 +654,7 @@ class DealBriefServiceTest {
             }
             return acquired;
         }).when(coordinator).acquire(any(), anyString(), anyBoolean());
-        var concurrentService = new DealBriefService(dealBriefAssembler, aiInvocationService,
+        var concurrentService = new DealBriefService(ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered(), dealBriefAssembler, aiInvocationService,
                 coordinator, aiFeatureGate, aiOutputCacheStore, workspaceService, Clock.fixed(NOW, ZoneOffset.UTC));
         when(aiOutputCacheStore.find(WORKSPACE_ID, CACHE_FEATURE, DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
                 .thenAnswer(call -> Optional.of(committed.get()));

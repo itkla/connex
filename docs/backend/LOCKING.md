@@ -1746,6 +1746,13 @@ only a zero-recipient draft/export from it; its old send badge may render the ra
 Those display limitations are accepted during rollback because no data is lost and no provider send
 can result from the synthetic snapshot.
 
+Person visibility statements bind the same unfiltered scope as Company visibility. Mutation roots
+capture it before their first authorization, duplicate mutex or person lock and pass it to nested
+validation/readback. Visible person `FOR UPDATE`/`FOR SHARE` and exact grant locks remain on the
+original tenant transaction connection. Bulk mutations retain independent commits, and empty,
+restricted or independently handled work uses deferred operation scopes. GET projections use the
+separate read callback; effectful session admission stays outside that callback.
+
 ## Duplicate review, record mutation, and imports
 
 `DuplicateDecisionLockService` serializes candidate-affecting mutations across the same-organization visibility domain.

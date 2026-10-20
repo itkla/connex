@@ -144,8 +144,8 @@ class AiAssistantWriteTargetGateCacheIntegrationTest {
         assertGateRereadsCommittedState(
                 "person",
                 person.getId(),
-                id -> personMapper.getPersonById(workspace.getId(), id).getName(),
-                id -> personMapper.getVisiblePersonByIdForShare(workspace.getId(), id).getId());
+                id -> personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), id).getName(),
+                id -> personMapper.getVisiblePersonByIdForShare(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), id).getId());
     }
 
     @Test
@@ -153,8 +153,8 @@ class AiAssistantWriteTargetGateCacheIntegrationTest {
         assertGateRereadsCommittedState(
                 "person",
                 person.getId(),
-                id -> personMapper.getPersonById(workspace.getId(), id).getName(),
-                id -> personMapper.getVisiblePersonByIdForUpdate(workspace.getId(), id).getId());
+                id -> personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), id).getName(),
+                id -> personMapper.getVisiblePersonByIdForUpdate(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), id).getId());
     }
 
     @Test

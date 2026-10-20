@@ -57,33 +57,33 @@ public class BulkOperationService {
     public BulkOperationResult addTagToPersons(List<Integer> ids, int tagId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requireTag(workspaceId, tagId);
-        return apply(ids, id -> personMapper.existsOwned(workspaceId, id), id -> personService.addTag(id, tagId));
+        return applyWithWorkspaceScope(workspaceId, ids, id -> personMapper.existsOwned(workspaceId, id), id -> personService.addTag(id, tagId));
     }
 
     @RequirePermission(Permission.PERSON_UPDATE)
     public BulkOperationResult removeTagFromPersons(List<Integer> ids, int tagId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requireTag(workspaceId, tagId);
-        return apply(ids, id -> personMapper.existsOwned(workspaceId, id), id -> personService.removeTag(id, tagId));
+        return applyWithWorkspaceScope(workspaceId, ids, id -> personMapper.existsOwned(workspaceId, id), id -> personService.removeTag(id, tagId));
     }
 
     @RequirePermission(Permission.PERSON_DELETE)
     public BulkOperationResult archivePersons(List<Integer> ids) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        return apply(ids, id -> personMapper.existsOwned(workspaceId, id), personService::archive);
+        return applyWithWorkspaceScope(workspaceId, ids, id -> personMapper.existsOwned(workspaceId, id), personService::archive);
     }
 
     @RequirePermission(Permission.PERSON_DELETE)
     public BulkOperationResult restorePersons(List<Integer> ids) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        return apply(ids, id -> personMapper.existsOwnedArchived(workspaceId, id), personService::restore);
+        return applyWithWorkspaceScope(workspaceId, ids, id -> personMapper.existsOwnedArchived(workspaceId, id), personService::restore);
     }
 
     @RequirePermission(Permission.PERSON_UPDATE)
     public BulkOperationResult assignOwnerToPersons(List<Integer> ids, Integer ownerId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (ownerId != null) workspaceService.requireMember(workspaceId, ownerId);
-        return apply(ids, id -> personMapper.existsOwned(workspaceId, id),
+        return applyWithWorkspaceScope(workspaceId, ids, id -> personMapper.existsOwned(workspaceId, id),
             id -> personService.updateOwner(id, ownerId));
     }
 

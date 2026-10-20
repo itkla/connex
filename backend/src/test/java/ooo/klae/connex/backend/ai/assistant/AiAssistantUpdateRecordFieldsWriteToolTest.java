@@ -353,7 +353,7 @@ class AiAssistantUpdateRecordFieldsWriteToolTest extends AbstractAiAssistantWrit
         company.setId(52);
         before.setCompany(company);
         when(personService.getPersonById(31)).thenReturn(before);
-        when(personService.lockProcessablePersonForUpdate(31)).thenReturn(before);
+        when(personService.lockProcessablePersonForUpdate(org.mockito.ArgumentMatchers.eq(31), org.mockito.ArgumentMatchers.anyString())).thenReturn(before);
         when(personService.update(eq(31), any())).thenReturn(before);
         AiAssistantWriteToolService service = service();
         propose(service, "update_record_fields", "{\"handle\":\"r1\",\"title\":\"Director\"}", "person", 31);

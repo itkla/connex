@@ -91,9 +91,9 @@ class ShareReadIsolationMapperTest extends AbstractMapperTest {
         Person person = newPersonIn(foreign);
         insertShare("person_share", "person_id", person.getId(), workspace.getId());
 
-        assertNull(personMapper.getPersonById(workspace.getId(), person.getId()));
-        assertFalse(personMapper.exists(workspace.getId(), person.getId()));
-        assertTrue(personMapper.getProcessablePersonIds(workspace.getId(), java.util.List.of(person.getId())).isEmpty());
+        assertNull(personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId()));
+        assertFalse(personMapper.exists(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId()));
+        assertTrue(personMapper.getProcessablePersonIds(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), java.util.List.of(person.getId())).isEmpty());
     }
 
     @Test
@@ -103,7 +103,7 @@ class ShareReadIsolationMapperTest extends AbstractMapperTest {
         insertShare("person_share", "person_id", person.getId(), workspace.getId());
 
         assertTrue(personMapper.getProcessablePersonIds(
-            workspace.getId(), java.util.List.of(person.getId())).contains(person.getId()));
+            workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), java.util.List.of(person.getId())).contains(person.getId()));
     }
 
     @Test

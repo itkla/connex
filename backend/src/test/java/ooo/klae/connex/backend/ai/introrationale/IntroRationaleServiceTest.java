@@ -90,7 +90,7 @@ class IntroRationaleServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new IntroRationaleService(
+        service = new IntroRationaleService(ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered(),
                 introRationaleAssembler,
                 aiInvocationService,
                 aiInvocationAdmissionService,
@@ -108,7 +108,7 @@ class IntroRationaleServiceTest {
         lenient().when(aiInvocationAdmissionService.acquire(any(), anyString(), anyBoolean())).thenReturn(admission);
         lenient().when(aiInvocationAdmissionService.precheck(any(), anyBoolean())).thenReturn(Rejection.NONE);
         lenient().when(admission.decision()).thenReturn(Decision.LEADER);
-        lenient().when(personMapper.getPersonById(eq(WORKSPACE_ID), anyInt())).thenReturn(new Person());
+        lenient().when(personMapper.getPersonById(eq(WORKSPACE_ID), org.mockito.ArgumentMatchers.anyString(), anyInt())).thenReturn(new Person());
         lenient().when(aiOutputCacheStore.saveForPersons(
                 anyInt(), any(), anyInt(), anyInt(), any(), any(), anyInt(), any(), any()))
                 .thenReturn(true);
@@ -235,27 +235,27 @@ class IntroRationaleServiceTest {
                 });
 
         assertGenerationCancelled();
-        verify(personMapper, never()).getPersonById(anyInt(), anyInt());
+        verify(personMapper, never()).getPersonById(anyInt(), org.mockito.ArgumentMatchers.anyString(), anyInt());
     }
 
     @Test
     void generate_interruptDuringTheFirstEndpointLookupStopsBeforeTheSecond() {
         when(introductionService.computeCancellableSuggestions(WORKSPACE_ID, IntroRationaleService.RESOLVE_LIMIT))
                 .thenReturn(List.of(suggestion(PERSON_A_ID, PERSON_B_ID)));
-        when(personMapper.getPersonById(WORKSPACE_ID, PERSON_A_ID)).thenAnswer(invocation -> {
+        when(personMapper.getPersonById(WORKSPACE_ID, "[7,8,9]", PERSON_A_ID)).thenAnswer(invocation -> {
             Thread.currentThread().interrupt();
             return new Person();
         });
 
         assertGenerationCancelled();
-        verify(personMapper, never()).getPersonById(WORKSPACE_ID, PERSON_B_ID);
+        verify(personMapper, never()).getPersonById(WORKSPACE_ID, "[7,8,9]", PERSON_B_ID);
     }
 
     @Test
     void generate_interruptDuringTheSecondEndpointLookupStopsBeforeAssembly() {
         when(introductionService.computeCancellableSuggestions(WORKSPACE_ID, IntroRationaleService.RESOLVE_LIMIT))
                 .thenReturn(List.of(suggestion(PERSON_A_ID, PERSON_B_ID)));
-        when(personMapper.getPersonById(WORKSPACE_ID, PERSON_B_ID)).thenAnswer(invocation -> {
+        when(personMapper.getPersonById(WORKSPACE_ID, "[7,8,9]", PERSON_B_ID)).thenAnswer(invocation -> {
             Thread.currentThread().interrupt();
             return new Person();
         });
@@ -284,7 +284,7 @@ class IntroRationaleServiceTest {
                 .thenReturn(List.of(suggestion(PERSON_A_ID, PERSON_B_ID)));
         Person ceased = new Person();
         ceased.setProvisionCeasedAt(java.time.LocalDateTime.parse("2026-07-01T00:00:00"));
-        when(personMapper.getPersonById(WORKSPACE_ID, PERSON_A_ID)).thenReturn(ceased);
+        when(personMapper.getPersonById(WORKSPACE_ID, "[7,8,9]", PERSON_A_ID)).thenReturn(ceased);
 
         IntroRationaleDto result = service.generate(PERSON_A_ID, PERSON_B_ID);
 

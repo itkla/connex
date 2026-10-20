@@ -87,7 +87,7 @@ public class TagService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Tag tag = tagMapper.getTagById(workspaceId, id);
         if (tag == null) throw new ResourceNotFoundException("Tag not found with id: " + id);
-        tag.setPeople(personMapper.getPersonsByTagId(workspaceId, id).toArray(Person[]::new));
+        tag.setPeople(personMapper.getPersonsByTagId(workspaceId, operationVisibilityScope.workspaceIdsJson(), id).toArray(Person[]::new));
         tag.setCompanies(companyMapper.getCompaniesByTagId(workspaceId,
             operationVisibilityScope.workspaceIdsJson(), id).toArray(Company[]::new));
         tag.setDeals(dealMapper.getDealsByTagId(workspaceId, id).toArray(Deal[]::new));
@@ -181,7 +181,8 @@ public class TagService {
     public List<Person> getPersonsByTagId(int tagId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requireTag(workspaceId, tagId);
-        return personMapper.getPersonsByTagId(workspaceId, tagId);
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        return personMapper.getPersonsByTagId(workspaceId, personWorkspaceIdsJson, tagId);
     }
 
     /**

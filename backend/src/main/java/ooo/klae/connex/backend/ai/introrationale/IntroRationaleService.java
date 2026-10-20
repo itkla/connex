@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai.introrationale;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
+
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
@@ -39,6 +41,8 @@ import ooo.klae.connex.backend.services.WorkspaceService;
 @Service
 @RequiredArgsConstructor
 public class IntroRationaleService {
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     static final int MAX_TOKENS = 4096;
     static final int MAX_RATIONALE_CHARS = 400;
     static final double TEMPERATURE = 0.2;
@@ -70,9 +74,14 @@ public class IntroRationaleService {
      * @throws java.util.concurrent.CancellationException when the current thread is interrupted
      */
     public IntroRationaleDto generate(int personAId, int personBId) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(workspaceId,
+            () -> generateWithinPersonScope(workspaceId, personAId, personBId));
+    }
+
+    private IntroRationaleDto generateWithinPersonScope(int workspaceId, int personAId, int personBId) {
         int lo = Math.min(personAId, personBId);
         int hi = Math.max(personAId, personBId);
-        int workspaceId = workspaceService.getCurrentWorkspaceId();
         Optional<AiGenerationProfile> profile = aiFeatureGate.generationProfileIfUsable(
                 AiFeature.INTRO_RATIONALE, MAX_TOKENS, TEMPERATURE);
         if (profile.isEmpty()) {
@@ -99,12 +108,13 @@ public class IntroRationaleService {
         if (suggestion == null) {
             return IntroRationaleDto.unavailable(lo, hi, NOT_A_SUGGESTION);
         }
-        Person personA = personMapper.getPersonById(workspaceId, lo);
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        Person personA = personMapper.getPersonById(workspaceId, personWorkspaceIdsJson, lo);
         AiCancellation.throwIfInterrupted();
         if (isAiRestricted(personA)) {
             return IntroRationaleDto.unavailable(lo, hi, NOT_A_SUGGESTION);
         }
-        Person personB = personMapper.getPersonById(workspaceId, hi);
+        Person personB = personMapper.getPersonById(workspaceId, personWorkspaceIdsJson, hi);
         AiCancellation.throwIfInterrupted();
         if (isAiRestricted(personB)) {
             return IntroRationaleDto.unavailable(lo, hi, NOT_A_SUGGESTION);

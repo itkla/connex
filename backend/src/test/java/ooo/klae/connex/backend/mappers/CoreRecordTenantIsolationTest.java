@@ -52,11 +52,11 @@ class CoreRecordTenantIsolationTest extends AbstractMapperTest {
         Person person = newPerson(newCompany());
 
         for (Workspace unauthorized : unauthorizedWorkspaces()) {
-            assertNull(personMapper.getPersonById(unauthorized.getId(), person.getId()));
+            assertNull(personMapper.getPersonById(unauthorized.getId(), orgWorkspaceIdsJson(workspaceMapper, unauthorized.getId()), person.getId()));
             assertEquals(0, personMapper.archive(unauthorized.getId(), person.getId()));
         }
 
-        assertNotNull(personMapper.getPersonById(workspace.getId(), person.getId()));
+        assertNotNull(personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId()));
     }
 
     @Test

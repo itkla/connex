@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 import tools.jackson.databind.ObjectMapper;
 
+import ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Rule;
 import ooo.klae.connex.backend.beans.RuleExecution;
@@ -77,7 +78,7 @@ public class RuleEngineService {
 
     /** Runs legacy-owned entity-change rules for one replay-stable dispatch. */
     public void onEntityChange(WorkflowTriggerDispatch.EntityChange dispatch) {
-        recordVisibilityScopeControlAccess.withWorkspaceScope(dispatch.workspaceId(), () -> {
+        recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(dispatch.workspaceId(), () -> {
             onEntityChangeWithinScope(dispatch);
             return null;
         });
@@ -90,6 +91,8 @@ public class RuleEngineService {
         for (Rule rule : ruleMapper.getEnabledByTrigger(workspaceId, "entity_change")) {
             try {
                 processEntityRule(rule, dispatch);
+            } catch (TenantScopeSnapshotException exception) {
+                throw exception;
             } catch (Exception e) {
                 log.warn(
                     "Rule dispatch failed ruleId={} recordType={} recordId={} exceptionClass={}",
@@ -124,7 +127,7 @@ public class RuleEngineService {
 
     /** Runs legacy-owned schedule rules for one deterministic cadence bucket. */
     public void runSchedule(WorkflowTriggerDispatch.ScheduleTick dispatch) {
-        recordVisibilityScopeControlAccess.withWorkspaceScope(dispatch.workspaceId(), () -> {
+        recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(dispatch.workspaceId(), () -> {
             runScheduleWithinScope(dispatch);
             return null;
         });
@@ -147,6 +150,8 @@ public class RuleEngineService {
                 for (int entityId : matches) {
                     fireSchedule(rule, dispatch, entityId);
                 }
+            } catch (TenantScopeSnapshotException exception) {
+                throw exception;
             } catch (Exception e) {
                 log.warn(
                     "Schedule rule failed ruleId={} exceptionClass={}",
@@ -205,6 +210,9 @@ public class RuleEngineService {
                 dispatch.recordId())) {
             return;
         }
+        String orgWorkspaceIdsJson = "person".equals(dispatch.recordType())
+            ? recordVisibilityScopeControlAccess.getForWorkspace(dispatch.workspaceId()).workspaceIdsJson()
+            : null;
         WorkflowRuntimeClaimService.LegacyClaim claim =
             workflowRuntimeClaimService.claimLegacyEntity(rule, trigger, dispatch);
         if (!claim.started() || claim.execution() == null) {
@@ -212,7 +220,7 @@ public class RuleEngineService {
         }
         if ("person".equals(dispatch.recordType())
                 && personMapper.getProcessablePersonIds(
-                    dispatch.workspaceId(), List.of(dispatch.recordId())).isEmpty()) {
+                    dispatch.workspaceId(), orgWorkspaceIdsJson, List.of(dispatch.recordId())).isEmpty()) {
             finishExecution(
                 claim.execution(),
                 "failed",

@@ -436,6 +436,7 @@ public class ReferenceService {
         }
         Map<String, EntityReference> unique = new LinkedHashMap<>();
         Matcher matcher = TOKEN.matcher(normalizeReferenceSyntax(content));
+        String personWorkspaceIdsJson = null;
         while (matcher.find() && unique.size() < MAX_REFERENCES) {
             String type = matcher.group(2);
             int refId;
@@ -444,7 +445,10 @@ public class ReferenceService {
             } catch (NumberFormatException ignored) {
                 continue;
             }
-            if (!isVisible(workspaceId, type, refId, currentUserId)) {
+            if (personWorkspaceIdsJson == null && Set.of(TYPE_PERSON, TYPE_COMPANY).contains(type)) {
+                personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+            }
+            if (!isVisible(workspaceId, type, refId, currentUserId, personWorkspaceIdsJson)) {
                 continue;
             }
             String key = type + ":" + refId;
@@ -456,12 +460,12 @@ public class ReferenceService {
         return new ArrayList<>(unique.values());
     }
 
-    private boolean isVisible(int workspaceId, String type, int refId, int currentUserId) {
+    private boolean isVisible(int workspaceId, String type, int refId, int currentUserId, String personWorkspaceIdsJson) {
         return switch (type) {
             case TYPE_USER -> workspaceService.isMemberIncludingPending(workspaceId, refId);
-            case TYPE_PERSON -> personMapper.exists(workspaceId, refId);
+            case TYPE_PERSON -> personMapper.exists(workspaceId, personWorkspaceIdsJson, refId);
             case TYPE_DEAL -> dealMapper.exists(workspaceId, refId);
-            case TYPE_COMPANY -> companyMapper.exists(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), refId);
+            case TYPE_COMPANY -> companyMapper.exists(workspaceId, personWorkspaceIdsJson, refId);
             case TYPE_NOTE -> noteMapper.getVisibleNoteById(workspaceId, refId, currentUserId) != null;
             case TYPE_FILE -> !attachmentMapper.getVisibleIdsIn(
                 workspaceId, List.of(refId), currentUserId).isEmpty();
@@ -640,10 +644,12 @@ public class ReferenceService {
             }
         }
         Set<ReferenceTarget> visible = new HashSet<>();
+        String personWorkspaceIdsJson = idsByType.containsKey(TYPE_PERSON) || idsByType.containsKey(TYPE_COMPANY)
+            ? recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson() : null;
         idsByType.forEach((type, ids) -> {
             for (int start = 0; start < ids.size(); start += BATCH_SIZE) {
                 List<Integer> batch = ids.subList(start, Math.min(start + BATCH_SIZE, ids.size()));
-                for (int id : visibleIds(workspaceId, type, batch, currentUserId)) {
+                for (int id : visibleIds(workspaceId, type, batch, currentUserId, personWorkspaceIdsJson)) {
                     visible.add(new ReferenceTarget(type, id));
                 }
             }
@@ -652,12 +658,12 @@ public class ReferenceService {
     }
 
     private List<Integer> visibleIds(
-            int workspaceId, String type, List<Integer> ids, int currentUserId) {
+            int workspaceId, String type, List<Integer> ids, int currentUserId, String personWorkspaceIdsJson) {
         return switch (type) {
             case TYPE_USER -> workspaceMapper.getMemberIdsIncludingPending(workspaceId, ids);
-            case TYPE_PERSON -> personMapper.getVisibleIdsIn(workspaceId, ids);
+            case TYPE_PERSON -> personMapper.getVisibleIdsIn(workspaceId, personWorkspaceIdsJson, ids);
             case TYPE_DEAL -> dealMapper.getVisibleIdsIn(workspaceId, ids);
-            case TYPE_COMPANY -> companyMapper.getVisibleIdsIn(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), ids);
+            case TYPE_COMPANY -> companyMapper.getVisibleIdsIn(workspaceId, personWorkspaceIdsJson, ids);
             case TYPE_NOTE -> noteMapper.getVisibleNoteIdsIn(workspaceId, ids, currentUserId);
             case TYPE_FILE -> attachmentMapper.getVisibleIdsIn(workspaceId, ids, currentUserId);
             case TYPE_TASK -> taskMapper.getVisibleIdsIn(workspaceId, ids);

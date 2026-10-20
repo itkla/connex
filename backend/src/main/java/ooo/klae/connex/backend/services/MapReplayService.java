@@ -81,7 +81,7 @@ public class MapReplayService {
         long[] cutoffs = new long[dates.size()];
         for (int i = 0; i < dates.size(); i++) cutoffs[i] = Math.min(endOfDayMillis(dates.get(i)), now);
 
-        List<Person> persons = personMapper.getProcessablePersons(workspaceId);
+        List<Person> persons = personMapper.getProcessablePersons(workspaceId, operationVisibilityScope.workspaceIdsJson());
         List<Company> companies = companyMapper.getAllCompanies(workspaceId, operationVisibilityScope.workspaceIdsJson());
         List<Deal> deals = dealMapper.getAllDeals(workspaceId);
         if ((long) dates.size() * (persons.size() + companies.size() + deals.size()) > MAX_ENTRIES) {

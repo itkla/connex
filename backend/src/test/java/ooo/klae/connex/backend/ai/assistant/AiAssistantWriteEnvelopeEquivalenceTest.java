@@ -550,7 +550,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         Person person = new Person();
         person.setId(31);
         person.setName("Ada Lovelace");
-        when(personMapper.getByIds(TURN.workspaceId(), List.of(31))).thenReturn(List.of(person));
+        when(personMapper.getByIds(TURN.workspaceId(), "[7,8,9]", List.of(31))).thenReturn(List.of(person));
         Deal deal = deal();
         deal.setStageId(5);
         deal.setUpdatedAt("2026-03-06 14:00:00.000000");
@@ -1022,7 +1022,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         when(readChatMapper.listAssistantMessagesBySessionAndTurnIds(
                 TURN.workspaceId(), TURN.sessionId(), List.of(TURN.turnId()), 100, 1L))
                 .thenReturn(List.of());
-        when(readPersonMapper.getByIds(TURN.workspaceId(), List.of(31)))
+        when(readPersonMapper.getByIds(TURN.workspaceId(), "[7,8,9]", List.of(31)))
                 .thenReturn(List.of(person(31)));
         when(dealMapper.getByIds(TURN.workspaceId(), List.of(44))).thenReturn(List.of(deal()));
         when(activityMapper.getVisibleIdsIn(TURN.workspaceId(), List.of(73)))
@@ -1205,7 +1205,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         assertFalse(resultJson.contains("verification"));
         switch (kind) {
             case "person" -> {
-                verify(personService).lockProcessablePersonForUpdate(31);
+                verify(personService).lockProcessablePersonForUpdate(org.mockito.ArgumentMatchers.eq(31), org.mockito.ArgumentMatchers.anyString());
                 verify(personService).addTag(31, 9);
             }
             case "company" -> {
@@ -1295,7 +1295,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         when(readChatMapper.listAssistantMessagesBySessionAndTurnIds(
                 TURN.workspaceId(), TURN.sessionId(), List.of(TURN.turnId()), 100, 1L))
                 .thenReturn(List.of());
-        when(readPersonMapper.getByIds(TURN.workspaceId(), List.of(31)))
+        when(readPersonMapper.getByIds(TURN.workspaceId(), "[7,8,9]", List.of(31)))
                 .thenReturn(List.of(person(31)));
         Company company = new Company();
         company.setId(52);
@@ -1623,7 +1623,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         when(readChatMapper.listAssistantMessagesBySessionAndTurnIds(
                 TURN.workspaceId(), TURN.sessionId(), List.of(TURN.turnId()), 100, 1L))
                 .thenReturn(List.of());
-        when(readPersonMapper.getByIds(TURN.workspaceId(), List.of(31)))
+        when(readPersonMapper.getByIds(TURN.workspaceId(), "[7,8,9]", List.of(31)))
                 .thenReturn(List.of(ownedPerson(31, 21)));
         when(companyMapper.getByIds(TURN.workspaceId(), "[7,8,9]", List.of(52)))
                 .thenReturn(List.of(ownedCompany(52, 11)));
@@ -1975,7 +1975,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
             String kind, int id, Integer currentOwnerId, Integer assignedOwnerId) {
         switch (kind) {
             case "person" -> {
-                when(personService.lockProcessablePersonForUpdate(id))
+                when(personService.lockProcessablePersonForUpdate(org.mockito.ArgumentMatchers.eq(id), org.mockito.ArgumentMatchers.anyString()))
                         .thenReturn(ownedPerson(id, currentOwnerId));
                 when(personService.updateOwner(id, assignedOwnerId))
                         .thenReturn(ownedPerson(id, assignedOwnerId));
@@ -2073,8 +2073,8 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
 
     /** The person is processable and each candidate activity links to it, as the executor requires. */
     private void stubConflictSearch(List<Activity> candidates) {
-        when(executorPersonMapper.getPersonById(TURN.workspaceId(), 31)).thenReturn(person(31));
-        when(executorPersonMapper.getByIds(TURN.workspaceId(), List.of(31)))
+        when(executorPersonMapper.getPersonById(TURN.workspaceId(), "[7,8,9]", 31)).thenReturn(person(31));
+        when(executorPersonMapper.getByIds(TURN.workspaceId(), "[7,8,9]", List.of(31)))
                 .thenReturn(List.of(person(31)));
         when(activityService.getActivitiesByPersonIdInWindow(
                 eq(31), any(), any(), eq(101))).thenReturn(candidates);

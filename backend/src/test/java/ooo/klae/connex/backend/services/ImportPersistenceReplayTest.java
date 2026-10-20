@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.time.Instant;
@@ -153,7 +154,7 @@ class ImportPersistenceReplayTest extends AbstractServiceTest {
         ImportCycle first = runCycle(definition);
         int personId = importedPersonIds().getFirst();
         int dealId = importedDealIds().getFirst();
-        Person person = personMapper.getPersonById(workspace.getId(), personId);
+        Person person = personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), personId);
         newActivity(currentUser, person, dealMapper.getDealById(workspace.getId(), dealId));
         newTask(currentUser, person, dealMapper.getDealById(workspace.getId(), dealId));
         newNotification(workspace.getId(), currentUser.getId());

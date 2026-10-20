@@ -607,8 +607,10 @@ public class AiAssistantScopeReadService {
             return Map.of();
         }
         Map<Integer, RecordLabel> labels = new LinkedHashMap<>();
+        String personWorkspaceIdsJson = "deal".equals(kind) ? null
+            : recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         switch (kind) {
-            case "person" -> personMapper.getByIds(workspaceId, ids).stream()
+            case "person" -> personMapper.getByIds(workspaceId, personWorkspaceIdsJson, ids).stream()
                     .filter(AiAssistantScopeReadService::isProcessable)
                     .filter(person -> person.getName() != null && !person.getName().isBlank())
                     .forEach(person -> labels.put(
@@ -616,7 +618,7 @@ public class AiAssistantScopeReadService {
             case "deal" -> dealMapper.getByIds(workspaceId, ids).stream()
                     .filter(deal -> deal.getName() != null && !deal.getName().isBlank())
                     .forEach(deal -> labels.put(deal.getId(), new RecordLabel(deal.getName())));
-            default -> companyMapper.getByIds(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), ids).stream()
+            default -> companyMapper.getByIds(workspaceId, personWorkspaceIdsJson, ids).stream()
                     .filter(company -> company.getArchivedAt() == null)
                     .filter(company -> company.getName() != null && !company.getName().isBlank())
                     .forEach(company -> labels.put(

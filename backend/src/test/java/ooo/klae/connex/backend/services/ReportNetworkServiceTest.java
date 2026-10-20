@@ -411,7 +411,7 @@ class ReportNetworkServiceTest {
         for (int id = 1; id <= 10_001; id++) {
             people.add(person(id, "Person " + id, null, false));
         }
-        when(personMapper.getPersonsForNetworkReport(7, 10_001)).thenReturn(people);
+        when(personMapper.getPersonsForNetworkReport(7, "[7]", 10_001)).thenReturn(people);
         when(edgeReader.getEdgesForNetworkReport(7, 100_001)).thenReturn(List.of());
         when(introductionMapper.findExistingPairsForReport(7, 250_001)).thenReturn(List.of());
         when(reportMapper.getNetworkAccountValues(query, "[7]", 50_001)).thenReturn(List.of());
@@ -420,7 +420,7 @@ class ReportNetworkServiceTest {
                 new RecordVisibilityScopeControlAccess.RecordVisibilityScope(1, List.of(7))));
 
         verifyNoInteractions(scoringService);
-        verify(personMapper).getPersonsForNetworkReport(7, 10_001);
+        verify(personMapper).getPersonsForNetworkReport(7, "[7]", 10_001);
         verify(edgeReader).getEdgesForNetworkReport(7, 100_001);
         verify(introductionMapper).findExistingPairsForReport(7, 250_001);
         verify(reportMapper).getNetworkAccountValues(query, "[7]", 50_001);

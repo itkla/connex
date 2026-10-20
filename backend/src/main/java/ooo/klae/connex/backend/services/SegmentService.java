@@ -745,7 +745,7 @@ public class SegmentService {
             return new HashSet<>(segmentMapper.companyIdsWithWarmIntro(
                     workspaceId, ctx.orgWorkspaceIdsJson(), ctx.userId(), candidateIds, STRONG_EDGE));
         }
-        Set<Integer> engaged = new HashSet<>(personMapper.getEngagedPersonIds(workspaceId));
+        Set<Integer> engaged = new HashSet<>(personMapper.getEngagedPersonIds(workspaceId, ctx.orgWorkspaceIdsJson()));
         if (engaged.isEmpty()) {
             return new HashSet<>();
         }

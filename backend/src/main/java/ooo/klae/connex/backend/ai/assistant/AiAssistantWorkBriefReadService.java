@@ -359,8 +359,9 @@ public class AiAssistantWorkBriefReadService {
         if (ids.isEmpty()) {
             return Map.of();
         }
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         Map<Integer, String> labels = new LinkedHashMap<>();
-        for (Person person : personMapper.getByIds(workspaceId, ids)) {
+        for (Person person : personMapper.getByIds(workspaceId, personWorkspaceIdsJson, ids)) {
             if (person.getSuspendedAt() != null || person.getProvisionCeasedAt() != null
                     || person.getArchivedAt() != null
                     || person.getName() == null || person.getName().isBlank()) {

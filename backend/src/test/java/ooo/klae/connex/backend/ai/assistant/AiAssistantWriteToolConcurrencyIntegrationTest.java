@@ -209,9 +209,9 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
         doAnswer(invocation -> {
             autoPersonLockAttempted.countDown();
             return realPersonMapper.getVisiblePersonByIdForUpdate(
-                    workspace.getId(), person.getId());
+                    workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId());
         }).when(personMapperSpy).getVisiblePersonByIdForUpdate(
-                workspace.getId(), person.getId());
+                workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId());
         ExecutorService executor = Executors.newFixedThreadPool(2);
 
         try {
@@ -234,7 +234,7 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
             executor.awaitTermination(10, TimeUnit.SECONDS);
         }
 
-        Person restricted = personMapper.getPersonById(workspace.getId(), person.getId());
+        Person restricted = personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId());
         assertTrue(restricted.getSuspendedAt() != null);
     }
 

@@ -90,7 +90,7 @@ class ReportServiceScopeTest {
     private final IntroductionMapper introductions = mock(IntroductionMapper.class);
     private final PersonEdgeReadService edges = mock(PersonEdgeReadService.class);
     private final ScoringService scoring = mock(ScoringService.class);
-    private final RecordVisibilityScopeControlAccess scopes = mock(RecordVisibilityScopeControlAccess.class);
+    private final RecordVisibilityScopeControlAccess scopes = ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
     private final ReportNetworkService network = spy(new ReportNetworkService(reports, people, edges, introductions, scoring));
     private final WorkspaceService workspace = mock(WorkspaceService.class);
     private final AuthService auth = mock(AuthService.class);
@@ -245,7 +245,8 @@ class ReportServiceScopeTest {
     void scopeFailureStopsBeforeReportInputs() {
         doThrow(new IllegalStateException("tenant mismatch")).when(scopes).getForWorkspace(WORKSPACE);
         assertThrows(IllegalStateException.class, () -> service.generate(REPORT, null, ReportService.NarrativeMode.NONE));
-        verifyOneScope();
+        verify(scopes).getForWorkspace(WORKSPACE);
+        verifyNoMoreInteractions(scopes);
         verify(reports).getDefinition(WORKSPACE, REPORT);
         verifyNoMoreInteractions(reports);
         verifyNoInteractions(network, people, introductions, scoring, epoch, narratives, generations, transactions);
@@ -270,11 +271,12 @@ class ReportServiceScopeTest {
         verify(network).reverseIntroSuggestions(WORKSPACE, SCOPE);
         verify(introductions).findCandidatePersonsForReport(WORKSPACE, JSON, 501);
         verify(reports, never()).getNetworkAccountValues(any(), anyString(), anyInt());
-        verify(people, never()).getPersonsForNetworkReport(anyInt(), anyInt());
+        verify(people, never()).getPersonsForNetworkReport(anyInt(), org.mockito.ArgumentMatchers.anyString(), anyInt());
     }
 
     private void verifyOneScope() {
         verify(scopes).getForWorkspace(WORKSPACE);
+        verify(scopes).withWorkspaceScopeRead(eq(WORKSPACE), same(SCOPE), any());
         verifyNoMoreInteractions(scopes);
     }
 
