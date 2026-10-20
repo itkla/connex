@@ -371,6 +371,7 @@ class AiAgentPrivacyLifecycleIntegrationTest extends AbstractAiAgentPrivacyInteg
     @Test
     void workspaceTeardownRemovesActionProposalAndSegmentRows() {
         createPreparationHoldings();
+        jdbc.update("UPDATE workspace SET lifecycle_state='tearing_down' WHERE id=?", workspace.getId());
         privacyService.prepareWorkspaceTeardown(workspace.getId());
         for (String table : List.of("ai_agent_action", "ai_chat_tool_call", "ai_agent_segment")) {
             assertEquals(0, lifecycle.countRows(workspace.getId(), TenantLifecycleRegistry.require(table)));
