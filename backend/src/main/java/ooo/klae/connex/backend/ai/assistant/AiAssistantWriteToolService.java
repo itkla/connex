@@ -287,6 +287,9 @@ public class AiAssistantWriteToolService {
             }
             return;
         }
+        if ("deal".equals(probe.kind()) && probe.companyId() != null) {
+            recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
+        }
         boolean candidates;
         try {
             candidates = switch (probe.kind()) {

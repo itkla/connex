@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -163,6 +164,48 @@ class WorkflowManualRunServiceTest {
 
         assertEquals("cancelled", result.status());
         assertEquals(cancelledAt, result.completedAt());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"snapshot", "missing", "ordinary"})
+    void savedViewScopeReadFailuresPropagateUnchangedThroughPreparation(String kind) throws Exception {
+        stubSavedViewScope("{\"segments\":{\"match\":\"all\",\"conditions\":[]}}");
+        RuntimeException failure = switch (kind) {
+            case "snapshot" -> new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException("scope mismatch");
+            case "missing" -> new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotMissingException("missing payload");
+            case "ordinary" -> new org.springframework.dao.DataAccessResourceFailureException("control unavailable");
+            default -> throw new AssertionError(kind);
+        };
+        try (var fixture = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(7)) {
+            when(fixture.control.findOrganizationWorkspacesForShare(7)).thenThrow(failure);
+            org.springframework.test.util.ReflectionTestUtils.setField(
+                service, "recordVisibilityScopeControlAccess", fixture.scopes);
+            when(segmentService.evaluate(eq("deal"), any(SegmentDefinition.class))).thenAnswer(call -> {
+                fixture.scopes.getForWorkspace(7);
+                throw new AssertionError("The scope read must refuse this operation");
+            });
+
+            assertSame(failure, assertThrows(RuntimeException.class, () -> service.prepare(
+                11, new WorkflowManualPrepareRequest("saved_view", new WorkflowManualScope.SavedView(5)))));
+
+            verify(fixture.control).findOrganizationWorkspacesForShare(7);
+            verifyNoInteractions(canonicalizer, operationsMapper, actionGuard);
+        }
+    }
+
+    @Test
+    void malformedSavedViewSegmentsStillRefusePreparation() throws Exception {
+        stubSavedViewScope("{\"segments\":\"malformed\"}");
+        var segments = JsonMapper.builder().build().readTree("\"malformed\"");
+        var malformed = assertThrows(tools.jackson.core.JacksonException.class,
+            () -> JsonMapper.builder().build().treeToValue(segments, SegmentDefinition.class));
+        when(objectMapper.treeToValue(segments, SegmentDefinition.class)).thenThrow(malformed);
+
+        var refusal = assertThrows(BadRequestException.class, () -> service.prepare(
+            11, new WorkflowManualPrepareRequest("saved_view", new WorkflowManualScope.SavedView(5))));
+
+        assertEquals("Saved view scope is malformed", refusal.getMessage());
+        verifyNoInteractions(segmentService, canonicalizer, operationsMapper);
     }
 
     @Test
@@ -403,7 +446,7 @@ class WorkflowManualRunServiceTest {
         verify(operationsMapper, never()).insertInvocation(any());
     }
 
-    private void stubSavedView(String configJson) throws Exception {
+    private SavedView stubSavedViewScope(String configJson) throws Exception {
         when(workspaceService.getCurrentUserId()).thenReturn(41);
         Workflow workflow = new Workflow();
         workflow.setId(11);
@@ -434,8 +477,14 @@ class WorkflowManualRunServiceTest {
             when(objectMapper.treeToValue(
                 view.getConfig().get("segments"), SegmentDefinition.class))
                 .thenReturn(new SegmentDefinition());
-            when(segmentService.evaluate(eq("deal"), any(SegmentDefinition.class)))
-                .thenReturn(List.of());
+        }
+        return view;
+    }
+
+    private void stubSavedView(String configJson) throws Exception {
+        SavedView view = stubSavedViewScope(configJson);
+        if (view.getConfig().get("segments") != null) {
+            when(segmentService.evaluate(eq("deal"), any(SegmentDefinition.class))).thenReturn(List.of());
         }
         WorkflowDefinition definition = new WorkflowDefinition(
             1, "trigger", List.of(), List.of());

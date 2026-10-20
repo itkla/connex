@@ -20,6 +20,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
+import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -401,13 +402,14 @@ public class WorkflowManualRunService {
         JsonNode segments = config == null ? null : config.get("segments");
         boolean segmentConfigured = segments != null && !segments.isNull();
         if (segmentConfigured) {
+            SegmentDefinition definition;
             try {
-                SegmentDefinition definition = objectMapper.treeToValue(
+                definition = objectMapper.treeToValue(
                     segments, SegmentDefinition.class);
-                matches.addAll(segmentService.evaluate(view.getRecordType(), definition));
-            } catch (Exception exception) {
+            } catch (JacksonException exception) {
                 throw new BadRequestException("Saved view scope is malformed");
             }
+            matches.addAll(segmentService.evaluate(view.getRecordType(), definition));
         }
         WorkflowManualFilter filter = filterFromSavedView(config, recordType);
         boolean nativeFilterConfigured = hasNativeFilter(filter);
