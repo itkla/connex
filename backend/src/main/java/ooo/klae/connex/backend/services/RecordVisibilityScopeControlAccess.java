@@ -32,9 +32,11 @@ public class RecordVisibilityScopeControlAccess {
      * Call before acquiring authorization, organization, provider, or record locks: a routed
      * transaction is suspended and borrows a second connection. Pass this scope through nested
      * reads instead of resolving it again while a lock is held.
-     * Within an actual transaction with synchronization, repeated evaluations reuse one scope per
+     * In single-database mode only, an actual transaction with synchronization reuses one scope per
      * workspace. The memo is suspended with that transaction and discarded on commit or rollback;
-     * outside a transaction, every call reads a fresh snapshot.
+     * outside a transaction, every call reads a fresh snapshot. Catalog-per-placement mode bypasses
+     * the memo entirely: every call reaches the boundary so the prepared snapshot supplied by
+     * #2165 is validated against the current workspace, organization, and catalog.
      *
      * @param workspaceId workspace anchoring the organization
      * @return the organization's workspace IDs, including the anchor
@@ -42,7 +44,8 @@ public class RecordVisibilityScopeControlAccess {
      *     the resolved tenant context
      */
     public RecordVisibilityScope getForWorkspace(int workspaceId) {
-        if (!TransactionSynchronizationManager.isActualTransactionActive()
+        if (shareWorkspaceControlAccess.isCatalogPerPlacement()
+                || !TransactionSynchronizationManager.isActualTransactionActive()
                 || !TransactionSynchronizationManager.isSynchronizationActive()) {
             return loadScope(workspaceId);
         }

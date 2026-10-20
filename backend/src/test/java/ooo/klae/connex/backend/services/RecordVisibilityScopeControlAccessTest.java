@@ -19,6 +19,7 @@ import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -223,16 +224,16 @@ class RecordVisibilityScopeControlAccessTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void defaultAndRoutedTransactionsPerformOnlyOneControlRead(boolean routed) {
+    void singleDatabaseMemoDoesNotDependOnThePinnedCatalog(boolean catalogPinned) {
         WorkspaceMapper workspaces = mock(WorkspaceMapper.class);
         TestTransactionManager manager = new TestTransactionManager();
-        tenantContext.set(7, 900, 42, "member", routed ? "cnx_tenant" : null);
+        tenantContext.set(7, 900, 42, "member", catalogPinned ? "cnx_tenant" : null);
         Workspace anchor = new Workspace();
         anchor.setId(7);
         anchor.setOrgId(900);
         anchor.setName("Anchor");
         when(workspaces.findOrganizationWorkspacesForShare(7)).thenAnswer(invocation -> {
-            assertEquals(!routed, TransactionSynchronizationManager.isActualTransactionActive());
+            assertEquals(!catalogPinned, TransactionSynchronizationManager.isActualTransactionActive());
             assertNull(tenantContext.getCatalog());
             return List.of(anchor);
         });
@@ -250,7 +251,72 @@ class RecordVisibilityScopeControlAccessTest {
         });
 
         verify(workspaces).findOrganizationWorkspacesForShare(7);
-        assertEquals(routed ? 1 : 0, manager.suspendCount());
+        assertEquals(catalogPinned ? 1 : 0, manager.suspendCount());
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = {"cnx_tenant"})
+    void routedReadsAlwaysReachTheBoundaryWithoutPopulatingTheMemo(String catalog) {
+        ShareWorkspaceControlAccess delegate = mock(ShareWorkspaceControlAccess.class);
+        when(delegate.isCatalogPerPlacement()).thenReturn(true);
+        when(delegate.getForWorkspace(7)).thenReturn(snapshot(900, 7, 11));
+        RecordVisibilityScopeControlAccess access = new RecordVisibilityScopeControlAccess(delegate, tenantContext);
+        tenantContext.set(7, 900, 42, "member", catalog);
+
+        new TransactionTemplate(new TestTransactionManager()).executeWithoutResult(status -> {
+            for (int record = 0; record < 200; record++) {
+                assertEquals("[7,11]", access.getForWorkspace(7).workspaceIdsJson());
+                assertTrue(TransactionSynchronizationManager.getResourceMap().isEmpty());
+                assertTrue(TransactionSynchronizationManager.getSynchronizations().isEmpty());
+            }
+        });
+
+        verify(delegate, times(200)).getForWorkspace(7);
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = {"cnx_tenant"})
+    void routedReadsRetainBoundaryRefusalsAfterReinstallingTheSameIdentity(String catalog) {
+        ShareWorkspaceControlAccess delegate = mock(ShareWorkspaceControlAccess.class);
+        when(delegate.isCatalogPerPlacement()).thenReturn(true);
+        IllegalStateException missingSnapshot = new IllegalStateException("prepared snapshot missing");
+        when(delegate.getForWorkspace(7)).thenReturn(snapshot(900, 7, 11)).thenThrow(missingSnapshot);
+        RecordVisibilityScopeControlAccess access = new RecordVisibilityScopeControlAccess(delegate, tenantContext);
+        tenantContext.set(7, 900, 42, "member", catalog);
+
+        new TransactionTemplate(new TestTransactionManager()).executeWithoutResult(status -> {
+            assertEquals("[7,11]", access.getForWorkspace(7).workspaceIdsJson());
+            tenantContext.clear();
+            tenantContext.set(7, 900, 42, "member", catalog);
+            assertSame(missingSnapshot, assertThrows(IllegalStateException.class, () -> access.getForWorkspace(7)));
+            assertTrue(TransactionSynchronizationManager.getResourceMap().isEmpty());
+            assertTrue(TransactionSynchronizationManager.getSynchronizations().isEmpty());
+        });
+
+        verify(delegate, times(2)).getForWorkspace(7);
+    }
+
+    @Test
+    void routedReadsCannotReuseAnExistingSingleDatabaseMemo() {
+        ShareWorkspaceControlAccess delegate = mock(ShareWorkspaceControlAccess.class);
+        IllegalStateException missingSnapshot = new IllegalStateException("prepared snapshot missing");
+        when(delegate.getForWorkspace(7)).thenReturn(snapshot(900, 7, 11)).thenThrow(missingSnapshot);
+        RecordVisibilityScopeControlAccess access = new RecordVisibilityScopeControlAccess(delegate, tenantContext);
+
+        new TransactionTemplate(new TestTransactionManager()).executeWithoutResult(status -> {
+            assertEquals("[7,11]", access.getForWorkspace(7).workspaceIdsJson());
+            var originalResources = TransactionSynchronizationManager.getResourceMap();
+            assertEquals(1, originalResources.size());
+            when(delegate.isCatalogPerPlacement()).thenReturn(true);
+
+            assertSame(missingSnapshot, assertThrows(IllegalStateException.class, () -> access.getForWorkspace(7)));
+            assertEquals(originalResources, TransactionSynchronizationManager.getResourceMap());
+            assertEquals(1, TransactionSynchronizationManager.getSynchronizations().size());
+        });
+
+        verify(delegate, times(2)).getForWorkspace(7);
     }
 
     @ParameterizedTest
