@@ -22,19 +22,15 @@ import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 
 import ooo.klae.connex.backend.mappers.ApiCredentialMapper;
-import ooo.klae.connex.backend.mappers.OrganizationMapper;
-import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.AuditService;
 
 class ApiCredentialLifecycleServiceTest {
 
     private final ApiCredentialMapper mapper = mock(ApiCredentialMapper.class);
-    private final WorkspaceMapper workspaceMapper = mock(WorkspaceMapper.class);
-    private final OrganizationMapper organizationMapper = mock(OrganizationMapper.class);
     private final AuditService auditService = mock(AuditService.class);
     private final ApiCredentialLifecycleService service =
         new ApiCredentialLifecycleService(
-            mapper, workspaceMapper, organizationMapper, auditService);
+            mapper, auditService);
 
     @Test
     void accountErasureSortsWorkspaceRootsAndExactCredentialChildrenBeforeDeletion() {
@@ -61,7 +57,7 @@ class ApiCredentialLifecycleServiceTest {
         order.verify(mapper).deleteById(3, 12);
         order.verify(mapper).findByIdForUpdate(9, 22);
         order.verify(mapper).deleteById(9, 22);
-        verifyNoInteractions(workspaceMapper, organizationMapper, auditService);
+        verifyNoInteractions(auditService);
 
         assertEquals(
             List.of(List.of(3, 2), List.of(3, 2), List.of(9, 4)),
@@ -102,16 +98,12 @@ class ApiCredentialLifecycleServiceTest {
     @Test
     void membershipCleanupStillDeletesAndAuditsWhileWorkspaceIsTearingDown() {
         ApiCredential credential = credential(11, 3, 2, 17);
-        when(workspaceMapper.lockWorkspaceOrgIdForShare(3)).thenReturn(2);
-        when(organizationMapper.lockByIdForShare(2)).thenReturn(2);
         when(mapper.listByMembershipForUpdate(3, 17)).thenReturn(List.of(credential));
         when(mapper.deleteByMembership(3, 17)).thenReturn(1);
 
         service.deleteForMembership(3, 17);
 
-        InOrder order = inOrder(workspaceMapper, organizationMapper, mapper, auditService);
-        order.verify(workspaceMapper).lockWorkspaceOrgIdForShare(3);
-        order.verify(organizationMapper).lockByIdForShare(2);
+        InOrder order = inOrder(mapper, auditService);
         order.verify(mapper).listByMembershipForUpdate(3, 17);
         order.verify(mapper).deleteByMembership(3, 17);
         order.verify(auditService).recordStrictScoped(
@@ -123,8 +115,6 @@ class ApiCredentialLifecycleServiceTest {
             "Credential 11 (last4 0011)",
             "Deleted an API credential during identity lifecycle cleanup",
             java.util.Map.of("credentialId", 11L, "last4", "0011"));
-        verify(workspaceMapper, never()).lockActiveWorkspaceForShare(anyInt());
-        verify(organizationMapper, never()).lockActiveByIdForShare(anyInt());
     }
 
     @Test
@@ -144,25 +134,22 @@ class ApiCredentialLifecycleServiceTest {
     }
 
     @Test
-    void membershipCleanupSkipsCredentialChildrenWhenWorkspaceRootIsGone() {
-        when(workspaceMapper.lockWorkspaceOrgIdForShare(3)).thenReturn(null);
-
+    void emptyMembershipCleanupReusesRetainedRootsAndEmitsNoAudit() {
         service.deleteForMembership(3, 17);
 
-        verify(workspaceMapper).lockWorkspaceOrgIdForShare(3);
-        verify(workspaceMapper, never()).lockActiveWorkspaceForShare(anyInt());
-        verifyNoInteractions(mapper, organizationMapper, auditService);
+        verify(mapper).listByMembershipForUpdate(3, 17);
+        verify(mapper, never()).deleteByMembership(anyInt(), anyInt());
+        verifyNoInteractions(auditService);
     }
 
     @Test
-    void membershipCleanupSkipsCredentialChildrenWhenOrganizationRootIsGone() {
-        when(workspaceMapper.lockWorkspaceOrgIdForShare(3)).thenReturn(2);
-        when(organizationMapper.lockByIdForShare(2)).thenReturn(null);
+    void membershipCleanupRejectsIncompleteCredentialDeletionBeforeAuditing() {
+        when(mapper.listByMembershipForUpdate(3, 17))
+            .thenReturn(List.of(credential(11, 3, 2, 17)));
 
-        service.deleteForMembership(3, 17);
+        assertThrows(IllegalStateException.class, () -> service.deleteForMembership(3, 17));
 
-        verify(organizationMapper).lockByIdForShare(2);
-        verifyNoInteractions(mapper, auditService);
+        verifyNoInteractions(auditService);
     }
 
     @Test
@@ -185,7 +172,6 @@ class ApiCredentialLifecycleServiceTest {
             pending.stream()
                 .map(audit -> List.of(audit.workspaceId(), audit.organizationId()))
                 .toList());
-        verifyNoInteractions(workspaceMapper, organizationMapper);
         verifyNoInteractions(auditService);
     }
 
@@ -201,7 +187,7 @@ class ApiCredentialLifecycleServiceTest {
         verify(mapper).findByIdForUpdate(3, 11);
         verify(mapper).findByIdForUpdate(3, 12);
         verify(mapper, never()).deleteById(anyInt(), anyLong());
-        verifyNoInteractions(workspaceMapper, organizationMapper, auditService);
+        verifyNoInteractions(auditService);
     }
 
     @Test
@@ -228,7 +214,6 @@ class ApiCredentialLifecycleServiceTest {
             "Credential 11 (last4 0011)",
             "Deleted an API credential during identity lifecycle cleanup",
             java.util.Map.of("credentialId", 11L, "last4", "0011"));
-        verifyNoInteractions(workspaceMapper, organizationMapper);
     }
 
     @Test
@@ -242,7 +227,7 @@ class ApiCredentialLifecycleServiceTest {
             new ApiCredentialReferenceRoot(3, 2),
             new ApiCredentialReferenceRoot(9, 4)),
             service.discoverAccountReferenceRoots(17));
-        verifyNoInteractions(workspaceMapper, organizationMapper, auditService);
+        verifyNoInteractions(auditService);
     }
 
     @Test
@@ -258,7 +243,7 @@ class ApiCredentialLifecycleServiceTest {
             "API credential account cleanup crossed an unlocked tenant root",
             failure.getMessage());
         verify(mapper, never()).deleteById(3, 11);
-        verifyNoInteractions(workspaceMapper, organizationMapper, auditService);
+        verifyNoInteractions(auditService);
     }
 
     private static ApiCredential credential(

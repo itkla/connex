@@ -241,7 +241,16 @@ memberships `lockRoleAssignees` holds.
 - The callers are non-transactional controllers. A caller that wraps one of these methods in its
   own transaction must open it at `READ COMMITTED`.
 
-Member removal/leave/invitation decline also lock the departing user root. The target user's globally ordered membership set is acquired at the documented point during removal so notification cleanup cannot invert membership lock order.
+Member removal/leave/invitation decline also lock the departing user root. Removal expands the
+recipient's membership set at that user's position in the ascending actor/target pass under the
+workspace X root, before owner/assignee NOWAIT probes and role roots. Owner leave retains owned
+workspace roots X ascending, then its recipient memberships before owner NOWAIT recovery scans.
+Non-owner leave and decline enter departure cleanup after their account X lock. The shared cleanup
+keeps main's workspace S → organization S prefix, then takes recipient memberships X before
+ownership-offer, capture/provider and domain cleanup. Owner/assignee probes remain explicit
+nonwaiting exceptions: only MySQL 3572/HY000 becomes 409, without an in-transaction retry.
+
+Catalog erasure retains the locking membership scan so it waits for matching uncommitted inserts.
 
 Invite grants lock creator/known-recipient users ascending, reject deletion reservations, then lock active workspace/organization, memberships ascending, and creator custom role when applicable before testing grantability. Claim paths repeat authorization immediately before the exact claim.
 
@@ -400,35 +409,39 @@ root-first path and must take both roots first.
 
 #### Membership cleanup
 
-Membership cleanup takes the workspace root FOR SHARE before the organization root FOR SHARE in
-both `detachMemberContent` and `prepareFreshMembershipInWorkspace`. The workspace read also supplies
-the organization id and is lifecycle-state independent. Fresh cleanup takes this workspace root
-before its exact membership read. These root locks remain held through offer invalidation, notice
-cleanup and the later credential cleanup, which may request them again. A teardown holding the
-workspace X can therefore acquire organization X and commit while departure waits for workspace S;
-no departure holds organization S while requesting that workspace. The real two-thread drill pins
-teardown just before organization acquisition and observes the departure's workspace-record wait.
+Departure cleanup retains workspace S (reusing any stronger X), organization S, then recipient
+memberships X before ownership-offer invalidation, capture/provider cleanup and tenant mutations.
+The workspace read supplies the organization id without a lifecycle predicate. Removal and owner
+leave already retain the recipient set before entering this helper under their existing workspace X
+prefix. Fresh cleanup keeps its exact current membership read after workspace S; only absence
+permits residual cleanup, which retains organization S before offer/provider/domain rows. Invite
+authorization keeps its existing account X → workspace X → organization S → exact membership order.
+A teardown holding workspace X can acquire organization X and commit while departure waits for
+workspace S. The root-order drill observes that exact workspace-record wait.
 
-Membership credential cleanup preserves each path's existing user, workspace, and membership lock
-order. At the end of member removal, invitation decline, leave, and fresh-membership cleanup it
-acquires the workspace root `FOR SHARE` in any lifecycle state, then that workspace's organization
-root `FOR SHARE`, immediately before locking `api_credential` children `FOR UPDATE` in ascending
-credential id, then deletes and audits them. Both root locks are unconditional: taking them only
-when credentials exist would place them after the credential rows and defeat the ordering. This is
-safe in the reverted-territory transactions it runs inside — member removal, decline, leave, invite,
-invite link, and SSO just-in-time membership — because every one of those callers already takes the
-same organization root `FOR SHARE` through its own trailing audit's foreign-key parents, after the
-same set of tenant-plane child locks. Cleanup returns without locking children when either root row
-is already gone, because the workspace foreign key has then already cascaded the credential children
-away. A `tearing_down` root still owns live credentials, which are deleted and audited normally, so
-the workspace lock used here carries no `lifecycle_state` predicate.
+`ApiCredentialLifecycleService.deleteForMembership` reuses the caller's retained workspace and
+organization roots and adds no direct root-lock reads. It locks credential children X in ascending
+credential id, deletes them and appends strict scoped audits, whose parent requests repeat retained
+roots. Empty fresh-membership cleanup emits
+no credential audit because the generation-bound foreign key already removed those credentials.
+A tearing-down workspace still owns live credentials, which are deleted and audited normally.
+The removal drill pauses at the exact credential read, verifies that the helper adds no root
+acquisition, and observes an organization-X writer queued behind removal's retained organization
+while removal completes its credential and membership audits.
 
-`detachMemberContent` holds its workspace and organization roots before
-`notificationMapper.lockRecipientMemberships` X-locks the departing user's `workspace_member` rows
-in every workspace. Credential cleanup reuses those held roots after the member scan. Every caller
-of `detachMemberContent` first takes the target `app_user` row `FOR UPDATE`;
-`prepareFreshMembershipInWorkspace` is the one caller with no `app_user` lock, and it never reaches
-an audit for the reason given above.
+InnoDB queues a new shared request behind a waiting exclusive request. Moving recipient M before
+the shared helper's first organization S would add an M → O wait to non-owner leave/decline: an
+invite in another workspace can retain O S and wait on that M while a queued O X prevents the
+departure's O S. Keeping O before M avoids that new cycle. Fresh acceptance does not expand its
+recipient's membership set into other workspaces: under its already-held O S, that new foreign-M
+wait could cycle with an ordinary membership-first writer's late audit O S and a queued O X.
+Credential cleanup reuses retained roots. Existing late audit roots and their #1582 cycles remain.
+
+Removal, decline and leave retain the target account X before cleanup. Fresh cleanup keeps its
+existing caller authorization and routed transaction boundary. Path-workspace routing remains
+outside `WorkspaceMembershipRemovalTransaction`'s transaction; cleanup, membership deletion,
+scoped audits and captured-reference cleanup commit or roll back together. Final control-plane
+account deletion's remaining membership cascade is unchanged.
 
 #### Account erasure
 
@@ -484,27 +497,18 @@ service-level cleanup.
 #### Ordering rules recorded here so round 17 does not reopen them
 
 - **No path may take an `organization` root EXCLUSIVELY and then lock a `workspace_member` row.** The one carve-out is the `app_user` cascade at the end of account erasure, which X-locks `workspace_member` rows after the owned organization roots were taken exclusively; that path is identical on `origin/main`, is invisible to the file-scoped `OrganizationRootLockOrderArchTest`, and is tracked under #1582 rather than by this rule.
-  Management takes the organization root before the membership row, while member detachment takes
-  membership rows before the organization root its trailing audit acquires. That inversion is inert
-  only while every organization root involved is shared. `OrganizationRootLockOrderArchTest`
-  enforces the rule.
-- The pre-existing `workspace_member` ordering inconsistencies are tracked in GitHub issue #1582 and
-
-  were deliberately not changed by the public API credential increment. Specifically:
-  the organization-root inversion inside `removeMemberInTransaction`, which takes the workspace root
-  exclusively first (`lockRoleMutation` → `lockWorkspaceMutationRoot`,
-  `WorkspaceService.java:1296`) and therefore does not invert on the workspace root at all, but
-  reaches the organization root only after X-locking active owner rows (`lockActiveOwnerMembers`, `:1509`)
-  and entering credential cleanup, whose `lockWorkspaceOrgIdForShare` and `lockByIdForShare` pair
-  consequently runs after those owner rows — the reverse of the erasure's
-  organization-roots-then-owner-rows pass; the
-  actor-versus-target erasure cycle created by `lockForeignKeyParents` taking the actor's `app_user`
-  row `FOR SHARE` after the roots; `ensureHead`'s `INSERT ... ON DUPLICATE KEY UPDATE` deadlock on a
-  first-ever concurrent head for one scope; and `lockRecipientMemberships`' cross-workspace
-  `workspace_member` X-locks preceding credential cleanup. Every one of these shapes already
-  exists on `main` through the same transactions' trailing audits; credential cleanup only makes
-  the last two explicit, and none of them is introduced or worsened here.
-- Membership-first record mutations (`lockAndRequireMember` → audit) racing a member's leave (`lockById` → `lockRecipientMemberships` → membership delete): the ordering is `origin/main`'s and unchanged here; this branch only appends the shared-root credential tail to the leave. A dedicated drill for that race was retired from this branch because it asserted a root-first leave design that was reverted; it belongs with #1582.
+  Management takes the organization root before the membership row, while removal and owner leave
+  already retain memberships before organization S. `OrganizationRootLockOrderArchTest` enforces
+  the explicit exclusive-root rule; it does not prove safety against queued exclusive requesters
+  and late shared roots across multiple transactions.
+- The pre-existing `workspace_member` ordering inconsistencies remain tracked under #1582.
+  Removal/owner leave acquire memberships before organization S; credential authorization retains
+  organization S before its exact membership. Shared modes alone do not prove these paths safe
+  against a queued organization X requester. Membership-first record mutations still acquire
+  audit actor, workspace and organization S late, and final account erasure still cascades remaining
+  memberships after organization/head acquisition. This change adds no early account/workspace/
+  organization S prefix to those writers. The first-head `ensureHead` upsert and existing
+  aggregate/reference cleanup inversions remain separate retryable races.
 - Deal-collaborator replacement (#1793) takes every requested membership `FOR UPDATE` in ascending user-id order, then the deal row `FOR UPDATE`, then the collaborator rows, then its trailing audit. It replaced a collaborator-rows-first order (the clear, then the deal and membership rows `FOR SHARE` inside an `INSERT ... SELECT`) that inverted against `updateOwner`, deal deletion and offboarding. Through its trailing audit it stays in the #1582 class above, and its membership locks are now exclusive and held across the wait for the deal row: a replacement queued behind a stage `move`, which locks whole stage columns, blocks the listed members' own writes until it completes. A cap on the size of the collaborator list, still a follow-up, would bound that.
   - The replacement reads the collaborator rows `FOR UPDATE` through the primary key twice: before the clear, and again after the clear and any insert. That makes the audited and returned lists current reads rather than the snapshot that its unlocked existence check opened before any lock was held (#1942).
   - The first read takes the deal's clustered-row locks, and the gap lock on the next primary-key record, one statement before the clear. Its locks are a subset of the clear's, so it adds no wait-for edge. It does lengthen three existing deadlock windows:

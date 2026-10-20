@@ -185,7 +185,7 @@ class UserOffboardingOrderTest {
         service.prepareFreshMembership(7, 9);
 
         InOrder order = inOrder(
-            tenantWorkScope, workspaceMapper, ownershipOfferOrganizationMapper, providerCapturePurgeService,
+            tenantWorkScope, workspaceMapper, ownershipOfferOrganizationMapper, ownershipOfferWriter, providerCapturePurgeService,
             savedViewPreferenceMapper, savedViewMapper,
             dealDuplicateReviewProofMapper, duplicateReviewMapper,
             aiChatMapper, aiBriefScheduleMapper, aiWatchMapper,
@@ -195,6 +195,8 @@ class UserOffboardingOrderTest {
         order.verify(workspaceMapper).lockWorkspaceOrgIdForShare(7);
         order.verify(workspaceMapper).lockAuthorizationMembership(7, 9);
         order.verify(ownershipOfferOrganizationMapper).lockByIdForShare(13);
+        order.verify(ownershipOfferWriter).invalidateDepartingMembershipLocked(13, 7, 9);
+        order.verify(ownershipOfferWriter).detachDestinationLocked(13, 7, 9);
         order.verify(providerCapturePurgeService).purge(7, 9, "google");
         order.verify(providerCapturePurgeService).purge(7, 9, "microsoft");
         order.verify(savedViewPreferenceMapper).deletePinsForFreshMembership(7, 9);
@@ -215,6 +217,7 @@ class UserOffboardingOrderTest {
         order.verify(teamMapper).deleteMembershipsForUser(7, 9);
         order.verify(teamMapper).clearManagerForUser(7, 9);
         order.verify(apiCredentialLifecycleService).deleteForMembership(7, 9);
+        verify(notificationMapper, never()).lockRecipientMemberships(9);
         assertPreviousTenantContext();
     }
 
@@ -265,7 +268,7 @@ class UserOffboardingOrderTest {
         service.detachMemberContent(7, 9);
 
         InOrder order = inOrder(
-            workspaceMapper, ownershipOfferOrganizationMapper, providerCapturePurgeService, notificationMapper,
+            workspaceMapper, ownershipOfferOrganizationMapper, ownershipOfferWriter, providerCapturePurgeService, notificationMapper,
             savedViewPreferenceMapper, savedViewMapper,
             dealDuplicateReviewProofMapper, duplicateReviewMapper,
             aiChatMapper, aiBriefScheduleMapper, aiWatchMapper,
@@ -274,9 +277,11 @@ class UserOffboardingOrderTest {
             teamMapper, apiCredentialLifecycleService);
         order.verify(workspaceMapper).lockWorkspaceOrgIdForShare(7);
         order.verify(ownershipOfferOrganizationMapper).lockByIdForShare(13);
+        order.verify(notificationMapper).lockRecipientMemberships(9);
+        order.verify(ownershipOfferWriter).invalidateDepartingMembershipLocked(13, 7, 9);
+        order.verify(ownershipOfferWriter).detachDestinationLocked(13, 7, 9);
         order.verify(providerCapturePurgeService).purge(7, 9, "google");
         order.verify(providerCapturePurgeService).purge(7, 9, "microsoft");
-        order.verify(notificationMapper).lockRecipientMemberships(9);
         order.verify(savedViewPreferenceMapper).deletePinsForUser(7, 9);
         order.verify(savedViewPreferenceMapper).deleteDefaultsForUser(7, 9);
         order.verify(savedViewMapper).deleteForUser(7, 9);
