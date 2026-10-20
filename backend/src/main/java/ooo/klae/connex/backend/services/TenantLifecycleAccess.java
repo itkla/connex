@@ -11,6 +11,7 @@ import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
+import ooo.klae.connex.backend.tenant.TenantWorkspaceScopeSnapshot;
 
 /**
  * Captures a trusted control-plane workspace placement and reinstalls it for
@@ -29,6 +30,10 @@ public class TenantLifecycleAccess {
         if (workspace == null || workspace.orgId() != expectedOrgId) {
             throw new ResourceNotFoundException("Workspace not found");
         }
+        if (tenantWorkScope.isCatalogPerPlacement()) {
+            var scopes = tenantWorkScope.prepareLifecycleWorkspace(workspace.id(), workspace.orgId());
+            return new Route(workspace.orgId(), workspace.id(), scopes.catalog(), scopes);
+        }
         String catalog = tenantWorkScope.unrouted(
             () -> tenantCatalogResolver.resolveCatalog(workspace.orgId()));
         return new Route(workspace.orgId(), workspace.id(), catalog);
@@ -38,40 +43,45 @@ public class TenantLifecycleAccess {
     public <T> T withRoute(Route route, int actorId, Supplier<T> work) {
         Objects.requireNonNull(route, "route");
         Objects.requireNonNull(work, "work");
-        return tenantWorkScope.withCatalog(route.catalog(), () ->
+        return tenantWorkScope.withPreparedWorkspace(
+            route.workspaceId(), route.orgId(), route.catalog(), route.scopes(), () ->
             withTenantContext(route, actorId, work));
     }
 
     private <T> T withTenantContext(Route route, int actorId, Supplier<T> work) {
-        boolean hadTenant = tenantContext.isResolved();
-        Integer previousWorkspace = hadTenant ? tenantContext.getWorkspaceId() : null;
-        Integer previousOrg = hadTenant ? tenantContext.getOrgId() : null;
-        Integer previousUser = hadTenant ? tenantContext.getUserId() : null;
-        String previousRole = hadTenant ? tenantContext.getRole() : null;
-        String previousCatalog = hadTenant ? tenantContext.getScopeCatalog() : null;
+        TenantContext.State previousTenant = tenantContext.snapshot();
         tenantContext.set(route.workspaceId(), route.orgId(), actorId, "org_admin", route.catalog());
         try {
             return work.get();
         } finally {
-            if (hadTenant) {
-                tenantContext.set(
-                    previousWorkspace,
-                    previousOrg,
-                    previousUser,
-                    previousRole,
-                    previousCatalog);
-            } else {
-                tenantContext.clear();
-            }
+            tenantContext.restore(previousTenant);
         }
     }
 
-    /** Immutable trusted lifecycle catalog route. */
-    public record Route(int orgId, int workspaceId, String catalog) {
+    /**
+     * Immutable trusted route and prepared data. Grouping remains by route identity so snapshots
+     * captured separately cannot split the ownership-offer account cleanup's transaction groups.
+     */
+    public record Route(int orgId, int workspaceId, String catalog, TenantWorkspaceScopeSnapshot scopes) {
+        public Route(int orgId, int workspaceId, String catalog) {
+            this(orgId, workspaceId, catalog, null);
+        }
+
         public Route {
             if (orgId <= 0 || workspaceId <= 0) {
                 throw new IllegalArgumentException("Lifecycle route ids must be positive");
             }
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            return other instanceof Route route && orgId == route.orgId
+                && workspaceId == route.workspaceId && Objects.equals(catalog, route.catalog);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(orgId, workspaceId, catalog);
         }
     }
 }

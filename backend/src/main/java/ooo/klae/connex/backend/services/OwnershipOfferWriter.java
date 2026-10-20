@@ -135,21 +135,13 @@ public class OwnershipOfferWriter {
 
     /** Switches only identity within an already-routed catalog; it never repins a connection. */
     public void withNoticeScope(OwnershipOffer offer, Runnable work) {
-        boolean resolved = tenantContext.isResolved();
-        Integer previousWorkspace = tenantContext.getWorkspaceId();
-        Integer previousOrg = tenantContext.getOrgId();
-        Integer previousUser = tenantContext.getUserId();
-        String previousRole = tenantContext.getRole();
+        TenantContext.State previousTenant = tenantContext.snapshot();
         String previousCatalog = tenantContext.getScopeCatalog();
         tenantContext.set(offer.getDeliveryWorkspaceId(), offer.getOrgId(), offer.getOffereeUserId(), "member", previousCatalog);
         try {
             work.run();
         } finally {
-            if (resolved) {
-                tenantContext.set(previousWorkspace, previousOrg, previousUser, previousRole, previousCatalog);
-            } else {
-                tenantContext.clear();
-            }
+            tenantContext.restore(previousTenant);
         }
     }
 

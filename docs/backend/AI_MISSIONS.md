@@ -340,10 +340,14 @@ record under an unblocked barrier also fails readiness. Pre-V232 active ordinary
 without durable tokens are settled without content before mission admission.
 
 Self-service, signup/bootstrap, and volume seeding publish the same workspace-provisioned
-event inside their control transaction. Its after-commit callback suspends the completed
-transaction's resources before resolving placement, then installs the system actor's tenant
-scope through `AutomationExecutor`. A catalog pin alone does not authorize scoped mapper
-calls on an unresolved signup request thread. Tenant initialization commits separately. Legacy discovery pages and startup recovery reads use fresh
+event inside their control transaction. In catalog-per-placement mode its after-commit callback
+submits initialization to the application executor without waiting, because the completed
+transaction retains its connection until the callback returns. The worker resolves placement and
+prepares workspace scopes before installing the system actor through `AutomationExecutor`.
+Single-database mode retains synchronous initialization with suspended provisioning resources.
+Failed submission or initialization is recovered by periodic reconciliation. A catalog pin alone
+does not authorize scoped mapper calls on an unresolved signup request thread. Tenant initialization
+commits separately. Legacy discovery pages and startup recovery reads use fresh
 routed transactions after placement is installed, ending before each independent settlement; resumed control sessions from placement lookup
 never supply their tenant reads.
 A crash between commits leaves mission admission unavailable until startup/periodic

@@ -242,7 +242,8 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   pairs every `FROM *_share` read with the ceiling; `ShareReadIsolationMapperTest` proves it.
 - **Record-visibility ceiling separation (#485):** `RecordVisibilityScopeControlAccess` exposes an
   immutable, unfiltered organization workspace set by delegating to `ShareWorkspaceControlAccess`'s
-  single control-catalog snapshot, including its transaction suspension and tenant-context checks.
+  single control-catalog snapshot, including its tenant-context checks. Routed operations consume
+  prepared data; single-database operations retain their lazy lookup.
   This preserves legacy `JOIN workspace` ceilings that had no lifecycle predicate; lifecycle
   tightening requires a separate explicit decision. It deliberately differs from the active-only
   `OrganizationWorkspaceScopeControlAccess` used by Identity, PersonEdge and assistant ceilings.
@@ -250,6 +251,34 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   tenant tables only; duplicate counts omit the optional employer-label joins. Their crossing
   baseline entries are removed. The routing default stays `single-database`; other #485 crossings
   and the flag-enable gate remain open.
+
+- **Context-installed workspace scopes (#2159 / #485 P5b).** Catalog-routed request resolution,
+  public API authentication and every workspace job entry prepare immutable unfiltered and
+  active-only organization snapshots before tenant transactions. Sharing and record visibility
+  share one control SELECT while retaining distinct types; the active-org ceiling uses its own
+  lifecycle-filtered SELECT. A short read-only control transaction releases its session and
+  connection before routing begins. Boundaries serve only the exact installed workspace,
+  organization and catalog. With no matching payload, an active-transaction scope read throws
+  `TenantScopeSnapshotMissingException` before suspension, mapper execution or checkout, even on a
+  shared placement. Outside transactions the control lookup remains available. `single-database`
+  installs no eager data and preserves its existing lazy reads, query counts and transaction paths.
+  Same-workspace nested `runAs` reuses the payload; different workspace routing remains independent.
+  Identity-only switches never load scopes and discard unusable bindings. Control-only selections
+  stay unresolved and have no usable snapshot; catalog-only enumeration prepares none.
+  Captured lifecycle routes carry prepared data across root deletion. Inactive or absent anchors
+  are recorded at preparation, with the original boundary refusal deferred until `getForWorkspace`,
+  so tombstone cleanup does not gain an active-lifecycle requirement. Snapshots last for one
+  workspace operation: creation, deletion, renaming and lifecycle changes during it are observed
+  on the next operation, without changing locked authorization or mutation revalidation.
+  Complete identity/selection/override/payload state is saved and restored on nested scopes;
+  request completion and async handoff clear it, and root job exit discards cached routes.
+  State uses plain `ThreadLocal`, with no inheritance or task decorator. Async jobs install their
+  own scope. Routed provisioning submits initialization without waiting in its `AFTER_COMMIT`
+  callback, which still retains the provisioning connection; scheduled reconciliation recovers
+  failed submissions and initialization. Single-database initialization remains synchronous.
+  An explicit source-inspection architecture test pins reviewed installers and restorers, while
+  pool-size-1 integration coverage exercises boundaries against a tenant catalog with no control
+  tables. Routing remains disabled until the rest of #485's enablement gates are satisfied.
 
 ### 0.6 Organization membership & org-level roles (#316)
 

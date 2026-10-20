@@ -10,7 +10,7 @@ import lombok.RequiredArgsConstructor;
 /**
  * Resolves the unfiltered organization workspace set preserving legacy {@code JOIN workspace}
  * record-visibility ceilings with exact parity (#485, program decision 1). Delegation to
- * {@link ShareWorkspaceControlAccess} retains its transaction suspension, default-catalog snapshot,
+ * {@link ShareWorkspaceControlAccess} retains its prepared routed snapshot, lazy single-database lookup,
  * and tenant-context checks without duplicating that boundary.
  *
  * <p>This deliberately differs from the active-only {@link OrganizationWorkspaceScopeControlAccess}
@@ -24,9 +24,9 @@ public class RecordVisibilityScopeControlAccess {
 
     /**
      * Resolves one immutable, unfiltered record-visibility ceiling for an operation.
-     * Call before acquiring authorization, organization, provider, or record locks: a routed
-     * transaction is suspended and borrows a second connection. Pass this scope through nested
-     * reads instead of resolving it again while a lock is held.
+     * Routed operations serve the immutable payload prepared before their first tenant transaction.
+     * A missing or mismatched payload inside a routed transaction fails before any control read.
+     * Single-database operations retain their lazy lookup and existing transaction behavior.
      *
      * @param workspaceId workspace anchoring the organization
      * @return the organization's workspace IDs, including the anchor
@@ -35,7 +35,7 @@ public class RecordVisibilityScopeControlAccess {
      */
     public RecordVisibilityScope getForWorkspace(int workspaceId) {
         var snapshot = shareWorkspaceControlAccess.getForWorkspace(workspaceId);
-        return new RecordVisibilityScope(snapshot.orgId(), snapshot.workspaceIds());
+        return snapshot.recordVisibilityScope();
     }
 
     /** An unfiltered organization workspace set, distinct from active-only read scopes. */

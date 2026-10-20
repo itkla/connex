@@ -50,7 +50,8 @@ class TenantControlOnlyResolutionTest {
     private final HttpServletResponse response = mock(HttpServletResponse.class);
     private final TenantResolutionInterceptor interceptor = new TenantResolutionInterceptor(
         workspaces, context, catalogs, new WorkspaceRequestResolver(workspaces), cookie,
-        mock(ClientAssertedCorrelationPseudonymizer.class));
+        mock(ClientAssertedCorrelationPseudonymizer.class),
+            org.mockito.Mockito.mock(ooo.klae.connex.backend.tenant.TenantWorkScope.class));
 
     @BeforeEach
     void authenticateMember() {

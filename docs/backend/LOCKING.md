@@ -23,7 +23,7 @@ Read the relevant section before adding/changing `FOR UPDATE`, transaction isola
     - cursor iteration in `TenantExportSnapshotTransaction`;
     - a failure swallowed inside another synchronization's `beforeCommit` or `beforeCompletion`, which registers too late for the commit it occurs in.
   - A lock failure that also crossed a participating `@Transactional` proxy has already marked the transaction rollback-only. Its commit therefore rolls back before any callback runs and fails with a cause-less `UnexpectedRollbackException`. Nothing is lost, but both engines classify that as permanent.
-- Read control-plane data that a tenant write needs only for its response — deal-collaborator profile hydration, for example — after that write's transaction has completed. Suspending a routed tenant transaction to read the control catalog borrows a second pooled connection while the write still holds its row locks and the workspace audit-chain head, so under `catalog-per-placement` enough concurrent requests exhaust the pool and hold those locks for a whole connection timeout. Control-plane state a write must consult before it commits keeps the suspend-and-read shape, and those paths budget two pooled connections per concurrent request — except control-plane **locks** the write relies on until it commits, which must be taken on the transaction's own connection through the control-catalog scope (`ControlCatalogRoutingInterceptor`), never by suspending and reading, or the lock is released before the tenant write commits. Deal-collaborator replacement locks its members' rows that way. The suspend-and-read paths are quiet-hours evaluation, `ShareService.share()`, and the pre-lock record-visibility snapshot for duplicate-review decisions described below. The sharing snapshot is the ceiling the tenant grant statement enforces and so must be read before the grant. Both sharing and duplicate-review decisions take their snapshot before acquiring any row lock. `ShareService.listShares()` reads it after the tenant listing and skips it entirely when there is nothing to hydrate.
+- Read control-plane data needed only for a response after the tenant write commits. Organization workspace scope reads are different: in `catalog-per-placement`, `TenantResolutionInterceptor`, public API authentication, and workspace job scopes prepare their immutable scopes before the first tenant transaction (#2159). `ShareWorkspaceControlAccess`, `RecordVisibilityScopeControlAccess` and `OrganizationWorkspaceScopeControlAccess` serve that exact workspace/organization/catalog payload without suspending the transaction or borrowing another connection. Without a matching prepared payload, an active-transaction lookup throws `TenantScopeSnapshotMissingException` before any query or checkout, including for shared placements with a null catalog. Never hold a tenant connection while waiting for one of these control scope reads. Existing `single-database` lazy branches remain unchanged; the active-only boundary still uses its independent control transaction there. Other control operations, including quiet-hours evaluation and the bounded disclosure audit, retain their separately documented connection budgets. Control-plane **locks** needed through commit stay on the tenant transaction's own connection through `ControlCatalogRoutingInterceptor`; snapshots never replace authorization locks.
 - Changes to lock order or transaction isolation are Tier 3/high-risk and receive focused concurrency/correctness review.
 
 Interactive and public API requests return HTTP 409 for Spring pessimistic lock failures and exact
@@ -1734,16 +1734,19 @@ after obtaining it, the service rechecks the evidence fingerprint and current vi
 writing. This places the decision row after the organization mutex without introducing an ordering
 edge against record targets or identity groups.
 
-Record-visibility scopes must be resolved before any authorization, organization mutex, provider
-connection, or tenant record lock. A routed scope lookup suspends the tenant transaction and borrows
-a second pooled connection; doing that while holding a mutex can exhaust the pool with waiters and
-leave the mutex owner waiting for its own second connection. Thread the same immutable
-`RecordVisibilityScope` through the locked operation instead of resolving it again in a nested read.
+Routed record-visibility and active-org scopes are prepared with the workspace route, before any
+tenant transaction or authorization, organization mutex, provider connection, or record lock.
+Preparation uses a short read-only control transaction: one unfiltered sharing statement also backs
+the separately typed record-visibility scope, and one active-only statement backs read ceilings.
+The connection and session are released before tenant work, including when an enclosing suspended
+operation has empty synchronization. `DuplicateReviewService.list` retains its count/page transaction;
+`WarmPathService` signal detection, queue-time identifier resolution and nested workflow actions can
+read the prepared payload inside their existing transactions without borrowing.
 
-In `catalog-per-placement` mode, a scope read inside an open tenant transaction borrows a second
-connection. `DuplicateReviewService.list` resolves its scope before opening the repeatable-read
-transaction shared by count and page. The general guarantee of a context-installed scope snapshot
-and a fail-fast guard is tracked in #485 as lane L-scope and must land before the flag can be enabled.
+Same-workspace `runAs` nesting reuses preparation; identity-only switches never load it. A switch to
+another identity retains usable data only when the prepared workspace, organization and catalog all
+match. Otherwise a later transactional scope lookup fails fast. Missing snapshot invariant failures
+escape notification preload degradation; ordinary preload failures retain existing pass isolation.
 
 The locked call chains are:
 
@@ -1771,19 +1774,27 @@ detection completes before signal replacement acquires write locks. Reverse-intr
 are generated before manual or delivery snapshot persistence locks; the scheduled occurrence claim
 commits before generation. Neither read chain inherits those subsequent write locks.
 
-Before any authorization or duplicate-decision lock, dismissal and reopen resolve one unfiltered
-`RecordVisibilityScopeControlAccess` snapshot for both their pre-decision visibility projection and
-their returned projection (#485). The boundary delegates to the existing sharing snapshot: a routed
-transaction is suspended for the control read and then restored, while a default-catalog transaction
-keeps the read in its existing snapshot. Budget two pooled connections per concurrent routed decision
-during this pre-lock read; the same two-connection budget applies to routed history-import and
-provider-page transactions during their pre-lock lookup. Notification reconciliation and provider
-review preload before opening their own transaction and need only the control-read connection at
-that point. Never defer that read
-until a lock is held, and never move authorization
-locks or `lockCurrentPair` to the suspended connection. Those locks remain on the tenant transaction's
-own connection until commit. Duplicate queue count and page retain one repeatable-read transaction;
-the count has no employer-label joins and summary counts need no control snapshot.
+Before authorization or duplicate-decision locks, dismissal and reopen obtain one unfiltered
+`RecordVisibilityScopeControlAccess` view for their visibility projections. In routed mode this is a
+memory-only read of the context-installed sharing snapshot, as are history-import and provider-page
+lookups. No scope read suspends their tenant transaction. Single-database sharing and record
+visibility keep their existing default-catalog transaction snapshot. Authorization locks and
+`lockCurrentPair` remain on the tenant transaction's own connection until commit. Count/page retain
+one repeatable-read transaction; summary counts need no control snapshot.
+
+Prepared data lasts for one workspace operation and is never refreshed under tenant locks. Workspace
+creation, deletion, renaming and lifecycle changes after preparation become visible on the next
+operation. Inactive or missing anchors are recorded without blocking trusted lifecycle/tombstone
+cleanup; `getForWorkspace` enforces the original refusal when that kind is actually requested.
+Captured lifecycle routes carry their payload across control-root deletion without another lookup.
+All identity, selection, override and payload state is restored together; root job spans discard their
+route cache and request completion/async handoff clears the thread. Plain `ThreadLocal` state is never
+inherited or copied to executors. Validated control-only selections have no usable snapshot.
+
+Routed provisioning's `AFTER_COMMIT` callback submits initialization without waiting, because that
+callback still retains the provisioning connection. The worker resolves its own route before tenant
+transactions; failed submissions or initialization remain covered by periodic reconciliation.
+Single-database provisioning stays synchronous.
 
 CSV commits claim their one-use review proof first, then lock and revalidate the actor's create
 permission before entering the duplicate-decision hierarchy. This retains the actor's custom-role

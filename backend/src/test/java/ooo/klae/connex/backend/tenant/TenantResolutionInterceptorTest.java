@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -66,14 +67,16 @@ class TenantResolutionInterceptorTest {
             catalogResolver,
             requestResolver,
             workspaceCookie,
-            correlationPseudonymizer);
+            correlationPseudonymizer,
+            org.mockito.Mockito.mock(ooo.klae.connex.backend.tenant.TenantWorkScope.class));
         liveInterceptor = new TenantResolutionInterceptor(
             workspaceService,
             liveContext,
             catalogResolver,
             requestResolver,
             workspaceCookie,
-            correlationPseudonymizer);
+            correlationPseudonymizer,
+            org.mockito.Mockito.mock(ooo.klae.connex.backend.tenant.TenantWorkScope.class));
         User member = new User();
         member.setId(7);
         authenticateAs(member);
@@ -94,6 +97,38 @@ class TenantResolutionInterceptorTest {
         verifyNoInteractions(requestResolver, workspaceService, catalogResolver, workspaceCookie);
         verify(tenantContext, times(3)).clear();
         verifyNoMoreInteractions(tenantContext);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void routedSnapshotIsPreparedBeforeIdentityAndReleasedOnCompletionOrAsyncHandoff(boolean async) throws Exception {
+        var scopes = new TenantWorkspaceScopeSnapshot(11, 3, "cnx_tenant", java.util.Optional.empty(),
+            new ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlOperations.WorkspaceScope(
+                3, java.util.List.of(11), "[11]"));
+        TenantWorkScope workScope = mock(TenantWorkScope.class);
+        when(requestResolver.resolve(any(), eq(7))).thenReturn(11);
+        when(workspaceService.getRole(11, 7)).thenReturn("member");
+        when(workspaceService.getOrgId(11)).thenReturn(3);
+        when(catalogResolver.resolveCatalog(3)).thenReturn("cnx_tenant");
+        when(workScope.prepareWorkspaceScopes(11, 3, "cnx_tenant")).thenAnswer(call -> {
+            assertFalse(liveContext.isResolved());
+            assertFalse(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
+            return scopes;
+        });
+        var resolver = new TenantResolutionInterceptor(workspaceService, liveContext, catalogResolver,
+            requestResolver, workspaceCookie, correlationPseudonymizer, workScope);
+        var request = new MockHttpServletRequest("GET", "/api/companies");
+
+        assertTrue(resolver.preHandle(request, response, handler));
+        assertSame(scopes, liveContext.getWorkspaceScopes());
+        if (async) {
+            resolver.afterConcurrentHandlingStarted(request, response, handler);
+        } else {
+            resolver.afterCompletion(request, response, handler, null);
+        }
+        assertFalse(liveContext.isResolved());
+        assertNull(liveContext.getWorkspaceScopes());
+        assertNull(liveContext.getCatalog());
     }
 
     @Test
@@ -664,7 +699,8 @@ class TenantResolutionInterceptorTest {
             catalogResolver,
             new WorkspaceRequestResolver(workspaceService),
             workspaceCookie,
-            correlationPseudonymizer);
+            correlationPseudonymizer,
+            org.mockito.Mockito.mock(ooo.klae.connex.backend.tenant.TenantWorkScope.class));
     }
 
     private void stubResolutionFor(int userId, int workspaceId) {

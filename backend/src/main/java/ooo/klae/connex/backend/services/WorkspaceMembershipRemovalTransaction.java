@@ -57,26 +57,12 @@ public class WorkspaceMembershipRemovalTransaction {
             String actorRole,
             String catalog,
             Supplier<T> work) {
-        boolean hadTenant = tenantContext.isResolved();
-        Integer previousWorkspace = hadTenant ? tenantContext.getWorkspaceId() : null;
-        Integer previousOrg = hadTenant ? tenantContext.getOrgId() : null;
-        Integer previousUser = hadTenant ? tenantContext.getUserId() : null;
-        String previousRole = hadTenant ? tenantContext.getRole() : null;
-        String previousCatalog = hadTenant ? tenantContext.getScopeCatalog() : null;
+        TenantContext.State previousTenant = tenantContext.snapshot();
         tenantContext.set(workspaceId, orgId, actorId, actorRole, catalog);
         try {
             return work.get();
         } finally {
-            if (hadTenant) {
-                tenantContext.set(
-                    Objects.requireNonNull(previousWorkspace, "previousWorkspace"),
-                    Objects.requireNonNull(previousOrg, "previousOrg"),
-                    Objects.requireNonNull(previousUser, "previousUser"),
-                    Objects.requireNonNull(previousRole, "previousRole"),
-                    previousCatalog);
-            } else {
-                tenantContext.clear();
-            }
+            tenantContext.restore(previousTenant);
         }
     }
 }

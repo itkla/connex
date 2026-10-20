@@ -66,6 +66,11 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
 
     /** Clones only the tables referenced by the selected mapper's visibility statements. */
     public RecordVisibilityPlaneFixture(boolean introductions, boolean split) throws Exception {
+        this(introductions, split, 2);
+    }
+
+    /** Creates the same minimal fixture with an explicit connection budget. */
+    public RecordVisibilityPlaneFixture(boolean introductions, boolean split, int maximumPoolSize) throws Exception {
         this.split = split;
         String url = System.getenv("CONNEX_DB_URL");
         String username = System.getenv("CONNEX_DB_USERNAME");
@@ -95,7 +100,7 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
         pool.setJdbcUrl(url);
         pool.setUsername(username);
         pool.setPassword(password);
-        pool.setMaximumPoolSize(2);
+        pool.setMaximumPoolSize(maximumPoolSize);
         pool.setConnectionTimeout(5_000);
         pool.setPoolName("record-visibility-plane");
         TenantRoutingProperties properties = new TenantRoutingProperties();

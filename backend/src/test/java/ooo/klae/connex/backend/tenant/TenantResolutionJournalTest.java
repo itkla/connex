@@ -70,7 +70,8 @@ class TenantResolutionJournalTest {
             catalogResolver,
             requestResolver,
             workspaceCookie,
-            correlationPseudonymizer);
+            correlationPseudonymizer,
+            org.mockito.Mockito.mock(ooo.klae.connex.backend.tenant.TenantWorkScope.class));
         User user = new User();
         user.setId(7);
         Authentication authentication = mock(Authentication.class);
