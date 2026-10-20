@@ -178,7 +178,9 @@ class AiAgentMaintenanceRoutingTest {
         when(system.user()).thenReturn(user);
         return new AiAgentPrivacyInitializer(workspaces, scope, privacy,
                 mock(AiAgentStartupRecoveryService.class), recorder, mock(PlatformTransactionManager.class),
-                new AutomationExecutor(context, new AutomationScope(), scope), system);
+                new AutomationExecutor(context, new AutomationScope(), scope), system,
+                new org.springframework.beans.factory.support.StaticListableBeanFactory()
+                    .getBeanProvider(org.springframework.core.task.TaskExecutor.class));
     }
 
     private record Recorded(String job, String catalog, JobRunStatus status) {}

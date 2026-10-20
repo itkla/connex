@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -52,6 +54,18 @@ import tools.jackson.databind.ObjectMapper;
 
 class NotificationReconciliationServiceTest {
     private static final RecordVisibilityScope RECORD_SCOPE = new RecordVisibilityScope(1, List.of(7));
+
+    @Test
+    void missingPreparedScopeCannotDegradeIntoASkippedIntroPass() {
+        ReconciliationFixture fixture = ReconciliationFixture.withDispatcher();
+        fixture.properties.setIntroOpportunitiesEnabled(true);
+        var missing = new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotMissingException("workspace 7");
+        when(fixture.recordVisibilityScopeControlAccess.getForWorkspace(7)).thenThrow(missing);
+
+        assertSame(missing, assertThrows(ooo.klae.connex.backend.exceptions.TenantScopeSnapshotMissingException.class,
+            () -> fixture.service().reconcileWorkspace(7, true)));
+        Mockito.verifyNoInteractions(fixture.transactionManager, fixture.notificationMapper, fixture.dispatcher);
+    }
 
     @Test
     void classifiesWarningCriticalAndInitialBackfillBoundaries() {

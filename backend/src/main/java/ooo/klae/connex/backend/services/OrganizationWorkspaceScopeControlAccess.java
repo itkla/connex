@@ -13,8 +13,13 @@ import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlOperati
 import ooo.klae.connex.backend.tenant.ControlPlaneRead;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
+import ooo.klae.connex.backend.tenant.TenantWorkspaceScopeSnapshot;
 
-/** Resolves immutable organization workspace scopes from the control catalog. */
+/**
+ * Resolves active-only organization scopes. Routed operations reuse prepared workspace data and
+ * refuse missing snapshots inside transactions; single-database operations retain lazy reads and
+ * the existing independent control transaction, including on the default catalog.
+ */
 @Component
 @RequiredArgsConstructor
 public class OrganizationWorkspaceScopeControlAccess {
@@ -30,6 +35,13 @@ public class OrganizationWorkspaceScopeControlAccess {
      * @return sorted workspace IDs and their JSON representation
      */
     public WorkspaceScope getForWorkspace(int workspaceId) {
+        if (tenantWorkScope.isCatalogPerPlacement()) {
+            TenantWorkspaceScopeSnapshot prepared = tenantContext.getWorkspaceScopes();
+            if (prepared != null && prepared.workspaceId() == workspaceId) {
+                return prepared.requireActiveWorkspace();
+            }
+            tenantWorkScope.requireScopePreparationAllowed("workspace " + workspaceId);
+        }
         WorkspaceScope scope = execute(() -> controlOperations.getForWorkspace(workspaceId));
         if (tenantContext.isResolved() && (tenantContext.getWorkspaceId().intValue() != workspaceId
                 || tenantContext.getOrgId().intValue() != scope.orgId())) {
@@ -45,6 +57,13 @@ public class OrganizationWorkspaceScopeControlAccess {
      * @return sorted workspace IDs and their JSON representation
      */
     public WorkspaceScope getForOrg(int orgId) {
+        if (tenantWorkScope.isCatalogPerPlacement()) {
+            TenantWorkspaceScopeSnapshot prepared = tenantContext.getWorkspaceScopes();
+            if (prepared != null && prepared.orgId() == orgId) {
+                return prepared.active();
+            }
+            tenantWorkScope.requireScopePreparationAllowed("organization " + orgId);
+        }
         WorkspaceScope scope = execute(() -> controlOperations.getForOrg(orgId));
         if (tenantContext.isResolved() && tenantContext.getOrgId().intValue() != orgId) {
             throw new ResourceNotFoundException("Organization not found: " + orgId);

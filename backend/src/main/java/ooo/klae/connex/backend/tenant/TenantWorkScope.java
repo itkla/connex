@@ -7,6 +7,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiFunction;
+import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -16,6 +17,9 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.exceptions.TenantScopeSnapshotMissingException;
+import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlOperations.WorkspaceScope;
+import ooo.klae.connex.backend.services.TenantWorkspaceScopeControlOperations;
 
 /**
  * Catalog scoping for work that runs without a request-resolved
@@ -41,13 +45,18 @@ public class TenantWorkScope {
         private int depth;
     }
 
-    private record WorkspaceRoute(int orgId, String catalog) {}
+    private record WorkspaceRoute(int orgId, String catalog, TenantWorkspaceScopeSnapshot scopes) {
+        private WorkspaceRoute(int orgId, String catalog) {
+            this(orgId, catalog, null);
+        }
+    }
 
     private final class WorkspaceRouteScope implements AutoCloseable {
         private final WorkspaceRoutes routes;
         private final WorkspaceRoute route;
         private final boolean root;
         private final Optional<String> previous;
+        private final TenantWorkspaceScopeSnapshot previousScopes;
 
         private WorkspaceRouteScope(
                 WorkspaceRoutes routes, WorkspaceRoute route, boolean root) {
@@ -55,12 +64,14 @@ public class TenantWorkScope {
             this.route = route;
             this.root = root;
             this.previous = beginOverride(Optional.ofNullable(route.catalog()));
+            this.previousScopes = tenantContext.swapWorkspaceScopes(route.scopes());
         }
 
         @Override
         public void close() {
             try {
                 tenantContext.swapCatalogOverride(previous);
+                tenantContext.swapWorkspaceScopes(previousScopes);
             } finally {
                 routes.depth--;
                 if (root && routes.depth == 0) {
@@ -76,6 +87,8 @@ public class TenantWorkScope {
     private final TenantCatalogResolver tenantCatalogResolver;
     private final WorkspaceMapper workspaceMapper;
     private final Function<Integer, Integer> lifecycleOrgResolver;
+    private final TenantWorkspaceScopeControlOperations scopeControlOperations;
+    private final BooleanSupplier routingEnabled;
 
     /** Creates the production scope with ordinary and trusted lifecycle resolvers. */
     @Autowired
@@ -83,12 +96,38 @@ public class TenantWorkScope {
             TenantContext tenantContext,
             TenantCatalogResolver tenantCatalogResolver,
             WorkspaceMapper workspaceMapper,
-            TenantLifecycleControlMapper tenantLifecycleControlMapper) {
+            TenantLifecycleControlMapper tenantLifecycleControlMapper,
+            TenantWorkspaceScopeControlOperations scopeControlOperations,
+            TenantRoutingProperties routingProperties) {
+        this(tenantContext, tenantCatalogResolver, workspaceMapper, tenantLifecycleControlMapper,
+            scopeControlOperations, routingProperties::isCatalogPerPlacement);
+    }
+
+    /** Creates explicitly routed scope preparation for focused tests. */
+    public TenantWorkScope(TenantContext tenantContext, TenantCatalogResolver tenantCatalogResolver,
+            WorkspaceMapper workspaceMapper, TenantLifecycleControlMapper lifecycleMapper,
+            TenantWorkspaceScopeControlOperations scopeControlOperations) {
+        this(tenantContext, tenantCatalogResolver, workspaceMapper, lifecycleMapper,
+            scopeControlOperations, tenantCatalogResolver::isCatalogPerPlacement);
+    }
+
+    private TenantWorkScope(TenantContext tenantContext, TenantCatalogResolver tenantCatalogResolver,
+            WorkspaceMapper workspaceMapper, TenantLifecycleControlMapper tenantLifecycleControlMapper,
+            TenantWorkspaceScopeControlOperations scopeControlOperations, BooleanSupplier routingEnabled) {
         this.tenantContext = tenantContext;
         this.tenantCatalogResolver = tenantCatalogResolver;
         this.workspaceMapper = workspaceMapper;
         this.lifecycleOrgResolver =
             tenantLifecycleControlMapper::findWorkspaceOrgIdForLifecycle;
+        this.scopeControlOperations = scopeControlOperations;
+        this.routingEnabled = routingEnabled;
+    }
+
+    /** Creates a scope with explicit lifecycle routing for focused tests. */
+    public TenantWorkScope(TenantContext tenantContext, TenantCatalogResolver tenantCatalogResolver,
+            WorkspaceMapper workspaceMapper, TenantLifecycleControlMapper lifecycleMapper) {
+        this(tenantContext, tenantCatalogResolver, workspaceMapper, lifecycleMapper,
+            new TenantWorkspaceScopeControlOperations(workspaceMapper, lifecycleMapper, tenantCatalogResolver), () -> false);
     }
 
     /** Creates an ordinary-routing scope for focused unit and routing tests. */
@@ -100,11 +139,46 @@ public class TenantWorkScope {
         this.tenantCatalogResolver = tenantCatalogResolver;
         this.workspaceMapper = workspaceMapper;
         this.lifecycleOrgResolver = workspaceMapper::getOrgId;
+        this.scopeControlOperations = new TenantWorkspaceScopeControlOperations(
+            workspaceMapper, tenantCatalogResolver);
+        this.routingEnabled = () -> false;
     }
 
-    /** Whether this deployment routes tenant catalogs independently of the control catalog. */
+    /** Whether preparation and the transaction-time scope invariant apply on this deployment. */
     public boolean isCatalogPerPlacement() {
-        return tenantCatalogResolver.isCatalogPerPlacement();
+        return routingEnabled.getAsBoolean();
+    }
+
+    /**
+     * Prepares a validated route before tenant transactions. Single-database mode performs no reads.
+     * A transactional caller may reuse an exact installed payload, but may never load a replacement.
+     */
+    public TenantWorkspaceScopeSnapshot prepareWorkspaceScopes(int workspaceId, int orgId, String catalog) {
+        if (!isCatalogPerPlacement()) {
+            return null;
+        }
+        TenantWorkspaceScopeSnapshot existing = tenantContext.getWorkspaceScopes();
+        if (existing != null && existing.matches(workspaceId, orgId, catalog)) {
+            return existing;
+        }
+        requireScopePreparationAllowed("workspace " + workspaceId);
+        return unroutedRead(() -> scopeControlOperations.load(workspaceId, orgId, catalog, null));
+    }
+
+    /** Resolves a trusted lifecycle placement and scopes in one short control transaction. */
+    public TenantWorkspaceScopeSnapshot prepareLifecycleWorkspace(int workspaceId, int orgId) {
+        if (!isCatalogPerPlacement()) {
+            return null;
+        }
+        requireScopePreparationAllowed("lifecycle workspace " + workspaceId);
+        return unroutedRead(() -> scopeControlOperations.forLifecycleWorkspace(workspaceId, orgId));
+    }
+
+    /** Refuses a scope lookup before it can suspend or borrow under a routed transaction. */
+    public void requireScopePreparationAllowed(String requestedScope) {
+        if (isCatalogPerPlacement() && TransactionSynchronizationManager.isActualTransactionActive()) {
+            throw new TenantScopeSnapshotMissingException(requestedScope);
+        }
     }
 
     /**
@@ -178,6 +252,39 @@ public class TenantWorkScope {
             route -> work.apply(route.orgId(), route.catalog()));
     }
 
+    /** Reuses a control-derived active organization scope already read by diagnostics. */
+    public <T> T withWorkspacePlacement(int workspaceId, WorkspaceScope activeScope,
+            BiFunction<Integer, String, T> work) {
+        try (var scope = enterWorkspaceRoute(workspaceId, false, activeScope)) {
+            return work.apply(scope.route.orgId(), scope.route.catalog());
+        }
+    }
+
+    /** Discovers a placement for grouping only, without installing a route or loading scopes. */
+    public <T> T readWorkspacePlacement(int workspaceId, BiFunction<Integer, String, T> read) {
+        WorkspaceRoute route = resolveRouteForWorkspace(workspaceId);
+        return read.apply(route.orgId(), route.catalog());
+    }
+
+    /**
+     * Installs an explicitly captured route and its payload without rereading a lifecycle root.
+     * The payload may record an unavailable anchor; only a subsequent boundary read refuses it.
+     */
+    public <T> T withPreparedWorkspace(int workspaceId, int orgId, String catalog,
+            TenantWorkspaceScopeSnapshot scopes, Supplier<T> work) {
+        if (scopes != null && !scopes.matches(workspaceId, orgId, catalog)) {
+            throw new IllegalArgumentException("Prepared workspace scopes do not match the captured route");
+        }
+        return withCatalog(catalog, () -> {
+            TenantWorkspaceScopeSnapshot previousScopes = tenantContext.swapWorkspaceScopes(scopes);
+            try {
+                return work.get();
+            } finally {
+                tenantContext.swapWorkspaceScopes(previousScopes);
+            }
+        });
+    }
+
     /**
      * Routes trusted cleanup and reconciliation through a workspace whose
      * lifecycle state may already be {@code tearing_down}.
@@ -220,18 +327,24 @@ public class TenantWorkScope {
     }
 
     private WorkspaceRouteScope enterWorkspaceRoute(int workspaceId, boolean lifecycle) {
+        return enterWorkspaceRoute(workspaceId, lifecycle, null);
+    }
+
+    private WorkspaceRouteScope enterWorkspaceRoute(
+            int workspaceId, boolean lifecycle, WorkspaceScope knownActiveScope) {
         WorkspaceRoutes routes = CURRENT_WORKSPACE_ROUTES.get();
         boolean root = routes == null;
         if (root) {
             routes = new WorkspaceRoutes();
             if (tenantContext.isResolved()) {
                 routes.routes.put(tenantContext.getWorkspaceId(),
-                    new WorkspaceRoute(tenantContext.getOrgId(), tenantContext.getScopeCatalog()));
+                    new WorkspaceRoute(tenantContext.getOrgId(), tenantContext.getScopeCatalog(),
+                        tenantContext.getWorkspaceScopes()));
             }
             CURRENT_WORKSPACE_ROUTES.set(routes);
         }
         try {
-            WorkspaceRoute route = routeFor(routes, workspaceId, lifecycle);
+            WorkspaceRoute route = routeFor(routes, workspaceId, lifecycle, knownActiveScope);
             routes.depth++;
             try {
                 return new WorkspaceRouteScope(routes, route, root);
@@ -277,15 +390,29 @@ public class TenantWorkScope {
     private WorkspaceRoute routeFor(
             WorkspaceRoutes routes,
             int workspaceId,
-            boolean lifecycle) {
+            boolean lifecycle,
+            WorkspaceScope knownActiveScope) {
         WorkspaceRoute existing = routes.routes.get(workspaceId);
         if (existing != null
                 && (lifecycle || !routes.lifecycleResolved.contains(workspaceId))) {
+            if (isCatalogPerPlacement() && existing.scopes() == null) {
+                existing = new WorkspaceRoute(existing.orgId(), existing.catalog(),
+                    prepareWorkspaceScopes(workspaceId, existing.orgId(), existing.catalog()));
+                routes.routes.put(workspaceId, existing);
+            }
             return existing;
         }
-        WorkspaceRoute resolved = lifecycle
-            ? resolveLifecycleRouteForWorkspace(workspaceId)
-            : resolveRouteForWorkspace(workspaceId);
+        WorkspaceRoute resolved;
+        if (isCatalogPerPlacement()) {
+            requireScopePreparationAllowed("workspace " + workspaceId);
+            TenantWorkspaceScopeSnapshot prepared = unroutedRead(() ->
+                scopeControlOperations.forWorkspace(workspaceId, lifecycle, knownActiveScope));
+            resolved = new WorkspaceRoute(prepared.orgId(), prepared.catalog(), prepared);
+        } else {
+            resolved = lifecycle
+                ? resolveLifecycleRouteForWorkspace(workspaceId)
+                : resolveRouteForWorkspace(workspaceId);
+        }
         routes.routes.put(workspaceId, resolved);
         if (lifecycle) {
             routes.lifecycleResolved.add(workspaceId);

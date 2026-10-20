@@ -193,9 +193,11 @@ class DataSubjectDisclosureAccessTest {
             return read.read();
         });
         when(placementRead.resolve(7, 4)).thenReturn(new DataSubjectDisclosurePlacementRead.Placement(7, "cnx_subject"));
-        when(tenantWorkScope.withCatalog(org.mockito.ArgumentMatchers.eq("cnx_subject"), any()))
+        when(tenantWorkScope.withPreparedWorkspace(org.mockito.ArgumentMatchers.eq(4),
+                org.mockito.ArgumentMatchers.eq(7), org.mockito.ArgumentMatchers.eq("cnx_subject"),
+                org.mockito.ArgumentMatchers.isNull(), any()))
             .thenAnswer(invocation -> {
-                Supplier<?> work = invocation.getArgument(1);
+                Supplier<?> work = invocation.getArgument(4);
                 return work.get();
             });
     }
