@@ -675,7 +675,8 @@ class RelationshipSignalDetectorServiceTest {
                 activityMapper,
                 noteMapper,
                 taskMapper,
-                Clock.fixed(evaluationInstant, ZoneOffset.UTC));
+                Clock.fixed(evaluationInstant, ZoneOffset.UTC),
+                mock(RecordVisibilityScopeControlAccess.class));
         }
     }
 

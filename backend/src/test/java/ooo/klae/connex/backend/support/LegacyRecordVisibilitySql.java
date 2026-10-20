@@ -31,7 +31,8 @@ public final class LegacyRecordVisibilitySql {
         Configuration configuration = new Configuration(
             new Environment("pre-485-record-visibility", new JdbcTransactionFactory(), dataSource));
         configuration.setMapUnderscoreToCamelCase(true);
-        for (String xml : List.of(INTRODUCTION, DUPLICATE_REVIEW)) {
+        configuration.getTypeAliasRegistry().registerAliases("ooo.klae.connex.backend.beans");
+        for (String xml : List.of(INTRODUCTION, DUPLICATE_REVIEW, NOTE)) {
             String resource = "pre-485-" + configuration.getMappedStatementNames().size();
             new XMLMapperBuilder(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)),
                 configuration, resource, configuration.getSqlFragments()).parse();
@@ -51,7 +52,8 @@ public final class LegacyRecordVisibilitySql {
     public long count(String statement, Map<String, Object> parameters) {
         try (SqlSession session = sessions.openSession()) {
             requireMigratedDefaultCatalog(session);
-            return session.selectOne("ooo.klae.connex.backend.mappers." + statement, parameters);
+            Number count = session.selectOne("ooo.klae.connex.backend.mappers." + statement, parameters);
+            return count.longValue();
         }
     }
 
@@ -362,6 +364,269 @@ public final class LegacyRecordVisibilitySql {
             <include refid="visibleReviewJoins"/>
             WHERE <include refid="visibleCurrentReviewPredicate"/>
               AND d.id = #{id}
+          </select>
+        </mapper>
+        """;
+    private static final String NOTE = """
+        <?xml version="1.0" encoding="UTF-8" ?>
+        <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+                "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+        <mapper namespace="ooo.klae.connex.backend.mappers.NoteMapper">
+
+          <resultMap id="NoteResult" type="Note">
+            <id     property="id"        column="id"/>
+            <result property="workspaceId" column="workspace_id"/>
+            <result property="content"   column="content"/>
+            <result property="title"     column="title"/>
+            <result property="visibility" column="visibility"/>
+            <result property="createdAt" column="created_at"/>
+            <result property="updatedAt" column="updated_at"/>
+            <association property="author" javaType="User">
+              <id property="id" column="author_id"/>
+            </association>
+            <association property="person" javaType="Person">
+              <id property="id" column="person_id"/>
+            </association>
+            <association property="deal" javaType="Deal">
+              <id property="id" column="deal_id"/>
+            </association>
+          </resultMap>
+
+          <resultMap id="SearchNoteResult" type="Note">
+            <id property="id" column="id"/>
+            <result property="workspaceId" column="workspace_id"/>
+            <result property="content" column="content"/>
+            <result property="title" column="title"/>
+            <result property="visibility" column="visibility"/>
+            <result property="createdAt" column="created_at"/>
+            <result property="updatedAt" column="updated_at"/>
+            <association property="author" javaType="User">
+              <id property="id" column="author_id"/>
+            </association>
+            <association property="person" javaType="Person">
+              <id property="id" column="person_id"/>
+              <result property="name" column="person_name"/>
+            </association>
+            <association property="deal" javaType="Deal">
+              <id property="id" column="deal_id"/>
+              <result property="name" column="deal_name"/>
+            </association>
+          </resultMap>
+
+          <sql id="noteColumns">
+            id, workspace_id, content, title, visibility, author_id, person_id, deal_id, created_at, updated_at
+          </sql>
+
+          <sql id="qualifiedNoteColumns">
+            n.id, n.workspace_id, n.content, n.title, n.visibility, n.author_id, n.person_id, n.deal_id, n.created_at, n.updated_at
+          </sql>
+
+          <sql id="searchNoteColumns">
+            <include refid="qualifiedNoteColumns"/>,
+            p.name AS person_name,
+            d.name AS deal_name
+          </sql>
+
+          <sql id="visiblePerson">
+            (p.workspace_id = #{workspaceId}
+             OR EXISTS (SELECT 1 FROM person_share ps
+                JOIN workspace pvws ON pvws.id = ps.workspace_id
+                JOIN workspace pows ON pows.id = p.workspace_id AND pows.org_id = pvws.org_id
+                WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId}))
+          </sql>
+
+          <sql id="visibleCompany">
+            (c.workspace_id = #{workspaceId}
+             OR EXISTS (SELECT 1 FROM company_share cs
+                JOIN workspace cvws ON cvws.id = cs.workspace_id
+                JOIN workspace cows ON cows.id = c.workspace_id AND cows.org_id = cvws.org_id
+                WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
+          </sql>
+
+          <sql id="internalInlineReferencePattern">
+            '\\\\[[^]\\\\r\\\\n]*\\\\][[:space:]]*\\\\([[:space:]]*&lt;?(user|person|deal|company|note|file|task|activity)(:|&amp;colon;|&amp;#0*58;|&amp;#x0*3a;|\\\\\\\\:)[0-9]+&gt;?([[:space:]]+[^)]*)?\\\\)'
+          </sql>
+
+          <sql id="internalReferenceTargetPattern">
+            '(user|person|deal|company|note|file|task|activity)(:|&amp;colon;|&amp;#0*58;|&amp;#x0*3a;|\\\\\\\\:)[0-9]+'
+          </sql>
+
+          <sql id="notePageQuery">
+            <if test="query != null">
+              AND (
+                n.title LIKE #{query}
+                <if test="authorIds != null and !authorIds.isEmpty()">
+                  OR n.author_id IN
+                  <foreach item="authorId" collection="authorIds" open="(" separator="," close=")">
+                    #{authorId}
+                  </foreach>
+                </if>
+                OR (
+                  NOT REGEXP_LIKE(
+                    REGEXP_REPLACE(
+                      n.content,
+                      <include refid="internalInlineReferencePattern"/>,
+                      '', 1, 0, 'i'
+                    ),
+                    <include refid="internalReferenceTargetPattern"/>,
+                    'i'
+                  )
+                  AND REGEXP_REPLACE(
+                    n.content,
+                    <include refid="internalInlineReferencePattern"/>,
+                    '', 1, 0, 'i'
+                  ) LIKE #{query}
+                )
+                OR EXISTS (
+                  SELECT 1
+                  FROM person p
+                  WHERE p.id = n.person_id
+                    AND p.archived_at IS NULL
+                    AND <include refid="visiblePerson"/>
+                    AND p.name LIKE #{query}
+                )
+                OR EXISTS (
+                  SELECT 1
+                  FROM deal d
+                  WHERE d.workspace_id = #{workspaceId}
+                    AND d.id = n.deal_id
+                    AND d.name LIKE #{query}
+                )
+              )
+            </if>
+          </sql>
+
+          <sql id="notePageSortDirection">
+            <choose>
+              <when test="dir == 'asc'">ASC</when>
+              <otherwise>DESC</otherwise>
+            </choose>
+          </sql>
+
+          <sql id="notePageOrder">
+            <choose>
+              <when test="sort == 'title'">
+                ORDER BY (n.title IS NULL OR n.title = '') ASC,
+                  n.title <include refid="notePageSortDirection"/>,
+                  n.id <include refid="notePageSortDirection"/>
+              </when>
+              <when test="sort == 'created'">
+                ORDER BY n.created_at <include refid="notePageSortDirection"/>,
+                  n.id <include refid="notePageSortDirection"/>
+              </when>
+              <otherwise>
+                ORDER BY COALESCE(n.updated_at, n.created_at) <include refid="notePageSortDirection"/>,
+                  n.id <include refid="notePageSortDirection"/>
+              </otherwise>
+            </choose>
+          </sql>
+
+          <select id="getVisibleNotesPage" resultMap="NoteResult">
+            SELECT <include refid="qualifiedNoteColumns"/> FROM note n
+            WHERE n.workspace_id = #{workspaceId}
+              AND (n.visibility = 'workspace' OR n.author_id = #{currentUserId})
+            <include refid="notePageQuery"/>
+            <include refid="notePageOrder"/>
+            LIMIT #{limit} OFFSET #{offset}
+          </select>
+
+          <select id="countVisibleNotes" resultType="long">
+            SELECT COUNT(*) FROM note n
+            WHERE n.workspace_id = #{workspaceId}
+              AND (n.visibility = 'workspace' OR n.author_id = #{currentUserId})
+            <include refid="notePageQuery"/>
+          </select>
+
+          <select id="getWorkspaceNotesPage" resultMap="NoteResult">
+            SELECT <include refid="qualifiedNoteColumns"/> FROM note n
+            WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace'
+            <include refid="notePageQuery"/>
+            <include refid="notePageOrder"/>
+            LIMIT #{limit} OFFSET #{offset}
+          </select>
+
+          <select id="countWorkspaceNotes" resultType="long">
+            SELECT COUNT(*) FROM note n
+            WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace'
+            <include refid="notePageQuery"/>
+          </select>
+
+          <select id="countOwnPrivateNotesForPersonEvidence" timeout="10" resultType="int">
+            SELECT COUNT(*)
+            FROM (
+              SELECT n.id
+              FROM note n
+              JOIN person p ON p.id = n.person_id
+              WHERE n.workspace_id = #{workspaceId}
+                AND n.person_id = #{personId}
+                AND n.author_id = #{currentUserId}
+                AND n.visibility = 'private'
+                AND n.created_at IS NOT NULL
+                AND n.created_at &lt;= #{reference}
+                AND p.suspended_at IS NULL
+                AND <include refid="visiblePerson"/>
+              LIMIT #{sourceLimit}
+            ) capped
+          </select>
+
+          <select id="countOwnPrivateNotesForCompanyEvidence" timeout="10" resultType="int">
+            SELECT COUNT(*)
+            FROM (
+              SELECT n.id
+              FROM note n
+              WHERE n.workspace_id = #{workspaceId}
+                AND n.author_id = #{currentUserId}
+                AND n.visibility = 'private'
+                AND n.created_at IS NOT NULL
+                AND n.created_at &lt;= #{reference}
+                AND (
+                  EXISTS (
+                    SELECT 1
+                    FROM person p
+                    WHERE p.id = n.person_id
+                      AND p.company_id = #{companyId}
+                      AND p.suspended_at IS NULL
+                      AND <include refid="visiblePerson"/>
+                  )
+                  OR EXISTS (
+                    SELECT 1
+                    FROM deal d
+                    WHERE d.id = n.deal_id
+                      AND d.workspace_id = #{workspaceId}
+                      AND d.company_id = #{companyId}
+                      AND (n.person_id IS NULL OR EXISTS (
+                        SELECT 1
+                        FROM person p
+                        WHERE p.id = n.person_id
+                          AND p.suspended_at IS NULL
+                          AND <include refid="visiblePerson"/>
+                      ))
+                  )
+                )
+                AND EXISTS (
+                  SELECT 1
+                  FROM company c
+                  WHERE c.id = #{companyId}
+                    AND <include refid="visibleCompany"/>
+                )
+              LIMIT #{sourceLimit}
+            ) capped
+          </select>
+
+          <select id="searchVisible" resultMap="SearchNoteResult">
+            SELECT <include refid="searchNoteColumns"/>
+            FROM note n
+            LEFT JOIN person p ON p.id = n.person_id AND p.archived_at IS NULL
+              AND <include refid="visiblePerson"/>
+            LEFT JOIN deal d ON d.workspace_id = #{workspaceId} AND d.id = n.deal_id
+            WHERE n.workspace_id = #{workspaceId}
+              AND (n.visibility = 'workspace' OR n.author_id = #{currentUserId})
+              AND (n.content LIKE #{query}
+              OR n.title LIKE #{query}
+              OR p.name LIKE #{query}
+              OR d.name LIKE #{query})
+            ORDER BY n.created_at DESC, n.id DESC
+            LIMIT #{limit} OFFSET #{offset}
           </select>
         </mapper>
         """;
