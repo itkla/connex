@@ -32,7 +32,7 @@ public final class LegacyRecordVisibilitySql {
             new Environment("pre-485-record-visibility", new JdbcTransactionFactory(), dataSource));
         configuration.setMapUnderscoreToCamelCase(true);
         configuration.getTypeAliasRegistry().registerAliases("ooo.klae.connex.backend.beans");
-        for (String xml : List.of(INTRODUCTION, DUPLICATE_REVIEW, NOTE, REPORT, SEGMENT, PIPELINE, COMPANY)) {
+        for (String xml : List.of(INTRODUCTION, DUPLICATE_REVIEW, NOTE, REPORT, SEGMENT, PIPELINE, COMPANY, DEAL)) {
             String resource = "pre-485-" + configuration.getMappedStatementNames().size();
             new XMLMapperBuilder(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)),
                 configuration, resource, configuration.getSqlFragments()).parse();
@@ -56,6 +56,42 @@ public final class LegacyRecordVisibilitySql {
             return count.longValue();
         }
     }
+
+    /** Runs original junction DML and captures its result before rolling back the isolated session. */
+    public WriteResult rollbackDealWrite(String statement, Map<String, Object> parameters) {
+        try (SqlSession session = sessions.openSession()) {
+            requireMigratedDefaultCatalog(session);
+            try {
+                int rows = session.update("ooo.klae.connex.backend.mappers.DealMapper." + statement, parameters);
+                return new WriteResult(rows, dealLinks(session.getConnection(), (Integer) parameters.get("dealId")));
+            } finally {
+                session.rollback();
+            }
+        }
+    }
+
+    /** Reads the exact junction state on the DML connection, including nullable roles. */
+    public static List<DealLink> dealLinks(java.sql.Connection connection, int dealId) {
+        try (var query = connection.prepareStatement(
+                "SELECT person_id, role FROM deal_person WHERE deal_id = ? ORDER BY person_id")) {
+            query.setInt(1, dealId);
+            try (var rows = query.executeQuery()) {
+                List<DealLink> links = new java.util.ArrayList<>();
+                while (rows.next()) {
+                    links.add(new DealLink(rows.getInt(1), rows.getString(2)));
+                }
+                return List.copyOf(links);
+            }
+        } catch (SQLException failure) {
+            throw new IllegalStateException("Could not read Deal junction state", failure);
+        }
+    }
+
+    /** Affected rows and the full junction state produced before transaction rollback. */
+    public record WriteResult(int rows, List<DealLink> links) { }
+
+    /** A junction row retains the distinction between a SQL NULL role and any literal text. */
+    public record DealLink(int personId, String role) { }
 
     private void requireMigratedDefaultCatalog(SqlSession session) {
         try {
@@ -2527,6 +2563,469 @@ public final class LegacyRecordVisibilitySql {
             </foreach>
             WHERE c.workspace_id = #{workspaceId} AND c.id = #{companyId} AND t.workspace_id = #{workspaceId}
           </insert>
+        </mapper>
+        """;
+    private static final String DEAL = """
+        <?xml version="1.0" encoding="UTF-8" ?>
+        <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+        <mapper namespace="ooo.klae.connex.backend.mappers.DealMapper">
+          <resultMap id="DealResult" type="Deal">
+            <id property="id" column="id"/>
+            <result property="workspaceId" column="workspace_id"/>
+            <result property="ownerId" column="owner_id"/>
+            <result property="name" column="name"/>
+            <result property="value" column="value" javaType="java.math.BigDecimal" jdbcType="DECIMAL"/>
+            <result property="actualValue" column="actual_value" javaType="java.math.BigDecimal" jdbcType="DECIMAL"/>
+            <result property="valueSource" column="value_source"/>
+            <result property="currency" column="currency"/>
+            <result property="pipelineId" column="pipeline_id"/>
+            <result property="stageId" column="stage_id"/>
+            <result property="position" column="position"/>
+            <result property="companyId" column="company_id"/>
+            <result property="expectedCloseDate" column="expected_close_date"/>
+            <result property="closedAt" column="closed_at"/>
+            <result property="closedReason" column="closed_reason"/>
+            <result property="won" column="won"/>
+            <result property="riskExcluded" column="risk_excluded"/>
+            <result property="createdAt" column="created_at"/>
+            <result property="updatedAt" column="updated_at"/>
+          </resultMap>
+
+          <resultMap id="DealPersonResult" type="DealPerson">
+            <id column="deal_person_pid"/>
+            <result property="role" column="role"/>
+            <association property="person" javaType="Person"
+                         resultMap="FrozenDealPersonResult"/>
+          </resultMap>
+
+          <resultMap id="DealStakeholderResult" type="DealStakeholder">
+            <result property="dealId" column="deal_id"/>
+            <result property="personId" column="person_id"/>
+            <result property="personLabel" column="person_label"/>
+            <result property="role" column="role"/>
+            <result property="riskExcluded" column="person_risk_excluded"/>
+          </resultMap>
+
+          <resultMap id="FrozenDealPersonResult" type="Person">
+            <id     property="id"        column="id"/>
+            <result property="workspaceId" column="workspace_id"/>
+            <result property="ownerId" column="owner_id"/>
+            <result property="name"      column="name"/>
+            <result property="email"     column="email"/>
+            <result property="phone"     column="phone"/>
+            <result property="title"     column="title"/>
+            <result property="createdAt" column="created_at"/>
+            <result property="updatedAt" column="updated_at"/>
+            <result property="imageUrl" column="image_url"/>
+            <result property="riskExcluded" column="risk_excluded"/>
+            <result property="introExcluded" column="intro_excluded"/>
+            <result property="suspendedAt" column="suspended_at"/>
+            <result property="provisionCeasedAt" column="provision_ceased_at"/>
+            <result property="archivedAt" column="archived_at"/>
+            <result property="lifecycleStage" column="lifecycle_stage"/>
+            <result property="lifecycleChangedAt" column="lifecycle_changed_at"/>
+            <result property="disqualifiedReason" column="disqualified_reason" javaType="java.lang.String"/>
+            <result property="qualificationNotes" column="qualification_notes"/>
+            <result property="leadSource" column="lead_source"/>
+            <result property="leadSourceDetail" column="lead_source_detail"/>
+            <result property="referrerPersonId" column="referrer_person_id"/>
+            <result property="firstResponseDueAt" column="first_response_due_at"/>
+            <result property="firstRespondedAt" column="first_responded_at"/>
+            <result property="firstResponseBreachedAt" column="first_response_breached_at"/>
+            <association property="company" javaType="Company" notNullColumn="company_id">
+              <id property="id" column="company_id"/>
+              <result property="name" column="company_name"/>
+              <result property="logoUrl" column="company_logo_url"/>
+            </association>
+          </resultMap>
+
+          <sql id="qualifiedDealColumns">
+            d.id, d.workspace_id, d.owner_id, d.name, d.value, d.actual_value, d.value_source, d.currency,
+            d.pipeline_id, d.stage_id, d.position, d.company_id, d.expected_close_date, d.closed_at,
+            d.closed_reason, d.won, d.risk_excluded, d.created_at, d.updated_at
+          </sql>
+
+          <sql id="visibleCompanyJoin">
+            (c.workspace_id = #{workspaceId}
+             OR EXISTS (SELECT 1 FROM company_share cs
+                JOIN workspace vws ON vws.id = cs.workspace_id
+                JOIN workspace ows ON ows.id = c.workspace_id AND ows.org_id = vws.org_id
+                WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
+            AND c.archived_at IS NULL
+          </sql>
+
+          <sql id="visiblePersonJoin">
+            (p.workspace_id = #{workspaceId}
+             OR EXISTS (SELECT 1 FROM person_share ps
+                JOIN workspace vws ON vws.id = ps.workspace_id
+                JOIN workspace ows ON ows.id = p.workspace_id AND ows.org_id = vws.org_id
+                WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId}))
+            AND p.archived_at IS NULL
+            AND p.suspended_at IS NULL
+            AND p.provision_ceased_at IS NULL
+          </sql>
+
+          <sql id="visibleFilteredPersonJoin">
+            (filtered_person.workspace_id = #{workspaceId}
+             OR EXISTS (SELECT 1 FROM person_share filtered_ps
+                JOIN workspace vws ON vws.id = filtered_ps.workspace_id
+                JOIN workspace ows
+                  ON ows.id = filtered_person.workspace_id
+                 AND ows.org_id = vws.org_id
+                WHERE filtered_ps.person_id = filtered_person.id
+                  AND filtered_ps.workspace_id = #{workspaceId}))
+            AND filtered_person.archived_at IS NULL
+            AND filtered_person.suspended_at IS NULL
+            AND filtered_person.provision_ceased_at IS NULL
+          </sql>
+
+          <sql id="visiblePipelineJoin">
+            (p.workspace_id = #{workspaceId}
+             OR EXISTS (SELECT 1 FROM pipeline_share ps
+                JOIN workspace vws ON vws.id = ps.workspace_id
+                JOIN workspace ows ON ows.id = p.workspace_id AND ows.org_id = vws.org_id
+                WHERE ps.pipeline_id = p.id AND ps.workspace_id = #{workspaceId}))
+          </sql>
+
+          <sql id="visibleStageJoin">
+            EXISTS (SELECT 1
+              FROM pipeline sp
+              WHERE sp.id = s.pipeline_id AND sp.workspace_id = s.workspace_id
+                AND (sp.workspace_id = #{workspaceId}
+                  OR EXISTS (SELECT 1 FROM pipeline_share ps
+                    JOIN workspace vws ON vws.id = ps.workspace_id
+                    JOIN workspace ows ON ows.id = sp.workspace_id AND ows.org_id = vws.org_id
+                    WHERE ps.pipeline_id = sp.id AND ps.workspace_id = #{workspaceId})))
+          </sql>
+
+          <sql id="memberScopePredicate">
+            <choose>
+              <when test="memberScope.mode.name() == 'ME'">
+                AND d.owner_id = #{memberScope.userId}
+              </when>
+              <when test="memberScope.mode.name() == 'MEMBERS'">
+                AND d.owner_id IN
+                <foreach item="id" collection="memberScope.memberIds" open="(" separator="," close=")">#{id}</foreach>
+              </when>
+              <when test="memberScope.mode.name() == 'UNASSIGNED'">
+                AND d.owner_id IS NULL
+              </when>
+            </choose>
+          </sql>
+
+          <sql id="dealListFilterWhere">
+            <where>
+              AND d.workspace_id = #{workspaceId}
+              <include refid="memberScopePredicate"/>
+              <if test="query != null">
+                AND (d.name LIKE #{query}
+                  OR d.currency LIKE #{query}
+                  OR c.name LIKE #{query}
+                  OR p.name LIKE #{query}
+                  OR s.name LIKE #{query})
+              </if>
+              <if test="currency != null">
+                AND d.currency = #{currency}
+              </if>
+              <if test="pipelineIds != null and pipelineIds.size() > 0">
+                AND d.pipeline_id IN
+                <foreach item="id" collection="pipelineIds" open="(" separator="," close=")">#{id}</foreach>
+              </if>
+              <if test="stageIds != null and stageIds.size() > 0">
+                AND d.stage_id IN
+                <foreach item="id" collection="stageIds" open="(" separator="," close=")">#{id}</foreach>
+              </if>
+              <if test="(companyIds != null and companyIds.size() > 0) or noCompany">
+                AND (
+                  <if test="companyIds != null and companyIds.size() > 0">
+                    d.company_id IN
+                    <foreach item="id" collection="companyIds" open="(" separator="," close=")">#{id}</foreach>
+                  </if>
+                  <if test="noCompany">
+                    <if test="companyIds != null and companyIds.size() > 0">OR</if>
+                    c.id IS NULL
+                  </if>
+                )
+              </if>
+              <if test="personIds != null and personIds.size() > 0">
+                AND EXISTS (
+                  SELECT 1
+                  FROM deal_person filtered_dp
+                  JOIN person filtered_person ON filtered_person.id = filtered_dp.person_id
+                    AND <include refid="visibleFilteredPersonJoin"/>
+                  WHERE filtered_dp.deal_id = d.id
+                    AND filtered_dp.person_id IN
+                    <foreach item="id" collection="personIds" open="(" separator="," close=")">#{id}</foreach>
+                )
+              </if>
+              <if test="statuses != null and statuses.size() > 0">
+                AND CASE WHEN d.won IS NULL THEN 'open' WHEN d.won THEN 'won' ELSE 'lost' END IN
+                <foreach item="value" collection="statuses" open="(" separator="," close=")">#{value}</foreach>
+              </if>
+              <if test="riskIds != null and riskIds.size() > 0">
+                AND d.id IN
+                <foreach item="id" collection="riskIds" open="(" separator="," close=")">#{id}</foreach>
+              </if>
+            </where>
+          </sql>
+
+          <sql id="segmentIdsJoin">
+            <if test="segmentIdsJson != null">
+              JOIN JSON_TABLE(#{segmentIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) segment_ids
+                ON segment_ids.id = d.id
+            </if>
+          </sql>
+
+          <sql id="dealSortDirection">
+            <choose>
+              <when test="dir == 'desc'">DESC</when>
+              <otherwise>ASC</otherwise>
+            </choose>
+          </sql>
+
+          <sql id="dealPageOrderBy">
+            <choose>
+              <when test="sort == 'name'">ORDER BY d.name <include refid="dealSortDirection"/>, d.id ASC</when>
+              <when test="sort == 'value'">ORDER BY d.value <include refid="dealSortDirection"/>, d.id ASC</when>
+              <when test="sort == 'actual_value'">ORDER BY d.actual_value <include refid="dealSortDirection"/>, d.id ASC</when>
+              <when test="sort == 'expected_close_date'">ORDER BY d.expected_close_date <include refid="dealSortDirection"/>, d.id ASC</when>
+              <when test="sort == 'closed_at'">ORDER BY d.closed_at <include refid="dealSortDirection"/>, d.id ASC</when>
+              <when test="sort == 'created_at'">ORDER BY d.created_at <include refid="dealSortDirection"/>, d.id ASC</when>
+              <when test="sort == 'updated_at'">ORDER BY d.updated_at <include refid="dealSortDirection"/>, d.id ASC</when>
+              <when test="sort == 'stage_id'">ORDER BY d.stage_id <include refid="dealSortDirection"/>, d.id ASC</when>
+              <when test="sort == 'position'">ORDER BY d.position <include refid="dealSortDirection"/>, d.id ASC</when>
+              <when test="sort == 'company'">ORDER BY c.name <include refid="dealSortDirection"/>, d.id ASC</when>
+              <when test="sort == 'pipeline'">ORDER BY p.name <include refid="dealSortDirection"/>, d.id ASC</when>
+              <when test="sort == 'stage'">ORDER BY s.name <include refid="dealSortDirection"/>, d.id ASC</when>
+              <when test="sort == 'status'">ORDER BY (d.won IS NOT NULL) <include refid="dealSortDirection"/>, d.id ASC</when>
+              <otherwise>ORDER BY d.stage_id, d.position, d.id</otherwise>
+            </choose>
+          </sql>
+
+          <select id="getDealPeopleByDealId" resultMap="DealPersonResult">
+            SELECT dp.person_id AS deal_person_pid,
+                   p.id, p.workspace_id, p.owner_id, p.name, p.email, p.phone, p.title, p.created_at, p.updated_at,
+                   p.image_url, p.risk_excluded, p.intro_excluded, p.suspended_at, p.provision_ceased_at,
+                   c.id AS company_id, c.name AS company_name, c.logo_url AS company_logo_url,
+                   dp.role
+            FROM deal_person dp
+            JOIN deal d ON d.id = dp.deal_id
+            JOIN person p ON p.id = dp.person_id AND <include refid="visiblePersonJoin"/>
+            LEFT JOIN company c ON c.id = p.company_id AND <include refid="visibleCompanyJoin"/>
+            WHERE d.workspace_id = #{workspaceId} AND dp.deal_id = #{dealId}
+            ORDER BY p.name
+          </select>
+
+          <select id="getPrimaryContactsByDealIds"
+                  resultType="ooo.klae.connex.backend.dto.DealPrimaryContactDto">
+            SELECT ranked.deal_id, ranked.person_id, ranked.name, ranked.image_url
+            FROM (
+              SELECT dp.deal_id, p.id AS person_id, p.name, p.image_url,
+                     ROW_NUMBER() OVER (PARTITION BY dp.deal_id ORDER BY p.name, p.id) AS position
+              FROM deal_person dp
+              JOIN deal d ON d.id = dp.deal_id AND d.workspace_id = #{workspaceId}
+              JOIN person p ON p.id = dp.person_id AND <include refid="visiblePersonJoin"/>
+              WHERE dp.deal_id IN
+              <foreach item="id" collection="dealIds" open="(" separator="," close=")">#{id}</foreach>
+            ) ranked
+            WHERE ranked.position = 1
+            ORDER BY ranked.deal_id
+          </select>
+
+          <select id="getAllDealStakeholders" resultMap="DealStakeholderResult">
+            SELECT dp.deal_id AS deal_id,
+                   p.id AS person_id,
+                   p.name AS person_label,
+                   dp.role AS role,
+                   p.risk_excluded AS person_risk_excluded
+            FROM deal_person dp
+            JOIN deal d ON d.id = dp.deal_id AND d.workspace_id = #{workspaceId}
+            JOIN person p ON p.id = dp.person_id AND <include refid="visiblePersonJoin"/>
+            WHERE d.workspace_id = #{workspaceId}
+            ORDER BY dp.deal_id, p.name
+          </select>
+
+          <select id="getDealStakeholdersByDealId" resultMap="DealStakeholderResult">
+            SELECT dp.deal_id AS deal_id,
+                   p.id AS person_id,
+                   p.name AS person_label,
+                   dp.role AS role,
+                   p.risk_excluded AS person_risk_excluded
+            FROM deal_person dp
+            JOIN deal d ON d.id = dp.deal_id AND d.workspace_id = #{workspaceId}
+            JOIN person p ON p.id = dp.person_id AND <include refid="visiblePersonJoin"/>
+            WHERE d.workspace_id = #{workspaceId} AND dp.deal_id = #{dealId}
+            ORDER BY p.name
+          </select>
+
+          <select id="getDealStakeholdersByDealIds" resultMap="DealStakeholderResult">
+            SELECT dp.deal_id AS deal_id,
+                   p.id AS person_id,
+                   p.name AS person_label,
+                   dp.role AS role,
+                   p.risk_excluded AS person_risk_excluded
+            FROM deal_person dp
+            JOIN deal d ON d.id = dp.deal_id AND d.workspace_id = #{workspaceId}
+            JOIN person p ON p.id = dp.person_id AND <include refid="visiblePersonJoin"/>
+            WHERE d.workspace_id = #{workspaceId}
+              AND dp.deal_id IN
+              <foreach item="id" collection="dealIds" open="(" separator="," close=")">#{id}</foreach>
+            ORDER BY dp.deal_id, p.name
+          </select>
+
+          <select id="getDealsPageFiltered" resultMap="DealResult">
+            SELECT <include refid="qualifiedDealColumns"/>
+            FROM deal d
+            <include refid="segmentIdsJoin"/>
+            LEFT JOIN company c ON c.id = d.company_id AND <include refid="visibleCompanyJoin"/>
+            LEFT JOIN pipeline p ON p.id = d.pipeline_id AND <include refid="visiblePipelineJoin"/>
+            LEFT JOIN stage s ON s.id = d.stage_id AND s.pipeline_id = d.pipeline_id
+              AND <include refid="visibleStageJoin"/>
+            <include refid="dealListFilterWhere"/>
+            <include refid="dealPageOrderBy"/>
+            LIMIT #{limit} OFFSET #{offset}
+          </select>
+
+          <select id="getDealsFiltered" resultMap="DealResult">
+            SELECT <include refid="qualifiedDealColumns"/>
+            FROM deal d
+            <include refid="segmentIdsJoin"/>
+            LEFT JOIN company c ON c.id = d.company_id AND <include refid="visibleCompanyJoin"/>
+            LEFT JOIN pipeline p ON p.id = d.pipeline_id AND <include refid="visiblePipelineJoin"/>
+            LEFT JOIN stage s ON s.id = d.stage_id AND s.pipeline_id = d.pipeline_id
+              AND <include refid="visibleStageJoin"/>
+            <include refid="dealListFilterWhere"/>
+            ORDER BY d.id
+          </select>
+
+          <select id="countDealsFiltered" resultType="long">
+            SELECT COUNT(*)
+            FROM deal d
+            <include refid="segmentIdsJoin"/>
+            LEFT JOIN company c ON c.id = d.company_id AND <include refid="visibleCompanyJoin"/>
+            LEFT JOIN pipeline p ON p.id = d.pipeline_id AND <include refid="visiblePipelineJoin"/>
+            LEFT JOIN stage s ON s.id = d.stage_id AND s.pipeline_id = d.pipeline_id
+              AND <include refid="visibleStageJoin"/>
+            <include refid="dealListFilterWhere"/>
+          </select>
+
+          <select id="dealMetricsFiltered" resultType="ooo.klae.connex.backend.dto.DealCurrencyMetricsDto">
+            SELECT d.currency AS currency,
+                   COUNT(CASE WHEN d.won IS NULL THEN 1 END) AS open_count,
+                   COALESCE(SUM(CASE WHEN d.won IS NULL THEN d.value END), 0) AS open_value,
+                   COUNT(CASE WHEN d.won IS NOT NULL THEN 1 END) AS closed_count,
+                   COALESCE(SUM(CASE WHEN d.won IS NOT NULL THEN d.value END), 0) AS closed_forecast,
+                   COALESCE(SUM(CASE WHEN d.won IS NOT NULL THEN d.actual_value END), 0) AS closed_revenue,
+                   COUNT(CASE WHEN d.won = TRUE THEN 1 END) AS won_count,
+                   COUNT(CASE WHEN d.won = FALSE THEN 1 END) AS lost_count
+            FROM deal d
+            <include refid="segmentIdsJoin"/>
+            LEFT JOIN company c ON c.id = d.company_id AND <include refid="visibleCompanyJoin"/>
+            LEFT JOIN pipeline p ON p.id = d.pipeline_id AND <include refid="visiblePipelineJoin"/>
+            LEFT JOIN stage s ON s.id = d.stage_id AND s.pipeline_id = d.pipeline_id
+              AND <include refid="visibleStageJoin"/>
+            <include refid="dealListFilterWhere"/>
+            GROUP BY d.currency
+            ORDER BY d.currency
+          </select>
+
+          <select id="getFilteredDealIds" resultType="int">
+            SELECT d.id
+            FROM deal d
+            <include refid="segmentIdsJoin"/>
+            LEFT JOIN company c ON c.id = d.company_id AND <include refid="visibleCompanyJoin"/>
+            LEFT JOIN pipeline p ON p.id = d.pipeline_id AND <include refid="visiblePipelineJoin"/>
+            LEFT JOIN stage s ON s.id = d.stage_id AND s.pipeline_id = d.pipeline_id
+              AND <include refid="visibleStageJoin"/>
+            <include refid="dealListFilterWhere"/>
+            ORDER BY d.id
+            LIMIT #{limit}
+          </select>
+
+          <select id="countsByCompany" resultType="ooo.klae.connex.backend.dto.FacetCount">
+            SELECT CAST(d.company_id AS CHAR) AS `key`, COUNT(*) AS count, c.name AS label
+            FROM deal d
+            JOIN company c ON c.id = d.company_id AND <include refid="visibleCompanyJoin"/>
+            WHERE d.workspace_id = #{workspaceId}
+              AND d.company_id IS NOT NULL
+            GROUP BY d.company_id, c.name
+            UNION ALL
+            SELECT '__empty__' AS `key`, COUNT(*) AS count, NULL AS label
+            FROM deal d
+            LEFT JOIN company c ON c.id = d.company_id AND <include refid="visibleCompanyJoin"/>
+            WHERE d.workspace_id = #{workspaceId}
+              AND c.id IS NULL
+            HAVING COUNT(*) &gt; 0
+          </select>
+
+          <select id="countsByPerson" resultType="ooo.klae.connex.backend.dto.FacetCount">
+            SELECT CAST(dp.person_id AS CHAR) AS `key`, COUNT(DISTINCT dp.deal_id) AS count,
+                   filtered_person.name AS label
+            FROM deal_person dp
+            JOIN deal d ON d.id = dp.deal_id AND d.workspace_id = #{workspaceId}
+            JOIN person filtered_person ON filtered_person.id = dp.person_id
+              AND <include refid="visibleFilteredPersonJoin"/>
+            GROUP BY dp.person_id, filtered_person.name
+          </select>
+
+          <select id="getDealsByPersonId" resultMap="DealResult">
+            SELECT <include refid="qualifiedDealColumns"/>
+            FROM deal d
+            JOIN deal_person dp ON dp.deal_id = d.id
+            JOIN person p ON p.id = dp.person_id AND <include refid="visiblePersonJoin"/>
+            WHERE d.workspace_id = #{workspaceId} AND dp.person_id = #{personId}
+          </select>
+
+          <select id="search" resultMap="DealResult">
+            SELECT <include refid="qualifiedDealColumns"/>
+            FROM deal d
+            LEFT JOIN company c ON c.id = d.company_id AND <include refid="visibleCompanyJoin"/>
+            WHERE d.workspace_id = #{workspaceId}
+              AND (d.name LIKE #{query} OR d.currency LIKE #{query} OR c.name LIKE #{query})
+            ORDER BY d.name
+            LIMIT 10
+          </select>
+
+          <select id="getStageOutcome" resultType="string">
+            SELECT CASE WHEN is_success THEN 'won' WHEN is_failure THEN 'lost' ELSE 'normal' END
+            FROM stage s
+            WHERE s.id = #{stageId} AND <include refid="visibleStageJoin"/>
+          </select>
+
+          <select id="getLastNormalStageId" resultType="java.lang.Integer">
+            SELECT s.id FROM stage s
+            WHERE s.pipeline_id = #{pipelineId} AND <include refid="visibleStageJoin"/>
+              AND s.is_success = FALSE AND s.is_failure = FALSE
+            ORDER BY s.position DESC
+            LIMIT 1
+          </select>
+
+          <insert id="addPerson">
+            INSERT INTO deal_person (deal_id, person_id, role)
+            SELECT d.id, p.id, #{role}
+            FROM deal d
+            JOIN person p ON p.id = #{personId} AND <include refid="visiblePersonJoin"/>
+            WHERE d.workspace_id = #{workspaceId} AND d.id = #{dealId}
+            ON DUPLICATE KEY UPDATE role = #{role}
+          </insert>
+
+          <insert id="addPersonIfAbsent">
+            INSERT IGNORE INTO deal_person (deal_id, person_id, role)
+            SELECT d.id, p.id, NULL
+            FROM deal d
+            JOIN person p ON p.id = #{personId} AND <include refid="visiblePersonJoin"/>
+            WHERE d.workspace_id = #{workspaceId} AND d.id = #{dealId}
+          </insert>
+
+          <update id="updatePersonRole">
+            UPDATE deal_person dp
+            JOIN deal d ON d.id = dp.deal_id
+            JOIN person p ON p.id = dp.person_id AND <include refid="visiblePersonJoin"/>
+            SET dp.role = #{role}
+            WHERE d.workspace_id = #{workspaceId}
+              AND dp.deal_id = #{dealId}
+              AND dp.person_id = #{personId}
+          </update>
         </mapper>
         """;
 }

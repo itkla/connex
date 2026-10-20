@@ -84,7 +84,7 @@ class SearchServiceUnitTest {
         verifyNoMoreInteractions(scopes);
         verify(companies).search(7, "[7,8]", "%needle%");
         verify(people).search(7, "%needle%");
-        verify(deals).search(7, "%needle%");
+        verify(deals).search(7, "[7,8]", "%needle%");
         verify(pipelines).search(7, "[7,8]", "%needle%");
         verify(tags).search(7, "%needle%");
         verify(activities).search(7, "%needle%", 25, 0);
@@ -132,7 +132,7 @@ class SearchServiceUnitTest {
         switch (type) {
             case "deals" -> {
                 service.search("needle", Set.of(type));
-                verify(deals).search(7, "%needle%");
+                verify(deals).search(7, "[7,8]", "%needle%");
                 verify(references).hydrateDeals(7, List.of());
             }
             case "activities" -> {

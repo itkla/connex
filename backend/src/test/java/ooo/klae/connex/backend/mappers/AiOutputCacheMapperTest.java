@@ -147,7 +147,7 @@ class AiOutputCacheMapperTest extends AbstractMapperTest {
         activityMapper.insert(activity(subject, activityDeal, actor));
         noteMapper.insert(note(subject, noteDeal, actor));
         taskMapper.insert(task(subject, taskDeal, actor));
-        dealMapper.addPerson(workspace.getId(), stakeholderDeal.getId(), subject.getId(), null);
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), stakeholderDeal.getId(), subject.getId(), null);
         for (Deal deal : new Deal[] {activityDeal, noteDeal, taskDeal, stakeholderDeal}) {
             save(workspace, "deal.brief:en", deal.getId(), 0, "brief-" + deal.getId(), "{}", 0);
             save(workspace, "deal.risk_rationale:en", deal.getId(), 0,
@@ -187,7 +187,7 @@ class AiOutputCacheMapperTest extends AbstractMapperTest {
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
         Deal deal = newDeal(pipeline, stage, company);
-        dealMapper.addPerson(workspace.getId(), deal.getId(), stakeholder.getId(), null);
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), deal.getId(), stakeholder.getId(), null);
         PersonEdge edge = new PersonEdge();
         edge.setWorkspaceId(workspace.getId());
         edge.setSourcePersonId(Math.min(stakeholder.getId(), connected.getId()));

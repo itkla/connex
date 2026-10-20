@@ -160,8 +160,8 @@ class DataSubjectRequestMapperTest extends AbstractMapperTest {
             subject.getId(), foreignWorkspace.getId(), actor.getId(), false);
         Deal subjectDeal = newDeal(overlayWorkspace.getId(), actor, "Subject Deal");
         Deal otherDeal = newDeal(overlayWorkspace.getId(), actor, "Other Deal");
-        dealMapper.addPerson(overlayWorkspace.getId(), subjectDeal.getId(), subject.getId(), "decision_maker");
-        dealMapper.addPerson(overlayWorkspace.getId(), otherDeal.getId(), other.getId(), "champion");
+        dealMapper.addPerson(overlayWorkspace.getId(), dealScope(overlayWorkspace.getId()), subjectDeal.getId(), subject.getId(), "decision_maker");
+        dealMapper.addPerson(overlayWorkspace.getId(), dealScope(overlayWorkspace.getId()), otherDeal.getId(), other.getId(), "champion");
 
         newIntroduction(overlayWorkspace.getId(), actor, subject, counterpart, "subject introduction");
         newIntroduction(overlayWorkspace.getId(), actor, other, third, "other introduction");

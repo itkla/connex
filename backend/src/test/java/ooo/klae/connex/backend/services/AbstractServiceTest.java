@@ -66,6 +66,12 @@ import ooo.klae.connex.backend.storage.ObjectDeletionTransactionExecutor;
 @Transactional
 @Import(AbstractServiceTest.ApprovalMutationTestConfiguration.class)
 public abstract class AbstractServiceTest {
+    /** Supplies the unfiltered organization ceiling to direct Deal mapper fixture calls. */
+    protected String dealScope(int workspaceId) {
+        return workspaceMapper.findOrganizationWorkspacesForShare(workspaceId).stream()
+            .map(ooo.klae.connex.backend.beans.Workspace::getId).toList().toString();
+    }
+
     private static final Duration OBJECT_DELETION_DRAIN_SAFETY_MARGIN = Duration.ofMinutes(10);
     private static final int OBJECT_DELETION_DRAIN_LIMIT = 10;
 

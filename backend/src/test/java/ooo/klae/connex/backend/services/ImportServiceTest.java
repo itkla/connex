@@ -1793,7 +1793,7 @@ class ImportServiceTest extends AbstractServiceTest {
         Deal deal = newDeal(pipeline, stage, company);
         Person person = newPerson(company);
         dealMapper.addPerson(
-            workspace.getId(), deal.getId(), person.getId(), "champion");
+            workspace.getId(), dealScope(workspace.getId()), deal.getId(), person.getId(), "champion");
         int auditCountBefore = rowCount(
             "SELECT COUNT(*) FROM audit_log "
                 + "WHERE action = 'import.deal' AND actor_id = ?",
@@ -1929,7 +1929,7 @@ class ImportServiceTest extends AbstractServiceTest {
                 row.getMergedRowCount())));
         assertEquals(1, result.getCreated());
         assertEquals(2, dealMapper.getDealPeopleByDealId(
-            workspace.getId(), imported.getId()).size());
+            workspace.getId(), dealScope(workspace.getId()), imported.getId()).size());
         assertEquals(2, tagMapper.getTagsByDealId(
             workspace.getId(), imported.getId()).size());
         assertEquals(

@@ -47,6 +47,7 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.seeder.SeedDataGenerator.PipelineSeed;
 import ooo.klae.connex.backend.tenant.TenantContext;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 
 /**
  * Persists one workspace through application mapper SQL using a MyBatis batch executor.
@@ -120,7 +121,11 @@ public class SeederBatchWriter {
             SeederProperties.Profile profile,
             long workspaceSeed,
             int workspaceIndex,
-            LocalDate anchorDate) {
+            LocalDate anchorDate,
+            List<Integer> existingOrganizationWorkspaceIds) {
+        if (!existingOrganizationWorkspaceIds.isEmpty()) {
+            throw new IllegalArgumentException("A seeded organization must begin without workspaces");
+        }
         Organization organization = generator.organization(workspaceSeed, workspaceIndex);
         organizationMapper.insert(organization);
         flush();
@@ -133,6 +138,9 @@ public class SeederBatchWriter {
         workspaceMapper.insert(workspace);
         flush();
         requireGeneratedId("workspace", workspace.getId());
+        List<Integer> organizationWorkspaceIds = new ArrayList<>(existingOrganizationWorkspaceIds);
+        organizationWorkspaceIds.add(workspace.getId());
+        RecordVisibilityScope scope = new RecordVisibilityScope(organization.getId(), organizationWorkspaceIds);
         applicationEvents.publishEvent(new WorkspaceProvisioned(workspace.getId()));
 
         List<User> users = generator.users(workspaceSeed, workspaceIndex);
@@ -173,7 +181,8 @@ public class SeederBatchWriter {
                 anchorDate,
                 organization,
                 workspace,
-                users
+                users,
+                scope
             );
         } finally {
             tenantContext.restore(previous);
@@ -187,7 +196,8 @@ public class SeederBatchWriter {
             LocalDate anchorDate,
             Organization organization,
             Workspace workspace,
-            List<User> users) {
+            List<User> users,
+            RecordVisibilityScope scope) {
         List<PipelineSeed> pipelines = writePipelines(workspace.getId());
         List<Tag> tags = writeTags(workspace.getId());
         List<Company> companies = writeCompanies(
@@ -203,7 +213,8 @@ public class SeederBatchWriter {
             personResult.persons(),
             pipelines,
             tags,
-            anchorDate
+            anchorDate,
+            scope
         );
         writeActivities(
             profile, workspaceSeed, workspace.getId(), users, personResult.persons(), dealResult.deals(), anchorDate);
@@ -373,7 +384,8 @@ public class SeederBatchWriter {
             List<Person> persons,
             List<PipelineSeed> pipelines,
             List<Tag> tags,
-            LocalDate anchorDate) {
+            LocalDate anchorDate,
+            RecordVisibilityScope scope) {
         List<Deal> deals = new ArrayList<>(profile.deals());
         Map<Integer, Integer> nextStagePositions = new LinkedHashMap<>();
         for (int index = 0; index < profile.deals(); index++) {
@@ -399,7 +411,7 @@ public class SeederBatchWriter {
                 generator.dealPersonIndexes(workspaceSeed, index, persons.size());
             for (int roleIndex = 0; roleIndex < personIndexes.size(); roleIndex++) {
                 dealMapper.addPerson(
-                    workspaceId,
+                    workspaceId, scope.workspaceIdsJson(),
                     deal.getId(),
                     persons.get(personIndexes.get(roleIndex)).getId(),
                     DEAL_PERSON_ROLES[roleIndex]

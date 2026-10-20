@@ -53,6 +53,7 @@ public class PersonLifecycleService {
     private final PersonMapper personMapper;
     private final PersonLifecycleHistoryMapper historyMapper;
     private final DealMapper dealMapper;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
     private final WorkspaceService workspaceService;
     private final AuditService auditService;
     private final RuleTriggerPublisher ruleTriggers;
@@ -333,7 +334,8 @@ public class PersonLifecycleService {
     }
 
     private void requireLinkedDeal(int workspaceId, int personId) {
-        if (dealMapper.getDealsByPersonId(workspaceId, personId).isEmpty()) {
+        if (dealMapper.getDealsByPersonId(workspaceId,
+                recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), personId).isEmpty()) {
             throw new BadRequestException(
                 "A contact can only be marked converted once a deal is linked to it");
         }

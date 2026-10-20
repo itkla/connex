@@ -86,6 +86,7 @@ class OrgShareCeilingArchTest {
                     || entry.getKey().equals("mappers/IntroductionMapper.xml")
                     || entry.getKey().equals("mappers/DuplicateReviewMapper.xml")
                     || entry.getKey().equals("mappers/SegmentMapper.xml")
+                    || entry.getKey().equals("mappers/DealMapper.xml")
                     || entry.getKey().equals("mappers/PipelineMapper.xml")
                     || entry.getKey().equals("mappers/CompanyMapper.xml")
                 ? CONTROL_DERIVED_READ_CEILING
@@ -122,6 +123,31 @@ class OrgShareCeilingArchTest {
             assertEquals(0, count(Pattern.compile("lifecycle_state|provision_ceased_at"), sql));
         }
         assertEquals(0, count(CONTROL_PLANE_WORKSPACE_TABLE, loadMapperText("mappers/CompanyMapper.xml")));
+    }
+
+    @Test
+    void everyDealShareFragmentBindsItsExactOwnerAndRetainsItsUnfilteredCeiling() throws Exception {
+        Document document = loadMapper("mappers/DealMapper.xml");
+        Map<String, String> owners = Map.of(
+            "visibleCompanyJoin", "c", "visiblePersonJoin", "p",
+            "visibleFilteredPersonJoin", "filtered_person", "visiblePipelineJoin", "p", "visibleStageJoin", "sp");
+        NodeList fragments = document.getElementsByTagName("sql");
+        int checked = 0;
+        for (int index = 0; index < fragments.getLength(); index++) {
+            Element fragment = (Element) fragments.item(index);
+            String id = fragment.getAttribute("id");
+            if (!owners.containsKey(id)) {
+                continue;
+            }
+            String sql = fragment.getTextContent().replaceAll("\\s+", " ");
+            assertEquals(1, count(CONTROL_DERIVED_READ_CEILING, sql), id);
+            assertEquals(1, count(Pattern.compile("org_workspace\\.id\\s*=\\s*"
+                + owners.get(id) + "\\.workspace_id"), sql), id);
+            assertEquals(0, count(CONTROL_PLANE_WORKSPACE_TABLE, sql), id);
+            assertEquals(0, count(Pattern.compile("lifecycle_state"), sql), id);
+            checked++;
+        }
+        assertEquals(5, checked);
     }
 
     @Test

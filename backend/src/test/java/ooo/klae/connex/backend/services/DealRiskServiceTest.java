@@ -46,13 +46,14 @@ class DealRiskServiceTest extends AbstractServiceTest {
     private Stage stage;
     private Company company;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private RecordVisibilityScopeControlAccess scopes;
 
     @BeforeEach
     void setUpService() {
         scoring = Mockito.mock(ScoringService.class);
         when(scoring.scoreContacts(workspace.getId())).thenReturn(List.of());
         when(scoring.scoreContacts(eq(workspace.getId()), anySet())).thenReturn(List.of());
-        service = new DealRiskService(dealMapper, activityMapper, noteMapper, taskMapper, scoring, CLOCK);
+        service = new DealRiskService(dealMapper, scopes, activityMapper, noteMapper, taskMapper, scoring, CLOCK);
     }
 
     private Deal openDeal() {
@@ -227,7 +228,7 @@ class DealRiskServiceTest extends AbstractServiceTest {
         Deal deal = openDeal();
         touch(deal, "2126-06-20 10:00:00");
         Person champion = newPerson(company);
-        dealMapper.addPerson(workspace.getId(), deal.getId(), champion.getId(), "Champion");
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), deal.getId(), champion.getId(), "Champion");
         warmth(champion.getId(), 8, "cold", "cooling", 40);
 
         DealRiskDto risk = service.assessDeal(workspace.getId(), deal.getId());
@@ -245,7 +246,7 @@ class DealRiskServiceTest extends AbstractServiceTest {
         closeDateOf(deal, "2126-12-31");
         touch(deal, "2126-06-20 10:00:00");
         Person contact = newPerson(company);
-        dealMapper.addPerson(workspace.getId(), deal.getId(), contact.getId(), "Champion");
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), deal.getId(), contact.getId(), "Champion");
         warmth(contact.getId(), 80, "hot", "rising", 3);
 
         DealRiskDto risk = service.assessDeal(workspace.getId(), deal.getId());
@@ -295,7 +296,7 @@ class DealRiskServiceTest extends AbstractServiceTest {
         closeDateOf(healthy, "2126-12-31");
         touch(healthy, "2126-06-20 10:00:00");
         Person contact = newPerson(company);
-        dealMapper.addPerson(workspace.getId(), healthy.getId(), contact.getId(), "Champion");
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), healthy.getId(), contact.getId(), "Champion");
         warmth(contact.getId(), 80, "hot", "rising", 3);
 
         List<DealRiskDto> risks = service.assessWorkspace(workspace.getId());
@@ -338,14 +339,14 @@ class DealRiskServiceTest extends AbstractServiceTest {
         Clock closingSoon = Clock.fixed(
             Instant.parse("2126-06-24T15:30:00Z"), ZoneOffset.UTC);
         DealRiskService beforeService = new DealRiskService(
-            dealMapper,
+            dealMapper, scopes,
             activityMapper,
             noteMapper,
             taskMapper,
             scoring,
             beforeClosingSoon);
         DealRiskService afterService = new DealRiskService(
-            dealMapper,
+            dealMapper, scopes,
             activityMapper,
             noteMapper,
             taskMapper,
@@ -385,7 +386,7 @@ class DealRiskServiceTest extends AbstractServiceTest {
         closeDateOf(deal, "2126-12-31");
         touch(deal, "2126-06-20 10:00:00");
         Person contact = newPerson(company);
-        dealMapper.addPerson(workspace.getId(), deal.getId(), contact.getId(), "Influencer");
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), deal.getId(), contact.getId(), "Influencer");
         warmthList(temp(contact.getId(), "cold", "cooling"));
 
         DealRiskDto risk = service.assessDeal(workspace.getId(), deal.getId());
@@ -400,7 +401,7 @@ class DealRiskServiceTest extends AbstractServiceTest {
         closeDateOf(keyDeal, "2126-12-31");
         touch(keyDeal, "2126-06-20 10:00:00");
         Person champion = newPerson(company);
-        dealMapper.addPerson(workspace.getId(), keyDeal.getId(), champion.getId(), "Champion");
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), keyDeal.getId(), champion.getId(), "Champion");
         warmthList(temp(champion.getId(), "cool", "cooling"));
         assertThat(service.assessDeal(workspace.getId(), keyDeal.getId()).getLevel()).isEqualTo("medium");
 
@@ -408,7 +409,7 @@ class DealRiskServiceTest extends AbstractServiceTest {
         closeDateOf(plainDeal, "2126-12-31");
         touch(plainDeal, "2126-06-20 10:00:00");
         Person contact = newPerson(company);
-        dealMapper.addPerson(workspace.getId(), plainDeal.getId(), contact.getId(), "Influencer");
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), plainDeal.getId(), contact.getId(), "Influencer");
         warmthList(temp(contact.getId(), "cool", "cooling"));
         assertThat(service.assessDeal(workspace.getId(), plainDeal.getId()).getLevel()).isEqualTo("low");
     }
@@ -419,7 +420,7 @@ class DealRiskServiceTest extends AbstractServiceTest {
         closeDateOf(deal, "2126-12-31");
         touch(deal, "2126-06-20 10:00:00");
         Person contact = newPerson(company);
-        dealMapper.addPerson(workspace.getId(), deal.getId(), contact.getId(), "Champion");
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), deal.getId(), contact.getId(), "Champion");
         warmthList();
 
         DealRiskDto risk = service.assessDeal(workspace.getId(), deal.getId());
@@ -448,7 +449,7 @@ class DealRiskServiceTest extends AbstractServiceTest {
         closeDateOf(deal, "2126-12-31");
         touch(deal, "2126-06-20 10:00:00");
         Person contact = newPerson(company);
-        dealMapper.addPerson(workspace.getId(), deal.getId(), contact.getId(), "Champion");
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), deal.getId(), contact.getId(), "Champion");
         warmth(contact.getId(), 4, "cold", "steady", 60);
         personMapper.updateEvaluationExclusions(workspace.getId(), contact.getId(), true, null);
 
@@ -466,8 +467,8 @@ class DealRiskServiceTest extends AbstractServiceTest {
         touch(deal, "2126-06-20 10:00:00");
         Person champion = newPerson(company);
         Person contact = newPerson(company);
-        dealMapper.addPerson(workspace.getId(), deal.getId(), champion.getId(), "Champion");
-        dealMapper.addPerson(workspace.getId(), deal.getId(), contact.getId(), "Influencer");
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), deal.getId(), champion.getId(), "Champion");
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), deal.getId(), contact.getId(), "Influencer");
         warmthList(temp(champion.getId(), "cold", "cooling"), temp(contact.getId(), "cold", "cooling"));
 
         DealRiskDto risk = service.assessDeal(workspace.getId(), deal.getId());
@@ -494,13 +495,13 @@ class DealRiskServiceTest extends AbstractServiceTest {
         closeDateOf(deal, "2126-12-31");
         touch(deal, "2126-06-20 10:00:00");
         Person stakeholder = newPerson(company);
-        dealMapper.addPerson(workspace.getId(), deal.getId(), stakeholder.getId(), "Champion");
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), deal.getId(), stakeholder.getId(), "Champion");
         touch(stakeholder, "2126-06-23 15:30:01");
         ScoringService actualScoring = new ScoringService(
             personMapper, companyMapper, dealMapper, activityMapper, noteMapper, taskMapper, CLOCK,
             Mockito.mock(RecordVisibilityScopeControlAccess.class));
         DealRiskService actualService = new DealRiskService(
-            dealMapper, activityMapper, noteMapper, taskMapper, actualScoring, CLOCK);
+            dealMapper, scopes, activityMapper, noteMapper, taskMapper, actualScoring, CLOCK);
 
         RelationshipTemperatureDto futureOnly = actualScoring
             .scoreContacts(workspace.getId(), java.util.Set.of(stakeholder.getId()))
@@ -533,7 +534,7 @@ class DealRiskServiceTest extends AbstractServiceTest {
         closeDateOf(overdue, "2126-06-01");
         touch(overdue, "2126-06-20 10:00:00");
         Person warm = newPerson(company);
-        dealMapper.addPerson(workspace.getId(), overdue.getId(), warm.getId(), "Champion");
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), overdue.getId(), warm.getId(), "Champion");
 
         warmthList(temp(warm.getId(), "hot", "rising"));
 

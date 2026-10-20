@@ -193,6 +193,14 @@ public class ExportService {
             List<String> statuses, List<String> risks,
             MemberScope memberScope) {
         requireExportStepUp();
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceService.getCurrentWorkspaceId(), () -> exportDealsWithinDealVisibility(query, currency, pipelineIds, stageIds, companyIds, personIds, noCompany, statuses, risks, memberScope));
+    }
+
+    private String exportDealsWithinDealVisibility(String query, String currency, List<Integer> pipelineIds, List<Integer> stageIds,
+            List<Integer> companyIds, List<Integer> personIds, boolean noCompany,
+            List<String> statuses, List<String> risks,
+            MemberScope memberScope) {
         List<Deal> deals = dealService.queryDealsForExport(
             query, currency, pipelineIds, stageIds, companyIds, personIds,
             noCompany, statuses, risks, memberScope);
@@ -205,6 +213,14 @@ public class ExportService {
             List<Integer> personIds, boolean noCompany, List<String> statuses,
             List<String> risks, MemberScope memberScope) {
         requireExportStepUp();
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceService.getCurrentWorkspaceId(), () -> exportSegmentDealsWithinDealVisibility(definition, query, currency, pipelineIds, stageIds, companyIds, personIds, noCompany, statuses, risks, memberScope));
+    }
+
+    private String exportSegmentDealsWithinDealVisibility(SegmentDefinition definition, String query, String currency,
+            List<Integer> pipelineIds, List<Integer> stageIds, List<Integer> companyIds,
+            List<Integer> personIds, boolean noCompany, List<String> statuses,
+            List<String> risks, MemberScope memberScope) {
         List<Deal> deals = dealService.querySegmentDealsForExport(
             definition, query, currency, pipelineIds, stageIds, companyIds, personIds,
             noCompany, statuses, risks, memberScope);

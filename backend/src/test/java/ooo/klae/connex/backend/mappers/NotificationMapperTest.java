@@ -550,7 +550,7 @@ class NotificationMapperTest extends AbstractMapperTest {
         );
 
         Person stakeholder = newPerson(company);
-        dealMapper.addPerson(workspace.getId(), deal.getId(), stakeholder.getId(), "champion");
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), deal.getId(), stakeholder.getId(), "champion");
 
         Set<Integer> recipients = notificationMapper
             .findRelationshipNudgeCandidates(workspace.getId())
@@ -598,7 +598,7 @@ class NotificationMapperTest extends AbstractMapperTest {
         Deal deal = newDeal(pipeline, stage, company);
         dealMapper.updateOwner(workspace.getId(), deal.getId(), owner.getId());
         Person stakeholder = newPerson(company);
-        dealMapper.addPerson(workspace.getId(), deal.getId(), stakeholder.getId(), "champion");
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), deal.getId(), stakeholder.getId(), "champion");
 
         assertTrue(notificationMapper.findRelationshipNudgeCandidates(workspace.getId()).stream()
             .anyMatch(candidate -> candidate.getPersonId() == stakeholder.getId()));

@@ -394,12 +394,9 @@ class DealServiceTest extends AbstractServiceTest {
         MemberScope allTeamScope = MemberScope.fromRequest(null, null, currentUser.getId());
         DealMetricsDto metrics = dealService.getDealMetrics(null, null, null, null, null, null);
         DealFacets facets = dealService.getDealFacets();
-        List<Deal> page = dealService.getDealsPage(
-            null, null, null, null, null, null, null, null, 25, 0);
+        List<Deal> page = dealService.queryDealsPage(null, null, null, null, null, null, null, null, false, null, null, null, 25, 0).items();
         long count = dealService.countDeals(null, null, null, null, null, null);
-        List<Deal> filteredPage = dealService.getDealsPage(
-            "%Local Won%", "value", "desc", "JPY", pipeline.getId(), stage.getId(),
-            company.getId(), "won", 25, 0);
+        List<Deal> filteredPage = dealService.queryDealsPage("%Local Won%", "value", "desc", "JPY", List.of(pipeline.getId()), List.of(stage.getId()), List.of(company.getId()), null, false, List.of("won"), null, null, 25, 0).items();
         long filteredCount = dealService.countDeals(
             "%Local Won%", "JPY", pipeline.getId(), stage.getId(), company.getId(), "won");
         DealMetricsDto filteredMetrics = dealService.getDealMetrics(
@@ -1751,9 +1748,9 @@ class DealServiceTest extends AbstractServiceTest {
         Person zulu = personNamed("Zulu Contact");
         Person alpha = personNamed("Alpha Contact");
         Person second = personNamed("Second Contact");
-        dealMapper.addPerson(workspace.getId(), firstDeal.getId(), zulu.getId(), null);
-        dealMapper.addPerson(workspace.getId(), firstDeal.getId(), alpha.getId(), null);
-        dealMapper.addPerson(workspace.getId(), secondDeal.getId(), second.getId(), null);
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), firstDeal.getId(), zulu.getId(), null);
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), firstDeal.getId(), alpha.getId(), null);
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), secondDeal.getId(), second.getId(), null);
 
         List<DealPrimaryContactDto> contacts = dealService.getPrimaryContacts(
             List.of(secondDeal.getId(), firstDeal.getId()));

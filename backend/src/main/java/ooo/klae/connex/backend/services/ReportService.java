@@ -1464,6 +1464,17 @@ public class ReportService {
             PeriodWindow period,
             RecordVisibilityScope scope,
             RiskInputScope riskInputScope) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(workspaceId, scope,
+            () -> generationInputsWithinDealVisibility(workspaceId, config, requestedWidgets, period, scope, riskInputScope));
+    }
+
+    private GenerationInputs generationInputsWithinDealVisibility(
+            int workspaceId,
+            ReportConfig config,
+            List<ReportWidgetConfig> requestedWidgets,
+            PeriodWindow period,
+            RecordVisibilityScope scope,
+            RiskInputScope riskInputScope) {
         String orgWorkspaceIdsJson = scope.workspaceIdsJson();
         boolean contactRelationships = requestedWidgets.stream()
                 .anyMatch(widget -> "relationships".equals(widget.dataSource())

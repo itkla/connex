@@ -195,7 +195,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
         Company company = newCompany();
         Pipeline pipeline = newPipeline();
         Deal deal = newDeal(pipeline, newStage(pipeline, 1), company);
-        dealMapper.addPerson(workspace.getId(), deal.getId(), person.getId(), "champion");
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), deal.getId(), person.getId(), "champion");
 
         Person converted = lifecycleService.updateLifecycle(
             person.getId(), request(PersonLifecycleStage.CONVERTED, null, null));
@@ -469,7 +469,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
             person.getId(), request(PersonLifecycleStage.QUALIFIED, null, null));
         Pipeline pipeline = newPipeline();
         Deal deal = newDeal(pipeline, newStage(pipeline, 1), newCompany());
-        dealMapper.addPerson(workspace.getId(), deal.getId(), person.getId(), "champion");
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), deal.getId(), person.getId(), "champion");
         lifecycleService.updateLifecycle(
             person.getId(), request(PersonLifecycleStage.CONVERTED, null, null));
         dealMapper.removePerson(workspace.getId(), deal.getId(), person.getId());
