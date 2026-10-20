@@ -16,6 +16,8 @@ import java.util.Optional;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -46,9 +48,10 @@ class TenantWorkScopeSnapshotTest {
         TransactionSynchronizationManager.clear();
     }
 
-    @Test
-    void sameWorkspaceRunAsInsideATransactionReusesTheOuterOperation() {
-        var prepared = routed(7, 900, "cnx_tenant");
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void sameWorkspaceRunAsInsideATransactionReusesTheOuterOperation(boolean routed) {
+        var prepared = route(7, 900, "cnx_tenant", routed);
         var executor = new AutomationExecutor(context, new AutomationScope(), scope);
         User actor = new User();
         actor.setId(42);
@@ -70,7 +73,7 @@ class TenantWorkScopeSnapshotTest {
         });
         assertNull(context.getWorkspaceScopes());
         assertNull(context.getCatalog());
-        verify(operations).forWorkspace(7, false, null);
+        verifyPreparedRoute(routed, 7, 900, "cnx_tenant");
     }
 
     @Test
@@ -98,10 +101,11 @@ class TenantWorkScopeSnapshotTest {
         verifyNoInteractions(workspaces, operations, lifecycle);
     }
 
-    @Test
-    void nestedDifferentWorkspaceRestoresTheOriginalPayloadAfterFailureAndClear() {
-        var outer = routed(7, 900, "cnx_outer");
-        routed(11, 901, "cnx_inner");
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void nestedDifferentWorkspaceRestoresTheOriginalPayloadAfterFailureAndClear(boolean routed) {
+        var outer = route(7, 900, "cnx_outer", routed);
+        route(11, 901, "cnx_inner", routed);
         scope.inWorkspace(7, () -> {
             assertThrows(IllegalArgumentException.class, () -> scope.inWorkspace(11, () -> {
                 assertEquals(11, context.getWorkspaceScopes().workspaceId());
@@ -115,15 +119,25 @@ class TenantWorkScopeSnapshotTest {
         assertNull(context.getCatalog());
     }
 
-    @Test
-    void failedPreparationDiscardsTheRootCacheBeforeTheNextOperation() {
-        var prepared = routed(7, 900, "cnx_tenant");
-        when(operations.forWorkspace(7, false, null))
-            .thenThrow(new IllegalStateException("unavailable")).thenReturn(prepared);
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void failedPreparationDiscardsTheRootCacheBeforeTheNextOperation(boolean routed) {
+        var prepared = route(7, 900, "cnx_tenant", routed);
+        if (routed) {
+            when(operations.forWorkspace(7, false, null))
+                .thenThrow(new IllegalStateException("unavailable")).thenReturn(prepared);
+        } else {
+            when(operations.load(7, 900, "cnx_tenant", null))
+                .thenThrow(new IllegalStateException("unavailable")).thenReturn(prepared);
+        }
         assertThrows(IllegalStateException.class, () -> scope.inWorkspace(7, () -> null));
         assertNull(context.getWorkspaceScopes());
         scope.inWorkspace(7, () -> assertSame(prepared, context.getWorkspaceScopes()));
-        verify(operations, times(2)).forWorkspace(7, false, null);
+        if (routed) {
+            verify(operations, times(2)).forWorkspace(7, false, null);
+        } else {
+            verify(operations, times(2)).load(7, 900, "cnx_tenant", null);
+        }
         assertNull(context.getWorkspaceScopes());
     }
 
@@ -149,10 +163,11 @@ class TenantWorkScopeSnapshotTest {
         assertEquals(first.hashCode(), second.hashCode());
     }
 
-    @Test
-    void lifecycleCapturePreparesPlacementAndMissingAnchorBeforeInstallingTheIdentity() {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void lifecycleCapturePreparesPlacementAndMissingAnchorBeforeInstallingTheIdentity(boolean routed) {
         var prepared = scopes(7, 900, "cnx_tenant");
-        when(catalogs.isCatalogPerPlacement()).thenReturn(true);
+        when(catalogs.isCatalogPerPlacement()).thenReturn(routed);
         when(operations.forLifecycleWorkspace(7, 900)).thenReturn(prepared);
         var access = new TenantLifecycleAccess(scope, catalogs, context);
         var route = access.capture(new WorkspaceLifecycleRef(7, 900, "Deleted", "deleted", "tearing_down"), 900);
@@ -172,7 +187,7 @@ class TenantWorkScopeSnapshotTest {
     }
 
     @Test
-    void singleDatabaseNeverPreparesEvenInsideAnExistingTransaction() {
+    void singleDatabaseSkipsPreparationInsideAnExistingTransaction() {
         when(workspaces.getOrgId(7)).thenReturn(900);
         context.set(7, 900, 42, "member", null);
         TransactionSynchronizationManager.setActualTransactionActive(true);
@@ -182,24 +197,81 @@ class TenantWorkScopeSnapshotTest {
         verifyNoInteractions(operations, workspaces, lifecycle);
     }
 
-    @Test
-    void diagnosticsSuppliesItsPreviouslyLoadedActiveScope() {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void diagnosticsSuppliesItsPreviouslyLoadedActiveScope(boolean routed) {
         var active = new WorkspaceScope(900, List.of(7), "[7]");
         var prepared = scopes(7, 900, "cnx_tenant");
-        when(catalogs.isCatalogPerPlacement()).thenReturn(true);
+        when(catalogs.isCatalogPerPlacement()).thenReturn(routed);
+        when(workspaces.getOrgId(7)).thenReturn(900);
+        when(catalogs.resolveCatalog(900)).thenReturn("cnx_tenant");
         when(operations.forWorkspace(7, false, active)).thenReturn(prepared);
+        when(operations.load(7, 900, "cnx_tenant", active)).thenReturn(prepared);
         scope.withWorkspacePlacement(7, active, (orgId, catalog) -> {
             assertSame(prepared, context.getWorkspaceScopes());
             return null;
         });
-        verify(operations).forWorkspace(7, false, active);
+        if (routed) {
+            verify(operations).forWorkspace(7, false, active);
+        } else {
+            verify(operations).load(7, 900, "cnx_tenant", active);
+        }
+    }
+
+    @Test
+    void singleDatabasePreparesWithEmptySynchronizationAndKnownIdentityWithoutRouteQueries() {
+        var prepared = scopes(7, 900, null);
+        when(operations.load(7, 900, null, null)).thenAnswer(call -> {
+            assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
+            return prepared;
+        });
+        TransactionSynchronizationManager.initSynchronization();
+        assertSame(prepared, scope.prepareWorkspaceScopes(7, 900, null));
+        scope.withPreparedWorkspace(7, 900, null, null, () -> {
+            assertSame(prepared, context.getWorkspaceScopes());
+            return null;
+        });
+        assertNull(context.getWorkspaceScopes());
+        verifyNoInteractions(workspaces, lifecycle);
+        verify(catalogs, org.mockito.Mockito.never()).resolveCatalog(900);
+        verify(operations, times(2)).load(7, 900, null, null);
+    }
+
+    @Test
+    void singleDatabaseCapturedLifecycleEntryInsideATransactionSkipsPreparation() {
+        when(catalogs.resolveCatalog(900)).thenReturn(null);
+        context.set(7, 900, 42, "member", null);
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        var access = new TenantLifecycleAccess(scope, catalogs, context);
+        var route = access.capture(new WorkspaceLifecycleRef(7, 900, "Fenced", "fenced", "tearing_down"), 900);
+        assertNull(route.scopes());
+        access.withRoute(route, 42, () -> {
+            assertNull(context.getWorkspaceScopes());
+            return null;
+        });
+        verifyNoInteractions(operations, workspaces, lifecycle);
     }
 
     private TenantWorkspaceScopeSnapshot routed(int workspaceId, int orgId, String catalog) {
+        return route(workspaceId, orgId, catalog, true);
+    }
+
+    private TenantWorkspaceScopeSnapshot route(int workspaceId, int orgId, String catalog, boolean routed) {
         var prepared = scopes(workspaceId, orgId, catalog);
-        when(catalogs.isCatalogPerPlacement()).thenReturn(true);
+        when(catalogs.isCatalogPerPlacement()).thenReturn(routed);
         when(operations.forWorkspace(workspaceId, false, null)).thenReturn(prepared);
+        when(workspaces.getOrgId(workspaceId)).thenReturn(orgId);
+        when(catalogs.resolveCatalog(orgId)).thenReturn(catalog);
+        when(operations.load(workspaceId, orgId, catalog, null)).thenReturn(prepared);
         return prepared;
+    }
+
+    private void verifyPreparedRoute(boolean routed, int workspaceId, int orgId, String catalog) {
+        if (routed) {
+            verify(operations).forWorkspace(workspaceId, false, null);
+        } else {
+            verify(operations).load(workspaceId, orgId, catalog, null);
+        }
     }
 
     private static TenantWorkspaceScopeSnapshot scopes(int workspaceId, int orgId, String catalog) {

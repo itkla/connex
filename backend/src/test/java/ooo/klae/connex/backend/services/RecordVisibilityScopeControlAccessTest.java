@@ -15,6 +15,7 @@ import static org.mockito.Mockito.when;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Optional;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -32,6 +33,8 @@ import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.Recor
 import ooo.klae.connex.backend.support.TestTransactionManager;
 import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
 import ooo.klae.connex.backend.tenant.TenantContext;
+import ooo.klae.connex.backend.tenant.TenantWorkspaceScopeSnapshot;
+import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlOperations.WorkspaceScope;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /** Pins the unfiltered delegation contract and immutable scope representation shared by #485 lanes. */
@@ -421,6 +424,77 @@ class RecordVisibilityScopeControlAccessTest {
             return null;
         });
         verify(delegate, times(2)).getForWorkspace(7);
+    }
+
+    @Test
+    void singleDatabaseOperationThenPreparedPayloadTakePrecedenceOverTheTransactionMemo() {
+        var delegate = mock(ShareWorkspaceControlAccess.class);
+        when(delegate.getForWorkspace(7)).thenReturn(snapshot(900, 7));
+        var access = new RecordVisibilityScopeControlAccess(delegate, tenantContext);
+        var prepared = new TenantWorkspaceScopeSnapshot(7, 900, null, Optional.of(snapshot(900, 7, 11)),
+            new WorkspaceScope(900, List.of(7), "[7]"));
+        var explicit = new RecordVisibilityScope(900, List.of(7, 13));
+        new TransactionTemplate(new TestTransactionManager()).executeWithoutResult(status -> {
+            var memo = access.getForWorkspace(7);
+            tenantContext.setWithWorkspaceScopes(7, 900, 42, "member", null, prepared);
+            var installed = access.getForWorkspace(7);
+            assertEquals(List.of(7, 11), installed.workspaceIds());
+            access.withWorkspaceScope(7, explicit, () -> {
+                assertSame(explicit, access.getForWorkspace(7));
+                return null;
+            });
+            assertSame(installed, access.getForWorkspace(7));
+            tenantContext.clear();
+            assertSame(memo, access.getForWorkspace(7));
+        });
+        verify(delegate).getForWorkspace(7);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void bothModesServeTheExactPreparedPayloadWithoutUsingTheDelegate(boolean routed) {
+        var delegate = mock(ShareWorkspaceControlAccess.class);
+        when(delegate.isCatalogPerPlacement()).thenReturn(routed);
+        var access = new RecordVisibilityScopeControlAccess(delegate, tenantContext);
+        var sharing = snapshot(900, 7, 11);
+        var prepared = new TenantWorkspaceScopeSnapshot(7, 900, null, Optional.of(sharing),
+            new WorkspaceScope(900, List.of(7), "[7]"));
+        tenantContext.setWithWorkspaceScopes(7, 900, 42, "member", null, prepared);
+        new TransactionTemplate(new TestTransactionManager()).executeWithoutResult(status -> {
+            assertSame(sharing.recordVisibilityScope(), access.getForWorkspace(7));
+            access.withWorkspaceScope(7, sharing.recordVisibilityScope(), () -> {
+                assertSame(sharing.recordVisibilityScope(), access.getForWorkspace(7));
+                return null;
+            });
+            if (routed) {
+                assertThrows(IllegalStateException.class, () -> access.withWorkspaceScope(
+                    7, new RecordVisibilityScope(900, List.of(7)), () -> null));
+                tenantContext.clear();
+                assertThrows(ooo.klae.connex.backend.exceptions.TenantScopeSnapshotMissingException.class,
+                    () -> access.withWorkspaceScope(7, sharing.recordVisibilityScope(), () -> null));
+            }
+        });
+        verify(delegate, org.mockito.Mockito.never()).getForWorkspace(7);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"workspace", "organization", "catalog"})
+    void singleDatabasePreparedIdentityMismatchesRetainTheLazyFallback(String mismatch) {
+        var delegate = mock(ShareWorkspaceControlAccess.class);
+        when(delegate.getForWorkspace(7)).thenReturn(snapshot(900, 7));
+        var access = new RecordVisibilityScopeControlAccess(delegate, tenantContext);
+        int preparedWorkspace = "workspace".equals(mismatch) ? 11 : 7;
+        var prepared = new TenantWorkspaceScopeSnapshot(preparedWorkspace, 900, null,
+            Optional.of(snapshot(900, preparedWorkspace, 13)),
+            new WorkspaceScope(900, List.of(preparedWorkspace), "[" + preparedWorkspace + "]"));
+        tenantContext.setWithWorkspaceScopes(preparedWorkspace, 900, 42, "member", null, prepared);
+        if ("organization".equals(mismatch)) {
+            tenantContext.set(7, 901, 42, "member", null);
+        } else if ("catalog".equals(mismatch)) {
+            tenantContext.set(7, 900, 42, "member", "different_catalog");
+        }
+        assertEquals(List.of(7), access.getForWorkspace(7).workspaceIds());
+        verify(delegate).getForWorkspace(7);
     }
 
     private static ShareWorkspaceControlAccess.OrganizationWorkspaces snapshot(int orgId, int... workspaceIds) {

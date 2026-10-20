@@ -7,10 +7,11 @@ import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlOperati
 import ooo.klae.connex.backend.services.ShareWorkspaceControlAccess.OrganizationWorkspaces;
 
 /**
- * Immutable control data prepared before a routed workspace operation starts its tenant transactions.
+ * Immutable control data prepared before a workspace operation starts its tenant transactions in either mode.
  * An absent sharing anchor and an inactive read anchor are retained as results, so trusted cleanup
  * can continue after lifecycle fencing or root deletion without authorizing a later scope read.
- * Workspace changes after preparation become visible to the next operation.
+ * Workspace changes after preparation become visible to the next operation. Explicit destructive
+ * freshness boundaries bypass this payload in single-database mode.
  */
 public record TenantWorkspaceScopeSnapshot(
         int workspaceId,

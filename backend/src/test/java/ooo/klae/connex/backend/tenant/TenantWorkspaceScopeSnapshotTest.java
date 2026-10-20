@@ -14,6 +14,9 @@ import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlOperations.WorkspaceScope;
 
@@ -117,6 +120,19 @@ class TenantWorkspaceScopeSnapshotTest {
             }).get(5, TimeUnit.SECONDS);
         }
         assertEquals(7, context.getWorkspaceId());
+    }
+
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = "cnx_tenant")
+    void exactIdentityMatchingIncludesSharedAndDedicatedCatalogs(String catalog) {
+        var prepared = scopes(7, 900, catalog);
+        assertTrue(prepared.matches(7, 900, catalog));
+        assertFalse(prepared.matches(11, 900, catalog));
+        assertFalse(prepared.matches(7, 901, catalog));
+        assertFalse(prepared.matches(7, 900, "different_catalog"));
+        context.setWithWorkspaceScopes(7, 900, 42, "member", catalog, prepared);
+        assertSame(prepared, context.getWorkspaceScopes());
     }
 
     private static TenantWorkspaceScopeSnapshot scopes(int workspaceId, int orgId, String catalog) {

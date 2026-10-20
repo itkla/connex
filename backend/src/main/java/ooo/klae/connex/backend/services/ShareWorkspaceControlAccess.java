@@ -33,7 +33,9 @@ import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.Recor
  * the grant ceiling, the listing filter, the workspace-name hydration and the name ordering. A
  * single statement produces it, so no read-only transaction is needed to make it consistent.
  * {@link RecordVisibilityScopeControlAccess} delegates here for legacy unfiltered record-visibility
- * ceilings (#485), exposing a distinct scope type without workspace-name hydration.
+ * ceilings (#485) when no prepared record-visibility payload is available, exposing a distinct
+ * scope type without workspace-name hydration. Its prepared reads do not change this boundary's
+ * single-database sharing behavior.
  *
  * <p><strong>Why this is not {@link OrganizationWorkspaceScopeControlAccess}.</strong> That
  * component answers the same question for the read-path ceilings (IdentityMapper,
