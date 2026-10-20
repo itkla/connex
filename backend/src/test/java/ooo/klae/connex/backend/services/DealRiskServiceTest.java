@@ -497,7 +497,8 @@ class DealRiskServiceTest extends AbstractServiceTest {
         dealMapper.addPerson(workspace.getId(), deal.getId(), stakeholder.getId(), "Champion");
         touch(stakeholder, "2126-06-23 15:30:01");
         ScoringService actualScoring = new ScoringService(
-            personMapper, companyMapper, dealMapper, activityMapper, noteMapper, taskMapper, CLOCK);
+            personMapper, companyMapper, dealMapper, activityMapper, noteMapper, taskMapper, CLOCK,
+            Mockito.mock(RecordVisibilityScopeControlAccess.class));
         DealRiskService actualService = new DealRiskService(
             dealMapper, activityMapper, noteMapper, taskMapper, actualScoring, CLOCK);
 

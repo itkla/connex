@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.mappers;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
+
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -219,11 +221,11 @@ class NoteMapperTest extends AbstractMapperTest {
         noteMapper.insert(otherPrivate);
 
         List<Note> page = noteMapper.getVisibleNotesPage(
-            pageWorkspace.getId(), current.getId(), null, List.of(), "updated", "desc", 10, 0);
+            pageWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, pageWorkspace.getId()), current.getId(), null, List.of(), "updated", "desc", 10, 0);
 
         assertEquals(2, page.size());
         assertEquals(2, noteMapper.countVisibleNotes(
-            pageWorkspace.getId(), current.getId(), null, List.of()));
+            pageWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, pageWorkspace.getId()), current.getId(), null, List.of()));
         assertTrue(page.stream().anyMatch(note -> note.getId() == workspaceNote.getId()));
         assertTrue(page.stream().anyMatch(note -> note.getId() == ownPrivate.getId()));
         assertTrue(page.stream().noneMatch(note -> note.getId() == otherPrivate.getId()));
@@ -247,10 +249,10 @@ class NoteMapperTest extends AbstractMapperTest {
         noteMapper.insert(foreign);
 
         List<Note> page = noteMapper.getWorkspaceNotesPage(
-            pageWorkspace.getId(), null, List.of(), "updated", "desc", 1, 0);
+            pageWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, pageWorkspace.getId()), null, List.of(), "updated", "desc", 1, 0);
 
         assertEquals(1, page.size());
-        assertEquals(2, noteMapper.countWorkspaceNotes(pageWorkspace.getId(), null, List.of()));
+        assertEquals(2, noteMapper.countWorkspaceNotes(pageWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, pageWorkspace.getId()), null, List.of()));
         assertTrue(page.stream().noneMatch(note -> note.getId() == privateNote.getId()));
         assertTrue(page.stream().noneMatch(note -> note.getId() == foreign.getId()));
     }
@@ -294,17 +296,17 @@ class NoteMapperTest extends AbstractMapperTest {
         noteMapper.insert(numericEntityFrozenLabel);
 
         List<Note> page = noteMapper.getVisibleNotesPage(
-            pageWorkspace.getId(), user.getId(), "%Needle%", List.of(), "title", "asc", 2, 1);
+            pageWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, pageWorkspace.getId()), user.getId(), "%Needle%", List.of(), "title", "asc", 2, 1);
 
         assertEquals(List.of(zeta.getId(), body.getId()), page.stream().map(Note::getId).toList());
         assertEquals(5, noteMapper.countVisibleNotes(
-            pageWorkspace.getId(), user.getId(), "%Needle%", List.of()));
+            pageWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, pageWorkspace.getId()), user.getId(), "%Needle%", List.of()));
         assertTrue(page.stream().noneMatch(note -> note.getId() == frozenLabel.getId()));
         assertTrue(page.stream().noneMatch(note -> note.getId() == escapedFrozenLabel.getId()));
         assertTrue(page.stream().noneMatch(note -> note.getId() == namedEntityFrozenLabel.getId()));
         assertTrue(page.stream().noneMatch(note -> note.getId() == numericEntityFrozenLabel.getId()));
         List<Integer> matchingIds = noteMapper.getVisibleNotesPage(
-            pageWorkspace.getId(), user.getId(), "%Needle%", List.of(), "title", "asc", 10, 0)
+            pageWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, pageWorkspace.getId()), user.getId(), "%Needle%", List.of(), "title", "asc", 10, 0)
             .stream().map(Note::getId).toList();
         assertTrue(matchingIds.contains(richBody.getId()));
         assertTrue(matchingIds.contains(mixedBody.getId()));

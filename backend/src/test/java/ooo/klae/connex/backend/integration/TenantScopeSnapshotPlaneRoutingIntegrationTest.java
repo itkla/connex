@@ -55,6 +55,7 @@ import ooo.klae.connex.backend.services.ShareWorkspaceControlAccess;
 import ooo.klae.connex.backend.services.TenantWorkspaceScopeControlOperations;
 import ooo.klae.connex.backend.services.TenantLifecycleAccess;
 import ooo.klae.connex.backend.support.RecordVisibilityPlaneFixture;
+import ooo.klae.connex.backend.support.RecordVisibilityPlaneFixture.Records;
 import ooo.klae.connex.backend.tenant.ControlCatalogRoutingInterceptor;
 import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
 import ooo.klae.connex.backend.tenant.TenantContext;
@@ -77,7 +78,7 @@ class TenantScopeSnapshotPlaneRoutingIntegrationTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        fixture = new RecordVisibilityPlaneFixture(true, true, 1);
+        fixture = new RecordVisibilityPlaneFixture(Records.INTRODUCTIONS, true, 1);
         connections = new CountingDataSource(fixture.routing);
         transactions = new DataSourceTransactionManager(connections);
         var configuration = new org.apache.ibatis.session.Configuration(new Environment(

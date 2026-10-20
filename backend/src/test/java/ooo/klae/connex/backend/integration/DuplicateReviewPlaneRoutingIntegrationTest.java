@@ -59,6 +59,7 @@ import ooo.klae.connex.backend.services.IdentityBackfillRunner;
 import ooo.klae.connex.backend.services.LegacyWorkflowBackfillRunner;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.support.RecordVisibilityPlaneFixture;
+import ooo.klae.connex.backend.support.RecordVisibilityPlaneFixture.Records;
 import ooo.klae.connex.backend.tenant.TenantRoutingProperties;
 
 /** Exercises real duplicate decisions and authorization against a tenant catalog containing no control tables. */
@@ -88,7 +89,7 @@ class DuplicateReviewPlaneRoutingIntegrationTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        fixture = new RecordVisibilityPlaneFixture(false, true);
+        fixture = new RecordVisibilityPlaneFixture(Records.DUPLICATE_REVIEW, true);
         fixture.controlJdbc.update("UPDATE app_user SET password_hash = ? WHERE id = ?",
             passwordEncoder.encode(PASSWORD), fixture.userId);
         mockMvc = MockMvcBuilders.webAppContextSetup(context).addFilters(securityFilterChain).build();

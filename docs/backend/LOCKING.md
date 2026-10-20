@@ -1774,6 +1774,14 @@ detection completes before signal replacement acquires write locks. Reverse-intr
 are generated before manual or delivery snapshot persistence locks; the scheduled occurrence claim
 commits before generation. Neither read chain inherits those subsequent write locks.
 
+Note page/count, global note search, and relationship-evidence reads resolve one unfiltered snapshot
+per operation. In routed mode these scope reads are memory-only from the prepared context snapshot.
+The page/count pair also reuses its author-ID snapshot; both note-search candidate
+streams share the scope across all batches. Evidence resolves only after the existing subject
+visibility check. These read paths hold no authorization, record, or organization lock. Note
+mutation authorization and `getVisibleNoteByIdForUpdate` locks do not reach these visibility reads
+and stay on their existing transaction connection; no transaction boundary is split for Note reads.
+
 Before authorization or duplicate-decision locks, dismissal and reopen obtain one unfiltered
 `RecordVisibilityScopeControlAccess` view for their visibility projections. In routed mode this is a
 memory-only read of the context-installed sharing snapshot, as are history-import and provider-page
