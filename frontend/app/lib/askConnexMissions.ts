@@ -1,7 +1,7 @@
 import type { AiAgentRealtimeFrame, AiAgentRun, AiAgentRunState, AiChatMessage } from '@/app/lib/types';
 
 /** Displayable reasons are selected locally; provider and server prose never become UI copy. */
-export type AskConnexMissionProblem = 'busy' | 'conflict' | 'expired' | 'allowance' | 'withheld' | 'unavailable' | 'forbidden' | 'failed';
+export type AskConnexMissionProblem = 'busy' | 'conflict' | 'expired' | 'allowance' | 'withheld' | 'unavailable' | 'forbidden' | 'budgetInfeasible' | 'failed';
 
 export function askConnexMissionProblem(status: number, code?: string): AskConnexMissionProblem {
     switch (code?.toLowerCase()) {
@@ -9,6 +9,7 @@ export function askConnexMissionProblem(status: number, code?: string): AskConne
         case 'mission_version_conflict':
         case 'mission_state_conflict': return 'conflict';
         case 'mission_expired': return 'expired';
+        case 'mission_budget_infeasible': return 'budgetInfeasible';
         case 'mission_budget_exhausted':
         case 'mission_attempt_limit': return 'allowance';
         case 'mission_output_withheld':

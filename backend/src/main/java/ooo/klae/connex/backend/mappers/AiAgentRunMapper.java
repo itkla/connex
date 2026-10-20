@@ -7,6 +7,8 @@ import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.AiAgentRun;
 import ooo.klae.connex.backend.beans.AiAgentSegment;
+import ooo.klae.connex.backend.beans.AiChatMessage;
+import ooo.klae.connex.backend.beans.AiChatToolCall;
 
 /** Tenant-scoped mission persistence; services own root locking and final lease operations. */
 @Mapper
@@ -123,5 +125,36 @@ public interface AiAgentRunMapper {
     /** Discovers a bounded keyset of nonterminal mission roots for permission-independent maintenance. */
     List<AiAgentRun> nonterminalRunsAfter(@Param("workspaceId") int workspaceId,
             @Param("afterId") int afterId, @Param("limit") int limit);
+
+    /** Writes canonical continuation under the exact active generation and both revisions. */
+    int updateContinuation(@Param("run") AiAgentRun run,
+            @Param("expectedStateVersion") long expectedStateVersion,
+            @Param("expectedExecutionGeneration") long expectedExecutionGeneration,
+            @Param("expectedActiveSegmentId") Integer expectedActiveSegmentId,
+            @Param("expectedPlanRevision") long expectedPlanRevision,
+            @Param("expectedCheckpointRevision") long expectedCheckpointRevision);
+
+    /** Loads goal ancestry without its prose. */
+    AiChatMessage goalMessageIdentity(@Param("workspaceId") int workspaceId, @Param("runId") int runId);
+
+    /** Discovers stopped READ attempts without obtaining execution or lease authority. */
+    List<AiAgentRun> interruptedReadRuns(@Param("workspaceId") int workspaceId, @Param("limit") int limit);
+
+    /** Atomically reserves one exact dispatch ordinal before egress. */
+    int reserveSegmentDispatch(@Param("workspaceId") int workspaceId, @Param("runId") int runId,
+            @Param("segmentId") int segmentId, @Param("generation") long generation,
+            @Param("expectedOrdinal") int expectedOrdinal, @Param("tokenCeiling") long tokenCeiling);
+
+    /** Charges one outstanding dispatch, refusing duplicates and successor callbacks. */
+    int recordDispatchUsage(@Param("workspaceId") int workspaceId, @Param("runId") int runId,
+            @Param("segmentId") int segmentId, @Param("generation") long generation,
+            @Param("ordinal") int ordinal, @Param("input") int input, @Param("output") int output);
+
+    /** Persists screened mission replay payloads using lossless UTF-8 transport. */
+    int insertMissionBookkeepingCall(@Param("call") AiChatToolCall call);
+
+    /** Locks only an exact attempt-local bookkeeping identity before turn and segment roots. */
+    AiChatToolCall findMissionBookkeepingCall(@Param("workspaceId") int workspaceId, @Param("runId") int runId,
+            @Param("idempotencyKey") String idempotencyKey);
 
 }

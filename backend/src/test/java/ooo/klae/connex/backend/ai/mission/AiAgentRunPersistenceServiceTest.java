@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.ai.mission;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -140,6 +141,8 @@ class AiAgentRunPersistenceServiceTest {
         segment.setId(SEGMENT);
         segment.setWorkspaceId(WORKSPACE);
         segment.setRunId(RUN);
+        segment.setSegmentNo(1);
+        segment.setAttemptNo(1);
         segment.setTurnId(TURN);
         segment.setStatus("running");
         segment.setExecutionGeneration(1);
@@ -161,6 +164,8 @@ class AiAgentRunPersistenceServiceTest {
         when(runs.lockSegment(WORKSPACE, SEGMENT)).thenReturn(segment);
         when(runs.updateRun(any(), anyLong(), anyLong())).thenReturn(1);
         when(runs.updateSegment(any(), eq("running"))).thenReturn(1);
+        when(runs.reserveSegmentDispatch(anyInt(), anyInt(), anyInt(), anyLong(), anyInt(), anyLong())).thenReturn(1);
+        when(runs.recordDispatchUsage(anyInt(), anyInt(), anyInt(), anyLong(), anyInt(), anyInt(), anyInt())).thenReturn(1);
         when(chat.getTurnByIdForUpdate(WORKSPACE, SESSION, TURN)).thenReturn(turn);
         when(chat.getMissionMessage(WORKSPACE, RUN, "goal")).thenReturn(goal);
         when(leases.acquireInCurrentTransaction(eq(LEASE_KEY), any())).thenReturn(lease);
@@ -301,23 +306,63 @@ class AiAgentRunPersistenceServiceTest {
     @Test
     void knownUsageSettlesUncertaintyAndAccumulatesBeforeNextDispatch() {
         AiAgentExecutionPolicy policy = policy();
+        var dispatch = service.reserveDispatch(policy, 8192);
+        service.recordUsage(policy, dispatch, 2048, 512);
+        assertEquals(2048, segment.getKnownInputTokens());
+        assertEquals(512, segment.getKnownOutputTokens());
         service.reserveDispatch(policy, 8192);
-        java.util.ArrayList<List<Number>> persisted = new java.util.ArrayList<>();
-        doAnswer(call -> {
-            AiAgentSegment written = call.getArgument(0);
-            persisted.add(List.of(written.getKnownSteps(), written.getKnownInputTokens(),
-                    written.getKnownOutputTokens(), written.isUsageUncertain() ? 1 : 0));
-            return 1;
-        }).when(runs).updateSegment(segment, "running");
-        service.recordUsage(policy, 2048, 512);
-        assertEquals(List.of(List.of(1, 2048L, 512L, 0)), persisted);
-        service.reserveDispatch(policy, 8192);
-        assertEquals(List.of(List.of(1, 2048L, 512L, 0), List.of(2, 2048L, 512L, 1)), persisted);
 
         assertEquals(2, segment.getKnownSteps());
         assertEquals(2048, segment.getKnownInputTokens());
         assertEquals(512, segment.getKnownOutputTokens());
         assertTrue(segment.isUsageUncertain());
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2})
+    void smallSegmentDispatchesAndChargesWithinItsReservation(int runtime) {
+        run.setRuntimeContractVersion(runtime);
+        if (runtime == 2) {
+            run.setScopeFingerprint(AiAgentCapabilityGate.hash(SCOPE));
+            new AiAgentContinuationCodec().initialize(run);
+        }
+        run.setMaxTokens(8192);
+        run.setReservedTokens(8192);
+        segment.setReservedTokens(8192);
+        AiAgentExecutionPolicy prior = policy();
+        AiAgentExecutionPolicy policy = new AiAgentExecutionPolicy(prior.runId(), prior.segmentId(),
+                prior.executionGeneration(), prior.turn(), prior.goal(), prior.scope(), 4, prior.deadline(),
+                prior.lease(), prior.ownership(), prior.persistence(), prior.capability(), runtime, 1, 1,
+                new AiAgentContinuationCodec().decode(run), false, 8192);
+
+        int output = service.maxOutputTokens(policy, 2048, 16384);
+        assertEquals(6144, output);
+        var dispatch = service.reserveDispatch(policy, 2048L + output);
+        service.recordUsage(policy, dispatch, 2048, output);
+
+        assertEquals(8192, dispatch.tokenCeiling());
+        assertEquals(new AiAgentBudgetService.Settlement(1, 8192), new AiAgentBudgetService().settle(segment));
+        assertEquals(1, segment.getKnownSteps());
+        assertEquals(2048, segment.getKnownInputTokens());
+        assertEquals(6144, segment.getKnownOutputTokens());
+        assertFalse(segment.isUsageUncertain());
+        assertEquals("running", run.getStatus());
+    }
+
+    @Test
+    void outputBelowFloorRefusesWithoutReservingOrChargingADispatch() {
+        segment.setReservedTokens(8192);
+        segment.setKnownInputTokens(6000);
+        segment.setKnownOutputTokens(1937);
+
+        var refused = assertThrows(AiAssistantLoopException.class,
+                () -> service.maxOutputTokens(policy(), 0, 16384));
+
+        assertEquals("mission_budget_exhausted", refused.terminalReason());
+        assertEquals(0, segment.getKnownSteps());
+        assertFalse(segment.isUsageUncertain());
+        verify(runs, never()).reserveSegmentDispatch(anyInt(), anyInt(), anyInt(), anyLong(), anyInt(), anyLong());
+        verify(runs, never()).recordDispatchUsage(anyInt(), anyInt(), anyInt(), anyLong(), anyInt(), anyInt(), anyInt());
     }
 
     @Test
@@ -422,7 +467,8 @@ class AiAgentRunPersistenceServiceTest {
     void thirdAttemptAndDeadlineAreStrictResumeBounds() {
         run.setStatus("paused");
         run.setActiveSegmentId(null);
-        when(runs.listSegments(WORKSPACE, RUN)).thenReturn(List.of(segment, segment, segment));
+        segment.setAttemptNo(3);
+        when(runs.listSegments(WORKSPACE, RUN)).thenReturn(List.of(segment));
         assertEquals("mission_attempt_limit", assertThrows(ConflictException.class,
                 () -> service.control(run, 2, "resume")).getMessage());
         run.setExecutionDeadlineAt(now());
@@ -430,6 +476,84 @@ class AiAgentRunPersistenceServiceTest {
                 () -> service.control(run, 2, "resume")).getMessage());
         assertEquals("paused", run.getStatus());
         verify(runs, never()).updateRun(any(), anyLong(), anyLong());
+    }
+
+    @Test
+    void duplicateOrStaleUsageCannotChargeOrClearSuccessorDispatch() {
+        var policy = policy();
+        var first = service.reserveDispatch(policy, 8192);
+        service.recordUsage(policy, first, 100, 50);
+        service.recordUsage(policy, first, 100, 50);
+        var second = service.reserveDispatch(policy, 8192);
+        service.recordUsage(policy, first, 900, 900);
+        assertEquals(100, segment.getKnownInputTokens());
+        assertEquals(50, segment.getKnownOutputTokens());
+        assertTrue(segment.isUsageUncertain());
+        service.recordUsage(policy, second, 20, 10);
+        assertEquals(120, segment.getKnownInputTokens());
+        assertEquals(60, segment.getKnownOutputTokens());
+        run.setExecutionGeneration(2);
+        assertThrows(ConflictException.class, () -> service.recordUsage(policy, second, 10, 10));
+        verifyNoInteractions(leases);
+    }
+
+    @Test
+    void observedUsageOverrunStopsWithoutClampingAccounting() {
+        var policy = policy();
+        var dispatch = service.reserveDispatch(policy, 100);
+        service.recordUsage(policy, dispatch, 200000, 50);
+        assertEquals("usage_overrun", run.getReasonCode());
+        assertEquals("paused", run.getStatus());
+        assertEquals(200050, run.getConsumedTokens());
+        assertThrows(ConflictException.class, () -> service.reserveDispatch(policy, 100));
+        verify(leases).releaseHeldInCurrentTransaction(LEASE_KEY);
+    }
+
+    @Test
+    void observedOverrunAfterAttemptDeadlineStillRetainsTruthfulAccounting() {
+        var live = policy();
+        var dispatch = service.reserveDispatch(live, 100);
+        var expired = new AiAgentExecutionPolicy(live.runId(), live.segmentId(), live.executionGeneration(),
+                live.turn(), live.goal(), live.scope(), live.maxSteps(), NOW.minusSeconds(1), live.lease(),
+                live.ownership(), live.persistence(), live.capability());
+        service.recordUsage(expired, dispatch, 200000, 50);
+        assertEquals(200050, run.getConsumedTokens());
+        assertEquals("usage_overrun", run.getReasonCode());
+        assertEquals("paused", run.getStatus());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"interrupted", "member", "provider_failed", "usage_overrun", "access_lost",
+            "source_changed", "mission_budget_exhausted", "mission_expired", "malformed_output", "unsupported_contract"})
+    void onlyGenuineInterruptionIsEligibleForAutomaticRetry(String reason) {
+        assertEquals("interrupted".equals(reason), AiAgentMissionCatalog.automaticRetryReason(reason));
+    }
+
+    @Test
+    void exactReplayComparesJsonValuesAfterDatabaseNormalization() {
+        var call = new AiChatToolCall();
+        call.setArgumentsJson("{\"items\": [], \"expectedPlanRevision\": \"1\"}");
+        call.setResultJson("{\"planRevision\": \"2\"}");
+        call.setStatus("executed");
+        when(runs.findMissionBookkeepingCall(WORKSPACE, RUN, "mission-31-37-1-0")).thenReturn(call);
+        assertEquals(call.getResultJson(), service.replayBookkeeping(policy(), 1, 0,
+                "{\"expectedPlanRevision\":\"1\",\"items\":[]}"));
+        assertThrows(ConflictException.class, () -> service.replayBookkeeping(policy(), 1, 0,
+                "{\"expectedPlanRevision\":\"9\",\"items\":[]}"));
+    }
+
+    @Test
+    void explicitPauseOverInterruptedRecordsMemberAndAdvancesVersion() {
+        run.setStatus("paused");
+        run.setReasonCode("interrupted");
+        run.setActiveSegmentId(null);
+        service.control(run, 2, "pause");
+        assertEquals("member", run.getReasonCode());
+        assertEquals(3, run.getStateVersion());
+        assertEquals(2, run.getExecutionGeneration());
+        service.control(run, 3, "pause");
+        assertEquals(3, run.getStateVersion());
+        verifyNoInteractions(leases);
     }
 
     private AiAgentExecutionPolicy policy() {

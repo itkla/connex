@@ -190,6 +190,58 @@ class AiAgentPrivacyLifecycleIntegrationTest extends AbstractAiAgentPrivacyInteg
         }
     }
 
+    @Test
+    void purgeAfterMoreThanThreeAttemptsErasesContinuationHoldings() {
+        AiAgentRun run = create();
+        for (int logical = 1; logical <= 2; logical++) {
+            for (int attempt = 1; attempt <= 3; attempt++) {
+                var policy = persistence.claim(runs.getRun(workspace.getId(), run.getId()),
+                        AiAgentCapabilityGate.hash("privacy continuation"), new AiRunLeaseGuard(properties.getRunLeaseTtl()), capability);
+                if (attempt < 3) {
+                    persistence.interrupt(runs.getRun(workspace.getId(), run.getId()), "interrupted");
+                    assertTrue(persistence.requeueInterrupted(runs.getRun(workspace.getId(), run.getId())));
+                } else {
+                    var snapshot = persistence.snapshot(policy);
+                    var args = json.createObjectNode().put("expectedPlanRevision", snapshot.plan().revision())
+                            .put("expectedCheckpointRevision", snapshot.checkpoint().revision()).putNull("nextPlanItemKey").put("phase", "reading");
+                    args.putObject("memory").put("summary", "Sensitive durable continuation").putArray("citations");
+                    var prepared = new AiAgentPlanService(new AiAgentContinuationCodec()).prepareCheckpoint(snapshot, args,
+                            policy.segmentNo(), text -> new AiAgentMemory.DurableText(text, List.of()), ignored -> List.of());
+                    persistence.commitCheckpoint(policy, 1, 0, json.writeValueAsString(prepared.arguments()),
+                            json.writeValueAsString(prepared.result()), prepared.snapshot());
+                }
+            }
+        }
+        assertEquals(6, runs.listSegments(workspace.getId(), run.getId()).size());
+        assertTrue(runs.getRun(workspace.getId(), run.getId()).getMemoryJson().contains("Sensitive durable continuation"));
+        finish(invalidate());
+        var erased = runs.getRun(workspace.getId(), run.getId());
+        assertTrue(AiAgentContinuationCodec.erased(erased));
+        assertNull(erased.getGoal());
+        assertTrue(runs.listSegments(workspace.getId(), run.getId()).isEmpty());
+        assertEquals(0, privacyMapper.residualCount(workspace.getId(), erased.getPrivacyGeneration()));
+        privacyService.prepareWorkspaceTeardown(workspace.getId());
+        assertEquals(1, lifecycle.countRows(workspace.getId(), TenantLifecycleRegistry.require("ai_agent_run")));
+        assertEquals(0, lifecycle.countRows(workspace.getId(), TenantLifecycleRegistry.require("ai_agent_segment")));
+    }
+
+    @Test
+    void purgedContinuationResiduePreventsCompletionUntilErased() {
+        var run = create();
+        finish(invalidate());
+        jdbc.update("UPDATE ai_agent_run SET plan_json='{\"unknown\":true}', memory_schema_version=99, checkpoint_revision=9, last_committed_segment_no=7 WHERE workspace_id=? AND id=?",
+                workspace.getId(), run.getId());
+        assertTrue(privacyMapper.residualCount(workspace.getId(), run.getPrivacyGeneration()) > 0);
+        String repair = invalidate();
+        var work = privacyMapper.getWork(workspace.getId(), repair);
+        assertEquals(List.of(run.getId()), privacyMapper.listAffectedRunIds(workspace.getId(), work.getCutoffGeneration(), 0, work.getMaxRunId(), 100));
+        assertTrue(privacyMapper.getBarrier(workspace.getId()).isBlocked());
+        finish(repair);
+        assertTrue(AiAgentContinuationCodec.erased(runs.getRun(workspace.getId(), run.getId())));
+        assertEquals(0, privacyMapper.residualCount(workspace.getId(), work.getCutoffGeneration()));
+        assertFalse(privacyMapper.getBarrier(workspace.getId()).isBlocked());
+    }
+
     private AiAgentRun create() {
         AiChatSession session = new AiChatSession();
         session.setWorkspaceId(workspace.getId());

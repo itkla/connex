@@ -60,6 +60,8 @@ public class AiChatMemoryService {
     private final AiWorkspaceGovernanceService governanceService;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    @org.springframework.beans.factory.annotation.Autowired
+    private ooo.klae.connex.backend.ai.mission.AiAgentContextBuilder missionContextBuilder;
 
     /**
      * Prepares current provider-sized history, compacting the oldest whole messages before the
@@ -91,6 +93,12 @@ public class AiChatMemoryService {
             MaskingContext context,
             Instant deadline,
             Runnable ownershipGuard) {
+        return prepare(turn, context, deadline, ownershipGuard, new AiChatResourceRegistry(context));
+    }
+
+    /** Prepares mission context with the exact fresh registry owned by the executing loop. */
+    public AiChatMemory prepare(AiChatQueuedTurn turn, MaskingContext context, Instant deadline,
+            Runnable ownershipGuard, AiChatResourceRegistry resources) {
         Objects.requireNonNull(ownershipGuard, "ownershipGuard");
         requireBeforeDeadline(deadline);
         var capabilities = invocationService.currentProviderCapabilities(
@@ -120,7 +128,14 @@ public class AiChatMemoryService {
         var mission = ooo.klae.connex.backend.ai.mission.AiAgentExecutionPolicy.forTurn(turn);
         if (mission != null) {
             persistenceService.requirePrivacyCurrent(turn);
-            return new AiChatMemory(List.of(mission.goal()), budget, 0, 0, nativeTools, 1);
+            AiAssistantToolResult missionContext = mission.runtimeContractVersion() == 2
+                    ? missionContextBuilder.build(mission, context, resources) : null;
+            if (mission.goal().getContent().getBytes(java.nio.charset.StandardCharsets.UTF_8).length
+                    > budget.historyBytes()) {
+                throw new AiAssistantLoopException("mission_context_overflow", "mission_context_overflow");
+            }
+            return new AiChatMemory(List.of(mission.goal()), budget, 0, 0, nativeTools, 1,
+                    missionContext);
         }
         List<AiChatMessage> recent = persistenceService.loadHistory(
                 turn, MAX_RECENT_MESSAGES);

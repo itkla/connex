@@ -48,9 +48,9 @@ One fixture serves two goldens (`confirm_proposal` backs both the proposal golde
 
 **Run them with `./gradlew scriptedTrajectoryTest`, never `./gradlew test`.** The pattern `**/*ScriptedTrajectory*Test.class` is excluded from `test` so this context key does not evict a hot one out of the shared ten-slot cache; the task has its own fork with a two-slot cache, and `check` depends on it. In CI, DB shard 2 runs `dbTestShard2 scriptedTrajectoryTest` behind the required `Backend — build & test` aggregator. `ScriptedAiProviderArchTest` asserts both that a required matrix entry supplies the task to an unconditional Gradle step and that every class extending the harness matches the include pattern, so a golden CI would silently skip fails the build instead of passing quietly.
 
-### Record-review mission goldens (Phase 2 slice 1)
+### Record-review mission goldens (Phase 2)
 
-`ai.mission.AiAgentScriptedTrajectoryTest` adds 33 cases using 25 separate fixtures under `ai/scripted/missions`. Its inherited harness resolves this bounded fixture directory without changing the provider's 64-script or journal limits. The cases exercise the real mission runner and persistence: one grounded report with empty review collection, exact attempt/dispatch and accounting assertions, masked outbound requests, primary-record scope and unknown-handle refusal, every declared write-tool refusal, cancellation, provider uncertainty, capability/context refusal, secondary gate loss with matched enabled controls, repair at the final dispatch boundary, completed-purge egress refusal, and special-care output screening. Static fixture loading and compilation do not establish these outcomes; execute the MySQL suite before activation.
+`ai.mission.AiAgentScriptedTrajectoryTest` runs the mission fixtures under `ai/scripted/missions`. The runtime-2 `mission_minimum_report.json` golden covers an 81,920-token request completing one segment and publishing one report. Its inherited harness resolves this bounded fixture directory without changing the provider's 64-script or journal limits. The cases exercise the real mission runner and persistence: one grounded report with empty review collection, exact attempt/dispatch and accounting assertions, masked outbound requests, primary-record scope and unknown-handle refusal, every declared write-tool refusal, cancellation, provider uncertainty, capability/context refusal, secondary gate loss with matched enabled controls, repair at the final dispatch boundary, completed-purge egress refusal, and special-care output screening. Static fixture loading and compilation do not establish these outcomes; execute the MySQL suite before activation.
 
 ```bash
 ./gradlew scriptedTrajectoryTest \
@@ -277,3 +277,16 @@ Nothing in this document authorizes a migration, a flag, a profile, or a line of
 - [`STAGING_DEPLOY.md`](STAGING_DEPLOY.md) — the staging instance, its declared edition, and how it is deployed.
 - [`VOLUME_SEEDER.md`](VOLUME_SEEDER.md) — the operator-invoked one-shot process this runner's shape copies.
 - [`SPECIAL_CARE_DATA_POLICY.md`](SPECIAL_CARE_DATA_POLICY.md) — the screen two goldens pin, and the reason a live corpus stays synthetic.
+
+## Runtime-2 continuation trajectories
+
+`AiAgentScriptedTrajectoryTest` adds `mission_two_segments.json`,
+`mission_plan_replacement.json`, `mission_continuation_budget.json`,
+`mission_interrupted_read_retry.json`, `mission_memory_refused.json`, and
+`mission_continuation_secondary_calls.json`. They use the existing isolated fixture selector,
+closed protocol and complete bounded journal observation. They exercise durable plan/fact
+identity, checkpoint-only fresh context, cumulative decisions/tokens, original-deadline retry,
+screened memory refusal and repair/fallback accounting. Outbound assertions cover explicit
+model projections without canonical provenance/evidence bindings. Existing leakage, special-care,
+write/question and secondary-gate-loss controls remain. No live runner, fixture protocol
+relaxation or live-model-quality claim is introduced.

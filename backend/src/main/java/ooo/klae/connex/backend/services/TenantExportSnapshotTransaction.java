@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
@@ -18,6 +19,8 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.mission.AiAgentContinuationCodec;
+import ooo.klae.connex.backend.beans.AiAgentRun;
 import ooo.klae.connex.backend.dto.ActiveObjectReference;
 import ooo.klae.connex.backend.dto.ClientErrorSupportRowDto;
 import ooo.klae.connex.backend.mappers.TenantLifecycleMapper;
@@ -148,6 +151,10 @@ public class TenantExportSnapshotTransaction {
                     zip.putNextEntry(new ZipEntry("data/" + registered.table() + ".jsonl"));
                     entryOpen = true;
                 }
+                restoreUtf8Payloads(row);
+                if ("ai_agent_run".equals(registered.table())) {
+                    validateMission(row);
+                }
                 zip.write(objectMapper.writeValueAsBytes(row));
                 zip.write('\n');
                 rows = Math.addExact(rows, 1);
@@ -163,6 +170,89 @@ public class TenantExportSnapshotTransaction {
                 registered.table(),
                 "data/" + registered.table() + ".jsonl",
                 rows);
+    }
+
+    private void restoreUtf8Payloads(Map<String, Object> row) throws IOException {
+        for (String column : List.of("plan_json", "checkpoint_json", "memory_json", "arguments_json", "result_json")) {
+            String transportColumn = "utf8_" + column;
+            if (row.containsKey(transportColumn)) {
+                Object bytes = row.remove(transportColumn);
+                if (bytes != null && !(bytes instanceof byte[])) {
+                    throw new IOException("Invalid mission export transport");
+                }
+                try {
+                    row.put(column, ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler.decode((byte[]) bytes));
+                } catch (java.sql.SQLException exception) {
+                    throw new IOException("Invalid mission export encoding", exception);
+                }
+            }
+        }
+    }
+
+    private void validateMission(Map<String, Object> row) {
+        if (row.get("purged_at") != null) {
+            for (String column : List.of("session_id", "goal", "scope_json", "request_hash", "scope_fingerprint",
+                    "report_message_id", "active_segment_id", "plan_schema_version", "plan_json",
+                    "checkpoint_schema_version", "checkpoint_json", "memory_schema_version", "memory_json")) {
+                if (row.get(column) != null) {
+                    throw new IllegalStateException("Mission tombstone contains residual content");
+                }
+            }
+            for (String column : List.of("plan_revision", "checkpoint_revision", "last_committed_segment_no")) {
+                if (missionNumber(row, column) != 0) {
+                    throw new IllegalStateException("Mission tombstone contains residual metadata");
+                }
+            }
+            return;
+        }
+        AiAgentRun run = new AiAgentRun();
+        run.setId(Math.toIntExact(missionNumber(row, "id")));
+        run.setWorkspaceId(Math.toIntExact(missionNumber(row, "workspace_id")));
+        run.setMissionType(missionText(row, "mission_type"));
+        run.setDefinitionVersion(Math.toIntExact(missionNumber(row, "definition_version")));
+        run.setRuntimeContractVersion(Math.toIntExact(missionNumber(row, "runtime_contract_version")));
+        run.setPrivacyGeneration(missionNumber(row, "privacy_generation"));
+        if (row.get("scope_fingerprint") instanceof byte[] fingerprint) {
+            run.setScopeFingerprint(fingerprint);
+        }
+        run.setScopeJson(missionText(row, "scope_json"));
+        run.setPlanSchemaVersion(missionSchema(row, "plan_schema_version"));
+        run.setPlanRevision(missionNumber(row, "plan_revision"));
+        run.setPlanJson(missionText(row, "plan_json"));
+        run.setCheckpointSchemaVersion(missionSchema(row, "checkpoint_schema_version"));
+        run.setCheckpointRevision(missionNumber(row, "checkpoint_revision"));
+        run.setCheckpointJson(missionText(row, "checkpoint_json"));
+        run.setMemorySchemaVersion(missionSchema(row, "memory_schema_version"));
+        run.setMemoryJson(missionText(row, "memory_json"));
+        run.setLastCommittedSegmentNo(Math.toIntExact(missionNumber(row, "last_committed_segment_no")));
+        var codec = new AiAgentContinuationCodec();
+        var snapshot = codec.decode(run);
+        if (snapshot != null) {
+            codec.validateExecutable(run, snapshot);
+        }
+    }
+
+    private Integer missionSchema(Map<String, Object> row, String column) {
+        return row.get(column) == null ? null : Math.toIntExact(missionNumber(row, column));
+    }
+
+    private long missionNumber(Map<String, Object> row, String column) {
+        Object value = row.get(column);
+        if (!(value instanceof Number number)) {
+            throw new IllegalStateException("Mission export metadata is missing");
+        }
+        return new BigDecimal(number.toString()).longValueExact();
+    }
+
+    private String missionText(Map<String, Object> row, String column) {
+        Object value = row.get(column);
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof String text) {
+            return text;
+        }
+        throw new IllegalStateException("Mission export payload has an invalid type");
     }
 
     private long writeObjectReferences(

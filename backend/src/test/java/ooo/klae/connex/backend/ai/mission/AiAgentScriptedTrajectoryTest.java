@@ -3,6 +3,8 @@ package ooo.klae.connex.backend.ai.mission;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -65,7 +67,11 @@ import ooo.klae.connex.backend.mappers.AiChatMapper;
         "connex.ai.mission-capabilities[0].provider=openai_compatible",
         "connex.ai.mission-capabilities[0].endpoint=https://scripted.invalid/v1",
         "connex.ai.mission-capabilities[0].model=scripted-native",
-        "connex.ai.mission-capabilities[0].capability=missions_v1"
+        "connex.ai.mission-capabilities[0].capability=missions_v1",
+        "connex.ai.mission-capabilities[1].provider=openai_compatible",
+        "connex.ai.mission-capabilities[1].endpoint=https://scripted.invalid/v1",
+        "connex.ai.mission-capabilities[1].model=scripted-json",
+        "connex.ai.mission-capabilities[1].capability=missions_v1"
 })
 class AiAgentScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
     @MockitoBean private AiAgentScheduler scheduler;
@@ -254,7 +260,7 @@ class AiAgentScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
         assertNoEffects(run);
     }
 
-    /** The fallback fixture explicitly settles known zero usage so capability alone decides admission. */
+    /** Repairs and real provider fallbacks must recheck their capability gate before dispatch. */
     @ParameterizedTest
     @CsvSource({"mission_repair_gate,true", "mission_repair_gate,false", "mission_fallback_gate,true", "mission_fallback_gate,false"})
     void secondaryAttemptDependsOnlyOnItsCapabilityGate(String fixture, boolean disable) {
@@ -271,10 +277,6 @@ class AiAgentScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
         }).when(capability).requireTarget(any());
         onScriptedStep((script, completed) -> {
             if (journal().recorded().size() == 2) {
-                if ("mission_fallback_gate".equals(fixture)) {
-                    persistence.recordUsage(AiAgentExecutionPolicy.current(), 0, 0);
-                    assertFalse(onlyAttempt(run).isUsageUncertain());
-                }
                 properties.setMissionsEnabled(!disable);
             }
         });
@@ -433,12 +435,199 @@ class AiAgentScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
         return AiAssistantToolCatalog.writeToolNames().stream();
     }
 
+    @Test
+    void minimumAcceptedAllowanceExecutesOneSegmentAndPublishesOneReport() {
+        Person selected = person("Minimum Review", "minimum.review@example.invalid", null);
+        AiAgentRun run = createRuntimeTwo(selected, "mission_minimum_report", 1, true,
+                AiAgentBudgetService.MIN_RUN_TOKENS);
+
+        execute(run);
+
+        assertCompletedContinuation(run, 1);
+        assertEquals(1, runs.listSegments(workspaceId(), run.getId()).size());
+        AiAgentRun done = runs.getRun(workspaceId(), run.getId());
+        assertEquals(AiAgentBudgetService.MIN_RUN_TOKENS, done.getMaxTokens());
+        assertTrue(done.getConsumedTokens() <= done.getMaxTokens());
+    }
+
+    @Test
+    void twoSegmentsRebuildFromCommittedCheckpointOnly() {
+        Person selected = person("Dorothea Willowmere", "dorothea.willowmere@example.invalid", null);
+        AiAgentRun run = createRuntimeTwo(selected, "mission_two_segments", 4, false);
+        jdbc.update("INSERT INTO ai_chat_message (workspace_id, session_id, seq, author_kind, content) VALUES (?, ?, ?, 'assistant', ?)",
+                workspaceId(), run.getSessionId(), 991, "PRIOR_TRANSCRIPT_SENTINEL");
+        execute(run);
+        AiAgentRun checkpointed = runs.getRun(workspaceId(), run.getId());
+        assertEquals("queued", checkpointed.getStatus());
+        assertEquals(1, checkpointed.getLastCommittedSegmentNo());
+        assertTrue(checkpointed.getCheckpointJson().contains("Durable completed fact"));
+        execute(checkpointed);
+        assertCompletedContinuation(run, 4);
+        var segments = runs.listSegments(workspaceId(), run.getId());
+        assertEquals(List.of(1, 2), segments.stream().map(AiAgentSegment::getSegmentNo).toList());
+        assertTrue(segments.get(0).getTurnId() != segments.get(1).getTurnId());
+        String successor = serverAuthored(journal().recorded().getLast().request());
+        assertTrue(successor.contains("Durable completed fact"));
+        assertTrue(successor.contains("{{P"));
+        assertFalse(successor.contains("PRIOR_TRANSCRIPT_SENTINEL"));
+        assertFalse(successor.contains(selected.getName()));
+    }
+
+    @Test
+    void planReplacementRetainsCompletedFactsAcrossSegments() {
+        Person selected = person("Winifred Fernhaven", "winifred.fernhaven@example.invalid", null);
+        AiAgentRun run = createRuntimeTwo(selected, "mission_plan_replacement", 5, false);
+        execute(run);
+        AiAgentRun checkpointed = runs.getRun(workspaceId(), run.getId());
+        assertEquals("queued", checkpointed.getStatus());
+        AiAgentContinuationCodec codec = new AiAgentContinuationCodec();
+        var durable = codec.decode(checkpointed);
+        assertEquals(List.of("p0002"), durable.plan().displayOrder());
+        assertEquals("p0001", durable.checkpoint().completedFacts().getFirst().planItemKey());
+        assertEquals("done", durable.plan().items().getFirst().status());
+        String fact = codec.encodeCheckpoint(durable.checkpoint());
+        execute(checkpointed);
+        assertCompletedContinuation(run, 5);
+        var finalState = codec.decode(runs.getRun(workspaceId(), run.getId()));
+        assertEquals(durable.checkpoint().completedFacts(), finalState.checkpoint().completedFacts());
+        assertTrue(serverAuthored(journal().recorded().getLast().request()).contains("Durable completed fact"));
+        assertTrue(fact.contains("p0001"));
+    }
+
+    @Test
+    void continuationStopsAtCumulativeBudget() {
+        Person selected = person("Theodora Alderhaven", "theodora.alderhaven@example.invalid", null);
+        AiAgentRun run = createRuntimeTwo(selected, "mission_continuation_budget", 4, false);
+        execute(run);
+        AiAgentRun checkpointed = runs.getRun(workspaceId(), run.getId());
+        assertEquals("queued", checkpointed.getStatus());
+        assertEquals(3, checkpointed.getConsumedSteps());
+        assertEquals(1, checkpointed.getLastCommittedSegmentNo());
+        assertAttempts(3, 3);
+        execute(checkpointed);
+        assertCompletedContinuation(run, 4);
+        AiAgentRun done = runs.getRun(workspaceId(), run.getId());
+        assertEquals(done.getMaxSteps(), done.getConsumedSteps());
+        assertNull(done.getReasonCode());
+        assertNull(done.getActiveSegmentId());
+        assertNotNull(done.getFinishedAt());
+        var segments = runs.listSegments(workspaceId(), run.getId());
+        assertEquals(List.of(1, 2), segments.stream().map(AiAgentSegment::getSegmentNo).toList());
+        assertEquals(List.of(3, 1), segments.stream().map(AiAgentSegment::getKnownSteps).toList());
+        assertTrue(segments.stream().allMatch(segment -> "completed".equals(segment.getStatus())));
+    }
+
+    @Test
+    void interruptedReadRetryRebuildsFreshContext() {
+        Person selected = person("Henrietta Brookmere", "henrietta.brookmere@example.invalid", null);
+        AiAgentRun run = createRuntimeTwo(selected, "mission_interrupted_read_retry", 4, false);
+        authenticate();
+        try {
+            var claimed = persistence.claim(run, capability.requireReady(),
+                    new AiRunLeaseGuard(properties.getRunLeaseTtl()), capability);
+            assertTrue(claimed != null);
+            persistence.interrupt(runs.getRun(workspaceId(), run.getId()), "interrupted");
+            assertTrue(persistence.requeueInterrupted(runs.getRun(workspaceId(), run.getId())));
+        } finally {
+            clearAuthentication();
+        }
+        execute(runs.getRun(workspaceId(), run.getId()));
+        execute(runs.getRun(workspaceId(), run.getId()));
+        assertCompletedContinuation(run, 4);
+        var segments = runs.listSegments(workspaceId(), run.getId());
+        assertEquals(List.of(1, 1, 2), segments.stream().map(AiAgentSegment::getSegmentNo).toList());
+        assertEquals(List.of(1, 2, 1), segments.stream().map(AiAgentSegment::getAttemptNo).toList());
+        AiAgentRun done = runs.getRun(workspaceId(), run.getId());
+        assertEquals(run.getExecutionDeadlineAt(), done.getExecutionDeadlineAt());
+        assertEquals(run.getHardDeadlineAt(), done.getHardDeadlineAt());
+    }
+
+    @Test
+    void continuationMemoryIsScreenedBeforePersistence() {
+        Person selected = person("Arabella Rookmere", "arabella.rookmere@example.invalid", null);
+        AiAgentRun run = createRuntimeTwo(selected, "mission_memory_refused", 4, false);
+        String initialMemory = run.getMemoryJson();
+        execute(run);
+        assertAttempts(1, 1);
+        AiAgentRun refused = runs.getRun(workspaceId(), run.getId());
+        assertEquals("paused", refused.getStatus());
+        assertEquals(initialMemory, refused.getMemoryJson());
+        assertEquals(0, refused.getLastCommittedSegmentNo());
+        assertEquals(0, reports(run));
+        assertEquals(0, count("SELECT COUNT(*) FROM ai_chat_tool_call WHERE workspace_id=? AND mission_run_id=?", workspaceId(), run.getId()));
+        assertFalse(refused.getCheckpointJson().contains("sensitive@example.invalid"));
+        assertLeaseReleased(run);
+        assertNoEffects(run);
+        assertSafeContinuationOutbound();
+    }
+
+    @Test
+    void continuationRepairAndFallbackUseRemainingRootAllowance() {
+        Person selected = person("Beatrice Hazelbrook", "beatrice.hazelbrook@example.invalid", null);
+        AiAgentRun run = createRuntimeTwo(selected, "mission_continuation_secondary_calls", 4, true);
+        execute(run);
+        AiAgentRun checkpointed = runs.getRun(workspaceId(), run.getId());
+        assertEquals("queued", checkpointed.getStatus());
+        assertEquals(3, checkpointed.getConsumedSteps());
+        execute(checkpointed);
+        assertCompletedContinuation(run, 4);
+        assertEquals(6, runs.getRun(workspaceId(), run.getId()).getConsumedTokens());
+        long rejectedReservation = Objects.requireNonNull(jdbc.queryForObject(
+                "SELECT MAX(reserved_tokens) FROM organization_ai_budget_reservation WHERE org_id=? AND consumed_tokens > 2",
+                Long.class, organizationId()));
+        assertEquals(rejectedReservation + 6, organizationUsage());
+        assertEquals(4, count("SELECT COUNT(*) FROM organization_ai_budget_reservation WHERE org_id=? AND state='settled'", organizationId()));
+        assertTrue(runs.listSegments(workspaceId(), run.getId()).stream().noneMatch(AiAgentSegment::isUsageUncertain));
+    }
+
+    private void assertCompletedContinuation(AiAgentRun run, int decisions) {
+        AiAgentRun done = runs.getRun(workspaceId(), run.getId());
+        assertEquals("done", done.getStatus());
+        assertAttempts(decisions, decisions);
+        assertEquals(decisions, done.getConsumedSteps());
+        assertEquals(1, reports(run));
+        assertEquals(0, done.getReservedSteps());
+        assertEquals(0, done.getReservedTokens());
+        assertLeaseReleased(run);
+        assertNoEffects(run);
+        assertSafeContinuationOutbound();
+    }
+
+    private void assertSafeContinuationOutbound() {
+        for (var entry : journal().recorded()) {
+            String outbound = serverAuthored(entry.request());
+            for (String forbidden : List.of("memberProvenance", "originalLabel", "evidenceReferences",
+                    "scopeFingerprint", "privacyGeneration", "actionSlotReferences")) {
+                assertFalse(outbound.contains(forbidden), forbidden);
+            }
+        }
+    }
+
+    private AiAgentRun createRuntimeTwo(Person selected, String fixture, int maxSteps, boolean nativeTools) {
+        return createRuntimeTwo(selected, fixture, maxSteps, nativeTools, null);
+    }
+
+    private AiAgentRun createRuntimeTwo(Person selected, String fixture, int maxSteps, boolean nativeTools, Long maxTokens) {
+        useCapabilityClass(nativeTools ? "scripted-native" : "scripted-json");
+        authenticate();
+        try {
+            var created = service.create(session(), new AiAgentRunCreateRequest(UUID.randomUUID().toString(),
+                    "record_review_v1", "connex_script_" + fixture + " Review the selected record.",
+                    new AiAgentRunCreateRequest.Scope("record", "person", selected.getId()),
+                    new AiAgentRunCreateRequest.Limits(maxSteps, maxTokens, null)));
+            return Objects.requireNonNull(runs.getRun(workspaceId(), created.id()));
+        } finally {
+            clearAuthentication();
+        }
+    }
+
     private AiAgentRun create(Person selected, String fixture) {
         authenticate();
         try {
             var created = service.create(session(), new AiAgentRunCreateRequest(UUID.randomUUID().toString(),
                     "record_review_v1", "connex_script_" + fixture + " Review the selected record.",
                     new AiAgentRunCreateRequest.Scope("record", "person", selected.getId()), null));
+            jdbc.update("UPDATE ai_agent_run SET runtime_contract_version=1, plan_schema_version=NULL, plan_revision=0, plan_json=NULL, checkpoint_schema_version=NULL, checkpoint_revision=0, checkpoint_json=NULL, memory_schema_version=NULL, memory_json=NULL, last_committed_segment_no=0 WHERE workspace_id=? AND id=?", workspaceId(), created.id());
             return Objects.requireNonNull(runs.getRun(workspaceId(), created.id()));
         } finally {
             clearAuthentication();

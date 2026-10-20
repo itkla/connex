@@ -52,7 +52,7 @@ public record AiAgentScopePolicy(String kind, int id) {
 
     /** Refuses writes, questions, plans, search, and aggregates independently of prompt hiding. */
     public void requireTool(String name) {
-        if (!TOOLS.contains(name)) {
+        if (!AiAgentExecutionPolicy.permits(name) || (AiAgentExecutionPolicy.current() == null && !TOOLS.contains(name))) {
             throw new AiAssistantLoopException("mission_tool_refused", "mission_tool_refused");
         }
     }

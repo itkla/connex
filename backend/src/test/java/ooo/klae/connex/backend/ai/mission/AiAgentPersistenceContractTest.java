@@ -42,6 +42,56 @@ class AiAgentPersistenceContractTest {
     }
 
     @Test
+    void v235ContinuationWritersAndResidualEnrollmentStayLosslessAndScoped() throws Exception {
+        String migration = Files.readString(Path.of("src/main/resources/db/migration/tenant/V235__ai_agent_continuation.sql"));
+        assertTrue(migration.contains("ALGORITHM=INSTANT, LOCK=DEFAULT"));
+        assertTrue(migration.contains("ALGORITHM=INPLACE, LOCK=NONE"));
+        assertFalse(migration.toLowerCase(java.util.Locale.ROOT).contains("from the"));
+        assertFalse(migration.contains("ADD CONSTRAINT"));
+        assertTrue(TenantScopeInterceptor.SCOPED_NAMESPACES.contains("ooo.klae.connex.backend.mappers.AiAgentRunMapper"));
+        var factory = javax.xml.parsers.DocumentBuilderFactory.newInstance();
+        factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+        var document = factory.newDocumentBuilder().parse(Path.of("src/main/resources/mappers/AiAgentRunMapper.xml").toFile());
+        var xpath = javax.xml.xpath.XPathFactory.newInstance().newXPath();
+        for (String statement : Set.of("insertRun", "updateRun", "updateContinuation")) {
+            String sql = xpath.evaluate("/mapper/*[@id='" + statement + "']", document);
+            for (String field : Set.of("planJson", "checkpointJson", "memoryJson")) {
+                assertTrue(sql.contains("CONVERT(#{run." + field
+                        + ",jdbcType=VARBINARY,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4)"), statement);
+            }
+        }
+        String privacy = Files.readString(Path.of("src/main/resources/mappers/AiAgentPrivacyMapper.xml"));
+        assertEquals(2, privacy.split("<include refid=\"runHasResidualPayload\" />", -1).length - 1);
+        for (String column : Set.of("plan_schema_version", "plan_revision", "plan_json", "checkpoint_schema_version",
+                "checkpoint_revision", "checkpoint_json", "memory_schema_version", "memory_json", "last_committed_segment_no")) {
+            assertTrue(privacy.contains("r." + column), column);
+        }
+    }
+
+    @Test
+    void utf8TransportNeverUsesConnectionStringEncodingAndRejectsMalformedBytes() throws Exception {
+        var handler = new ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler();
+        String text = "日本語😀 担当者様";
+        byte[] bytes = text.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        var statement = org.mockito.Mockito.mock(java.sql.PreparedStatement.class);
+        handler.setNonNullParameter(statement, 1, text, org.apache.ibatis.type.JdbcType.VARBINARY);
+        org.mockito.Mockito.verify(statement).setBytes(1, bytes);
+        var result = org.mockito.Mockito.mock(java.sql.ResultSet.class);
+        org.mockito.Mockito.when(result.getBytes("payload")).thenReturn(bytes);
+        org.mockito.Mockito.when(result.getBytes(1)).thenReturn(bytes);
+        assertEquals(text, handler.getNullableResult(result, "payload"));
+        assertEquals(text, handler.getNullableResult(result, 1));
+        org.mockito.Mockito.verify(result, org.mockito.Mockito.never()).getString(org.mockito.ArgumentMatchers.anyString());
+        org.mockito.Mockito.verify(result, org.mockito.Mockito.never()).getString(org.mockito.ArgumentMatchers.anyInt());
+        var callable = org.mockito.Mockito.mock(java.sql.CallableStatement.class);
+        org.mockito.Mockito.when(callable.getBytes(1)).thenReturn(bytes);
+        assertEquals(text, handler.getNullableResult(callable, 1));
+        org.junit.jupiter.api.Assertions.assertNull(handler.getNullableResult(result, "missing"));
+        org.junit.jupiter.api.Assertions.assertThrows(java.sql.SQLException.class,
+                () -> ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler.decode(new byte[] {(byte) 0xc3, 0x28}));
+    }
+
+    @Test
     void purgeAndResidualShareTheImmutableMessageBoundary() throws Exception {
         String mapper = Files.readString(Path.of("src/main/resources/mappers/AiAgentPrivacyMapper.xml"));
         String residual = mapper.substring(mapper.indexOf("<sql id=\"sessionResidual\">"));

@@ -1339,6 +1339,7 @@
         "busy": "This conversation is still working. Wait for it to finish, then start the review.",
         "conflict": "This review changed. Its current status has been refreshed.",
         "expired": "This review’s time limit has ended. Start a new review to continue.",
+        "budgetInfeasible": "This review cannot start with the current request. Shorten the goal and try again.",
         "allowance": "This review has reached its work limit. Start a new review to continue.",
         "withheld": "This review’s content is no longer available.",
         "unavailable": "Record reviews are unavailable right now. Try again later.",

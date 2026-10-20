@@ -8,6 +8,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+import ooo.klae.connex.backend.ai.mission.AiAgentBudgetService;
 
 /** Explicit, bounded, read-only record-review request; ownership is resolved by the server. */
 public record AiAgentRunCreateRequest(
@@ -33,7 +34,7 @@ public record AiAgentRunCreateRequest(
 
     /** Smaller caller-selected limits never increase on retry. */
     public record Limits(@Min(1) @Max(8) Integer maxSteps,
-            @Min(8192) @Max(131072) Long maxTokens,
+            @Min(AiAgentBudgetService.MIN_RUN_TOKENS) @Max(131072) Long maxTokens,
             @Min(180) @Max(900) Integer executionLifetimeSeconds) {
         public Limits {
             maxSteps = maxSteps == null ? 8 : maxSteps;

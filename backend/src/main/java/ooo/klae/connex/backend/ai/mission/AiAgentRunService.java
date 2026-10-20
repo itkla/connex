@@ -76,6 +76,8 @@ public class AiAgentRunService {
             }
             return project(existing);
         }
+        AiAgentBudgetService.requireFeasibleCreation(json.writeValueAsBytes(request.goal()).length,
+                request.limits().maxTokens());
         gate.requireReady();
         requirePrivacyReady();
         if (ooo.klae.connex.backend.ai.masking.SpecialCareTextScreen.screen(request.goal()).excluded()) {
@@ -234,21 +236,35 @@ public class AiAgentRunService {
 
     private boolean withheld(AiAgentRun run) {
         var barrier = chat.getPrivacyBarrier(run.getWorkspaceId());
-        return run.getDefinitionVersion() != 1 || run.getRuntimeContractVersion() != 1
+        return !supportedContent(run)
                 || run.getWithheldAt() != null || run.getPurgedAt() != null || barrier == null
                 || barrier.isBlocked() || barrier.getGeneration() != run.getPrivacyGeneration();
+    }
+
+    private boolean supportedContent(AiAgentRun run) {
+        try {
+            var codec = new AiAgentContinuationCodec();
+            var snapshot = codec.decode(run);
+            if (snapshot != null) {
+                codec.validateExecutable(run, snapshot);
+            }
+            return true;
+        } catch (IllegalArgumentException | IllegalStateException exception) {
+            return false;
+        }
     }
 
     private AiAgentRunDto project(AiAgentRun run) {
         boolean hidden = withheld(run);
         boolean output = !hidden && run.getReportMessageId() != null;
         List<String> actions = new ArrayList<>();
-        if (!hidden && ("running".equals(run.getStatus()) || "queued".equals(run.getStatus()))) {
+        if (!hidden && run.getSessionId() != null && ("running".equals(run.getStatus()) || "queued".equals(run.getStatus())
+                || ("paused".equals(run.getStatus()) && !"member".equals(run.getReasonCode())))) {
             actions.add("pause");
         }
         if (!hidden && "paused".equals(run.getStatus()) && instant(run.getExecutionDeadlineAt()).isAfter(clock.instant())
                 && run.getConsumedSteps() < run.getMaxSteps() && run.getConsumedTokens() < run.getMaxTokens()
-                && runs.listSegments(run.getWorkspaceId(), run.getId()).size() < 3) {
+                && persistence.attemptsForNextSegment(run) < 3) {
             actions.add("resume");
         }
         if (!Set.of("done", "failed", "cancelled").contains(run.getStatus()) && run.getSessionId() != null) {

@@ -114,7 +114,7 @@ public class AiAssistantToolExecutor {
         }
         AiChatScopedToolPolicy.requireHonorsDeclaredScope(name, scope);
         try {
-            return switch (name) {
+            AiAssistantToolResult shaped = switch (name) {
                 case "search_records" -> search(args, resources);
                 case "get_record" -> getRecord(args, resources, includePrivateNotes);
                 case "get_records" -> getRecords(args, resources, includePrivateNotes);
@@ -128,6 +128,9 @@ public class AiAssistantToolExecutor {
                         "find_tools_requires_turn_state");
                 default -> throw AiAssistantLoopException.malformed("unknown_tool");
             };
+            ooo.klae.connex.backend.ai.mission.AiAgentEvidenceService.capture(
+                    name, args, shaped, resources);
+            return shaped;
         } catch (ResourceNotFoundException exception) {
             throw AiAssistantLoopException.accessRevoked("inaccessible_resource");
         }

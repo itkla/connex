@@ -13,8 +13,19 @@ import ooo.klae.connex.backend.beans.AiChatMessage;
 public record AiAgentExecutionPolicy(int runId, int segmentId, long executionGeneration,
         AiChatQueuedTurn turn, AiChatMessage goal, AiAgentScopePolicy scope, int maxSteps,
         Instant deadline, AiRunLease lease, AiRunLeaseGuard ownership,
-        AiAgentRunPersistenceService persistence, AiAgentCapabilityGate capability) {
+        AiAgentRunPersistenceService persistence, AiAgentCapabilityGate capability,
+        int runtimeContractVersion, int segmentNo, int attemptNo,
+        AiAgentContinuationCodec.Snapshot snapshot, boolean continuationCapable, long reservedTokens) {
     private static final ThreadLocal<AiAgentExecutionPolicy> CURRENT = new ThreadLocal<>();
+
+    /** Preserves legacy server-created executions with their shipped single-segment behavior. */
+    public AiAgentExecutionPolicy(int runId, int segmentId, long executionGeneration,
+            AiChatQueuedTurn turn, AiChatMessage goal, AiAgentScopePolicy scope, int maxSteps,
+            Instant deadline, AiRunLease lease, AiRunLeaseGuard ownership,
+            AiAgentRunPersistenceService persistence, AiAgentCapabilityGate capability) {
+        this(runId, segmentId, executionGeneration, turn, goal, scope, maxSteps, deadline, lease,
+                ownership, persistence, capability, 1, 1, 1, null, false, 131072);
+    }
 
     /** Returns the current server policy or null for an ordinary reactive execution. */
     public static AiAgentExecutionPolicy current() {
@@ -45,6 +56,6 @@ public record AiAgentExecutionPolicy(int runId, int segmentId, long executionGen
 
     /** Filters mission declarations while leaving ordinary prompt envelopes unchanged. */
     public static boolean permits(String tool) {
-        return CURRENT.get() == null || AiAgentScopePolicy.TOOLS.contains(tool);
+        return CURRENT.get() == null || AiAgentMissionCatalog.tools(CURRENT.get().runtimeContractVersion()).contains(tool);
     }
 }

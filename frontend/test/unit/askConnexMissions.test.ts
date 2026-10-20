@@ -56,6 +56,7 @@ describe('Ask Connex missions', () => {
     });
 
     it('gives distinct localized refusal keys without exposing server text', () => {
+        expect(askConnexMissionProblem(400, 'mission_budget_infeasible')).toBe('budgetInfeasible');
         expect(askConnexMissionProblem(409, 'mission_session_busy')).toBe('busy');
         expect(askConnexMissionProblem(409, 'mission_version_conflict')).toBe('conflict');
         expect(askConnexMissionProblem(410, 'mission_output_withheld')).toBe('withheld');

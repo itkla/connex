@@ -38,6 +38,15 @@ public class AiAgentStartupRecoveryService {
         if (!read(() -> runs.orphanedRuns(workspaceId, 1)).isEmpty()) {
             throw new IllegalStateException("Mission startup reconciliation is incomplete");
         }
+        var candidates = new java.util.ArrayList<>(read(() -> runs.dueRuns(workspaceId, 25)));
+        candidates.addAll(read(() -> runs.interruptedReadRuns(workspaceId, 25)));
+        for (var run : candidates) {
+            var codec = new AiAgentContinuationCodec();
+            var snapshot = codec.decode(run);
+            if (snapshot != null) {
+                codec.validateExecutable(run, snapshot);
+            }
+        }
     }
 
     /** Ends each routed snapshot before settlement so one run never retains a lease ahead of the next run's roots. */

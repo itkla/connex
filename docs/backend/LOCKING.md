@@ -750,9 +750,35 @@ inside the inverse's locked fingerprint predicate, before deletion/audit, and re
 that skips admission. Replays and discard retain privacy directly without domain acquisition.
 No successful write decision acquires either fence after the audited delegate returns.
 
-### Durable record-review missions (V232)
+### Durable record-review missions (V232/V235)
 
 The complete privacy and rollout contract is [AI_MISSIONS.md](AI_MISSIONS.md). Mission claim, resume and publication use `READ_COMMITTED`: authorization roots in existing order, session X, run X, existing tool X if any, turn X, segment X, domain roots if applicable, local restriction read fence, privacy barrier S, audit head if needed, lease last. Slice 1 admits read tools only. Root re-reads after locks flush MyBatis's transaction cache. Every execution write compares the exact active attempt and execution generation; a stale callback cannot settle or release its successor.
+
+V235 retains this order for every runtime-2 transaction:
+
+| Transaction | Ordered atomic contents and ending |
+|---|---|
+| Create | Authorization → session X; private run/goal/taint inserts and initialized continuation; restriction fence → barrier S. Generated run ID binds initial checkpoint before commit. |
+| Claim | Authorization → session X → run X; strict codec/allowance checks; private fresh turn/segment and bounded root reservation; fence → barrier S → lease acquisition LAST. |
+| Bookkeeping replay | Authorization → session X → run X → exact existing tool X → turn X → segment X; compare screened canonical arguments and current identity; fence → barrier S. No lease operation. |
+| Plan commit | Same roots and existing-tool-before-turn order; result-size admission precedes mutation; screened call/result plus plan, immutable fact ledger, plan/checkpoint revisions and state version commit together; fence → barrier S. No lease operation. |
+| Dispatch reservation / usage | Authorization → session X → run X → turn X → segment X; exact ordinal/generation and uncertainty predicates; fence → barrier S. Overrun settles truthful usage and releases the changed attempt lease LAST; normal callbacks perform no lease operation. Definite 400/422 protocol rejection uses this same exact-dispatch settlement with zero tokens before any fallback reservation; ambiguous failures retain uncertainty. |
+| Checkpoint | Authorization → session X → run X → existing tool X if any → turn X → segment X; screened replay, checkpoint/memory, cursor +1, accounting, terminal attempt/turn, queued state and generation commit together; fence → barrier S → exact lease release LAST. |
+| Final report | Existing report settlement order, with known/uncertain accounting and unchanged continuation; fence → barrier S → lease release LAST. |
+| Pause/cancel/expiry | Existing owner/maintenance roots → session X → run X → active turn/segment X; preserve continuation and original caps/deadlines, settle allowance and invalidate generation; changed expected attempt lease release LAST. Explicit pause over interrupted updates member reason/version; member pause alone is idempotent. |
+| Orphan settlement | Maintenance session X → run X → turn X → segment X; terminal attempt/accounting and paused/interrupted state; expected lease takeover/release LAST. No reconstruction, provider work or requeue. |
+| Interrupted requeue | Discovery excludes exhausted next-segment attempts before its page limit. Fresh authorization → session X → run X; revalidate stopped discovery version/generation, compatibility, allowance, attempts and privacy; queued state/version; fence → barrier S. No lease operation or provider call. |
+| Readiness backoff | Maintenance session X → run X; exact discovered state/version, original deadline unchanged, next-attempt +30 seconds. Interrupted backoff preserves interruption reason. No lease operation. |
+| Continuation purge/residual repair | Existing content session/run/tool/turn/segment order → barrier S → exact work X → audit if required → lease release LAST; clear all continuation columns without decoding, including purged residue. |
+| Purge completion | Barrier X → exact work X → fresh unconditional nonlocking residual counts. No content roots, provider work or leases. |
+
+Plan-only checkpoint-revision changes do not advance the logical segment cursor. Only a
+successful checkpoint increments it exactly once. All new mutation transactions use
+READ COMMITTED; root locking/current-state mapper reads flush local cache. Discover keys
+outside mutation transactions and revalidate under their roots. Private inserts beneath
+the retained session/run mutex add no independent root. Deadlock retries, when used, start
+fresh bounded transactions; no REQUIRES_NEW helper nests while mission locks are retained.
+Provider/network work is outside transactions. Publications occur only after commit.
 
 Restriction invalidation has the opposite **authority direction**, not an inverted lock sequence: under its domain roots it retains sorted local write fences, takes barrier X, then work X, advances generation and records bounded cleanup work in the restriction transaction. It never takes mission/session roots. Cleanup discovers IDs without locks, then locks session/run/tool/turn/segment roots, barrier S and work X. Deletion and expected work-revision advancement commit together. Final verification takes barrier X then work X, counts all enrolled residuals without discovery-watermark limits, and unblocks only after all incomplete work and all current-cutoff residuals are gone. Privacy cleanup never requires the departed owner's AI permission or an available provider.
 

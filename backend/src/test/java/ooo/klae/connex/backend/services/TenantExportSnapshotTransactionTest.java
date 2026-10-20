@@ -57,6 +57,72 @@ class TenantExportSnapshotTransactionTest {
     }
 
     @Test
+    void missionRowsRequireSupportedContinuationAndErasedTombstones() {
+        var transaction = new TenantExportSnapshotTransaction(mock(TenantLifecycleMapper.class),
+                JsonMapper.builder().build(), mock(ClientErrorService.class), new TenantLifecycleProperties());
+        var run = new ooo.klae.connex.backend.beans.AiAgentRun();
+        run.setId(31);
+        run.setWorkspaceId(7);
+        run.setMissionType("record_review_v1");
+        run.setDefinitionVersion(1);
+        run.setRuntimeContractVersion(2);
+        run.setPrivacyGeneration(1);
+        run.setScopeJson("{\"kind\":\"record\",\"recordKind\":\"person\",\"recordId\":41}");
+        run.setScopeFingerprint(new byte[32]);
+        new ooo.klae.connex.backend.ai.mission.AiAgentContinuationCodec().initialize(run);
+        Map<String, Object> row = new java.util.HashMap<>();
+        row.put("id", 31);
+        row.put("workspace_id", 7);
+        row.put("mission_type", run.getMissionType());
+        row.put("definition_version", 1);
+        row.put("runtime_contract_version", 2);
+        row.put("privacy_generation", 1L);
+        row.put("scope_fingerprint", run.getScopeFingerprint());
+        row.put("scope_json", run.getScopeJson());
+        row.put("plan_schema_version", 1);
+        row.put("plan_revision", 1L);
+        row.put("plan_json", run.getPlanJson());
+        row.put("checkpoint_schema_version", 1);
+        row.put("checkpoint_revision", 1L);
+        row.put("checkpoint_json", run.getCheckpointJson());
+        row.put("memory_schema_version", 1);
+        row.put("memory_json", run.getMemoryJson());
+        row.put("last_committed_segment_no", 0);
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(() ->
+                org.springframework.test.util.ReflectionTestUtils.invokeMethod(transaction, "validateMission", row));
+        for (String column : List.of("definition_version", "runtime_contract_version", "plan_schema_version",
+                "checkpoint_schema_version", "memory_schema_version")) {
+            Object previous = row.put(column, 99);
+            org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () ->
+                    org.springframework.test.util.ReflectionTestUtils.invokeMethod(transaction, "validateMission", row));
+            row.put(column, previous);
+        }
+        row.put("checkpoint_json", "malformed content");
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () ->
+                org.springframework.test.util.ReflectionTestUtils.invokeMethod(transaction, "validateMission", row));
+        row.clear();
+        row.put("purged_at", java.time.LocalDateTime.now());
+        row.put("plan_revision", 0L);
+        row.put("checkpoint_revision", 0L);
+        row.put("last_committed_segment_no", 0);
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(() ->
+                org.springframework.test.util.ReflectionTestUtils.invokeMethod(transaction, "validateMission", row));
+        for (String column : List.of("plan_schema_version", "plan_json", "checkpoint_schema_version", "checkpoint_json",
+                "memory_schema_version", "memory_json")) {
+            row.put(column, "residual");
+            org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class, () ->
+                    org.springframework.test.util.ReflectionTestUtils.invokeMethod(transaction, "validateMission", row));
+            row.remove(column);
+        }
+        for (String column : List.of("plan_revision", "checkpoint_revision", "last_committed_segment_no")) {
+            row.put(column, 1);
+            org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class, () ->
+                    org.springframework.test.util.ReflectionTestUtils.invokeMethod(transaction, "validateMission", row));
+            row.put(column, 0);
+        }
+    }
+
+    @Test
     void captureClosesEveryTableAndObjectCursorBeforeReturning() throws Exception {
         TenantLifecycleMapper mapper = mock(TenantLifecycleMapper.class);
         ClientErrorService clientErrorService = mock(ClientErrorService.class);

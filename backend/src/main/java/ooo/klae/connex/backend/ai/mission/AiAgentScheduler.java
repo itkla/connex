@@ -76,6 +76,13 @@ public class AiAgentScheduler {
                             }
                         }
                         if (properties.isMissionsEnabled()) {
+                            for (var interrupted : runs.interruptedReadRuns(workspaceId, 25)) {
+                                try {
+                                    runner.recoverInterrupted(interrupted);
+                                } catch (RuntimeException refusal) {
+                                    persistence.deferInterrupted(interrupted);
+                                }
+                            }
                             for (var candidate : runs.dueRuns(workspaceId, 1)) {
                                 try {
                                     runner.run(candidate);
