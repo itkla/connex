@@ -11,7 +11,8 @@ import ooo.klae.connex.backend.beans.AiAssistantPrivacyOperation;
 /** Control coordination statements use the caller's transaction-bound connection. */
 @Mapper
 public interface AiAssistantPrivacyControlMapper {
-    List<ooo.klae.connex.backend.ai.assistant.AiAssistantWorkspacePrivacy> notificationWorkspaceGenerations();
+    List<ooo.klae.connex.backend.ai.assistant.AiAssistantWorkspacePrivacy> notificationWorkspaceGenerations(
+            @Param("recipientId") Integer recipientId, @Param("workspaceId") Integer workspaceId);
     AiAssistantPrivacyFence getFence(@Param("organizationId") int organizationId);
     AiAssistantPrivacyFence lockFenceForShare(@Param("organizationId") int organizationId);
     AiAssistantPrivacyFence lockFence(@Param("organizationId") int organizationId);
@@ -26,6 +27,11 @@ public interface AiAssistantPrivacyControlMapper {
     long countUnverified(@Param("organizationId") int organizationId, @Param("operationKey") String operationKey);
     int completeOperation(@Param("organizationId") int organizationId, @Param("operationKey") String operationKey);
     List<Integer> operationWorkspaceIds(@Param("organizationId") int organizationId, @Param("operationKey") String operationKey);
+    List<Integer> incompleteOrganizationIdsPage(@Param("afterId") int afterId, @Param("limit") int limit);
+    java.time.LocalDateTime deletedWorkspaceVerifiedAt(@Param("organizationId") int organizationId,
+            @Param("operationKey") String operationKey, @Param("workspaceId") int workspaceId);
+    boolean verifiedTeardownWorkspace(@Param("organizationId") int organizationId,
+            @Param("operationKey") String operationKey, @Param("workspaceId") int workspaceId);
     AiAssistantPrivacyOperation lockOperation(@Param("organizationId") int organizationId, @Param("operationKey") String operationKey);
     Integer lockWorkspaceIntent(@Param("organizationId") int organizationId, @Param("operationKey") String operationKey, @Param("workspaceId") int workspaceId);
     int reopenWorkspace(@Param("organizationId") int organizationId, @Param("operationKey") String operationKey, @Param("workspaceId") int workspaceId);

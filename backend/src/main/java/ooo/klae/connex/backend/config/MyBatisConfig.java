@@ -40,9 +40,15 @@ public class MyBatisConfig {
     @Bean
     ooo.klae.connex.backend.notifications.NotificationPrivacyInterceptor notificationPrivacyInterceptor(
             org.springframework.beans.factory.ObjectProvider<ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService> authority,
-            org.springframework.beans.factory.ObjectProvider<ooo.klae.connex.backend.tenant.TenantWorkScope> workScope) {
+            org.springframework.beans.factory.ObjectProvider<ooo.klae.connex.backend.tenant.TenantWorkScope> workScope,
+            org.springframework.beans.factory.ObjectProvider<org.springframework.transaction.PlatformTransactionManager> transactions) {
         return new ooo.klae.connex.backend.notifications.NotificationPrivacyInterceptor(
-                () -> workScope.getObject().unroutedRead(() -> authority.getObject().notificationWorkspaceGenerations()));
+                (recipientId, workspaceId) -> {
+                    var detached = new org.springframework.transaction.support.TransactionTemplate(transactions.getObject());
+                    detached.setPropagationBehavior(org.springframework.transaction.TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
+                    return detached.execute(status -> workScope.getObject().unroutedRead(
+                            () -> authority.getObject().notificationWorkspaceGenerations(recipientId, workspaceId)));
+                });
     }
 
 }

@@ -204,6 +204,8 @@ public class AiAgentPrivacyService {
      *
      * <p>Control receipts can outlive a tenant-catalog restore. Missing or unfinished local work
      * reopens placement and organization completion until fresh residual verification succeeds.
+     * Verified terminal teardown receipts remain durable after local work is swept; lifecycle
+     * cleanup owns the full residual scan and C2 waits for workspace root deletion.
      */
     @Transactional(propagation = Propagation.MANDATORY)
     public void enrollOperation(int workspaceId, ooo.klae.connex.backend.beans.AiAssistantPrivacyOperation operation) {
@@ -216,6 +218,9 @@ public class AiAgentPrivacyService {
         var fence = assistantControlMapper.lockFence(organizationId);
         if (fence == null || fence.getGeneration() < operation.getInvalidatedGeneration()) {
             throw unavailable();
+        }
+        if (assistantControlMapper.verifiedTeardownWorkspace(organizationId, operation.getOperationKey(), workspaceId)) {
+            return;
         }
         if (privacyMapper.lockBarrierForShare(workspaceId) == null) {
             throw unavailable();
@@ -354,6 +359,10 @@ public class AiAgentPrivacyService {
     public void prepareWorkspaceTeardown(int workspaceId) {
         initialize(workspaceId);
         for (var accepted : assistantPrivacy.operations(organizationId(workspaceId))) {
+            if (assistantControlMapper.verifiedTeardownWorkspace(
+                    accepted.getOrganizationId(), accepted.getOperationKey(), workspaceId)) {
+                continue;
+            }
             boolean finished = false;
             for (int batches = 0; batches < 10000; batches++) {
                 if (batch(workspaceId, accepted.getOperationKey())) {

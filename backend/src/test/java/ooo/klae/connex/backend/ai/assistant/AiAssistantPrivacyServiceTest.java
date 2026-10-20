@@ -123,6 +123,40 @@ class AiAssistantPrivacyServiceTest {
         verify(control, never()).completeBootstrap(7, key);
     }
 
+    @Test
+    void emptyBootstrapCompletesThroughOrganizationReconciliation() {
+        String key = UUID.randomUUID().toString();
+        AiAssistantPrivacyOperation operation = new AiAssistantPrivacyOperation();
+        operation.setOperationKey(key);
+        operation.setInvalidatedGeneration(1);
+        when(control.lockFence(7)).thenReturn(fence(1));
+        when(control.listOperations(7)).thenReturn(java.util.List.of(operation));
+        when(control.lockOperation(7, key)).thenReturn(operation);
+
+        authority.reconcileOrganizationCompletion(7);
+
+        verify(control).reconcileWorkspaceIntents(7, key);
+        verify(control).completeOperation(7, key);
+        verify(control).completeBootstrap(7, key);
+    }
+
+    @Test
+    void missingWorkspaceCannotErasePendingEvidenceDuringOrganizationReconciliation() {
+        String key = UUID.randomUUID().toString();
+        AiAssistantPrivacyOperation operation = new AiAssistantPrivacyOperation();
+        operation.setOperationKey(key);
+        operation.setInvalidatedGeneration(1);
+        when(control.lockFence(7)).thenReturn(fence(1));
+        when(control.listOperations(7)).thenReturn(java.util.List.of(operation));
+        when(control.lockOperation(7, key)).thenReturn(operation);
+        when(control.countUnverified(7, key)).thenReturn(1L);
+
+        authority.reconcileOrganizationCompletion(7);
+
+        verify(control, never()).completeOperation(7, key);
+        verify(control, never()).completeBootstrap(7, key);
+    }
+
     private static AiAssistantPrivacyFence fence(long generation) {
         AiAssistantPrivacyFence fence = new AiAssistantPrivacyFence();
         fence.setOrganizationId(7);

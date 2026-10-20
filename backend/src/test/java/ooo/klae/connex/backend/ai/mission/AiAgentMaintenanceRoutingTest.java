@@ -178,7 +178,7 @@ class AiAgentMaintenanceRoutingTest {
         user.setId(1);
         when(system.user()).thenReturn(user);
         return new AiAgentPrivacyInitializer(workspaces, scope, privacy,
-                mock(AiAgentStartupRecoveryService.class), recorder, mock(PlatformTransactionManager.class),
+                mock(AiAgentStartupRecoveryService.class), mock(ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService.class), recorder, mock(PlatformTransactionManager.class),
                 new AutomationExecutor(context, new AutomationScope(), scope), system,
                 new org.springframework.beans.factory.support.StaticListableBeanFactory()
                     .getBeanProvider(org.springframework.core.task.TaskExecutor.class));

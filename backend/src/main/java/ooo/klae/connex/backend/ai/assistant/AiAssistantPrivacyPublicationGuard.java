@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
 import java.io.IOException;
+import java.util.Collection;
 import java.util.Objects;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Supplier;
@@ -40,6 +41,20 @@ public final class AiAssistantPrivacyPublicationGuard {
     public interface Publication extends AutoCloseable {
         @Override
         void close();
+    }
+
+    /** Retains distinct physical stripes in ascending order across a multi-organization projection. */
+    public static Publication retainPublicationReads(Collection<Integer> organizationIds) {
+        int[] stripes = organizationIds.stream().mapToInt(AiAssistantPrivacyPublicationGuard::stripe)
+                .distinct().sorted().toArray();
+        for (int stripe : stripes) {
+            LOCKS[stripe].readLock().lock();
+        }
+        return () -> {
+            for (int index = stripes.length - 1; index >= 0; index--) {
+                LOCKS[stripes[index]].readLock().unlock();
+            }
+        };
     }
 
     /** Retains the local invalidation fence before durable organization X through completion. */
@@ -109,10 +124,14 @@ public final class AiAssistantPrivacyPublicationGuard {
     }
 
     private static ReentrantReadWriteLock lock(int organizationId) {
+        return LOCKS[stripe(organizationId)];
+    }
+
+    private static int stripe(int organizationId) {
         if (organizationId <= 0) {
             throw new IllegalArgumentException("Organization identity must be positive");
         }
-        return LOCKS[Math.floorMod(organizationId, LOCKS.length)];
+        return Math.floorMod(organizationId, LOCKS.length);
     }
 
     private static ReentrantReadWriteLock[] locks() {

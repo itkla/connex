@@ -47,15 +47,20 @@ public class AiAssistantPrivacyService {
     /** Hydrates separately routed control metadata before notification filtering and pagination. */
     @Transactional(readOnly = true, propagation = Propagation.REQUIRES_NEW,
             isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
-    public java.util.Map<Integer, Long> notificationWorkspaceGenerations() {
-        java.util.Map<Integer, Long> generations = new java.util.HashMap<>();
-        for (AiAssistantWorkspacePrivacy workspace : controlMapper.notificationWorkspaceGenerations()) {
-            if (workspace.workspaceId() <= 0 || workspace.generation() <= 0
-                    || generations.put(workspace.workspaceId(), workspace.generation()) != null) {
+    public List<AiAssistantWorkspacePrivacy> notificationWorkspaceGenerations(Integer recipientId, Integer workspaceId) {
+        if (recipientId == null && workspaceId == null
+                || recipientId != null && recipientId <= 0 || workspaceId != null && workspaceId <= 0) {
+            throw unavailable();
+        }
+        List<AiAssistantWorkspacePrivacy> workspaces = controlMapper.notificationWorkspaceGenerations(recipientId, workspaceId);
+        Set<Integer> identities = new java.util.HashSet<>();
+        for (AiAssistantWorkspacePrivacy workspace : workspaces) {
+            if (workspace.workspaceId() <= 0 || workspace.organizationId() <= 0 || workspace.generation() <= 0
+                    || !identities.add(workspace.workspaceId())) {
                 throw unavailable();
             }
         }
-        return java.util.Map.copyOf(generations);
+        return List.copyOf(workspaces);
     }
 
     /** Missing authority is unavailable, including during initialization or restore. */
@@ -108,6 +113,25 @@ public class AiAssistantPrivacyService {
     /** Includes durable placement intents that were discovered after acceptance. */
     public List<Integer> operationWorkspaceIds(int organizationId, String operationKey) {
         return controlMapper.operationWorkspaceIds(organizationId, operationKey);
+    }
+
+    /** Discovers incomplete organizations independently of surviving workspace roots. */
+    public List<Integer> incompleteOrganizationIdsPage(int afterId, int limit) {
+        return controlMapper.incompleteOrganizationIdsPage(afterId, limit);
+    }
+
+    /** Uses positive control evidence only after the workspace root has been removed. */
+    public java.time.LocalDateTime deletedWorkspaceVerifiedAt(int organizationId, String operationKey, int workspaceId) {
+        return controlMapper.deletedWorkspaceVerifiedAt(organizationId, operationKey, workspaceId);
+    }
+
+    /** Completes empty bootstraps and verified historical coverage without requiring a tenant route. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.READ_COMMITTED)
+    public void reconcileOrganizationCompletion(int organizationId) {
+        requireFence(controlMapper.lockFence(organizationId));
+        for (var operation : controlMapper.listOperations(organizationId)) {
+            reconcileCompletion(organizationId, operation.getOperationKey());
+        }
     }
 
     /** Advances once under organization X after callers retain their local restriction fences. */

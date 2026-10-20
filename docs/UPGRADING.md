@@ -1146,3 +1146,22 @@ floor requires a separately reviewed procedure; normal recovery is a forward fix
 Inaccessible placements and incomplete managed-object deletion keep cleanup pending. Restore
 procedures must reconcile privacy authority and old-generation holdings before enabling service.
 Restart and restore never relabel old holdings as current.
+
+Startup and scheduled privacy reconciliation include an organization-level control-plane pass.
+It completes V236 bootstrap operations for organizations with no workspaces and retries operations
+after their last workspace is removed. V236 is repaired by this runtime follow-up; no migration
+checksum changes are required. Historical pending workspace receipts remain blockers.
+
+V2 DSR recovery can finish after an already-verified non-subject workspace is deleted: recovery,
+progress and final C2 accept its durable verified control receipt only while its root is absent.
+Active/restored workspaces retain routed residual verification. Missing verification evidence continues
+to refuse completion. Ask Connex refreshes session metadata and transcript on the first successful
+socket subscription as well as reconnects, covering cutoffs missed during connection establishment.
+Notification reads scope authority hydration to candidate workspaces and refuse results when a
+cutoff races their query rather than returning stale assistant-derived content.
+
+Reconciliation preserves an exact verified receipt while its workspace is terminally
+`tearing_down`, even after the tenant sweep removes local work. Teardown retries skip that
+operation's tenant batch and still run full local lifecycle cleanup and residual verification.
+V2 C2 refuses a surviving terminal workspace root; only root deletion enables receipt-only
+completion. Active workspace restoration still reopens stale local evidence.

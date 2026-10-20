@@ -277,7 +277,7 @@ public class DataSubjectRequestControlOperations {
     }
 
     /** Appends C2 once using the original C1 authority; this never edits the human DSR status. */
-    @Transactional
+    @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
     public void completeMissionPurge(ooo.klae.connex.backend.ai.mission.AiAgentPurgeAcceptance accepted) {
         var authentication = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
         if (authentication != null && authentication.isAuthenticated()
@@ -290,7 +290,11 @@ public class DataSubjectRequestControlOperations {
                     .distinct().sorted().toList();
         for (int workspaceId : workspaceIds) {
             var workspace = tenantLifecycleControlMapper.lockWorkspaceForShare(workspaceId);
-            if (workspace == null || workspace.orgId() != accepted.orgId()) {
+            if (workspace == null ? accepted.schemaVersion() != 2
+                    || assistantPrivacyService.deletedWorkspaceVerifiedAt(
+                        accepted.orgId(), accepted.operationId(), workspaceId) == null
+                    : workspace.orgId() != accepted.orgId()
+                        || accepted.schemaVersion() == 2 && !"active".equals(workspace.lifecycleState())) {
                 throw new ConflictException("dsr_lifecycle_evidence_required");
             }
         }

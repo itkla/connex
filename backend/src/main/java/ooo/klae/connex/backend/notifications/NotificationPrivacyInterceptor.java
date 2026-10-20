@@ -1,9 +1,11 @@
 package ooo.klae.connex.backend.notifications;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Supplier;
+import java.util.function.BiFunction;
+import java.util.stream.Collectors;
 
 import org.apache.ibatis.cache.CacheKey;
 import org.apache.ibatis.executor.Executor;
@@ -16,7 +18,10 @@ import org.apache.ibatis.plugin.Signature;
 import org.apache.ibatis.session.ResultHandler;
 import org.apache.ibatis.session.RowBounds;
 
-/** Binds fresh control authority to notification source predicates before filtering and pagination. */
+import ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyPublicationGuard;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantWorkspacePrivacy;
+
+/** Binds scoped authority before filtering and revalidates materialized results under publication fences. */
 @Intercepts({
     @Signature(type = Executor.class, method = "update", args = {MappedStatement.class, Object.class}),
     @Signature(type = Executor.class, method = "query",
@@ -34,10 +39,10 @@ public final class NotificationPrivacyInterceptor implements Interceptor {
             "markRead", "markUnread", "dismiss", "restore", "restoreActionableApprovalRequest",
             "restoreResolvedApprovalRequest", "snooze", "unsnooze", "markAllRead",
             "findInaccessibleNotificationRecipientIds", "resolveInaccessibleNotifications");
-    private final Supplier<Map<Integer, Long>> authority;
+    private final BiFunction<Integer, Integer, List<AiAssistantWorkspacePrivacy>> authority;
 
     /** Defers control mapper resolution until after SqlSessionFactory construction. */
-    public NotificationPrivacyInterceptor(Supplier<Map<Integer, Long>> authority) {
+    public NotificationPrivacyInterceptor(BiFunction<Integer, Integer, List<AiAssistantWorkspacePrivacy>> authority) {
         this.authority = java.util.Objects.requireNonNull(authority);
     }
 
@@ -59,7 +64,17 @@ public final class NotificationPrivacyInterceptor implements Interceptor {
             }
             parameters.put(key, entry.getValue());
         }
-        parameters.put("assistantWorkspaceGenerations", Map.copyOf(authority.get()));
+        if (invocation.getMethod().getName().equals("queryCursor")
+                || arguments.length >= 4 && arguments[3] != null) {
+            throw new IllegalStateException("Notification privacy requires materialized results");
+        }
+        Integer recipientId = identity(parameters, "recipientId");
+        Integer workspaceId = identity(parameters, "workspaceId");
+        List<AiAssistantWorkspacePrivacy> captured = authority.apply(recipientId, workspaceId);
+        Set<Integer> organizations = captured.stream().map(AiAssistantWorkspacePrivacy::organizationId)
+                .collect(Collectors.toSet());
+        parameters.put("assistantWorkspaceGenerations", captured.stream().collect(Collectors.toUnmodifiableMap(
+                AiAssistantWorkspacePrivacy::workspaceId, AiAssistantWorkspacePrivacy::generation)));
         arguments[1] = parameters;
         if (arguments.length == 6) {
             BoundSql bound = statement.getBoundSql(parameters);
@@ -67,6 +82,23 @@ public final class NotificationPrivacyInterceptor implements Interceptor {
             arguments[4] = ((Executor) invocation.getTarget()).createCacheKey(
                     statement, parameters, (RowBounds) arguments[2], bound);
         }
-        return invocation.proceed();
+        Object result = invocation.proceed();
+        try (var publication = AiAssistantPrivacyPublicationGuard.retainPublicationReads(organizations)) {
+            if (!authority.apply(recipientId, workspaceId).containsAll(captured)) {
+                throw new ooo.klae.connex.backend.exceptions.ConflictException("assistant_privacy_unavailable");
+            }
+            return result;
+        }
+    }
+
+    private static Integer identity(Map<String, Object> parameters, String name) {
+        Object value = parameters.get(name);
+        if (value == null) {
+            return null;
+        }
+        if (!(value instanceof Integer id) || id <= 0) {
+            throw new IllegalStateException("Notification privacy scope identity is invalid");
+        }
+        return id;
     }
 }

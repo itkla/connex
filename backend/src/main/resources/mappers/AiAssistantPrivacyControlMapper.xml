@@ -79,6 +79,30 @@
     SELECT workspace_id FROM ai_assistant_privacy_operation_workspace
     WHERE organization_id = #{organizationId} AND operation_key = #{operationKey} ORDER BY workspace_id
   </select>
+  <select id="incompleteOrganizationIdsPage" resultType="int" useCache="false" flushCache="true">
+    SELECT DISTINCT o.organization_id FROM ai_assistant_privacy_operation o
+    WHERE o.organization_id &gt; #{afterId}
+      AND (o.completed_at IS NULL OR EXISTS (
+        SELECT 1 FROM ai_assistant_privacy_operation_workspace w
+        WHERE w.organization_id = o.organization_id AND w.operation_key = o.operation_key AND w.state &lt;&gt; 'verified'))
+    ORDER BY o.organization_id LIMIT #{limit}
+  </select>
+  <select id="deletedWorkspaceVerifiedAt" resultType="java.time.LocalDateTime" useCache="false" flushCache="true">
+    SELECT verified_at FROM ai_assistant_privacy_operation_workspace receipt
+    WHERE receipt.organization_id = #{organizationId} AND receipt.operation_key = #{operationKey}
+      AND receipt.workspace_id = #{workspaceId} AND receipt.state = 'verified'
+      AND receipt.verified_work_revision IS NOT NULL AND receipt.verified_at IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM workspace w WHERE w.id = receipt.workspace_id)
+  </select>
+  <select id="verifiedTeardownWorkspace" resultType="boolean" useCache="false" flushCache="true">
+    SELECT EXISTS (
+      SELECT 1 FROM ai_assistant_privacy_operation_workspace receipt
+      JOIN workspace w ON w.id = receipt.workspace_id AND w.org_id = receipt.organization_id
+      WHERE receipt.organization_id = #{organizationId} AND receipt.operation_key = #{operationKey}
+        AND receipt.workspace_id = #{workspaceId} AND receipt.state = 'verified'
+        AND receipt.verified_work_revision IS NOT NULL AND receipt.verified_at IS NOT NULL
+        AND w.lifecycle_state = 'tearing_down')
+  </select>
   <select id="lockOperation" resultMap="operation" useCache="false" flushCache="true">
     SELECT * FROM ai_assistant_privacy_operation WHERE organization_id = #{organizationId} AND operation_key = #{operationKey} FOR UPDATE
   </select>
@@ -96,8 +120,19 @@
   <select id="notificationWorkspaceGenerations"
       resultType="ooo.klae.connex.backend.ai.assistant.AiAssistantWorkspacePrivacy"
       useCache="false" flushCache="true">
-    SELECT w.id AS workspaceId, f.generation
+    SELECT w.id AS workspaceId, w.org_id AS organizationId, f.generation
     FROM workspace w JOIN ai_assistant_privacy_fence f ON f.organization_id = w.org_id
+    WHERE
+    <choose>
+      <when test="recipientId != null">
+        EXISTS (SELECT 1 FROM workspace_member wm
+          WHERE wm.workspace_id = w.id AND wm.user_id = #{recipientId} AND wm.status = 'active')
+        <if test="workspaceId != null">AND w.id = #{workspaceId}</if>
+      </when>
+      <when test="workspaceId != null">w.id = #{workspaceId}</when>
+      <otherwise>FALSE</otherwise>
+    </choose>
+    ORDER BY w.id
   </select>
   <update id="reopenBootstrap">
     UPDATE ai_assistant_privacy_fence SET bootstrap_completed_at = NULL

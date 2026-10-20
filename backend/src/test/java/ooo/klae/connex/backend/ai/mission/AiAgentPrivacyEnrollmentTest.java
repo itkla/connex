@@ -123,6 +123,44 @@ class AiAgentPrivacyEnrollmentTest {
         context.clear();
     }
 
+    @Test
+    void terminalTeardownDoesNotReopenVerifiedReceiptAfterTenantWorkWasSwept() {
+        local = null;
+        org.mockito.Mockito.clearInvocations(work);
+        when(control.verifiedTeardownWorkspace(11, operation.getOperationKey(), 7)).thenReturn(true);
+
+        service.initialize(7);
+
+        assertTrue(verified);
+        assertNotNull(operation.getCompletedAt());
+        assertNotNull(fence.getBootstrapCompletedAt());
+        assertNull(local);
+        verify(control, never()).reopenWorkspace(eq(11), any(), eq(7));
+        verify(work, never()).insertWork(any());
+    }
+
+    @Test
+    void teardownRetrySkipsSweptVerifiedOperationAndStillRunsFullLocalCleanup() {
+        local = null;
+        org.mockito.Mockito.clearInvocations(work);
+        when(control.verifiedTeardownWorkspace(11, operation.getOperationKey(), 7)).thenReturn(true);
+        when(control.workspaceLifecycleState(7)).thenReturn("tearing_down");
+        var fullCleanup = new java.util.concurrent.atomic.AtomicReference<AiAgentPrivacyWork>();
+        when(work.lockWork(eq(7), org.mockito.ArgumentMatchers.anyString())).thenAnswer(call -> fullCleanup.get());
+        doAnswer(call -> { fullCleanup.set(call.getArgument(0)); return 1; }).when(work).insertWork(any());
+        when(work.advanceBarrier(eq(7), eq(1L), org.mockito.ArgumentMatchers.anyString())).thenReturn(1);
+        var retry = org.mockito.Mockito.spy(service);
+        org.mockito.Mockito.doReturn(true).when(retry).batch(eq(7), org.mockito.ArgumentMatchers.anyString());
+
+        retry.prepareWorkspaceTeardown(7);
+
+        verify(retry, never()).batch(7, operation.getOperationKey());
+        assertNotNull(fullCleanup.get());
+        assertEquals("offboarding", fullCleanup.get().getReason());
+        verify(retry).batch(7, fullCleanup.get().getOperationKey());
+        assertTrue(verified);
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"missing", "runs", "sessions", "verify"})
     void initializationReopensStaleReceiptForRestoredPreCleanupWork(String phase) {

@@ -55,6 +55,8 @@ class AiAgentPrivacyInitializationHandoffTest {
     private final TenantWorkScope scope = new TenantWorkScope(context, catalogs, workspaces,
         mock(TenantLifecycleControlMapper.class), operations);
     private final AiAgentPrivacyService privacy = mock(AiAgentPrivacyService.class);
+    private final ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService assistantPrivacy =
+        mock(ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService.class);
     private final AiAgentStartupRecoveryService recovery = mock(AiAgentStartupRecoveryService.class);
     private final SystemActor system = mock(SystemActor.class);
     private final ArrayDeque<Runnable> pending = new ArrayDeque<>();
@@ -152,10 +154,41 @@ class AiAgentPrivacyInitializationHandoffTest {
         assertFalse(context.isResolved());
     }
 
+    @Test
+    void reconciliationCompletesOrganizationWorkEvenWhenNoWorkspaceSurvives() {
+        when(workspaces.findWorkspaceIdsPage(0, 100)).thenReturn(List.of());
+        when(assistantPrivacy.incompleteOrganizationIdsPage(0, 100)).thenReturn(List.of(900));
+        when(assistantPrivacy.incompleteOrganizationIdsPage(900, 100)).thenReturn(List.of());
+        var initializer = initializer();
+
+        initializer.reconcile();
+
+        verify(assistantPrivacy).reconcileOrganizationCompletion(900);
+        verifyNoInteractions(privacy, recovery);
+        assertTrue(initializer.isReady());
+    }
+
+    @Test
+    void organizationCompletionFailureKeepsReadinessClosedAndIsRetriedWithoutWorkspaceRoots() {
+        when(workspaces.findWorkspaceIdsPage(0, 100)).thenReturn(List.of());
+        when(assistantPrivacy.incompleteOrganizationIdsPage(0, 100)).thenReturn(List.of(900));
+        when(assistantPrivacy.incompleteOrganizationIdsPage(900, 100)).thenReturn(List.of());
+        doThrow(new IllegalStateException("completion interrupted")).doNothing()
+            .when(assistantPrivacy).reconcileOrganizationCompletion(900);
+        var initializer = initializer();
+
+        initializer.reconcile();
+        assertFalse(initializer.isReady());
+        initializer.reconcile();
+
+        assertTrue(initializer.isReady());
+        verify(assistantPrivacy, times(2)).reconcileOrganizationCompletion(900);
+    }
+
     private AiAgentPrivacyInitializer initializer() {
         var beans = new StaticListableBeanFactory();
         beans.addBean("aiAgentPrivacyInitializationExecutor", (TaskExecutor) pending::add);
-        return new AiAgentPrivacyInitializer(workspaces, scope, privacy, recovery,
+        return new AiAgentPrivacyInitializer(workspaces, scope, privacy, recovery, assistantPrivacy,
             mock(JobRunRecorder.class), new TestTransactionManager(),
             new AutomationExecutor(context, new AutomationScope(), scope), system,
             beans.getBeanProvider(TaskExecutor.class));

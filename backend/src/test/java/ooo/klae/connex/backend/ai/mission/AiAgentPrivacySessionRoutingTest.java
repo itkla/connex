@@ -179,7 +179,7 @@ class AiAgentPrivacySessionRoutingTest {
         var recovery = new AiAgentStartupRecoveryService(sessions.getMapper(AiAgentRunMapper.class),
                 persistence, sessions.getMapper(AiRunLeaseMapper.class), transactions);
         var initializer = new AiAgentPrivacyInitializer(sessions.getMapper(WorkspaceMapper.class), scope,
-                privacy, recovery, mock(JobRunRecorder.class), transactions,
+                privacy, recovery, mock(ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService.class), mock(JobRunRecorder.class), transactions,
                 new AutomationExecutor(context, new AutomationScope(), scope), system,
                 new org.springframework.beans.factory.support.StaticListableBeanFactory()
                     .getBeanProvider(org.springframework.core.task.TaskExecutor.class));

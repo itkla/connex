@@ -406,6 +406,30 @@ describe('Ask Connex provider privacy withdrawal', () => {
         await mounted.unmount();
     });
 
+    it.each([403, 404])('revalidates an idle transcript and session list on the first connection after a missed cutoff (%s)', async (status) => {
+        harness.getSessions.mockResolvedValue({ items: [session] });
+        const mounted = await mount(false);
+        try {
+            expect(props().sessions).toEqual([session]);
+            const sessionReads = harness.getSession.mock.calls.length;
+            const listReads = harness.getSessions.mock.calls.length;
+            harness.getSession.mockRejectedValue(new ApiError('Session unavailable', status));
+            harness.getSessions.mockResolvedValue({ items: [] });
+
+            await act(async () => socket().onStatusChange?.('connected'));
+            await flushRealtimeRefresh();
+
+            expect(harness.getSession).toHaveBeenCalledTimes(sessionReads + 1);
+            expect(harness.getSessions).toHaveBeenCalledTimes(listReads + 1);
+            expect(props().activeSession).toBeNull();
+            expect(props().sessions).toEqual([]);
+            expect(props().messages).toEqual([]);
+            expect(props().streamStore.getSnapshot()).toBeNull();
+        } finally {
+            await mounted.unmount();
+        }
+    });
+
     it('clears a retained stream on reconnect when cleanup removed its settled turn', async () => {
         const mounted = await mount();
         await stream('Retained partial');

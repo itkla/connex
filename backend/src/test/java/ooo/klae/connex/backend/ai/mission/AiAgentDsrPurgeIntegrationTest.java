@@ -372,6 +372,32 @@ class AiAgentDsrPurgeIntegrationTest extends AbstractAiAgentPrivacyIntegrationTe
                 workspace.getOrgId(), requestId, currentUser.getId(), accepted.operationId()));
     }
 
+    @Test
+    void verifiedDeletedWorkspaceCanFinishRecoveryAndC2FromItsDurableReceipt() {
+        acceptedWorkspace = additionalWorkspace("Verified workspace later deleted");
+        var accepted = purgeService.initiate(workspace.getOrgId(), requestId, currentUser.getId(), assistantCommand());
+        finish(accepted.operationId());
+        finishWorkspace(acceptedWorkspace.getId(), accepted.operationId());
+        assertNull(receipts.findCompletion(workspace.getOrgId(), requestId, accepted.operationId()));
+        jdbc.update("UPDATE workspace SET lifecycle_state='tearing_down' WHERE id=?", acceptedWorkspace.getId());
+        jdbc.update("DELETE FROM ai_agent_privacy_object WHERE workspace_id=?", acceptedWorkspace.getId());
+        jdbc.update("DELETE FROM ai_agent_privacy_work WHERE workspace_id=?", acceptedWorkspace.getId());
+        purgeService.recoverAccepted();
+        workScope.inLifecycleWorkspace(acceptedWorkspace.getId(), () -> privacyService.initialize(acceptedWorkspace.getId()));
+        assertNull(receipts.findCompletion(workspace.getOrgId(), requestId, accepted.operationId()));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM ai_assistant_privacy_operation_workspace"
+                + " WHERE organization_id=? AND operation_key=? AND workspace_id=? AND state='verified'", Integer.class,
+                workspace.getOrgId(), accepted.operationId(), acceptedWorkspace.getId()));
+        removeAdditionalWorkspace(acceptedWorkspace.getId());
+
+        purgeService.recoverAccepted();
+
+        assertNotNull(receipts.findCompletion(workspace.getOrgId(), requestId, accepted.operationId()));
+        var current = purgeService.get(workspace.getOrgId(), requestId, currentUser.getId(), accepted.operationId());
+        assertEquals("complete", current.state());
+        assertEquals(2, current.completedWorkspaceCount());
+    }
+
     private AiAgentHoldingsPurgeRequest assistantCommand() {
         return new AiAgentHoldingsPurgeRequest(UUID.randomUUID().toString(),
                 DataSubjectRequestSnapshot.token(requestMapper.findById(workspace.getOrgId(), requestId)),

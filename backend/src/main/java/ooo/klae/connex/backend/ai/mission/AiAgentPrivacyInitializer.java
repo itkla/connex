@@ -36,6 +36,7 @@ public class AiAgentPrivacyInitializer {
     private final TenantWorkScope tenantWorkScope;
     private final AiAgentPrivacyService privacyService;
     private final AiAgentStartupRecoveryService startupRecovery;
+    private final ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService assistantPrivacy;
     private final JobRunRecorder jobRunRecorder;
     private final PlatformTransactionManager transactionManager;
     private final AutomationExecutor automationExecutor;
@@ -46,6 +47,7 @@ public class AiAgentPrivacyInitializer {
     /** Creates initialization with its bounded, managed, non-propagating provisioning executor. */
     public AiAgentPrivacyInitializer(WorkspaceMapper workspaceMapper, TenantWorkScope tenantWorkScope,
             AiAgentPrivacyService privacyService, AiAgentStartupRecoveryService startupRecovery,
+            ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService assistantPrivacy,
             JobRunRecorder jobRunRecorder, PlatformTransactionManager transactionManager,
             AutomationExecutor automationExecutor, SystemActor systemActor,
             @Qualifier("aiAgentPrivacyInitializationExecutor") ObjectProvider<TaskExecutor> initializationExecutor) {
@@ -53,6 +55,7 @@ public class AiAgentPrivacyInitializer {
         this.tenantWorkScope = tenantWorkScope;
         this.privacyService = privacyService;
         this.startupRecovery = startupRecovery;
+        this.assistantPrivacy = assistantPrivacy;
         this.jobRunRecorder = jobRunRecorder;
         this.transactionManager = transactionManager;
         this.automationExecutor = automationExecutor;
@@ -85,12 +88,32 @@ public class AiAgentPrivacyInitializer {
             int cursor = after;
             List<Integer> ids = tenantWorkScope.unroutedRead(() -> workspaceMapper.findWorkspaceIdsPage(cursor, 100));
             if (ids.isEmpty()) {
-                ready.set(successful);
-                return;
+                break;
             }
             for (int workspaceId : ids) {
                 try {
                     initialize(workspaceId);
+                } catch (RuntimeException failure) {
+                    successful = false;
+                }
+            }
+            after = ids.getLast();
+        }
+        after = 0;
+        while (true) {
+            int cursor = after;
+            List<Integer> ids = tenantWorkScope.unroutedRead(
+                    () -> assistantPrivacy.incompleteOrganizationIdsPage(cursor, 100));
+            if (ids.isEmpty()) {
+                ready.set(successful);
+                return;
+            }
+            for (int organizationId : ids) {
+                try {
+                    tenantWorkScope.unrouted(() -> {
+                        assistantPrivacy.reconcileOrganizationCompletion(organizationId);
+                        return null;
+                    });
                 } catch (RuntimeException failure) {
                     successful = false;
                 }

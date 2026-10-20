@@ -117,6 +117,9 @@ public class AiAgentDsrPurgeService {
                 throw new ConflictException("dsr_lifecycle_evidence_required");
             }
             for (int workspaceId : acceptedWorkspaceIds(accepted)) {
+                if (deletedWorkspaceVerifiedAt(accepted, workspaceId) != null) {
+                    continue;
+                }
                 tenantWorkScope.inLifecycleWorkspace(workspaceId, () -> inAcceptedScope(accepted, workspaceId, () -> {
                     TransactionTemplate tenant = new TransactionTemplate(transactionManager);
                     tenant.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
@@ -169,6 +172,15 @@ public class AiAgentDsrPurgeService {
         String finishedAt = null;
         List<Integer> workspaceIds = acceptedWorkspaceIds(accepted);
         for (int workspaceId : workspaceIds) {
+            java.time.LocalDateTime receipt = deletedWorkspaceVerifiedAt(accepted, workspaceId);
+            if (receipt != null) {
+                complete++;
+                String completedAt = receipt.toInstant(java.time.ZoneOffset.UTC).toString();
+                if (finishedAt == null || completedAt.compareTo(finishedAt) > 0) {
+                    finishedAt = completedAt;
+                }
+                continue;
+            }
             AiAgentPrivacyWork work = tenantWorkScope.inLifecycleWorkspaceRead(workspaceId,
                     () -> readAcceptedWork(accepted, workspaceId));
             if (work == null) {
@@ -202,6 +214,11 @@ public class AiAgentDsrPurgeService {
                 tenantWorkScope.unroutedRead(() -> assistantPrivacyService.operationWorkspaceIds(
                     accepted.orgId(), accepted.operationId())).stream())
                 .distinct().sorted().toList();
+    }
+
+    private java.time.LocalDateTime deletedWorkspaceVerifiedAt(AiAgentPurgeAcceptance accepted, int workspaceId) {
+        return accepted.schemaVersion() == 2 ? tenantWorkScope.unroutedRead(
+                () -> assistantPrivacyService.deletedWorkspaceVerifiedAt(accepted.orgId(), accepted.operationId(), workspaceId)) : null;
     }
 
     /** Installs only frozen accepted workspace authority and restores the caller after every tenant phase. */

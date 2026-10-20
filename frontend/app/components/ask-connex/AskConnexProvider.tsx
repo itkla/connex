@@ -1944,7 +1944,6 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
 
     useEffect(() => {
         if (userId === null || activeWorkspaceId === null || switching) return;
-        let connectedBefore = false;
         const socket = createAiChatSocket({
             onPrivacyFrame: (frame) => {
                 if (frame.workspaceId !== activeWorkspaceId) return;
@@ -2006,10 +2005,6 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             onDelta: handleStreamDelta,
             onStatusChange: (status) => {
                 if (status !== 'connected') return;
-                if (!connectedBefore) {
-                    connectedBefore = true;
-                    return;
-                }
                 const signal = identityControllerRef.current?.signal;
                 if (!signal || signal.aborted) return;
                 const sessionId = activeSessionRef.current?.id;

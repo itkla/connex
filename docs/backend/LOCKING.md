@@ -2305,6 +2305,19 @@ workspace insert. It must not enumerate the empty workspace range with `INSERT .
 under REPEATABLE READ, concurrent registrations can retain shared next-key locks on the same gap
 and deadlock on their first workspace inserts. The after-commit initializer installs placement
 intents, and completion re-enumerates coverage. See [MySQL's statement locking rules](https://dev.mysql.com/doc/refman/8.4/en/innodb-locks-set.html).
+Startup and periodic reconciliation also page incomplete organizations independently of workspace
+roots. Organization completion runs on the control plane under READ COMMITTED and organization X,
+re-enumerates current workspaces and retains all historical pending receipts. This completes empty
+V236 bootstraps and retries completion after the last workspace disappears without inventing evidence.
+
+Notification source predicates hydrate only active recipient memberships, optionally the exact
+requested workspace; workspace maintenance hydrates that workspace alone. Suspend any tenant
+transaction before installing the control route for each separate fresh authority read. Materialize
+notification queries and updates before acquiring publication read stripes, since locking inbox reads
+also acquire workspace roots. Then acquire distinct physical stripes in ascending order, re-read
+fresh authority and reject changed or missing captured authority through materialized mapper return.
+Cursors and result handlers are refused because they can expose rows before final validation.
+
 Actual realtime, export and chat-file output holds its read fence and performs a fresh control read
 on a separate READ COMMITTED transaction; an export snapshot is never that authority. Do not hold
 database privacy locks across an export or object transfer. One serving JVM remains mandatory.
@@ -2333,3 +2346,16 @@ A workspace already fenced as `tearing_down` reuses v1 offboarding work for life
 full local cleanup. It retains the existing mission cutoff and uses bounded full-workspace discovery
 and uncapped local residual/object checks. It does not advance organization authority or create
 a competing v2 generation. Accepted organization operations finish and record evidence first.
+
+V2 DSR recovery, progress projection and C2 may replace tenant work evidence with the exact durable
+verified control receipt only when the workspace root is absent. The receipt must retain verification
+time and work revision. Active workspaces still route through enrollment and residual checks,
+including restoration recovery. Missing or pending receipts remain blocking. C2 takes live workspace
+roots in ascending order, uses READ COMMITTED, and reconciles complete operation coverage under
+organization X before appending its strict audit; deleted roots require their receipt at that boundary.
+
+Reconciliation preserves an exact verified receipt while its workspace is terminally
+`tearing_down`, even after the tenant sweep removes local work. Teardown retries skip that
+operation's tenant batch and still run full local lifecycle cleanup and residual verification.
+V2 C2 refuses a surviving terminal workspace root; only root deletion enables receipt-only
+completion. Active workspace restoration still reopens stale local evidence.

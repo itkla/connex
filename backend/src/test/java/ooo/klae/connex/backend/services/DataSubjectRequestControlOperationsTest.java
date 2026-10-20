@@ -64,6 +64,7 @@ class DataSubjectRequestControlOperationsTest {
     @Mock private SessionSecurityService sessionSecurityService;
 
     @Mock private AiAgentDsrControlMapper missionPurgeMapper;
+    @Mock private ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService assistantPrivacy;
     private final ObjectMapper json = new ObjectMapper();
     private DataSubjectRequestControlOperations operations;
 
@@ -78,7 +79,7 @@ class DataSubjectRequestControlOperationsTest {
             auditService,
             sessionSecurityService,
             missionPurgeMapper,
-            json, org.mockito.Mockito.mock(ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService.class),
+            json, assistantPrivacy,
             org.mockito.Mockito.mock(ooo.klae.connex.backend.ai.AiRestrictionEpoch.class));
         lenient().when(userMapper.lockByIdForShare(ACTOR_ID)).thenReturn(ACTOR_ID);
     }
@@ -257,6 +258,54 @@ class DataSubjectRequestControlOperationsTest {
         order.verify(tenantLifecycleControlMapper).lockWorkspaceForShare(WORKSPACE_ID);
         order.verify(tenantLifecycleControlMapper).lockWorkspaceForShare(11);
         order.verify(tenantLifecycleControlMapper).lockActiveOrganizationForShare(ORG_ID);
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void v2CompletionAcceptsDeletedWorkspaceOnlyWithVerifiedControlEvidence(boolean verified) {
+        String operation = UUID.randomUUID().toString();
+        var accepted = new AiAgentPurgeAcceptance(41, ORG_ID, 14, operation, UUID.randomUUID().toString(),
+                List.of(WORKSPACE_ID, 9), "2026-01-01T00:00:00Z", 2,
+                AiAgentPurgeAcceptance.ASSISTANT_SCOPE, AiAgentPurgeAcceptance.ASSISTANT_CUTOFF_POLICY, 1L, 2L);
+        when(tenantLifecycleControlMapper.lockWorkspaceForShare(WORKSPACE_ID)).thenReturn(WORKSPACE);
+        if (!verified) {
+            assertThrows(ConflictException.class, () -> operations.completeMissionPurge(accepted));
+            verifyNoInteractions(auditService);
+            return;
+        }
+        when(assistantPrivacy.deletedWorkspaceVerifiedAt(ORG_ID, operation, 9))
+                .thenReturn(LocalDateTime.of(2026, 1, 1, 0, 0));
+        when(tenantLifecycleControlMapper.lockActiveOrganizationForShare(ORG_ID)).thenReturn(ORG_ID);
+        when(dataSubjectRequestMapper.findByIdForUpdate(ORG_ID, 14)).thenReturn(request(WORKSPACE_ID));
+        when(assistantPrivacy.reconcileCompletion(ORG_ID, operation)).thenReturn(true);
+        AtomicReference<AuditLog> stored = new AtomicReference<>();
+        when(missionPurgeMapper.findCompletion(ORG_ID, 14, operation)).thenAnswer(call -> stored.get());
+        doAnswer(call -> {
+            var receipt = new AuditLog();
+            receipt.setChanges(json.writeValueAsString(call.getArgument(7)));
+            stored.set(receipt);
+            return null;
+        }).when(auditService).recordStrictScoped(eq(AiAgentPurgeAcceptance.COMPLETED), eq("organization"),
+                eq(ORG_ID), isNull(), eq(ORG_ID), any(), any(), any());
+
+        operations.completeMissionPurge(accepted);
+
+        verify(assistantPrivacy).reconcileCompletion(ORG_ID, operation);
+        assertEquals(json.readTree(json.writeValueAsString(accepted.metadata())), json.readTree(stored.get().getChanges()));
+    }
+
+    @Test
+    void v2CompletionWaitsForTerminalWorkspaceRootDeletion() {
+        var accepted = new AiAgentPurgeAcceptance(41, ORG_ID, 14, UUID.randomUUID().toString(),
+                UUID.randomUUID().toString(), List.of(WORKSPACE_ID), "2026-01-01T00:00:00Z", 2,
+                AiAgentPurgeAcceptance.ASSISTANT_SCOPE, AiAgentPurgeAcceptance.ASSISTANT_CUTOFF_POLICY, 1L, 2L);
+        when(tenantLifecycleControlMapper.lockWorkspaceForShare(WORKSPACE_ID)).thenReturn(
+                new WorkspaceLifecycleRef(WORKSPACE_ID, ORG_ID, "Terminal", "terminal", "tearing_down"));
+
+        assertThrows(ConflictException.class, () -> operations.completeMissionPurge(accepted));
+
+        verifyNoInteractions(auditService);
+        verify(assistantPrivacy, never()).reconcileCompletion(ORG_ID, accepted.operationId());
     }
 
     @Test

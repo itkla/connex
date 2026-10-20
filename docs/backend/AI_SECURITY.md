@@ -1151,6 +1151,9 @@ closed without lazy creation. Proposal-set production remains disabled.
 New-organization provisioning creates its fence and bootstrap operation before its first workspace,
 without scanning empty workspace ranges. The after-commit initializer enrolls placement evidence;
 periodic reconciliation recovers an interrupted callback. Completion still checks current coverage.
+An additional control-plane organization pass completes zero-workspace bootstraps from V236 and
+retries completion after the last workspace disappears. Historical pending placement evidence is
+preserved and still blocks completion; absence of a workspace alone proves nothing.
 
 Organization S precedes workspace S after existing content/domain roots. Public projection and
 decision paths cannot use a current token to relabel stale execution. Actual realtime, file and export
@@ -1170,10 +1173,18 @@ current active members with `AI_USE` or `AI_SESSION_ADMIN`. It loads no session 
 rows, so physical cleanup cannot suppress withdrawal for invitees or retained-chat administrators.
 Clients compare the session's original decimal authority, retire affected caches and reject late
 responses while preserving newer chats. Missing provenance is withheld after a known cutoff.
+Every successful socket connection, including the first subscription, refreshes the active session,
+transcript and session list so a cutoff missed between initial REST load and subscription is observed.
+Notification inbox authority is limited to recipient candidate workspaces and revalidated under
+ordered publication fences after materialization; a concurrent cutoff refuses the stale result.
 
 Accepted v1 DSR authority remains unchanged. New all-chat requests require both explicit v2
 acknowledgments and all existing admin, recent-authentication, CSRF, subject-proof and snapshot gates.
 Erasure completion requires positive file-deletion receipts and current placement coverage.
+For a deleted workspace, v2 recovery, progress and C2 use its exact durable verified control receipt
+with verification time and work revision. Active workspaces continue to require routed tenant evidence
+and residual verification, preserving restore detection. An absent or unverified receipt never
+substitutes for deleted tenant work.
 V1 polling may return content-free turn status while mission holdings are withheld; browser withdrawal
 clears cached content but keeps the session reloadable after cleanup. Permanent retirement requires
 v2 organization invalidation. V2 organization checks remain unconditional on every projection.
@@ -1194,3 +1205,9 @@ Assistant session detail and retained-detail reads return the generic 403
 `AI assistant session is not accessible` for historical generations, including restored rows
 before and after initialization reopens cleanup evidence. Reopening never makes those rows readable
 or changes the refusal to 404.
+
+Reconciliation preserves an exact verified receipt while its workspace is terminally
+`tearing_down`, even after the tenant sweep removes local work. Teardown retries skip that
+operation's tenant batch and still run full local lifecycle cleanup and residual verification.
+V2 C2 refuses a surviving terminal workspace root; only root deletion enables receipt-only
+completion. Active workspace restoration still reopens stale local evidence.
