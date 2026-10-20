@@ -34,6 +34,8 @@ public class RecordVisibilityScopeControlAccess {
      * Shares one snapshot across an operation's independent transactions without changing commits.
      * The scope is confined to this synchronous call and restored on every exit. Routed lookups
      * still validate the context's prepared payload on every read; this memo is single-database only.
+     * A catalog-only operation may install an automation identity later, provided its workspace,
+     * organization and catalog still match the snapshot. A resolved entry identity must remain resolved.
      */
     public <T> T withWorkspaceScope(int workspaceId, Supplier<T> operation) {
         return runWithinScope(workspaceId, getForWorkspace(workspaceId), operation);
@@ -87,7 +89,7 @@ public class RecordVisibilityScopeControlAccess {
         OperationScope operation = operationScope.get();
         if (operation != null && operation.workspaceId() == workspaceId) {
             requireScopeIdentity(workspaceId, operation.scope());
-            if (operation.resolved() != tenantContext.isResolved()
+            if (operation.resolved() && !tenantContext.isResolved()
                     || !Objects.equals(operation.catalog(), tenantContext.getCatalog())) {
                 throw new IllegalStateException("Operation scope does not match the resolved tenant catalog");
             }

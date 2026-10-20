@@ -1797,9 +1797,12 @@ Workflow traversal, immediate workflow dispatch, legacy rule dispatch and schedu
 mode it reuses the caller's immutable snapshot across nested calls and independent step/outbox
 transactions on that thread. It restores an enclosing operation on every exit, clears the binding
 after the outermost operation, and rejects workspace, organization or catalog drift. It does not
-propagate into asynchronous work. Transaction propagation, per-record commits and authorization
-locks remain unchanged. This is explicit operation reuse, separate from the default transaction
-memo: ordinary `REQUIRES_NEW`, completion callbacks and nontransactional reads outside that boundary
+propagate into asynchronous work. A scheduler or legacy listener may enter with only a catalog pin;
+installing an automation identity later reuses that scope only for the same workspace, organization
+and catalog. An identity resolved at operation entry must remain resolved. Transaction propagation,
+per-record commits and authorization locks remain unchanged. This is explicit operation reuse,
+separate from the default transaction memo: ordinary `REQUIRES_NEW`, completion callbacks and
+nontransactional reads outside that boundary
 retain their fresh-read contract. In routed mode every boundary read still validates the prepared
 context payload before considering any memo, so a missing or stale payload still fails inside an
 open transaction without a control query. Assistant parallel tool batches reject writes; one
