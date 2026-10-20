@@ -34,6 +34,8 @@ import ooo.klae.connex.backend.services.DuplicateDecisionLockService;
 import ooo.klae.connex.backend.services.IdentityKind;
 import ooo.klae.connex.backend.services.MatchingService;
 import ooo.klae.connex.backend.services.ProviderCaptureHistoricalBaselineService;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
 
@@ -55,9 +57,12 @@ public class ProviderCapturePagePersistence {
     private final DuplicateDecisionLockService duplicateDecisionLockService;
     private final WorkspaceService workspaceService;
     private final ProviderCaptureHistoricalBaselineService historicalBaselineService;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     /**
      * Commits one provider page and advances its cursor under the claimed lease.
+     * The notification scope is loaded before locks even for a completed initial sync, since
+     * that preliminary state can change before the locked sync-state recheck.
      */
     @Transactional
     public void commit(
@@ -68,6 +73,7 @@ public class ProviderCapturePagePersistence {
             CaptureExecutionPolicy policy,
             String accountEmail) {
         ProviderCaptureSyncState owner = stateOwner(workspaceId, syncStateId);
+        RecordVisibilityScope recordVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         ProviderConnection connection = connectionMapper.getByUserAndProviderForShare(
             owner.getUserId(), owner.getProvider());
         if (connection == null
@@ -123,7 +129,8 @@ public class ProviderCapturePagePersistence {
                     workspaceId,
                     evaluationInstant,
                     beforePersonIds,
-                    beforeActivityIds)
+                    beforeActivityIds,
+                    recordVisibilityScope)
                 : null;
         long processedItems = state.getProcessedItems();
         for (ProviderCaptureItem item : page.items()) {
@@ -613,7 +620,8 @@ public class ProviderCapturePagePersistence {
             int workspaceId,
             int actorId,
             ProviderCapturedInteraction interaction,
-            List<ProviderCapturedParticipant> participants) {
+            List<ProviderCapturedParticipant> participants,
+            RecordVisibilityScope recordVisibilityScope) {
         List<Long> interactionIds = List.of(interaction.getId());
         Set<Integer> personIds = new LinkedHashSet<>(
             captureMapper.getPersonIdsForInteractions(
@@ -627,7 +635,8 @@ public class ProviderCapturePagePersistence {
                 workspaceId,
                 evaluationInstant,
                 personIds,
-                beforeActivityIds);
+                beforeActivityIds,
+                recordVisibilityScope);
         project(workspaceId, actorId, interaction, participants);
         Set<Integer> afterActivityIds = new LinkedHashSet<>(
             captureMapper.getActivityIdsForInteractions(

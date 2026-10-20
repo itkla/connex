@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -10,6 +11,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
@@ -54,6 +56,20 @@ class IntroductionCompanyScopeTest {
         verify(scopes).getForWorkspace(7);
         verify(mapper).findCandidatePersons(7, "[7,11]");
         verifyNoInteractions(workspaceService);
+    }
+
+    @Test
+    void lockedCallerReusesItsPreloadedScopeWithoutControlAccess() {
+        service.computeSuggestions(7, 20, Map.of(), new RecordVisibilityScope(900, List.of(7, 11)));
+        verify(mapper).findCandidatePersons(7, "[7,11]");
+        verifyNoInteractions(scopes, workspaceService);
+    }
+
+    @Test
+    void preloadedScopeMustContainTheRequestedWorkspace() {
+        assertThrows(IllegalArgumentException.class,
+            () -> service.computeSuggestions(7, 20, Map.of(), new RecordVisibilityScope(901, List.of(99))));
+        verifyNoInteractions(scopes, mapper, workspaceService);
     }
 
     @Test

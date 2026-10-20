@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.Clock;
@@ -80,6 +81,17 @@ class IntroductionSuggestionCancellationTest {
             objectMapper,
             tenantWorkScope,
             recordVisibilityScopeControlAccess);
+    }
+
+    @Test
+    void interruptDuringScopeResolutionStopsBeforeCandidateLoading() {
+        when(recordVisibilityScopeControlAccess.getForWorkspace(WORKSPACE_ID))
+            .thenAnswer(interruptingWith(
+                new RecordVisibilityScopeControlAccess.RecordVisibilityScope(1, List.of(WORKSPACE_ID))));
+
+        assertRankingCancelled();
+
+        verifyNoInteractions(introductionMapper, edgeReader, scoringService);
     }
 
     @Test

@@ -24,6 +24,9 @@ public class RecordVisibilityScopeControlAccess {
 
     /**
      * Resolves one immutable, unfiltered record-visibility ceiling for an operation.
+     * Call before acquiring authorization, organization, provider, or record locks: a routed
+     * transaction is suspended and borrows a second connection. Pass this scope through nested
+     * reads instead of resolving it again while a lock is held.
      *
      * @param workspaceId workspace anchoring the organization
      * @return the organization's workspace IDs, including the anchor

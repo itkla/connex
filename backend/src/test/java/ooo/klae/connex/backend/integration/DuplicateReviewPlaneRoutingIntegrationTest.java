@@ -108,13 +108,24 @@ class DuplicateReviewPlaneRoutingIntegrationTest {
         assertNoControlTables();
         List<DuplicateReviewItemRow> expected = fixture.legacy.selectList(
             "DuplicateReviewMapper.findVisibleItems", fixture.parameters());
+        long expectedCount = fixture.legacy.count("DuplicateReviewMapper.countVisibleItems", fixture.parameters());
         fixture.controlJdbc.update("UPDATE company SET name = 'Default Catalog Decoy' WHERE workspace_id = ?",
             fixture.workspaceId);
+        fixture.controlJdbc.update("DELETE FROM duplicate_review_decision WHERE workspace_id = ? "
+            + "AND (record_type = 'company' OR id = ?)", fixture.workspaceId, fixture.pairIds.getFirst());
+        assertEquals(7, fixture.legacy.count("DuplicateReviewMapper.countVisibleItems", fixture.parameters()));
+        assertEquals(6, fixture.controlJdbc.queryForObject("SELECT COUNT(*) FROM duplicate_review_decision "
+            + "WHERE workspace_id = ? AND record_type = 'person' AND state = 'open'", Integer.class, fixture.workspaceId));
+        assertEquals(0, fixture.controlJdbc.queryForObject("SELECT COUNT(*) FROM duplicate_review_decision "
+            + "WHERE workspace_id = ? AND record_type = 'company' AND state = 'open'", Integer.class, fixture.workspaceId));
         fixture.installTenant();
         String scope = fixture.scopeAccess.getForWorkspace(fixture.workspaceId).workspaceIdsJson();
         assertEquals(9, mapper.countVisibleItems(fixture.workspaceId, null, null, null, 20));
-        assertEquals(fixture.legacy.count("DuplicateReviewMapper.countVisibleItems", fixture.parameters()),
+        assertEquals(expectedCount,
             mapper.countVisibleItems(fixture.workspaceId, null, null, null, 20));
+        assertEquals(8, mapper.countVisibleItems(fixture.workspaceId, null, null, "open", 20));
+        assertEquals(7, mapper.countVisibleItems(fixture.workspaceId, "person", null, "open", 20));
+        assertEquals(1, mapper.countVisibleItems(fixture.workspaceId, "company", null, "open", 20));
         assertEquals(expected, mapper.findVisibleItems(fixture.workspaceId, scope, null, null, null, 100, 0, 20));
         for (DuplicateReviewItemRow row : expected) {
             assertEquals(row, mapper.findVisibleItemById(fixture.workspaceId, scope, row.getId(), 20));

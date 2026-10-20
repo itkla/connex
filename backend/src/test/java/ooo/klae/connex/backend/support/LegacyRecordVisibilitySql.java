@@ -83,7 +83,7 @@ public final class LegacyRecordVisibilitySql {
                 WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
             AND c.archived_at IS NULL
           </sql>
-        
+
           <sql id="eligibleGraphEvidence">
             EXISTS (
               SELECT 1
@@ -98,7 +98,7 @@ public final class LegacyRecordVisibilitySql {
                 AND (e.source_person_id = p.id OR e.target_person_id = p.id)
             )
           </sql>
-        
+
           <select id="findCandidatePersons" resultType="ooo.klae.connex.backend.beans.IntroCandidatePerson">
             SELECT p.id         AS id,
                    p.name       AS name,
@@ -120,7 +120,7 @@ public final class LegacyRecordVisibilitySql {
                 OR <include refid="eligibleGraphEvidence"/>
               )
           </select>
-        
+
           <select id="findCandidatePersonsForReport" resultType="ooo.klae.connex.backend.beans.IntroCandidatePerson">
             SELECT p.id         AS id,
                    p.name       AS name,
@@ -144,7 +144,7 @@ public final class LegacyRecordVisibilitySql {
             ORDER BY p.id
             LIMIT #{limit}
           </select>
-        
+
           <select id="findWarmPathCandidates" resultType="ooo.klae.connex.backend.beans.IntroCandidatePerson">
             SELECT p.id         AS id,
                    p.name       AS name,
@@ -188,7 +188,7 @@ public final class LegacyRecordVisibilitySql {
             <result property="dismissedAt" column="dismissed_at"/>
             <result property="dismissedByUserId" column="dismissed_by_user_id"/>
           </resultMap>
-        
+
           <sql id="visibleReviewJoins">
             FROM duplicate_review_decision d
             LEFT JOIN person_identity evidence_person
@@ -262,7 +262,7 @@ public final class LegacyRecordVisibilitySql {
               AND high_company.id = d.high_company_id
               AND high_company.archived_at IS NULL
           </sql>
-        
+
           <sql id="visibleCurrentReviewPredicate">
             d.workspace_id = #{workspaceId}
             AND d.is_current = TRUE
@@ -292,7 +292,7 @@ public final class LegacyRecordVisibilitySql {
                AND high_company.id IS NOT NULL)
             )
           </sql>
-        
+
           <sql id="visibleReviewPredicate">
             <include refid="visibleCurrentReviewPredicate"/>
             <if test="recordType != null">
@@ -305,7 +305,7 @@ public final class LegacyRecordVisibilitySql {
               AND d.state = #{state}
             </if>
           </sql>
-        
+
           <sql id="reviewItemColumns">
             d.id,
             CASE WHEN d.oversized_marker = 1 THEN 'oversized_group' ELSE 'pair' END AS item_type,
@@ -342,13 +342,13 @@ public final class LegacyRecordVisibilitySql {
             d.dismissed_at,
             d.dismissed_by_user_id
           </sql>
-        
+
           <select id="countVisibleItems" resultType="long" timeout="3">
             SELECT /*+ MAX_EXECUTION_TIME(3000) */ COUNT(*)
             <include refid="visibleReviewJoins"/>
             WHERE <include refid="visibleReviewPredicate"/>
           </select>
-        
+
           <select id="findVisibleItems" resultMap="reviewItemRow" timeout="3">
             SELECT /*+ MAX_EXECUTION_TIME(3000) */ <include refid="reviewItemColumns"/>
             <include refid="visibleReviewJoins"/>
@@ -356,7 +356,7 @@ public final class LegacyRecordVisibilitySql {
             ORDER BY d.detected_at DESC, d.id DESC
             LIMIT #{limit} OFFSET #{offset}
           </select>
-        
+
           <select id="findVisibleItemById" resultMap="reviewItemRow">
             SELECT <include refid="reviewItemColumns"/>
             <include refid="visibleReviewJoins"/>

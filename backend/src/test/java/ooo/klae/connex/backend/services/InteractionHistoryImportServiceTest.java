@@ -57,9 +57,11 @@ import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 
 @ExtendWith(MockitoExtension.class)
 class InteractionHistoryImportServiceTest {
+    private static final RecordVisibilityScope RECORD_SCOPE = new RecordVisibilityScope(1, List.of(7));
 
     private static final int WORKSPACE_ID = 7;
     private static final int PERSON_ID = 101;
@@ -78,6 +80,7 @@ class InteractionHistoryImportServiceTest {
     @Mock private TaskMapper taskMapper;
     @Mock private NotificationReconciliationService notificationReconciliationService;
     @Mock private AuditService auditService;
+    @Mock private RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     private final Deque<DuplicatePreflightService.ImportPreviewSession> previews =
         new ArrayDeque<>();
@@ -106,11 +109,13 @@ class InteractionHistoryImportServiceTest {
             taskMapper,
             notificationReconciliationService,
             auditService,
-            clock);
+            clock,
+            recordVisibilityScopeControlAccess);
 
         User actor = new User();
         actor.setId(42);
         lenient().when(workspaceService.getCurrentWorkspaceId()).thenReturn(WORKSPACE_ID);
+        lenient().when(recordVisibilityScopeControlAccess.getForWorkspace(WORKSPACE_ID)).thenReturn(RECORD_SCOPE);
         lenient().when(authService.getCurrentUser()).thenReturn(actor);
         lenient().when(matchingService.normalizeIdentifier(any(IdentityKind.class), anyString()))
             .thenAnswer(invocation ->
@@ -129,10 +134,10 @@ class InteractionHistoryImportServiceTest {
         NotificationReconciliationService.HistoricalExpectationSnapshot emptySnapshot =
             new NotificationReconciliationService.HistoricalExpectationSnapshot(Map.of());
         lenient().when(notificationReconciliationService.historicalExpectationSnapshot(
-                WORKSPACE_ID, EVALUATION_INSTANT))
+                WORKSPACE_ID, EVALUATION_INSTANT, RECORD_SCOPE))
             .thenReturn(emptySnapshot);
         lenient().when(notificationReconciliationService.historicalExpectationSnapshot(
-                eq(WORKSPACE_ID), eq(EVALUATION_INSTANT), any()))
+                eq(WORKSPACE_ID), eq(EVALUATION_INSTANT), any(), eq(RECORD_SCOPE)))
             .thenReturn(emptySnapshot);
         lenient().when(activityMapper.insertHistoryBatch(eq(WORKSPACE_ID), anyList()))
             .thenAnswer(invocation -> {
@@ -183,6 +188,30 @@ class InteractionHistoryImportServiceTest {
     }
 
     @Test
+    void historicalImportsResolveOneScopeBeforeOrganizationAndPersonLocks() {
+        HistoryImportRequest request = activityRequest(
+            "prelock-scope", "Imported touch", "2026-01-02T03:04:05Z");
+
+        assertEquals(1, previewAndCommitActivity(request, strongResponse(PERSON_ID)).created());
+
+        var order = org.mockito.Mockito.inOrder(recordVisibilityScopeControlAccess,
+            duplicateDecisionLockService, personMapper, notificationReconciliationService, activityMapper);
+        order.verify(recordVisibilityScopeControlAccess).getForWorkspace(WORKSPACE_ID);
+        order.verify(duplicateDecisionLockService).lockCurrentOrganization();
+        order.verify(personMapper).getOwnedPersonByIdForShare(WORKSPACE_ID, PERSON_ID);
+        order.verify(notificationReconciliationService).historicalExpectationSnapshot(
+            WORKSPACE_ID, EVALUATION_INSTANT, RECORD_SCOPE);
+        order.verify(activityMapper).insertHistoryBatch(eq(WORKSPACE_ID), anyList());
+        order.verify(notificationReconciliationService).historicalExpectationSnapshot(
+            WORKSPACE_ID, EVALUATION_INSTANT, RECORD_SCOPE);
+        verify(recordVisibilityScopeControlAccess).getForWorkspace(WORKSPACE_ID);
+        verify(notificationReconciliationService, org.mockito.Mockito.times(2)).historicalExpectationSnapshot(
+            WORKSPACE_ID, EVALUATION_INSTANT, RECORD_SCOPE);
+        verify(notificationReconciliationService).historicalExpectationSnapshot(
+            eq(WORKSPACE_ID), eq(EVALUATION_INSTANT), any(), eq(RECORD_SCOPE));
+    }
+
+    @Test
     void importsAllThreeKindsWithCanonicalHistoricalWritesAndTaskPositions() {
         HistoryImportRequest activity = activityRequest(
             "activity-source", "Followed up", "2026-01-02 03:04:05.123456");
@@ -225,10 +254,10 @@ class InteractionHistoryImportServiceTest {
         verify(taskMapper).lockTaskBoard(WORKSPACE_ID);
         verify(notificationReconciliationService,
             org.mockito.Mockito.times(6)).historicalExpectationSnapshot(
-                WORKSPACE_ID, EVALUATION_INSTANT);
+                WORKSPACE_ID, EVALUATION_INSTANT, RECORD_SCOPE);
         verify(notificationReconciliationService,
             org.mockito.Mockito.times(3)).historicalExpectationSnapshot(
-                eq(WORKSPACE_ID), eq(EVALUATION_INSTANT), any());
+                eq(WORKSPACE_ID), eq(EVALUATION_INSTANT), any(), eq(RECORD_SCOPE));
         verify(notificationReconciliationService,
             org.mockito.Mockito.times(3)).persistHistoricalBaselines(
                 eq(WORKSPACE_ID), any(), any(), any(), anyString());
@@ -605,7 +634,7 @@ class InteractionHistoryImportServiceTest {
                         NotificationReconciliationService.RELATIONSHIP_TYPE,
                         "warning")));
         when(notificationReconciliationService.historicalExpectationSnapshot(
-                eq(WORKSPACE_ID), eq(EVALUATION_INSTANT), any()))
+                eq(WORKSPACE_ID), eq(EVALUATION_INSTANT), any(), eq(RECORD_SCOPE)))
             .thenReturn(counterfactual);
 
         assertThrows(
