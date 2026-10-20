@@ -39,7 +39,7 @@
       "closing": true,
       "emit": {
         "kind": "final",
-        "text": "{\"tool\":null,\"final\":{\"text\":\"The selected contact was hospitalized last quarter.\",\"citations\":[\"r1\"],\"suggestions\":[],\"title\":null}}"
+        "text": "{\"tool\":null,\"final\":{\"text\":\"The review concerns {{P99}}.\",\"citations\":[\"r1\"],\"suggestions\":[],\"title\":null}}"
       }
     }
   ]

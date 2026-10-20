@@ -249,8 +249,11 @@ class AiAgentScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
         execute(run);
         assertAttempts(4, 4);
         assertEquals("failed", runs.getRun(workspaceId(), run.getId()).getStatus());
+        assertEquals("malformed_output", runs.getRun(workspaceId(), run.getId()).getReasonCode());
         assertEquals(0, reports(run));
         assertEquals(0, count("SELECT COUNT(*) FROM ai_chat_tool_call WHERE workspace_id=? AND mission_run_id=? AND proposal_origin='mission' AND status='proposed'", workspaceId(), run.getId()));
+        assertLeaseReleased(run);
+        assertNoEffects(run);
     }
 
     private Person preparationPerson() {

@@ -67,11 +67,18 @@ public record ScriptedAiTurnCursor(
     /** Delimiter closing a schema-repair request, which is that message's final text. */
     private static final String REPAIR_END_MARKER = "MODEL_OUTPUT_END";
 
-    /** Opening sentence of the loop's server-authored closing directive. */
-    private static final String CLOSING_MARKER = "You have no investigation steps left.";
+    /** Exact loop directive; a shared opening sentence alone does not establish closing state. */
+    private static final String CLOSING_MARKER = """
+            You have no investigation steps left. Answer the question now, using only the evidence \
+            already gathered in this turn. Do not request another tool. Cite the records you did \
+            read, and state plainly in the answer which parts of the question you could not check \
+            and why. If the evidence supports no answer at all, say exactly that.""";
 
-    /** Opening sentence of the loop's server-authored checkpoint-or-report directive. */
-    private static final String MISSION_CLOSING_MARKER = "This is the last decision of this segment.";
+    /** Exact loop directive allowing either a final report or a sole checkpoint call. */
+    private static final String MISSION_CLOSING_MARKER =
+            "This is the last decision of this segment. Return the final report now, or call "
+                    + "checkpoint_segment alone to save bounded memory and continue later. "
+                    + "Do not retrieve data or edit the plan.";
 
     public ScriptedAiTurnCursor {
         Objects.requireNonNull(selector, "selector");
@@ -148,8 +155,10 @@ public record ScriptedAiTurnCursor(
      *
      * <p>Same structural rule as the repair request: the directive is emitted as a whole bare user
      * turn beside the turn's other server-authored contract text, so only a segment that is not an
-     * untrusted envelope can be one. A member, an activity subject or any other CRM value quoting
-     * the closing sentence travels inside an envelope and cannot reach this state.
+     * untrusted envelope can be one. The whole directive must match the loop's production text;
+     * a bare message sharing only its opening sentence does not establish closing state. A member,
+     * an activity subject or any other CRM value quoting it travels inside an envelope and cannot
+     * reach this state.
      *
      * @param messages the prompt's messages in order
      * @return whether the loop asked for the closing answer
@@ -158,7 +167,7 @@ public record ScriptedAiTurnCursor(
         for (AiMessage message : messages) {
             if (isServerAuthoredDirective(message)) {
                 String content = message.content().strip();
-                if (content.startsWith(CLOSING_MARKER) || content.startsWith(MISSION_CLOSING_MARKER)) {
+                if (content.equals(CLOSING_MARKER) || content.equals(MISSION_CLOSING_MARKER)) {
                     return true;
                 }
             }

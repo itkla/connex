@@ -33,7 +33,7 @@
     {
       "afterToolCalls": 0,
       "protocol": "json",
-      "closing": false,
+      "closing": true,
       "emit": {
         "kind": "tool_call",
         "toolName": "checkpoint_segment",
