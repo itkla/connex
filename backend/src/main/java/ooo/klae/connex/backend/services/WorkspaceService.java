@@ -497,6 +497,58 @@ public class WorkspaceService {
             .forEach(userId -> lockAndRequireMember(workspaceId, userId));
     }
 
+    /**
+     * Retains an audited assignment's actor and workspace roots before its complete membership
+     * batch, then its organization root before any aggregate lock. Empty batches still retain
+     * the audit parents. Enclosing transactions must acquire their complete principal/member set
+     * before other locks; nested calls may only repeat roots and memberships already retained.
+     */
+    public void lockAssignmentMembers(int workspaceId, List<Integer> userIds) {
+        int actorId = getCurrentUserId();
+        if (userMapper.lockByIdForShare(actorId) == null) {
+            throw new ForbiddenException("Assignment actor no longer exists");
+        }
+        if (workspaceMapper.lockWorkspaceForShare(workspaceId) == null) {
+            throw new ResourceNotFoundException("Workspace not found: " + workspaceId);
+        }
+        lockAndRequireMembers(workspaceId, userIds);
+        retainAuditOrganization(workspaceId);
+    }
+
+    /** Retains the audit organization after an enclosing transaction's member/role authorization. */
+    public void retainAuditOrganization(int workspaceId) {
+        Integer organizationId = workspaceMapper.getOrgId(workspaceId);
+        if (organizationId == null || organizationMapper.lockByIdForShare(organizationId) == null) {
+            throw new ResourceNotFoundException("Workspace organization not found");
+        }
+    }
+
+    /**
+     * Retains both execution and attribution accounts before the workspace and complete execution
+     * membership batch. Additional memberships keep the existing nonwaiting probes; authorization
+     * and its role locks precede the organization, and all precede the runtime gate/run locks.
+     */
+    public Set<Permission> lockExecutionPermissions(
+            int workspaceId, int actorId, int authorizationMemberId, Set<Integer> memberIds) {
+        for (int userId : new TreeSet<>(List.of(actorId, authorizationMemberId))) {
+            if (userMapper.lockByIdForShare(userId) == null) {
+                throw new ForbiddenException("Workflow actor account no longer exists");
+            }
+        }
+        if (!Boolean.FALSE.equals(userMapper.isAccountDeletionReservedForShare(authorizationMemberId))) {
+            throw new ForbiddenException("Workflow actor account is being deleted");
+        }
+        if (workspaceMapper.lockActiveWorkspaceForShare(workspaceId) == null) {
+            throw new ResourceNotFoundException("Workspace not found: " + workspaceId);
+        }
+        Set<Integer> additionalIds = new TreeSet<>(memberIds);
+        additionalIds.remove(authorizationMemberId);
+        Set<Permission> permissions = lockedMemberPermissionsAndMemberships(
+            workspaceId, authorizationMemberId, additionalIds).permissions();
+        retainAuditOrganization(workspaceId);
+        return permissions;
+    }
+
     /** Locks current membership and custom-role authority for every requested permission check. */
     public void lockAndRequirePermissions(
             int workspaceId,

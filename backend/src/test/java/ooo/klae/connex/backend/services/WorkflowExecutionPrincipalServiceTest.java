@@ -26,7 +26,7 @@ class WorkflowExecutionPrincipalServiceTest {
     @BeforeEach
     void setUp() {
         service = new WorkflowExecutionPrincipalService(
-            workspaceService, userMapper, systemActor);
+            workspaceService, userMapper, systemActor, new RuleDefinitionCodec(new tools.jackson.databind.ObjectMapper()));
     }
 
     @Test
@@ -72,6 +72,40 @@ class WorkflowExecutionPrincipalServiceTest {
             () -> service.resolve(7, version));
 
         assertEquals("actor_unavailable", failure.code());
+    }
+
+    @Test
+    void executionDiscoversEveryOwnerBeforeTheOuterRuntimeLocksIncludingPaddedActionTypes() {
+        WorkflowVersion version = version("user", 17, 19);
+        version.setActionsJson("[{\"type\":\" assign_owner \",\"targetUserId\":23},"
+            + "{\"type\":\"assign_owner\",\"targetUserId\":11},"
+            + "{\"type\":\"create_task\"}]");
+        when(workspaceService.lockExecutionPermissions(7, 17, 17, java.util.Set.of(11, 17, 23)))
+            .thenReturn(java.util.Set.of(ooo.klae.connex.backend.tenant.Permission.PERSON_UPDATE));
+        when(workspaceService.getRole(7, 17)).thenReturn("member");
+        when(userMapper.getUserById(17)).thenReturn(user(17));
+
+        WorkflowExecutionPrincipal principal = service.resolveLocked(7, version);
+
+        assertEquals(java.util.Set.of(ooo.klae.connex.backend.tenant.Permission.PERSON_UPDATE),
+            principal.lockedPermissions());
+        org.mockito.Mockito.verify(workspaceService).lockExecutionPermissions(
+            7, 17, 17, java.util.Set.of(11, 17, 23));
+    }
+
+    @Test
+    void systemExecutionRetainsItsAuditAccountAndTheAttributionMembership() {
+        WorkflowVersion version = version("system", null, 19);
+        version.setActionsJson("[]");
+        when(systemActor.user()).thenReturn(user(1));
+        when(workspaceService.getRole(7, 19)).thenReturn("admin");
+        when(workspaceService.lockExecutionPermissions(7, 1, 19, java.util.Set.of(19)))
+            .thenReturn(java.util.Set.of());
+        when(systemActor.permissions()).thenReturn(java.util.Set.of());
+
+        service.resolveLocked(7, version);
+
+        org.mockito.Mockito.verify(workspaceService).lockExecutionPermissions(7, 1, 19, java.util.Set.of(19));
     }
 
     private static WorkflowVersion version(

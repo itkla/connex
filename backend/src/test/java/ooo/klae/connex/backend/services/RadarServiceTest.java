@@ -81,6 +81,7 @@ class RadarServiceTest {
         when(workspaceService.getCurrentUserId()).thenReturn(USER_ID);
         when(signalMapper.findFamilyStates(WORKSPACE_ID)).thenReturn(List.of(availableFamily()));
         when(userMapper.lockByIdForShare(USER_ID)).thenReturn(USER_ID);
+        when(workspaceMapper.lockWorkspaceForShare(WORKSPACE_ID)).thenReturn(WORKSPACE_ID);
         when(userMapper.isAccountDeletionReserved(USER_ID)).thenReturn(false);
         memberLock();
         when(personMapper.getProcessablePersonIds(eq(WORKSPACE_ID), anyList()))
@@ -295,9 +296,12 @@ class RadarServiceTest {
             new RadarTaskRequestDto(
                 "Call", "2026-08-10", assigneeId, signal.getSubjectId(), null, null));
 
-        InOrder order = inOrder(workspaceMapper, signalMapper, taskService);
+        InOrder order = inOrder(userMapper, workspaceMapper, workspaceService, signalMapper, taskService);
+        order.verify(userMapper).lockByIdForShare(USER_ID);
+        order.verify(workspaceMapper).lockWorkspaceForShare(WORKSPACE_ID);
         order.verify(workspaceMapper).lockAuthorizationMembership(WORKSPACE_ID, assigneeId);
         order.verify(workspaceMapper).lockAuthorizationMembership(WORKSPACE_ID, USER_ID);
+        order.verify(workspaceService).retainAuditOrganization(WORKSPACE_ID);
         order.verify(signalMapper).getActiveForActorForUpdate(
             WORKSPACE_ID, signal.getId(), USER_ID);
         order.verify(taskService).create(any(Task.class));

@@ -504,7 +504,7 @@ public class TaskService {
     @RequirePermission(Permission.TASK_CREATE)
     public void lockBoardForCreation() {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        workspaceService.lockAndRequireMember(workspaceId, workspaceService.getCurrentUserId());
+        workspaceService.lockAssignmentMembers(workspaceId, List.of(workspaceService.getCurrentUserId()));
         lockTaskBoard(workspaceId);
         workspaceService.requirePermission(Permission.TASK_CREATE);
     }
@@ -603,7 +603,7 @@ public class TaskService {
     }
 
     private void lockAssignee(Task task, int workspaceId) {
-        workspaceService.lockAndRequireMember(workspaceId, requireAssigneeId(task));
+        workspaceService.lockAssignmentMembers(workspaceId, List.of(requireAssigneeId(task)));
     }
 
     private int requireAssigneeId(Task task) {

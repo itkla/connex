@@ -1,11 +1,13 @@
 package ooo.klae.connex.backend.services;
 
 import java.util.Set;
+import java.util.TreeSet;
 
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
 
+import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.WorkflowVersion;
 import ooo.klae.connex.backend.mappers.UserMapper;
@@ -19,6 +21,7 @@ public class WorkflowExecutionPrincipalService {
     private final WorkspaceService workspaceService;
     private final UserMapper userMapper;
     private final SystemActor systemActor;
+    private final RuleDefinitionCodec definitionCodec;
 
     public WorkflowExecutionPrincipal resolve(int workspaceId, WorkflowVersion version) {
         return resolve(
@@ -38,12 +41,19 @@ public class WorkflowExecutionPrincipalService {
                 "The configured workflow actor is unavailable.",
                 true);
         }
-        Set<Permission> permissions = "system".equals(version.getExecutionMode())
-            ? systemActor.permissions()
-            : workspaceService.lockedPermissionsFor(workspaceId, authorizationMemberId);
-        if ("system".equals(version.getExecutionMode())) {
-            workspaceService.lockedMemberPermissionsFor(workspaceId, authorizationMemberId);
+        boolean system = "system".equals(version.getExecutionMode());
+        int actorId = system ? systemActor.user().getId() : authorizationMemberId;
+        Set<Integer> memberIds = new TreeSet<>();
+        memberIds.add(authorizationMemberId);
+        for (RuleAction action : definitionCodec.parse(version.getActionsJson(), RuleAction[].class)) {
+            if (action.getType() != null && "assign_owner".equalsIgnoreCase(action.getType().trim())
+                    && action.getTargetUserId() != null) {
+                memberIds.add(action.getTargetUserId());
+            }
         }
+        Set<Permission> memberPermissions = workspaceService.lockExecutionPermissions(
+            workspaceId, actorId, authorizationMemberId, memberIds);
+        Set<Permission> permissions = system ? systemActor.permissions() : memberPermissions;
         return resolve(
             workspaceId,
             version.getExecutionMode(),

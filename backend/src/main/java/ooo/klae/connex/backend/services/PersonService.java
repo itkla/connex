@@ -578,7 +578,7 @@ public class PersonService {
     public Person updateOwner(int personId, Integer ownerId, MutationAdmission admission) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requireOwnedPerson(workspaceId, personId);
-        if (ownerId != null) workspaceService.lockAndRequireMember(workspaceId, ownerId);
+        workspaceService.lockAssignmentMembers(workspaceId, ownerId == null ? List.of() : List.of(ownerId));
         Person before = personMapper.getOwnedPersonByIdForUpdate(workspaceId, personId);
         if (before == null || before.getArchivedAt() != null) {
             throw new ResourceNotFoundException("Contact not found");

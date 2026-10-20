@@ -816,6 +816,7 @@ public class AiAssistantWriteToolService {
         }
         LockedPermissionSnapshot authority =
                 workspaceService.lockAndRequirePermissionsSnapshot(workspaceId, required);
+        workspaceService.retainAuditOrganization(workspaceId);
         AiChatSession session = chatMapper.getSessionByIdForUpdate(workspaceId, userId, sessionId);
         if (session == null || !ACTIVE.equals(session.getStatus())) {
             throw inaccessible();

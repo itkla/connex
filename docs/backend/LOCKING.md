@@ -56,15 +56,12 @@ Workflow lifecycle writes and permanent account offboarding share a hierarchy:
 
 Version/rule key discovery is non-locking and Java-sorted before individual exact `getByIdForUpdate` calls. Final workflow authorization uses the locked membership's current role/role id, not an earlier `WorkspaceService` snapshot.
 
-The workspace root at step 3 stays `FOR SHARE` for workflow lifecycle writes, and taking it
-exclusively there is a defect. Every audited transaction in the workspace takes that same row
-`FOR SHARE` at its end (`AuditIntegrityService.lockForeignKeyParents`), and membership-first record
-mutations — person owner change, deal, deal-collaborator replacement, company, task, saved views, AI
-chat turn persistence — lock the `workspace_member` row before reaching the root in that trailing
-audit. Deal-collaborator replacement locks every requested member's active membership `FOR UPDATE`
-in ascending user-id order, then the deal row `FOR UPDATE`, then reads the deal's `deal_collaborator`
-rows `FOR UPDATE` and replaces them, before its trailing audit — the order `DealService.updateOwner`
-uses — so a member offboarded concurrently is never written back as a collaborator (#1793). The owner
+The workspace root at step 3 stays `FOR SHARE` for workflow lifecycle writes; taking it
+exclusively there would barrier every audited write for the duration of authoring. Audited
+assignments retain that shared root before membership and aggregate locks, as specified below.
+Deal-collaborator replacement locks every requested active membership `FOR UPDATE` in ascending
+user-id order, then the deal row and collaborator rows `FOR UPDATE`, so concurrent offboarding
+cannot be written back as a collaborator (#1793). The owner
 changes (`DealService`, `PersonService` and `CompanyService.updateOwner`) lock the new owner's membership,
 then read the record row `FOR UPDATE`, and take the audited old owner and the `owner_changed` decision
 from that row rather than from their unlocked existence check (#1948). Each read takes exactly the
@@ -89,12 +86,8 @@ record row at its foreign-key check, and a concurrent `removeTag`, which takes n
 on the association row, so the audited previous tags are exactly the rows the replacement deletes. A
 tag deletion that cascades into a record while a replacement re-adds the same tag can still deadlock,
 as it could before (the replacement holds the association row and waits on the tag row for its
-insert's foreign-key check); InnoDB rolls one back with a retryable error. The collaborator path is in the #1582 class
-below, as the trailing audit's `FOR SHARE` roots follow its membership locks. An exclusive root at
-step 3 would therefore both barrier every audited write in the tenant for the duration of an
-authoring transaction and close a deadlock cycle against those mutations (issue #1582's inversion
-class). Mutual exclusion for the trigger-capacity count comes from step 3b instead, which is scoped
-to the counter it protects because no other path locks that row.
+insert's foreign-key check); InnoDB rolls one back with a retryable error. Trigger-capacity mutual exclusion
+comes from step 3b's scoped admission row, rather than an exclusive workspace root.
 
 The activation entry points that perform trigger-capacity admission — `WorkflowService.publish`,
 `enable`, and `resume`, `RuleService.create` and `update`, and `WorkflowRecipeService.install` —
@@ -109,6 +102,50 @@ runs at startup under the exclusive workspace root (`:62`) and only mirrors pre-
 over the limit stays bounded by the retained intake backstop.
 
 Account offboarding takes the union of owner/workflow workspace roots in one ascending pass before membership rows, then disables affected paired/unpaired rules before principal redaction.
+
+## Audited assignments and membership roots (#1582 phase 1)
+
+Audited owner assignment (`DealService`, `PersonService`, `CompanyService`), deal collaborator
+replacement, task create/full update, and intervention owner assignment use
+`WorkspaceService.lockAssignmentMembers` on the transaction's own connection:
+
+1. Audit actor `app_user FOR SHARE`.
+2. Workspace `FOR SHARE`, retained even for a null owner or empty collaborator list.
+3. The complete requested membership batch `FOR UPDATE`, Java-deduplicated and user-id sorted.
+4. Organization `FOR SHARE`, after membership and any enclosing role authorization.
+5. Existing aggregate locks and writes, then the audit head and append. The append repeats only
+   retained parent roots; `ensureHead` still precedes `lockHead`.
+
+This removes the workspace/membership cycle against role creation, invite authorization and
+workspace teardown, and the audit-actor account/domain cycle against member removal. The actor
+account is required even when the assignee is somebody else. Assignment validation and the
+existing record, collaborator and board lock modes remain unchanged. Raw `lockAndRequireMember(s)`
+remain membership-only primitives for prelocked callers and unaudited leaves: AI queue already
+retains its audit parents, polling does not append, and saved-view creation does not append.
+
+Nested callers acquire their complete set before gate, session or aggregate locks. Assistant write
+decisions retain the actor and resolved principals' account/membership union and role authorization,
+then `retainAuditOrganization`, before the chat session/tool rows; task-board admission and owner
+helpers only repeat retained locks. Radar task creation retains actor S, workspace S, sorted
+actor/assignee memberships X, then organization S before its signal and nested task write.
+`WorkflowExecutionPrincipalService.resolveLocked` discovers all owner targets from the immutable
+version's complete action projection, includes task attribution membership and the system account
+when it is the audit actor, and retains accounts in ascending id, workspace S, the single sorted
+membership/role phase, then organization S. Outbox delivery calls it before the workspace gate;
+canonical step execution calls it before the run/step locks. The authorization member keeps its
+ordinary waiting membership X lock; additional execution-member probes retain NOWAIT X.
+No new root may first appear inside a nested owner/task helper.
+
+Owner/assignee and confinement NOWAIT probes remain nonwaiting exceptions. Exact MySQL
+`3572/HY000` maps to 409 without an in-transaction retry; other failures retain their existing
+translation. Final account deletion's remaining-membership cascade, recipient traversal, and
+role/invite organization normalization are separate #1582 phases and are not changed here.
+
+`MembershipMutationLockOrderTest` pins direct acquisition order, empty batches and deduplication;
+workflow principal and assistant/Radar ordering tests pin enclosing boundaries.
+`MembershipRootOrderConcurrencyIntegrationTest` uses committed isolated fixtures, distinct
+principals/connections and exact mapper latches, observes physical workspace/account record waits,
+and verifies committed audits against role creation, invite acceptance, teardown and actor removal.
 
 ## Post-delete assignment recovery (#1941)
 
@@ -484,8 +521,10 @@ service-level cleanup.
   `workspace_member` X-locks preceding credential cleanup. Every one of these shapes already
   exists on `main` through the same transactions' trailing audits; credential cleanup only makes
   the last two explicit, and none of them is introduced or worsened here.
-- Membership-first record mutations (`lockAndRequireMember` → audit) racing a member's leave (`lockById` → `lockRecipientMemberships` → membership delete): the ordering is `origin/main`'s and unchanged here; this branch only appends the shared-root credential tail to the leave. A dedicated drill for that race was retired from this branch because it asserted a root-first leave design that was reverted; it belongs with #1582.
-- Deal-collaborator replacement (#1793) takes every requested membership `FOR UPDATE` in ascending user-id order, then the deal row `FOR UPDATE`, then the collaborator rows, then its trailing audit. It replaced a collaborator-rows-first order (the clear, then the deal and membership rows `FOR SHARE` inside an `INSERT ... SELECT`) that inverted against `updateOwner`, deal deletion and offboarding. Through its trailing audit it stays in the #1582 class above, and its membership locks are now exclusive and held across the wait for the deal row: a replacement queued behind a stage `move`, which locks whole stage columns, blocks the listed members' own writes until it completes. A cap on the size of the collaborator list, still a follow-up, would bound that.
+- Phase 1 audited assignments now retain actor/workspace/organization parents before aggregate
+  writes as specified above. Other recipient/offboarding and final-cascade ordering concerns remain
+  tracked in #1582.
+- Deal-collaborator replacement (#1793, #1582 phase 1) retains actor/workspace S before every requested membership `FOR UPDATE` in ascending user-id order, then organization S, the deal row `FOR UPDATE`, collaborator rows, and its trailing audit. It replaced a collaborator-rows-first order (the clear, then the deal and membership rows `FOR SHARE` inside an `INSERT ... SELECT`) that inverted against `updateOwner`, deal deletion and offboarding. Its membership locks stay exclusive and held across the wait for the deal row: a replacement queued behind a stage `move`, which locks whole stage columns, blocks the listed members' own writes until it completes. A cap on the size of the collaborator list, still a follow-up, would bound that.
   - The replacement reads the collaborator rows `FOR UPDATE` through the primary key twice: before the clear, and again after the clear and any insert. That makes the audited and returned lists current reads rather than the snapshot that its unlocked existence check opened before any lock was held (#1942).
   - The first read takes the deal's clustered-row locks, and the gap lock on the next primary-key record, one statement before the clear. Its locks are a subset of the clear's, so it adds no wait-for edge. It does lengthen three existing deadlock windows:
     - **A member dropped while being offboarded.** Offboarding's `removeCollaboratorFromWorkspace` and `removeCollaboratorAnywhere` lock a member's secondary-index entry before its clustered row. The replacement locks the clustered rows first, and reaches the secondary entries only in the clear.
@@ -657,10 +696,11 @@ execution and prevents offboarding's user-before-workflow order from forming a c
 
 ## Task board mutations
 
-Task creation/full update lock the requested active membership first. Mutations that can change board positions run at `READ_COMMITTED` and acquire the exact tenant-plane `task_board_lock` workspace root through the atomic insert-or-update mapper statement.
+Task creation/full update retain audit actor S → workspace S → requested active membership X →
+organization S before the board. Mutations that can change board positions run at `READ_COMMITTED` and acquire the exact tenant-plane `task_board_lock` workspace root through the atomic insert-or-update mapper statement.
 
-- Create: membership → board root → linked people → exact visibility grants → insert.
-- Full update: membership → board root → exact task rows → linked people → exact visibility grants.
+- Create: retained audit roots/membership → board root → linked people → exact visibility grants → insert.
+- Full update: retained audit roots/membership → board root → exact task rows → linked people → exact visibility grants.
 - Completion/deletion/movement: board root → exact task rows.
 - Due-date-only reschedule: exact task only; no board root.
 
@@ -906,7 +946,9 @@ The framework acquires its locks in exactly this order:
    custom-role row and its `workspace_role_permission` rows `FOR UPDATE` ascending by role id. Roles
    are locked only for users with a non-empty requirement, so the actor's custom role is locked and
    the owner's never is. An owner whose account deletion is reserved is refused here with `User N is
-   not a member of this workspace` even while its membership row is still active.
+   not a member of this workspace` even while its membership row is still active. After that
+   authorization phase, the framework retains organization `FOR SHARE` through
+   `retainAuditOrganization`, before the session or any delegate locks.
 2. Exact `(workspace_id,id)` `ai_chat_session` root `FOR UPDATE`.
 3. Exact `ai_chat_tool_call` row `FOR UPDATE`.
 4. Immediate tier only: exact `ai_chat_turn` row `FOR UPDATE`. The real order is session → tool call

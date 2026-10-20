@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import java.util.List;
 import java.util.Map;
 
 import org.springframework.stereotype.Service;
@@ -35,9 +36,8 @@ public class WorkflowInterventionService {
             long interventionId,
             WorkflowInterventionOwnerRequest request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        if (request.ownerUserId() != null) {
-            workspaceService.lockAndRequireMember(workspaceId, request.ownerUserId());
-        }
+        workspaceService.lockAssignmentMembers(workspaceId,
+            request.ownerUserId() == null ? List.of() : List.of(request.ownerUserId()));
         WorkflowIntervention intervention = requireForUpdate(workspaceId, interventionId);
         WorkflowRun run = requireRun(workspaceId, intervention.getWorkflowRunId());
         if (operationsMapper.updateInterventionOwner(
