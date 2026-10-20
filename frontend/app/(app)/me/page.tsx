@@ -21,6 +21,7 @@ import SectionUnavailable from "@/app/components/SectionUnavailable";
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
 import type { Activity, Contact, Deal, DealRisk, Note, RelationshipTemperature, Task, User } from "@/app/lib/types";
 import { formatDate, formatDateTime, pickDominantCurrency } from "@/app/lib/utils";
+import { settingsDestination } from "@/app/lib/settingsEntryPoints";
 import { computeKpis } from "@/app/components/overview/analytics/metrics";
 
 import Rise from "@/app/components/motion/Rise";
@@ -148,7 +149,7 @@ export default async function MePage() {
                         <span>{t("lastActive", { date: formatDateTime(user.lastLoginAt, locale) })}</span>
                     </div>
                     <Link
-                        href="/account"
+                        href={settingsDestination("account.home").href}
                         className="inline-flex items-center gap-1.5 font-medium text-brand transition-colors hover:text-brand-hover"
                     >
                         <Cog6ToothIcon className="size-4" />

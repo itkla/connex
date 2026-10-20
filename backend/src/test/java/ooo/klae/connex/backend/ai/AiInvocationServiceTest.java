@@ -9,11 +9,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.same;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
@@ -27,6 +30,8 @@ import static org.mockito.Mockito.when;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -37,6 +42,7 @@ import java.util.concurrent.locks.LockSupport;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
@@ -60,6 +66,12 @@ import ooo.klae.connex.backend.ai.masking.MaskingLeakException;
 import ooo.klae.connex.backend.ai.masking.PromptAssembly;
 import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.introrationale.IntroRationaleContent;
+import ooo.klae.connex.backend.ai.mission.AiAgentBudgetService;
+import ooo.klae.connex.backend.ai.mission.AiAgentBudgetService.AiAgentDispatchReservation;
+import ooo.klae.connex.backend.ai.mission.AiAgentCapabilityGate;
+import ooo.klae.connex.backend.ai.mission.AiAgentExecutionPolicy;
+import ooo.klae.connex.backend.ai.mission.AiAgentRunPersistenceService;
+import ooo.klae.connex.backend.ai.mission.AiAgentScopePolicy;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiMessage;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
@@ -85,6 +97,9 @@ import ooo.klae.connex.backend.ai.provider.AiToolDefinition;
 import ooo.klae.connex.backend.ai.provider.AiToolExchange;
 import ooo.klae.connex.backend.ai.provider.ResolvedAiProvider;
 import ooo.klae.connex.backend.beans.AiChatMessage;
+import ooo.klae.connex.backend.beans.AiAgentSegment;
+import ooo.klae.connex.backend.beans.AiAgentRun;
+import ooo.klae.connex.backend.dto.AiAgentRunCreateRequest;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.AiBudgetExhaustedException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
@@ -2258,6 +2273,269 @@ class AiInvocationServiceTest {
     }
 
     @Test
+    void minimumAcceptedMissionCheckpointsThenCompletesAReportWithinItsRootAllowance() {
+        var request = new AiAgentRunCreateRequest("2ec8b877-06f4-44a1-b315-e8ad20a61a8c", "record_review_v1",
+                "Review this record", new AiAgentRunCreateRequest.Scope("record", "person", 41),
+                new AiAgentRunCreateRequest.Limits(null, AiAgentBudgetService.MIN_RUN_TOKENS, null));
+        AiAgentBudgetService.requireFeasibleCreation(new ObjectMapper().writeValueAsBytes(request.goal()).length,
+                request.limits().maxTokens());
+        var root = new AiAgentRun();
+        root.setMissionType(request.missionType());
+        root.setDefinitionVersion(1);
+        root.setRuntimeContractVersion(2);
+        root.setMaxSteps(request.limits().maxSteps());
+        root.setMaxTokens(request.limits().maxTokens());
+        root.setExecutionDeadlineAt(LocalDateTime.ofInstant(NOW.plusSeconds(900), ZoneOffset.UTC));
+        root.setHardDeadlineAt(root.getExecutionDeadlineAt());
+        var budgets = new AiAgentBudgetService();
+        var persistence = mock(AiAgentRunPersistenceService.class);
+        var active = new AtomicReference<AiAgentSegment>();
+        when(persistence.maxOutputTokens(any(), anyInt(), anyInt())).thenAnswer(call ->
+                budgets.maxOutputTokens(active.get(), call.getArgument(1), call.getArgument(2)));
+        when(persistence.reserveDispatch(any(), anyLong())).thenAnswer(call -> {
+            long ceiling = call.getArgument(1);
+            assertTrue(ceiling <= active.get().getReservedTokens());
+            return new AiAgentDispatchReservation(31, 37, 1, 1, ceiling);
+        });
+        doAnswer(call -> {
+            active.get().setKnownSteps(active.get().getKnownSteps() + 1);
+            active.get().setKnownInputTokens((int) call.getArgument(2));
+            active.get().setKnownOutputTokens((int) call.getArgument(3));
+            return null;
+        }).when(persistence).recordUsage(any(), any(), anyInt(), anyInt());
+        when(aiProvider.toolCallingCapability(resolved.target())).thenReturn(AiToolCallingMode.NATIVE_FUNCTIONS);
+        when(aiProvider.contextWindowTokens(resolved.target())).thenReturn(131072);
+        when(aiProvider.maxOutputTokens(resolved.target())).thenReturn(16384);
+        var json = new ObjectMapper();
+        var catalog = new AiAssistantToolCatalog();
+        var assembler = new AiAssistantPromptAssembler(json, catalog);
+        var schema = new AiAssistantStepSchema(json, catalog);
+        var guard = new AiAssistantStepGuard(catalog);
+        var goal = new AiChatMessage();
+        goal.setAuthorKind("user");
+        goal.setContent(request.goal());
+
+        for (int segmentNo = 1; segmentNo <= 2; segmentNo++) {
+            var reservation = budgets.reserve(root, segmentNo, NOW);
+            assertEquals(segmentNo == 1, reservation.continuationCapable());
+            assertEquals(segmentNo == 1 ? 16384 : 65536, reservation.tokens());
+            var segment = new AiAgentSegment();
+            segment.setReservedSteps(reservation.steps());
+            segment.setReservedTokens(reservation.tokens());
+            active.set(segment);
+            var policy = new AiAgentExecutionPolicy(31, 37, 1, null, goal, new AiAgentScopePolicy("person", 41),
+                    reservation.steps(), reservation.deadline(), null, null, persistence,
+                    mock(AiAgentCapabilityGate.class), 2, segmentNo, 1, null,
+                    reservation.continuationCapable(), reservation.tokens());
+            boolean closing = segmentNo == 2;
+            providerReturns(closing
+                    ? new AiCompletionResult("{\"text\":\"Record reviewed.\",\"citations\":[],\"suggestions\":[],\"title\":null}", 0, 0, "stop")
+                    : new AiCompletionResult("", 0, 0, "tool_calls", AiStructuredOutputEnforcement.JSON_SCHEMA,
+                            "", AiReasoningMode.NONE, List.of(new AiToolCall("checkpoint", "checkpoint_segment",
+                                    "{\"expectedPlanRevision\":\"1\",\"expectedCheckpointRevision\":\"1\",\"nextPlanItemKey\":null,"
+                                            + "\"memory\":{\"summary\":\"\",\"citations\":[]},\"phase\":\"reporting\"}"))));
+            var completion = policy.execute(() -> {
+                var context = new MaskingContext();
+                var nativeTools = new AiNativeToolRequest(
+                        assembler.nativeToolDefinitions(AiAssistantToolCatalog.ALL), List.of(), null, closing);
+                int envelope = service.serializedPromptBytes(assembler.fixedNativePrompt(AiAssistantToolCatalog.ALL),
+                        schema.finalResponseSchema(), AiReasoningMode.NONE, nativeTools);
+                var prompt = assembler.assembleNative(List.of(goal),
+                        new AiAssistantToolResult(Map.of("missionContext", Map.of("memory", "")), List.of()),
+                        List.of(), context, new AiChatResourceRegistry(), List.of(),
+                        AiAssistantPromptBudget.from(new AiProviderCapabilities(AiStructuredOutputEnforcement.JSON_SCHEMA,
+                                AiReasoningMode.NONE, 131072, 16384, AiToolCallingMode.NATIVE_FUNCTIONS), 16384, envelope),
+                        AiAssistantPromptAssembler.SkillContext.NONE, AiAssistantToolCatalog.ALL);
+                var invocation = new AiInvocation(AiFeature.ASSISTANT_CHAT, context, prompt, List.of(),
+                        16384, 0.2, false, null, AiInvocationProtocol.NATIVE_TOOLS);
+                return service.completeNativeToolsRepairable(invocation, AiAssistantStep.FinalAnswer.class,
+                        guard.forStep(AiAssistantToolCatalog.ALL, Set.of()), guard.finalAnswerForIssuedPlaceholders(Set.of()),
+                        schema.finalResponseSchema(), nativeTools,
+                        directAdmission, providerAttemptGuard);
+            });
+            if (closing) {
+                var content = assertInstanceOf(AiNativeToolCompletion.Content.class, completion);
+                var parsed = assertInstanceOf(AiStructuredOutcome.Parsed.class, content.attempt().outcome());
+                assertEquals("Record reviewed.", assertInstanceOf(AiAssistantStep.FinalAnswer.class, parsed.value()).text());
+            } else {
+                assertEquals("checkpoint_segment", assertInstanceOf(AiNativeToolCompletion.Tool.class, completion).providerCall().name());
+            }
+            var settlement = budgets.settle(segment);
+            root.setConsumedSteps(root.getConsumedSteps() + settlement.steps());
+            root.setConsumedTokens(root.getConsumedTokens() + settlement.tokens());
+        }
+        assertEquals(2, root.getConsumedSteps());
+        assertTrue(root.getConsumedTokens() <= request.limits().maxTokens());
+        verify(aiProvider, times(2)).complete(any());
+    }
+
+    @Test
+    void smallSegmentPassesClampedOutputToProviderAndConservativeAccounting() {
+        var persistence = mock(AiAgentRunPersistenceService.class);
+        var mission = mission(persistence);
+        AiInvocation invocation = missionInvocation("Review the selected record");
+        int promptTokens = service.serializedPromptBytes(invocation.prompt(), null, AiReasoningMode.NONE);
+        var segment = new AiAgentSegment();
+        segment.setReservedSteps(4);
+        segment.setReservedTokens(8192);
+        when(persistence.maxOutputTokens(eq(mission), anyInt(), eq(16384))).thenAnswer(call ->
+                new AiAgentBudgetService().maxOutputTokens(segment, call.getArgument(1), call.getArgument(2)));
+        var dispatch = new AiAgentDispatchReservation(31, 37, 1, 1, 8192);
+        when(persistence.reserveDispatch(mission, 8192)).thenReturn(dispatch);
+        providerReturns(new AiCompletionResult("Review complete.", 0, 0, "stop"));
+
+        mission.execute(() -> service.complete(invocation));
+
+        ArgumentCaptor<AiCompletionRequest> request = ArgumentCaptor.forClass(AiCompletionRequest.class);
+        verify(aiProvider).complete(request.capture());
+        assertEquals(8192 - promptTokens, request.getValue().maxTokens());
+        assertTrue(request.getValue().maxTokens() < invocation.maxTokens());
+        verify(persistence).reserveDispatch(mission, 8192);
+        verify(persistence).recordUsage(mission, dispatch, promptTokens, 8192 - promptTokens);
+        verify(budgetLease).settle(promptTokens, 8192 - promptTokens);
+        ArgumentCaptor<AiInvocation> budgetInvocation = ArgumentCaptor.forClass(AiInvocation.class);
+        verify(budgetCoordinator).reserve(eq(ORG_ID), budgetInvocation.capture(), anyString());
+        assertEquals(request.getValue().maxTokens(), budgetInvocation.getValue().maxTokens());
+        assertTrue(budgetInvocation.getValue().outputTokensClamped());
+    }
+
+    @Test
+    void missionBelowOutputFloorRefusesBeforeProviderOrBudgetAdmission() {
+        var persistence = mock(AiAgentRunPersistenceService.class);
+        var mission = mission(persistence);
+        AiInvocation invocation = missionInvocation("Review the selected record");
+        int promptTokens = service.serializedPromptBytes(invocation.prompt(), null, AiReasoningMode.NONE);
+        var segment = new AiAgentSegment();
+        segment.setReservedSteps(4);
+        segment.setReservedTokens(8192);
+        segment.setKnownInputTokens(8192 - promptTokens - 255);
+        when(persistence.maxOutputTokens(eq(mission), anyInt(), eq(16384))).thenAnswer(call ->
+                new AiAgentBudgetService().maxOutputTokens(segment, call.getArgument(1), call.getArgument(2)));
+
+        var refused = assertThrows(AiAssistantLoopException.class,
+                () -> mission.execute(() -> service.complete(invocation)));
+
+        assertEquals("mission_budget_exhausted", refused.terminalReason());
+        verify(aiProvider, never()).complete(any());
+        verifyNoInteractions(budgetCoordinator, providerTransport);
+        verify(persistence, never()).reserveDispatch(any(), anyLong());
+        verify(persistence, never()).recordUsage(any(), any(), anyInt(), anyInt());
+    }
+
+    @Test
+    void missionRepairRecomputesOutputFromItsLargerPromptAndPriorUsage() {
+        var persistence = mock(AiAgentRunPersistenceService.class);
+        var mission = mission(persistence);
+        var segment = new AiAgentSegment();
+        segment.setReservedSteps(4);
+        segment.setReservedTokens(8192);
+        when(persistence.maxOutputTokens(eq(mission), anyInt(), eq(16384))).thenAnswer(call ->
+                new AiAgentBudgetService().maxOutputTokens(segment, call.getArgument(1), call.getArgument(2)));
+        when(persistence.reserveDispatch(eq(mission), anyLong())).thenAnswer(call ->
+                new AiAgentDispatchReservation(31, 37, 1, segment.getKnownSteps() + 1, call.getArgument(1)));
+        doAnswer(call -> {
+            segment.setKnownSteps(segment.getKnownSteps() + 1);
+            segment.setKnownInputTokens(segment.getKnownInputTokens() + (int) call.getArgument(2));
+            segment.setKnownOutputTokens(segment.getKnownOutputTokens() + (int) call.getArgument(3));
+            return null;
+        }).when(persistence).recordUsage(eq(mission), any(), anyInt(), anyInt());
+        AiResponseSchema schema = new AiResponseSchema("intro_rationale",
+                new ObjectMapper().createObjectNode().put("type", "object"));
+        AiInvocation initial = missionInvocation("Review the selected record");
+        providerReturns(new AiCompletionResult("malformed", 100, 50, "stop"));
+        var attempt = mission.execute(() -> service.completeStructuredRepairable(
+                initial, IntroRationaleContent.class, AiRawOutputGuard.PERMIT_ALL, schema));
+        assertInstanceOf(AiStructuredOutcome.Malformed.class, attempt.outcome());
+        AiInvocation repaired = new AiInvocation(initial.feature(), initial.context(),
+                PromptAssembly.builder(initial.context()).system("Return the required JSON object")
+                        .userTurn("Repair the malformed response: " + "malformed".repeat(30)).build(),
+                16384, initial.temperature());
+        providerReturns(new AiCompletionResult("{\"rationale\":\"Review complete.\"}", 100, 50, "stop"));
+
+        mission.execute(() -> service.completeStructuredRepairable(
+                repaired, IntroRationaleContent.class, AiRawOutputGuard.PERMIT_ALL, schema));
+
+        ArgumentCaptor<AiCompletionRequest> requests = ArgumentCaptor.forClass(AiCompletionRequest.class);
+        verify(aiProvider, times(2)).complete(requests.capture());
+        int initialPrompt = service.serializedPromptBytes(initial.prompt(), schema, AiReasoningMode.NONE);
+        int repairPrompt = service.serializedPromptBytes(repaired.prompt(), schema, AiReasoningMode.NONE);
+        assertEquals(8192 - initialPrompt, requests.getAllValues().getFirst().maxTokens());
+        assertEquals(8192 - 150 - repairPrompt, requests.getAllValues().getLast().maxTokens());
+        assertEquals(300, segment.getKnownInputTokens() + segment.getKnownOutputTokens());
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {400, 422, 503})
+    void definiteFallbackRejectionSettlesTheActualMissionDispatchWhileServerFailureStaysUncertain(int status) {
+        var persistence = mock(ooo.klae.connex.backend.ai.mission.AiAgentRunPersistenceService.class);
+        var capability = mock(ooo.klae.connex.backend.ai.mission.AiAgentCapabilityGate.class);
+        var mission = new AiAgentExecutionPolicy(31, 37, 1, null, null,
+                new AiAgentScopePolicy("person", 41), 4,
+                Instant.parse("2030-01-01T00:00:00Z"), null, null, persistence, capability);
+        AiInvocation invocation = missionInvocation("Summarize");
+        int promptTokens = service.serializedPromptBytes(invocation.prompt(), null, AiReasoningMode.NONE);
+        when(persistence.maxOutputTokens(mission, promptTokens, 16384)).thenReturn(8192 - promptTokens);
+        var reservations = new java.util.ArrayList<AiAgentDispatchReservation>();
+        when(persistence.reserveDispatch(eq(mission), anyLong())).thenAnswer(call -> {
+            var dispatch = new AiAgentDispatchReservation(
+                    31, 37, 1, reservations.size() + 1, call.getArgument(1));
+            reservations.add(dispatch);
+            return dispatch;
+        });
+        if (status != 503) {
+            when(aiInvocationAdmissionService.acquireDirect()).thenReturn(fallbackAdmission);
+        }
+        when(aiProvider.complete(any(AiCompletionRequest.class))).thenAnswer(call -> {
+            AiCompletionRequest request = call.getArgument(0);
+            assertEquals(8192 - promptTokens, request.maxTokens());
+            try {
+                request.providerAttemptExecutor().execute(() -> {
+                    request.providerAttemptExecutor().beforeSend();
+                    throw new AiProviderRequestRejectedException("provider", status);
+                });
+            } catch (AiProviderRequestRejectedException exception) {
+                if (!exception.permitsStructuredOutputFallback()) {
+                    throw exception;
+                }
+            }
+            request.providerAttemptExecutor().execute(() -> {
+                request.providerAttemptExecutor().beforeSend();
+                return "fallback";
+            });
+            return new AiCompletionResult("done", 1, 1, "stop");
+        });
+        if (status == 503) {
+            assertThrows(AiProviderRequestRejectedException.class,
+                    () -> mission.execute(() -> service.complete(invocation)));
+            verify(persistence, never()).recordUsage(any(), any(), anyInt(), anyInt());
+            assertEquals(1, reservations.size());
+        } else {
+            mission.execute(() -> service.complete(invocation));
+            assertEquals(2, reservations.size());
+            var order = inOrder(persistence);
+            order.verify(persistence).reserveDispatch(eq(mission), anyLong());
+            order.verify(persistence).recordUsage(mission, reservations.getFirst(), 0, 0);
+            order.verify(persistence).reserveDispatch(eq(mission), anyLong());
+            order.verify(persistence).recordUsage(mission, reservations.getLast(), 1, 1);
+        }
+        assertTrue(reservations.stream().allMatch(dispatch -> dispatch.tokenCeiling() == 8192));
+        verify(budgetLease).close();
+    }
+
+    private AiInvocation missionInvocation(String text) {
+        AiInvocation base = invocation(text);
+        lenient().when(aiProvider.contextWindowTokens(resolved.target())).thenReturn(131072);
+        when(aiProvider.maxOutputTokens(resolved.target())).thenReturn(16384);
+        return new AiInvocation(AiFeature.ASSISTANT_CHAT, base.context(), base.prompt(), 16384, 0.2);
+    }
+
+    private AiAgentExecutionPolicy mission(AiAgentRunPersistenceService persistence) {
+        return new AiAgentExecutionPolicy(31, 37, 1, null, null,
+                new AiAgentScopePolicy("person", 41), 4, NOW.plusSeconds(180), null, null,
+                persistence, mock(AiAgentCapabilityGate.class), 2, 1, 1, null, false, 8192);
+    }
+
+    @Test
     void structuredFallbackGetsItsOwnQuotaCommitAuditAndEgressChecks() {
         AiInvocation invocation = invocation("Summarize relationship state");
         AiRequestDeadline originalDeadline = AiRequestDeadline.afterMillis(60_000);
@@ -2341,6 +2619,53 @@ class AiInvocationServiceTest {
         verify(invocationAdmission).commitLeaderInvocation();
         verify(fallbackAdmission, never()).commitInvocation();
         verify(fallbackAdmission).close();
+        verify(providerTransport).run();
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void durablePrivacyIsRecheckedAtActualFallbackEgress(boolean expectedEpoch) {
+        var mapper = mock(ooo.klae.connex.backend.mappers.AiChatMapper.class);
+        var session = new ooo.klae.connex.backend.beans.AiChatSession();
+        session.setMissionTaintSeq(1);
+        var barrier = new ooo.klae.connex.backend.beans.AiAgentPrivacyBarrier();
+        barrier.setGeneration(1);
+        when(mapper.getPrivacySession(WORKSPACE_ID, 7)).thenReturn(session);
+        when(mapper.getPrivacyBarrier(WORKSPACE_ID)).thenReturn(barrier);
+        var token = new ooo.klae.connex.backend.ai.assistant.AiChatPrivacyToken(WORKSPACE_ID, 7, 1, 1);
+        AiInvocation invocation = invocation("Summarize relationship state");
+        when(aiInvocationAdmissionService.acquireDirect()).thenReturn(fallbackAdmission);
+        when(aiProvider.complete(any(AiCompletionRequest.class))).thenAnswer(call -> {
+            AiCompletionRequest request = call.getArgument(0);
+            assertThrows(AiProviderRequestRejectedException.class, () ->
+                    request.providerAttemptExecutor().execute(() -> {
+                        request.providerAttemptExecutor().beforeSend();
+                        providerTransport.run();
+                        throw new AiProviderRequestRejectedException("provider", 400);
+                    }));
+            barrier.setGeneration(2);
+            request.providerAttemptExecutor().execute(() -> {
+                request.providerAttemptExecutor().beforeSend();
+                providerTransport.run();
+                return "forbidden fallback";
+            });
+            throw new AssertionError("Durable privacy did not reject fallback egress");
+        });
+        java.util.function.Supplier<AiStructuredOutcome<IntroRationaleContent>> complete = () ->
+                ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard.execute(mapper, token,
+                        () -> service.completeStructured(invocation, IntroRationaleContent.class, invocationAdmission));
+        var refused = assertThrows(ooo.klae.connex.backend.ai.assistant.AiAssistantLoopException.class,
+                () -> {
+                    if (expectedEpoch) {
+                        restrictionEpoch.runWithExpectedEgressEpoch(WORKSPACE_ID,
+                                restrictionEpoch.current(WORKSPACE_ID), () -> complete.get());
+                    } else {
+                        complete.get();
+                    }
+                });
+        assertEquals("restrictions_changed", refused.detailReason());
+        verify(invocationAdmission).commitLeaderInvocation();
+        verify(fallbackAdmission, never()).commitInvocation();
         verify(providerTransport).run();
     }
 

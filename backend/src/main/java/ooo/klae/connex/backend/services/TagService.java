@@ -1,6 +1,8 @@
 package ooo.klae.connex.backend.services;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
@@ -38,6 +40,28 @@ public class TagService {
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "color");
+
+    /** Retains the exact resolved tag definition before an assistant acquires its target root. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Tag lockDefinitionForShare(int id) {
+        Tag tag = tagMapper.getTagByIdForShare(workspaceService.getCurrentWorkspaceId(), id);
+        if (tag == null) {
+            throw new ResourceNotFoundException("Tag not found");
+        }
+        return tag;
+    }
+
+    /** Locks existing associations only, after the caller has retained the record root. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void lockAssociationsForUpdate(String kind, int id) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        switch (kind) {
+            case "person" -> tagMapper.getTagsByPersonIdForUpdate(workspaceId, id);
+            case "company" -> tagMapper.getTagsByCompanyIdForUpdate(workspaceId, id);
+            case "deal" -> tagMapper.getTagsByDealIdForUpdate(workspaceId, id);
+            default -> throw new IllegalArgumentException("Unsupported tag association kind");
+        }
+    }
 
     /**
      * Retrieves all {@code Tag} records in the active workspace.

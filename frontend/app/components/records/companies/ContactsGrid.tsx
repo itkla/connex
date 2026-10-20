@@ -11,6 +11,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { type BusinessCardImportDraft, CreateContactPayload } from "@/app/lib/types";
 import { createContact, importBusinessCard, isFieldError, uploadContactPicture } from "@/app/lib/api";
+import { renderedWorkspaceId, workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { useTranslations } from "next-intl";
 
@@ -122,7 +123,9 @@ export default function ContactsGrid({ contacts, company, allTags }: { contacts:
                 createNewContact={async (
                     businessCard?: BusinessCardImportDraft,
                     duplicateReviewToken: string | null = null,
+                    init?: RequestInit,
                 ) => {
+                    const origin = init ?? workspacePinnedRequest(renderedWorkspaceId());
                     invalidatePendingClose();
                     const operationGeneration = closeGenerationRef.current;
                     const isCurrent = () => closeGenerationRef.current === operationGeneration;
@@ -130,19 +133,19 @@ export default function ContactsGrid({ contacts, company, allTags }: { contacts:
                     setIsCreating(true);
                     try {
                         const imported = businessCard
-                            ? await importBusinessCard(businessCard)
+                            ? await importBusinessCard(businessCard, origin)
                             : null;
                         const newContact = imported?.contact
                             ?? await createContact({
                                 ...newContactPayload,
                                 duplicateReviewToken: duplicateReviewToken ?? undefined,
-                            });
+                            }, origin);
                         if (!isCurrent()) return;
                         const reusedContact = imported?.disposition === 'reused';
                         let avatarUploadFailed = false;
                         if (imageFile && !reusedContact) {
                             try {
-                                await uploadContactPicture(newContact.id, imageFile);
+                                await uploadContactPicture(newContact.id, imageFile, origin);
                             } catch {
                                 avatarUploadFailed = true;
                             }

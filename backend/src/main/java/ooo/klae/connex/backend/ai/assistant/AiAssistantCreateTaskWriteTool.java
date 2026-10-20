@@ -16,6 +16,7 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.services.MutationAdmission;
 import ooo.klae.connex.backend.services.TaskService;
 import ooo.klae.connex.backend.tenant.Permission;
 import tools.jackson.databind.JsonNode;
@@ -101,7 +102,7 @@ public class AiAssistantCreateTaskWriteTool implements AiAssistantWriteTool {
         assignee.setId(execution.authority().userId());
         task.setAssignedTo(assignee);
         link(task, execution.row().target());
-        Task created = taskService.create(task);
+        Task created = taskService.create(task, execution.admission());
         Map<String, Object> outcome = new LinkedHashMap<>();
         outcome.put("status", EXECUTED);
         outcome.put("recordType", TASK);
@@ -124,14 +125,20 @@ public class AiAssistantCreateTaskWriteTool implements AiAssistantWriteTool {
     }
 
     @Override
-    public void undo(Authority authority, Inverse inverse) {
+    public void undo(Authority authority, Inverse inverse, MutationAdmission admission) {
         if (!TASK.equals(inverse.entityKind())) {
             throw new ConflictException("Assistant tool undo metadata is invalid");
         }
         taskService.deleteIf(
                 inverse.entityId(),
-                current -> inverse.fingerprint().equals(
-                        AiAssistantWriteTool.fingerprint(objectMapper, taskState(current))));
+                current -> {
+                    if (!inverse.fingerprint().equals(
+                            AiAssistantWriteTool.fingerprint(objectMapper, taskState(current)))) {
+                        return false;
+                    }
+                    admission.beforeMutation();
+                    return true;
+                });
     }
 
     @Override

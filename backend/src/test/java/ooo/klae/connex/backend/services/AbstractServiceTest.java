@@ -1,6 +1,10 @@
 package ooo.klae.connex.backend.services;
 
 import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -15,6 +19,7 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.test.context.transaction.AfterTransaction;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -43,19 +48,26 @@ import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
+import ooo.klae.connex.backend.mappers.ObjectDeletionQueueMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.mappers.UserObjectDeletionQueueMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.tenant.TenantContext;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
+import ooo.klae.connex.backend.storage.ObjectDeletionTask;
+import ooo.klae.connex.backend.storage.ObjectDeletionTransactionExecutor;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @Transactional
 @Import(AbstractServiceTest.ApprovalMutationTestConfiguration.class)
 public abstract class AbstractServiceTest {
+    private static final Duration OBJECT_DELETION_DRAIN_SAFETY_MARGIN = Duration.ofMinutes(10);
+    private static final int OBJECT_DELETION_DRAIN_LIMIT = 10;
 
     @TestConfiguration(proxyBeanMethods = false)
     static class ApprovalMutationTestConfiguration {
@@ -110,6 +122,11 @@ public abstract class AbstractServiceTest {
     @Autowired protected TenantContext tenantContext;
     @Autowired private PlatformTransactionManager fixtureTransactionManager;
     @Autowired private JdbcTemplate approvalFixtureJdbc;
+    @Autowired private ObjectDeletionQueueMapper fixtureDeletionQueueMapper;
+    @Autowired private UserObjectDeletionQueueMapper fixtureUserDeletionQueueMapper;
+    @Autowired private ObjectDeletionTransactionExecutor fixtureDeletionTransactionExecutor;
+    @Autowired private TenantWorkScope fixtureTenantWorkScope;
+    @Autowired private Clock fixtureClock;
 
     protected Workspace workspace;
     protected User currentUser;
@@ -145,6 +162,7 @@ public abstract class AbstractServiceTest {
             created.setName("Test Workspace");
             created.setSlug("default");
             workspaceMapper.insert(created);
+            TestEntityFixtures.seedExistingWorkspacePrivacy(approvalFixtureJdbc, created.getId());
             Workspace reloaded = workspaceMapper.getDefaultWorkspace();
             return reloaded == null ? created : reloaded;
         }), "default workspace");
@@ -189,6 +207,92 @@ public abstract class AbstractServiceTest {
     protected void clearAuthentication() {
         SecurityContextHolder.clearContext();
         clearRequestContext();
+    }
+
+    /**
+     * Drains one bounded batch per queue after rollback, when cancelled upload tombstones are
+     * visible again and no test transaction holds their locks. One indexed selection per queue
+     * keeps an empty drain cheap while repeated tests and runs advance both passes without sleeping.
+     * A row becomes eligible only once its next attempt is at least ten minutes overdue. Thus a
+     * fixture such as ManagedObjectRollbackIntegrationTest is never raced within its tombstone
+     * delay plus this margin; a test stalled beyond that interval is accepted as out of scope.
+     * The cutoff is rechecked under the executor's row lock, preserving the margin for a
+     * concurrently rescheduled row. The real executor deletes orphaned bytes and reschedules the
+     * second pass, which a later drain completes after its backoff and the same margin.
+     *
+     * <p>The shared default workspace's tenant queue uses its resolved route, and user-profile
+     * tombstones use the unrouted control-plane queue even when the default workspace is absent.
+     * Each task failure is left for a later drain so quota-lock contention with another test
+     * cannot fail this test's teardown. Ten tasks per queue bound each call's lock exposure; drains
+     * per run far outnumber leaked rows, keeping the backlog bounded as tasks recover.
+     */
+    @AfterTransaction
+    protected void drainLeakedObjectDeletions() {
+        LocalDateTime cutoff = LocalDateTime.ofInstant(fixtureClock.instant(), ZoneOffset.UTC)
+            .minus(OBJECT_DELETION_DRAIN_SAFETY_MARGIN);
+        drainLeakedUserObjectDeletions(cutoff, true);
+        Workspace defaultWorkspace = fixtureTenantWorkScope.unroutedRead(
+            workspaceMapper::getDefaultWorkspace);
+        if (defaultWorkspace == null) {
+            return;
+        }
+        drainLeakedObjectDeletions(defaultWorkspace.getId(), cutoff, true);
+    }
+
+    /**
+     * Drains a bounded batch in an explicitly selected workspace without suppressing task failures.
+     * Tests use an isolated workspace and explicit cutoff to exercise both passes without sleeps
+     * or exposing their rows to another fork's default-workspace hook.
+     *
+     * @param workspaceId the workspace owning the test's deletion rows
+     * @param cutoff the latest next-attempt time eligible for this pass, rechecked under row lock
+     */
+    protected void drainLeakedObjectDeletions(int workspaceId, LocalDateTime cutoff) {
+        drainLeakedObjectDeletions(workspaceId, cutoff, false);
+    }
+
+    private void drainLeakedObjectDeletions(
+            int workspaceId, LocalDateTime cutoff, boolean continueAfterTaskFailure) {
+        fixtureTenantWorkScope.inWorkspace(workspaceId, () -> {
+            for (ObjectDeletionTask task : fixtureDeletionQueueMapper.findDue(
+                    workspaceId, cutoff, OBJECT_DELETION_DRAIN_LIMIT)) {
+                try {
+                    fixtureDeletionTransactionExecutor.retryTenant(task, cutoff);
+                } catch (RuntimeException exception) {
+                    if (!continueAfterTaskFailure) {
+                        throw exception;
+                    }
+                }
+            }
+        });
+    }
+
+    /**
+     * Drains a bounded control-plane user-object batch without suppressing task failures.
+     * Tests supply an explicit cutoff and isolate selection of future-dated fixture rows so
+     * neither this drain nor another fork's hook can claim unrelated fixtures.
+     *
+     * @param cutoff the latest next-attempt time eligible for this pass, rechecked under row lock
+     */
+    protected void drainLeakedUserObjectDeletions(LocalDateTime cutoff) {
+        drainLeakedUserObjectDeletions(cutoff, false);
+    }
+
+    private void drainLeakedUserObjectDeletions(
+            LocalDateTime cutoff, boolean continueAfterTaskFailure) {
+        fixtureTenantWorkScope.unrouted(() -> {
+            for (ObjectDeletionTask task : fixtureUserDeletionQueueMapper.findDue(
+                    cutoff, OBJECT_DELETION_DRAIN_LIMIT)) {
+                try {
+                    fixtureDeletionTransactionExecutor.retryUser(task, cutoff);
+                } catch (RuntimeException exception) {
+                    if (!continueAfterTaskFailure) {
+                        throw exception;
+                    }
+                }
+            }
+            return null;
+        });
     }
 
     protected void clearRequestContext() {

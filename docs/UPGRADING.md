@@ -7,6 +7,49 @@ migration-discipline part of #87 §9 / #102).
 > The specific support window below is a **proposed** policy; confirm it before it is published to
 > customers.
 
+## Dormant assistant proposal-set storage (tenant V233)
+
+V233 adds the chat-owned proposal-set parent, nullable membership/preparation columns on tool
+calls, and tenant-local ancestry constraints. Existing calls retain their trust, statuses and
+timestamps; no proposal sets are backfilled or produced by the running application. The new
+storage participates in chat deletion, account-erasure attribution cleanup, tenant export and
+residual verification.
+
+Following the V220/V222/V230 nullable-column precedent, the tool-call columns are added separately
+with `ALGORITHM=INSTANT, LOCK=DEFAULT` (MySQL permits only the default lock clause with INSTANT).
+Ancestry indexes, the membership unique index and the FK-supporting index require
+`ALGORITHM=INPLACE, LOCK=NONE`. The child metadata/trust invariant uses BEFORE INSERT and BEFORE
+UPDATE triggers: adding an enforced CHECK to this retained table would require COPY on MySQL 8.4.
+The new parent table retains its CHECK constraints. These explicit algorithm/lock guards fail
+instead of silently rebuilding the retained chat tables or blocking writers for a table copy.
+
+The child FK is installed separately with `ALGORITHM=INPLACE, LOCK=NONE`, temporarily disabling
+`foreign_key_checks` **only on the migration connection**, then restoring its saved value. That
+connection performs no DML while checks are disabled. This is safe because every existing child
+has a null proposal key and concurrent legacy writers continue to omit the new columns; no
+production proposal-set writer may be enabled during this migration. Re-enabling FK checks does
+not validate old rows, so this procedure must not be reused after set production is activated.
+
+Online DDL still needs brief exclusive metadata locks, and index creation consumes I/O and index
+build space. Deploy outside long-running chat transactions and monitor metadata-lock waits and
+disk capacity. If a guarded ALTER fails, stop the migration, close its connection (especially if
+FK checks were suspended), and inspect the partially committed DDL before recovery. Keep proposal
+writers disabled; reconcile the applied statements and Flyway failure record through the normal
+migration recovery procedure before retrying. Do not remove algorithm/lock guards to force an
+upgrade through. The V233 migration test checks those guards, unchanged InnoDB tool-call table
+identity, FK-check restoration on the migration connection, and both trigger write paths; its
+MySQL account needs `PROCESS` to read `information_schema.INNODB_TABLES`.
+
+MySQL documents the [online FK/index operations](https://dev.mysql.com/doc/refman/8.4/en/innodb-online-ddl-operations.html)
+and [INSTANT lock restriction](https://dev.mysql.com/doc/refman/8.4/en/alter-table.html#alter-table-concurrency).
+
+The rollback floor stays `tenant/V232__ai_agent_runs.sql`: V233 is additive and dormant, and
+V232-compatible binaries continue writing null-set calls. The existing
+[V232 privacy and message-sequence cutover](#v232-mission-privacy-and-message-sequence-cutover)
+still applies, including when missions are disabled. Production set activation and set-specific
+privacy admission require a later semantic cutover; V233 alone authorizes neither. See the
+[storage contract](backend/AI_SECURITY.md#dormant-chat-proposal-set-storage-tenant-v233).
+
 ## AI identifier lookup keys (tenant V230)
 
 V230 adds four nullable derived columns to each of person, company and deal. Each ALTER explicitly
@@ -122,7 +165,7 @@ contract is in [AI_SECURITY.md](backend/AI_SECURITY.md#exposure-enforcement-acro
   [`deploy/staging/rollback-floor`](../deploy/staging/rollback-floor) in the **same PR** as any
   migration that earlier binaries cannot survive. Keep the highest such migration as one path
   relative to `backend/src/main/resources/db/migration/`, such as
-  `tenant/V228__drop_campaign_delivery_unsubscribe_tokens.sql`; blank lines and `#` comment lines
+  `tenant/V232__ai_agent_runs.sql`; blank lines and `#` comment lines
   are allowed. Staging records `backend_starting` before copying the target JAR into the live path.
   The floor has one exception: a matching transaction still in `prepared` or `frontend_stopped`,
   with **both** the live JAR and serving backend identified as the prior release, proves the target
@@ -144,6 +187,14 @@ contract is in [AI_SECURITY.md](backend/AI_SECURITY.md#exposure-enforcement-acro
   restored. Older target commits with no floor file retain the
   previous rollback behavior. This guard does not reverse migrations or replace the coordinated
   restart requirements below.
+
+### V232 mission privacy and message-sequence cutover
+
+V232 requires a coordinated drain of every old backend, scheduled worker, and message writer before migration. Keep message writes stopped through backfill and deploy only binaries that use the session's durable `message_seq_high_water` allocator for every message insertion. Deleting messages never resets that counter or the immutable first-mission taint boundary.
+
+The rollback floor is `tenant/V232__ai_agent_runs.sql`. Once this backend may have run, a pre-V232 binary cannot safely read or write enrolled chat holdings, even with missions disabled. Use forward recovery. Returning below this floor requires an explicit drain, terminal settlement, privacy purge and residual verification; disabling the flag alone is insufficient.
+
+Keep missions disabled until routed initialization has verified every workspace barrier, recovered legacy null-token turns and unowned mission attempts, and confirmed incomplete privacy work remains blocked. Missing barriers with mission evidence require repair, never generation-1 recreation. Complete the [mission acceptance gate](backend/AI_MISSIONS.md) and record synthetic staging evidence on #2101 before enabling exact provider declarations. Slice 1 requires a drained single serving JVM; mixed-version or multi-JVM operation is not supported by the local dispatch fence.
 
 ### Malware-scanning cutover — start the sidecar before the backend
 
@@ -184,6 +235,30 @@ replica, then start the new backend so Flyway can apply V170 with no old binary 
 not run old and new backend versions concurrently across this migration. The standard Compose
 runbook below already quiesces all writers and starts one backend with ingress closed; custom
 multi-replica deployments must enforce the same all-replicas-down boundary before migration.
+
+### V231 assistant proposal review expiry
+
+`tenant/V231__ai_proposal_review_expiry_cutover.sql` is an executable compatibility marker (`DO 0`).
+It changes no application table, stored timestamp, trust marker, or durable status. Ship it together
+with the seventy-two-hour guards on legacy approval, discard and AUTO execution, all delegate
+admission checkpoints, read projections, pending discovery and frontend disarming. A marker-only
+intermediate binary is not a compatible release.
+
+Drain every incompatible backend before serving the cutover; close ingress during the coordinated
+restart. Existing trusted pending proposals whose original `created_at` is at least seventy-two
+hours old immediately become non-actionable. Their history remains readable under existing
+authorization and retention rules. Completed outcomes and the independent ten-minute undo window
+are unchanged. Expiry is not deletion, archival, or a retained-chat privacy repair.
+
+**Rollback floor:** only a release carrying V231 and the complete expiry contract may serve after
+this cutover. Older binaries can execute known expired proposal IDs despite the unchanged schema.
+Staging automatic rollback and interrupted-deployment recovery therefore refuse a prior JAR lacking
+V231 and use the existing forward-recovery procedure. Do not remove the marker or relabel timestamps
+to permit rollback. A compatible V231 release is eligible for ordinary paired rollback only when
+it also meets every later cutover's rollback floor.
+
+The later [V232 mission privacy cutover](#v232-mission-privacy-and-message-sequence-cutover)
+raises the floor to V232. V231 introduces no proposal-set storage or producer.
 
 ### V227/V228 campaign unsubscribe cutover
 
@@ -1035,3 +1110,15 @@ version baselines exist.
 ## Ownership consent (#1534 slice 4o)
 
 Existing-scope owner promotions create offers; acceptance grants ownership. The HTTP, MFA, locking, control-plane, notice and cleanup contracts are in [Ownership offers](backend/OWNERSHIP_OFFERS.md). Founding, admin changes and last-owner checks retain their existing behavior. The self-offer card is authoritative on every catalog layout; ordinary inbox delivery retains the existing cross-catalog limitation.
+
+## Mission continuation and durable plans — tenant V235
+
+V235 adds bounded versioned mission plans, checkpoints, and memory. New missions use runtime contract 2. Existing runtime-1 missions retain their original single-segment behavior, limits, accounting, and deadlines; migration performs no content backfill or runtime promotion.
+
+Drain older serving binaries and mission workers before deploying this cutover. Keep missions disabled until the compatible context builder, version guards, accounting, recovery, privacy cleanup, and export validation are installed. The existing single-serving-JVM requirement remains.
+
+Column additions and the default change require `ALGORITHM=INSTANT, LOCK=DEFAULT`. Removing the old single-segment CHECK requires `ALGORITHM=INPLACE, LOCK=NONE`; triggers enforce bounded immutable attempt numbering for future writes. Explicit guards refuse unsupported operations rather than falling back to table copying. Deploy outside long-running transactions and monitor metadata-lock waits.
+
+DDL auto-commits. If migration fails, keep writers disabled, inspect the applied statements and Flyway failure record, and recover through the normal migration procedure. Do not bypass the algorithm guards.
+
+The rollback floor is `tenant/V235__ai_agent_continuation.sql`, including when missions are disabled. Earlier binaries cannot safely clean up runtime-2 holdings. Returning below the floor requires an explicit reviewed drain, settlement, privacy-purge, and residual-verification procedure.

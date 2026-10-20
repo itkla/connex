@@ -42,6 +42,7 @@ import ooo.klae.connex.backend.dto.ApprovalInboxItemDto;
 import ooo.klae.connex.backend.dto.ApprovalInboxRow;
 import ooo.klae.connex.backend.dto.ApprovalInboxScanPage;
 import ooo.klae.connex.backend.dto.ApprovalReminderRow;
+import ooo.klae.connex.backend.dto.ApprovalStepCandidatesDto;
 import ooo.klae.connex.backend.dto.DocumentApprovalDto;
 import ooo.klae.connex.backend.dto.DocumentApprovalStepDto;
 import ooo.klae.connex.backend.dto.DocumentContent;
@@ -246,6 +247,12 @@ public class DocumentApprovalService {
                 .contains(Permission.DOCUMENT_APPROVE))
             .collect(Collectors.toCollection(LinkedHashSet::new));
         return new ApproverPool(members, approvers);
+    }
+
+    private ApproverPool managementApproverPool(int workspaceId) {
+        List<User> members = workspaceService.documentApprovalCandidateMembers(workspaceId);
+        return new ApproverPool(members, members.stream().map(User::getId)
+            .collect(Collectors.toCollection(LinkedHashSet::new)));
     }
 
     /**
@@ -1015,6 +1022,42 @@ public class DocumentApprovalService {
                 effective, actorId, member.getId()))
             .map(ApprovalDelegateDto::from)
             .toList();
+    }
+
+    /**
+     * Lists active, authorized members outside the request's frozen separation exclusions, even
+     * when they are not currently assigned to the step. This advisory read never changes routing;
+     * mutations retain their existing locked validation. Missing attribution yields no candidates.
+     */
+    @Transactional(readOnly = true)
+    @RequirePermission(Permission.DOCUMENT_MANAGE)
+    public ApprovalStepCandidatesDto approverCandidates(int dealId, int documentId, int stepId) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        requireDeal(workspaceId, dealId);
+        DealDocument document = requireDocument(workspaceId, dealId, documentId);
+        DocumentApproval approval = approvalMapper.findPending(workspaceId, documentId);
+        if (approval == null || approval.getDealId() != dealId
+                || !"pending_approval".equals(document.getStatus())) {
+            throw new ResourceNotFoundException("Pending approval not found for this document");
+        }
+        approval = withChain(workspaceId, List.of(approval)).getFirst();
+        DocumentApprovalStep step = requireActiveStep(approval.getSteps(), stepId);
+        ApproverPool pool = managementApproverPool(workspaceId);
+        Set<Integer> exclusions = separationExclusions(approval, document);
+        EffectiveApprovers effective = eligibility.resolve(step, pool, exclusions);
+        List<ApprovalStepCandidatesDto.Candidate> candidates = attributionFailure(approval, document) == null
+            ? pool.members().stream()
+                .filter(member -> pool.approvers().contains(member.getId()))
+                .filter(member -> !exclusions.contains(member.getId()))
+                .map(ApprovalStepCandidatesDto.Candidate::from).toList()
+            : List.of();
+        int approvedCount = (int) step.getDecisions().stream()
+            .filter(decision -> APPROVED.equals(decision.getDecision()))
+            .map(DocumentApprovalDecision::getDecidedBy).distinct().count();
+        return new ApprovalStepCandidatesDto(candidates, step.getRequiredCount(), approvedCount,
+            effective.remainingNeeded(), step.getDecisions().stream()
+                .map(DocumentApprovalDecision::getDecidedBy).distinct().toList(),
+            List.copyOf(effective.eligible()));
     }
 
     /**

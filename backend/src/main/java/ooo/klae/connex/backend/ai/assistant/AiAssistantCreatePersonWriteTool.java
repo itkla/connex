@@ -128,7 +128,7 @@ public class AiAssistantCreatePersonWriteTool implements AiAssistantWriteTool {
                 new GuidedPersonRecordDto(request.name(), null, null, companyId,
                         request.title(), null, null, null, null),
                 AiAssistantCreationTemplatePin.use(execution.pinned(), companyId),
-                Map.of(), List.of()));
+                Map.of(), List.of()), execution.admission());
         if (created == null) {
             throw new IllegalStateException("Created contact could not be read back");
         }

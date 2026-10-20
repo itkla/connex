@@ -114,7 +114,7 @@ public class ControlCatalogRoutingInterceptor implements Interceptor {
     }
 
     /** Whether the mapped statement is physically control-plane-only. */
-    boolean routesToControlCatalog(String statementId) {
+    static boolean routesToControlCatalog(String statementId) {
         if (CONTROL_CATALOG_STATEMENTS.contains(statementId)) {
             return true;
         }

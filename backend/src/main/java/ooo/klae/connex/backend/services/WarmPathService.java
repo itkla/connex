@@ -60,6 +60,7 @@ public class WarmPathService {
     private final AuthService authService;
     private final TaskService taskService;
     private final Clock clock;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     /** A dormant relationship must be untouched at least this long to surface as a re-warm target. */
     private static final int MIN_DORMANT_DAYS = 30;
@@ -135,7 +136,10 @@ public class WarmPathService {
         if (limit <= 0) {
             return List.of();
         }
-        List<IntroCandidatePerson> candidates = introductionMapper.findWarmPathCandidates(workspaceId);
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId)
+            .workspaceIdsJson();
+        List<IntroCandidatePerson> candidates =
+            introductionMapper.findWarmPathCandidates(workspaceId, orgWorkspaceIdsJson);
         if (candidates.size() < 2) {
             return List.of();
         }

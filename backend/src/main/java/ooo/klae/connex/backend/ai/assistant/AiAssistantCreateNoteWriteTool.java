@@ -14,6 +14,7 @@ import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.services.MutationAdmission;
 import ooo.klae.connex.backend.services.NoteService;
 import ooo.klae.connex.backend.tenant.Permission;
 import tools.jackson.databind.JsonNode;
@@ -95,7 +96,7 @@ public class AiAssistantCreateNoteWriteTool implements AiAssistantWriteTool {
         note.setTitle(request.title());
         note.setVisibility(request.visibility());
         link(note, target);
-        Note created = noteService.create(note);
+        Note created = noteService.create(note, execution.admission());
         Map<String, Object> outcome = new LinkedHashMap<>();
         outcome.put("status", EXECUTED);
         outcome.put("recordType", NOTE);
@@ -118,14 +119,20 @@ public class AiAssistantCreateNoteWriteTool implements AiAssistantWriteTool {
     }
 
     @Override
-    public void undo(Authority authority, Inverse inverse) {
+    public void undo(Authority authority, Inverse inverse, MutationAdmission admission) {
         if (!NOTE.equals(inverse.entityKind())) {
             throw new ConflictException("Assistant tool undo metadata is invalid");
         }
         noteService.deleteIf(
                 inverse.entityId(),
-                current -> inverse.fingerprint().equals(
-                        AiAssistantWriteTool.fingerprint(objectMapper, noteState(current))));
+                current -> {
+                    if (!inverse.fingerprint().equals(
+                            AiAssistantWriteTool.fingerprint(objectMapper, noteState(current)))) {
+                        return false;
+                    }
+                    admission.beforeMutation();
+                    return true;
+                });
     }
 
     @Override

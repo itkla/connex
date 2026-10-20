@@ -46,7 +46,9 @@ import {
     PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { uploadAttachmentImage } from "@/app/lib/api";
+import { isWorkspaceUnavailableError, uploadAttachmentImage } from "@/app/lib/api";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
+import { renderedWorkspaceId, workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
 import {
     defaultAltFromFileName,
     INLINE_MANAGED_IMAGE_ACCEPT,
@@ -118,7 +120,7 @@ type Props = {
     editor: Editor | null;
     labels: ToolbarLabels;
     compact?: boolean;
-    ensureNoteId?: () => Promise<number>;
+    ensureNoteId?: (init?: RequestInit) => Promise<number | null>;
     filePickerOpen?: boolean;
     onFilePickerOpenChange?: (open: boolean) => void;
 };
@@ -254,10 +256,11 @@ function ImagePopover({
 }: {
     editor: Editor;
     labels: ToolbarLabels;
-    ensureNoteId?: () => Promise<number>;
+    ensureNoteId?: (init?: RequestInit) => Promise<number | null>;
 }) {
     const sourceId = useId();
     const altId = useId();
+    const showApiError = useApiErrorToast();
     const sourceErrorId = `${sourceId}-error`;
     const altErrorId = `${altId}-error`;
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -308,6 +311,7 @@ function ImagePopover({
     };
 
     const uploadImageFile = async (file: File) => {
+        const origin = workspacePinnedRequest(renderedWorkspaceId());
         if (!ensureNoteId) {
             toastError(labels.imageUploadFailed);
             return;
@@ -318,8 +322,9 @@ function ImagePopover({
         }
         setUploading(true);
         try {
-            const noteId = await ensureNoteId();
-            const attachment = await uploadAttachmentImage("note", noteId, file);
+            const noteId = await ensureNoteId(origin);
+            if (noteId === null) return;
+            const attachment = await uploadAttachmentImage("note", noteId, file, origin);
             const nextSource = normalizeNoteImageSource(attachment.url);
             if (!nextSource) {
                 toastError(labels.imageUploadFailed);
@@ -330,8 +335,12 @@ function ImagePopover({
             setAlt(nextAlt);
             applyImageAttrs(nextSource, nextAlt);
             setOpen(false);
-        } catch {
-            toastError(labels.imageUploadFailed);
+        } catch (error) {
+            if (isWorkspaceUnavailableError(error)) {
+                showApiError(error);
+            } else {
+                toastError(labels.imageUploadFailed);
+            }
         } finally {
             setUploading(false);
             setDragActive(false);

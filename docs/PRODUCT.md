@@ -26,7 +26,7 @@ A feature that shows a signal but offers no action breaks the loop. A feature th
 - **Not a generic database.** Screens are opinionated about relationships and next actions, not neutral tables of rows. If a surface could belong to any record-keeping tool, it is underdesigned for Connex.
 - **Not a compliance console.** Connex is rigorously compliant under the hood (APPI, tenant isolation, auditability), but compliance is plumbing the everyday user should feel as safety, not read as statute. Legal machinery surfaces only on the pages built for it (see principle 3).
 - **Not a dense admin shell.** Configuration exists to serve selling and relationship work, not the other way around. Admin surfaces are visited occasionally by a minority of users; they never set the tone of the product.
-- **Not an autonomous actor. AI proposes; the user applies.** Every AI output in Connex — briefs, risk rationales, intro suggestions, assistant answers — is a proposal a person can inspect, question, and ignore. When the assistant offers to change an existing record, it prepares a validated proposal and shows exactly what would change; nothing is changed until the user explicitly applies it. The one deliberate exception: while answering a request, the assistant may immediately add something small — log an activity, create a task or note, add a tag — and always says so; activities, tasks, and notes offer a short undo window, and a tag is removed the same way any tag is. Automation (workflows) acts only within rules a person explicitly built, reviewed, and turned on. We never claim "AI never touches records" — the truthful promise is that every AI write is announced, and either confirmed by the user first or plainly reversible on the record.
+- **Not an autonomous actor. AI proposes; the user applies — or pre-authorizes, within a standing approval they built, reviewed, and can revoke.** Every AI output in Connex — briefs, risk rationales, intro suggestions, assistant answers — is a proposal a person can inspect, question, and ignore. Unless covered by a standing approval, when the assistant offers to change an existing record, it prepares a validated proposal and shows exactly what would change; nothing is changed until the user explicitly applies it. Small additions are another exception: while answering a request, the assistant may immediately add something small — log an activity, create a task or note, add a tag — and always says so; activities, tasks, and notes offer a short undo window, and a tag is removed the same way any tag is. Automation (workflows) acts only within rules a person explicitly built, reviewed, and turned on. A standing approval follows the same promise. It lets a member pre-authorize specific Ask Connex actions for a selected set of records, a saved view, or the records they own, within daily and per-run limits and until an expiry date, and they can revoke it at any time. They create it only by applying a preview that shows exactly those choices; a chat message never creates one or widens it. Every change under it is checked against the member's permissions at the moment it is made, so it can never do more than they are currently allowed to do, and losing the needed permission stops it. Organization administrators choose which actions can be pre-authorized, set the highest limits, and can switch standing approvals off for everyone. Sending anything outside Connex, deleting or otherwise destroying data, merging records, changing permissions, and turning on workflows can never be pre-authorized. We never claim "AI never touches records" — the truthful promise is that every AI write is announced, and either confirmed by the user first, made under a standing approval that names whose approval it was, or plainly reversible on the record.
 
 ## 2. Who it's for
 
@@ -72,6 +72,7 @@ Numbered and testable. Cite them by number in reviews.
 |---|---|---|---|
 | The relationship metric (the differentiator) | **Warmth**; bands: **warmth band** (hot / warm / cool / cold); trend: "warmth is cooling" | **温度感**; bands: **温度帯**（ホット／ウォーム／クール／コールド） | relationship temperature, temperature band, relationship score; 温度バンド, 関係の温度, 関係性の温度, 関係スコア, 温度 alone as the metric name |
 | The signals triage surface | **Radar** ("Relationship Radar" only as an occasional full name in onboarding/marketing prose) | **レーダー** | Relationship Radar as the everyday label |
+| Read-only Ask Connex review of one selected record | **Record review** | **レコードの確認** | — |
 | The personal work page | **My Work** — your tasks, your relationships, your follow-ups | **マイワーク** | Profile (for this page); マイページ |
 | Company record | **Company** | **会社** | account (for the record); アカウント, 取引先 (legal pages: allowed) |
 | Person record | **Contact** (labels, columns, counts, search groups); "person/people" only inside explanatory prose | **連絡先**; 文中の「人」は可 | People (as a label for contact lists) |
@@ -83,6 +84,7 @@ Numbered and testable. Cite them by number in reviews.
 | A person in a workspace | **member** | **メンバー** | user (except auth/sign-in/session contexts), teammate (as a label; fine in informal prose) |
 | Org-level admin | **organization administrator** | **組織管理者** | — |
 | The automation object | **workflow**; **automation** only as the category noun; **recipe** for a pre-built template | **ワークフロー**／**自動化**（総称）／**レシピ** | rule (except as "legacy automations" inside the one migration screen while it exists), canonical, runtime, legacy runtime |
+| A member's pre-authorization for Ask Connex to apply bounded changes | **standing approval** | **事前承認** | mandate, autopilot |
 | The act/record of introducing | **introduction** ("intro" in tight buttons) | **紹介** | — |
 | The route through the network | **intro path** | **紹介ルート** | warm path (as a label); ウォームパス, 温かい経路 |
 | Standalone linked note record | **Note** | **メモ** | ノート |
@@ -162,7 +164,33 @@ The canonical behavior for each recurring moment. **This section is normative ta
 
 **Permission denied.** Page-level: a calm explanation with a way back and, where useful, who to ask. Inline/toast: "You don't have permission to do that here. Ask a workspace admin." Never a permission constant, never a bare 403. If a whole surface is unavailable to a role, prefer not rendering the entry point over showing a locked door.
 
-**AI moments.** AI proposes; the user applies: assistant-prepared changes to existing records are validated proposals that show exactly what would change and wait for explicit confirmation; small additions made while answering (an activity, task, note, or tag) apply immediately and are announced — activities, tasks, and notes with a short undo window, a tag removed the same way it was added. Every AI surface names its evidence and how fresh it is — or plainly says it can't. Transparency stays in plain register: the assistant discloses "Chats here belong to this workspace — its admins can see them, even after you leave." once per session list (not per chat); card scanning tells the truth about where reading happens and what is kept — "Cards are read on Connex's own servers when possible; otherwise the image is sent to your organization's AI provider. A copy of the card is saved with the contact — check the details before saving." Deeper guarantees live in docs and admin AI settings, not in everyday copy.
+**AI moments.** AI proposes; the user applies — or pre-authorizes within a standing approval: assistant-prepared changes to existing records outside a standing approval are validated proposals that show exactly what would change and wait for explicit confirmation; small additions made while answering (an activity, task, note, or tag) apply immediately and are announced — activities, tasks, and notes with a short undo window, a tag removed the same way it was added. Every change made under a standing approval is announced in the chat or background work where it happens and credited in record history and the audit log — "Ask Connex, on behalf of {member}, under {standing approval name}" — so the exact approval is always identifiable. Each change can be undone the same way when the change allows it, and appears in that approval's own history. Everything still waiting on a person — proposals, questions, and approvals from chats and background work — collects in one place. Every AI surface names its evidence and how fresh it is — or plainly says it can't. Transparency stays in plain register: the assistant discloses "Chats here belong to this workspace — its admins can see them, even after you leave." once per session list (not per chat); card scanning tells the truth about where reading happens and what is kept — "Cards are read on Connex's own servers when possible; otherwise the image is sent to your organization's AI provider. A copy of the card is saved with the contact — check the details before saving." Deeper guarantees live in docs and admin AI settings, not in everyday copy.
+
+Assistant proposals awaiting a decision have a seventy-two-hour review window from their original
+creation. At the deadline, Apply and Discard become unavailable and the card explains that a new
+proposal is needed. Reopening or refreshing never extends the window. Completed, discarded,
+failed and undone outcomes retain their meaning; an executed action's ten-minute undo window is
+independent. Expired proposal history remains readable under the existing access rules.
+
+When an assistant answer fails, Retry is offered only after Connex confirms that the answer made no
+changes and can identify that answer's own question unambiguously. A newer request in the chat
+removes Retry from the older answer. If changes were saved, their action cards remain visible; if
+Connex cannot confirm what was saved, it says so and asks the member to check their records.
+Continue from here puts a follow-up in the composer for the member to read and edit, without sending it.
+
+The requester's per-call execution evidence lets an answer that only read records, tasks, or
+activities retain Retry. Every call must be a read or a proposal in a server-guaranteed terminal,
+non-executable state (rejected or expired). A still-proposed or pending change keeps Retry hidden:
+another tab or an older action card could apply it after any check. A card's review deadline alone
+does not establish a terminal outcome; an action admitted before expiry may still finish afterward.
+Unknown tools or execution states, and older servers without this evidence, keep the conservative
+check-records guidance.
+Reconciliation re-checks the failed answer's own execution evidence, including after a proposal is
+approved. Once this client has seen a saved change for that answer, later refreshes cannot restore
+Retry by omitting its action card. An unreadable or missing proposal outcome keeps Retry hidden.
+Each Retry click revalidates that answer's execution evidence and action cards with the server
+before sending and proceeds only when that fresh evidence still rules out executable or saved
+changes. A failed check keeps Retry hidden and shows the existing guidance to check records.
 
 ## 7. Where things live
 

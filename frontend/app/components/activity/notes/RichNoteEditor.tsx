@@ -38,7 +38,7 @@ type Props = {
     className?: string;
     /** Miniaturized layout for embedding in a dialog: shorter body, condensed toolbar, no drag handle. */
     compact?: boolean;
-    ensureNoteId?: () => Promise<number>;
+    ensureNoteId?: (init?: RequestInit) => Promise<number | null>;
 };
 
 /**

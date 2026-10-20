@@ -15,6 +15,7 @@ import {
     editRecordComment,
     getCommentThread,
     getCommentThreads,
+    isWorkspaceUnavailableError,
     removeCommentReaction,
     reopenCommentThread,
     replyToCommentThread,
@@ -25,6 +26,7 @@ import { normalizeNoteImageSource } from '@/app/components/activity/notes/editor
 import type { DraftKeyParts } from '@/app/lib/formDrafts';
 import { COMMENT_URL_KEY } from '@/app/hooks/listStateUrl';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import type {
     RecordComment,
     RecordCommentReactionKey,
@@ -70,6 +72,7 @@ export default function CommentsSection({
     className,
 }: Props) {
     const t = useTranslations('Comments');
+    const showApiError = useApiErrorToast('Comments');
     const searchParams = useSearchParams();
     const reduceMotion = useReducedMotion();
     const { activeWorkspaceId } = useWorkspace();
@@ -209,12 +212,13 @@ export default function CommentsSection({
             setComposerValue('');
             composerToken.current = null;
             toastSuccess(t('posted'));
-        } catch {
-            toastError(t('postFailed'));
+        } catch (error) {
+            if (isWorkspaceUnavailableError(error)) showApiError(error, 'postFailed');
+            else toastError(t('postFailed'));
         } finally {
             setSubmitting(false);
         }
-    }, [submitting, loaded, composerValue, targetType, targetId, t]);
+    }, [submitting, loaded, composerValue, targetType, targetId, t, showApiError]);
 
     const submitReply = useCallback(
         async (
@@ -246,13 +250,15 @@ export default function CommentsSection({
                     toastError(t('conflict'));
                     setLoaded(false);
                     setRefreshNonce((nonce) => nonce + 1);
+                } else if (isWorkspaceUnavailableError(error)) {
+                    showApiError(error, 'postFailed');
                 } else {
                     toastError(t('postFailed'));
                 }
                 return false;
             }
         },
-        [t],
+        [t, showApiError],
     );
 
     const submitEdit = useCallback(
@@ -280,17 +286,18 @@ export default function CommentsSection({
                     setRefreshNonce((nonce) => nonce + 1);
                     return true;
                 }
-                toastError(t('editFailed'));
+                if (isWorkspaceUnavailableError(error)) showApiError(error, 'editFailed');
+                else toastError(t('editFailed'));
                 return false;
             }
         },
-        [t],
+        [t, showApiError],
     );
 
     const attachImage = useCallback(
-        async (file: File): Promise<string | null> => {
+        async (file: File, init?: RequestInit): Promise<string | null> => {
             try {
-                const attachment = await uploadAttachmentImage(targetType, targetId, file);
+                const attachment = await uploadAttachmentImage(targetType, targetId, file, init);
                 const source = normalizeNoteImageSource(attachment.url);
                 if (!source) {
                     toastError(t('imageUploadFailed'));

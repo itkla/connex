@@ -13,7 +13,13 @@ import {
 import { resolveAiGeneration } from '@/app/lib/aiGeneration';
 import { isProtectedPath } from "@/app/lib/protectedRoutes";
 import { isProtectedMediaPath } from "@/app/lib/protectedMedia";
+import { observeProposalReviewClock } from "@/app/lib/proposalReviewClock";
 import { settingsDestination } from "@/app/lib/settingsEntryPoints";
+import {
+    pinsToRenderedWorkspace,
+    rememberedWorkspaceName,
+    renderedWorkspaceId,
+} from "@/app/lib/renderedWorkspace";
 
 import type {
     AuthenticationResponseJSON,
@@ -47,8 +53,12 @@ function clientWorkspaceId(): string | null {
 
 function workspaceIdFromCookieHeader(cookie: string): number | null {
     const match = cookie.match(/(?:^|;\s*)connex_workspace=([^;]+)/);
-    if (!match) return null;
-    const value = match[1].trim();
+    return match ? parseWorkspaceId(match[1]) : null;
+}
+
+/** Parses a workspace id the way the backend reads its header and cookie: a trimmed decimal integer. */
+function parseWorkspaceId(raw: string): number | null {
+    const value = raw.trim();
     if (!/^[+-]?\d+$/.test(value)) return null;
     const workspaceId = Number(value);
     return Number.isInteger(workspaceId) && workspaceId > 0 && workspaceId <= 2_147_483_647
@@ -56,8 +66,125 @@ function workspaceIdFromCookieHeader(cookie: string): number | null {
         : null;
 }
 
+/**
+ * Whether a request is a workspace-bound write: it changes state on a route outside the account,
+ * organization and selection routes that `UNPINNED_WRITE_ROUTES` keeps on the cookie (#1732).
+ * @param path the request path
+ * @param mutating whether the request changes state
+ */
+function isWorkspaceBoundWrite(path: string, mutating: boolean): boolean {
+    return mutating && pinsToRenderedWorkspace(path);
+}
+
+/**
+ * The workspace a browser request is sent for. Reads, and writes to account, organization and
+ * selection routes, follow the `connex_workspace` cookie as before, so the first safe read after a
+ * revocation can heal the selection (#1108). Workspace-bound writes follow the workspace the app
+ * shell renders instead, so content composed in one workspace can never ride a healed cookie into
+ * another; the server refuses the pinned write when that workspace is gone (#1732). An explicit
+ * `X-Workspace-Id` in the caller's init overrides both.
+ * @param path the request path
+ * @param mutating whether the request changes state
+ * @returns the header value to send, or null to send none
+ */
+function requestWorkspaceId(path: string, mutating: boolean): string | null {
+    const rendered = isWorkspaceBoundWrite(path, mutating) ? renderedWorkspaceId() : null;
+    return rendered === null ? clientWorkspaceId() : String(rendered);
+}
+
+/**
+ * The `X-Workspace-Id` a request actually carries: the caller's explicit header, or else the one
+ * {@link requestWorkspaceId} chose.
+ */
+function outgoingWorkspaceId(init: RequestInit, chosen: string | null): string | null {
+    const workspace = new Headers(init.headers).get("X-Workspace-Id") ?? chosen;
+    if (workspace !== null && parseWorkspaceId(workspace) === null) {
+        throw new TypeError("X-Workspace-Id must contain one valid workspace id");
+    }
+    return workspace;
+}
+
+/**
+ * Fixes the workspace a write will carry at the moment it is requested. `requestJson` reads the pin
+ * synchronously, but a helper that first awaits something (an identity, a CSRF token) would reach it
+ * only after the wait, when a workspace switch may already have published another workspace. Such
+ * helpers call this before their first await (#1732). Account, organization and selection writes, an
+ * explicit caller header, and a page with no app shell are left as they are.
+ * @param path the request path
+ * @param init the caller's request options
+ * @returns the options with the rendered workspace's `X-Workspace-Id` added where it applies
+ */
+function pinWriteNow(path: string, init: RequestInit = {}): RequestInit {
+    const rendered = renderedWorkspaceId();
+    if (rendered === null
+            || !isWorkspaceBoundWrite(path, true)
+            || new Headers(init.headers).has("X-Workspace-Id")) {
+        return init;
+    }
+    const headers = new Headers(init.headers);
+    headers.set("X-Workspace-Id", String(rendered));
+    return { ...init, headers };
+}
+
+/**
+ * Re-codes a failed workspace-bound write as {@link WORKSPACE_UNAVAILABLE_CODE} when the workspace
+ * it carried refused it, and returns every other failure unchanged.
+ * @param error the failure the response produced
+ * @param path the request path
+ * @param mutating whether the request changed state
+ * @param pinnedWorkspace the `X-Workspace-Id` value the request carried
+ */
+function refusalFor(
+    error: ApiError,
+    path: string,
+    mutating: boolean,
+    pinnedWorkspace: string | null,
+): ApiError {
+    return isWorkspaceBoundWrite(path, mutating) ? workspaceRefusal(error, pinnedWorkspace) : error;
+}
+
+/**
+ * Recognizes the backend's refusal of a request pinned to a workspace the caller no longer belongs
+ * to — `TenantResolutionInterceptor` answers `403 FORBIDDEN "Not a member of workspace {id}"` — and
+ * re-codes it as {@link WORKSPACE_UNAVAILABLE_CODE}, carrying the workspace and the name the viewer
+ * last saw for it. Any other failure is returned unchanged.
+ * @param error the failure the response produced
+ * @param pinnedWorkspace the `X-Workspace-Id` value the request carried
+ */
+function workspaceRefusal(error: ApiError, pinnedWorkspace: string | null): ApiError {
+    const workspaceId = pinnedWorkspace === null ? null : parseWorkspaceId(pinnedWorkspace);
+    if (workspaceId === null
+            || error.status !== 403
+            || error.code !== "FORBIDDEN"
+            || error.message !== `Not a member of workspace ${workspaceId}`) {
+        return error;
+    }
+    return workspaceUnavailableError(workspaceId, error.message, error.correlationId);
+}
+
+/**
+ * Builds the {@link WORKSPACE_UNAVAILABLE_CODE} refusal for a workspace, naming it as the viewer last
+ * saw it.
+ * @param workspaceId the workspace that is no longer available
+ * @param message the diagnostic message, never shown to the viewer
+ * @param correlationId the server correlation id, when a response carried one
+ */
+function workspaceUnavailableError(workspaceId: number, message: string, correlationId?: string): ApiError {
+    const refusal = new ApiError(message, 403, WORKSPACE_UNAVAILABLE_CODE, undefined, correlationId);
+    refusal.workspaceId = workspaceId;
+    refusal.workspaceName = rememberedWorkspaceName(workspaceId) ?? undefined;
+    return refusal;
+}
+
+/**
+ * The workspace a business-card capture is scoped to and later submitted under. It follows the
+ * rendered workspace like every other write, so a capture started after a safe read healed the
+ * cookie is still pinned to the workspace on screen (#1732).
+ */
 function clientRecoveryWorkspaceId(): string | null {
     if (typeof document === "undefined") return null;
+    const rendered = renderedWorkspaceId();
+    if (rendered !== null) return String(rendered);
     const workspaceId = workspaceIdFromCookieHeader(document.cookie);
     return workspaceId == null ? null : String(workspaceId);
 }
@@ -94,6 +221,17 @@ const inFlightAssistantTurns = new Map<string, {
     request: Promise<Types.AiChatTurnAccepted>;
 }>();
 const clientRequestIdentityInvalidationListeners = new Set<() => void>();
+const pendingPinnedWriteIdentities = new Set<AbortController>();
+
+/**
+ * Abandons every pinned write still preparing its request identity or CSRF retry, because a workspace or
+ * account transition has begun or landed (#1732). A write prepared under the previous selection must
+ * not be sent once the shell may already render another workspace.
+ */
+function abandonPendingPinnedWrites() {
+    for (const waiting of pendingPinnedWriteIdentities) waiting.abort();
+    pendingPinnedWriteIdentities.clear();
+}
 
 if (typeof window !== "undefined") {
     window.addEventListener("storage", (event) => {
@@ -103,6 +241,7 @@ if (typeof window !== "undefined") {
         else if (action === "account") invalidateAccountStorage();
         else if (action === "refresh") reconcileBrowserAccount();
         if (action === "logout" || action === "account") resetPrivilegedMfaState();
+        abandonPendingPinnedWrites();
         invalidateClientRequestIdentity();
         if (action === "logout") {
             clearAllDrafts();
@@ -233,6 +372,7 @@ function signalClientRequestIdentityTransition(action: ClientIdentityTransition)
     if (action === "account") invalidateAccountStorage();
     if (action === "logout") resetBrowserAccount();
     if (action === "account" || action === "logout") resetPrivilegedMfaState();
+    abandonPendingPinnedWrites();
     invalidateClientRequestIdentity();
     broadcastClientRequestIdentityTransition(action);
 }
@@ -246,6 +386,7 @@ export function synchronizeBrowserAccount(userId: number): void {
     if (adoptBrowserAccount(userId) !== "replaced") return;
     clearAllDrafts();
     resetPrivilegedMfaState();
+    abandonPendingPinnedWrites();
     invalidateClientRequestIdentity();
     broadcastClientRequestIdentityTransition("refresh");
 }
@@ -284,6 +425,33 @@ async function resolveClientRequestIdentity(): Promise<ResolvedClientRequestIden
 
 async function currentClientRequestIdentity(): Promise<string | null> {
     return (await resolveClientRequestIdentity())?.request ?? null;
+}
+
+/**
+ * Resolves the request identity for a write that has already fixed its workspace with
+ * {@link pinWriteNow}. The wait is registered before it starts, so a workspace or account transition
+ * that begins while it is pending abandons the write rather than sending it after the shell may
+ * have moved to another workspace (#1732).
+ * @param preflight optional preparation guarded by the same transition and identity checks
+ * @returns the identity, or null when none can be proven
+ * @throws Error when a transition abandoned the write while it waited
+ */
+async function identityBeforePinnedWrite(preflight?: () => Promise<void>): Promise<string | null> {
+    const waiting = new AbortController();
+    pendingPinnedWriteIdentities.add(waiting);
+    const identityEpoch = clientRequestIdentityEpoch;
+    try {
+        if (preflight) {
+            await preflight();
+        }
+        const identity = await currentClientRequestIdentity();
+        if (waiting.signal.aborted || (preflight && clientRequestIdentityEpoch !== identityEpoch)) {
+            throw new Error("The workspace changed before this request was sent");
+        }
+        return identity;
+    } finally {
+        pendingPinnedWriteIdentities.delete(waiting);
+    }
 }
 
 /** Returns a non-reversible browser-storage context for the active user and workspace. */
@@ -754,14 +922,17 @@ async function requestJson<T>(
     path: string,
     init: RequestInit = {},
     workspaceSelectionBody: "standard" | "required" | "optional" = "standard",
+    workspaceHeader: "auto" | "omit" = "auto",
+    beforeSend?: (headers: Headers) => void,
 ): Promise<T> {
     const suppression = privilegedMfaSuppression(path, init.method);
     if (suppression !== null) {
         throw privilegedMfaConfinementError(suppression);
     }
     const locale = requestLocale(init);
-    const workspaceId = clientWorkspaceId();
     const mutating = isMutating(init.method);
+    const workspaceId = workspaceHeader === "omit" ? null : requestWorkspaceId(path, mutating);
+    const pinnedWorkspace = outgoingWorkspaceId(init, workspaceId);
     const stepUpGeneration = passkeyStepUpGeneration;
     const hasMultipartBody = typeof FormData !== "undefined" && init.body instanceof FormData;
 
@@ -773,6 +944,7 @@ async function requestJson<T>(
             ...csrf,
         });
         new Headers(init.headers).forEach((value, key) => headers.set(key, value));
+        beforeSend?.(headers);
         return fetch(`${API_BASE}${path}`, {
             ...init,
             credentials: "include",
@@ -796,8 +968,12 @@ async function requestJson<T>(
         res = await sendWithCsrfRetry();
     }
 
+    if (typeof window !== 'undefined' && path.startsWith('/api/ai/assistant/')) {
+        observeProposalReviewClock(res.headers);
+    }
+
     if (!res.ok) {
-        throw await getAuthenticatedApiError(res);
+        throw refusalFor(await getAuthenticatedApiError(res), path, mutating, pinnedWorkspace);
     }
 
     try {
@@ -890,7 +1066,8 @@ async function requestMultipart<T>(
         throw privilegedMfaConfinementError(suppression);
     }
     const locale = requestLocale(init);
-    const workspaceId = clientWorkspaceId();
+    const workspaceId = requestWorkspaceId(path, true);
+    const pinnedWorkspace = outgoingWorkspaceId(init, workspaceId);
     const stepUpGeneration = passkeyStepUpGeneration;
     const send = (csrf: Record<string, string>) => {
         const headers = new Headers({
@@ -922,7 +1099,7 @@ async function requestMultipart<T>(
         response = await sendWithCsrfRetry();
     }
     if (!response.ok) {
-        throw await getAuthenticatedApiError(response);
+        throw refusalFor(await getAuthenticatedApiError(response), path, true, pinnedWorkspace);
     }
     const text = await response.text();
     return text ? JSON.parse(text) as T : undefined as T;
@@ -1026,11 +1203,15 @@ async function postWorkspaceSelectionJson<T>(
     path: string,
     body: unknown = {},
     bodyRequired = true,
+    init: RequestInit = {},
+    workspaceHeader: "auto" | "omit" = "auto",
+    beforeSend?: (headers: Headers) => void,
 ): Promise<T> {
     return requestJson<T>(path, {
+        ...init,
         method: "POST",
         body: JSON.stringify(body),
-    }, bodyRequired ? "required" : "optional");
+    }, bodyRequired ? "required" : "optional", workspaceHeader, beforeSend);
 }
 
 async function postFormData<T>(path: string, body: FormData, init: RequestInit = {}): Promise<T> {
@@ -1071,13 +1252,14 @@ async function pollAiGeneration<T>(
  * generation, active workspace, and locale. Requests without a provable identity bypass de-duplication.
  */
 async function dedupedAiPost<T>(path: string, init: RequestInit = {}): Promise<T> {
+    const pinned = pinWriteNow(path, init);
     if (typeof window === "undefined" || Object.keys(init).length > 0) {
-        const accepted = await postJson<Types.AiGenerationStatus<T>>(path, {}, init);
+        const accepted = await postJson<Types.AiGenerationStatus<T>>(path, {}, pinned);
         return pollAiGeneration(accepted, init);
     }
-    const identity = await currentClientRequestIdentity();
+    const identity = await identityBeforePinnedWrite();
     if (identity == null) {
-        const accepted = await postJson<Types.AiGenerationStatus<T>>(path, {}, init);
+        const accepted = await postJson<Types.AiGenerationStatus<T>>(path, {}, pinned);
         return pollAiGeneration(accepted, init);
     }
     const key = `${identity}\u0000${path}`;
@@ -1090,7 +1272,7 @@ async function dedupedAiPost<T>(path: string, init: RequestInit = {}): Promise<T
         const accepted = await postJson<Types.AiGenerationStatus<T>>(
             path,
             {},
-            { signal: controller.signal },
+            { ...pinned, signal: controller.signal },
         );
         const response = await pollAiGeneration<T>(accepted, { signal: controller.signal });
         if (await currentClientRequestIdentity() !== identity) {
@@ -1429,6 +1611,10 @@ export class ApiError extends Error {
      * denial, which the backend answers with an explanatory body.
      */
     emptyBody?: boolean;
+    /** For {@link WORKSPACE_UNAVAILABLE_CODE} only: the workspace the refused request was pinned to. */
+    workspaceId?: number;
+    /** For {@link WORKSPACE_UNAVAILABLE_CODE} only: that workspace's name, when the shell ever listed it. */
+    workspaceName?: string;
 
     constructor(
         message: string,
@@ -1446,6 +1632,21 @@ export class ApiError extends Error {
         this.correlationId = correlationId;
         this.emptyBody = emptyBody;
     }
+}
+
+/**
+ * A state-changing request refused because the workspace it was pinned to no longer includes the
+ * caller (#1732). Nothing was written anywhere; whatever the user composed is still on screen and
+ * belongs to that workspace, so it must be reported rather than resubmitted elsewhere. Assigned by
+ * the client from the backend's membership refusal, never sent by the backend itself.
+ */
+export const WORKSPACE_UNAVAILABLE_CODE = "WORKSPACE_UNAVAILABLE";
+
+/** Whether a rejection is the {@link WORKSPACE_UNAVAILABLE_CODE} refusal of a pinned write. */
+export function isWorkspaceUnavailableError(error: unknown): error is ApiError & { workspaceId: number } {
+    return error instanceof ApiError
+        && error.code === WORKSPACE_UNAVAILABLE_CODE
+        && typeof error.workspaceId === "number";
 }
 
 export function isFieldError(err: unknown): err is ApiError & { fieldErrors: ApiFieldErrors } {
@@ -2870,8 +3071,8 @@ export function preflightCompanyDuplicates(
     );
 }
 
-export function updateCompany(id: number, payload: Types.UpdateCompanyPayload) {
-    return putJson<Types.Company>(`/api/companies/${id}`, payload);
+export function updateCompany(id: number, payload: Types.UpdateCompanyPayload, init: RequestInit = {}) {
+    return putJson<Types.Company>(`/api/companies/${id}`, payload, init);
 }
 
 export async function uploadCompanyLogo(companyId: number, file: File, init: RequestInit = {}) {
@@ -2994,8 +3195,9 @@ export function commitInteractionHistoryImport(
  */
 export async function downloadCsv(path: string, filename: string, init: RequestInit = {}): Promise<void> {
     const locale = localeFromCookieHeader(document.cookie);
-    const workspaceId = clientWorkspaceId();
     const mutating = isMutating(init.method);
+    const workspaceId = requestWorkspaceId(path, mutating);
+    const pinnedWorkspace = outgoingWorkspaceId(init, workspaceId);
     const send = (csrf: Record<string, string>) => {
         const headers = new Headers({
             ...(init.body ? { "Content-Type": "application/json" } : {}),
@@ -3019,7 +3221,7 @@ export async function downloadCsv(path: string, filename: string, init: RequestI
         res = await send(mutating ? await csrfHeader() : {});
     }
     if (!res.ok) {
-        throw await getAuthenticatedApiError(res);
+        throw refusalFor(await getAuthenticatedApiError(res), path, mutating, pinnedWorkspace);
     }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
@@ -3122,44 +3324,64 @@ async function runBulk(
     return merged;
 }
 
-export function bulkAddTagToContacts(ids: number[], tagId: number) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/persons/bulk/tags/add`, { ids: chunk, tagId }));
+export function bulkAddTagToContacts(ids: number[], tagId: number, init: RequestInit = {}) {
+    const path = "/api/persons/bulk/tags/add";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk, tagId }, origin));
 }
 
-export function bulkRemoveTagFromContacts(ids: number[], tagId: number) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/persons/bulk/tags/remove`, { ids: chunk, tagId }));
+export function bulkRemoveTagFromContacts(ids: number[], tagId: number, init: RequestInit = {}) {
+    const path = "/api/persons/bulk/tags/remove";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk, tagId }, origin));
 }
 
-export function bulkArchiveContacts(ids: number[]) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/persons/bulk/archive`, { ids: chunk }));
+export function bulkArchiveContacts(ids: number[], init: RequestInit = {}) {
+    const path = "/api/persons/bulk/archive";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk }, origin));
 }
 
-export function bulkRestoreContacts(ids: number[]) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/persons/bulk/restore`, { ids: chunk }));
+export function bulkRestoreContacts(ids: number[], init: RequestInit = {}) {
+    const path = "/api/persons/bulk/restore";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk }, origin));
 }
 
-export function bulkAddTagToCompanies(ids: number[], tagId: number) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/companies/bulk/tags/add`, { ids: chunk, tagId }));
+export function bulkAddTagToCompanies(ids: number[], tagId: number, init: RequestInit = {}) {
+    const path = "/api/companies/bulk/tags/add";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk, tagId }, origin));
 }
 
-export function bulkRemoveTagFromCompanies(ids: number[], tagId: number) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/companies/bulk/tags/remove`, { ids: chunk, tagId }));
+export function bulkRemoveTagFromCompanies(ids: number[], tagId: number, init: RequestInit = {}) {
+    const path = "/api/companies/bulk/tags/remove";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk, tagId }, origin));
 }
 
-export function bulkArchiveCompanies(ids: number[]) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/companies/bulk/archive`, { ids: chunk }));
+export function bulkArchiveCompanies(ids: number[], init: RequestInit = {}) {
+    const path = "/api/companies/bulk/archive";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk }, origin));
 }
 
-export function bulkRestoreCompanies(ids: number[]) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/companies/bulk/restore`, { ids: chunk }));
+export function bulkRestoreCompanies(ids: number[], init: RequestInit = {}) {
+    const path = "/api/companies/bulk/restore";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk }, origin));
 }
 
-export function bulkAssignCompanyOwner(ids: number[], ownerId: number | null) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/companies/bulk/owner`, { ids: chunk, ownerId }));
+export function bulkAssignCompanyOwner(ids: number[], ownerId: number | null, init: RequestInit = {}) {
+    const path = "/api/companies/bulk/owner";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk, ownerId }, origin));
 }
 
-export function bulkAssignPersonOwner(ids: number[], ownerId: number | null) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/persons/bulk/owner`, { ids: chunk, ownerId }));
+export function bulkAssignPersonOwner(ids: number[], ownerId: number | null, init: RequestInit = {}) {
+    const path = "/api/persons/bulk/owner";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk, ownerId }, origin));
 }
 
 export function updateCompanyOwner(id: number, ownerId: number | null) {
@@ -3170,24 +3392,34 @@ export function updatePersonOwner(id: number, ownerId: number | null) {
     return putJson<Types.Contact>(`/api/persons/${id}/owner`, { ownerId });
 }
 
-export function bulkAddTagToDeals(ids: number[], tagId: number) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/deals/bulk/tags/add`, { ids: chunk, tagId }));
+export function bulkAddTagToDeals(ids: number[], tagId: number, init: RequestInit = {}) {
+    const path = "/api/deals/bulk/tags/add";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk, tagId }, origin));
 }
 
-export function bulkRemoveTagFromDeals(ids: number[], tagId: number) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/deals/bulk/tags/remove`, { ids: chunk, tagId }));
+export function bulkRemoveTagFromDeals(ids: number[], tagId: number, init: RequestInit = {}) {
+    const path = "/api/deals/bulk/tags/remove";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk, tagId }, origin));
 }
 
-export function bulkDeleteDeals(ids: number[]) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/deals/bulk/delete`, { ids: chunk }));
+export function bulkDeleteDeals(ids: number[], init: RequestInit = {}) {
+    const path = "/api/deals/bulk/delete";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk }, origin));
 }
 
-export function bulkAssignDealOwner(ids: number[], ownerId: number | null) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/deals/bulk/owner`, { ids: chunk, ownerId }));
+export function bulkAssignDealOwner(ids: number[], ownerId: number | null, init: RequestInit = {}) {
+    const path = "/api/deals/bulk/owner";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk, ownerId }, origin));
 }
 
-export function bulkChangeDealStage(ids: number[], stageId: number) {
-    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(`/api/deals/bulk/stage`, { ids: chunk, stageId }));
+export function bulkChangeDealStage(ids: number[], stageId: number, init: RequestInit = {}) {
+    const path = "/api/deals/bulk/stage";
+    const origin = pinWriteNow(path, init);
+    return runBulk(ids, (chunk) => postJson<Types.BulkOperationResult>(path, { ids: chunk, stageId }, origin));
 }
 
 /** Ids of every contact matching an active filter, capped by the backend bulk-operation limit. */
@@ -3619,8 +3851,8 @@ export function restoreContact(id: number, init: RequestInit = {}) {
     return postJson<Types.Contact>(`/api/persons/${id}/restore`, {}, init);
 }
 
-export function updateContact(id: number, payload: Types.UpdateContactPayload) {
-    return putJson<Types.Contact>(`/api/persons/${id}`, payload);
+export function updateContact(id: number, payload: Types.UpdateContactPayload, init: RequestInit = {}) {
+    return putJson<Types.Contact>(`/api/persons/${id}`, payload, init);
 }
 
 export async function uploadContactPicture(contactId: number, file: File, init: RequestInit = {}) {
@@ -4169,8 +4401,8 @@ export function preflightDealDuplicates(
     );
 }
 
-export function updateDeal(id: number, payload: Types.UpdateDealPayload) {
-    return putJson<Types.Deal>(`/api/deals/${id}`, payload);
+export function updateDeal(id: number, payload: Types.UpdateDealPayload, init: RequestInit = {}) {
+    return putJson<Types.Deal>(`/api/deals/${id}`, payload, init);
 }
 
 /** Renames a deal without touching any other field (safe against concurrent edits). */
@@ -4214,12 +4446,12 @@ export function moveDeal(id: number, stageId: number, position: number) {
  * other field. Unlike `updateDeal` this cannot clobber a concurrent edit or reopen a closed deal,
  * so it is used for optimistic reschedule.
  */
-export function rescheduleDeal(id: number, expectedCloseDate: string) {
-    return postJson<Types.Deal>(`/api/deals/${id}/reschedule`, { expectedCloseDate });
+export function rescheduleDeal(id: number, expectedCloseDate: string, init: RequestInit = {}) {
+    return postJson<Types.Deal>(`/api/deals/${id}/reschedule`, { expectedCloseDate }, init);
 }
 
-export function updateDealOwner(id: number, ownerId: number | null) {
-    return putJson<Types.Deal>(`/api/deals/${id}/owner`, { ownerId });
+export function updateDealOwner(id: number, ownerId: number | null, init: RequestInit = {}) {
+    return putJson<Types.Deal>(`/api/deals/${id}/owner`, { ownerId }, init);
 }
 
 export function updateDealEvaluation(id: number, payload: Types.UpdateDealEvaluationPayload) {
@@ -4230,8 +4462,8 @@ export function getDealCollaborators(id: number, init: RequestInit = {}) {
     return getJson<Types.User[]>(`/api/deals/${id}/collaborators`, init);
 }
 
-export function replaceDealCollaborators(id: number, userIds: number[]) {
-    return putJson<Types.User[]>(`/api/deals/${id}/collaborators`, { userIds });
+export function replaceDealCollaborators(id: number, userIds: number[], init: RequestInit = {}) {
+    return putJson<Types.User[]>(`/api/deals/${id}/collaborators`, { userIds }, init);
 }
 
 export function getDealPeople(id: number, init: RequestInit = {}) {
@@ -4412,12 +4644,12 @@ export function getStagesByPipelineId(pipelineId: number, init: RequestInit = {}
     return getJson<Types.Stage[]>(`/api/pipelines/${pipelineId}/stages`, init);
 }
 
-export function createStage(pipelineId: number, payload: Types.CreateStagePayload) {
-    return postJson<Types.Stage>(`/api/pipelines/${pipelineId}/stages`, payload);
+export function createStage(pipelineId: number, payload: Types.CreateStagePayload, init: RequestInit = {}) {
+    return postJson<Types.Stage>(`/api/pipelines/${pipelineId}/stages`, payload, init);
 }
 
-export function updateStage(id: number, payload: Types.UpdateStagePayload) {
-    return putJson<Types.Stage>(`/api/pipelines/stages/${id}`, payload);
+export function updateStage(id: number, payload: Types.UpdateStagePayload, init: RequestInit = {}) {
+    return putJson<Types.Stage>(`/api/pipelines/stages/${id}`, payload, init);
 }
 
 /**
@@ -4431,20 +4663,21 @@ export function replacePipelineStages(
     pipelineId: number,
     knownStageIds: number[],
     stages: Types.PipelineStageInput[],
+    init: RequestInit = {},
 ) {
-    return putJson<Types.Stage[]>(`/api/pipelines/${pipelineId}/stages`, { knownStageIds, stages });
+    return putJson<Types.Stage[]>(`/api/pipelines/${pipelineId}/stages`, { knownStageIds, stages }, init);
 }
 
 export function deleteStage(id: number, init: RequestInit = {}) {
     return deleteJson<void>(`/api/pipelines/stages/${id}`, init);
 }
 
-export function createPipeline(payload: Types.CreatePipelinePayload) {
-    return postJson<Types.Pipeline>(`/api/pipelines`, payload);
+export function createPipeline(payload: Types.CreatePipelinePayload, init: RequestInit = {}) {
+    return postJson<Types.Pipeline>(`/api/pipelines`, payload, init);
 }
 
-export function updatePipeline(id: number, payload: Types.UpdatePipelinePayload) {
-    return putJson<Types.Pipeline>(`/api/pipelines/${id}`, payload);
+export function updatePipeline(id: number, payload: Types.UpdatePipelinePayload, init: RequestInit = {}) {
+    return putJson<Types.Pipeline>(`/api/pipelines/${id}`, payload, init);
 }
 
 export function getPipelineById(id: number, init: RequestInit = {}) {
@@ -4576,12 +4809,12 @@ export function getApprovalPoliciesFromCookie(cookie: string | null) {
     return safeReadWithCookie<Types.ApprovalPolicy>((init) => getApprovalPolicies(init), cookie);
 }
 
-export function createApprovalPolicy(payload: Types.CreateApprovalPolicyPayload) {
-    return postJson<Types.ApprovalPolicy>(`/api/approval-policies`, payload);
+export function createApprovalPolicy(payload: Types.CreateApprovalPolicyPayload, init: RequestInit = {}) {
+    return postJson<Types.ApprovalPolicy>(`/api/approval-policies`, payload, init);
 }
 
-export function updateApprovalPolicy(id: number, payload: Types.UpdateApprovalPolicyPayload) {
-    return putJson<Types.ApprovalPolicy>(`/api/approval-policies/${id}`, payload);
+export function updateApprovalPolicy(id: number, payload: Types.UpdateApprovalPolicyPayload, init: RequestInit = {}) {
+    return putJson<Types.ApprovalPolicy>(`/api/approval-policies/${id}`, payload, init);
 }
 
 export function deleteApprovalPolicy(id: number, init: RequestInit = {}) {
@@ -4593,8 +4826,8 @@ export function deleteApprovalPolicy(id: number, init: RequestInit = {}) {
  * Read-only: the server runs the same classification the save enforces, so the disclosed count
  * matches what a confirmed write invalidates.
  */
-export function previewApprovalPolicyImpact(id: number, payload: Types.UpdateApprovalPolicyPayload) {
-    return postJson<Types.ApprovalPolicyImpact>(`/api/approval-policies/${id}/impact`, payload);
+export function previewApprovalPolicyImpact(id: number, payload: Types.UpdateApprovalPolicyPayload, init: RequestInit = {}) {
+    return postJson<Types.ApprovalPolicyImpact>(`/api/approval-policies/${id}/impact`, payload, init);
 }
 
 export function requestDocumentApproval(dealId: number, documentId: number, comment?: string | null) {
@@ -4639,6 +4872,19 @@ export function getDocumentApprovalDelegateCandidates(
 ) {
     return getJson<Types.ApprovalDelegate[]>(
         `/api/deals/${dealId}/documents/${documentId}/approval/steps/${stepId}/delegate-candidates`,
+        { cache: 'no-store', ...init },
+    );
+}
+
+/** Reads the server-authorized management candidates for one active approval step. */
+export function getDocumentApprovalApproverCandidates(
+    dealId: number,
+    documentId: number,
+    stepId: number,
+    init: RequestInit = {},
+) {
+    return getJson<Types.ApprovalStepCandidates>(
+        `/api/deals/${dealId}/documents/${documentId}/approval/steps/${stepId}/approver-candidates`,
         { cache: 'no-store', ...init },
     );
 }
@@ -4980,12 +5226,12 @@ export function uploadAttachment(entityType: string, entityId: number, file: Fil
     return requestMultipart<Types.Attachment>("/api/attachments/upload", "POST", formData);
 }
 
-export function uploadAttachmentImage(entityType: string, entityId: number, file: File) {
+export function uploadAttachmentImage(entityType: string, entityId: number, file: File, init: RequestInit = {}) {
     const formData = new FormData();
     formData.append("entityType", entityType);
     formData.append("entityId", String(entityId));
     formData.append("file", file);
-    return requestMultipart<Types.Attachment>("/api/attachments/upload-image", "POST", formData);
+    return requestMultipart<Types.Attachment>("/api/attachments/upload-image", "POST", formData, init);
 }
 
 export function getAttachment(id: number, init: RequestInit = {}) {
@@ -5192,6 +5438,25 @@ export function createDataSubjectRequest(orgId: number, body: Types.DataSubjectR
     return postJson<Types.DataSubjectRequest>(`/api/orgs/${orgId}/data-subject-requests`, body);
 }
 
+/** Explicit erasure acceptance; editing a request never initiates this operation. */
+export function purgeAiAgentHoldings(
+    orgId: number,
+    requestId: number,
+    payload: Types.AiAgentHoldingsPurgeRequest,
+    init: RequestInit = {},
+) {
+    return postJson<Types.AiAgentHoldingsPurge>(
+        `/api/orgs/${orgId}/data-subject-requests/${requestId}/mission-holdings-purge`, payload, init,
+    );
+}
+
+export function getAiAgentHoldingsPurge(orgId: number, requestId: number, operationId: string, init: RequestInit = {}) {
+    return getJson<Types.AiAgentHoldingsPurge>(
+        `/api/orgs/${orgId}/data-subject-requests/${requestId}/mission-holdings-purges/${encodeURIComponent(operationId)}`,
+        { cache: 'no-store', ...init },
+    );
+}
+
 export function updateDataSubjectRequest(orgId: number, requestId: number, body: Types.DataSubjectRequestBody) {
     return putJson<Types.DataSubjectRequest>(`/api/orgs/${orgId}/data-subject-requests/${requestId}`, body);
 }
@@ -5308,14 +5573,81 @@ export async function getMyWorkspacesResultFromCookie(
     return { ok: true, data: workspaceSnapshotForForwardedCookie(result.data, cookie) };
 }
 
-export function createWorkspace(name: string) {
-    return withClientRequestIdentityReset(
-        () => recoverWorkspaceSelectionResponse(
-            () => postWorkspaceSelectionJson<Types.Workspace>(`/api/workspaces`, { name }),
-            activeWorkspaceFromSelection,
-        ),
-        "workspace",
-    );
+/**
+ * The options that create a workspace from the organization of the workspace on screen (#1732).
+ * The backend takes a new workspace's organization from the resolved workspace, so a creation that
+ * followed a healed cookie could place a name typed under one organization inside another. When the
+ * shell renders a workspace, the viewer's memberships are read again: a
+ * workspace they still belong to is pinned explicitly, and a revoked one refuses the creation as
+ * {@link WORKSPACE_UNAVAILABLE_CODE} before anything is sent, so the form keeps the typed name. A
+ * page with no app shell, such as onboarding, omits the workspace header even when a revoked
+ * selection remains in the browser cookie, leaving recovery to the server.
+ * @returns the pinned options, or null for header-free onboarding creation
+ * @throws ApiError coded {@link WORKSPACE_UNAVAILABLE_CODE} when the rendered workspace is gone
+ * @throws Error when the authenticated creation identity cannot be established
+ */
+async function workspaceCreationOrigin(): Promise<RequestInit | null> {
+    const rendered = renderedWorkspaceId();
+    if (rendered === null || typeof document === "undefined") return null;
+    const pinned: RequestInit = { headers: { "X-Workspace-Id": String(rendered) } };
+    const identity = await identityBeforePinnedWrite(async () => {
+        const snapshot = await getMyWorkspaces();
+        if (!snapshot.workspaces.some((workspace) => workspace.id === rendered)) {
+            throw workspaceUnavailableError(rendered, `Not a member of workspace ${rendered}`);
+        }
+    });
+    if (identity === null) {
+        throw new Error("Unable to establish the authenticated workspace creation identity");
+    }
+    return pinned;
+}
+
+/** Creates under the origin's account identity, including final CSRF preparation and every retry. */
+export async function createWorkspace(name: string) {
+    const preflightEpoch = clientRequestIdentityEpoch;
+    const origin = await workspaceCreationOrigin();
+    if (clientRequestIdentityEpoch !== preflightEpoch) {
+        throw new Error("The workspace changed before this request was sent");
+    }
+    const requestIdentity = origin === null ? null : csrfTokenCache?.requestIdentity;
+    if (origin !== null && requestIdentity == null) {
+        throw new Error("Unable to establish the authenticated workspace creation identity");
+    }
+    try {
+        return await withClientRequestIdentityReset(
+            async () => {
+                const waiting = new AbortController();
+                pendingPinnedWriteIdentities.add(waiting);
+                const identityEpoch = clientRequestIdentityEpoch;
+                const beforeSend = (headers: Headers) => {
+                    const currentCsrf = csrfTokenCache;
+                    if (waiting.signal.aborted
+                        || clientRequestIdentityEpoch !== identityEpoch
+                        || (requestIdentity != null && (currentCsrf === null
+                            || currentCsrf.requestIdentity !== requestIdentity
+                            || headers.get(currentCsrf.headerName) !== currentCsrf.token))) {
+                        throw new Error("The workspace changed before this request was sent");
+                    }
+                };
+                try {
+                    return await recoverWorkspaceSelectionResponse(
+                        () => postWorkspaceSelectionJson<Types.Workspace>(
+                            `/api/workspaces`, { name }, true, origin ?? {},
+                            origin === null ? "omit" : "auto", beforeSend,
+                        ),
+                        activeWorkspaceFromSelection,
+                    );
+                } finally {
+                    pendingPinnedWriteIdentities.delete(waiting);
+                }
+            },
+            "workspace",
+        );
+    } catch (error) {
+        throw error instanceof ApiError
+            ? workspaceRefusal(error, new Headers(origin?.headers).get("X-Workspace-Id"))
+            : error;
+    }
 }
 
 export function updateWorkspaceIdentity(
@@ -5918,8 +6250,9 @@ export function updateEntityCustomFields(
     entityType: Types.CustomFieldEntityType,
     id: number,
     values: Record<number, unknown>,
+    init: RequestInit = {},
 ) {
-    return putJson<Types.CustomFieldEntry[]>(customFieldEntityPath(entityType, id), { values });
+    return putJson<Types.CustomFieldEntry[]>(customFieldEntityPath(entityType, id), { values }, init);
 }
 
 export function updateEntityCustomField(
@@ -6257,9 +6590,16 @@ export async function uploadAiChatAttachment(
 ): Promise<Types.AiChatAttachment> {
     const path = `/api/ai/assistant/sessions/${sessionId}/attachments`;
     const locale = requestLocale(init);
-    const workspaceId = clientWorkspaceId();
+    const workspaceId = requestWorkspaceId(path, true);
+    const pinnedWorkspace = outgoingWorkspaceId(init, workspaceId);
     const send = async (forceRefresh: boolean): Promise<Response> => {
         const csrf = await csrfHeader(forceRefresh);
+        const headers = new Headers({
+            'Accept-Language': locale,
+            ...(pinnedWorkspace ? { 'X-Workspace-Id': pinnedWorkspace } : {}),
+            ...csrf,
+        });
+        new Headers(init.headers).forEach((value, name) => headers.set(name, value));
         const formData = new FormData();
         formData.append('file', file);
         return new Promise<Response>((resolve, reject) => {
@@ -6267,10 +6607,7 @@ export async function uploadAiChatAttachment(
             const abort = () => request.abort();
             request.open('POST', `${API_BASE}${path}`);
             request.withCredentials = true;
-            request.setRequestHeader('Accept-Language', locale);
-            if (workspaceId) request.setRequestHeader('X-Workspace-Id', workspaceId);
-            Object.entries(csrf).forEach(([name, value]) => request.setRequestHeader(name, value));
-            new Headers(init.headers).forEach((value, name) => request.setRequestHeader(name, value));
+            headers.forEach((value, name) => request.setRequestHeader(name, value));
             request.upload.addEventListener('progress', (event) => {
                 if (!event.lengthComputable || event.total <= 0) return;
                 onProgress(Math.min(99, Math.round((event.loaded / event.total) * 100)));
@@ -6302,7 +6639,9 @@ export async function uploadAiChatAttachment(
     if (await shouldRetryWithFreshCsrf(path, response, true)) {
         response = await send(true);
     }
-    if (!response.ok) throw await getAuthenticatedApiError(response);
+    if (!response.ok) {
+        throw refusalFor(await getAuthenticatedApiError(response), path, true, pinnedWorkspace);
+    }
     const text = await response.text();
     if (!text) throw new TypeError('Assistant attachment response was empty');
     const attachment: unknown = JSON.parse(text);
@@ -6406,17 +6745,27 @@ export function previewAiChatScope(
     );
 }
 
+/**
+ * Starts one assistant turn. The workspace the turn is sent to is fixed when this is called, before
+ * the request identity is resolved, and a workspace transition during that wait abandons the turn,
+ * so a question asked in one workspace is never sent into another (#1732).
+ * @param sessionId the chat the turn belongs to
+ * @param payload the question and its context
+ * @param init request options; a caller that captured the workspace earlier pins it here
+ */
 export async function startAiChatTurn(
     sessionId: number,
     payload: Types.AiChatTurnCreateRequest,
+    init: RequestInit = {},
 ): Promise<Types.AiChatTurnAccepted> {
     const path = `/api/ai/assistant/sessions/${sessionId}/turns`;
+    const pinned = pinWriteNow(path, init);
     if (typeof window === 'undefined') {
-        return postJson<Types.AiChatTurnAccepted>(path, payload);
+        return postJson<Types.AiChatTurnAccepted>(path, payload, pinned);
     }
-    const identity = await currentClientRequestIdentity();
+    const identity = await identityBeforePinnedWrite();
     if (identity == null) {
-        return postJson<Types.AiChatTurnAccepted>(path, payload);
+        return postJson<Types.AiChatTurnAccepted>(path, payload, pinned);
     }
     const key = `${identity}\u0000${path}\u0000${JSON.stringify(payload)}`;
     const existing = inFlightAssistantTurns.get(key);
@@ -6424,7 +6773,8 @@ export async function startAiChatTurn(
     const controller = new AbortController();
     const request = (async () => {
         const response = await postJson<Types.AiChatTurnAccepted>(path, payload, {
-            signal: controller.signal,
+            ...pinned,
+            signal: init.signal ? AbortSignal.any([controller.signal, init.signal]) : controller.signal,
         });
         if (await currentClientRequestIdentity() !== identity) {
             throw new Error('AI request identity changed before turn acceptance');
@@ -6461,6 +6811,35 @@ export function cancelAiChatTurn(
         {},
         init,
     );
+}
+
+/** Creates one bounded, read-only mission with a caller-stable idempotency key. */
+export function createAiAgentRun(sessionId: number, payload: Types.AiAgentRunCreateRequest, init: RequestInit = {}) {
+    return postJson<Types.AiAgentRun>(`/api/ai/assistant/sessions/${sessionId}/missions`, payload, init);
+}
+
+export function getAiAgentRuns(
+    params: { limit?: number; sessionId?: number; state?: Types.AiAgentRunState; cursor?: string } = {},
+    init: RequestInit = {},
+) {
+    return getJson<Types.AiAgentRunPage>(`/api/ai/assistant/missions${buildQuery(params)}`, { cache: 'no-store', ...init });
+}
+
+export function getAiAgentRun(id: number, init: RequestInit = {}) {
+    return getJson<Types.AiAgentRun>(`/api/ai/assistant/missions/${id}`, { cache: 'no-store', ...init });
+}
+
+export function getAiAgentOutput(id: number, init: RequestInit = {}) {
+    return getJson<Types.AiAgentOutput>(`/api/ai/assistant/missions/${id}/output`, { cache: 'no-store', ...init });
+}
+
+export function controlAiAgentRun(
+    id: number,
+    action: Types.AiAgentRunControl,
+    expectedStateVersion: string,
+    init: RequestInit = {},
+) {
+    return postJson<Types.AiAgentRun>(`/api/ai/assistant/missions/${id}/${action}`, { expectedStateVersion }, init);
 }
 
 export function getAiAssistantToolCalls(
@@ -6546,8 +6925,8 @@ export async function getDashboardLayoutFromCookie(
     }
 }
 
-export function saveDashboardLayout(layout: Types.DashboardLayout) {
-    return putJson<Types.DashboardLayoutResponse>(`/api/dashboard-layout`, { layout });
+export function saveDashboardLayout(layout: Types.DashboardLayout, init: RequestInit = {}) {
+    return putJson<Types.DashboardLayoutResponse>(`/api/dashboard-layout`, { layout }, init);
 }
 
 export function resetDashboardLayout(init: RequestInit = {}) {
@@ -6589,8 +6968,11 @@ export function getReportComposerAvailabilityResultFromCookie(cookie: string | n
 }
 
 export function previewReportComposer(prompt: string) {
-    return withReportRequestIdentity((signal) =>
-        postJson<Types.ReportComposerPreview>(`/api/reports/composer/preview`, { prompt }, { signal }));
+    const path = `/api/reports/composer/preview`;
+    return withReportRequestIdentity(
+        (init) => postJson<Types.ReportComposerPreview>(path, { prompt }, init),
+        pinWriteNow(path),
+    );
 }
 
 export function createReport(payload: Types.ReportDefinitionInput) {
@@ -6628,7 +7010,7 @@ export function getReportSchedule(
     init: RequestInit = {},
 ): Promise<Types.ReportSchedule | null> {
     if (Object.keys(init).length > 0) return requestReportSchedule(reportId, init);
-    return withReportRequestIdentity((signal) => requestReportSchedule(reportId, { signal }));
+    return withReportRequestIdentity((requestInit) => requestReportSchedule(reportId, requestInit));
 }
 
 export function getReportScheduleFromCookie(reportId: number, cookie: string | null) {
@@ -6641,17 +7023,18 @@ export function saveReportSchedule(
     body: Types.ReportScheduleRequest,
     scheduleExists: boolean,
 ) {
-    return withReportRequestIdentity((signal) => {
-        const path = `/api/reports/${reportId}/schedule`;
-        return scheduleExists
-            ? putJson<Types.ReportSchedule>(path, body, { signal })
-            : postJson<Types.ReportSchedule>(path, body, { signal });
-    });
+    const path = `/api/reports/${reportId}/schedule`;
+    return withReportRequestIdentity(
+        (init) => scheduleExists
+            ? putJson<Types.ReportSchedule>(path, body, init)
+            : postJson<Types.ReportSchedule>(path, body, init),
+        pinWriteNow(path),
+    );
 }
 
 export function deleteReportSchedule(reportId: number) {
-    return withReportRequestIdentity((signal) =>
-        deleteJson<void>(`/api/reports/${reportId}/schedule`, { signal }));
+    const path = `/api/reports/${reportId}/schedule`;
+    return withReportRequestIdentity((init) => deleteJson<void>(path, init), pinWriteNow(path));
 }
 
 export function getGoals(init: RequestInit = {}) {
@@ -6683,14 +7066,15 @@ export async function generateReport(
     payload: Types.ReportGenerateInput = {},
     mode: Types.ReportNarrativeMode = "cached",
 ) {
+    const path = `/api/reports/${id}/generate?narrative=${mode}`;
+    const pinned = pinWriteNow(path);
     if (typeof window === "undefined") {
-        return postJson<Types.ReportDocument>(`/api/reports/${id}/generate?narrative=${mode}`, payload);
+        return postJson<Types.ReportDocument>(path, payload, pinned);
     }
-    const identity = await currentClientRequestIdentity();
+    const identity = await identityBeforePinnedWrite();
     if (identity == null) {
         throw new Error("Unable to establish the authenticated report request identity");
     }
-    const path = `/api/reports/${id}/generate?narrative=${mode}`;
     const key = `${identity}\u0000${path}\u0000${JSON.stringify(payload)}`;
     const existing = inFlightReportGenerations.get(key);
     if (existing) {
@@ -6698,7 +7082,7 @@ export async function generateReport(
     }
     const controller = new AbortController();
     const request = (async () => {
-        const response = await postJson<Types.ReportDocument>(path, payload, { signal: controller.signal });
+        const response = await postJson<Types.ReportDocument>(path, payload, { ...pinned, signal: controller.signal });
         if (await currentClientRequestIdentity() !== identity) {
             throw new Error("AI request identity changed before completion");
         }
@@ -6717,8 +7101,11 @@ export function getReportSnapshots(id: number, init: RequestInit = {}) {
 }
 
 export function createReportSnapshot(id: number, payload: Types.ReportGenerateInput = {}) {
-    return withReportRequestIdentity((signal) =>
-        postJson<Types.ReportSnapshot>(`/api/reports/${id}/snapshots`, payload, { signal }));
+    const path = `/api/reports/${id}/snapshots`;
+    return withReportRequestIdentity(
+        (init) => postJson<Types.ReportSnapshot>(path, payload, init),
+        pinWriteNow(path),
+    );
 }
 
 export function getReportSnapshot(id: number, snapshotId: number, init: RequestInit = {}) {
@@ -6728,30 +7115,40 @@ export function getReportSnapshot(id: number, snapshotId: number, init: RequestI
             ...init,
         });
     }
-    return withReportRequestIdentity((signal) =>
+    return withReportRequestIdentity((requestInit) =>
         getJson<Types.ReportSnapshot>(`/api/reports/${id}/snapshots/${snapshotId}`, {
             cache: "no-store",
-            signal,
+            ...requestInit,
         }));
 }
 
 export function deleteReportSnapshot(id: number, snapshotId: number) {
-    return withReportRequestIdentity((signal) =>
-        deleteJson<void>(`/api/reports/${id}/snapshots/${snapshotId}`, { signal }));
+    const path = `/api/reports/${id}/snapshots/${snapshotId}`;
+    return withReportRequestIdentity((init) => deleteJson<void>(path, init), pinWriteNow(path));
 }
 
-async function withReportRequestIdentity<T>(request: (signal?: AbortSignal) => Promise<T>): Promise<T> {
+/**
+ * Runs a report request under a proven request identity and aborts it on an identity change. A
+ * write passes the options {@link pinWriteNow} fixed before this was called, because the identity is
+ * resolved first and a workspace switch during that wait must not move the write (#1732).
+ * @param request the request, given the options to send with
+ * @param pinned options fixed when the request was made, such as its workspace pin
+ */
+async function withReportRequestIdentity<T>(
+    request: (init: RequestInit) => Promise<T>,
+    pinned: RequestInit = {},
+): Promise<T> {
     if (typeof window === "undefined") {
-        return request();
+        return request(pinned);
     }
-    const identity = await currentClientRequestIdentity();
+    const identity = await identityBeforePinnedWrite();
     if (identity == null) {
         throw new Error("Unable to establish the authenticated report request identity");
     }
     const controller = new AbortController();
     inFlightReportRequests.add(controller);
     try {
-        const result = await request(controller.signal);
+        const result = await request({ ...pinned, signal: controller.signal });
         if (await currentClientRequestIdentity() !== identity) {
             throw new Error("Report request identity changed before completion");
         }
@@ -6773,21 +7170,25 @@ function downloadBlob(blob: Blob, filename: string): void {
 }
 
 async function fetchReportCsv(path: string, init: RequestInit): Promise<Blob> {
-    return withReportRequestIdentity(async (signal) => {
+    const mutating = isMutating(init.method);
+    const pinnedInit = mutating ? pinWriteNow(path, init) : init;
+    return withReportRequestIdentity(async (requestInit) => {
         const locale = localeFromCookieHeader(document.cookie);
-        const workspaceId = clientWorkspaceId();
-        const mutating = isMutating(init.method);
-        const send = (csrf: Record<string, string>) => fetch(`${API_BASE}${path}`, {
-                ...init,
-                signal,
-                credentials: "include",
-                headers: {
-                    "Accept-Language": locale,
-                    ...(workspaceId ? { "X-Workspace-Id": workspaceId } : {}),
-                    ...csrf,
-                    ...init.headers,
-                },
+        const workspaceId = requestWorkspaceId(path, mutating);
+        const pinnedWorkspace = outgoingWorkspaceId(requestInit, workspaceId);
+        const send = (csrf: Record<string, string>) => {
+            const headers = new Headers({
+                "Accept-Language": locale,
+                ...(workspaceId ? { "X-Workspace-Id": workspaceId } : {}),
+                ...csrf,
             });
+            new Headers(requestInit.headers).forEach((value, key) => headers.set(key, value));
+            return fetch(`${API_BASE}${path}`, {
+                ...requestInit,
+                credentials: "include",
+                headers,
+            });
+        };
         let res = await send(mutating ? await csrfHeader() : {});
         if (await shouldRetryWithFreshCsrf(path, res, mutating)) {
             res = await send(await csrfHeader(true));
@@ -6797,10 +7198,10 @@ async function fetchReportCsv(path: string, init: RequestInit): Promise<Blob> {
             res = await send(mutating ? await csrfHeader() : {});
         }
         if (!res.ok) {
-            throw await getAuthenticatedApiError(res);
+            throw refusalFor(await getAuthenticatedApiError(res), path, mutating, pinnedWorkspace);
         }
         return res.blob();
-    });
+    }, pinnedInit);
 }
 
 export async function exportReportCsv(

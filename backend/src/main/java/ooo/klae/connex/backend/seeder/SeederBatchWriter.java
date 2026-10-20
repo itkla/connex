@@ -9,10 +9,12 @@ import java.util.Map;
 import org.apache.ibatis.session.ExecutorType;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.mybatis.spring.SqlSessionTemplate;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 
 import ooo.klae.connex.backend.util.RecordInsertBatches;
+import ooo.klae.connex.backend.ai.mission.AiAgentPrivacyInitializer.WorkspaceProvisioned;
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.beans.Company;
@@ -70,6 +72,7 @@ public class SeederBatchWriter {
 
     private final SeedDataGenerator generator;
     private final TenantContext tenantContext;
+    private final ApplicationEventPublisher applicationEvents;
     private final SqlSessionTemplate batchSession;
     private final OrganizationMapper organizationMapper;
     private final WorkspaceMapper workspaceMapper;
@@ -90,9 +93,11 @@ public class SeederBatchWriter {
     public SeederBatchWriter(
             SqlSessionFactory sqlSessionFactory,
             SeedDataGenerator generator,
-            TenantContext tenantContext) {
+            TenantContext tenantContext,
+            ApplicationEventPublisher applicationEvents) {
         this.generator = generator;
         this.tenantContext = tenantContext;
+        this.applicationEvents = applicationEvents;
         this.batchSession = new SqlSessionTemplate(sqlSessionFactory, ExecutorType.BATCH);
         this.organizationMapper = batchSession.getMapper(OrganizationMapper.class);
         this.workspaceMapper = batchSession.getMapper(WorkspaceMapper.class);
@@ -125,6 +130,7 @@ public class SeederBatchWriter {
         workspaceMapper.insert(workspace);
         flush();
         requireGeneratedId("workspace", workspace.getId());
+        applicationEvents.publishEvent(new WorkspaceProvisioned(workspace.getId()));
 
         List<User> users = generator.users(workspaceSeed, workspaceIndex);
         for (User user : users) {

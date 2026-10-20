@@ -136,7 +136,7 @@ public class AiAssistantCreateCompanyWriteTool implements AiAssistantWriteTool {
         CreateCompany request = request(execution.row().request());
         Company created = creationService.createCompany(new GuidedCompanyCreateRequestDto(
                 new GuidedCompanyRecordDto(request.name(), request.website(), request.industry(), null, null, null),
-                AiAssistantCreationTemplatePin.use(execution.pinned(), null), Map.of(), List.of()));
+                AiAssistantCreationTemplatePin.use(execution.pinned(), null), Map.of(), List.of()), execution.admission());
         if (created == null) {
             throw new IllegalStateException("Created company could not be read back");
         }

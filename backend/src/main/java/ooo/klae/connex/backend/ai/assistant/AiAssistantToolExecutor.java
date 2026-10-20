@@ -114,7 +114,7 @@ public class AiAssistantToolExecutor {
         }
         AiChatScopedToolPolicy.requireHonorsDeclaredScope(name, scope);
         try {
-            return switch (name) {
+            AiAssistantToolResult shaped = switch (name) {
                 case "search_records" -> search(args, resources);
                 case "get_record" -> getRecord(args, resources, includePrivateNotes);
                 case "get_records" -> getRecords(args, resources, includePrivateNotes);
@@ -128,6 +128,9 @@ public class AiAssistantToolExecutor {
                         "find_tools_requires_turn_state");
                 default -> throw AiAssistantLoopException.malformed("unknown_tool");
             };
+            ooo.klae.connex.backend.ai.mission.AiAgentEvidenceService.capture(
+                    name, args, shaped, resources);
+            return shaped;
         } catch (ResourceNotFoundException exception) {
             throw AiAssistantLoopException.accessRevoked("inaccessible_resource");
         }
@@ -185,6 +188,18 @@ public class AiAssistantToolExecutor {
     public AiAssistantToolResult pageContext(
             List<AiChatPageContextDto> pageContext, AiChatResourceRegistry resources) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        var mission = ooo.klae.connex.backend.ai.mission.AiAgentScopePolicy.current();
+        if (mission != null) {
+            pageContext.forEach(record -> mission.requireRecord(record.kind(), record.id()));
+            List<Map<String, Object>> records = new ArrayList<>();
+            List<Identifier> identifiers = new ArrayList<>();
+            for (AiChatPageContextDto record : pageContext) {
+                RecordResult primary = readRecord(record.kind(), record.id(), resources, false, false);
+                records.add(primary.data());
+                identifiers.addAll(primary.identifiers());
+            }
+            return result(Map.of("records", List.copyOf(records)), identifiers);
+        }
         List<Integer> personIds = idsForKind(pageContext, "person");
         List<Integer> companyIds = idsForKind(pageContext, "company");
         List<Integer> dealIds = idsForKind(pageContext, "deal");
@@ -369,7 +384,7 @@ public class AiAssistantToolExecutor {
                         resources.maskingContext());
             }
             case "deal" -> {
-                dealService.getDealById(resource.id());
+                requireReadableDeal(resource.id());
                 yield filterRestrictedLinkedPeople(
                         historyService.activitiesForDeal(
                                 resource.id(), period.startUtc(), period.endUtc(), limit),
@@ -414,7 +429,7 @@ public class AiAssistantToolExecutor {
                         resources.maskingContext());
             }
             case "deal" -> {
-                dealService.getDealById(resource.id());
+                requireReadableDeal(resource.id());
                 yield filterRestrictedLinkedPeople(
                         historyService.tasksForDeal(resource.id(), limit),
                         Task::getPerson,
@@ -531,15 +546,21 @@ public class AiAssistantToolExecutor {
             AiChatResourceRegistry resources,
             boolean includeNotes,
             boolean includePrivateNotes) {
+        var mission = ooo.klae.connex.backend.ai.mission.AiAgentScopePolicy.current();
+        if (mission != null) {
+            mission.requireRecord(kind, id);
+        }
         return switch (kind) {
             case "person" -> personRecord(
-                    personService.getPersonById(id), resources,
+                    mission == null ? personService.getPersonById(id)
+                            : personService.getAssistantPrimaryPersonById(id), resources,
                     includeNotes, includePrivateNotes);
             case "company" -> companyRecord(
                     companyService.getCompanyById(id), resources,
                     includeNotes, includePrivateNotes);
             case "deal" -> dealRecord(
-                    dealService.getDealById(id), resources,
+                    mission == null ? dealService.getDealById(id)
+                            : dealService.getAssistantPrimaryDealById(id), resources,
                     includeNotes, includePrivateNotes, null);
             default -> throw AiAssistantLoopException.malformed("unknown_record_kind");
         };
@@ -561,7 +582,8 @@ public class AiAssistantToolExecutor {
         putIfPresent(data, "title", person.getTitle());
         List<Identifier> identifiers = new ArrayList<>();
         identifiers.add(new Identifier("person", person.getName()));
-        if (person.getCompany() != null && person.getCompany().getId() > 0
+        if (ooo.klae.connex.backend.ai.mission.AiAgentScopePolicy.current() == null
+                && person.getCompany() != null && person.getCompany().getId() > 0
                 && person.getCompany().getName() != null) {
             String companyHandle = resources.register("company", person.getCompany().getId());
             data.put("company", Map.of(
@@ -638,7 +660,7 @@ public class AiAssistantToolExecutor {
         }
         List<Identifier> identifiers = new ArrayList<>();
         identifiers.add(new Identifier("deal", deal.getName()));
-        if (deal.getCompanyId() != null) {
+        if (ooo.klae.connex.backend.ai.mission.AiAgentScopePolicy.current() == null && deal.getCompanyId() != null) {
             try {
                 Company company = prefetchedCompanies == null
                         ? companyService.getCompanyById(deal.getCompanyId())
@@ -724,7 +746,9 @@ public class AiAssistantToolExecutor {
     private static Map<String, Object> taskData(
             Task task, AiChatResourceRegistry resources, int actorId) {
         Map<String, Object> data = new LinkedHashMap<>();
-        data.put("handle", resources.registerTask(task.getId()));
+        if (ooo.klae.connex.backend.ai.mission.AiAgentScopePolicy.current() == null) {
+            data.put("handle", resources.registerTask(task.getId()));
+        }
         data.put("assignedToMe", task.getAssignedTo() != null
                 && task.getAssignedTo().getId() == actorId);
         putIfPresent(data, "description", task.getDescription());
@@ -793,8 +817,15 @@ public class AiAssistantToolExecutor {
             return List.copyOf(records);
         }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        List<Person> processablePeople = personMapper.getByIds(
-                        workspaceId, List.copyOf(personIds)).stream()
+        var mission = ooo.klae.connex.backend.ai.mission.AiAgentScopePolicy.current();
+        List<Person> candidates;
+        if (mission == null) {
+            candidates = personMapper.getByIds(workspaceId, List.copyOf(personIds));
+        } else {
+            personIds.forEach(id -> mission.requireRecord("person", id));
+            candidates = List.of(personService.getAssistantPrimaryPersonById(mission.id()));
+        }
+        List<Person> processablePeople = candidates.stream()
                 .filter(AiAssistantToolExecutor::isProcessable)
                 .toList();
         processablePeople.forEach(person ->
@@ -824,13 +855,14 @@ public class AiAssistantToolExecutor {
     private static void seedMemberReferences(
             Object record, List<EntityReference> references, MaskingContext context) {
         AiAssistantMemberIdentifiers.seedReferences(references, context);
-        String content = switch (record) {
-            case Note note -> note.getContent();
-            case Activity activity -> activity.getNotes();
-            case Task task -> task.getDescription();
-            default -> null;
-        };
-        AiAssistantMemberIdentifiers.seedReferenceText(content, context);
+        switch (record) {
+            case Note note -> note.setContent(AiAssistantMemberIdentifiers.seedReferenceText(note.getContent(), context));
+            case Activity activity -> activity.setNotes(
+                    AiAssistantMemberIdentifiers.seedReferenceText(activity.getNotes(), context));
+            case Task task -> task.setDescription(
+                    AiAssistantMemberIdentifiers.seedReferenceText(task.getDescription(), context));
+            default -> { }
+        }
     }
 
     private static boolean putBounded(
@@ -918,10 +950,25 @@ public class AiAssistantToolExecutor {
     }
 
     private Person requireProcessablePerson(int personId) {
-        Person person = personMapper.getPersonById(
-                workspaceService.getCurrentWorkspaceId(), personId);
+        var mission = ooo.klae.connex.backend.ai.mission.AiAgentScopePolicy.current();
+        if (mission != null) {
+            mission.requireRecord("person", personId);
+        }
+        Person person = mission == null
+                ? personMapper.getPersonById(workspaceService.getCurrentWorkspaceId(), personId)
+                : personService.getAssistantPrimaryPersonById(personId);
         requireProcessable(person);
         return person;
+    }
+
+    private void requireReadableDeal(int dealId) {
+        var mission = ooo.klae.connex.backend.ai.mission.AiAgentScopePolicy.current();
+        if (mission == null) {
+            dealService.getDealById(dealId);
+        } else {
+            mission.requireRecord("deal", dealId);
+            dealService.getAssistantPrimaryDealById(dealId);
+        }
     }
 
     private static boolean isProcessable(Person person) {

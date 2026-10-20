@@ -14,7 +14,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.PreparedStatement;
-import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -371,6 +370,7 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
                 BodySafeSmtpTransport.class.getPackageName());
         java.util.logging.Level previousSmtpLevel = smtpLogger.getLevel();
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.list = new java.util.concurrent.CopyOnWriteArrayList<>();
         appender.start();
         logger.addAppender(appender);
         logger.setLevel(Level.DEBUG);
@@ -784,7 +784,6 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
             }
         }
 
-        assertFalse(hasDeadlockCause(leaveFailure));
         assertNull(leaveFailure);
         assertEquals(0, jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM api_credential WHERE workspace_id = ?",
@@ -909,19 +908,6 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         } catch (Throwable failure) {
             return failure;
         }
-    }
-
-    private static boolean hasDeadlockCause(Throwable failure) {
-        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
-            if (cause instanceof SQLException sqlException && sqlException.getErrorCode() == 1213) {
-                return true;
-            }
-            if (cause.getMessage() != null
-                    && cause.getMessage().toLowerCase(java.util.Locale.ROOT).contains("deadlock")) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private long insertOpenSubjectRequest(int orgId, int workspaceId, int personId) {

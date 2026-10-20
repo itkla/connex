@@ -19,6 +19,8 @@ import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InOrder;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -51,6 +53,7 @@ import ooo.klae.connex.backend.tenant.TenantContext;
  * Pins the root-before-child lock order of both credential management paths. Issuance and
  * revocation reach {@code api_credential} only through the locked authorization, so the workspace
  * root and its organization root must already be held shared before any credential row is locked.
+ * A deletion reservation must refuse both paths before either root or any credential is reached.
  */
 class ApiCredentialManagementLockOrderTest {
     private static final int WORKSPACE_ID = 7;
@@ -91,7 +94,8 @@ class ApiCredentialManagementLockOrderTest {
             mock(AccountDeletionReservationRead.class),
             mock(RegistrationVerificationService.class),
             mock(ooo.klae.connex.backend.services.OwnershipOfferWriter.class),
-            mock(ooo.klae.connex.backend.services.PrivilegedMfaLockedAuthorization.class));
+            mock(ooo.klae.connex.backend.services.PrivilegedMfaLockedAuthorization.class),
+            mock(org.springframework.context.ApplicationEventPublisher.class));
         service = new ApiCredentialService(
             apiCredentialMapper,
             userMapper,
@@ -107,7 +111,6 @@ class ApiCredentialManagementLockOrderTest {
             new UsernamePasswordAuthenticationToken(actor, null, actor.getAuthorities()));
         when(tenantContext.isResolved()).thenReturn(true);
         when(tenantContext.getWorkspaceId()).thenReturn(WORKSPACE_ID);
-        when(userMapper.isAccountDeletionReservedForShare(ACTOR_ID)).thenReturn(Boolean.FALSE);
         when(workspaceMapper.lockActiveWorkspaceForShare(WORKSPACE_ID)).thenReturn(ORGANIZATION_ID);
         when(organizationMapper.lockByIdForShare(ORGANIZATION_ID)).thenReturn(ORGANIZATION_ID);
         when(workspaceMapper.lockAuthorizationMembership(WORKSPACE_ID, ACTOR_ID))
@@ -121,8 +124,15 @@ class ApiCredentialManagementLockOrderTest {
         SecurityContextHolder.clearContext();
     }
 
-    @Test
-    void issueTakesBothRootsSharedBeforeAnyCredentialRow() {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void issueChecksReservationBeforeRootsAndCredentialRows(boolean reserved) {
+        when(userMapper.isAccountDeletionReservedForShare(ACTOR_ID)).thenReturn(reserved);
+        if (reserved) {
+            assertReservedAccountRefused(() -> service.issue(
+                "Ordering", Set.of(ApiScope.CRM_READ), LocalDateTime.now().plusDays(30)));
+            return;
+        }
         ApiCredential persisted = credential();
         when(apiCredentialMapper.findByTokenHash(anyString())).thenReturn(persisted);
 
@@ -139,8 +149,14 @@ class ApiCredentialManagementLockOrderTest {
         order.verify(apiCredentialMapper).insert(any(ApiCredential.class));
     }
 
-    @Test
-    void revokeTakesBothRootsSharedBeforeTheCredentialRow() {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void revokeChecksReservationBeforeRootsAndCredentialRows(boolean reserved) {
+        when(userMapper.isAccountDeletionReservedForShare(ACTOR_ID)).thenReturn(reserved);
+        if (reserved) {
+            assertReservedAccountRefused(() -> service.revoke(4711L));
+            return;
+        }
         ApiCredential persisted = credential();
         when(apiCredentialMapper.findByIdForUpdate(WORKSPACE_ID, persisted.getId()))
             .thenReturn(persisted);
@@ -160,6 +176,7 @@ class ApiCredentialManagementLockOrderTest {
 
     @Test
     void aVanishedOrganizationRootRefusesManagementBeforeAnyCredentialRow() {
+        when(userMapper.isAccountDeletionReservedForShare(ACTOR_ID)).thenReturn(Boolean.FALSE);
         when(organizationMapper.lockByIdForShare(ORGANIZATION_ID)).thenReturn(null);
 
         assertThrows(ForbiddenException.class, () -> service.revoke(4242L));
@@ -177,6 +194,15 @@ class ApiCredentialManagementLockOrderTest {
         verify(apiCredentialMapper).updateLastUsed(4711L, "hash");
         verifyNoMoreInteractions(apiCredentialMapper);
         verifyNoInteractions(workspaceMapper, organizationMapper, roleMapper, auditService);
+    }
+
+    private void assertReservedAccountRefused(Runnable action) {
+        assertThrows(ForbiddenException.class, action::run);
+
+        verify(userMapper).isAccountDeletionReservedForShare(ACTOR_ID);
+        verifyNoMoreInteractions(userMapper);
+        verifyNoInteractions(
+            workspaceMapper, organizationMapper, roleMapper, apiCredentialMapper, auditService);
     }
 
     private static WorkspaceMember ownerMembership() {

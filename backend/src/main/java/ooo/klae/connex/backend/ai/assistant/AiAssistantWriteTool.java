@@ -21,6 +21,7 @@ import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.services.DealService;
+import ooo.klae.connex.backend.services.MutationAdmission;
 import ooo.klae.connex.backend.tenant.Permission;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
@@ -241,8 +242,9 @@ public interface AiAssistantWriteTool {
      *
      * @param authority who is undoing the write, never why they may
      * @param inverse the durable inverse {@link #apply} recorded
+     * @param admission privacy fences to retain after all inverse locks and before mutation/audit
      */
-    default void undo(Authority authority, Inverse inverse) {
+    default void undo(Authority authority, Inverse inverse, MutationAdmission admission) {
         throw new ConflictException("Assistant tool has no owned inverse");
     }
 
@@ -525,7 +527,12 @@ public interface AiAssistantWriteTool {
      * The aggregate locks a tool needs, taken by the framework in its own fixed order: the task
      * board root first when {@link #taskBoard()} is set, then the target.
      */
-    record Lock(boolean taskBoard, TargetLock target) {
+    record Lock(boolean taskBoard, TargetLock target, boolean tagAssociations) {
+        /** Existing tools require no tag-definition or association locks. */
+        public Lock(boolean taskBoard, TargetLock target) {
+            this(taskBoard, target, false);
+        }
+
         public Lock {
             Objects.requireNonNull(target, "An assistant write lock names its target lock");
         }
@@ -591,7 +598,9 @@ public interface AiAssistantWriteTool {
      *
      * <p>{@link #apply} may not re-resolve {@link #principals()} or {@link #resolution()} and may
      * not take a lock: every one of those was established before the locks it depends on. Its one
-     * read beyond its own domain services is {@link #scheduleConflicts()}.
+     * read beyond its own domain services is {@link #scheduleConflicts()}. Every adapter must pass
+     * {@link #admission()} to the canonical domain overload, whose final checkpoint follows all
+     * blocking prerequisite locks. The framework refuses a successful result without admission.
      */
     record Execution(
             Authority authority,
@@ -600,15 +609,10 @@ public interface AiAssistantWriteTool {
             Resolution resolution,
             LockedTarget lockedTarget,
             ScheduleConflicts scheduleConflicts,
-            Map<String, Object> pinned) {
-        /** Existing writes carry no proposal-time domain state. */
-        public Execution(
-                Authority authority, Row row, List<PrincipalRequest> principals,
-                Resolution resolution, LockedTarget lockedTarget, ScheduleConflicts scheduleConflicts) {
-            this(authority, row, principals, resolution, lockedTarget, scheduleConflicts, Map.of());
-        }
-
+            Map<String, Object> pinned,
+            MutationAdmission admission) {
         public Execution {
+            Objects.requireNonNull(admission, "An assistant write carries its mutation admission");
             pinned = AiAssistantToolProposalPin.copy(pinned);
             principals = List.copyOf(principals);
             Objects.requireNonNull(

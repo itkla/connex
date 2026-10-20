@@ -13,8 +13,11 @@ import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
+import ooo.klae.connex.backend.beans.AiChatTurn;
 import ooo.klae.connex.backend.dto.AiChatProgressItemDto;
 import ooo.klae.connex.backend.dto.AiChatStepFrameDto;
+import ooo.klae.connex.backend.dto.AiChatTurnDto;
+import ooo.klae.connex.backend.dto.AiChatTurnToolCallDto;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -31,7 +34,65 @@ class AiChatProgressServiceTest {
 
     private final AiChatMapper chatMapper = mock(AiChatMapper.class);
     private final AiChatProgressService service = new AiChatProgressService(
-            chatMapper, JsonMapper.builder().build());
+            chatMapper, JsonMapper.builder().build(), new AiAssistantToolCatalog());
+
+    @Test
+    void turnEvidenceUsesCatalogTiersAndDurableStatesFromOneBoundedRead() {
+        when(chatMapper.listToolCallsByTurn(3, 5, "turn-7-step-", ROW_LIMIT))
+                .thenReturn(List.of(
+                        toolCall(1, "list_tasks", "executed", "{\"tasks\":[{}]}"),
+                        toolCall(2, "create_task", "executed", "{}"),
+                        toolCall(3, "assign_owner", "proposed", null),
+                        toolCall(4, "list_activities", "failed", null),
+                        toolCall(5, "find_tools", "executed", "{}"),
+                        toolCall(6, "unknown_tool", "failed", null),
+                        toolCall(7, "create_note", "undone", "{}"),
+                        toolCall(8, "assign_owner", "rejected", null)));
+        AiChatTurn turn = turn();
+
+        AiChatTurnDto projected = service.projectTurn(turn, 11, null);
+
+        assertEquals(List.of(
+                new AiChatTurnToolCallDto("list_tasks", AiAssistantToolCatalog.ToolTier.READ, "executed"),
+                new AiChatTurnToolCallDto("create_task", AiAssistantToolCatalog.ToolTier.AUTO, "executed"),
+                new AiChatTurnToolCallDto("assign_owner", AiAssistantToolCatalog.ToolTier.CONFIRM, "proposed"),
+                new AiChatTurnToolCallDto("list_activities", AiAssistantToolCatalog.ToolTier.READ, "failed"),
+                new AiChatTurnToolCallDto("find_tools", AiAssistantToolCatalog.ToolTier.READ, "executed"),
+                new AiChatTurnToolCallDto("unknown_tool", null, "failed"),
+                new AiChatTurnToolCallDto("create_note", AiAssistantToolCatalog.ToolTier.AUTO, "undone"),
+                new AiChatTurnToolCallDto("assign_owner", AiAssistantToolCatalog.ToolTier.CONFIRM, "rejected")),
+                projected.toolCalls());
+        assertEquals("timed_out", projected.progress().getLast().status());
+        verify(chatMapper).listToolCallsByTurn(3, 5, "turn-7-step-", ROW_LIMIT);
+    }
+
+    @Test
+    void turnEvidenceIsUnavailableToSharedViewersAndAnonymousReaders() {
+        when(chatMapper.listToolCallsByTurn(3, 5, "turn-7-step-", ROW_LIMIT))
+                .thenReturn(List.of(toolCall(1, "list_tasks", "executed", "{\"tasks\":[{}]}")));
+
+        AiChatTurnDto shared = service.projectTurn(turn(), 12, null);
+        assertNull(shared.toolCalls());
+        assertNull(shared.progress().get(1).count());
+        assertNull(service.projectTurn(turn(), null, null).toolCalls());
+    }
+
+    @Test
+    void requesterWithNoDurableCallsReceivesAnEmptyEvidenceList() {
+        when(chatMapper.listToolCallsByTurn(3, 5, "turn-7-step-", ROW_LIMIT)).thenReturn(List.of());
+
+        assertEquals(List.of(), service.projectTurn(turn(), 11, null).toolCalls());
+    }
+
+    private static AiChatTurn turn() {
+        AiChatTurn turn = new AiChatTurn();
+        turn.setWorkspaceId(3);
+        turn.setSessionId(5);
+        turn.setId(7);
+        turn.setRequestedByUserId(11);
+        turn.setStatus("timed_out");
+        return turn;
+    }
 
     @Test
     void projectsBoundedSourceMilestonesFromDurableToolCalls() {

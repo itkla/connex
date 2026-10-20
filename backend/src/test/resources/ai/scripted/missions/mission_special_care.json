@@ -1,0 +1,15 @@
+{
+  "id": "mission_special_care",
+  "selector": "connex_script_mission_special_care",
+  "capabilityClass": "scripted-native",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "emit": {
+        "kind": "final",
+        "text": "{\"text\":\"The selected contact was hospitalized last quarter.\",\"citations\":[\"r1\"],\"suggestions\":[],\"title\":null}"
+      }
+    }
+  ]
+}

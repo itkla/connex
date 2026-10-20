@@ -13,21 +13,24 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.LockSupport;
+import java.util.function.LongConsumer;
+import java.util.function.LongSupplier;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import jakarta.annotation.PreDestroy;
-import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.dto.ActiveObjectReference;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
@@ -61,7 +64,6 @@ import tools.jackson.databind.ObjectMapper;
  * a truncated ZIP; strict authorization audit is durable before any response body begins.
  */
 @Service
-@RequiredArgsConstructor
 public class TenantExportService {
     private static final String AUDIT_ACTION = "org.workspace.export";
     static final int MAX_CONCURRENT_EXPORTS = 4;
@@ -79,8 +81,72 @@ public class TenantExportService {
     private final TenantLifecycleProperties properties;
     private final ObjectMapper objectMapper;
     private final Clock clock;
-    private final ScheduledThreadPoolExecutor deadlineExecutor = deadlineExecutor();
+    private final LongSupplier nanoTime;
+    private final LongConsumer admissionWait;
+    private final ScheduledThreadPoolExecutor deadlineExecutor;
     private final ThreadPoolExecutor cancellationExecutor = cancellationExecutor();
+
+    /** Constructs the export service with the system monotonic clock and admission wait. */
+    @Autowired
+    public TenantExportService(
+            OrgMemberService orgMemberService,
+            SessionSecurityService sessionSecurityService,
+            TenantWorkScope tenantWorkScope,
+            TenantLifecycleControlOperations controlOperations,
+            TenantLifecycleAccess lifecycleAccess,
+            TenantExportSnapshotTransaction snapshotTransaction,
+            ManagedObjectService managedObjectService,
+            AuditService auditService,
+            TenantLifecycleProperties properties,
+            ObjectMapper objectMapper,
+            Clock clock) {
+        this(
+            orgMemberService,
+            sessionSecurityService,
+            tenantWorkScope,
+            controlOperations,
+            lifecycleAccess,
+            snapshotTransaction,
+            managedObjectService,
+            auditService,
+            properties,
+            objectMapper,
+            clock,
+            System::nanoTime,
+            LockSupport::parkNanos,
+            deadlineExecutor());
+    }
+
+    TenantExportService(
+            OrgMemberService orgMemberService,
+            SessionSecurityService sessionSecurityService,
+            TenantWorkScope tenantWorkScope,
+            TenantLifecycleControlOperations controlOperations,
+            TenantLifecycleAccess lifecycleAccess,
+            TenantExportSnapshotTransaction snapshotTransaction,
+            ManagedObjectService managedObjectService,
+            AuditService auditService,
+            TenantLifecycleProperties properties,
+            ObjectMapper objectMapper,
+            Clock clock,
+            LongSupplier nanoTime,
+            LongConsumer admissionWait,
+            ScheduledThreadPoolExecutor deadlineExecutor) {
+        this.orgMemberService = orgMemberService;
+        this.sessionSecurityService = sessionSecurityService;
+        this.tenantWorkScope = tenantWorkScope;
+        this.controlOperations = controlOperations;
+        this.lifecycleAccess = lifecycleAccess;
+        this.snapshotTransaction = snapshotTransaction;
+        this.managedObjectService = managedObjectService;
+        this.auditService = auditService;
+        this.properties = properties;
+        this.objectMapper = objectMapper;
+        this.clock = clock;
+        this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
+        this.admissionWait = Objects.requireNonNull(admissionWait, "admissionWait");
+        this.deadlineExecutor = Objects.requireNonNull(deadlineExecutor, "deadlineExecutor");
+    }
 
     /**
      * Performs synchronous authorization, database-global admission, spool creation, and strict
@@ -266,7 +332,7 @@ public class TenantExportService {
         TooManyRequestsException admissionFailure = null;
         while (true) {
             execution.checkActive();
-            long remainingNanos = objectDeadlineNanos - System.nanoTime();
+            long remainingNanos = objectDeadlineNanos - nanoTime.getAsLong();
             if (remainingNanos <= 0) {
                 if (admissionFailure != null) {
                     throw admissionFailure;
@@ -287,12 +353,12 @@ public class TenantExportService {
         }
     }
 
-    private static void waitForObjectAdmission(long objectDeadlineNanos) {
-        long remainingNanos = objectDeadlineNanos - System.nanoTime();
+    private void waitForObjectAdmission(long objectDeadlineNanos) {
+        long remainingNanos = objectDeadlineNanos - nanoTime.getAsLong();
         if (remainingNanos <= 0) {
             return;
         }
-        LockSupport.parkNanos(
+        admissionWait.accept(
             Math.min(remainingNanos, OBJECT_ADMISSION_RETRY_NANOS));
         if (Thread.interrupted()) {
             Thread.currentThread().interrupt();
@@ -449,7 +515,8 @@ public class TenantExportService {
             execution = new TenantExportExecution(
                 properties.getExportTimeout(),
                 cancellationExecutor,
-                this::cleanupOwnedResources);
+                this::cleanupOwnedResources,
+                nanoTime);
             execution.armDeadline(deadlineExecutor);
         }
 

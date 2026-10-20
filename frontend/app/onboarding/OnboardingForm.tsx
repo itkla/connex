@@ -12,6 +12,7 @@ import {
     logout,
     WorkspaceSelectionUnavailableError,
 } from "@/app/lib/api";
+import { navigateAfterWorkspaceSelection } from "@/app/lib/renderedWorkspace";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { useSelfOwnershipOffers } from "@/app/hooks/useSelfOwnershipOffers";
 import { usePrivilegedMfaStanding } from "@/app/hooks/usePrivilegedMfaStanding";
@@ -57,10 +58,10 @@ export default function OnboardingForm() {
         try {
             await createWorkspace(trimmed);
             toastSuccess(t("created"));
-            window.location.replace("/dashboard");
+            navigateAfterWorkspaceSelection(() => window.location.replace("/dashboard"));
         } catch (err) {
             if (err instanceof WorkspaceSelectionUnavailableError) {
-                window.location.replace("/dashboard");
+                navigateAfterWorkspaceSelection(() => window.location.replace("/dashboard"));
                 return;
             }
             showApiError(err, "createFailed");

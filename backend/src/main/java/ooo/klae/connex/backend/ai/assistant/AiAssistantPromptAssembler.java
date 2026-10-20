@@ -414,7 +414,7 @@ public class AiAssistantPromptAssembler {
         }
         if (!pageContext.data().isEmpty()) {
             prompt.userTurn(boundedCrmData(
-                    "page_context", pageContext.data(), context, budget.pageContextBytes()));
+                    "page_context", pageContext, context, budget.pageContextBytes()));
         }
         appendSkillContext(prompt, skill, context, budget);
         List<OutboundSegment> repairSegments = repair == null ? List.of() : repairRequest(repair, context);
@@ -500,7 +500,7 @@ public class AiAssistantPromptAssembler {
         }
         if (!pageContext.data().isEmpty()) {
             prompt.userTurn(boundedCrmData(
-                    "page_context", pageContext.data(), context, budget.pageContextBytes()));
+                    "page_context", pageContext, context, budget.pageContextBytes()));
         }
         appendSkillContext(prompt, skill, context, budget);
         return prompt.build();
@@ -721,6 +721,23 @@ public class AiAssistantPromptAssembler {
                 context,
                 budget,
                 budget.toolResultBytes()).audit();
+    }
+
+    /** Admits an intact newest mission result while retaining ordinary prior-result budget behavior. */
+    public ToolBudgetAudit requireAdditionalMissionBookkeepingCapacity(boolean nativeTools,
+            List<ToolTurn> toolTurns, ToolTurn prospectiveTurn,
+            Map<AiAssistantToolCallRef, AiToolCall> nativeCalls,
+            MaskingContext context, AiAssistantPromptBudget budget) {
+        List<ToolTurn> prospective = appended(toolTurns, prospectiveTurn);
+        prospective.forEach(turn -> seedIdentifiers(turn.result().identifiers(), context));
+        BoundedToolResults bounded = nativeTools
+                ? boundedNativeToolResults(prospective, nativeCalls, context, budget, budget.toolResultBytes())
+                : boundedToolResults(prospective, context, budget, budget.toolResultBytes());
+        if (bounded.exchanges().getLast().truncated()
+                || !bounded.exchanges().getLast().result().equals(toolResultContent(prospectiveTurn, context))) {
+            throw new AiAssistantLoopException("tool_result_budget_exhausted", "tool_result_budget_exhausted");
+        }
+        return bounded.audit();
     }
 
     /** Returns honesty counters for a complete current-turn tool replay. */
@@ -1625,9 +1642,13 @@ public class AiAssistantPromptAssembler {
             if (!spec.executable()) {
                 tool.put("unavailable", spec.unavailableReason());
             }
-            tool.put("args", spec.arguments().stream()
-                    .map(AiAssistantPromptAssembler::declaredArgument)
-                    .toList());
+            if (AiAgentToolSchema.enabled() && AiAgentToolSchema.bookkeeping(spec.name())) {
+                tool.put("schema", AiAgentToolSchema.arguments(objectMapper, spec.name()));
+            } else {
+                tool.put("args", spec.arguments().stream()
+                        .map(AiAssistantPromptAssembler::declaredArgument)
+                        .toList());
+            }
             declared.add(java.util.Collections.unmodifiableMap(tool));
         }
         return List.copyOf(declared);
@@ -2129,12 +2150,31 @@ public class AiAssistantPromptAssembler {
                 + "\n" + CRM_DATA_END;
     }
 
+    /** Masks precise member fields once, retaining their containment scope through the leak scan. */
+    private String boundedCrmData(String type, AiAssistantToolResult result, MaskingContext context, int budgetBytes) {
+        if (!result.data().containsKey("missionContext")) {
+            return boundedCrmData(type, result.data(), context, budgetBytes);
+        }
+        JsonNode masked = maskToolStrings(objectMapper.valueToTree(result.data()), context,
+                result.identifiers().stream().filter(identifier -> "member".equals(identifier.kind())).toList(),
+                "/result", false);
+        String serialized = crmDataMasked(type, masked);
+        if (result.data().containsKey("missionContext") && utf8Bytes(serialized) > budgetBytes) {
+            throw new AiAssistantLoopException("mission_context_overflow", "mission_context_overflow");
+        }
+        return utf8Bytes(serialized) <= budgetBytes
+                ? serialized : crmData(type, Map.of("status", BUDGET_EXCEEDED), context);
+    }
+
     private String boundedCrmData(
             String type,
             Map<String, Object> rawData,
             MaskingContext context,
             int budgetBytes) {
         String serialized = crmData(type, rawData, context);
+        if (rawData.containsKey("missionContext") && utf8Bytes(serialized) > budgetBytes) {
+            throw new AiAssistantLoopException("mission_context_overflow", "mission_context_overflow");
+        }
         return utf8Bytes(serialized) <= budgetBytes
                 ? serialized
                 : crmData(type, Map.of("status", BUDGET_EXCEEDED), context);

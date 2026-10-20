@@ -8,11 +8,13 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -35,6 +37,8 @@ import ooo.klae.connex.backend.mappers.ProviderConnectionMapper;
 import ooo.klae.connex.backend.services.DuplicateDecisionLockService;
 import ooo.klae.connex.backend.services.MatchingService;
 import ooo.klae.connex.backend.services.ProviderCaptureHistoricalBaselineService;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 import ooo.klae.connex.backend.services.WorkspaceService;
 
 @ExtendWith(MockitoExtension.class)
@@ -46,6 +50,7 @@ class ProviderCapturePagePersistenceTest {
     @Mock private DuplicateDecisionLockService duplicateDecisionLockService;
     @Mock private WorkspaceService workspaceService;
     @Mock private ProviderCaptureHistoricalBaselineService historicalBaselineService;
+    @Mock private RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     private ProviderCapturePagePersistence persistence;
     private ProviderCaptureSyncState state;
@@ -62,7 +67,8 @@ class ProviderCapturePagePersistenceTest {
             new ObjectMapper(),
             duplicateDecisionLockService,
             workspaceService,
-            historicalBaselineService);
+            historicalBaselineService,
+            recordVisibilityScopeControlAccess);
         state = new ProviderCaptureSyncState();
         state.setId(8);
         state.setWorkspaceId(7);
@@ -87,6 +93,28 @@ class ProviderCapturePagePersistenceTest {
                 eq(7), eq(8L), eq("lease"), any(), any(), anyString(),
                 any(Long.class), any(), anyString(), anyString()))
             .thenReturn(1);
+    }
+
+    @Test
+    void historyScopePrecedesLocksWhenTheInitialSyncFlagChangesDuringLockAcquisition() {
+        RecordVisibilityScope scope = new RecordVisibilityScope(1, List.of(7));
+        when(recordVisibilityScopeControlAccess.getForWorkspace(7)).thenReturn(scope);
+        when(captureMapper.getSyncStateForUpdate(7, 8)).thenAnswer(invocation -> {
+            state.setInitialSyncCompleted(false);
+            return state;
+        });
+
+        persistence.commit(7, 8, "lease", new ProviderCapturePage(List.of(), null, "cursor-1", 0L),
+            policy("review"), "owner@example.test");
+
+        var order = inOrder(recordVisibilityScopeControlAccess, connectionMapper,
+            duplicateDecisionLockService, captureMapper, historicalBaselineService);
+        order.verify(recordVisibilityScopeControlAccess).getForWorkspace(7);
+        order.verify(connectionMapper).getByUserAndProviderForShare(9, "google");
+        order.verify(duplicateDecisionLockService).lockBackgroundMemberOrganization(7, 9);
+        order.verify(captureMapper).getSyncStateForUpdate(7, 8);
+        order.verify(historicalBaselineService).snapshot(eq(7), any(), eq(Set.of()), eq(Set.of()), eq(scope));
+        verify(recordVisibilityScopeControlAccess).getForWorkspace(7);
     }
 
     @Test
@@ -173,7 +201,7 @@ class ProviderCapturePagePersistenceTest {
             anyString(),
             anyString());
         verify(historicalBaselineService, never()).snapshot(
-            anyInt(), any(), any(), any());
+            anyInt(), any(), any(), any(), any());
     }
 
     @Test

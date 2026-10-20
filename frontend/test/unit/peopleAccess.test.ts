@@ -9,6 +9,7 @@ import {
     peopleSectionHref,
 } from "@/app/lib/peopleSections";
 import { SETTINGS_ENTRIES, SETTINGS_GROUPS } from "@/app/lib/settingsManifest";
+import { settingsConfigRedirects } from "@/app/lib/settingsRedirects";
 
 /**
  * Gate over the consolidated People & access destination (#1340 WS4.3).
@@ -473,16 +474,16 @@ describe("the shipped panels still render in the home they had", () => {
             ["users"],
         ];
 
+        const forwarded = settingsConfigRedirects().map((redirect) => redirect.source);
+
         for (const segments of routes) {
-            const page = source(path.join(process.cwd(), "app", "(app)", ...segments, "page.tsx"));
+            expect(forwarded, `/${segments.join("/")} still renders instead of forwarding`).toContain(
+                `/${segments.join("/")}`,
+            );
             expect(
-                page,
-                `/${segments.join("/")} still renders instead of forwarding`,
-            ).toContain("permanentRedirect(settingsRedirectTarget(");
-            expect(
-                page,
-                "a stub renders nothing; a panel left behind here would be a second copy of a section",
-            ).not.toContain("Panel");
+                existsSync(path.join(process.cwd(), "app", "(app)", ...segments, "page.tsx")),
+                "a forwarded address keeps no page; a panel left behind there would be a second copy of a section",
+            ).toBe(false);
         }
     });
 

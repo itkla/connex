@@ -194,8 +194,29 @@ Stored prose can name a member who has renamed themselves or is still pending. N
 task descriptions, skill activity reads and personal work-brief commitments therefore register every authored `user:` reference label
 from reader-authorized content before assistant screening or truncation, regardless of current name
 or membership status. Repeated references to one user and reference-style Markdown retain all
-labels, including both authored HTML-entity spellings and decoded labels. The collector covers the
-following constructs. Examples show stored source; `\n`, `\r` and `\t` denote line breaks or tabs.
+labels, including both authored HTML-entity spellings and decoded labels. Both member provenance
+and reader visibility now use the pure `ReferenceContentReader` shared by `ReferenceService`.
+It parses original source with pinned CommonMark Java 0.30.1, the GFM tables extension and the
+footnotes extension, with block and inline source spans. It does not globally decode the document
+before parsing. Resolved links, images and all link-reference definitions (including unused and
+duplicate definitions) contribute internal targets; HTML `href` attributes do not, matching
+`NoteContent`'s `skipHtml` posture. The closed vocabulary remains `user`, `person`, `deal`, `company`,
+`note`, `file`, `task` and `activity`. Nonpositive, invalid or overflowing internal IDs retain an
+unsafe signal instead of disappearing from visibility checks.
+
+Member label spans exclude link syntax, reference keys and destinations. UTF-16 source offsets
+retain original line endings and container gaps; logical and rendered label readings supplement
+the authored spelling. Table-cell offsets are mapped back across escaped pipes because the
+extension removes those backslashes before inline parsing. The collector covers the following
+constructs. Examples show stored source; `\n`, `\r` and `\t` denote line breaks or tabs.
+
+The package-private compatibility label APIs preserve legacy source-spelling/entity-decoding
+readings and their ordering, and add parser-resolved source labels. Their results are a conservative
+superset, not an AI admission decision. The completeness-aware AI reading additionally includes rendered labels with code,
+emphasis and escape syntax removed, sharing the same authorization target groups.
+Legacy definition-key suppression applies only to the source-label view: when the AST instead
+resolves that bracket as a shortcut, its label remains in the AI masking view with the same
+authorization group. Malformed definitions never remove later valid fallback candidates.
 
 | Covered construct | One-line example |
 | --- | --- |
@@ -212,9 +233,12 @@ following constructs. Examples show stored source; `\n`, `\r` and `\t` denote li
 | Continued definition keys and destinations, with LF, CR or CRLF | `[Alice][m n]\n\n> [m\n> n]:\r> <user:42>` |
 | Titled definitions, without decoding the title for member detection | `[Alice][m]\n\n[m]: user:42 "a&#10;b"` |
 | Unicode case-folded and whitespace-collapsed keys | `[Alice][SS]\n\n[ß]: user:42`; `[Alice][m n]\n\n[M\tN]: user:42` |
+| Independent table-cell and table-row inline contexts | ``| ` | [Alice][m] | ` |\n| --- | --- | --- |\n\n[m]: user:42`` |
+| Footnote-body links | `See [^f].\n\n[^f]: [Alice][m]\n\n[m]: user:42` |
 | The shared 999-code-point label bound, checked before copying or normalization | `"[" + "😀".repeat(999) + "](user:42)"` is accepted; 1,000 code points are outside the bound |
 
-The implemented paragraph-interruption rules determine when a following definition may start:
+The retained conservative supplement uses these paragraph-interruption rules when deciding
+whether a following definition suppresses a shortcut reading:
 
 | Paragraph rule | One-line example |
 | --- | --- |
@@ -225,7 +249,7 @@ The implemented paragraph-interruption rules determine when a following definiti
 | Indented code cannot interrupt | `Hello\n    code` continues the paragraph |
 | Container paragraphs retain lazy continuations | `> Hello\n[Alice]: welcome.\n\n[Alice]: user:42` keeps the first bracket as a shortcut usage |
 
-Code and escape handling use one shared sequential delimiter table following
+The compatibility supplement's code and escape handling use one shared sequential delimiter table following
 [CommonMark 0.31.2 §§2.4 and 6.1](https://spec.commonmark.org/0.31.2/#code-spans).
 Outside code, a backslash escapes the next ASCII punctuation character. An unescaped backtick run
 opens code only when a later raw run has exactly the same length; that whole span is literal,
@@ -241,10 +265,157 @@ Cartesian product of labels and ids. Group deduplication and visibility matching
 each shared target set is traversed once per phase rather than once per label. Member
 provenance writers and readers use the same code-point bound, including supplementary characters.
 
-Full CommonMark parity is **not claimed**. Any construct not listed above is a bounded residual
-tracked in [#2072](https://github.com/itkla/connex/issues/2072), which proposes a real CommonMark parser
-for both reference readers; the owner decision is pending. In particular, raw HTML block state is
-not modelled, and reference-style labels adjacent to raw HTML remain in that residual.
+The parser closes the definition-layout and shared-reader residuals in
+[#2071](https://github.com/itkla/connex/issues/2071) and
+[#2072](https://github.com/itkla/connex/issues/2072): zero-indent LF/CR/CRLF continuations,
+blockquote/list containers and raw-HTML block termination use actual parser semantics. Tables and
+footnotes have separate inline/container contexts; differential fixtures cover backend discovery
+and frontend rendering.
+The pinned table extension disagrees with GFM on lone-pipe body rows and unequal header/delimiter
+column counts. The reader therefore unions links and definitions from a second bounded parse
+with footnotes but without tables. A destination census independently locates literal syntax throughout the **full original
+body**, including source rejected by parser admission. Only census destinations use backend HTML-entity
+decoding followed by the AI screen's shared `CanonicalText` literal projection; both AST parses
+still receive unchanged original source. Composed UTF-16 source maps retain each hit's original
+occurrence through entity decoding, NFKC, case folding and default-ignorable/delimiter removal.
+The census recognizes all eight internal types, backend Unicode decimal digits, literal/escaped
+colons and named/decimal/hex entity spellings. Thus `user:４２`, `user:٤٢`, `tasK:42`, full-width
+type/colon spellings, `user\&colon;42`, `user&#92;:42` and `u&#115;er:42` cannot hide missed links.
+
+The census visits only literal ASCII destination anchors in the original source: `](` for an
+inline link/image, `<` immediately before an autolink destination, and `]:` for a definition.
+The `]:` anchor has no physical-line or key-opening requirement. Indented definitions inside
+footnotes and other container layouts must still contribute conservative hits when both parses
+miss them.
+After `](` or `]:`, it accepts spaces/tabs, at most one LF/CR/CRLF continuation with literal
+blockquote/list prefixes or indentation, and an optional `<`. Entity decoding and normalization
+apply only to the following destination; they cannot create syntax anchors. Cached forward
+`indexOf` cursors locate anchors, and disjoint candidate runs keep normalization off ordinary
+prose. Thus `Note:2026/10/16`, `Note：2026年10月16日`, `(note:7)`, `Deal:3件`, `Task：①資料作成`
+and `activity:12 logged` remain prose. External URL substrings also remain prose, including
+`https://example.com/(docs)/:user:42` and `[Help](https://example.com/path]user:42)`; the reader
+no longer attempts a separate URL-exclusion grammar. Literal `<` anchors still protect
+`https://example.com/<note:42>` and `a://<user:42>`, even inside the table disagreement.
+Only an actual link, image or definition destination from either parse explains a census hit, by the
+same type, integer ID and original source occurrence; compatibility scans cannot explain one.
+An unrelated definition with the same ID cannot establish coverage for a missed table link.
+Bare type/ID text in labels, titles and reference keys is not a census hit; literal destination
+anchors inside such text remain conservative candidates. Every unexplained hit
+joins the visibility inventory, so invisible destinations are still redacted when both parses miss
+them. A visible destination retains the existing scoped authorization checks.
+
+Any unexplained `user:` census hit makes the member reading incomplete. Original queued text
+is refused at identifier admission; stored AI prose degrades per item as described below. Nonpositive or overflowing census IDs retain an unsafe signal. Context-free
+snippets replace the **whole snippet** with the existing unavailable placeholder for unexplained,
+unrepresentable or incomplete readings, or `a note` when a complete reading contains a note target.
+Canonical tokens in otherwise complete content still flatten individually. Literal destination
+syntax in code spans, fenced/indented code, examples, HTML and table cells also counts: this
+deliberately redacts some non-rendered references. A malformed
+`user:7)` definition followed by a valid `user:42` definition retains its conservative user-42
+alias but makes its member reading incomplete because user 7 remains unexplained. `user:(7` is not a destination
+token; its valid fallback shortcut remains maskable. The differential fixtures cover both table
+disagreements across all eight types, including blockquote/list containers.
+Autolink-literal and strikethrough artifacts are deliberately absent: literal autolinks use
+HTTP(S)/mailto rather than internal schemes, and strikethrough introduces no destination or
+separate inline context. Links within tildes and task lists remain covered by core inline parsing.
+
+CommonMark is authoritative for resolved syntax, with the existing bounded conservative readings
+retained additively inside the shared reader. Canonical source readings still apply in code/HTML,
+accept `&colon;` and `\:` separators, and preserve oversized non-spec definition-key protection.
+Duplicate definitions still retain every possible member ID even when the parser resolves the
+first definition to another type. Unclosed HTML and other deliberately conservative readings can
+therefore contribute candidates without an AST link. Those candidates can cause extra redaction
+or masking; they do not grant authorization. The fixed-number supplement runs over the full text
+even when parser admission fails, and shared target sets avoid label/id Cartesian expansion.
+The same bounded definition/destination supplement inventories all eight target types, including
+indented or container definitions that parser/renderer extension differences could otherwise hide.
+Its added definition readings require a digit immediately after the destination separator,
+including entity-decoded digits, without a physical-line requirement. Thus `[Owner]: User: Hanako`
+and `[メモ]: Note: 来週確認` remain prose; a digit-starting invalid or overflowing ID retains an
+unsafe signal. The original definition inventory remains the compatibility floor.
+Malformed angle destinations stop at impossible internal-reference syntax rather than repeatedly
+searching the remaining body for a closing angle.
+
+Parser admission is capped at **262,144 UTF-16 units per body**, without truncation. Upstream block
+and inline nesting limits stay at **100**; an AST reaching saturation is incomplete, including
+depths 100 and 101 (99 remains readable). Tables allow at most **256 columns** and **8,192 prospective
+cells** across the body. A conservative source scan bounds padded-cell expansion before parsing;
+separator rows, edge pipes and pipe-heavy prose/code/HTML also consume that budget, and the AST
+checks exact column counts. Parser or source-span failures are incomplete too. These are resource
+bounds, not a claim that every possible upstream input has a universal linear-time proof.
+
+A linear preflight also caps prospective bracket work at **16,777,216**: at each raw `]`, it adds
+the cumulative number of raw `[` characters seen so far. This intentionally overcounts escaped,
+code and balanced brackets. It upper-bounds the pinned parser's repeated traversal of prior
+brackets on every successful link; even below the input cap, 131,000 unmatched openers followed
+by 26,000 empty links would otherwise cause about 3.4 billion iterations. Exceeding the budget is
+incomplete (`bracket_limit`), while the existing 50,000-opener/one-link regression remains admitted.
+
+The pinned footnotes extension has two known renderer differences: its label scanner does not
+handle escaped closing brackets, and its continuation indentation is absolute inside containers.
+Until upstream supports those layouts, all container footnotes, footnote labels containing a
+backslash or opening bracket, and ordinary-definition fallbacks whose key starts with `^` are
+explicitly incomplete (`unsupported_footnote`). When this is the only incomplete status and the syntax census finds no internal destination
+(including no unrepresentable ID), the reading remains complete and preserves harmless prose.
+Bodies with internal destinations keep the whole-body fail-closed behavior. Escaped footnote definition markers are checked in a linear
+source pass, independently of the AST: a missed footnote can merge paragraphs into a code span
+and leave no definition node to diagnose. Literal destination syntax in source examples may therefore fail closed too.
+The escaped-label, paragraph-interruption and nested-blockquote reproductions are
+also exercised against the frontend renderer. Normal root footnotes remain supported; the
+compatibility inventory still retains targets and member candidates from refused bodies.
+
+Member labels retain the existing **999-code-point** bound, including supplementary characters.
+A resolved member link or image whose authored label exceeds that bound makes AI member admission
+incomplete instead of silently dropping its label. Destination visibility discovery remains
+independent of the label bound; genuinely empty labels remain admitted.
+
+Every incomplete visibility reading replaces the whole body with `(unavailable reference)`, also
+on reader-authorized AI projections and context-free snippets. No unchecked prefix or suffix is
+returned. Structured references retain their independent existing visibility checks. The
+Micrometer counter `connex.reference.content.incomplete` uses the global registry of this static
+reader and counts **reads**, not requests, users, items or AI admission decisions. Parser reasons
+increment once per incomplete `read()`, including visibility, audit and snippet reads/re-reads.
+The bounded `member_provenance` reason increments once when an otherwise complete reading's lazy
+member analysis first detects unsafe/unexplained member provenance; visibility/snippet paths do
+not compute it. Separate readings of the same content can increment again. Tags contain only the
+fixed reason vocabulary, never content, labels, IDs or workspace data. This diagnostic is not a
+count of refused provider requests; retaining the static reader avoids constructor changes solely
+for metrics.
+Queue identifier admission parses the original complete text and refuses incomplete readings with
+the existing `identifier_text_unsafe` error before identifier queries or provider dispatch.
+For stored reader-authorized prose, incomplete member readings instead replace only that item's
+AI prose with `(unavailable reference)` and register no partial labels. Record/list tools, scope
+activities, work commitments and complete/reschedule task outcomes apply this projection before
+screening/truncation. Other items and non-prose fields continue normally. Fresh write results and
+stored-outcome replays use the same pure projection and do not throw because one description is
+incomplete; durable source/outcome text remains unchanged. An unrepresentable `user:` destination
+follows these same queue-refusal and per-item-degradation paths.
+An invalid non-member destination does not suppress valid member provenance from original queue text.
+There is no cross-request content, AST or authorization cache. Per-group member visibility,
+500-ID batches and combined identifier limits remain unchanged; persisted references and mention
+recipients still use only
+the existing canonical write grammar and its 100-reference cap.
+
+Within the input cap, content with none of `[`, `]`, `<` or `&` returns an empty
+complete reading without census or AST parsing. Member compatibility scans, authored/logical/
+rendered label extraction and reference grouping are invocation-local and lazy: only member/AI
+APIs request them, never reader redaction or context-free snippets. No cross-request cache is added.
+Colons, full-width colons and backslashes alone need no Markdown parsing, so timestamps, IPv6,
+JSON audit strings and link-free tables with time text retain their original prose. The `]` guard
+keeps a literal inline destination anchor detectable even when its opening `[` is absent.
+
+Residuals are the retained compatibility supplement's conservative over-inclusion, literal
+Markdown destination syntax in code/HTML, unsupported footnote bodies containing internal
+destinations, bounded/unrepresentable inputs failing closed, and future parser/renderer drift.
+Bare prose type/ID text is outside the census. The original conservative supplement can still
+protect entity-encoded syntax that the renderer leaves literal; it does not create census anchors.
+Literal `]:` followed by a digit-starting internal destination remains a conservative candidate
+inside ordinary sentences, for example `Status [Q3]: deal:5 closed`. An invisible ID can therefore
+redact that whole body, and a user destination can refuse AI admission. This residual requires
+digits immediately after the destination colon; `Status [Q3]: deal: signed` and the English
+and Japanese heading examples without IDs above remain prose.
+Renew the differential fixtures when either dependency changes. Further normalization or Markdown
+exotica outside the tested syntax layouts require a separately scoped review.
 Current active members are masked everywhere through directory candidates. Prose mentions of
 former members outside reference syntax remain outside #1822's guarantee. Full assistant note reads
 bypass display previews so a label cannot be cut before this boundary. Shared sessions exclude private notes in SQL before the result limit, including company
@@ -566,6 +737,14 @@ Streaming remains inside `AiInvocationService`:
 - keep cancellation authorization and terminal state database-backed;
 - treat JVM transport-abort hooks as an optimization, not the source of truth.
 
+## Read-only missions and durable chat privacy
+
+V232 introduces `record_review_v1` inside an existing Ask Connex session. [AI_MISSIONS.md](AI_MISSIONS.md) defines its durable generation/taint predicate, conservative cleanup enrollment, DSR authority, and drained single-JVM activation boundary. Every ordinary message writer uses the same durable session sequence allocator; every derived execution retains its original privacy token through reads, secondary provider dispatch, writes, and deferred requester publication. Missing barriers and stale tokens fail closed after restart and after purge unblocks.
+
+Missions use the existing invocation, masking, leak scan, organization budget, audit and provider transport. Their server policy narrows the catalog and execution boundary to five read tools, enforces the selected primary record before retrieval/registration/handle resolution (including preclaim validation), and never enables CONFIRM/AUTO or question tools. Linked tasks are bounded evidence without task handles in this slice. Shared prompt serialization and envelope constants are unchanged. One `AGENT_RUN` lease covers each attempt; legacy `CHAT_TURN` routes cannot claim or control it.
+
+Mission realtime sends only requester-authorized metadata invalidations, with fresh membership, permission, session and generation checks inside the local fence. Ordinary content frames revalidate their immutable stored turn provenance and source state at send time. Output is fetched through the canonical owner-only report API; no mission model prose is broadcast.
+
 ## Assistant tools and collaboration
 
 Native assistant tools are capability-declared transport choices, not a second authorization model.
@@ -587,6 +766,29 @@ Native assistant tools are capability-declared transport choices, not a second a
 - A provider without native-tool capability retains the existing ReAct protocol; do not silently change its prompt/request semantics.
 - Each tool step executes as the member who authored that turn.
 - Shared transcript access requires joined membership in the same workspace.
+- Durable turn responses include requester-only `toolCalls` execution evidence: the tool key,
+  its current authoritative `AiAssistantToolCatalog.ToolTier` (null for unknown tools), and its
+  durable status. `AiChatProgressService.projectTurn` derives this and progress from one query
+  bounded by `MAX_TOOL_CALL_ROWS_PER_TURN`; no arguments, results, or record identifiers enter
+  the projection. `AiChatTurnDto` applies the same requester identity check as partial text and
+  detailed progress, returning null for shared viewers. Retry still requires settled progress
+  and transcript reconciliation. Every projected call must be READ-tier or a write proposal in a
+  server-guaranteed terminal non-executable state (`rejected` or `expired`). Still-`proposed`,
+  pending, failed or unknown write outcomes, unknown tiers and absent projections fail closed.
+  A review deadline or derived `reviewState: expired` is insufficient: the current server keeps
+  the durable status `proposed`, and an action admitted before expiry may still commit afterward.
+  New approvals after the deadline are refused at the final mutation boundary by
+  `AiAssistantWriteToolService.ProposalAdmission.beforeMutation`; durable rejected rows also fail
+  approval's locked `requireStatus(PROPOSED)` check. No client read can invalidate a live proposal.
+- The client re-reads a bound failed turn's projection during transcript reconciliation and after
+  approval; polling stopping at the turn's terminal state does not freeze proposal outcomes.
+  Observed executed writes are retained for that turn across bounded card and projection refreshes.
+  Pending or failed execution-evidence refreshes cannot authorize Retry from a cached proposal.
+  Approval settlement invalidates outstanding transcript refreshes so a delayed pre-approval
+  projection cannot replace the execution evidence after an unknown approval response.
+  The Retry callback also revalidates the bound turn's projection and cards immediately before
+  submission, regardless of realtime notifications. Only fresh `none` evidence can submit;
+  failed reads, committed writes, and unknown proposal outcomes refuse and update client state.
 - Citations are re-authorized and filtered per viewer.
 - Realtime fanout resolves current joined recipients after commit; cached/caller-supplied recipient sets are not authorization.
 - Presence/typing signals are bounded ephemeral hints and never authorization evidence.
@@ -640,6 +842,107 @@ withdraws the current partial answer if a handle is detected across fragment bou
 complete answer is checked again at stream finish.
 No task-handle replay remapping exists. Stored task arguments normalize the handle to `t1` and
 keep the resolved tenant-local identity under `target`, plus a canonical `targetVersion` hash.
+
+### Assistant proposal review deadlines
+
+`AiAssistantProposalExpiry.PROPOSAL_REVIEW_WINDOW` is seventy-two hours, anchored only to the
+original server `ai_chat_tool_call.created_at` interpreted as UTC with microsecond precision.
+A trusted still-proposed row expires at `now >= created_at + window`, including legacy singles and
+stranded AUTO rows. Missing or invalid creation times fail closed. Reads, replay and retries never
+extend the deadline. Expiry derives `reviewState` and `reviewExpiresAt` on both legacy DTOs; it does
+not write a new status, column or holding. Terminal outcomes retain their actual meaning, and undo
+continues to use its independent inverse eligibility and ten-minute deadline.
+
+Each approval and AUTO execution carries a transaction-bound `MutationAdmission` through
+`AiAssistantWriteTool.Execution` to the domain delegate. The callback reads the injected clock
+at the final pre-mutation boundary after every blocking prerequisite lock and validation, including
+successful no-op branches. Successful admission belongs to that one atomic action and may commit
+after the deadline; subsequent effects do not perform a new expiry decision. The framework refuses
+to persist an execution receipt if the delegate did not admit. Non-assistant overloads retain their
+original signatures and use unrestricted admission. New write tools must propagate this callback
+and prove its placement under their domain locks; an early framework check is insufficient. The
+complete hierarchy and checkpoints are in [LOCKING.md](LOCKING.md#assistant-write-tools).
+
+Legacy approval and discard return HTTP 409 with code `AI_PROPOSAL_EXPIRED` and message
+`Assistant proposal review window has expired` only after authorization, requester/session, trust,
+state and tier validation. Discard checks immediately before its conditional rejection write under
+session/tool-call locks; it adds no domain permission, target lookup or domain lock. An expired
+refusal rolls back without domain mutation, success audit, receipt or rejection. AUTO remains
+ineligible for manual decisions; its existing generation-owned failure settlement remains intact.
+
+Every list captures one injected-clock instant for SQL and projection. Pending reads filter trusted
+`proposed` rows with `created_at > now - 72 hours` before their existing ordering and 100-row limit,
+including audited retained reads. Historical reads retain the oldest 100 rows and supplement them
+with up to 100 newest trusted undecided rows beyond that raw `(message.seq, tool-call.id)` window,
+filtering trust and proposed status before the separate limit. The supplement includes both open
+and expired proposals; it cannot consume the live-pending read's budget. The same bounds apply to
+audited retained history. Individual reads retain authorized expired rows.
+False-marker proposed/failed rows and malformed envelopes retain existing exclusion rules; legacy
+terminal history remains visible without being promoted to trusted, with a null review deadline.
+Current visibility, special-care masking, processing restrictions, local restriction fences and
+retained-read audits remain authoritative.
+
+Frontend Apply and Discard require a valid open deadline and server-relative time strictly before
+it. Assistant API responses calibrate that clock from their HTTP `Date` header, advanced with
+monotonic elapsed time rather than the device wall clock; missing samples disarm action guards.
+The header's second precision and transport delay can leave the client slightly behind, so the
+server's locked expiry checks remain authoritative. A local timer, focus and visibility resume
+disarm controls without a network frame, and recalibration reschedules mounted timers; the typed expiry
+error clears the action and settles the individual row without retry. EN/JA expiry copy and
+historical/pending reload merging preserve the existing surfaces. This deadline is decision
+expiry, not erasure: deletion cascades, export ownership, retention and account-erasure handling
+are unchanged. V231 is marker-only, raises the rollback floor, and does not repair retained-chat
+privacy. Ship the full contract together and drain older instances as described in
+[UPGRADING.md](../UPGRADING.md#v231-assistant-proposal-review-expiry).
+
+### Dormant chat proposal-set storage (tenant V233)
+
+`ai_assistant_proposal_set` stores one immutable chat invocation: opaque workspace-scoped key,
+real session/message/turn ancestry, original requester, step/call coordinates, tool, scalar/bulk
+mode, row count, intent fingerprint, scope revision, privacy generation and original timestamp.
+The generated bulk slot reserves one bulk invocation per turn, including failed calls and arrays
+of one. Scalar sets require one child; bulk sets permit 1–20. No legacy rows are backfilled.
+The parent stores no copied labels, rationale or argument JSON. `publication_state` is technical
+settlement (`staged`, `ready`, `failed`), independent of child decisions; failed storage requires a
+closed reason (`call_failed`, `cancelled`, `timed_out`, `execution_lost`), never exception text.
+
+Composite cascading FKs bind parents to messages and turns in the same workspace and session,
+and children to their parent's exact message. Children keep `message_id NOT NULL`, the existing
+status vocabulary and trust marker. Set-owned children add a unique ordinal and preparation
+anchor; legacy rows retain null membership columns. BEFORE INSERT/UPDATE triggers enforce complete
+membership metadata, ordinal bounds and server trust without adding a COPY-requiring CHECK to the
+retained tool-call table; parent constraints remain CHECKs. The guarded online DDL and migration-only
+FK installation procedure are documented in [UPGRADING](../UPGRADING.md#dormant-assistant-proposal-set-storage-tenant-v233).
+Their creation timestamp and privacy generation are copied from the parent, separately from the
+earlier preparation anchor. Children remain ordinary reactive chat artifacts with no mission run;
+read-only missions use their separate persistence path and do not produce proposal sets.
+Proposal-key FK columns explicitly use
+the same ASCII binary collation. Account erasure clears the parent's requester beside message
+authors and turn requesters; membership departure retains attribution and never transfers it.
+The table's `TenantLifecycleRegistry` message cascade supplies tenant export, teardown and
+residual reach while chat messages, tools and turns retain their direct lifecycle declarations.
+Export applies the existing mission privacy barrier and parent message/turn visibility to set
+metadata; residual counts remain unconditional. V232 restriction and DSR cleanup remove sets
+through their message and origin-turn cascades, including sets attached to retained pre-taint
+user input, because the originating turn remains enrolled. The mapper reads no person rows, so
+the person-reader restriction registry does not apply. Account erasure discovers proposal-set
+requester provenance when locking session roots and clears it in the chat-child phase before
+domain mutations, restriction fences and privacy invalidation.
+
+`AiAssistantProposalSetMapper` is a dormant storage surface with no production consumer. Its
+inserts admit a user message and turn with matching requester/session, then stage trusted children
+under that parent. It has no identity, mode, membership or timestamp update operation and no
+publication transition. Exact reads return all children in ordinal order, without transcript caps;
+`hasCompleteMembership` checks count, contiguous ordinals, trust, tool, requester ancestry and
+creation/preparation anchors. It is an integrity check, not authorization or readiness. MySQL
+constraints alone cannot enforce a cross-row child count at commit.
+
+The later creation service must establish current authority, privacy generation and exact
+turn/message association under the session mutex, insert the parent and every member in one
+transaction, and require complete membership before commit. Existing chat readers and writers
+retain their legacy behavior. Production set creation, effective-tier decisions, whole-call
+publication, set-specific privacy admission and discovery remain disabled until their own slices. V233
+preserves the existing V232 rollback floor; activation requires a fresh semantic cutover.
 
 ### Adding an assistant write tool
 
@@ -811,3 +1114,18 @@ Deterministic warmth, risk, report figures, and other non-AI behavior remain ava
 - Unmasked/streaming/collaboration behavior preserves durable authorization and screening.
 - Budgets/governance/admission are database-coordinated and checked before egress.
 - Provider, masking, leak-scan, timeout, cancellation, budget, and cross-workspace tests pass.
+
+## Durable mission continuation (V235)
+
+Runtime-2 plans and checkpoints follow [AI_MISSIONS.md](AI_MISSIONS.md). Bookkeeping has
+strict mission-only schemas and bypasses ordinary todo normalization, result caching and
+proposal persistence. Screen and admit the complete result before committing. Provider
+requests receive explicit masked plan/context projections; canonical member IDs, original
+member-label provenance and evidence bindings remain server-side. Fresh segments reauthorize
+bounded evidence and member provenance and rebuild fresh registries without chat history or
+provider replay state. Required-context overflow refuses rather than dropping facts.
+
+Every actual dispatch, including repair/fallback, carries its exact mission ordinal through
+usage settlement. Continuation never resets organization gates, root caps, deadlines or
+outbound leak/special-care screening. Slice 2 adds no write, proposal, question or live-evaluation
+surface. See the mission contract for checkpoint-only closing decisions and retry exclusions.

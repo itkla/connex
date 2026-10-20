@@ -78,8 +78,8 @@ class GuidedRecordCreationServiceTest {
             field("tags", null, true, array(6, 4)));
         when(augmentationService.resolvePreliminary(RecordCreationRecordType.person, use))
             .thenReturn(resolved);
-        when(personService.createReviewed(any(), eq("proof"), any())).thenAnswer(invocation ->
-            invocation.getArgument(0));
+        when(personService.createReviewed(any(), eq("proof"), any(), eq(MutationAdmission.UNRESTRICTED)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
         GuidedPersonCreateRequestDto request = new GuidedPersonCreateRequestDto(
             new GuidedPersonRecordDto(
                 "Ada", "ada@example.com", null, null, null, null, null, null, "proof"),
@@ -92,7 +92,8 @@ class GuidedRecordCreationServiceTest {
         assertEquals(44, created.getCompany().getId());
         ArgumentCaptor<RecordCreationAugmentation> augmentation =
             ArgumentCaptor.forClass(RecordCreationAugmentation.class);
-        verify(personService).createReviewed(any(), eq("proof"), augmentation.capture());
+        verify(personService).createReviewed(
+            any(), eq("proof"), augmentation.capture(), eq(MutationAdmission.UNRESTRICTED));
         assertEquals("default", augmentation.getValue().customFields().get(9).textValue());
         assertEquals(List.of(6, 4), augmentation.getValue().tagIds());
         verify(workspaceService).lockAndRequirePermissions(
@@ -113,10 +114,10 @@ class GuidedRecordCreationServiceTest {
                 field("currency", null, true, null),
                 field("pipeline", null, true, null),
                 field("stage", null, true, null)));
-        when(companyService.createCompanyReviewed(any(), eq(null), any())).thenAnswer(invocation ->
-            invocation.getArgument(0));
-        when(dealService.createReviewed(any(), eq(null), any())).thenAnswer(invocation ->
-            invocation.getArgument(0));
+        when(companyService.createCompanyReviewed(any(), eq(null), any(), eq(MutationAdmission.UNRESTRICTED)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
+        when(dealService.createReviewed(any(), eq(null), any(), eq(MutationAdmission.UNRESTRICTED)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
 
         Company company = service.createCompany(new GuidedCompanyCreateRequestDto(
             new GuidedCompanyRecordDto("Connex", "https://connex.example", "CRM", null, null, null),
@@ -131,8 +132,8 @@ class GuidedRecordCreationServiceTest {
         assertEquals(new BigDecimal("12.34"), deal.getValue());
         assertEquals(new BigDecimal("0.00"), deal.getActualValue());
         assertEquals("2026-12-31", deal.getExpectedCloseDate());
-        verify(companyService).createCompanyReviewed(any(), eq(null), any());
-        verify(dealService).createReviewed(any(), eq(null), any());
+        verify(companyService).createCompanyReviewed(any(), eq(null), any(), eq(MutationAdmission.UNRESTRICTED));
+        verify(dealService).createReviewed(any(), eq(null), any(), eq(MutationAdmission.UNRESTRICTED));
     }
 
     @Test
@@ -152,7 +153,7 @@ class GuidedRecordCreationServiceTest {
             () -> service.createPerson(request));
 
         assertEquals("TEMPLATE_FIELD_NOT_SUBMITTED", exception.error().code());
-        verify(personService, never()).createReviewed(any(), any(), any());
+        verify(personService, never()).createReviewed(any(), any(), any(), any());
     }
 
     @Test
@@ -171,7 +172,7 @@ class GuidedRecordCreationServiceTest {
         order.verify(workspaceService).lockAndRequirePermissions(
             7, Map.of(11, Set.of(Permission.DEAL_CREATE)));
         order.verify(augmentationService).resolvePreliminary(RecordCreationRecordType.deal, use);
-        order.verify(dealService).createReviewed(any(), eq(null), any());
+        order.verify(dealService).createReviewed(any(), eq(null), any(), eq(MutationAdmission.UNRESTRICTED));
     }
 
     @Test
@@ -188,7 +189,8 @@ class GuidedRecordCreationServiceTest {
         ArgumentCaptor<Deal> deal = ArgumentCaptor.forClass(Deal.class);
         ArgumentCaptor<RecordCreationAugmentation> augmentation =
             ArgumentCaptor.forClass(RecordCreationAugmentation.class);
-        verify(dealService).createReviewed(deal.capture(), eq(null), augmentation.capture());
+        verify(dealService).createReviewed(
+            deal.capture(), eq(null), augmentation.capture(), eq(MutationAdmission.UNRESTRICTED));
         assertEquals(8, deal.getValue().getPipelineId());
         assertEquals(10, deal.getValue().getStageId());
         assertEquals("Discovery", augmentation.getValue().reviewedStageName());

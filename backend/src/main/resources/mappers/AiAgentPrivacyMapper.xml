@@ -1,0 +1,348 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.AiAgentPrivacyMapper">
+
+  <resultMap id="barrierResult" type="ooo.klae.connex.backend.beans.AiAgentPrivacyBarrier">
+    <result column="workspace_id" property="workspaceId" />
+    <result column="generation" property="generation" />
+    <result column="blocked" property="blocked" />
+    <result column="latest_operation_key" property="latestOperationKey" />
+    <result column="created_at" property="createdAt" />
+    <result column="updated_at" property="updatedAt" />
+  </resultMap>
+
+  <resultMap id="workResult" type="ooo.klae.connex.backend.beans.AiAgentPrivacyWork">
+    <result column="id" property="id" />
+    <result column="cutoff_generation" property="cutoffGeneration" />
+    <result column="invalidated_generation" property="invalidatedGeneration" />
+    <result column="revision" property="revision" />
+    <result column="workspace_id" property="workspaceId" />
+    <result column="max_run_id" property="maxRunId" />
+    <result column="max_session_id" property="maxSessionId" />
+    <result column="max_turn_id" property="maxTurnId" />
+    <result column="max_message_id" property="maxMessageId" />
+    <result column="max_tool_call_id" property="maxToolCallId" />
+    <result column="last_run_id" property="lastRunId" />
+    <result column="last_session_id" property="lastSessionId" />
+    <result column="last_turn_id" property="lastTurnId" />
+    <result column="last_tool_call_id" property="lastToolCallId" />
+    <result column="last_message_id" property="lastMessageId" />
+    <result column="retry_count" property="retryCount" />
+    <result column="dsr_request_id" property="dsrRequestId" />
+    <result column="last_residual_count" property="lastResidualCount" />
+    <result column="control_acceptance_audit_id" property="controlAcceptanceAuditId" />
+    <result column="current_session_id" property="currentSessionId" />
+    <result column="operation_key" property="operationKey" />
+    <result column="reason" property="reason" />
+    <result column="phase" property="phase" />
+    <result column="session_phase" property="sessionPhase" />
+    <result column="last_error_code" property="lastErrorCode" />
+    <result column="operation_fingerprint" property="operationFingerprint" />
+    <result column="next_attempt_at" property="nextAttemptAt" />
+    <result column="verified_at" property="verifiedAt" />
+    <result column="completed_at" property="completedAt" />
+    <result column="created_at" property="createdAt" />
+    <result column="updated_at" property="updatedAt" />
+  </resultMap>
+
+  <resultMap id="watermarksResult" type="ooo.klae.connex.backend.beans.AiAgentPrivacyWatermarks">
+    <result column="max_run_id" property="maxRunId" />
+    <result column="max_session_id" property="maxSessionId" />
+    <result column="max_turn_id" property="maxTurnId" />
+    <result column="max_message_id" property="maxMessageId" />
+    <result column="max_tool_call_id" property="maxToolCallId" />
+  </resultMap>
+
+  <select id="getBarrier" resultMap="barrierResult" useCache="false" flushCache="true">
+    SELECT * FROM ai_agent_privacy_barrier WHERE workspace_id = #{workspaceId}
+  </select>
+
+  <select id="lockBarrier" resultMap="barrierResult" useCache="false" flushCache="true">
+    SELECT * FROM ai_agent_privacy_barrier WHERE workspace_id = #{workspaceId} FOR UPDATE
+  </select>
+
+  <select id="lockBarrierForShare" resultMap="barrierResult" useCache="false" flushCache="true">
+    SELECT * FROM ai_agent_privacy_barrier WHERE workspace_id = #{workspaceId} FOR SHARE
+  </select>
+
+  <insert id="insertBarrier">
+    INSERT INTO ai_agent_privacy_barrier (workspace_id) VALUES (#{workspaceId})
+  </insert>
+
+  <update id="advanceBarrier">
+    UPDATE ai_agent_privacy_barrier
+    SET generation = generation + 1, blocked = TRUE, latest_operation_key = #{operationKey}
+    WHERE workspace_id = #{workspaceId} AND generation = #{expectedGeneration}
+      AND generation &lt; 9223372036854775807
+  </update>
+
+  <update id="unblockBarrier">
+    UPDATE ai_agent_privacy_barrier b SET blocked = FALSE
+    WHERE b.workspace_id = #{workspaceId} AND b.generation = #{expectedGeneration}
+      AND NOT EXISTS (SELECT 1 FROM ai_agent_privacy_work w
+        WHERE w.workspace_id = #{workspaceId} AND w.phase &lt;&gt; 'complete')
+  </update>
+
+  <select id="countInitializationEvidence" resultType="long" useCache="false" flushCache="true">
+    SELECT (SELECT COUNT(*) FROM ai_agent_run WHERE workspace_id = #{workspaceId})
+      + (SELECT COUNT(*) FROM ai_agent_segment WHERE workspace_id = #{workspaceId})
+      + (SELECT COUNT(*) FROM ai_agent_privacy_work WHERE workspace_id = #{workspaceId})
+      + (SELECT COUNT(*) FROM ai_chat_session
+         WHERE workspace_id = #{workspaceId} AND mission_taint_generation IS NOT NULL)
+  </select>
+
+  <select id="watermarks" resultMap="watermarksResult" useCache="false" flushCache="true">
+    SELECT (SELECT COALESCE(MAX(id), 0) FROM ai_agent_run WHERE workspace_id = #{workspaceId}) max_run_id,
+      (SELECT COALESCE(MAX(id), 0) FROM ai_chat_session WHERE workspace_id = #{workspaceId}) max_session_id,
+      (SELECT COALESCE(MAX(id), 0) FROM ai_chat_turn WHERE workspace_id = #{workspaceId}) max_turn_id,
+      (SELECT COALESCE(MAX(id), 0) FROM ai_chat_message WHERE workspace_id = #{workspaceId}) max_message_id,
+      (SELECT COALESCE(MAX(id), 0) FROM ai_chat_tool_call WHERE workspace_id = #{workspaceId}) max_tool_call_id
+  </select>
+
+  <insert id="insertWork" useGeneratedKeys="true" keyProperty="work.id">
+    INSERT INTO ai_agent_privacy_work
+      (cutoff_generation, invalidated_generation, revision, workspace_id, max_run_id, max_session_id, max_turn_id, max_message_id, max_tool_call_id, last_run_id, last_session_id, last_turn_id, last_tool_call_id, last_message_id, retry_count, dsr_request_id, last_residual_count, control_acceptance_audit_id, current_session_id, operation_key, reason, phase, session_phase, last_error_code, operation_fingerprint, next_attempt_at, verified_at, completed_at)
+    VALUES
+      (#{work.cutoffGeneration}, #{work.invalidatedGeneration}, #{work.revision}, #{work.workspaceId}, #{work.maxRunId}, #{work.maxSessionId}, #{work.maxTurnId}, #{work.maxMessageId}, #{work.maxToolCallId}, #{work.lastRunId}, #{work.lastSessionId}, #{work.lastTurnId}, #{work.lastToolCallId}, #{work.lastMessageId}, #{work.retryCount}, #{work.dsrRequestId,jdbcType=BIGINT}, #{work.lastResidualCount,jdbcType=BIGINT}, #{work.controlAcceptanceAuditId,jdbcType=INTEGER}, #{work.currentSessionId,jdbcType=INTEGER}, #{work.operationKey,jdbcType=VARCHAR}, #{work.reason,jdbcType=VARCHAR}, #{work.phase,jdbcType=VARCHAR}, #{work.sessionPhase,jdbcType=VARCHAR}, #{work.lastErrorCode,jdbcType=VARCHAR}, #{work.operationFingerprint,jdbcType=VARBINARY}, #{work.nextAttemptAt,jdbcType=TIMESTAMP}, #{work.verifiedAt,jdbcType=TIMESTAMP}, #{work.completedAt,jdbcType=TIMESTAMP})
+  </insert>
+
+  <select id="getWork" resultMap="workResult" useCache="false" flushCache="true">
+    SELECT * FROM ai_agent_privacy_work WHERE workspace_id = #{workspaceId}
+      AND operation_key = #{operationKey}
+  </select>
+
+  <select id="lockWork" resultMap="workResult" useCache="false" flushCache="true">
+    SELECT * FROM ai_agent_privacy_work WHERE workspace_id = #{workspaceId}
+      AND operation_key = #{operationKey} FOR UPDATE
+  </select>
+
+  <select id="dueWork" resultMap="workResult" useCache="false" flushCache="true">
+    SELECT * FROM ai_agent_privacy_work
+    WHERE workspace_id = #{workspaceId} AND phase &lt;&gt; 'complete'
+      AND next_attempt_at &lt;= CURRENT_TIMESTAMP(6)
+    ORDER BY id LIMIT #{limit}
+  </select>
+
+  <update id="updateWork">
+    UPDATE ai_agent_privacy_work
+    SET revision = #{work.revision},
+        last_run_id = #{work.lastRunId},
+        last_session_id = #{work.lastSessionId},
+        last_turn_id = #{work.lastTurnId},
+        last_tool_call_id = #{work.lastToolCallId},
+        last_message_id = #{work.lastMessageId},
+        retry_count = #{work.retryCount},
+        last_residual_count = #{work.lastResidualCount,jdbcType=BIGINT},
+        current_session_id = #{work.currentSessionId,jdbcType=INTEGER},
+        phase = #{work.phase,jdbcType=VARCHAR},
+        session_phase = #{work.sessionPhase,jdbcType=VARCHAR},
+        last_error_code = #{work.lastErrorCode,jdbcType=VARCHAR},
+        next_attempt_at = #{work.nextAttemptAt,jdbcType=TIMESTAMP},
+        verified_at = #{work.verifiedAt,jdbcType=TIMESTAMP},
+        completed_at = #{work.completedAt,jdbcType=TIMESTAMP}
+    WHERE workspace_id = #{work.workspaceId} AND id = #{work.id}
+      AND operation_key = #{work.operationKey} AND operation_fingerprint = #{work.operationFingerprint}
+      AND cutoff_generation = #{work.cutoffGeneration} AND invalidated_generation = #{work.invalidatedGeneration}
+      AND revision = #{expectedRevision}
+  </update>
+
+  <sql id="affectedMessage">
+    s.mission_taint_seq IS NOT NULL
+    AND (m.mission_run_id IS NOT NULL OR m.author_kind &lt;&gt; 'user' OR m.seq &gt;= s.mission_taint_seq)
+    AND COALESCE(m.privacy_generation, s.mission_taint_generation) &lt;= #{cutoffGeneration}
+  </sql>
+  <sql id="affectedTool">
+    s.mission_taint_seq IS NOT NULL
+    AND COALESCE(t.privacy_generation, s.mission_taint_generation) &lt;= #{cutoffGeneration}
+  </sql>
+  <sql id="affectedTurn">
+    s.mission_taint_seq IS NOT NULL
+    AND COALESCE(t.privacy_generation, s.mission_taint_generation) &lt;= #{cutoffGeneration}
+  </sql>
+
+  <sql id="runHasResidualPayload">
+    (r.purged_at IS NULL OR r.session_id IS NOT NULL OR r.goal IS NOT NULL
+      OR r.scope_json IS NOT NULL OR r.request_hash IS NOT NULL OR r.scope_fingerprint IS NOT NULL
+      OR r.report_message_id IS NOT NULL OR r.active_segment_id IS NOT NULL
+      OR r.plan_schema_version IS NOT NULL OR r.plan_revision &lt;&gt; 0 OR r.plan_json IS NOT NULL
+      OR r.checkpoint_schema_version IS NOT NULL OR r.checkpoint_revision &lt;&gt; 0 OR r.checkpoint_json IS NOT NULL
+      OR r.memory_schema_version IS NOT NULL OR r.memory_json IS NOT NULL OR r.last_committed_segment_no &lt;&gt; 0)
+  </sql>
+
+  <select id="listAffectedRunIds" resultType="int" useCache="false" flushCache="true">
+    SELECT r.id FROM ai_agent_run r
+    WHERE r.workspace_id = #{workspaceId} AND r.privacy_generation &lt;= #{cutoffGeneration}
+      AND r.id &gt; #{afterId} AND r.id &lt;= #{maxId} AND <include refid="runHasResidualPayload" />
+    ORDER BY r.id LIMIT #{limit}
+  </select>
+  <select id="listAffectedSessionIds" resultType="int" useCache="false" flushCache="true">
+    SELECT id FROM ai_chat_session
+    WHERE workspace_id = #{workspaceId} AND mission_taint_generation &lt;= #{cutoffGeneration}
+      AND id &gt; #{afterId} AND id &lt;= #{maxId}
+    ORDER BY id LIMIT #{limit}
+  </select>
+
+  <select id="listAffectedTurnIds" resultType="int" useCache="false" flushCache="true">
+    SELECT t.id FROM ai_chat_turn t
+    JOIN ai_chat_session s ON s.workspace_id = t.workspace_id AND s.id = t.session_id
+    WHERE t.workspace_id = #{workspaceId} AND t.session_id = #{sessionId}
+      AND t.id &gt; #{afterId} AND t.id &lt;= #{maxId} AND t.mission_run_id IS NULL
+      AND <include refid="affectedTurn" />
+    <if test="activeOnly">AND t.status IN ('queued', 'running')</if>
+    ORDER BY t.id LIMIT #{limit}
+  </select>
+  <select id="listAffectedToolCallIds" resultType="int" useCache="false" flushCache="true">
+    SELECT t.id FROM ai_chat_tool_call t
+    JOIN ai_chat_message m ON m.workspace_id = t.workspace_id AND m.id = t.message_id
+    JOIN ai_chat_session s ON s.workspace_id = m.workspace_id AND s.id = m.session_id
+    WHERE t.workspace_id = #{workspaceId} AND s.id = #{sessionId}
+      AND t.id &gt; #{afterId} AND t.id &lt;= #{maxId}
+      AND <include refid="affectedTool" />
+    ORDER BY t.id LIMIT #{limit}
+  </select>
+  <select id="listAffectedMessageIds" resultType="int" useCache="false" flushCache="true">
+    SELECT m.id FROM ai_chat_message m
+    JOIN ai_chat_session s ON s.workspace_id = m.workspace_id AND s.id = m.session_id
+    WHERE m.workspace_id = #{workspaceId} AND m.session_id = #{sessionId}
+      AND m.id &gt; #{afterId} AND m.id &lt;= #{maxId}
+      AND <include refid="affectedMessage" />
+    ORDER BY m.id LIMIT #{limit}
+  </select>
+
+  <delete id="deleteAffectedTools">
+    DELETE t FROM ai_chat_tool_call t
+    JOIN ai_chat_message m ON m.workspace_id = t.workspace_id AND m.id = t.message_id
+    JOIN ai_chat_session s ON s.workspace_id = m.workspace_id AND s.id = m.session_id
+    WHERE t.workspace_id = #{workspaceId} AND s.id = #{sessionId}
+      AND <include refid="affectedTool" />
+      AND t.id IN <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+  </delete>
+  <delete id="deleteAffectedMessages">
+    DELETE m FROM ai_chat_message m
+    JOIN ai_chat_session s ON s.workspace_id = m.workspace_id AND s.id = m.session_id
+    WHERE m.workspace_id = #{workspaceId} AND m.session_id = #{sessionId}
+      AND <include refid="affectedMessage" />
+      AND m.id IN <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+  </delete>
+  <delete id="deleteAffectedTerminalTurns">
+    DELETE t FROM ai_chat_turn t
+    JOIN ai_chat_session s ON s.workspace_id = t.workspace_id AND s.id = t.session_id
+    WHERE t.workspace_id = #{workspaceId} AND t.session_id = #{sessionId}
+      AND t.mission_run_id IS NULL AND t.status NOT IN ('queued', 'running')
+      AND <include refid="affectedTurn" />
+      AND t.id IN <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+  </delete>
+  <delete id="deleteMissionTurns">
+    DELETE FROM ai_chat_turn WHERE workspace_id = #{workspaceId} AND mission_run_id = #{runId}
+      AND status NOT IN ('queued', 'running')
+  </delete>
+  <update id="settleAffectedTurn">
+    UPDATE ai_chat_turn t
+    JOIN ai_chat_session s ON s.workspace_id = t.workspace_id AND s.id = t.session_id
+    SET t.status = 'cancelled', t.terminal_reason = 'privacy_invalidated',
+        t.partial_content = NULL, t.partial_content_utf16_offset = 0, t.scope_json = NULL
+    WHERE t.workspace_id = #{workspaceId} AND t.session_id = #{sessionId} AND t.id = #{turnId}
+      AND t.status IN ('queued', 'running') AND <include refid="affectedTurn" />
+  </update>
+  <update id="resetAffectedTitle">
+    UPDATE ai_chat_session SET title = #{title}, title_privacy_generation = #{generation},
+      last_message_at = COALESCE((SELECT MAX(m.created_at) FROM ai_chat_message m
+        WHERE m.workspace_id = #{workspaceId} AND m.session_id = #{sessionId}), created_at)
+    WHERE workspace_id = #{workspaceId} AND id = #{sessionId}
+      AND mission_taint_generation IS NOT NULL AND title_user_set = FALSE
+      AND COALESCE(title_privacy_generation, mission_taint_generation) &lt;= #{cutoffGeneration}
+  </update>
+  <update id="clearSessionProjections">
+    UPDATE ai_brief_schedule SET pending_kind = NULL, pending_session_id = NULL, pending_turn_id = NULL
+    WHERE workspace_id = #{workspaceId} AND pending_session_id = #{sessionId}
+  </update>
+  <select id="countIncompleteWork" resultType="int" useCache="false" flushCache="true">
+    SELECT COUNT(*) FROM ai_agent_privacy_work
+    WHERE workspace_id = #{workspaceId} AND phase &lt;&gt; 'complete'
+  </select>
+
+  <delete id="deleteSessionNotifications">
+    DELETE FROM notification WHERE workspace_id = #{workspaceId}
+      AND source_type = 'ai_chat_session' AND source_id = #{sessionId} LIMIT #{limit}
+  </delete>
+  <update id="updateSessionPreview">
+    UPDATE ai_chat_session SET last_message_at = COALESCE((SELECT MAX(m.created_at)
+      FROM ai_chat_message m WHERE m.workspace_id = #{workspaceId} AND m.session_id = #{sessionId}), created_at)
+    WHERE workspace_id = #{workspaceId} AND id = #{sessionId}
+  </update>
+  <select id="lockMessage" resultType="int" useCache="false" flushCache="true">
+    SELECT id FROM ai_chat_message WHERE workspace_id = #{workspaceId} AND session_id = #{sessionId}
+      AND id = #{id} FOR UPDATE
+  </select>
+  <sql id="sessionResidual">
+    (SELECT COUNT(*) FROM ai_chat_message m
+     JOIN ai_chat_session s ON s.workspace_id = m.workspace_id AND s.id = m.session_id
+     WHERE m.workspace_id = #{workspaceId}
+     <if test="sessionId != null">AND s.id = #{sessionId}</if>
+       AND <include refid="affectedMessage" />)
+    + (SELECT COUNT(*) FROM ai_chat_tool_call t
+       JOIN ai_chat_message m ON m.workspace_id = t.workspace_id AND m.id = t.message_id
+       JOIN ai_chat_session s ON s.workspace_id = m.workspace_id AND s.id = m.session_id
+       WHERE t.workspace_id = #{workspaceId}
+       <if test="sessionId != null">AND s.id = #{sessionId}</if>
+         AND <include refid="affectedTool" />)
+    + (SELECT COUNT(*) FROM ai_chat_turn t
+       JOIN ai_chat_session s ON s.workspace_id = t.workspace_id AND s.id = t.session_id
+       WHERE t.workspace_id = #{workspaceId}
+       <if test="sessionId != null">AND s.id = #{sessionId}</if>
+         AND <include refid="affectedTurn" />)
+    + (SELECT COUNT(*) FROM ai_chat_session s
+       WHERE s.workspace_id = #{workspaceId} AND s.mission_taint_generation IS NOT NULL
+       <if test="sessionId != null">AND s.id = #{sessionId}</if>
+         AND s.title_user_set = FALSE
+         AND COALESCE(s.title_privacy_generation, s.mission_taint_generation) &lt;= #{cutoffGeneration})
+    + (SELECT COUNT(*) FROM notification n
+       JOIN ai_chat_session s ON s.workspace_id = n.workspace_id AND s.id = n.source_id
+       WHERE n.workspace_id = #{workspaceId} AND n.source_type = 'ai_chat_session'
+       <if test="sessionId != null">AND s.id = #{sessionId}</if>
+         AND s.mission_taint_generation &lt;= #{cutoffGeneration})
+    + (SELECT COUNT(*) FROM ai_brief_schedule b
+       JOIN ai_chat_session s ON s.workspace_id = b.workspace_id AND s.id = b.pending_session_id
+       WHERE b.workspace_id = #{workspaceId}
+       <if test="sessionId != null">AND s.id = #{sessionId}</if>
+         AND s.mission_taint_generation &lt;= #{cutoffGeneration})
+  </sql>
+  <select id="sessionResidualCount" resultType="long" useCache="false" flushCache="true">
+    SELECT <include refid="sessionResidual" />
+  </select>
+  <select id="residualCount" resultType="long" useCache="false" flushCache="true">
+    <bind name="sessionId" value="null" />
+    SELECT <include refid="sessionResidual" />
+    + (SELECT COUNT(*) FROM ai_agent_run r
+       WHERE r.workspace_id = #{workspaceId} AND r.privacy_generation &lt;= #{cutoffGeneration}
+         AND <include refid="runHasResidualPayload" />)
+    + (SELECT COUNT(*) FROM ai_agent_segment g
+       WHERE g.workspace_id = #{workspaceId} AND g.privacy_generation &lt;= #{cutoffGeneration})
+    + (SELECT COUNT(*) FROM ai_run_lease l
+       JOIN ai_agent_run r ON l.subject_kind = 'agent_run' AND l.subject_id = r.id
+         AND l.workspace_id = r.workspace_id
+       WHERE l.workspace_id = #{workspaceId} AND r.privacy_generation &lt;= #{cutoffGeneration}
+         AND l.owner IS NOT NULL)
+    + (SELECT COUNT(*) FROM ai_run_lease l
+       JOIN ai_chat_turn t ON l.subject_kind = 'chat_turn' AND l.subject_id = t.id
+         AND l.workspace_id = t.workspace_id
+       JOIN ai_chat_session s ON s.workspace_id = t.workspace_id AND s.id = t.session_id
+       WHERE l.workspace_id = #{workspaceId} AND l.owner IS NOT NULL
+         AND <include refid="affectedTurn" />)
+  </select>
+
+  <select id="legacyActiveTurns" resultType="ooo.klae.connex.backend.beans.AiChatTurnRef"
+          useCache="false" flushCache="true">
+    SELECT session_id AS sessionId, id FROM ai_chat_turn
+    WHERE workspace_id = #{workspaceId} AND mission_run_id IS NULL
+      AND privacy_generation IS NULL AND status IN ('queued', 'running')
+    ORDER BY id LIMIT #{limit}
+  </select>
+  <update id="settleLegacyTurn">
+    UPDATE ai_chat_turn SET status = 'cancelled', terminal_reason = 'privacy_token_missing',
+      partial_content = NULL, partial_content_utf16_offset = 0, scope_json = NULL
+    WHERE workspace_id = #{workspaceId} AND session_id = #{sessionId} AND id = #{turnId}
+      AND mission_run_id IS NULL AND privacy_generation IS NULL AND status IN ('queued', 'running')
+  </update>
+</mapper>

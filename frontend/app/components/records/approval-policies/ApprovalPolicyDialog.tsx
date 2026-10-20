@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Loader2Icon } from 'lucide-react';
 
@@ -30,6 +30,7 @@ import {
     previewApprovalPolicyImpact,
     updateApprovalPolicy,
 } from '@/app/lib/api';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { toastSuccess } from '@/app/lib/toast';
 import type {
@@ -73,6 +74,8 @@ type Draft = {
     separationOfDuties: SeparationOfDuties;
     steps: ChainStepDraft[];
 };
+
+type PendingImpact = ApprovalPolicyImpact & { origin: RequestInit; sessionGeneration: number };
 
 const toStepDraft = (step: ApprovalPolicyStep, index: number): ChainStepDraft => {
     const anyApprover = step.approvers.some((approver) => approver.approverKind === 'any_approver');
@@ -124,34 +127,48 @@ const toStepPayload = (step: ChainStepDraft): ApprovalPolicyStep => ({
 export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSaved }: Props) {
     const t = useTranslations('ApprovalPolicyDialog');
     const showApiError = useApiErrorToast('ApprovalPolicyDialog');
+    const sessionKey = policy?.id ?? null;
     const [draft, setDraft] = useState<Draft>(() => toDraft(policy));
     const [saving, setSaving] = useState(false);
-    const [wasOpen, setWasOpen] = useState(open);
+    const [renderedSession, setRenderedSession] = useState({ open, sessionKey });
     const [members, setMembers] = useState<WorkspaceMember[]>([]);
-    const [impact, setImpact] = useState<ApprovalPolicyImpact | null>(null);
+    const [impact, setImpact] = useState<PendingImpact | null>(null);
+    const sessionGenerationRef = useRef(0);
 
-    if (open !== wasOpen) {
-        setWasOpen(open);
+    if (open !== renderedSession.open || sessionKey !== renderedSession.sessionKey) {
+        setRenderedSession({ open, sessionKey });
+        setSaving(false);
+        setImpact(null);
+        setMembers([]);
         if (open) {
             setDraft(toDraft(policy));
-            setImpact(null);
         }
     }
 
+    useLayoutEffect(() => {
+        sessionGenerationRef.current += 1;
+        return () => {
+            sessionGenerationRef.current += 1;
+        };
+    }, [open, sessionKey]);
+
     useEffect(() => {
         if (!open) return;
+        const generation = sessionGenerationRef.current;
         let cancelled = false;
         getActiveWorkspaceMembers()
             .then((all) => {
-                if (!cancelled) setMembers(all.filter((member) => member.status !== 'pending'));
+                if (!cancelled && generation === sessionGenerationRef.current) {
+                    setMembers(all.filter((member) => member.status !== 'pending'));
+                }
             })
             .catch(() => {
-                if (!cancelled) setMembers([]);
+                if (!cancelled && generation === sessionGenerationRef.current) setMembers([]);
             });
         return () => {
             cancelled = true;
         };
-    }, [open]);
+    }, [open, sessionKey]);
 
     const set = <K extends keyof Draft>(key: K, value: Draft[K]) =>
         setDraft((prev) => ({ ...prev, [key]: value }));
@@ -180,22 +197,26 @@ export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSav
 
     const commit = async (
         payload: UpdateApprovalPolicyPayload,
-        pendingApprovalsUnchanged = false,
+        pendingApprovalsUnchanged: boolean,
+        origin: RequestInit,
+        generation: number,
     ) => {
+        const isCurrent = () => generation === sessionGenerationRef.current;
+        if (!isCurrent()) return;
         setSaving(true);
         try {
             const saved = policy
-                ? await updateApprovalPolicy(policy.id, payload)
-                : await createApprovalPolicy(payload);
+                ? await updateApprovalPolicy(policy.id, payload, origin)
+                : await createApprovalPolicy(payload, origin);
             toastSuccess(policy ? t('updated') : t('created'), pendingApprovalsUnchanged
                 ? { description: t('pendingApprovalsUnchanged') }
                 : undefined);
             onSaved(saved, policy === null);
-            onOpenChange(false);
+            if (isCurrent()) onOpenChange(false);
         } catch (err) {
             showApiError(err, 'saveFailed');
         } finally {
-            setSaving(false);
+            if (isCurrent()) setSaving(false);
         }
     };
 
@@ -206,23 +227,27 @@ export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSav
      * tightening, so a request that races another edit fails rather than invalidating silently.
      */
     const save = async () => {
-        if (!canSave) return;
+        const origin = workspacePinnedRequest(renderedWorkspaceId());
+        const generation = sessionGenerationRef.current;
+        const isCurrent = () => generation === sessionGenerationRef.current;
+        if (!open || !canSave) return;
         const payload = buildPayload();
         if (!policy) {
-            await commit(payload);
+            await commit(payload, false, origin, generation);
             return;
         }
         setSaving(true);
         let preview: ApprovalPolicyImpact | null = null;
         try {
-            preview = await previewApprovalPolicyImpact(policy.id, payload);
+            preview = await previewApprovalPolicyImpact(policy.id, payload, origin);
         } catch {
             preview = null;
         } finally {
-            setSaving(false);
+            if (isCurrent()) setSaving(false);
         }
+        if (!isCurrent()) return;
         if (preview && preview.changeClass === 'TIGHTEN' && preview.pendingApprovalCount > 0) {
-            setImpact(preview);
+            setImpact({ ...preview, origin, sessionGeneration: generation });
             return;
         }
         await commit(
@@ -230,14 +255,21 @@ export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSav
             preview != null
                 && preview.changeClass !== 'TIGHTEN'
                 && preview.pendingApprovalCount > 0,
+            origin,
+            generation,
         );
     };
 
     const confirmInvalidation = async () => {
-        if (!impact) return;
+        if (!open || !impact || impact.sessionGeneration !== sessionGenerationRef.current) return;
         const impactFingerprint = impact.impactFingerprint;
         setImpact(null);
-        await commit({ ...buildPayload(), confirmInvalidation: true, impactFingerprint });
+        await commit(
+            { ...buildPayload(), confirmInvalidation: true, impactFingerprint },
+            false,
+            impact.origin,
+            impact.sessionGeneration,
+        );
     };
 
     if (impact) {

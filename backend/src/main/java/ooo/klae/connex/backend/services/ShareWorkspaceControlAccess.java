@@ -30,6 +30,8 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
  * <p>The snapshot is taken once per operation and is immutable, so the same workspace set backs
  * the grant ceiling, the listing filter, the workspace-name hydration and the name ordering. A
  * single statement produces it, so no read-only transaction is needed to make it consistent.
+ * {@link RecordVisibilityScopeControlAccess} delegates here for legacy unfiltered record-visibility
+ * ceilings (#485), exposing a distinct scope type without workspace-name hydration.
  *
  * <p><strong>Why this is not {@link OrganizationWorkspaceScopeControlAccess}.</strong> That
  * component answers the same question for the read-path ceilings (IdentityMapper,
@@ -135,6 +137,11 @@ public class ShareWorkspaceControlAccess {
          */
         int orgId() {
             return orgId;
+        }
+
+        /** Returns immutable sorted IDs for the unfiltered record-visibility boundary. */
+        List<Integer> workspaceIds() {
+            return namesById.keySet().stream().sorted().toList();
         }
 
         /**

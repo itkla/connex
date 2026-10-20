@@ -181,6 +181,47 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   (`db/migration/control|tenant`; root frozen at V65), the pinned mapper-crossing baseline (= the Phase-4
   hydration work-list), and user-reference index survival. Routing mode defaults to `single-database`
   (the only mode on-prem/silo) and stays off until the flag-enable gate (#485) clears.
+- **Control-only recovery during catalog routing (#485).** The exact `HandlerMethod` allowlist in
+  `ControlOnlyHandlerPolicy` covers workspace listing, pending memberships, switching, member-profile
+  reads, self-profile updates and self-locale updates, plus implicit HEAD for those GET handlers.
+  In `catalog-per-placement` mode an initially valid membership installs a typed validated control
+  selection without resolving its placement. `TenantContext.isResolved()` remains false; the selection
+  preserves the server-validated workspace/organization identity for profile authorization and audit
+  attribution, and never authorizes tenant SQL. A server-owned request capability independently
+  restricts MyBatis execution to `ControlCatalogRoutingInterceptor`'s physical-control registry before
+  ordinary scope exemptions, including when general scope enforcement is disabled. Clearing or
+  replacing the tenant context does not remove that request restriction. Completion and async handoff
+  release both the control selection and capability; an interceptor refusal also removes its capability.
+  The capability belongs only to its request thread. Neither tenant identity nor a restriction is
+  thread-inherited, and no task decorator copies either into pooled async helpers or event listeners.
+  The control selection is never resolved: even copying that typed selection cannot grant a tenant
+  route. Descendants without their own scope are refused by ordinary tenant-scope enforcement.
+  `catalog-per-placement` therefore requires `connex.tenancy.enforce-scope=true`; startup refuses a
+  disabled guard before any datasource initializes, because an unscoped tenant statement could otherwise
+  silently use the default catalog. This invariant does not affect `single-database` deployments.
+  Descendants use their own explicit `TenantWorkScope.inWorkspace`/`AutomationExecutor.runAs` span,
+  which resolves placement fail-closed; an unservable placement still refuses tenant SQL. Scope is
+  restored on exit and never inherited by further children. Cold and pre-warmed pool workers retain
+  no restriction for later unrelated scoped work. The HTTP handler itself remains restricted even
+  inside an explicit workspace span, including when ordinary enforcement is disabled in a unit test.
+  Header parsing, membership refusals, selection-route
+  target authorization and revoked-selection recovery retain their existing behavior; a recovered
+  fallback still resolves its placement. Single-database mode retains eager placement resolution and
+  its existing 503s. `GET /api/auth/me` keeps its existing MVC exclusion. `PATCH /api/users/me` is excluded
+  because `UserService.updateTimezone` publishes a source-change event whose listener reconciles tenant
+  notifications. `PUT /api/users/{id}` may persist timezone through `UserService.update` but does not
+  publish that event; this existing distinction is pinned by tests and remains unchanged. Workspace
+  creation/offboarding and the notification inbox are not allowlisted; the inbox remains 503 when its
+  remembered placement is unservable until recipient-catalog routing is implemented. The handler
+  architecture contract is a pinned-handler and direct-dependency tripwire, including simple local
+  aliases and method references. Reviewed dependency entries and their source-local helpers also
+  reject event publication or async submission. It is not a general transitive containment proof;
+  the request-thread SQL guard and ordinary descendant enforcement, required by the startup invariant,
+  enforce the runtime boundary. Real-handler integration tests keep the normally migrated default
+  catalog as control, including Spring Session JDBC tables, and create only a minimal tenant scratch
+  catalog without control tables. An injected tenant call proves the request guard refuses SQL before
+  execution. Normal Flyway initialization makes the class independent of earlier tests on a fresh
+  CI schema; committed fixture workspaces, organizations, users and scratch catalogs are cleaned up.
 - **Enforced seams:** (1) share grants are `INSERT..SELECT` with an ownership + same-org ceiling in SQL —
   0 affected rows means structurally refused (`ShareMapperTest`), and `ShareService` additionally throws;
   (2) **workspace→org placement**: a new workspace joins the active workspace's org only when its creator
@@ -199,6 +240,19 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   (`Company`/`Person`/`Pipeline` `visible`) carry the same-org ceiling the write path enforces, so a
   legacy or out-of-band cross-org share row grants no read visibility either. `OrgShareCeilingArchTest`
   pairs every `FROM *_share` read with the ceiling; `ShareReadIsolationMapperTest` proves it.
+- **Record-visibility ceiling separation (#485):** `RecordVisibilityScopeControlAccess` exposes an
+  immutable, unfiltered organization workspace set by delegating to `ShareWorkspaceControlAccess`'s
+  single control-catalog snapshot, including its transaction suspension and tenant-context checks.
+  This preserves legacy `JOIN workspace` ceilings that had no lifecycle predicate; lifecycle
+  tightening requires a separate explicit decision. It deliberately differs from the active-only
+  `OrganizationWorkspaceScopeControlAccess` used by Identity, PersonEdge and assistant ceilings.
+  `IntroductionMapper`, `DuplicateReviewMapper`, and `NoteMapper` now bind this set through
+  `JSON_TABLE` and read tenant tables only; duplicate counts omit the optional employer-label joins.
+  Note pages and their counts reuse one scope and author-ID snapshot, and global note search reuses
+  one scope across both bounded candidate streams. Private-note evidence resolves its scope after
+  the existing subject-visibility refusal. Note assistant history retains its separate active-only
+  organization scope. These mappers' crossing baseline entries are removed. The routing default
+  stays `single-database`; other #485 crossings and the flag-enable gate remain open.
 
 ### 0.6 Organization membership & org-level roles (#316)
 
@@ -622,7 +676,57 @@ becomes the migration-only backfill target.
 **Transport: header + cookie** (aligns with §4.1; no URL segment). `api.ts` funnels ~120 wrappers
 through one `requestJson` (`api.ts:17-43`) → inject the active workspace **once** there.
 
-- **Client components** → `X-Workspace-Id` header from a non-`HttpOnly` `connex_workspace` cookie.
+- **Client components** → `X-Workspace-Id` header from a non-`HttpOnly` `connex_workspace` cookie for
+  reads and for the account, organization and selection writes listed in `UNPINNED_WRITE_ROUTES`.
+  Workspace-bound state-changing requests carry the workspace the app shell *renders* instead
+  (`WorkspaceProvider` publishes it through `app/lib/renderedWorkspace.ts`), because a safe read heals
+  the cookie to another membership after a revocation while the page, and any draft on it, still
+  belongs to the revoked workspace. The pinned write gets the interceptor's 403 instead of following
+  the heal; `api.ts` re-codes that refusal as `WORKSPACE_UNAVAILABLE` and the shared error copy names
+  the workspace and keeps the draft on screen. Surfaces that save after a delay (the note editor's
+  autosave and unmount flush, dashboard layout saves) pin the workspace the content was composed in
+  via `workspacePinnedRequest` (#1732, closing the bound #1649 left). Every multi-step user action
+  captures its origin before awaiting anything, including duplicate/impact preflight, and carries
+  the same request options through parent callbacks, custom-field saves, uploads, stage creation
+  and sequential batches (#2130). Undo callbacks retain their original action's options; chunked API
+  bulk helpers capture before their first chunk and retain that pin through the entire selection.
+  Forwarded origins retain their headers and cancellation signals;
+  business-card preparation refuses a recovery context that differs from that origin before reserving
+  an import. `test/unit/workspaceWriteChainGuard.test.ts` derives workspace-bound write helpers from
+  the API client and checks component/page chains. Its shrinking exception ledger covers only the
+  dashboard worker's two writes: each queued job already carries the workspace of its separate action.
+  Note-image workspace refusals retain the editor content and its own draft; the toolbar reports
+  an inline creation refusal once, and quietly stops if an autosave already reported it. All navigation
+  after a workspace selection decision uses `navigateAfterWorkspaceSelection`: switch/create,
+  notifications, invitation acceptance, saved views, organization navigation, exits and recovery. It
+  increments a version before routing or refreshing, including a selection cleared to null; an older editor's first
+  save may adopt its note id but cannot overwrite that navigation's URL, even before unmount.
+  Once a new note receives an id, its kept-draft identity moves from `new` to `note:{id}` within
+  the original user and workspace, so later refused edits resume from that note's editor.
+- The inbox's seven `/api/notifications` mutations (read, unread, dismiss, restore, snooze,
+  unsnooze, read-all) follow the cookie: `NotificationController` delegates to `NotificationService`,
+  which authorizes the current recipient across memberships rather than the rendered workspace.
+  The allowlist names these exact routes and is checked against the API-surface ledger. My Work
+  notification dismiss/snooze remain workspace-bound and pinned to the rendered workspace.
+- Workspace creation from the shell explicitly pins the rendered origin and preflights membership
+  even when the cookie still matches. The server refuses an unavailable explicit origin with
+  `403 FORBIDDEN "Not a member of workspace {id}"`, including revoked or foreign pins when no other
+  membership remains. Provisioning revalidates the origin under its existing shared account lock,
+  which membership removal acquires exclusively, before choosing an organization. Administrators
+  create in that origin's organization; ordinary members retain the fresh-organization rule.
+  Onboarding explicitly omits the workspace header even when the browser retains a revoked selection
+  cookie, preserving the unresolved recovery path. The client preflight keeps
+  the entered name locally, while the server check enforces the boundary after the preflight.
+  Creation registers with the pinned-write identity guard before the preflight and rechecks identity
+  afterward. Cancellation remains active through final CSRF preparation and every retry; immediately
+  before each POST, the client checks the transition epoch and the preflight's opaque server identity,
+  so an account or workspace transition abandons the creation before sending it under another account.
+  Pinned creation also refuses when the preflight cannot establish that authenticated identity.
+- Explicit workspace headers contain exactly one parseable integer. Malformed, comma-combined or
+  repeated headers are refused without cookie or remembered-selection fallback; the frontend
+  rejects malformed pins before sending and merges XHR headers case-insensitively before setting
+  each name once. Personal native pairing POST/DELETE controls remain in the account allowlist:
+  `NativeConnectService` authorizes them by the current user, independently of the rendered workspace.
 - **SSR pages** (`records/deals/page.tsx`, `me`, `notes`, `search`) → already forward
   `headers: { cookie }` via `safeWithCookie` (`api.ts:80-90`); the `connex_workspace` cookie rides along.
   Resolver precedence: header > cookie > user's default membership.

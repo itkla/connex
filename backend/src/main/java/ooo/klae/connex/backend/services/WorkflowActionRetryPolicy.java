@@ -1,23 +1,15 @@
 package ooo.klae.connex.backend.services;
 
 import java.time.Duration;
-import java.util.ArrayDeque;
-import java.util.Collections;
-import java.util.Deque;
-import java.util.IdentityHashMap;
 import java.util.Locale;
-import java.util.Set;
 
-import org.springframework.dao.CannotAcquireLockException;
-import org.springframework.dao.CannotSerializeTransactionException;
-import org.springframework.dao.DeadlockLoserDataAccessException;
-import org.springframework.dao.QueryTimeoutException;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.TransactionSystemException;
 
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.dto.RuleAction;
+import ooo.klae.connex.backend.exceptions.DatabaseFailureClassifier;
 
 /** Closed retry-safety table and transient database allowlist for workflow actions. */
 @Component
@@ -53,30 +45,7 @@ public class WorkflowActionRetryPolicy {
      * @return whether the action should be retried
      */
     public boolean transientDatabaseFailure(Throwable failure) {
-        Set<Throwable> seen = Collections.newSetFromMap(new IdentityHashMap<>());
-        Deque<Throwable> pending = new ArrayDeque<>();
-        if (failure != null) {
-            pending.push(failure);
-        }
-        while (!pending.isEmpty()) {
-            Throwable current = pending.pop();
-            if (!seen.add(current)) {
-                continue;
-            }
-            if (current instanceof CannotAcquireLockException
-                    || current instanceof CannotSerializeTransactionException
-                    || current instanceof DeadlockLoserDataAccessException
-                    || current instanceof QueryTimeoutException) {
-                return true;
-            }
-            if (current instanceof TransactionSystemException lost && lost.getApplicationException() != null) {
-                pending.push(lost.getApplicationException());
-            }
-            if (current.getCause() != null) {
-                pending.push(current.getCause());
-            }
-        }
-        return false;
+        return DatabaseFailureClassifier.isTransientDatabaseFailure(failure);
     }
 
     public Duration retryDelay(long runId, String nodeId, int attemptNumber) {

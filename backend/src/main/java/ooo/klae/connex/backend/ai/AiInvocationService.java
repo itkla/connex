@@ -31,6 +31,8 @@ import ooo.klae.connex.backend.ai.masking.MaskingLeakException;
 import ooo.klae.connex.backend.ai.masking.OutboundLeakScan;
 import ooo.klae.connex.backend.ai.masking.OutboundSegment;
 import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
+import ooo.klae.connex.backend.ai.mission.AiAgentBudgetService.AiAgentDispatchReservation;
+import ooo.klae.connex.backend.ai.mission.AiAgentExecutionPolicy;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiInputImage;
@@ -882,23 +884,29 @@ public class AiInvocationService {
             throw new AiProviderException("AI provider reported an invalid output token limit");
         }
         boolean invocationOutputTokensClamped = invocation.maxTokens() > providerMaxOutputTokens;
-        boolean outputTokensClamped = invocation.outputTokensClamped()
-                || invocationOutputTokensClamped;
-        AiInvocation effectiveInvocation = invocationOutputTokensClamped
+        AiInvocation providerInvocation = invocationOutputTokensClamped
                 ? withMaxTokens(invocation, providerMaxOutputTokens)
                 : invocation;
-        registerEnvelopeAuthoredText(effectiveInvocation.context(), reasoningMode, nativeTools);
+        registerEnvelopeAuthoredText(providerInvocation.context(), reasoningMode, nativeTools);
 
         String serializedPrompt;
         try {
             serializedPrompt = serializeProviderInput(
-                    effectiveInvocation.prompt(), responseSchema, reasoningMode, nativeTools);
+                    providerInvocation.prompt(), responseSchema, reasoningMode, nativeTools);
         } catch (AiProviderException exception) {
-            emitAudit(workspaceId, orgId, resolved, effectiveInvocation, correlationId, "blocked",
+            emitAudit(workspaceId, orgId, resolved, providerInvocation, correlationId, "blocked",
                     null, null, null, null, "serialization", structured, null,
-                    outputTokensClamped);
+                    providerInvocation.outputTokensClamped());
             throw exception;
         }
+
+        var mission = AiAgentExecutionPolicy.current();
+        int maxOutputTokens = mission == null ? providerInvocation.maxTokens()
+                : mission.persistence().maxOutputTokens(mission,
+                        serializedPrompt.getBytes(StandardCharsets.UTF_8).length, providerInvocation.maxTokens());
+        AiInvocation effectiveInvocation = maxOutputTokens < providerInvocation.maxTokens()
+                ? withMaxTokens(providerInvocation, maxOutputTokens) : providerInvocation;
+        boolean outputTokensClamped = effectiveInvocation.outputTokensClamped();
 
         if (serializedPrompt.getBytes(StandardCharsets.UTF_8).length > providerInputByteCeiling(
                 adapter.contextWindowTokens(resolved.target()), effectiveInvocation.maxTokens())) {
@@ -1473,6 +1481,7 @@ public class AiInvocationService {
         private final AiRequestDeadline providerDeadline;
         private boolean firstAttempt = true;
         private boolean failureAudited;
+        private AiAgentDispatchReservation missionDispatch;
 
         private ProviderAttemptTracker(
                 int workspaceId,
@@ -1539,6 +1548,12 @@ public class AiInvocationService {
                             null, null, null, null, null, structured, null,
                             outputTokensClamped);
                 }
+                var mission = AiAgentExecutionPolicy.current();
+                if (mission != null) {
+                    mission.capability().requireTarget(resolved.target());
+                    missionDispatch = mission.persistence().reserveDispatch(mission,
+                            (long) serializedPrompt.getBytes(StandardCharsets.UTF_8).length + invocation.maxTokens());
+                }
                 return aiRestrictionEpoch.invokeAtEgress(workspaceId, () -> {
                     requireCurrentProviderSnapshot();
                     aiFeatureGate.requireAiUsable(invocation.feature());
@@ -1564,6 +1579,10 @@ public class AiInvocationService {
                         outputTokensClamped);
                 throw exception;
             } catch (RuntimeException exception) {
+                if (exception instanceof AiProviderRequestRejectedException rejected
+                        && rejected.permitsStructuredOutputFallback()) {
+                    settleRejectedMissionDispatch();
+                }
                 closeBudget();
                 failureAudited = true;
                 String reason = exception instanceof AiProviderException
@@ -1609,6 +1628,10 @@ public class AiInvocationService {
         }
 
         private void requireCurrentProviderSnapshot() {
+            var mission = AiAgentExecutionPolicy.current();
+            if (mission != null) {
+                mission.capability().requireTarget(resolved.target());
+            }
             ResolvedAiProvider current = aiProviderConfigService.resolveForOrg(orgId, userId);
             if (!resolved.equals(current)) {
                 throw new AiProviderException(
@@ -1648,7 +1671,22 @@ public class AiInvocationService {
                 throw new IllegalStateException("Provider attempt completed without a budget reservation");
             }
             activeLease.settle(inputTokens, outputTokens);
+            var mission = AiAgentExecutionPolicy.current();
+            if (mission != null) {
+                var dispatch = Objects.requireNonNull(missionDispatch, "missionDispatch");
+                mission.persistence().recordUsage(mission, dispatch, inputTokens, outputTokens);
+                missionDispatch = null;
+            }
             budgetLease = null;
+        }
+
+        /** A definite protocol rejection consumed a decision but no generated tokens. */
+        private void settleRejectedMissionDispatch() {
+            var mission = AiAgentExecutionPolicy.current();
+            if (mission != null && missionDispatch != null) {
+                mission.persistence().recordUsage(mission, missionDispatch, 0, 0);
+                missionDispatch = null;
+            }
         }
 
         private synchronized void closeBudget() {

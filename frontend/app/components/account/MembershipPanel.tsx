@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useFormatter, useTranslations } from "next-intl";
 import { Loader2Icon } from "lucide-react";
 
+import { navigateAfterWorkspaceSelection } from "@/app/lib/renderedWorkspace";
 import type { Workspace } from "@/app/lib/types";
 import {
     acceptWorkspace,
@@ -75,7 +76,7 @@ export default function MembershipPanel() {
                 publishActiveWorkspace(accepted.id);
                 setPending((prev) => prev.filter((w) => w.id !== workspace.id));
                 toastSuccess(t("accepted", { workspace: workspace.name }));
-                router.refresh();
+                navigateAfterWorkspaceSelection(() => router.refresh());
             });
         } catch (err) {
             showApiError(err, "acceptFailed");
@@ -105,10 +106,12 @@ export default function MembershipPanel() {
                 const selection = await leaveWorkspace(activeWorkspaceId);
                 publishActiveWorkspace(selection.activeWorkspaceId);
                 toastSuccess(t("left"));
-                router.replace(selection.activeWorkspaceId === null
-                    ? "/onboarding"
-                    : privilegedMfaConfinementDestination() ?? "/dashboard");
-                router.refresh();
+                navigateAfterWorkspaceSelection(() => {
+                    router.replace(selection.activeWorkspaceId === null
+                        ? "/onboarding"
+                        : privilegedMfaConfinementDestination() ?? "/dashboard");
+                    router.refresh();
+                });
             });
         } catch (err) {
             showApiError(err, "leaveFailed");

@@ -81,7 +81,7 @@ public class AiAssistantCompleteTaskWriteTool implements AiAssistantWriteTool {
             throw new IllegalStateException("Assistant tool request is invalid");
         }
         Target target = execution.row().target();
-        Task returned = taskService.complete(target.id());
+        Task returned = taskService.complete(target.id(), execution.admission());
         Map<String, Object> outcome = new LinkedHashMap<>();
         outcome.put("status", "executed");
         outcome.put("recordType", "task");
@@ -125,6 +125,9 @@ public class AiAssistantCompleteTaskWriteTool implements AiAssistantWriteTool {
         Map<String, Object> result = new LinkedHashMap<>();
         AiAssistantWriteTool.copyText(storedOutcome, result, "recordType");
         AiAssistantWriteTool.copyText(storedOutcome, result, "description");
+        if (result.get("description") instanceof String description) {
+            result.put("description", AiAssistantMemberIdentifiers.readerVisibleContent(description));
+        }
         result.put("completed", storedOutcome.path("completed").asBoolean());
         return result;
     }

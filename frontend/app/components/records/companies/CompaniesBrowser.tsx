@@ -84,6 +84,7 @@ import { useCommentIndicators } from '@/app/hooks/useCommentIndicators';
 import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
 import { subscribeToRecordMutations } from '@/app/lib/record-mutation-events';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import {
     recordDetailNavigationPath,
     recordDetailPath,
@@ -417,7 +418,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
         setPendingContacts((prev) => prev.map((c) => (c.tempId === tempId ? { tempId, ...draft } : c)));
     const removePendingContact = (tempId: string) =>
         setPendingContacts((prev) => prev.filter((c) => c.tempId !== tempId));
-    const createPendingContact = async (c: PendingContact, companyId: number) => {
+    const createPendingContact = async (c: PendingContact, companyId: number, origin: RequestInit) => {
         const payload = {
             name: c.name.trim(),
             email: c.email.trim(),
@@ -426,9 +427,9 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
             companyId,
             duplicateReviewToken: c.duplicateReviewToken ?? undefined,
         };
-        const newContact = await createContact(payload);
+        const newContact = await createContact(payload, origin);
         if (c.imageFile) {
-            await uploadContactPicture(newContact.id, c.imageFile).catch(() => undefined);
+            await uploadContactPicture(newContact.id, c.imageFile, origin).catch(() => undefined);
         }
         return newContact;
     };
@@ -496,7 +497,9 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
     const createNewCompany = async (
         duplicateReviewToken: string | null,
         reviewedContacts: PendingContact[],
+        init?: RequestInit,
     ) => {
+        const origin = init ?? workspacePinnedRequest(renderedWorkspaceId());
         setCreationSucceeded(false);
         setIsCreating(true);
         try {
@@ -504,11 +507,11 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
                 ...cleanCompanyPayload(newPayload),
                 duplicateReviewToken: duplicateReviewToken ?? undefined,
             };
-            const created = await createCompany(companyPayload);
+            const created = await createCompany(companyPayload, origin);
             let logoUploadFailed = false;
             if (logoFile) {
                 try {
-                    await uploadCompanyLogo(created.id, logoFile);
+                    await uploadCompanyLogo(created.id, logoFile, origin);
                 } catch {
                     logoUploadFailed = true;
                 }
@@ -517,7 +520,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
                 let failed = 0;
                 for (const contact of reviewedContacts) {
                     try {
-                        await createPendingContact(contact, created.id);
+                        await createPendingContact(contact, created.id, origin);
                     } catch {
                         failed += 1;
                     }

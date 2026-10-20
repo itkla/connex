@@ -8,6 +8,9 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class AiChatToolCall {
     private int id;
+    private Integer missionRunId;
+    private String artifactOrigin = "reactive";
+    private Long privacyGeneration;
     private int workspaceId;
     private int messageId;
     private int sessionId;
@@ -21,6 +24,11 @@ public class AiChatToolCall {
     private String executedAt;
     private String idempotencyKey;
     private boolean serverProposal;
+    private String proposalKey;
+    private Integer proposalOrdinal;
+    private String proposalPreparedAt;
+    private String invocationMode;
+    private String publicationState;
     private String createdAt;
     private String updatedAt;
 }

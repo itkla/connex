@@ -46,7 +46,7 @@ describe('settled answer retention', () => {
     });
 
     it('drops a partial the member is no longer entitled to, as the server already has', () => {
-        for (const reason of ['access_revoked', 'restrictions_changed']) {
+        for (const reason of ['access_revoked', 'restrictions_changed', 'privacy_invalidated']) {
             expect(shouldDropAskConnexStream('failed', reason)).toBe(true);
             expect(shouldDropAskConnexStream('timed_out', reason)).toBe(true);
         }
@@ -63,7 +63,7 @@ describe('settled answer reconciliation', () => {
         return { store, drop: () => store.publish(null) };
     }
 
-    for (const reason of ['access_revoked', 'restrictions_changed']) {
+    for (const reason of ['access_revoked', 'restrictions_changed', 'privacy_invalidated']) {
         it(`clears a ${reason} tail before the transcript request, not after it`, async () => {
             const { store, drop } = withdrawnStore();
             let duringRefresh: unknown = 'unobserved';
@@ -422,4 +422,3 @@ describe('which settled turns adopt their durable partial exactly', () => {
         expect(adoptsSettledAskConnexPartial('running', null, true)).toBe(false);
     });
 });
-

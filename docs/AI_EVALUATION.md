@@ -48,6 +48,18 @@ One fixture serves two goldens (`confirm_proposal` backs both the proposal golde
 
 **Run them with `./gradlew scriptedTrajectoryTest`, never `./gradlew test`.** The pattern `**/*ScriptedTrajectory*Test.class` is excluded from `test` so this context key does not evict a hot one out of the shared ten-slot cache; the task has its own fork with a two-slot cache, and `check` depends on it. In CI, DB shard 2 runs `dbTestShard2 scriptedTrajectoryTest` behind the required `Backend — build & test` aggregator. `ScriptedAiProviderArchTest` asserts both that a required matrix entry supplies the task to an unconditional Gradle step and that every class extending the harness matches the include pattern, so a golden CI would silently skip fails the build instead of passing quietly.
 
+### Record-review mission goldens (Phase 2)
+
+`ai.mission.AiAgentScriptedTrajectoryTest` runs the mission fixtures under `ai/scripted/missions`. The runtime-2 `mission_minimum_report.json` golden covers an 81,920-token request completing one segment and publishing one report. Its inherited harness resolves this bounded fixture directory without changing the provider's 64-script or journal limits. The cases exercise the real mission runner and persistence: one grounded report with empty review collection, exact attempt/dispatch and accounting assertions, masked outbound requests, primary-record scope and unknown-handle refusal, every declared write-tool refusal, cancellation, provider uncertainty, capability/context refusal, secondary gate loss with matched enabled controls, repair at the final dispatch boundary, completed-purge egress refusal, and special-care output screening. Static fixture loading and compilation do not establish these outcomes; execute the MySQL suite before activation.
+
+```bash
+./gradlew scriptedTrajectoryTest \
+  --tests 'ooo.klae.connex.backend.ai.mission.AiAgentScriptedTrajectoryTest' \
+  --tests 'ooo.klae.connex.backend.ai.assistant.AiAssistantScriptedTrajectoryTest'
+```
+
+The durable privacy/locking acceptance tests and activation conditions are listed in [AI_MISSIONS.md](backend/AI_MISSIONS.md). Record approved live staging evidence on #2101: deployed SHA, exact provider/model declaration, synthetic scope, outcomes/refusals, accounting and verified cleanup. Scripted fixtures do not replace real-provider evidence.
+
 ### The browser mode
 
 The same provider also runs in the `Frontend — unit & e2e` CI stack, where `ask-connex-trajectory.spec.ts` drives one streamed turn from a real browser against the single fixture in `frontend/test/e2e/fixtures/ai-scripted/`. Readiness is per organization, so the spec registers its own tenant and saves its provider row through the real controller; the seeded project tenants keep no row and keep refusing, which is why the untouched refusal assertions in `ask-connex.spec.ts` are this mode's merge gate. The stack's settings are written down once, in [the browser-stack recipe](backend/AI_SECURITY.md#the-browser-stack-recipe); `ScriptedAiProviderArchTest` pins it to that one CI step and `ScriptedAiScriptLoaderTest` loads the directory the workflow names, so a bad browser fixture fails the backend suite rather than the browser job's boot. `classify-ci-changes.py` selects that suite for a change confined to the fixture directory, which otherwise classifies as frontend-only.
@@ -265,3 +277,16 @@ Nothing in this document authorizes a migration, a flag, a profile, or a line of
 - [`STAGING_DEPLOY.md`](STAGING_DEPLOY.md) — the staging instance, its declared edition, and how it is deployed.
 - [`VOLUME_SEEDER.md`](VOLUME_SEEDER.md) — the operator-invoked one-shot process this runner's shape copies.
 - [`SPECIAL_CARE_DATA_POLICY.md`](SPECIAL_CARE_DATA_POLICY.md) — the screen two goldens pin, and the reason a live corpus stays synthetic.
+
+## Runtime-2 continuation trajectories
+
+`AiAgentScriptedTrajectoryTest` adds `mission_two_segments.json`,
+`mission_plan_replacement.json`, `mission_continuation_budget.json`,
+`mission_interrupted_read_retry.json`, `mission_memory_refused.json`, and
+`mission_continuation_secondary_calls.json`. They use the existing isolated fixture selector,
+closed protocol and complete bounded journal observation. They exercise durable plan/fact
+identity, checkpoint-only fresh context, cumulative decisions/tokens, original-deadline retry,
+screened memory refusal and repair/fallback accounting. Outbound assertions cover explicit
+model projections without canonical provenance/evidence bindings. Existing leakage, special-care,
+write/question and secondary-gate-loss controls remain. No live runner, fixture protocol
+relaxation or live-model-quality claim is introduced.

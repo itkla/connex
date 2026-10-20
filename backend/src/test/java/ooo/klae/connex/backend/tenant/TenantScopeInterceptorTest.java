@@ -55,6 +55,15 @@ class TenantScopeInterceptorTest {
     }
 
     @Test
+    void dormantProposalStorageRequiresScopeForEveryStatement() {
+        for (String method : Set.of("insert", "insertMember", "findByKey", "findByCallIdentity",
+                "listMembers", "hasCompleteMembership")) {
+            assertTrue(interceptor.requiresResolvedContext(NS + "AiAssistantProposalSetMapper." + method));
+        }
+        assertFalse(interceptor.requiresResolvedContext(NS + "AiChatMapper.clearProposalSetRequestersAnywhere"));
+    }
+
+    @Test
     void approvalMetadataStatementsRetainTheirControlAndWorkspaceClassifications() {
         assertTrue(TenantScopeInterceptor.CONTROL_PLANE_NAMESPACES.contains(NS + "UserMapper"));
         assertFalse(interceptor.requiresResolvedContext(NS + "UserMapper.privilegedMemberships"));
@@ -130,6 +139,8 @@ class TenantScopeInterceptorTest {
         assertFalse(interceptor.requiresResolvedContext(NS + "NotificationMapper.lockRecipientIdsByActor"));
         assertFalse(interceptor.requiresResolvedContext(
             NS + "AiChatMapper.deleteParticipantsForUserAnywhere"));
+        assertFalse(interceptor.requiresResolvedContext(
+            NS + "AiChatMapper.lockSessionsForUserErasureAnywhere"));
         assertFalse(interceptor.requiresResolvedContext(
             NS + "AiChatMapper.clearSessionCreatorsAnywhere"));
         assertFalse(interceptor.requiresResolvedContext(

@@ -8,6 +8,7 @@ import { useTranslations } from 'next-intl';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { replacePipelineStages, updatePipeline } from '@/app/lib/api';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { Pipeline, Stage, UpdatePipelinePayload } from '@/app/lib/types';
 import QuickEditPipelineSheet, { type PipelineDraft, type StageKind } from '@/app/components/records/pipelines/QuickEditPipelineSheet';
 
@@ -90,6 +91,7 @@ export default function EditPipelineSheet({
     };
 
     const saveEdits = async () => {
+        const origin = workspacePinnedRequest(renderedWorkspaceId());
         resetFieldErrors();
         const original = toDraft(pipeline, stages);
         if (!diffDraft(original, draft)) {
@@ -115,7 +117,7 @@ export default function EditPipelineSheet({
         try {
             if (original.name !== draft.name) {
                 const payload: UpdatePipelinePayload = { name: draft.name.trim() };
-                await updatePipeline(pipeline.id, payload);
+                await updatePipeline(pipeline.id, payload, origin);
             }
 
             const fresh = await replacePipelineStages(pipeline.id, stages.map((s) => s.id), draft.stages.map((s) => ({
@@ -123,7 +125,7 @@ export default function EditPipelineSheet({
                 name: s.name.trim(),
                 success: s.success,
                 failure: s.failure,
-            })));
+            })), origin);
 
             toastSuccess(t('pipelineUpdated'));
             handleOpenChange(false);

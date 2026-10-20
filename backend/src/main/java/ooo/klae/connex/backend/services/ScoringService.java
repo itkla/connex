@@ -85,6 +85,7 @@ public class ScoringService {
     private final NoteMapper noteMapper;
     private final TaskMapper taskMapper;
     private final Clock clock;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     private static final int MAX_BATCH_CONTACTS = 1_000;
     private static final int MAX_BATCH_COMPANIES = 2_000;
@@ -372,6 +373,8 @@ public class ScoringService {
         if (!personMapper.getProcessablePersonIds(workspaceId, List.of(personId)).contains(personId)) {
             throw new ResourceNotFoundException("Contact not found");
         }
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId)
+            .workspaceIdsJson();
         Instant asOf = scoringInstant(Instant.now(clock));
         LocalDateTime reference = LocalDateTime.ofInstant(asOf, ZoneOffset.UTC);
         RelationshipEvidenceTotalsDto totals = boundedTotals(personMapper.getRelationshipEvidenceTotals(
@@ -392,7 +395,7 @@ public class ScoringService {
                 MAX_EVIDENCE_CONTRIBUTORS
             );
         int privateNotes = boundedPrivateNoteCount(noteMapper.countOwnPrivateNotesForPersonEvidence(
-            workspaceId, personId, currentUserId, reference, MAX_EVIDENCE_SOURCES + 1));
+            workspaceId, orgWorkspaceIdsJson, personId, currentUserId, reference, MAX_EVIDENCE_SOURCES + 1));
         return evidence(
             SubjectType.PERSON,
             personId,
@@ -531,6 +534,8 @@ public class ScoringService {
                 .noneMatch(company -> company.getId() == companyId)) {
             throw new ResourceNotFoundException("Company not found");
         }
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId)
+            .workspaceIdsJson();
         Instant asOf = scoringInstant(Instant.now(clock));
         LocalDateTime reference = LocalDateTime.ofInstant(asOf, ZoneOffset.UTC);
         RelationshipEvidenceTotalsDto totals = boundedTotals(companyMapper.getRelationshipEvidenceTotals(
@@ -551,7 +556,7 @@ public class ScoringService {
                 MAX_EVIDENCE_CONTRIBUTORS
             );
         int privateNotes = boundedPrivateNoteCount(noteMapper.countOwnPrivateNotesForCompanyEvidence(
-            workspaceId, companyId, currentUserId, reference, MAX_EVIDENCE_SOURCES + 1));
+            workspaceId, orgWorkspaceIdsJson, companyId, currentUserId, reference, MAX_EVIDENCE_SOURCES + 1));
         return evidence(
             SubjectType.COMPANY,
             companyId,

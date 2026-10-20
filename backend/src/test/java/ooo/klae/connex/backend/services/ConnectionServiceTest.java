@@ -32,6 +32,7 @@ import ooo.klae.connex.backend.mappers.PersonEdgeMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 
 class ConnectionServiceTest extends AbstractServiceTest {
+    @Autowired private RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     @Autowired private ConnectionService connectionService;
     @Autowired private IntroductionMapper introductionMapper;
@@ -250,7 +251,8 @@ class ConnectionServiceTest extends AbstractServiceTest {
     }
 
     private IntroCandidatePerson candidate(Person person) {
-        return introductionMapper.findCandidatePersons(workspace.getId()).stream()
+        return introductionMapper.findCandidatePersons(workspace.getId(),
+                recordVisibilityScopeControlAccess.getForWorkspace(workspace.getId()).workspaceIdsJson()).stream()
             .filter(candidate -> candidate.getId() == person.getId())
             .findFirst()
             .orElseThrow();

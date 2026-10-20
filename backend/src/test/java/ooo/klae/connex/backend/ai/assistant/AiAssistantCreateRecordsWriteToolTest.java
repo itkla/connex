@@ -59,6 +59,7 @@ import ooo.klae.connex.backend.recordcreation.RecordCreationFieldValueType;
 import ooo.klae.connex.backend.recordcreation.RecordCreationRecordType;
 import ooo.klae.connex.backend.recordcreation.RecordCreationTemplateAvailability;
 import ooo.klae.connex.backend.services.GuidedRecordCreationService;
+import ooo.klae.connex.backend.services.MutationAdmission;
 import ooo.klae.connex.backend.services.PipelineService;
 import ooo.klae.connex.backend.services.RecordCreationPresetService;
 import tools.jackson.databind.JsonNode;
@@ -72,7 +73,7 @@ class AiAssistantCreateRecordsWriteToolTest {
     private static final CreateDeal DEAL = new CreateDeal(
             "r1", "Renewal", "Qualified", "1250.50", "USD", "2026-12-01");
     private final ObjectMapper objectMapper = JsonMapper.builder().build();
-    private final GuidedRecordCreationService creationService = mock(GuidedRecordCreationService.class);
+    private final GuidedRecordCreationService creationService = AiAssistantAdmissionTestSupport.admittingMock(GuidedRecordCreationService.class);
     private final RecordCreationPresetService presetService = mock(RecordCreationPresetService.class);
     private final PipelineService pipelineService = mock(PipelineService.class);
     private final AiAssistantCreatePersonWriteTool personTool = new AiAssistantCreatePersonWriteTool(
@@ -344,7 +345,7 @@ class AiAssistantCreateRecordsWriteToolTest {
             AiAssistantWriteToolRequest request, Resolution resolution, Map<String, Object> pinned) {
         return new Execution(new Authority(4, 17, 91, Instant.EPOCH), new Row(COMPANY, request),
                 List.of(), resolution, new LockedTarget(null, null),
-                (start, end) -> { throw new AssertionError("Creation has no calendar dependency"); }, pinned);
+                (start, end) -> { throw new AssertionError("Creation has no calendar dependency"); }, pinned, MutationAdmission.UNRESTRICTED);
     }
 
     private Review review(

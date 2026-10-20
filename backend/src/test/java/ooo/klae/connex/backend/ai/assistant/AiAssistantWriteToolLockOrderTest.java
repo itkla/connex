@@ -7,9 +7,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -18,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Predicate;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
@@ -41,9 +46,9 @@ import ooo.klae.connex.backend.tenant.Permission;
  *
  * <p>The documented order in {@code docs/backend/LOCKING.md} is this one: the locked authorization
  * roots, the session root, the tool-call row, then — immediate tier only — the turn row, then the
- * task board root, the target row, the restriction fence, the owner-scope gate and only then the
- * write. The concurrency integration test proves contention behaviour but cannot observe this
- * sequence; swapping the turn and tool-call acquisitions, hoisting the authority read after the
+ * task board root, the target row, the owner-scope gate, all delegate domain roots, the restriction
+ * fence, the privacy barrier and only then the audited write. The concurrency integration test
+ * proves contention behaviour but cannot observe this sequence; swapping the turn and tool-call acquisitions, hoisting the authority read after the
  * session root, taking the target before the board, or moving the scope gate after the write turns
  * this red.
  */
@@ -78,10 +83,14 @@ class AiAssistantWriteToolLockOrderTest extends AbstractAiAssistantWriteToolTest
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId());
         order.verify(taskService).lockBoardForCreation();
         order.verify(personService).lockProcessablePersonForShare(31);
+        order.verify(personService).getPersonById(31);
         order.verify(restrictionEpoch).retainReadFenceUntilTransactionCompletionIfCurrent(
                 TURN.workspaceId(), TURN.restrictionEpoch());
-        order.verify(personService).getPersonById(31);
+        order.verify(chatMapper).lockPrivacyBarrierForShare(TURN.workspaceId());
         order.verify(taskService).create(any(Task.class));
+        verify(chatMapper, times(1)).lockPrivacyBarrierForShare(TURN.workspaceId());
+        verify(restrictionEpoch, times(1)).retainReadFenceUntilTransactionCompletionIfCurrent(
+                TURN.workspaceId(), TURN.restrictionEpoch());
         verify(personService, never()).lockProcessablePersonForUpdate(anyInt());
     }
 
@@ -106,12 +115,62 @@ class AiAssistantWriteToolLockOrderTest extends AbstractAiAssistantWriteToolTest
                 TURN.workspaceId(), TURN.sessionId(), TOOL_CALL_ID);
         order.verify(dealService).getDealById(44);
         order.verify(dealService).lockStageChangeRowsForUpdate(44, 6);
+        order.verify(dealService).getDealById(44);
         order.verify(restrictionEpoch).retainReadFenceUntilTransactionCompletionIfCurrent(
                 TURN.workspaceId(), TURN.restrictionEpoch());
-        order.verify(dealService).getDealById(44);
+        order.verify(chatMapper).lockPrivacyBarrierForShare(TURN.workspaceId());
         order.verify(dealService).changeStage(locked);
+        verify(chatMapper, times(1)).lockPrivacyBarrierForShare(TURN.workspaceId());
+        verify(restrictionEpoch, times(1)).retainReadFenceUntilTransactionCompletionIfCurrent(
+                TURN.workspaceId(), TURN.restrictionEpoch());
         verify(chatMapper, never()).getTurnByIdForUpdate(anyInt(), anyInt(), anyInt());
         verify(dealService, never()).lockDealForUpdate(anyInt());
+    }
+
+    @Test
+    void undoRetainsBothFencesAfterItsLockedFingerprintAndBeforeDeletionAudit() throws Exception {
+        AtomicReference<Task> created = new AtomicReference<>();
+        doAnswer(invocation -> {
+            Task task = invocation.getArgument(0);
+            task.setId(74);
+            task.setStatus("todo");
+            created.set(task);
+            return task;
+        }).when(taskService).create(any(Task.class));
+        AiAssistantWriteToolService service = service();
+        propose(service, "create_task", "{\"handle\":\"r1\",\"description\":\"Agenda\"}",
+                "person", 31);
+        service.executeAuto(TURN, TOOL_CALL_ID, result -> { });
+        storedToolCall.setResultJson(capturedExecutedResult());
+        Runnable deletionAudit = mock(Runnable.class);
+        doAnswer(invocation -> {
+            taskService.lockBoardForUpdate();
+            taskService.lockTaskForUpdate(74);
+            Predicate<Task> guard = invocation.getArgument(1);
+            assertTrue(guard.test(created.get()));
+            deletionAudit.run();
+            return null;
+        }).when(taskService).deleteIf(eq(74), any());
+        clearInvocations(workspaceService, chatMapper, taskService, restrictionEpoch);
+
+        service.undo(TURN.sessionId(), TOOL_CALL_ID);
+
+        InOrder order = inOrder(workspaceService, chatMapper, taskService, restrictionEpoch, deletionAudit);
+        order.verify(workspaceService).lockAndRequirePermissionsSnapshot(
+                TURN.workspaceId(), Map.of(TURN.userId(), Set.of(Permission.AI_USE)));
+        order.verify(chatMapper).getSessionByIdForUpdate(
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId());
+        order.verify(chatMapper).getToolCallBySessionForUpdate(
+                TURN.workspaceId(), TURN.sessionId(), TOOL_CALL_ID);
+        order.verify(taskService).lockBoardForUpdate();
+        order.verify(taskService).lockTaskForUpdate(74);
+        order.verify(restrictionEpoch).retainReadFenceUntilTransactionCompletionIfCurrent(
+                TURN.workspaceId(), TURN.restrictionEpoch());
+        order.verify(chatMapper).lockPrivacyBarrierForShare(TURN.workspaceId());
+        order.verify(deletionAudit).run();
+        verify(chatMapper, times(1)).lockPrivacyBarrierForShare(TURN.workspaceId());
+        verify(restrictionEpoch, times(1)).retainReadFenceUntilTransactionCompletionIfCurrent(
+                TURN.workspaceId(), TURN.restrictionEpoch());
     }
 
     @Test
@@ -233,18 +292,19 @@ class AiAssistantWriteToolLockOrderTest extends AbstractAiAssistantWriteToolTest
         order.verify(chatMapper).getTurnByIdForUpdate(
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId());
         order.verify(personService).lockProcessablePersonForUpdate(31);
-        order.verify(restrictionEpoch).retainReadFenceUntilTransactionCompletionIfCurrent(
-                TURN.workspaceId(), TURN.restrictionEpoch());
         order.verify(personService).getPersonById(31);
         order.verify(activityService).getActivitiesByPersonIdInWindow(
                 eq(31), any(), any(), eq(101));
+        order.verify(restrictionEpoch).retainReadFenceUntilTransactionCompletionIfCurrent(
+                TURN.workspaceId(), TURN.restrictionEpoch());
+        order.verify(chatMapper).lockPrivacyBarrierForShare(TURN.workspaceId());
         order.verify(activityService).create(any(Activity.class));
         verify(taskService, never()).lockBoardForCreation();
         verify(personService, never()).lockProcessablePersonForShare(anyInt());
     }
 
     @Test
-    void anImmediateTagOnACompanyLocksItForUpdateAndResolvesTheTagOnlyAfterTheScopeGate()
+    void anImmediateTagLocksDefinitionBeforeTargetAndAssociationsBeforeAdmission()
             throws Exception {
         Tag tag = new Tag();
         tag.setId(9);
@@ -267,11 +327,14 @@ class AiAssistantWriteToolLockOrderTest extends AbstractAiAssistantWriteToolTest
                 TURN.workspaceId(), TURN.sessionId(), TOOL_CALL_ID);
         order.verify(chatMapper).getTurnByIdForUpdate(
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId());
+        order.verify(tagService).getAllTags();
+        order.verify(tagService).lockDefinitionForShare(9);
         order.verify(companyService).lockOwnedCompanyForUpdate(52);
+        order.verify(tagService).lockAssociationsForUpdate("company", 52);
+        order.verify(companyService).getCompanyById(52);
         order.verify(restrictionEpoch).retainReadFenceUntilTransactionCompletionIfCurrent(
                 TURN.workspaceId(), TURN.restrictionEpoch());
-        order.verify(companyService).getCompanyById(52);
-        order.verify(tagService).getAllTags();
+        order.verify(chatMapper).lockPrivacyBarrierForShare(TURN.workspaceId());
         order.verify(companyService).addTag(52, 9);
         verify(taskService, never()).lockBoardForCreation();
     }
@@ -290,9 +353,10 @@ class AiAssistantWriteToolLockOrderTest extends AbstractAiAssistantWriteToolTest
         order.verify(chatMapper).getTurnByIdForUpdate(
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId());
         order.verify(dealService).lockDealForUpdate(44);
+        order.verify(dealService).getDealById(44);
         order.verify(restrictionEpoch).retainReadFenceUntilTransactionCompletionIfCurrent(
                 TURN.workspaceId(), TURN.restrictionEpoch());
-        order.verify(dealService).getDealById(44);
+        order.verify(chatMapper).lockPrivacyBarrierForShare(TURN.workspaceId());
         order.verify(noteService).create(any(Note.class));
         verify(taskService, never()).lockBoardForCreation();
         verify(activityService, never()).getActivitiesByPersonIdInWindow(
@@ -328,9 +392,10 @@ class AiAssistantWriteToolLockOrderTest extends AbstractAiAssistantWriteToolTest
         order.verify(chatMapper).getToolCallBySessionForUpdate(
                 TURN.workspaceId(), TURN.sessionId(), TOOL_CALL_ID);
         order.verify(personService).lockProcessablePersonForUpdate(31);
+        order.verify(personService).getPersonById(31);
         order.verify(restrictionEpoch).retainReadFenceUntilTransactionCompletionIfCurrent(
                 TURN.workspaceId(), TURN.restrictionEpoch());
-        order.verify(personService).getPersonById(31);
+        order.verify(chatMapper).lockPrivacyBarrierForShare(TURN.workspaceId());
         order.verify(personService).updateOwner(31, 21);
         verify(chatMapper, never()).getTurnByIdForUpdate(anyInt(), anyInt(), anyInt());
         verify(taskService, never()).lockBoardForCreation();

@@ -19,6 +19,20 @@ Single-origin means cookies, WebAuthn (RP = the serving host), and realtime all 
 browser-facing backend URL. Internally, browser rewrites still talk to `backend:8080`, while
 server-rendered preview fetches use the app-network-only `backend-app:8080` alias.
 
+Data-subject disclosure uses the synchronous Tomcat HTTP/1.1 NIO connector behind Caddy. Its
+pass-two absolute delivery deadline is `CONNEX_DSR_DISCLOSURE_DELIVERY_TIMEOUT_MS=120000`
+(`connex.data-subject-disclosure.delivery-timeout-ms`). The backend explicitly sets
+`CONNEX_TOMCAT_CONNECTION_TIMEOUT=30s` (`server.tomcat.connection-timeout`); Tomcat also uses this
+positive setting for blocking writes. Deadline cancellation closes the specific socket, so stalled
+or trickling delivery ends within the deadline plus one connector write timeout (150 seconds with
+defaults), followed by normal rollback/cleanup. Unlimited connector writes are rejected at startup.
+Admission is two disclosures per instance and one per organization. Budget four pooled connections
+for both slots plus ordinary traffic; each disclosure peaks at two, after its separate placement
+lookup has returned its connection. Pools of two or three admit one disclosure to retain audit
+capacity. See the [operator procedure](APPI_DATA_SUBJECT_REQUEST_PROCEDURE.md)
+for incomplete-download rejection and explicit retries. An unsupported live connector/protocol
+fails disclosure closed before output; it needs equivalent cancellation support before use.
+
 The site-level edge header contract applies to every response, including frontend HTML and static
 assets, downloads, backend JSON, and Caddy-generated error responses. Caddy normalizes
 `X-Content-Type-Options: nosniff` and `X-Frame-Options: DENY`. It preserves an upstream
@@ -349,6 +363,8 @@ create bodies active. Set it to `true` only in the coupled release whose fronten
 nested person, company, and deal create bodies; the enabled backend rejects legacy flat bodies and
 has no compatibility fallback. Values other than the exact literals `true` and `false` fail backend
 startup.
+Record-review missions remain disabled independently of ordinary AI. V232 requires draining all older backends and background message writers, applying the durable sequence backfill, and starting only compatible readers/writers. See [the V232 upgrade cutover](UPGRADING.md#v232-mission-privacy-and-message-sequence-cutover). Activation additionally requires `connex.ai.missions-enabled=true`, `connex.ai.missions-single-jvm-confirmed=true`, successful routed initialization, and an exact `connex.ai.mission-capabilities` declaration containing provider, endpoint, model and `capability: missions_v1`. Absence or loss of any gate refuses execution; stopping and privacy maintenance remain available. Keep disabled until #2101 contains the required MySQL, trajectory, browser and approved synthetic staging evidence. V235 is the rollback floor even while the mission flag is off.
+
 AI remains instance-disabled unless `CONNEX_AI_ENABLED=true`. When the master switch is enabled,
 operators may independently disable deal briefs, deal-risk rationales, introduction rationales,
 report narratives, or provider-backed business-card extraction with

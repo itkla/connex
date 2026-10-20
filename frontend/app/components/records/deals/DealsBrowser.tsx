@@ -97,6 +97,7 @@ import {
     ApiError,
     isFieldError,
 } from '@/app/lib/api';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import {
     recordDetailNavigationPath,
     recordDetailPath,
@@ -862,7 +863,8 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         }
     };
 
-    const createNewDeal = async (duplicateReviewToken: string) => {
+    const createNewDeal = async (duplicateReviewToken: string, init?: RequestInit) => {
+        const origin = init ?? workspacePinnedRequest(renderedWorkspaceId());
         setCreationSucceeded(false);
         setIsCreating(true);
         try {
@@ -876,7 +878,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                 stage: newPayload.stage || null,
                 duplicateReviewToken,
                 expectedCloseDate: newPayload.expectedCloseDate || undefined,
-            });
+            }, origin);
             toastSuccess(t('dealCreated'));
             setIsCreating(false);
             setCreationSucceeded(true);

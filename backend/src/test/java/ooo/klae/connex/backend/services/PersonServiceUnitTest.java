@@ -8,7 +8,6 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
-import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
@@ -52,7 +51,7 @@ class PersonServiceUnitTest {
             mock(DuplicateDecisionLockService.class),
             mock(RecordCreationAugmentationService.class),
             mock(ooo.klae.connex.backend.mappers.ProviderCaptureMapper.class),
-            mock(AiRestrictionEpoch.class)
+            mock(ooo.klae.connex.backend.ai.mission.AiAgentPrivacyService.class)
         );
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(mapper.countPersons(

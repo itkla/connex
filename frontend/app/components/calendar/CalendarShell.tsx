@@ -9,6 +9,7 @@ import { ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
 import Rise from '@/app/components/motion/Rise';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { completeTask, rescheduleDeal, rescheduleTask } from '@/app/lib/api';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { useNow } from '@/app/hooks/useNow';
 import { isTypingTarget, parseCalendarDate } from '@/app/lib/utils';
 import type { Activity, Contact, Deal, Note, RelationshipTemperature, Task } from '@/app/lib/types';
@@ -176,14 +177,14 @@ export default function CalendarShell({
     );
 
     const applyReschedule = useCallback(
-        async (event: CalendarEvent, key: string): Promise<boolean> => {
+        async (event: CalendarEvent, key: string, origin: RequestInit): Promise<boolean> => {
             setOverrides((prev) => new Map(prev).set(event.id, key));
             setPendingIds((prev) => new Set(prev).add(event.id));
             try {
                 if (event.kind === 'task') {
-                    await rescheduleTask(event.entityId, key);
+                    await rescheduleTask(event.entityId, key, origin);
                 } else if (event.kind === 'deal') {
-                    await rescheduleDeal(event.entityId, key);
+                    await rescheduleDeal(event.entityId, key, origin);
                 }
                 router.refresh();
                 return true;
@@ -209,18 +210,19 @@ export default function CalendarShell({
 
     const handleReschedule = useCallback(
         async (event: CalendarEvent, newDayKey: string) => {
+            const origin = workspacePinnedRequest(renderedWorkspaceId());
             if (!event.draggable || newDayKey === event.dayKey || Number.isNaN(parseCalendarDate(newDayKey))) {
                 return;
             }
             const originalKey = event.dayKey;
-            const ok = await applyReschedule(event, newDayKey);
+            const ok = await applyReschedule(event, newDayKey, origin);
             if (ok) {
                 toastSuccess(t('rescheduled'), {
                     id: `reschedule-${event.id}`,
                     action: {
                         label: t('undo'),
                         onClick: () => {
-                            void applyReschedule(event, originalKey).then((undone) => {
+                            void applyReschedule(event, originalKey, origin).then((undone) => {
                                 if (!undone) toastError(t('rescheduleFailed'));
                             });
                         },

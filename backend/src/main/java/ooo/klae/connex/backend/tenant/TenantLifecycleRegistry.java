@@ -319,6 +319,13 @@ public final class TenantLifecycleRegistry {
         raw.add(direct("person", 430));
         raw.add(direct("company_share", 440));
         raw.add(direct("company", 450));
+        raw.add(direct("ai_chat_tool_call", 452));
+        raw.add(direct("ai_chat_message", 453));
+        raw.add(direct("ai_chat_turn", 454));
+        raw.add(direct("ai_agent_segment", 455, nullify("turn_id")));
+        raw.add(direct("ai_agent_run", 456, nullify("report_message_id"), nullify("active_segment_id")));
+        raw.add(direct("ai_agent_privacy_work", 457));
+        raw.add(direct("ai_agent_privacy_barrier", 458, nullify("latest_operation_key")));
         raw.add(direct("attachment", 460));
         raw.add(direct("ai_chat_session", 465));
         raw.add(direct("ai_workspace_governance", 466));
@@ -378,15 +385,10 @@ public final class TenantLifecycleRegistry {
         raw.add(cascade("ai_chat_session_participant", "ai_chat_session",
             "fk_ai_chat_session_participant_session",
             link("workspace_id", "workspace_id"), link("session_id", "id")));
-        raw.add(cascade("ai_chat_message", "ai_chat_session",
-            "fk_ai_chat_message_session",
-            link("workspace_id", "workspace_id"), link("session_id", "id")));
-        raw.add(cascade("ai_chat_tool_call", "ai_chat_message",
-            "fk_ai_chat_tool_call_message",
-            link("workspace_id", "workspace_id"), link("message_id", "id")));
-        raw.add(cascade("ai_chat_turn", "ai_chat_session",
-            "fk_ai_chat_turn_session",
-            link("workspace_id", "workspace_id"), link("session_id", "id")));
+        raw.add(cascade("ai_assistant_proposal_set", "ai_chat_message",
+            "fk_ai_assistant_proposal_set_message",
+            link("workspace_id", "workspace_id"), link("session_id", "session_id"),
+            link("message_id", "id")));
         raw.add(direct("sequence_version_publisher", 621));
         raw.add(direct("sequence_version", 622));
         raw.add(direct("sequence_step_content", 623));

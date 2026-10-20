@@ -46,6 +46,7 @@ import {
     replacePipelineStages,
     updatePipeline,
 } from '@/app/lib/api';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { parseMysqlDateTime } from '@/app/lib/utils';
 import { PIPELINE_EDIT_URL_KEY, writeOwnedParamsToUrl } from '@/app/hooks/listStateUrl';
 import type {
@@ -177,6 +178,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
     };
 
     const createNewPipeline = async () => {
+        const origin = workspacePinnedRequest(renderedWorkspaceId());
         const { stages: rawStages, ...pipelineFields } = newPipelinePayload;
         const validStages = (rawStages ?? []).flatMap((stage) => {
             const trimmedStage = { ...stage, name: stage.name.trim() };
@@ -191,12 +193,12 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
         setCreationSucceeded(false);
         setIsCreating(true);
         try {
-            const created = await createPipeline(pipelineFields);
+            const created = await createPipeline(pipelineFields, origin);
 
             if (validStages.length > 0) {
                 const results = await Promise.allSettled(
                     validStages.map((s, position) =>
-                        createStage(created.id, { name: s.name, position, success: s.success ?? false, failure: s.failure ?? false }),
+                        createStage(created.id, { name: s.name, position, success: s.success ?? false, failure: s.failure ?? false }, origin),
                     ),
                 );
                 const failed = results.filter((r) => r.status === 'rejected').length;
@@ -293,6 +295,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
     };
 
     const saveEdits = async () => {
+        const origin = workspacePinnedRequest(renderedWorkspaceId());
         const changed = selectedPipelines.filter((p) => {
             const draft = drafts[p.id];
             const original = toDraft(p, stagesByPipeline.get(p.id) ?? []);
@@ -337,7 +340,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
 
                     if (original.name !== draft.name) {
                         const payload: UpdatePipelinePayload = { name: draft.name.trim() };
-                        await updatePipeline(p.id, payload);
+                        await updatePipeline(p.id, payload, origin);
                     }
 
                     await replacePipelineStages(p.id, (stagesByPipeline.get(p.id) ?? []).map((s) => s.id), draft.stages.map((s) => ({
@@ -345,7 +348,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
                         name: s.name.trim(),
                         success: s.success,
                         failure: s.failure,
-                    })));
+                    })), origin);
                 }),
             );
             toastSuccess(

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
@@ -15,8 +15,20 @@ import {
 } from "@heroicons/react/24/outline";
 import type { Contact, Deal, Note, NoteVisibility, User } from "@/app/lib/types";
 import { SegmentedControl } from "@/components/ui/segmented-control";
-import { createNote, updateNote } from "@/app/lib/api";
-import { toastError } from "@/app/lib/toast";
+import { createNote, isWorkspaceUnavailableError, updateNote } from "@/app/lib/api";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
+import { useWorkspace } from "@/app/hooks/useWorkspace";
+import { useFormDraft } from "@/app/hooks/useFormDraft";
+import {
+    clearDraftIfGeneration,
+    DRAFT_VERSIONS,
+    getDraftKeyGeneration,
+    readDraft,
+    type DraftKeyParts,
+} from "@/app/lib/formDrafts";
+import { noteContentToVisibleText } from "@/app/lib/references";
+import { renderedWorkspaceNavigationVersion, workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
+import { toastDismiss, toastError, toastInfo } from "@/app/lib/toast";
 import { deriveNoteTitle } from "@/app/lib/noteText";
 import { CrumbLabel } from "@/app/hooks/useNavTrail";
 import RecordReturnLink from "@/app/components/records/RecordReturnLink";
@@ -26,6 +38,30 @@ import BacklinksPanel from "./BacklinksPanel";
 const RichNoteEditor = dynamic(() => import("./RichNoteEditor"), { ssr: false });
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
+
+type NoteEditorDraft = {
+    title: string;
+    content: string;
+    visibility: NoteVisibility;
+};
+
+const KEPT_DRAFT_LABEL_LENGTH = 48;
+
+function isNoteEditorDraft(value: unknown): value is NoteEditorDraft {
+    return typeof value === "object"
+        && value !== null
+        && "title" in value
+        && typeof value.title === "string"
+        && "content" in value
+        && typeof value.content === "string"
+        && "visibility" in value
+        && (value.visibility === "private" || value.visibility === "workspace");
+}
+
+function keptDraftLabel(content: string): string {
+    const text = noteContentToVisibleText(content).trim().replace(/\s+/g, " ");
+    return text.length > KEPT_DRAFT_LABEL_LENGTH ? `${text.slice(0, KEPT_DRAFT_LABEL_LENGTH - 1)}…` : text;
+}
 
 const MAX_NOTE_TITLE_LENGTH = 255;
 
@@ -45,11 +81,40 @@ type Props = {
 /**
  * Full-page rich note editor. Handles both an existing note and a new draft,
  * persisting via debounced autosave (creating on the first non-empty change).
+ *
+ * Every save, including the flush when the editor unmounts, is pinned to the workspace the editor
+ * was opened in (#1732). A workspace switch publishes the new selection before navigation unmounts
+ * this page, so an unpinned flush would write this note's text into the newly selected workspace.
+ * Once that workspace refuses a save because the viewer is no longer a member, autosave stops for
+ * good: retrying could only fail again. The text stays in the editor and is also kept as this
+ * editor's own draft (form type `noteEditor`, one per new note or existing note), written through
+ * the draft store's ownership and generation guards so it never replaces another composer's draft.
+ * Opening the same editor in that workspace again offers to resume it; it is never offered in
+ * another workspace.
  */
 export default function NoteEditorView({ note, currentUserId, persons, deals, users, returnPath }: Props) {
     const t = useTranslations("ActivityNotesEditor");
-
+    const showApiError = useApiErrorToast("ActivityNotesEditor");
+    const { activeWorkspaceId } = useWorkspace();
+    const tResume = useTranslations("DraftResume");
+    const [originWorkspaceId] = useState(activeWorkspaceId);
+    const [originNavigationVersion] = useState(renderedWorkspaceNavigationVersion);
     const [noteId, setNoteId] = useState<number | null>(note?.id ?? null);
+    const editorDraftScope = noteId === null ? "new" : `note:${noteId}`;
+    const editorDraftParts = useMemo<DraftKeyParts>(() => ({
+        userId: currentUserId,
+        workspaceId: originWorkspaceId,
+        formType: "noteEditor",
+        scope: editorDraftScope,
+    }), [currentUserId, editorDraftScope, originWorkspaceId]);
+    const editorDraft = useFormDraft<NoteEditorDraft>({
+        keyParts: editorDraftParts,
+        version: DRAFT_VERSIONS.noteEditor,
+    });
+    const persistEditorDraft = editorDraft.persist;
+    const clearEditorDraft = editorDraft.clear;
+    const rekeyEditorDraft = editorDraft.rekeyScope;
+
     const [title, setTitle] = useState(note?.title ?? "");
     const [content, setContent] = useState(note?.content ?? "");
     const [visibility, setVisibility] = useState<NoteVisibility>(
@@ -58,7 +123,9 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
     const [status, setStatus] = useState<SaveStatus>("idle");
     const [titleError, setTitleError] = useState<string | null>(null);
     const dirtyRef = useRef(false);
+    const workspaceRefusedRef = useRef(false);
     const savingRef = useRef(false);
+    const mountedRef = useRef(true);
     const saveRef = useRef<() => void>(() => {});
     const stateRef = useRef({ noteId, title, content, visibility });
 
@@ -66,12 +133,69 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
         stateRef.current = { noteId, title, content, visibility };
     }, [noteId, title, content, visibility]);
 
+    useEffect(() => {
+        mountedRef.current = true;
+        return () => {
+            mountedRef.current = false;
+        };
+    }, []);
+
+    const keepRefusedText = useCallback(() => {
+        const snapshot = stateRef.current;
+        if (!snapshot.content.trim()) return;
+        persistEditorDraft({ title: snapshot.title, content: snapshot.content, visibility: snapshot.visibility });
+    }, [persistEditorDraft]);
+
+    useEffect(() => {
+        const kept = readDraft(editorDraftParts, { version: DRAFT_VERSIONS.noteEditor });
+        if (!kept || !isNoteEditorDraft(kept.data)) return;
+        const keptData = kept.data;
+        const keptGeneration = getDraftKeyGeneration(kept.key);
+        toastInfo(tResume("noteMessageNamed", { label: keptDraftLabel(keptData.content) }), {
+            id: kept.key,
+            duration: Infinity,
+            action: {
+                label: tResume("resumeNote"),
+                onClick: () => {
+                    if (getDraftKeyGeneration(kept.key) !== keptGeneration) return;
+                    persistEditorDraft(keptData);
+                    setTitle(keptData.title);
+                    setContent(keptData.content);
+                    setVisibility(keptData.visibility);
+                    dirtyRef.current = true;
+                },
+            },
+            cancel: {
+                label: tResume("discardNote"),
+                onClick: () => {
+                    clearDraftIfGeneration(kept.key, keptGeneration);
+                },
+            },
+        });
+        return () => toastDismiss(kept.key);
+    }, [editorDraftParts, persistEditorDraft, tResume]);
+
+    const noteWorkspaceRefused = useCallback((error: unknown, report = true): boolean => {
+        if (!isWorkspaceUnavailableError(error)) return false;
+        if (!workspaceRefusedRef.current) {
+            workspaceRefusedRef.current = true;
+            if (report) showApiError(error, "saveError");
+        }
+        keepRefusedText();
+        return true;
+    }, [keepRefusedText, showApiError]);
+
     const person = note?.person ? persons.find((item) => item.id === note.person) ?? null : null;
     const deal = note?.deal ? deals.find((item) => item.id === note.deal) ?? null : null;
     const author = users.find((item) => item.id === (note?.author ?? currentUserId)) ?? null;
 
     const save = useCallback(() => {
         if (savingRef.current) return;
+        if (workspaceRefusedRef.current) {
+            dirtyRef.current = false;
+            keepRefusedText();
+            return;
+        }
         const snapshot = stateRef.current;
         const body = snapshot.content;
         const nextTitle = snapshot.title.trim() ? snapshot.title.trim() : null;
@@ -89,31 +213,40 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
         savingRef.current = true;
         dirtyRef.current = false;
         setStatus("saving");
+        const pinned = workspacePinnedRequest(originWorkspaceId);
         const request =
             snapshot.noteId == null
-                ? createNote({ content: body, title: nextTitle, visibility: snapshot.visibility, author: currentUserId })
-                : updateNote(snapshot.noteId, { content: body, title: nextTitle, visibility: snapshot.visibility });
+                ? createNote(
+                    { content: body, title: nextTitle, visibility: snapshot.visibility, author: currentUserId },
+                    pinned,
+                )
+                : updateNote(snapshot.noteId, { content: body, title: nextTitle, visibility: snapshot.visibility }, pinned);
         request
             .then((saved) => {
                 if (snapshot.noteId == null && saved?.id) {
+                    rekeyEditorDraft(`note:${saved.id}`);
                     stateRef.current = { ...stateRef.current, noteId: saved.id };
                     setNoteId(saved.id);
-                    window.history.replaceState(null, "", `/activity/notes/${saved.id}`);
+                    if (mountedRef.current && renderedWorkspaceNavigationVersion() === originNavigationVersion) {
+                        window.history.replaceState(null, "", `/activity/notes/${saved.id}`);
+                    }
                 }
+                clearEditorDraft();
                 setStatus("saved");
             })
-            .catch(() => {
-                dirtyRef.current = true;
+            .catch((error: unknown) => {
                 setStatus("error");
+                if (noteWorkspaceRefused(error)) return;
+                dirtyRef.current = true;
                 toastError(t("saveError"));
             })
             .finally(() => {
                 savingRef.current = false;
                 if (dirtyRef.current) saveRef.current();
             });
-    }, [currentUserId, t]);
+    }, [clearEditorDraft, currentUserId, keepRefusedText, noteWorkspaceRefused, originNavigationVersion, originWorkspaceId, rekeyEditorDraft, t]);
 
-    const ensureNoteId = useCallback(async (): Promise<number> => {
+    const ensureNoteId = useCallback(async (): Promise<number | null> => {
         const existing = stateRef.current.noteId;
         if (existing != null) return existing;
 
@@ -124,6 +257,7 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
             const createdWhileWaiting = stateRef.current.noteId;
             if (createdWhileWaiting != null) return createdWhileWaiting;
         }
+        if (workspaceRefusedRef.current) return null;
 
         const snapshot = stateRef.current;
         const nextTitle = snapshot.title.trim() ? snapshot.title.trim() : null;
@@ -143,23 +277,26 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
                 title: nextTitle,
                 visibility: snapshot.visibility,
                 author: currentUserId,
-            });
+            }, workspacePinnedRequest(originWorkspaceId));
             if (!saved?.id) throw new Error("missing-note-id");
+            rekeyEditorDraft(`note:${saved.id}`);
             stateRef.current = { ...stateRef.current, noteId: saved.id };
             setNoteId(saved.id);
-            window.history.replaceState(null, "", `/activity/notes/${saved.id}`);
+            if (mountedRef.current && renderedWorkspaceNavigationVersion() === originNavigationVersion) {
+                window.history.replaceState(null, "", `/activity/notes/${saved.id}`);
+            }
             dirtyRef.current = false;
             setStatus("saved");
             return saved.id;
         } catch (error) {
-            dirtyRef.current = true;
             setStatus("error");
+            if (!noteWorkspaceRefused(error, false)) dirtyRef.current = true;
             throw error;
         } finally {
             savingRef.current = false;
             if (dirtyRef.current) saveRef.current();
         }
-    }, [currentUserId, t]);
+    }, [currentUserId, noteWorkspaceRefused, originNavigationVersion, originWorkspaceId, rekeyEditorDraft, t]);
 
     useEffect(() => {
         saveRef.current = save;

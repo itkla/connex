@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -17,6 +18,7 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import ooo.klae.connex.backend.ai.assistant.AiAssistantProposalExpiry;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
@@ -30,6 +32,35 @@ class AiChatMapperTest extends AbstractMapperTest {
     @Autowired private AiChatMapper chatMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private org.mybatis.spring.SqlSessionTemplate sqlSession;
+
+    @Test
+    void accountErasureLocksTheOrderedUnionOfEveryProvenanceSource() {
+        User erased = newUser();
+        User retained = newUser();
+        Workspace laterWorkspace = newWorkspace();
+        AiChatSession later = session(laterWorkspace, erased, "Later workspace", "private");
+        AiChatSession owned = session(workspace, erased, "Owned", "private");
+        AiChatSession authored = session(workspace, retained, "Shared message", "shared");
+        message(authored, erased, 1, "Contribution");
+        AiChatSession executed = session(workspace, retained, "Shared tool", "shared");
+        AiChatMessage retainedMessage = message(executed, retained, 1, "Retained message");
+        jdbcTemplate.update(
+            "INSERT INTO ai_chat_tool_call (workspace_id, message_id, tool_name, status, executed_by_user_id) "
+                + "VALUES (?, ?, 'erasure_fixture', 'executed', ?)",
+            workspace.getId(), retainedMessage.getId(), erased.getId());
+        AiChatSession requested = session(workspace, retained, "Shared turn", "shared");
+        jdbcTemplate.update(
+            "INSERT INTO ai_chat_turn (workspace_id, session_id, requested_by_user_id, status) "
+                + "VALUES (?, ?, ?, 'resolved')",
+            workspace.getId(), requested.getId(), erased.getId());
+        message(owned, erased, 1, "Overlapping provenance");
+        AiChatSession unrelated = session(workspace, retained, "Unrelated", "shared");
+        message(unrelated, retained, 1, "Retained contribution");
+
+        assertEquals(List.of(owned.getId(), authored.getId(), executed.getId(), requested.getId(), later.getId()),
+            chatMapper.lockSessionsForUserErasureAnywhere(erased.getId()));
+        assertTrue(chatMapper.lockSessionsForUserErasureAnywhere(newUser().getId()).isEmpty());
+    }
 
     @Test
     void sessionAndMessageColumnsRoundTrip() {
@@ -275,8 +306,104 @@ class AiChatMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void pendingToolCallsFilterExpiredProposalsBeforeLimitWithRealCutoff() {
+        User owner = newUser();
+        AiChatSession session = session(workspace, owner, "Proposal expiry", "private");
+        AiChatMessage userMessage = message(session, owner, 1, "Review proposals");
+        LocalDateTime reviewCreatedAfter = AiAssistantProposalExpiry.pendingCreatedAfter(Instant.now());
+        AiChatToolCall freshProposal = null;
+        for (int microseconds : List.of(-1, 0, 1)) {
+            AiChatToolCall proposal = new AiChatToolCall();
+            proposal.setWorkspaceId(workspace.getId());
+            proposal.setMessageId(userMessage.getId());
+            proposal.setToolName("assign_owner");
+            proposal.setStatus("proposed");
+            proposal.setArgumentsJson("{}");
+            proposal.setServerProposal(true);
+            chatMapper.insertToolCall(proposal);
+            jdbcTemplate.update(
+                    "UPDATE ai_chat_tool_call SET created_at = ? WHERE workspace_id = ? AND id = ?",
+                    reviewCreatedAfter.plusNanos(microseconds * 1_000L), workspace.getId(), proposal.getId());
+            freshProposal = proposal;
+        }
+        sqlSession.clearCache();
+
+        assertNotNull(freshProposal);
+        assertEquals(List.of(freshProposal.getId()), chatMapper.listToolCallsBySession(
+                        workspace.getId(), session.getId(), true, 1, reviewCreatedAfter).stream()
+                .map(AiChatToolCall::getId)
+                .toList());
+        assertEquals(3, chatMapper.listToolCallsBySession(
+                workspace.getId(), session.getId(), false, 10, null).size());
+    }
+
+    @Test
+    void cappedHistorySupplementRetainsUndecidedProposalsWithoutStarvingLivePending() {
+        User owner = newUser();
+        AiChatSession session = session(workspace, owner, "Capped proposal history", "private");
+        AiChatMessage firstMessage = message(session, owner, 1, "Earlier calls");
+        AiChatMessage laterMessage = message(session, owner, 2, "Later proposals");
+        LocalDateTime cutoff = AiAssistantProposalExpiry.pendingCreatedAfter(Instant.now());
+        for (int index = 0; index < 101; index++) {
+            proposalAt(firstMessage, cutoff.minusSeconds(1), true, "proposed");
+        }
+        AiChatToolCall expiresNext = proposalAt(laterMessage, cutoff.plusNanos(1_000), true, "proposed");
+        AiChatToolCall live = proposalAt(laterMessage, cutoff.plusHours(1), true, "proposed");
+        proposalAt(laterMessage, cutoff.plusHours(2), false, "proposed");
+        proposalAt(laterMessage, cutoff.plusHours(2), true, "rejected");
+        sqlSession.clearCache();
+
+        List<AiChatToolCall> history = chatMapper.listToolCallsBySession(
+                workspace.getId(), session.getId(), false, 100, null);
+        assertEquals(100, history.size());
+        AiChatToolCall boundary = history.getLast();
+        assertEquals(List.of(expiresNext.getId(), live.getId()), chatMapper.listToolCallsBySession(
+                        workspace.getId(), session.getId(), true, 100, cutoff).stream()
+                .map(AiChatToolCall::getId).toList());
+        assertEquals(List.of(live.getId(), expiresNext.getId()), chatMapper.listUndecidedToolCallsAfterHistory(
+                        workspace.getId(), session.getId(), boundary.getMessageId(), boundary.getId(), 2).stream()
+                .map(AiChatToolCall::getId).toList());
+
+        LocalDateTime expiredCutoff = cutoff.plusNanos(1_000);
+        assertEquals(List.of(live.getId()), chatMapper.listToolCallsBySession(
+                        workspace.getId(), session.getId(), true, 100, expiredCutoff).stream()
+                .map(AiChatToolCall::getId).toList());
+        List<AiChatToolCall> supplement = chatMapper.listUndecidedToolCallsAfterHistory(
+                workspace.getId(), session.getId(), boundary.getMessageId(), boundary.getId(), 2);
+        assertEquals(List.of(live.getId(), expiresNext.getId()), supplement.stream()
+                .map(AiChatToolCall::getId).toList());
+        assertTrue(AiAssistantProposalExpiry.isExpired(
+                AiAssistantProposalExpiry.reviewExpiresAt(supplement.getLast().getCreatedAt()),
+                expiredCutoff.plusHours(72).toInstant(java.time.ZoneOffset.UTC)));
+        assertTrue(chatMapper.listUndecidedToolCallsAfterHistory(
+                workspace.getId() + 1, session.getId(), boundary.getMessageId(), boundary.getId(), 100).isEmpty());
+        AiChatSession another = session(workspace, owner, "Other session", "private");
+        assertTrue(chatMapper.listUndecidedToolCallsAfterHistory(
+                workspace.getId(), another.getId(), boundary.getMessageId(), boundary.getId(), 100).isEmpty());
+        AiChatMessage otherMessage = message(another, owner, 1, "Other boundary");
+        assertTrue(chatMapper.listUndecidedToolCallsAfterHistory(
+                workspace.getId(), session.getId(), otherMessage.getId(), boundary.getId(), 100).isEmpty());
+    }
+
+    private AiChatToolCall proposalAt(
+            AiChatMessage message, LocalDateTime createdAt, boolean trusted, String status) {
+        AiChatToolCall call = new AiChatToolCall();
+        call.setWorkspaceId(workspace.getId());
+        call.setMessageId(message.getId());
+        call.setToolName("assign_owner");
+        call.setStatus(status);
+        call.setArgumentsJson("{}");
+        call.setServerProposal(trusted);
+        chatMapper.insertToolCall(call);
+        jdbcTemplate.update("UPDATE ai_chat_tool_call SET created_at = ? WHERE workspace_id = ? AND id = ?",
+                createdAt, workspace.getId(), call.getId());
+        return call;
+    }
+
+    @Test
     void durableTurnToolAndStructuredMessageStateRoundTripsWithinWorkspace() throws Exception {
         User owner = newUser();
+        LocalDateTime reviewCreatedAfter = AiAssistantProposalExpiry.pendingCreatedAfter(Instant.now());
         AiChatSession session = session(workspace, owner, "Agent loop", "private");
         AiChatMessage userMessage = message(session, owner, 1, "Investigate");
         AiChatTurn turn = new AiChatTurn();
@@ -303,12 +430,8 @@ class AiChatMapperTest extends AbstractMapperTest {
                 toolCall.getId(),
                 chatMapper.getToolCallBySession(
                         workspace.getId(), session.getId(), toolCall.getId()).getId());
-        assertEquals(
-                List.of(toolCall.getId()),
-                chatMapper.listToolCallsBySession(
-                                workspace.getId(), session.getId(), true, 1).stream()
-                        .map(AiChatToolCall::getId)
-                        .toList());
+        assertTrue(chatMapper.listToolCallsBySession(
+                workspace.getId(), session.getId(), true, 1, reviewCreatedAfter).isEmpty());
         assertNull(chatMapper.getToolCallBySession(
                 workspace.getId() + 1, session.getId(), toolCall.getId()));
         assertEquals(1, chatMapper.updateToolCall(
@@ -355,7 +478,7 @@ class AiChatMapperTest extends AbstractMapperTest {
         assertTrue(chatMapper.getToolCallBySessionForUpdate(
                 workspace.getId(), session.getId(), secondToolCall.getId()).isServerProposal());
         assertTrue(chatMapper.listToolCallsBySession(
-                        workspace.getId(), session.getId(), false, 10).stream()
+                        workspace.getId(), session.getId(), false, 10, null).stream()
                 .filter(listed -> listed.getId() == secondToolCall.getId())
                 .findFirst()
                 .orElseThrow()
@@ -369,13 +492,13 @@ class AiChatMapperTest extends AbstractMapperTest {
         assertEquals(
                 List.of(toolCall.getId()),
                 chatMapper.listToolCallsBySession(
-                                workspace.getId(), session.getId(), false, 1).stream()
+                                workspace.getId(), session.getId(), false, 1, null).stream()
                         .map(AiChatToolCall::getId)
                         .toList());
         assertTrue(chatMapper.listToolCallsBySession(
-                workspace.getId(), session.getId(), true, 1).isEmpty());
+                workspace.getId(), session.getId(), true, 1, reviewCreatedAfter).isEmpty());
         assertTrue(chatMapper.listToolCallsBySession(
-                workspace.getId() + 1, session.getId(), false, 1).isEmpty());
+                workspace.getId() + 1, session.getId(), false, 1, null).isEmpty());
         assertEquals(
                 turn.getId(),
                 chatMapper.getLatestActiveTurnBySession(

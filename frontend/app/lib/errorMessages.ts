@@ -1,6 +1,6 @@
 import { type useTranslations } from "next-intl";
 
-import { ApiError } from "@/app/lib/api";
+import { ApiError, isWorkspaceUnavailableError } from "@/app/lib/api";
 import { isSessionExpired, redirectToSignIn } from "@/app/lib/sessionExpiry";
 import { toastError } from "@/app/lib/toast";
 
@@ -31,6 +31,8 @@ const OFFLINE_KEY = "ApiErrors.offline";
 const SERVER_ERROR_KEY = "ApiErrors.serverError";
 const SESSION_EXPIRED_KEY = "ApiErrors.sessionExpired";
 const REFERENCE_KEY = "ApiErrors.reference";
+const WORKSPACE_UNAVAILABLE_KEY = "ApiErrors.workspaceUnavailable";
+const WORKSPACE_UNAVAILABLE_NAMED_KEY = "ApiErrors.workspaceUnavailableNamed";
 
 /**
  * Stable backend error codes that carry a meaning no status alone conveys, mapped to their copy.
@@ -53,12 +55,29 @@ function statusMessageKey(status: number): string {
     return GENERIC_KEY;
 }
 
+/**
+ * The copy for a write refused because the workspace it belongs to is no longer available to the
+ * viewer (#1732): it names that workspace when the shell ever listed it, says nothing was saved, and
+ * tells the viewer to keep their text before reloading, since a reload leaves that workspace behind.
+ * @param error a rejected request's reason
+ * @param t a translator bound to the message root
+ * @returns the description, or null when the rejection is not that refusal
+ */
+export function workspaceUnavailableDescription(error: unknown, t: MessageTranslator): string | null {
+    if (!isWorkspaceUnavailableError(error)) return null;
+    return error.workspaceName
+        ? t(WORKSPACE_UNAVAILABLE_NAMED_KEY, { workspace: error.workspaceName })
+        : t(WORKSPACE_UNAVAILABLE_KEY);
+}
+
 function descriptionFor(error: unknown, t: MessageTranslator, fallbackDescriptionKey?: string): string {
     if (error instanceof TypeError) return t(OFFLINE_KEY);
     if (!(error instanceof ApiError)) return t(GENERIC_KEY);
 
+    const workspaceDescription = workspaceUnavailableDescription(error, t);
     const codeKey = error.code === undefined ? undefined : CODE_MESSAGE_KEYS.get(error.code);
     const requestedFallback = codeKey === undefined
+        && workspaceDescription === null
         && fallbackDescriptionKey !== undefined
         && fallbackDescriptionKey !== ''
         && t.has(fallbackDescriptionKey)
@@ -69,7 +88,7 @@ function descriptionFor(error: unknown, t: MessageTranslator, fallbackDescriptio
         && !requestedFallback.includes('{')
         ? requestedFallback
         : undefined;
-    const description = t(codeKey ?? statusMessageKey(error.status));
+    const description = workspaceDescription ?? t(codeKey ?? statusMessageKey(error.status));
     const resolvedDescription = usableFallback ?? description;
     if (!error.correlationId) return resolvedDescription;
 

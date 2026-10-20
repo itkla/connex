@@ -19,7 +19,7 @@ export default function UserLoading() {
                     </header>
                 </div>
 
-                <div className="grid grid-cols-1 gap-8 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+                <div className="grid grid-cols-1 gap-8 xl:grid-cols-[minmax(16rem,20rem)_minmax(0,1fr)] xl:items-start">
                     <aside>
                         <div className="mb-3 flex h-8 items-center px-6">
                             <Skeleton className="h-3 w-16" />

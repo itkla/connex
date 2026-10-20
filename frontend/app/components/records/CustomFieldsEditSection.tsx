@@ -21,7 +21,7 @@ import type { CustomFieldCellValue, CustomFieldEntityType, CustomFieldEntry } fr
 /** Imperative handle a record edit sheet uses to commit custom-field edits on Save. */
 export type CustomFieldsEditHandle = {
     hasChanges: () => boolean;
-    save: () => Promise<void>;
+    save: (init?: RequestInit) => Promise<void>;
 };
 
 function asText(value: CustomFieldCellValue): string {
@@ -83,14 +83,14 @@ export function CustomFieldsEditSection({
         () => {
             return {
                 hasChanges: () => changed.length > 0,
-                save: async () => {
+                save: async (init) => {
                     if (changed.length === 0) return;
                     const values: Record<number, unknown> = {};
                     for (const entry of changed) {
                         values[entry.definitionId] = draft[entry.definitionId] ?? "";
                     }
                     try {
-                        const saved = await updateEntityCustomFields(entityType, entityId, values);
+                        const saved = await updateEntityCustomFields(entityType, entityId, values, init);
                         setEntries(saved);
                         setDraft(Object.fromEntries(saved.map((entry) => [entry.definitionId, entry.value])));
                     } catch (err) {

@@ -25,7 +25,9 @@ describe('manual deal duplicate preflight', () => {
 
         expect(composer).toContain("useDuplicatePreflight('deal'");
         expect(composer).toContain('name: payload.name.trim()');
-        expect(composer).toContain('await duplicatePreflight.reviewNow()');
+        expect(composer).toContain('const origin = workspacePinnedRequest(renderedWorkspaceId(), requestInit);');
+        expect(composer).toContain('await duplicatePreflight.reviewNow(origin)');
+        expect(composer).toContain('await createNewDeal(duplicateDecision.duplicateReviewToken, origin)');
         expect(composer).toContain('!duplicateDecision.duplicateReviewToken');
         expect(composer).toContain('kind="deal"');
         expect(composer).toContain('onAcknowledgedChange={duplicatePreflight.setAcknowledged}');

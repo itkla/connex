@@ -12,6 +12,7 @@ import QuickEditSheet, { type ContactDraft } from '@/app/components/records/cont
 import ProtectedMediaImage from '@/app/components/ProtectedMediaImage';
 import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompanyDialog';
 import { updateContact, uploadContactPicture } from '@/app/lib/api';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import type { Contact, UpdateContactPayload } from '@/app/lib/types';
 import type { RecordMenuModel, RecordRemoveIntent } from '@/app/components/records/types';
 import { BuildingOffice2Icon, UserCircleIcon } from '@heroicons/react/24/outline';
@@ -134,6 +135,7 @@ export default function ContactCard({
     }
 
     async function saveInternalEdits() {
+        const origin = workspacePinnedRequest(renderedWorkspaceId());
         const trimmedName = draft.name.trim();
         if (!trimmedName) {
             toastError(t('toastNameRequired'));
@@ -149,9 +151,9 @@ export default function ContactCard({
                 title: draft.title.trim() || undefined,
                 companyId: companyId ?? null,
             };
-            await updateContact(id, payload);
+            await updateContact(id, payload, origin);
             detailsSaved = true;
-            if (imageFile) await uploadContactPicture(id, imageFile);
+            if (imageFile) await uploadContactPicture(id, imageFile, origin);
             toastSuccess(t('toastContactUpdated'));
             setEditSheetOpen(false);
             setImageFile(null);

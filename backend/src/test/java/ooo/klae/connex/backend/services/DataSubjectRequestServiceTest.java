@@ -252,7 +252,7 @@ class DataSubjectRequestServiceTest extends AbstractServiceTest {
         DataSubjectRequestDto unlinked = dataSubjectRequestService.create(
             org.getId(), currentUser.getId(), verifiedRequest("disclosure"));
         assertThrows(BadRequestException.class,
-            () -> dataSubjectRequestService.disclosure(org.getId(), unlinked.getId(), currentUser.getId()));
+            () -> disclosure(org.getId(), unlinked.getId(), currentUser.getId()));
 
         Workspace subjectWorkspace = newWorkspace(org.getId());
         Person subject = newPerson(subjectWorkspace.getId());
@@ -262,7 +262,7 @@ class DataSubjectRequestServiceTest extends AbstractServiceTest {
             subjectWorkspace.getId(), subject.getId());
 
         assertThrows(ResourceNotFoundException.class,
-            () -> dataSubjectRequestService.disclosure(org.getId(), linked.getId(), currentUser.getId()));
+            () -> disclosure(org.getId(), linked.getId(), currentUser.getId()));
     }
 
     @Test
@@ -282,12 +282,12 @@ class DataSubjectRequestServiceTest extends AbstractServiceTest {
         DataSubjectRequestDto verified = dataSubjectRequestService.create(
             org.getId(), currentUser.getId(), linkedRequest(subjectWorkspace.getId(), subject.getId()));
 
-        assertEquals(subject.getId(), dataSubjectRequestService.disclosure(
-            org.getId(), verified.getId(), currentUser.getId()).getPerson().getId());
+        assertEquals(subject.getId(), disclosure(
+            org.getId(), verified.getId(), currentUser.getId()).path("person").path("id").asInt());
         assertThrows(BadRequestException.class,
-            () -> dataSubjectRequestService.disclosure(org.getId(), wrongType.getId(), currentUser.getId()));
+            () -> disclosure(org.getId(), wrongType.getId(), currentUser.getId()));
         assertThrows(BadRequestException.class,
-            () -> dataSubjectRequestService.disclosure(org.getId(), unverified.getId(), currentUser.getId()));
+            () -> disclosure(org.getId(), unverified.getId(), currentUser.getId()));
     }
 
     @Test
@@ -319,21 +319,23 @@ class DataSubjectRequestServiceTest extends AbstractServiceTest {
             currentUser.getId(),
             linkedRequest(subjectWorkspace.getId(), subject.getId()));
 
-        var identities = dataSubjectRequestService.disclosure(
-            org.getId(), request.getId(), currentUser.getId()).getIdentities();
+        var identities = disclosure(
+            org.getId(), request.getId(), currentUser.getId()).path("identities");
 
         assertEquals(2, identities.size());
-        assertEquals("current@example.com", identities.getFirst().getValue());
-        assertNull(identities.getFirst().getSupersededAt());
-        assertEquals("old@example.com", identities.getLast().getValue());
-        assertEquals("csv_import", identities.getLast().getSourceSystem());
-        assertEquals("person.email", identities.getLast().getSourceChannel());
-        assertEquals("crm-17", identities.getLast().getSourceExternalId());
-        assertEquals("csv-row:4", identities.getLast().getSourceRowRef());
+        assertEquals("current@example.com", identities.get(0).path("value").asString());
+        assertTrue(identities.get(0).path("supersededAt").isMissingNode()
+            || identities.get(0).path("supersededAt").isNull());
+        assertEquals("old@example.com", identities.get(1).path("value").asString());
+        assertEquals("csv_import", identities.get(1).path("sourceSystem").asString());
+        assertEquals("person.email", identities.get(1).path("sourceChannel").asString());
+        assertEquals("crm-17", identities.get(1).path("sourceExternalId").asString());
+        assertEquals("csv-row:4", identities.get(1).path("sourceRowRef").asString());
         assertEquals(
             "relationship_management",
-            identities.getLast().getPurposeOfUseCode());
-        assertNotNull(identities.getLast().getSupersededAt());
+            identities.get(1).path("purposeOfUseCode").asString());
+        assertEquals(LocalDateTime.of(2026, 1, 2, 3, 4, 5),
+            LocalDateTime.parse(identities.get(1).path("supersededAt").asString()));
     }
 
     @Test
@@ -526,8 +528,13 @@ class DataSubjectRequestServiceTest extends AbstractServiceTest {
     private JsonNode disclosureFor(Organization org, Workspace subjectWorkspace, Person subject) {
         DataSubjectRequestDto request = dataSubjectRequestService.create(
             org.getId(), currentUser.getId(), linkedRequest(subjectWorkspace.getId(), subject.getId()));
-        return objectMapper.valueToTree(dataSubjectRequestService.disclosure(
-            org.getId(), request.getId(), currentUser.getId()));
+        return disclosure(org.getId(), request.getId(), currentUser.getId());
+    }
+
+    private JsonNode disclosure(int orgId, long requestId, int actorId) {
+        var output = new java.io.ByteArrayOutputStream();
+        dataSubjectRequestService.disclosure(orgId, requestId, actorId, fingerprint -> output);
+        return objectMapper.readTree(output.toByteArray());
     }
 
     private void seedConsentHistory(Workspace subjectWorkspace, Person subject, String evidencePrefix) {
@@ -615,12 +622,12 @@ class DataSubjectRequestServiceTest extends AbstractServiceTest {
             org.getId(), currentUser.getId(),
             linkedRequest(subjectWorkspace.getId(), customSubject.getId()));
 
-        var customDisclosure = dataSubjectRequestService.disclosure(
+        var customDisclosure = disclosure(
             org.getId(), customRequest.getId(), currentUser.getId());
-        assertEquals("Outside our region", customDisclosure.getPerson().getDisqualifiedReasonLabel());
-        assertEquals("Outside our region", customDisclosure.getLifecycleHistory().getFirst().getReasonLabel());
+        assertEquals("Outside our region", customDisclosure.path("person").path("disqualifiedReasonLabel").asString());
+        assertEquals("Outside our region", customDisclosure.path("lifecycleHistory").get(0).path("reasonLabel").asString());
         assertTrue(!"Different workspace label".equals(
-            customDisclosure.getPerson().getDisqualifiedReasonLabel()));
+            customDisclosure.path("person").path("disqualifiedReasonLabel").asString()));
         assertEquals("Different workspace label",
             jdbcTemplate.queryForObject(
                 "SELECT label FROM disqualification_reason WHERE workspace_id = ? AND code = ?",
@@ -634,10 +641,10 @@ class DataSubjectRequestServiceTest extends AbstractServiceTest {
             linkedRequest(subjectWorkspace.getId(), builtInSubject.getId()));
         LocaleContextHolder.setLocale(Locale.JAPANESE);
 
-        var builtInDisclosure = dataSubjectRequestService.disclosure(
+        var builtInDisclosure = disclosure(
             org.getId(), builtInRequest.getId(), currentUser.getId());
-        assertEquals("適合しない", builtInDisclosure.getPerson().getDisqualifiedReasonLabel());
-        assertEquals("適合しない", builtInDisclosure.getLifecycleHistory().getFirst().getReasonLabel());
+        assertEquals("適合しない", builtInDisclosure.path("person").path("disqualifiedReasonLabel").asString());
+        assertEquals("適合しない", builtInDisclosure.path("lifecycleHistory").get(0).path("reasonLabel").asString());
     }
 
     private void setDisqualification(
@@ -706,7 +713,7 @@ class DataSubjectRequestServiceTest extends AbstractServiceTest {
         TransactionTemplate callerTransaction = new TransactionTemplate(transactionManager);
 
         callerTransaction.executeWithoutResult(status -> {
-            dataSubjectRequestService.disclosure(org.getId(), request.getId(), currentUser.getId());
+            disclosure(org.getId(), request.getId(), currentUser.getId());
             status.setRollbackOnly();
         });
 

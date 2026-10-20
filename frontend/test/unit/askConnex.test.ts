@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { formatUtcDateTime, parseMysqlDateTime } from '@/app/lib/utils';
 import enCommon from '@/messages/en/common.json';
 import jaCommon from '@/messages/ja/common.json';
+import { askConnexToolCall } from '@/test/unit/helpers/askConnexToolCards';
 
 import {
     ANSWER_ROW_PLACEHOLDER,
@@ -28,7 +29,6 @@ import {
     askConnexLatestMessages,
     askConnexTranscript,
     askConnexMessageContent,
-    askConnexRetryPrompt,
     askConnexSessionStorageKey,
     askConnexToolCardAffordances,
     askConnexToolCardStatus,
@@ -128,6 +128,8 @@ const TOOL_CALL: AiAssistantToolCall = {
     toolName: 'create_task',
     tier: 'auto',
     status: 'executed',
+    reviewState: 'applied',
+    reviewExpiresAt: '2026-08-15T12:00:00Z',
     target: { kind: 'person', id: 7, label: 'Kenji Sato' },
     requestSummary: 'Create a task',
     outcomeSummary: 'Task created',
@@ -452,6 +454,64 @@ describe('Ask Connex file lifecycle', () => {
 });
 
 describe('Ask Connex turn state reduction', () => {
+    it('retains a committed write through omitted projections and resets only for a different turn', () => {
+        const accepted = reduceAskConnexTurn(EMPTY_ASK_CONNEX_TURN, {
+            type: 'accepted', sessionId: 4, turnId: 9, generationHandle: null, status: 'running',
+            toolCalls: [{ toolName: 'create_task', tier: 'AUTO', status: 'executed' }],
+        });
+        const omitted = reduceAskConnexTurn(accepted, {
+            type: 'status', status: 'timed_out', toolCalls: undefined,
+        });
+        expect(omitted.writeCommitted).toBe(true);
+        const reconciled = reduceAskConnexTurn(omitted, {
+            type: 'reconciled',
+            turn: { sessionId: 4, turnId: 9, status: 'timed_out', terminalReason: null, progress: [], toolCalls: [] },
+        });
+        expect(reconciled.writeCommitted).toBe(true);
+        expect(reduceAskConnexTurn(reconciled, {
+            type: 'accepted', sessionId: 4, turnId: 9, generationHandle: null, status: 'running',
+        }).writeCommitted).toBe(true);
+        expect(reduceAskConnexTurn(reconciled, {
+            type: 'accepted', sessionId: 4, turnId: 10, generationHandle: null, status: 'accepted',
+        }).writeCommitted).toBe(false);
+        expect(reduceAskConnexTurn(reconciled, { type: 'reset' }).writeCommitted).toBeUndefined();
+    });
+
+    it('rejects terminal evidence and cards from another session or turn', () => {
+        const accepted = reduceAskConnexTurn(EMPTY_ASK_CONNEX_TURN, {
+            type: 'accepted', sessionId: 4, turnId: 9, generationHandle: null, status: 'running',
+        });
+        expect(reduceAskConnexTurn(accepted, {
+            type: 'toolsObserved', sessionId: 5, toolCalls: [askConnexToolCall({ status: 'executed' })],
+        })).toBe(accepted);
+        expect(reduceAskConnexTurn(accepted, {
+            type: 'reconciled',
+            turn: {
+                sessionId: 4, turnId: 8, status: 'timed_out', terminalReason: null, progress: [],
+                toolCalls: [{ toolName: 'create_task', tier: 'AUTO', status: 'executed' }],
+            },
+        })).toBe(accepted);
+    });
+
+    it('keeps durable execution evidence scoped to the accepted turn and the current server response', () => {
+        const accepted = reduceAskConnexTurn(EMPTY_ASK_CONNEX_TURN, {
+            type: 'accepted', sessionId: 4, turnId: 9, generationHandle: null, status: 'running',
+            toolCalls: [{ toolName: 'create_task', tier: 'AUTO', status: 'executed' }],
+        });
+        expect(reduceAskConnexTurn(accepted, { type: 'status', status: 'running' }).toolCalls)
+            .toEqual(accepted.toolCalls);
+        expect(reduceAskConnexTurn(accepted, {
+            type: 'status', status: 'timed_out', toolCalls: [],
+        }).toolCalls).toEqual([]);
+        expect(reduceAskConnexTurn(accepted, {
+            type: 'status', status: 'timed_out', toolCalls: undefined,
+        }).toolCalls).toBeUndefined();
+        expect(reduceAskConnexTurn(accepted, {
+            type: 'accepted', sessionId: 4, turnId: 10, generationHandle: null, status: 'accepted',
+        }).toolCalls).toBeUndefined();
+        expect(reduceAskConnexTurn(accepted, { type: 'reset' }).toolCalls).toBeUndefined();
+    });
+
     it('keeps accepted, running, resolved, failed, and timed-out states distinct', () => {
         const accepted = reduceAskConnexTurn(EMPTY_ASK_CONNEX_TURN, {
             type: 'accepted',
@@ -603,6 +663,7 @@ describe('Ask Connex tool-call cards', () => {
             ...TOOL_CALL,
             tier: 'confirm' as const,
             status: 'proposed' as const,
+            reviewState: 'open' as const,
             change: PROPOSED_CHANGE,
             undoAvailable: false,
             undoExpiresAt: null,
@@ -665,6 +726,7 @@ describe('Ask Connex tool-call cards', () => {
             ...TOOL_CALL,
             tier: 'confirm',
             status: 'proposed',
+            reviewState: 'open',
             change: PROPOSED_CHANGE,
             undoAvailable: false,
             undoExpiresAt: null,
@@ -699,6 +761,7 @@ describe('Ask Connex tool-call cards', () => {
             ...TOOL_CALL,
             tier: 'confirm',
             status: 'proposed',
+            reviewState: 'open',
             change: PROPOSED_CHANGE,
             undoAvailable: false,
             undoExpiresAt: null,
@@ -776,6 +839,7 @@ describe('Ask Connex tool-call cards', () => {
             toolName: 'draft_document',
             tier: 'confirm',
             status: 'proposed',
+            reviewState: 'open',
             change: { ...PROPOSED_CHANGE, field: 'document', currentValue: null, proposedValue: 'Quote' },
             undoAvailable: false,
             undoExpiresAt: null,
@@ -790,7 +854,8 @@ describe('Ask Connex tool-call cards', () => {
         };
         const refreshed = reduceAskConnexToolCards(loaded, refresh);
         expect(refreshed[0].change?.currentValue).toBe('1');
-        expect(askConnexToolCardAffordances(refreshed[0], Date.now())).toContain('approve');
+        expect(askConnexToolCardAffordances(refreshed[0], Date.parse(TOOL_CALL.createdAt)))
+            .toContain('approve');
         const started = reduceAskConnexToolCards(loaded, {
             type: 'actionStarted', toolCallId: proposed.id, action: 'approve',
         });
@@ -806,6 +871,7 @@ describe('Ask Connex tool-call cards', () => {
             ...TOOL_CALL,
             tier: 'confirm',
             status: 'proposed',
+            reviewState: 'open',
             change: PROPOSED_CHANGE,
             undoAvailable: false,
             undoExpiresAt: null,
@@ -833,6 +899,8 @@ describe('Ask Connex tool-call cards', () => {
                 result: {},
                 undoAvailable: false,
                 undoExpiresAt: null,
+                reviewState: 'applied',
+                reviewExpiresAt: TOOL_CALL.reviewExpiresAt,
             },
         });
         const settled = reduceAskConnexToolCards(applied, {
@@ -985,6 +1053,7 @@ describe('Ask Connex tool-call cards', () => {
             turnId: 109,
             tier: 'confirm' as const,
             status: 'proposed' as const,
+            reviewState: 'open' as const,
         };
 
         const merged = mergeAskConnexToolCalls([TOOL_CALL], [updated, pending]);
@@ -1206,46 +1275,6 @@ describe('Ask Connex citations', () => {
         expect(askConnexCitations(many)).toHaveLength(8);
         expect(askConnexCitations(null)).toEqual([]);
         expect(askConnexCitations(undefined)).toEqual([]);
-    });
-});
-
-describe('Ask Connex retry prompt', () => {
-    const user = {
-        id: 1,
-        sessionId: 4,
-        seq: 1,
-        authorKind: 'user' as const,
-        authorUserId: 11,
-        authorDisplayName: 'Aiko',
-        content: 'Which deals are cooling?',
-        createdAt: '2026-08-11T10:00:00Z',
-    };
-    const reply = {
-        ...user,
-        id: 2,
-        seq: 2,
-        authorKind: 'assistant' as const,
-        authorUserId: null,
-        authorDisplayName: null,
-        content: 'Two deals are cooling.',
-    };
-
-    it('offers the most recent thing the member wrote', () => {
-        expect(askConnexRetryPrompt([user, reply])).toBe('Which deals are cooling?');
-        expect(askConnexRetryPrompt([
-            user,
-            reply,
-            { ...user, id: 3, seq: 3, content: '  Any at risk?  ' },
-        ])).toBe('Any at risk?');
-    });
-
-    it('offers nothing when there is nothing of the member’s to send again', () => {
-        expect(askConnexRetryPrompt([])).toBeNull();
-        expect(askConnexRetryPrompt([reply])).toBeNull();
-        expect(askConnexRetryPrompt([{ ...user, content: '   ' }])).toBeNull();
-        expect(askConnexRetryPrompt([
-            { ...user, content: '', contentWithheld: true },
-        ])).toBeNull();
     });
 });
 

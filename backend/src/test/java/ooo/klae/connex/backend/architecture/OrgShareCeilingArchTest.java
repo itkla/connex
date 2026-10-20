@@ -1,11 +1,13 @@
 package ooo.klae.connex.backend.architecture;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Pattern;
 
 import javax.xml.parsers.DocumentBuilder;
@@ -14,6 +16,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 import org.junit.jupiter.api.Test;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
+import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 
 /**
@@ -24,10 +27,12 @@ import org.w3c.dom.NodeList;
  * (read path). The two paths express it differently and this test knows which is
  * which: every write grant now receives a trusted control-derived workspace
  * allowlist instead of joining the control table (#811), while on the read path
- * only {@code AiAssistantIdentifierMapper}, {@code IdentityMapper} and
- * {@code PersonEdgeMapper} bind that allowlist — the remaining five mappers in
+ * {@code AiAssistantIdentifierMapper}, {@code IdentityMapper}, {@code PersonEdgeMapper},
+ * {@code IntroductionMapper} and {@code DuplicateReviewMapper} bind that allowlist — the remaining four mappers in
  * {@code SHARE_READERS} still join the control-plane {@code workspace} table and
  * match {@code ows.org_id = vws.org_id}.
+ * Note fragments are checked separately because their legacy unfiltered record ceilings and
+ * active-only assistant ceiling deliberately consume different scope types.
  * The workspace-predicate scan cannot see either model (it only checks
  * {@code #{workspaceId}} is bound). These tests assert both paths carry their
  * reviewed ceiling, so a future shareable entity type copied without it fails
@@ -60,6 +65,7 @@ class OrgShareCeilingArchTest {
         "mappers/DealMapper.xml", Pattern.compile("FROM (?:company|person|pipeline)_share"),
         "mappers/DuplicateReviewMapper.xml", Pattern.compile("FROM company_share"),
         "mappers/IdentityMapper.xml", Pattern.compile("FROM (?:person|company)_share"),
+        "mappers/IntroductionMapper.xml", Pattern.compile("FROM company_share"),
         "mappers/PersonEdgeMapper.xml", Pattern.compile("FROM (?:person|company)_share"),
         "mappers/PersonMapper.xml", Pattern.compile("FROM (?:person|company)_share"),
         "mappers/PipelineMapper.xml", Pattern.compile("FROM pipeline_share")
@@ -74,6 +80,8 @@ class OrgShareCeilingArchTest {
             Pattern ceiling = entry.getKey().equals("mappers/AiAssistantIdentifierMapper.xml")
                     || entry.getKey().equals("mappers/PersonEdgeMapper.xml")
                     || entry.getKey().equals("mappers/IdentityMapper.xml")
+                    || entry.getKey().equals("mappers/IntroductionMapper.xml")
+                    || entry.getKey().equals("mappers/DuplicateReviewMapper.xml")
                 ? CONTROL_DERIVED_READ_CEILING
                 : READ_CEILING;
             int ceilings = count(ceiling, xml);
@@ -86,6 +94,60 @@ class OrgShareCeilingArchTest {
         }
         assertTrue(violations.isEmpty(),
             "Read-path share visibility is missing the same-organization ceiling: " + violations);
+    }
+
+    @Test
+    void every_note_share_fragment_carries_its_reviewed_scope_ceiling() throws Exception {
+        Document document = loadMapper("mappers/NoteMapper.xml");
+        Pattern shareRead = Pattern.compile("(?:FROM|JOIN)\\s+\\w+_share\\b",
+            Pattern.CASE_INSENSITIVE);
+        Map<String, String> recordFragments = Map.of("visiblePerson", "p", "visibleCompany", "c");
+        int shareReads = 0;
+        int recordCeilings = 0;
+        int assistantCeilings = 0;
+        NodeList children = document.getDocumentElement().getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            Node child = children.item(i);
+            if (!(child instanceof Element element)) {
+                continue;
+            }
+            String sql = element.getTextContent().replaceAll("\\s+", " ").trim();
+            int reads = count(shareRead, sql);
+            if (reads == 0) {
+                continue;
+            }
+            shareReads += reads;
+            String id = element.getAttribute("id");
+            assertEquals("sql", element.getTagName(), id);
+            assertEquals(1, reads, id);
+            if (recordFragments.containsKey(id)) {
+                assertEquals(1, count(CONTROL_DERIVED_READ_CEILING, sql), id);
+                assertTrue(sql.contains("ON org_workspace.id = " + recordFragments.get(id) + ".workspace_id"), id);
+                recordCeilings++;
+            } else {
+                assertEquals("assistantProcessablePerson", id, "Unreviewed Note share fragment");
+                NodeList allowlists = element.getElementsByTagName("foreach");
+                assertEquals(1, allowlists.getLength(), id);
+                Element allowlist = (Element) allowlists.item(0);
+                assertEquals("organizationWorkspaceIds", allowlist.getAttribute("collection"));
+                assertEquals("organizationWorkspaceId", allowlist.getAttribute("item"));
+                assertEquals("(", allowlist.getAttribute("open"));
+                assertEquals(")", allowlist.getAttribute("close"));
+                assertEquals(",", allowlist.getAttribute("separator"));
+                assertEquals("#{organizationWorkspaceId}", allowlist.getTextContent().trim());
+                for (String column : List.of("archived_at", "suspended_at", "provision_ceased_at")) {
+                    assertTrue(sql.contains("p." + column + " IS NULL"), id);
+                }
+                assertTrue(sql.contains("OR (p.workspace_id IN #{organizationWorkspaceId} AND EXISTS"), id);
+                assertTrue(sql.contains("ps.person_id = p.id AND ps.workspace_id = #{workspaceId}"), id);
+                assertEquals(0, count(CONTROL_DERIVED_READ_CEILING, sql), id);
+                assistantCeilings++;
+            }
+        }
+        assertEquals(3, shareReads);
+        assertEquals(2, recordCeilings);
+        assertEquals(1, assistantCeilings);
+        assertEquals(0, count(CONTROL_PLANE_WORKSPACE_TABLE, loadMapperText("mappers/NoteMapper.xml")));
     }
 
     private int count(Pattern pattern, String text) {
@@ -160,14 +222,18 @@ class OrgShareCeilingArchTest {
     }
 
     private Document loadShareMapper() throws Exception {
+        return loadMapper("mappers/ShareMapper.xml");
+    }
+
+    private Document loadMapper(String resource) throws Exception {
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
         factory.setValidating(false);
         factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
         factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
         factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
         DocumentBuilder builder = factory.newDocumentBuilder();
-        try (InputStream in = getClass().getClassLoader().getResourceAsStream("mappers/ShareMapper.xml")) {
-            assertNotNull(in, "ShareMapper.xml not found on the classpath");
+        try (InputStream in = getClass().getClassLoader().getResourceAsStream(resource)) {
+            assertNotNull(in, resource + " not found on the classpath");
             return builder.parse(in);
         }
     }

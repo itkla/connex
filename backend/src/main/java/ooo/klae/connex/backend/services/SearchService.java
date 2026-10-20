@@ -47,6 +47,7 @@ import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -72,6 +73,10 @@ public class SearchService {
     private static final int CANDIDATE_BATCH_SIZE = 25;
     private static final int MAX_CANDIDATES = 250;
     private static final Pattern COMBINING_MARKS = Pattern.compile("\\p{M}+");
+    private static final Set<String> ALL_TYPES = Set.of(
+        "companies", "people", "deals", "pipelines", "tags", "activities", "notes", "tasks",
+        "users", "attachments", "products", "campaigns", "reports", "documentTemplates",
+        "documents", "workflows");
 
     private final CompanyMapper companyMapper;
     private final PersonMapper personMapper;
@@ -91,6 +96,7 @@ public class SearchService {
     private final WorkflowMapper workflowMapper;
     private final WorkspaceService workspaceService;
     private final ReferenceService referenceService;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     /**
      * Runs one bounded global search in the active workspace.
@@ -99,6 +105,45 @@ public class SearchService {
      * @return the grouped results, with unreadable groups empty
      */
     public SearchResultsDto search(String query) {
+        return search(query, ALL_TYPES);
+    }
+
+    /**
+     * Parses the optional HTTP group selector before search work begins.
+     *
+     * @param types repeated or comma-separated group names, or null for all groups
+     * @return the selected, deduplicated group names
+     * @throws BadRequestException when a name is unknown or no names remain after parsing
+     */
+    public static Set<String> parseTypes(List<String> types) {
+        if (types == null) {
+            return ALL_TYPES;
+        }
+        Set<String> selected = new LinkedHashSet<>();
+        for (String value : types) {
+            if (value == null) {
+                throw new BadRequestException("Search types must contain known group names");
+            }
+            for (String type : value.split(",")) {
+                if (!type.isBlank()) {
+                    selected.add(type.trim());
+                }
+            }
+        }
+        validateTypes(selected);
+        return Set.copyOf(selected);
+    }
+
+    /**
+     * Searches only selected groups in the active workspace without changing their permissions.
+     *
+     * @param query the raw caller query
+     * @param types the validated group names
+     * @return the grouped results, with unselected and unreadable groups empty
+     * @throws BadRequestException when the selector is empty or contains an unknown group
+     */
+    public SearchResultsDto search(String query, Set<String> types) {
+        validateTypes(types);
         if (query == null || query.isBlank()) {
             return empty();
         }
@@ -113,33 +158,51 @@ public class SearchService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = workspaceService.getCurrentUserId();
         Set<Permission> permissions = workspaceService.permissionsFor(workspaceId, userId);
-        List<Activity> activities = searchVisibleActivities(workspaceId, pattern, needle);
-        List<Note> notes = mergeVisibleNotes(
-            searchVisibleNotes(workspaceId, pattern, needle, userId),
-            searchVisibleNotesByAuthor(workspaceId, pattern, userId));
-        List<Task> tasks = searchVisibleTasks(workspaceId, pattern, needle);
         return new SearchResultsDto(
-            companyMapper.search(workspaceId, pattern).stream().map(CompanyDto::from).toList(),
-            personMapper.search(workspaceId, pattern).stream().map(PersonDto::from).toList(),
-            referenceService.hydrateDeals(workspaceId, dealMapper.search(workspaceId, pattern))
-                .stream().map(DealDto::from).toList(),
-            pipelineMapper.search(workspaceId, pattern).stream().map(PipelineDto::from).toList(),
-            tagMapper.search(workspaceId, pattern).stream().map(TagDto::from).toList(),
-            activities.stream().map(ActivityDto::from).toList(),
-            notes.stream().map(NoteDto::from).toList(),
-            tasks.stream().map(TaskDto::from).toList(),
-            userMapper.search(workspaceId, pattern).stream().map(UserDto::from).toList(),
-            attachmentMapper.search(workspaceId, pattern, userId).stream().map(AttachmentDto::from).toList(),
-            productMapper.search(workspaceId, pattern),
-            gated(permissions, Permission.CAMPAIGN_VIEW,
-                () -> campaignMapper.searchCampaigns(workspaceId, pattern)),
-            gated(permissions, Permission.REPORT_READ,
-                () -> reportMapper.searchDefinitions(workspaceId, pattern)),
-            documentTemplateMapper.search(workspaceId, pattern),
-            dealDocumentMapper.search(workspaceId, pattern),
-            gated(permissions, Permission.RULE_MANAGE,
-                () -> workflowMapper.search(workspaceId, pattern))
+            selected(types, "companies", () -> companyMapper.search(workspaceId, pattern)
+                .stream().map(CompanyDto::from).toList()),
+            selected(types, "people", () -> personMapper.search(workspaceId, pattern)
+                .stream().map(PersonDto::from).toList()),
+            selected(types, "deals", () -> referenceService.hydrateDeals(
+                workspaceId, dealMapper.search(workspaceId, pattern))
+                .stream().map(DealDto::from).toList()),
+            selected(types, "pipelines", () -> pipelineMapper.search(workspaceId, pattern)
+                .stream().map(PipelineDto::from).toList()),
+            selected(types, "tags", () -> tagMapper.search(workspaceId, pattern)
+                .stream().map(TagDto::from).toList()),
+            selected(types, "activities", () -> searchVisibleActivities(workspaceId, pattern, needle)
+                .stream().map(ActivityDto::from).toList()),
+            selected(types, "notes", () -> searchNotes(workspaceId, pattern, needle, userId)
+                .stream().map(NoteDto::from).toList()),
+            selected(types, "tasks", () -> searchVisibleTasks(workspaceId, pattern, needle)
+                .stream().map(TaskDto::from).toList()),
+            selected(types, "users", () -> userMapper.search(workspaceId, pattern)
+                .stream().map(UserDto::from).toList()),
+            selected(types, "attachments", () -> attachmentMapper.search(workspaceId, pattern, userId)
+                .stream().map(AttachmentDto::from).toList()),
+            selected(types, "products", () -> productMapper.search(workspaceId, pattern)),
+            selected(types, "campaigns", () -> gated(permissions, Permission.CAMPAIGN_VIEW,
+                () -> campaignMapper.searchCampaigns(workspaceId, pattern))),
+            selected(types, "reports", () -> gated(permissions, Permission.REPORT_READ,
+                () -> reportMapper.searchDefinitions(workspaceId, pattern))),
+            selected(types, "documentTemplates", () -> documentTemplateMapper.search(workspaceId, pattern)),
+            selected(types, "documents", () -> dealDocumentMapper.search(workspaceId, pattern)),
+            selected(types, "workflows", () -> gated(permissions, Permission.RULE_MANAGE,
+                () -> workflowMapper.search(workspaceId, pattern)))
         );
+    }
+
+    private static void validateTypes(Set<String> types) {
+        if (types == null || types.isEmpty()) {
+            throw new BadRequestException("Search types must select at least one group");
+        }
+        if (!ALL_TYPES.containsAll(types)) {
+            throw new BadRequestException("Search types must contain known group names");
+        }
+    }
+
+    private static <T> List<T> selected(Set<String> types, String type, Supplier<List<T>> group) {
+        return types.contains(type) ? group.get() : List.of();
     }
 
     private List<Activity> searchVisibleActivities(int workspaceId, String pattern, String needle) {
@@ -163,14 +226,22 @@ public class SearchService {
         return visible;
     }
 
+    private List<Note> searchNotes(int workspaceId, String pattern, String needle, int currentUserId) {
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId)
+            .workspaceIdsJson();
+        return mergeVisibleNotes(
+            searchVisibleNotes(workspaceId, orgWorkspaceIdsJson, pattern, needle, currentUserId),
+            searchVisibleNotesByAuthor(workspaceId, orgWorkspaceIdsJson, pattern, currentUserId));
+    }
+
     private List<Note> searchVisibleNotes(
-            int workspaceId, String pattern, String needle, int currentUserId) {
+            int workspaceId, String orgWorkspaceIdsJson, String pattern, String needle, int currentUserId) {
         List<Note> visible = new ArrayList<>();
         int offset = 0;
         while (visible.size() < RESULT_LIMIT && offset < MAX_CANDIDATES) {
             int limit = Math.min(CANDIDATE_BATCH_SIZE, MAX_CANDIDATES - offset);
             List<Note> batch = noteMapper.searchVisible(
-                workspaceId, pattern, currentUserId, limit, offset);
+                workspaceId, orgWorkspaceIdsJson, pattern, currentUserId, limit, offset);
             if (batch.isEmpty()) {
                 return visible;
             }
@@ -187,13 +258,13 @@ public class SearchService {
     }
 
     private List<Note> searchVisibleNotesByAuthor(
-            int workspaceId, String pattern, int currentUserId) {
+            int workspaceId, String orgWorkspaceIdsJson, String pattern, int currentUserId) {
         List<Note> visible = new ArrayList<>();
         int offset = 0;
         while (visible.size() < RESULT_LIMIT && offset < MAX_CANDIDATES) {
             int limit = Math.min(CANDIDATE_BATCH_SIZE, MAX_CANDIDATES - offset);
             List<Note> batch = noteMapper.getVisibleNotesPage(
-                workspaceId, currentUserId, null, List.of(), "created", "desc", limit, offset);
+                workspaceId, orgWorkspaceIdsJson, currentUserId, null, List.of(), "created", "desc", limit, offset);
             if (batch.isEmpty()) {
                 return visible;
             }

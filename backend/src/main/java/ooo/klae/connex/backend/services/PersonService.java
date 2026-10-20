@@ -16,7 +16,6 @@ import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
-import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
@@ -87,7 +86,7 @@ public class PersonService {
     private final DuplicateDecisionLockService duplicateDecisionLockService;
     private final RecordCreationAugmentationService recordCreationAugmentationService;
     private final ProviderCaptureMapper providerCaptureMapper;
-    private final AiRestrictionEpoch aiRestrictionEpoch;
+    private final ooo.klae.connex.backend.ai.mission.AiAgentPrivacyService aiAgentPrivacyService;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "email", "phone", "title", "imageUrl");
@@ -276,6 +275,14 @@ public class PersonService {
         return hydrated;
     }
 
+    /** Returns a processable primary record without loading linked records or attached evidence. */
+    public Person getAssistantPrimaryPersonById(int id) {
+        Person person = personMapper.getAssistantPrimaryPersonById(
+                workspaceService.getCurrentWorkspaceId(), id);
+        if (person == null) throw new ResourceNotFoundException("Contact not found");
+        return person;
+    }
+
     /**
      * Creates a new {@code Person} in the active workspace. The ID is auto-generated. When the
      * contact is created with a company, an opening employment-history row is recorded.
@@ -313,6 +320,14 @@ public class PersonService {
             Person person,
             String duplicateReviewToken,
             RecordCreationAugmentation augmentation) {
+        return createReviewed(person, duplicateReviewToken, augmentation, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    Person createReviewed(
+            Person person,
+            String duplicateReviewToken,
+            RecordCreationAugmentation augmentation, MutationAdmission admission) {
         duplicatePreflightService.requireReviewedPersonCreation(
             new PersonDuplicatePreflightRequest(
                 person.getName(),
@@ -323,7 +338,7 @@ public class PersonService {
             recordCreationAugmentationService.preparePerson(
                 companyIdOf(person), person.getReferrerPersonId(), augmentation);
         return createWithSource(
-            person, IdentityAcquisitionSource.INTERACTIVE_CREATE, null, prepared, true);
+            person, IdentityAcquisitionSource.INTERACTIVE_CREATE, null, prepared, true, admission);
     }
 
     /**
@@ -426,7 +441,7 @@ public class PersonService {
             IdentityAcquisitionSource source,
             String sourceRowRef,
             RecordCreationAugmentationService.PreparedAugmentation prepared) {
-        return createWithSource(person, source, sourceRowRef, prepared, false);
+        return createWithSource(person, source, sourceRowRef, prepared, false, MutationAdmission.UNRESTRICTED);
     }
 
     private Person createWithSource(
@@ -434,7 +449,7 @@ public class PersonService {
             IdentityAcquisitionSource source,
             String sourceRowRef,
             RecordCreationAugmentationService.PreparedAugmentation prepared,
-            boolean duplicateDecisionAlreadyLocked) {
+            boolean duplicateDecisionAlreadyLocked, MutationAdmission admission) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (!duplicateDecisionAlreadyLocked) {
             duplicateDecisionLockService.lockCurrentOrganization();
@@ -449,6 +464,7 @@ public class PersonService {
         person.setOwnerId(authService.getCurrentUser().getId());
         person.setImageUrl(null);
         person.setCreatedAt(null);
+        admission.beforeMutation();
         personMapper.insert(person);
         identityIntakeService.recordPerson(
             workspaceId, person.getId(), person.getEmail(), person.getPhone(),
@@ -500,6 +516,13 @@ public class PersonService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_UPDATE)
     public Person update(int id, Person person) {
+        return update(id, person, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.PERSON_UPDATE)
+    public Person update(int id, Person person, MutationAdmission admission) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         var locked = duplicateDecisionLockService.lockCurrentOrganization(Permission.PERSON_UPDATE);
         Person before = personMapper.getOwnedPersonByIdForUpdate(workspaceId, id);
@@ -513,6 +536,7 @@ public class PersonService {
         person.setWorkspaceId(workspaceId);
         person.setOwnerId(before.getOwnerId());
         person.setImageUrl(before.getImageUrl());
+        admission.beforeMutation();
         personMapper.update(person);
         if (!Objects.equals(companyIdOf(before), companyIdOf(person))) {
             employmentService.recordTransition(workspaceId, id, companyIdOf(person), person.getTitle());
@@ -545,6 +569,13 @@ public class PersonService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_UPDATE)
     public Person updateOwner(int personId, Integer ownerId) {
+        return updateOwner(personId, ownerId, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.PERSON_UPDATE)
+    public Person updateOwner(int personId, Integer ownerId, MutationAdmission admission) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requireOwnedPerson(workspaceId, personId);
         if (ownerId != null) workspaceService.lockAndRequireMember(workspaceId, ownerId);
@@ -552,6 +583,7 @@ public class PersonService {
         if (before == null || before.getArchivedAt() != null) {
             throw new ResourceNotFoundException("Contact not found");
         }
+        admission.beforeMutation();
         personMapper.updateOwner(workspaceId, personId, ownerId);
         auditService.record("person.updateOwner", "person", personId, before.getName(),
             "Updated owner on " + before.getName(),
@@ -709,7 +741,8 @@ public class PersonService {
         int revokedShares = provisionCeased ? shareMapper.revokePersonShares(id, workspaceId) : 0;
         int purgedAiOutputs = 0;
         if (suspended || provisionCeased) {
-            aiRestrictionEpoch.bumpAll(restrictionWorkspaceIds);
+            aiAgentPrivacyService.invalidateWorkspaces(
+                    restrictionWorkspaceIds, java.util.UUID.randomUUID(), "restriction", null, null);
             purgedAiOutputs = aiOutputCacheMapper.deleteForPerson(workspaceId, id);
         }
         Person after = requireOwnedPerson(workspaceId, id);
@@ -887,10 +920,17 @@ public class PersonService {
      */
     @RequirePermission(Permission.PERSON_UPDATE)
     public boolean addTag(int personId, int tagId) {
+        return addTag(personId, tagId, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @RequirePermission(Permission.PERSON_UPDATE)
+    public boolean addTag(int personId, int tagId, MutationAdmission admission) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Person person = requireOwnedPerson(workspaceId, personId);
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
         if (tag == null) throw new ResourceNotFoundException("Tag not found");
+        admission.beforeMutation();
         if (personMapper.addTag(workspaceId, personId, tagId) != 1) {
             return false;
         }
@@ -908,9 +948,16 @@ public class PersonService {
      */
     @RequirePermission(Permission.PERSON_UPDATE)
     public boolean removeTag(int personId, int tagId) {
+        return removeTag(personId, tagId, MutationAdmission.UNRESTRICTED);
+    }
+
+    /** Performs the canonical action after its final under-lock mutation admission. */
+    @RequirePermission(Permission.PERSON_UPDATE)
+    public boolean removeTag(int personId, int tagId, MutationAdmission admission) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Person person = requireOwnedPerson(workspaceId, personId);
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
+        admission.beforeMutation();
         if (personMapper.removeTag(workspaceId, personId, tagId) != 1) {
             return false;
         }

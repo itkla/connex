@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect } from '@playwright/test';
 
 import type {
     CaptureOverview,
@@ -6,7 +6,7 @@ import type {
     ProviderCaptureOverview,
     ProviderConnection,
 } from '@/app/lib/types';
-import { useLocale } from './support/locale';
+import { test } from './support/capture.fixture';
 import { message } from './support/messages';
 
 const CONNECTION: ProviderConnection = {
@@ -127,178 +127,201 @@ function overviewResponse(provider: ProviderCaptureOverview): CaptureOverview {
     return { providers: [provider] };
 }
 
-/**
- * Reads whether this instance switches Google capture on, the same server state the settings page
- * renders the capture card from. The spec branches on it rather than on whether the card has painted
- * yet, because the panel requests the capture overview in either case (#1797). The CI stack runs
- * with capture off, so only that branch runs there.
- */
-async function googleCaptureEnabled(page: Page): Promise<boolean> {
-    const response = await page.request.get('/api/capabilities');
-    expect(response.status()).toBe(200);
-    const capabilities: unknown = await response.json();
-    if (
-        typeof capabilities !== 'object'
-        || capabilities === null
-        || !('connectedCapture' in capabilities)
-        || typeof capabilities.connectedCapture !== 'object'
-        || capabilities.connectedCapture === null
-        || !('google' in capabilities.connectedCapture)
-        || typeof capabilities.connectedCapture.google !== 'boolean'
-    ) {
-        throw new Error('Invalid capabilities response');
-    }
-    return capabilities.connectedCapture.google;
-}
+for (const captureEnabled of [true, false]) {
+    test.describe(`Google capture capability ${captureEnabled ? 'on' : 'off'}`, () => {
+        test.use({ captureEnabled });
 
-for (const locale of ['en', 'ja'] as const) {
-    test(`connected capture policy and review flow in ${locale} @mobile`, async ({ page }) => {
-        let captureRequests = 0;
-        let overview = BASE_OVERVIEW;
-        let reviews = REVIEW_PAGE;
-        let approvedInteractionId: number | null = null;
+        for (const locale of ['en', 'ja'] as const) {
+            test(`connected capture policy and review flow in ${locale} @mobile`, async ({ page, captureAppURL, isMobile }) => {
+                if (!isMobile) await page.setViewportSize({ width: 1280, height: 720 });
+                let captureRequests = 0;
+                let overview = BASE_OVERVIEW;
+                let reviews = REVIEW_PAGE;
+                const mutations = { policy: 0, attach: 0, approve: 0, purge: 0 };
 
-        await page.route('**/api/account/connections**', async (route) => {
-            const request = route.request();
-            const url = new URL(request.url());
-            const path = url.pathname;
+                await page.route('**/api/account/connections**', async (route) => {
+                    const request = route.request();
+                    const url = new URL(request.url());
+                    const path = url.pathname;
 
-            if (request.method() === 'GET' && path === '/api/account/connections') {
-                await route.fulfill({ json: [CONNECTION] });
-                return;
-            }
-            if (request.method() === 'GET' && path === '/api/account/connections/capture') {
-                captureRequests += 1;
-                await route.fulfill({ json: overviewResponse(overview) });
-                return;
-            }
-            if (request.method() === 'PUT' && path.endsWith('/google/capture-policy')) {
-                overview = {
-                    ...overview,
-                    userPolicy: {
-                        enabled: true,
-                        calendar: true,
-                        mailInbox: false,
-                        mailSent: false,
-                        backfillDays: 30,
-                        includeBodies: false,
-                        admissionMode: 'review',
-                        reviewBeforeCapture: true,
-                        excludedPeople: [],
-                        excludedConversations: [],
-                        version: 1,
-                        updatedAt: '2026-07-30T10:00:00Z',
-                    },
-                    effectivePolicy: {
-                        enabled: true,
-                        calendar: true,
-                        mailInbox: false,
-                        mailSent: false,
-                        backfillDays: 30,
-                        includeBodies: false,
-                        admissionMode: 'review',
-                        restrictionCodes: [],
-                    },
-                };
-                await route.fulfill({ json: overview });
-                return;
-            }
-            if (request.method() === 'GET' && path.endsWith('/google/reviews')) {
-                await route.fulfill({ json: reviews });
-                return;
-            }
-            if (request.method() === 'POST' && path.endsWith('/google/reviews/91')) {
-                overview = { ...overview, reviewCount: 0, pendingApprovalCount: 1 };
-                reviews = APPROVAL_PAGE;
-                await route.fulfill({ json: overview });
-                return;
-            }
-            if (request.method() === 'POST' && path.endsWith('/google/captured/802/approve')) {
-                approvedInteractionId = 802;
-                overview = { ...overview, pendingApprovalCount: 0 };
-                reviews = { ...APPROVAL_PAGE, items: [], total: 0 };
-                await route.fulfill({ json: overview });
-                return;
-            }
-            if (request.method() === 'DELETE' && path.endsWith('/google/captured-data')) {
-                await route.fulfill({
-                    json: { active: true, status: 'disconnecting', errorCode: null },
+                    if (request.method() === 'GET' && path === '/api/account/connections') {
+                        await route.fulfill({ json: [CONNECTION] });
+                        return;
+                    }
+                    if (request.method() === 'GET' && path === '/api/account/connections/capture') {
+                        captureRequests += 1;
+                        await route.fulfill({ json: overviewResponse(overview) });
+                        return;
+                    }
+                    if (request.method() === 'PUT' && path.endsWith('/google/capture-policy')) {
+                        expect(request.postDataJSON()).toEqual({
+                            enabled: true,
+                            calendar: true,
+                            mailInbox: false,
+                            mailSent: false,
+                            backfillDays: 30,
+                            includeBodies: false,
+                            admissionMode: 'review',
+                            excludedPeople: [],
+                            excludedConversations: [],
+                            version: 0,
+                        });
+                        mutations.policy += 1;
+                        overview = {
+                            ...overview,
+                            userPolicy: {
+                                enabled: true,
+                                calendar: true,
+                                mailInbox: false,
+                                mailSent: false,
+                                backfillDays: 30,
+                                includeBodies: false,
+                                admissionMode: 'review',
+                                reviewBeforeCapture: true,
+                                excludedPeople: [],
+                                excludedConversations: [],
+                                version: 1,
+                                updatedAt: '2026-07-30T10:00:00Z',
+                            },
+                            effectivePolicy: {
+                                enabled: true,
+                                calendar: true,
+                                mailInbox: false,
+                                mailSent: false,
+                                backfillDays: 30,
+                                includeBodies: false,
+                                admissionMode: 'review',
+                                restrictionCodes: [],
+                            },
+                        };
+                        await route.fulfill({ json: overview });
+                        return;
+                    }
+                    if (request.method() === 'GET' && path.endsWith('/google/reviews')) {
+                        await route.fulfill({ json: reviews });
+                        return;
+                    }
+                    if (request.method() === 'POST' && path.endsWith('/google/reviews/91')) {
+                        expect(request.postDataJSON()).toEqual({
+                            action: 'attach',
+                            personId: 11,
+                            rememberExact: false,
+                            version: 4,
+                        });
+                        mutations.attach += 1;
+                        overview = { ...overview, reviewCount: 0, pendingApprovalCount: 1 };
+                        reviews = APPROVAL_PAGE;
+                        await route.fulfill({ json: overview });
+                        return;
+                    }
+                    if (request.method() === 'POST' && path.endsWith('/google/captured/802/approve')) {
+                        expect(request.postDataJSON()).toEqual({ version: 3 });
+                        mutations.approve += 1;
+                        overview = { ...overview, pendingApprovalCount: 0 };
+                        reviews = { ...APPROVAL_PAGE, items: [], total: 0 };
+                        await route.fulfill({ json: overview });
+                        return;
+                    }
+                    if (request.method() === 'DELETE' && path.endsWith('/google/captured-data')) {
+                        mutations.purge += 1;
+                        await route.fulfill({
+                            json: { active: true, status: 'disconnecting', errorCode: null },
+                        });
+                        return;
+                    }
+                    await route.continue();
                 });
-                return;
-            }
-            await route.continue();
-        });
 
-        await useLocale(page, locale);
-        const captureEnabled = await googleCaptureEnabled(page);
-        const overviewLoaded = page.waitForResponse((response) =>
-            new URL(response.url()).pathname === '/api/account/connections/capture');
-        await page.goto('/account/connections');
-        await overviewLoaded;
+                await page.context().addCookies([{
+                    name: 'NEXT_LOCALE', value: locale, url: captureAppURL, sameSite: 'Lax',
+                }]);
+                const overviewLoaded = page.waitForResponse((response) =>
+                    new URL(response.url()).pathname === '/api/account/connections/capture');
+                await page.goto('/account/connections');
+                await overviewLoaded;
 
-        const configure = page.getByRole('button', {
-            name: message(locale, 'account', 'AccountCaptureProvider.configure'),
-        });
-        if (!captureEnabled) {
-            await expect(configure).toHaveCount(0);
-            await expect(page.getByText(
-                message(locale, 'account', 'AccountCaptureProvider.title'),
-            )).toHaveCount(0);
-            return;
+                const configure = page.getByRole('button', {
+                    name: message(locale, 'account', 'AccountCaptureProvider.configure'),
+                });
+                expect(captureRequests).toBeGreaterThan(0);
+                await page.getByRole('button', {
+                    name: message(locale, 'account', 'AccountConnections.manage'),
+                }).click();
+                await expect(page.getByRole('dialog')).toBeVisible();
+                if (!captureEnabled) {
+                    await expect(configure).toHaveCount(0);
+                    await expect(page.getByText(
+                        message(locale, 'account', 'AccountCaptureProvider.title'),
+                    )).toHaveCount(0);
+                    expect(mutations).toEqual({ policy: 0, attach: 0, approve: 0, purge: 0 });
+                    return;
+                }
+
+                await expect(configure).toBeVisible();
+                await configure.click();
+                await expect(page.getByRole('heading', {
+                    name: message(locale, 'account', 'AccountCapturePolicy.title'),
+                })).toBeVisible();
+                const policyDialog = page.getByRole('dialog');
+                await expect(policyDialog).toHaveCount(1);
+                await expect(policyDialog).toBeInViewport({ ratio: 1 });
+                if (!isMobile) {
+                    await test.step('open desktop policy keeps its scroll boundary after resizing below md', async () => {
+                        await expect(policyDialog).toHaveAttribute('data-slot', 'dialog-content');
+                        await page.setViewportSize({ width: 700, height: 720 });
+                        await expect(policyDialog).toHaveAttribute('data-slot', 'dialog-content');
+                        await expect(policyDialog).toBeInViewport({ ratio: 1 });
+                    });
+                }
+                const enabledSwitch = page.getByLabel(
+                    message(locale, 'account', 'AccountCapturePolicy.enabled'),
+                );
+                await enabledSwitch.click();
+                await expect(enabledSwitch).toBeChecked();
+                await page.getByLabel(
+                    message(locale, 'account', 'AccountCapturePolicy.streams.calendar'),
+                ).click();
+                await page.getByLabel(
+                    message(locale, 'account', 'AccountCapturePolicy.backfill.label'),
+                ).fill('30');
+                await page.getByRole('button', {
+                    name: message(locale, 'account', 'AccountCapturePolicy.save'),
+                }).click();
+                await expect(page.getByText(
+                    message(locale, 'account', 'AccountCapturePolicy.saved'),
+                )).toBeVisible();
+                if (!isMobile) await page.setViewportSize({ width: 1280, height: 720 });
+
+                await page.goto('/account/connections?provider=google&panel=reviews');
+                await expect(page.getByText('Evaluator review meeting')).toBeVisible();
+                await page.getByText('Evaluator review meeting').click();
+                await page.getByRole('button', {
+                    name: message(locale, 'account', 'AccountCaptureReviews.attach'),
+                }).click();
+                await expect(page.getByText(
+                    message(locale, 'account', 'AccountCaptureReviews.resolved'),
+                )).toBeVisible();
+                await page.getByText('Approval review message').click();
+                await page.getByRole('button', {
+                    name: message(locale, 'account', 'AccountCaptureReviews.approve'),
+                }).click();
+                await expect(page.getByText(
+                    message(locale, 'account', 'AccountCaptureReviews.approved'),
+                )).toBeVisible();
+                expect(mutations).toEqual({ policy: 1, attach: 1, approve: 1, purge: 0 });
+
+                await page.goto('/account/connections?provider=google&panel=purge');
+                await page.getByLabel(
+                    message(locale, 'account', 'AccountCaptureLifecycle.acknowledge'),
+                ).click();
+                await page.getByRole('button', {
+                    name: message(locale, 'account', 'AccountCaptureLifecycle.confirmPurge'),
+                }).click();
+                await expect(page.getByText(
+                    message(locale, 'account', 'AccountCaptureLifecycle.purgeStarted'),
+                )).toBeVisible();
+                expect(mutations).toEqual({ policy: 1, attach: 1, approve: 1, purge: 1 });
+            });
         }
-
-        expect(captureRequests).toBeGreaterThan(0);
-        await page.getByRole('button', {
-            name: message(locale, 'account', 'AccountConnections.manage'),
-        }).click();
-        await expect(configure).toBeVisible();
-        await configure.click();
-        await expect(page.getByRole('heading', {
-            name: message(locale, 'account', 'AccountCapturePolicy.title'),
-        })).toBeVisible();
-        await page.getByLabel(
-            message(locale, 'account', 'AccountCapturePolicy.enabled'),
-        ).click();
-        await page.getByLabel(
-            message(locale, 'account', 'AccountCapturePolicy.streams.calendar'),
-        ).click();
-        await page.getByLabel(
-            message(locale, 'account', 'AccountCapturePolicy.backfill.label'),
-        ).fill('30');
-        await page.getByRole('button', {
-            name: message(locale, 'account', 'AccountCapturePolicy.save'),
-        }).click();
-        await expect(page.getByText(
-            message(locale, 'account', 'AccountCapturePolicy.saved'),
-        )).toBeVisible();
-
-        await page.goto('/account/connections?provider=google&panel=reviews');
-        await expect(page.getByText('Evaluator review meeting')).toBeVisible();
-        await page.getByText('Evaluator review meeting').click();
-        await page.getByRole('button', {
-            name: message(locale, 'account', 'AccountCaptureReviews.attach'),
-        }).click();
-        await expect(page.getByText(
-            message(locale, 'account', 'AccountCaptureReviews.resolved'),
-        )).toBeVisible();
-        await page.getByText('Approval review message').click();
-        await page.getByRole('button', {
-            name: message(locale, 'account', 'AccountCaptureReviews.approve'),
-        }).click();
-        await expect(page.getByText(
-            message(locale, 'account', 'AccountCaptureReviews.approved'),
-        )).toBeVisible();
-        expect(approvedInteractionId).toBe(802);
-
-        await page.goto('/account/connections?provider=google&panel=purge');
-        await page.getByLabel(
-            message(locale, 'account', 'AccountCaptureLifecycle.acknowledge'),
-        ).click();
-        await page.getByRole('button', {
-            name: message(locale, 'account', 'AccountCaptureLifecycle.confirmPurge'),
-        }).click();
-        await expect(page.getByText(
-            message(locale, 'account', 'AccountCaptureLifecycle.purgeStarted'),
-        )).toBeVisible();
     });
 }
