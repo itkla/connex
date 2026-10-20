@@ -120,6 +120,24 @@ class WorkspaceNotificationLockOrderTest {
     }
 
     @Test
+    void nonOwnerLeaveRetainsAccountBeforeDepartureAcquiresRecipientMemberships() {
+        runMembershipRemovalWork();
+        when(userMapper.lockById(9)).thenReturn(9);
+        when(workspaceMapper.getRole(7, 9)).thenReturn("member");
+
+        service.leaveWorkspace(7, 9);
+
+        InOrder order = inOrder(userMapper, userOffboardingService, workspaceMapper, stateVersionService);
+        order.verify(userMapper).lockById(9);
+        order.verify(userOffboardingService).captureDepartureReferences(7, 9);
+        order.verify(userOffboardingService).assertCanDepart(7, 9);
+        order.verify(userOffboardingService).detachMemberContent(7, 9);
+        order.verify(workspaceMapper).removeMember(7, 9);
+        order.verify(stateVersionService).markChanged(9);
+        verify(workspaceMapper, never()).lockActiveOwnerMembers(7);
+    }
+
+    @Test
     void ownerLeaveLocksWorkspaceAndMembershipsBeforeOwnerRowsAndNotifications() {
         runMembershipRemovalWork();
         when(userMapper.lockById(9)).thenReturn(9);

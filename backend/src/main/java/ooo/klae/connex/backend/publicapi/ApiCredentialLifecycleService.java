@@ -13,8 +13,6 @@ import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.mappers.ApiCredentialMapper;
-import ooo.klae.connex.backend.mappers.OrganizationMapper;
-import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.AuditService;
 
 /** Deletes membership-bound credentials inside offboarding and account-erasure transactions. */
@@ -22,25 +20,18 @@ import ooo.klae.connex.backend.services.AuditService;
 @RequiredArgsConstructor
 public class ApiCredentialLifecycleService {
     private final ApiCredentialMapper apiCredentialMapper;
-    private final WorkspaceMapper workspaceMapper;
-    private final OrganizationMapper organizationMapper;
     private final AuditService auditService;
 
     /**
-     * Deletes and audits every credential created by one membership root, including while the
-     * workspace is tearing down; returns only when a root is already gone. The workspace root and
-     * its organization root are taken {@code FOR SHARE} unconditionally, before any credential row,
-     * because taking them only when credentials exist would place them after the child rows the
-     * trailing audit's foreign-key parents re-request.
+     * Deletes and audits credentials under the caller's retained workspace and organization roots,
+     * including while the workspace is tearing down. This method must not acquire roots after
+     * departure cleanup has already acquired domain rows. A missing fresh
+     * membership has already cascaded its credentials through the generation-bound foreign key.
+     *
+     * @param workspaceId workspace root already retained by the caller
+     * @param userId departing or joining account
      */
     public void deleteForMembership(int workspaceId, int userId) {
-        Integer organizationId = workspaceMapper.lockWorkspaceOrgIdForShare(workspaceId);
-        if (organizationId == null) {
-            return;
-        }
-        if (organizationMapper.lockByIdForShare(organizationId) == null) {
-            return;
-        }
         List<ApiCredential> credentials =
             apiCredentialMapper.listByMembershipForUpdate(workspaceId, userId);
         if (credentials.isEmpty()) {

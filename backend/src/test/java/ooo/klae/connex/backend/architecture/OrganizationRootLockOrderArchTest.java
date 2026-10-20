@@ -14,21 +14,16 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
 /**
- * Guards, as a per-file co-occurrence grep, the ordering rule that keeps the credential paths'
- * shared organization root inert. The credential management paths take an organization root
- * {@code FOR SHARE} before the {@code workspace_member} row, while member detachment takes
- * {@code workspace_member} rows before the organization root its trailing audit acquires. That
- * inversion cannot cycle while every organization root involved is shared, so no source may take an
- * organization root EXCLUSIVELY and then lock a {@code workspace_member} row.
+ * Guards the file-scoped rule against combining an exclusive organization root with
+ * {@code workspace_member} row locks. Credential authorization retains organization S before its
+ * exact membership, while removal and owner leave already retain memberships before organization S.
+ * Departure/fresh cleanup retains workspace S before organization S, and credential cleanup reuses
+ * those roots.
  *
- * <p>This grep is a rot alarm, not the proof. What actually holds the invariant is the workspace
- * root that precedes every organization root on both sides: a manager reaches an organization root
- * only through {@code WorkspaceService.lockedMemberAuthorization} or
- * {@code ApiCredentialLifecycleService.deleteForMembership}, each of which takes that workspace's
- * root ({@code lockActiveWorkspaceForShare} or {@code lockWorkspaceOrgIdForShare}) first, and
- * account erasure holds every owned workspace root exclusively before it touches an owner row. Two
- * transactions that would otherwise cross on an organization root therefore conflict on the
- * workspace root first, and whichever one waits there holds no organization root yet.
+ * <p>This grep is a rot alarm, not a cross-transaction proof. Shared requests can queue behind a
+ * waiting exclusive requester, so shared organization modes and a workspace prefix alone do not
+ * rule out cycles involving other workspaces or late audit roots. Those paths require the focused
+ * analysis and drills described in {@code docs/backend/LOCKING.md}.
  *
  * <p>The same file-scoped grep also registers the workflow authoring chain's admission mutex
  * (GitHub #1670). That mutex is the {@code acquireTriggerAdmissionMutex} upsert itself: InnoDB
@@ -40,8 +35,8 @@ import org.junit.jupiter.api.Test;
  * membership-first record mutation that already holds the {@code workspace_member} row the
  * authoring chain locks next.
  *
- * <p>Because the check is file-scoped, a cycle spread over two sources is invisible to it. The one
- * such shape that exists — the {@code app_user} cascade at the end of account erasure X-locking
+ * <p>Because the check is file-scoped, a cycle spread over two sources is invisible to it. The
+ * {@code app_user} cascade at the end of account erasure X-locking
  * {@code workspace_member} rows after owned organization roots were taken exclusively — is
  * identical on {@code origin/main} and is carved out in {@code docs/backend/LOCKING.md} under
  * GitHub issue #1582 rather than by this test.
@@ -84,9 +79,7 @@ class OrganizationRootLockOrderArchTest {
         }
         assertTrue(offenders.isEmpty(),
             "An exclusive organization root must never be combined with a workspace_member row "
-                + "lock: the credential paths take the organization root shared before the "
-                + "membership row and would then cycle against member detachment (see "
-                + "docs/backend/LOCKING.md). Offending sources: " + offenders);
+                + "lock in one source (see docs/backend/LOCKING.md). Offending sources: " + offenders);
     }
 
     @Test

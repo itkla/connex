@@ -329,13 +329,13 @@ public class UserOffboardingService {
             throw new ResourceNotFoundException("Workspace not found");
         }
         ownershipOfferOrganizationMapper.lockByIdForShare(orgId);
+        notificationMapper.lockRecipientMemberships(userId);
         ownershipOfferWriter.invalidateDepartingMembershipLocked(orgId, workspaceId, userId);
         ownershipOfferWriter.detachDestinationLocked(orgId, workspaceId, userId);
         providerCapturePurgeService.purge(
             workspaceId, userId, ConnectedAccountProviders.GOOGLE);
         providerCapturePurgeService.purge(
             workspaceId, userId, ConnectedAccountProviders.MICROSOFT);
-        notificationMapper.lockRecipientMemberships(userId);
         savedViewPreferenceMapper.deletePinsForUser(workspaceId, userId);
         savedViewPreferenceMapper.deleteDefaultsForUser(workspaceId, userId);
         savedViewMapper.deleteForUser(workspaceId, userId);
