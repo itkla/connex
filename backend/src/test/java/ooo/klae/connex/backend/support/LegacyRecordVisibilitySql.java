@@ -32,7 +32,7 @@ public final class LegacyRecordVisibilitySql {
             new Environment("pre-485-record-visibility", new JdbcTransactionFactory(), dataSource));
         configuration.setMapUnderscoreToCamelCase(true);
         configuration.getTypeAliasRegistry().registerAliases("ooo.klae.connex.backend.beans");
-        for (String xml : List.of(INTRODUCTION, DUPLICATE_REVIEW, NOTE, REPORT, SEGMENT, PIPELINE)) {
+        for (String xml : List.of(INTRODUCTION, DUPLICATE_REVIEW, NOTE, REPORT, SEGMENT, PIPELINE, COMPANY)) {
             String resource = "pre-485-" + configuration.getMappedStatementNames().size();
             new XMLMapperBuilder(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)),
                 configuration, resource, configuration.getSqlFragments()).parse();
@@ -1462,6 +1462,1071 @@ public final class LegacyRecordVisibilitySql {
           </update>
 
           <delete id="deleteStage">DELETE FROM stage WHERE workspace_id = #{workspaceId} AND id = #{id}</delete>
+        </mapper>
+        """;
+
+    private static final String COMPANY = """
+        <?xml version="1.0" encoding="UTF-8" ?>
+        <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+                "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+        <mapper namespace="ooo.klae.connex.backend.mappers.CompanyMapper">
+
+          <sql id="companyColumns">
+            id, workspace_id, owner_id, name, website, industry, phone, address, created_at, updated_at,
+            logo_url, archived_at
+          </sql>
+
+          <sql id="qualifiedCompanyColumns">
+            c.id, c.workspace_id, c.owner_id, c.name, c.website, c.industry, c.phone, c.address,
+            c.created_at, c.updated_at, c.logo_url, c.archived_at
+          </sql>
+
+          <sql id="visibleAny">
+            (c.workspace_id = #{workspaceId}
+             OR EXISTS (SELECT 1 FROM company_share cs
+                JOIN workspace vws ON vws.id = cs.workspace_id
+                JOIN workspace ows ON ows.id = c.workspace_id AND ows.org_id = vws.org_id
+                WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
+          </sql>
+
+          <sql id="visible">
+            <include refid="visibleAny"/> AND c.archived_at IS NULL
+          </sql>
+
+          <sql id="visiblePerson">
+            (p.workspace_id = #{workspaceId}
+             OR EXISTS (SELECT 1 FROM person_share ps
+                JOIN workspace pvws ON pvws.id = ps.workspace_id
+                JOIN workspace pows ON pows.id = p.workspace_id AND pows.org_id = pvws.org_id
+                WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId}))
+            AND p.archived_at IS NULL
+          </sql>
+
+          <!-- Normalized interaction type and model weight for one activity row, shared by the
+               workspace-wide aggregate and the subject-scoped evidence union so both read the same
+               attribution vocabulary. Requires the table aliased `a`. -->
+          <sql id="activityInteractionType">
+            CASE LOWER(a.type)
+              WHEN 'meeting' THEN 'meeting'
+              WHEN 'call' THEN 'call'
+              WHEN 'email' THEN 'email'
+              ELSE 'other'
+            END
+          </sql>
+
+          <sql id="activityBaseWeight">
+            CASE LOWER(a.type)
+              WHEN 'meeting' THEN #{model.meetingWeight}
+              WHEN 'call' THEN #{model.callWeight}
+              WHEN 'email' THEN #{model.emailWeight}
+              ELSE #{model.otherActivityWeight}
+            END
+          </sql>
+
+          <!-- A contact whose touches may be attributed to its company. Requires the table aliased `p`. -->
+          <sql id="attributablePerson">
+            p.suspended_at IS NULL AND <include refid="visiblePerson"/>
+          </sql>
+
+          <sql id="relationshipTouchSources">
+            SELECT 'activity' AS source_type,
+                   a.id AS source_id,
+                   p.company_id,
+                   <include refid="activityInteractionType"/> AS interaction_type,
+                   a.timestamp AS touched_at,
+                   <include refid="activityBaseWeight"/> AS weight
+            FROM activity a
+            JOIN person p ON p.id = a.person_id
+            WHERE a.workspace_id = #{workspaceId} AND p.company_id IS NOT NULL
+              AND <include refid="attributablePerson"/>
+            UNION ALL
+            SELECT 'activity' AS source_type,
+                   a.id AS source_id,
+                   d.company_id,
+                   <include refid="activityInteractionType"/> AS interaction_type,
+                   a.timestamp AS touched_at,
+                   <include refid="activityBaseWeight"/> AS weight
+            FROM activity a
+            JOIN deal d ON d.id = a.deal_id
+            WHERE a.workspace_id = #{workspaceId} AND d.workspace_id = #{workspaceId}
+              AND d.company_id IS NOT NULL
+              AND (a.person_id IS NULL OR EXISTS (
+                SELECT 1 FROM person p
+                WHERE p.id = a.person_id AND <include refid="attributablePerson"/>
+              ))
+            UNION ALL
+            SELECT 'note' AS source_type,
+                   n.id AS source_id,
+                   p.company_id,
+                   'workspace-note' AS interaction_type,
+                   n.created_at AS touched_at,
+                   #{model.noteWeight} AS weight
+            FROM note n
+            JOIN person p ON p.id = n.person_id
+            WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace'
+              AND p.company_id IS NOT NULL
+              AND <include refid="attributablePerson"/>
+            UNION ALL
+            SELECT 'note' AS source_type,
+                   n.id AS source_id,
+                   d.company_id,
+                   'workspace-note' AS interaction_type,
+                   n.created_at AS touched_at,
+                   #{model.noteWeight} AS weight
+            FROM note n
+            JOIN deal d ON d.id = n.deal_id
+            WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace'
+              AND d.workspace_id = #{workspaceId} AND d.company_id IS NOT NULL
+              AND (n.person_id IS NULL OR EXISTS (
+                SELECT 1 FROM person p
+                WHERE p.id = n.person_id AND <include refid="attributablePerson"/>
+              ))
+            UNION ALL
+            SELECT 'task' AS source_type,
+                   t.id AS source_id,
+                   p.company_id,
+                   'task' AS interaction_type,
+                   t.created_at AS touched_at,
+                   #{model.taskWeight} AS weight
+            FROM task t
+            JOIN person p ON p.id = t.person_id
+            WHERE t.workspace_id = #{workspaceId} AND p.company_id IS NOT NULL
+              AND <include refid="attributablePerson"/>
+            UNION ALL
+            SELECT 'task' AS source_type,
+                   t.id AS source_id,
+                   d.company_id,
+                   'task' AS interaction_type,
+                   t.created_at AS touched_at,
+                   #{model.taskWeight} AS weight
+            FROM task t
+            JOIN deal d ON d.id = t.deal_id
+            WHERE t.workspace_id = #{workspaceId} AND d.workspace_id = #{workspaceId}
+              AND d.company_id IS NOT NULL
+              AND (t.person_id IS NULL OR EXISTS (
+                SELECT 1 FROM person p
+                WHERE p.id = t.person_id AND <include refid="attributablePerson"/>
+              ))
+          </sql>
+
+          <!-- Sources attributed to one company, filtered inside every branch so the union stays
+               index-driven on that company and can be capped by row count. The deal branches drop a source
+               whose contact already attributes it to the same company, so dual-attributed sources appear
+               once without a deduplication pass over the whole union. -->
+          <sql id="companyEvidenceSources">
+            SELECT 'activity' AS source_type,
+                   a.id AS source_id,
+                   <include refid="activityInteractionType"/> AS interaction_type,
+                   a.timestamp AS touched_at,
+                   <include refid="activityBaseWeight"/> AS weight
+            FROM activity a
+            JOIN person p ON p.id = a.person_id
+            WHERE a.workspace_id = #{workspaceId} AND p.company_id = #{companyId}
+              AND <include refid="attributablePerson"/>
+              AND a.timestamp IS NOT NULL AND a.timestamp &lt;= #{reference}
+            UNION ALL
+            SELECT 'activity' AS source_type,
+                   a.id AS source_id,
+                   <include refid="activityInteractionType"/> AS interaction_type,
+                   a.timestamp AS touched_at,
+                   <include refid="activityBaseWeight"/> AS weight
+            FROM activity a
+            JOIN deal d ON d.id = a.deal_id
+            WHERE a.workspace_id = #{workspaceId} AND d.workspace_id = #{workspaceId}
+              AND d.company_id = #{companyId}
+              AND (a.person_id IS NULL OR EXISTS (
+                SELECT 1 FROM person p
+                WHERE p.id = a.person_id AND <include refid="attributablePerson"/>
+              ))
+              AND NOT EXISTS (
+                SELECT 1 FROM person p
+                WHERE p.id = a.person_id AND p.company_id = d.company_id
+                  AND <include refid="attributablePerson"/>
+              )
+              AND a.timestamp IS NOT NULL AND a.timestamp &lt;= #{reference}
+            UNION ALL
+            SELECT 'note' AS source_type,
+                   n.id AS source_id,
+                   'workspace-note' AS interaction_type,
+                   n.created_at AS touched_at,
+                   #{model.noteWeight} AS weight
+            FROM note n
+            JOIN person p ON p.id = n.person_id
+            WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace'
+              AND p.company_id = #{companyId}
+              AND <include refid="attributablePerson"/>
+              AND n.created_at IS NOT NULL AND n.created_at &lt;= #{reference}
+            UNION ALL
+            SELECT 'note' AS source_type,
+                   n.id AS source_id,
+                   'workspace-note' AS interaction_type,
+                   n.created_at AS touched_at,
+                   #{model.noteWeight} AS weight
+            FROM note n
+            JOIN deal d ON d.id = n.deal_id
+            WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace'
+              AND d.workspace_id = #{workspaceId} AND d.company_id = #{companyId}
+              AND (n.person_id IS NULL OR EXISTS (
+                SELECT 1 FROM person p
+                WHERE p.id = n.person_id AND <include refid="attributablePerson"/>
+              ))
+              AND NOT EXISTS (
+                SELECT 1 FROM person p
+                WHERE p.id = n.person_id AND p.company_id = d.company_id
+                  AND <include refid="attributablePerson"/>
+              )
+              AND n.created_at IS NOT NULL AND n.created_at &lt;= #{reference}
+            UNION ALL
+            SELECT 'task' AS source_type,
+                   t.id AS source_id,
+                   'task' AS interaction_type,
+                   t.created_at AS touched_at,
+                   #{model.taskWeight} AS weight
+            FROM task t
+            JOIN person p ON p.id = t.person_id
+            WHERE t.workspace_id = #{workspaceId} AND p.company_id = #{companyId}
+              AND <include refid="attributablePerson"/>
+              AND t.created_at IS NOT NULL AND t.created_at &lt;= #{reference}
+            UNION ALL
+            SELECT 'task' AS source_type,
+                   t.id AS source_id,
+                   'task' AS interaction_type,
+                   t.created_at AS touched_at,
+                   #{model.taskWeight} AS weight
+            FROM task t
+            JOIN deal d ON d.id = t.deal_id
+            WHERE t.workspace_id = #{workspaceId} AND d.workspace_id = #{workspaceId}
+              AND d.company_id = #{companyId}
+              AND (t.person_id IS NULL OR EXISTS (
+                SELECT 1 FROM person p
+                WHERE p.id = t.person_id AND <include refid="attributablePerson"/>
+              ))
+              AND NOT EXISTS (
+                SELECT 1 FROM person p
+                WHERE p.id = t.person_id AND p.company_id = d.company_id
+                  AND <include refid="attributablePerson"/>
+              )
+              AND t.created_at IS NOT NULL AND t.created_at &lt;= #{reference}
+          </sql>
+
+          <!-- Company evidence reads the capped source set twice: once collapsed to totals, once ranked for
+               the returned contributors. Both bind the same #{sourceLimit}, so neither statement can scan or
+               rank more rows than the service allows. -->
+          <sql id="companyEvidenceScope">
+            FROM (
+              <include refid="companyEvidenceSources"/>
+              LIMIT #{sourceLimit}
+            ) source
+            WHERE EXISTS (
+              SELECT 1
+              FROM company c
+              WHERE c.id = #{companyId}
+                AND <include refid="visible"/>
+            )
+          </sql>
+
+          <select id="getAllCompanies" resultType="Company">
+            SELECT <include refid="qualifiedCompanyColumns"/>
+            FROM company c
+            WHERE <include refid="visible"/>
+            ORDER BY c.name, c.id
+          </select>
+
+          <select id="findVisibleNameCandidates" resultType="Company">
+            SELECT c.id, c.workspace_id, c.name
+            FROM company c
+            WHERE <include refid="visible"/>
+              AND c.name LIKE #{pattern}
+            ORDER BY CASE WHEN LOWER(c.name) = #{normalizedName} THEN 0 ELSE 1 END,
+              CHAR_LENGTH(c.name), c.id
+            LIMIT #{limit}
+          </select>
+
+          <select id="getRelationshipScoreAggregates"
+                  resultType="ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto">
+            SELECT c.id,
+                   COALESCE(SUM(touch.weight
+                     * POW(#{model.decayBase}, -touch.age_days / #{model.halfLifeDays})), 0.0) AS raw_weight,
+                   COALESCE(SUM(CASE WHEN touch.age_days &lt;= #{model.recentWindowDays}
+                                     THEN touch.weight ELSE 0.0 END), 0.0)
+                     AS recent_weight,
+                   COALESCE(SUM(CASE WHEN touch.age_days &gt; #{model.recentWindowDays}
+                                       AND touch.age_days &lt;= #{model.priorWindowDays}
+                                     THEN touch.weight ELSE 0.0 END), 0.0) AS prior_weight,
+                   DATE_FORMAT(MAX(touch.touched_at), '%Y-%m-%d %H:%i:%s') AS last_touch_at,
+                   SUM(CASE WHEN touch.age_days &lt;= #{model.recentWindowDays}
+                            THEN 1 ELSE 0 END) AS recent_touch_count
+            FROM company c
+            LEFT JOIN (
+              SELECT attributed.company_id, attributed.touched_at, attributed.weight,
+                     GREATEST(0.0,
+                       TIMESTAMPDIFF(MICROSECOND, attributed.touched_at, #{reference})
+                         / #{model.microsecondsPerDay}) AS age_days
+              FROM (
+                SELECT source.source_type,
+                       source.source_id,
+                       source.company_id,
+                       source.interaction_type,
+                       source.touched_at,
+                       source.weight
+                FROM (
+                  <include refid="relationshipTouchSources"/>
+                ) source
+                WHERE source.touched_at IS NOT NULL AND source.touched_at &lt;= #{reference}
+                GROUP BY source.source_type,
+                         source.source_id,
+                         source.company_id,
+                         source.interaction_type,
+                         source.touched_at,
+                         source.weight
+              ) attributed
+            ) touch ON touch.company_id = c.id
+            WHERE <include refid="visible"/>
+            GROUP BY c.id
+            ORDER BY c.id
+          </select>
+
+          <select id="getRelationshipScoreAggregatesByIds"
+                  resultType="ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto">
+            SELECT c.id,
+                   COALESCE(SUM(touch.weight
+                     * POW(#{model.decayBase}, -touch.age_days / #{model.halfLifeDays})), 0.0) AS raw_weight,
+                   COALESCE(SUM(CASE WHEN touch.age_days &lt;= #{model.recentWindowDays}
+                                     THEN touch.weight ELSE 0.0 END), 0.0)
+                     AS recent_weight,
+                   COALESCE(SUM(CASE WHEN touch.age_days &gt; #{model.recentWindowDays}
+                                       AND touch.age_days &lt;= #{model.priorWindowDays}
+                                     THEN touch.weight ELSE 0.0 END), 0.0) AS prior_weight,
+                   DATE_FORMAT(MAX(touch.touched_at), '%Y-%m-%d %H:%i:%s') AS last_touch_at,
+                   SUM(CASE WHEN touch.age_days &lt;= #{model.recentWindowDays}
+                            THEN 1 ELSE 0 END) AS recent_touch_count
+            FROM company c
+            LEFT JOIN (
+              SELECT attributed.company_id, attributed.touched_at, attributed.weight,
+                     GREATEST(0.0,
+                       TIMESTAMPDIFF(MICROSECOND, attributed.touched_at, #{reference})
+                         / #{model.microsecondsPerDay}) AS age_days
+              FROM (
+                SELECT source.source_type,
+                       source.source_id,
+                       source.company_id,
+                       source.interaction_type,
+                       source.touched_at,
+                       source.weight
+                FROM (
+                  <include refid="relationshipTouchSources"/>
+                ) source
+                WHERE source.touched_at IS NOT NULL AND source.touched_at &lt;= #{reference}
+                AND source.company_id IN
+                <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
+                GROUP BY source.source_type,
+                         source.source_id,
+                         source.company_id,
+                         source.interaction_type,
+                         source.touched_at,
+                         source.weight
+              ) attributed
+            ) touch ON touch.company_id = c.id
+            WHERE <include refid="visible"/>
+              AND c.id IN
+              <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
+            GROUP BY c.id
+            ORDER BY c.id
+          </select>
+
+          <select id="getRelationshipEvidenceTotals" timeout="10"
+                  resultType="ooo.klae.connex.backend.dto.RelationshipEvidenceTotalsDto">
+            SELECT COUNT(*) AS contributor_count,
+                   COALESCE(SUM(capped.base_weight
+                     * POW(#{model.decayBase}, -capped.age_days / #{model.halfLifeDays})), 0.0)
+                     AS total_decayed_contribution,
+                   COALESCE(SUM(CASE WHEN capped.source_type = 'activity' THEN 1 ELSE 0 END), 0)
+                     AS activity_count,
+                   COALESCE(SUM(CASE WHEN capped.source_type = 'note' THEN 1 ELSE 0 END), 0)
+                     AS note_count,
+                   COALESCE(SUM(CASE WHEN capped.source_type = 'task' THEN 1 ELSE 0 END), 0)
+                     AS task_count,
+                   COALESCE(SUM(CASE WHEN capped.age_days &lt;= #{model.recentWindowDays}
+                                     THEN capped.base_weight ELSE 0.0 END), 0.0) AS recent_weight,
+                   COALESCE(SUM(CASE WHEN capped.age_days &gt; #{model.recentWindowDays}
+                                       AND capped.age_days &lt;= #{model.priorWindowDays}
+                                     THEN capped.base_weight ELSE 0.0 END), 0.0) AS prior_weight,
+                   DATE_FORMAT(MAX(capped.touched_at), '%Y-%m-%d %H:%i:%s') AS last_touch_at,
+                   COALESCE(SUM(CASE WHEN capped.age_days &lt;= #{model.recentWindowDays}
+                                     THEN 1 ELSE 0 END), 0) AS recent_touch_count
+            FROM (
+              SELECT source.source_type,
+                     source.touched_at,
+                     source.weight AS base_weight,
+                     GREATEST(0.0,
+                       TIMESTAMPDIFF(MICROSECOND, source.touched_at, #{reference})
+                         / #{model.microsecondsPerDay}) AS age_days
+              <include refid="companyEvidenceScope"/>
+            ) capped
+          </select>
+
+          <select id="getRelationshipEvidenceContributors" timeout="10"
+                  resultType="ooo.klae.connex.backend.dto.RelationshipEvidenceRowDto">
+            SELECT aged.source_type,
+                   aged.source_id,
+                   aged.interaction_type,
+                   DATE_FORMAT(aged.touched_at, '%Y-%m-%d %H:%i:%s') AS occurred_at,
+                   aged.base_weight,
+                   aged.base_weight
+                     * POW(#{model.decayBase}, -aged.age_days / #{model.halfLifeDays})
+                     AS decayed_contribution,
+                   provider_activity.provider_name,
+                   provider_activity.provider_stream,
+                   provider_activity.provider_source_id,
+                   DATE_FORMAT(provider_activity.provider_captured_at, '%Y-%m-%d %H:%i:%s')
+                     AS provider_captured_at,
+                   CASE WHEN provider_activity.provider_owned
+                     THEN DATE_FORMAT(#{reference}, '%Y-%m-%d %H:%i:%s') END AS capture_as_of,
+                   provider_activity.provider_visibility,
+                   provider_activity.provider_admitted_fields_json,
+                   provider_activity.provider_material_exclusions_json
+            FROM (
+              SELECT source.source_type,
+                     source.source_id,
+                     source.interaction_type,
+                     source.touched_at,
+                     source.weight AS base_weight,
+                     GREATEST(0.0,
+                       TIMESTAMPDIFF(MICROSECOND, source.touched_at, #{reference})
+                         / #{model.microsecondsPerDay}) AS age_days
+              <include refid="companyEvidenceScope"/>
+            ) aged
+            LEFT JOIN activity provider_activity
+              ON aged.source_type = 'activity'
+              AND provider_activity.workspace_id = #{workspaceId}
+              AND provider_activity.id = aged.source_id
+            ORDER BY decayed_contribution DESC,
+                     aged.touched_at DESC,
+                     aged.source_type,
+                     aged.source_id
+            LIMIT #{limit}
+          </select>
+
+          <!-- Decayed relationship warmth for the browser's sort, band facet, and decay horizon. This
+               reuses the same attributed touch union and model parameters as getRelationshipScoreAggregates,
+               including its de-duplicating GROUP BY, so the browser and the smart-segment warmth predicates
+               can never read two different scores. The join is emitted only when a warmth sort or filter was
+               requested. Binding `model` and `reference` here lets the shared touch-source fragment resolve
+               its parameters unchanged. -->
+          <sql id="warmthAggregate">
+              <bind name="model" value="warmth.model"/>
+              <bind name="reference" value="warmth.reference"/>
+              LEFT JOIN (
+                SELECT aged.company_id,
+                       SUM(aged.weight
+                         * POW(#{model.decayBase}, -aged.age_days / #{model.halfLifeDays})) AS raw_weight,
+                       MAX(aged.touched_at) AS last_touch_at
+                FROM (
+                  SELECT attributed.company_id, attributed.touched_at, attributed.weight,
+                         GREATEST(0.0,
+                           TIMESTAMPDIFF(MICROSECOND, attributed.touched_at, #{reference})
+                             / #{model.microsecondsPerDay}) AS age_days
+                  FROM (
+                    SELECT source.source_type,
+                           source.source_id,
+                           source.company_id,
+                           source.interaction_type,
+                           source.touched_at,
+                           source.weight
+                    FROM (
+                      <include refid="relationshipTouchSources"/>
+                    ) source
+                    WHERE source.touched_at IS NOT NULL AND source.touched_at &lt;= #{reference}
+                    GROUP BY source.source_type,
+                             source.source_id,
+                             source.company_id,
+                             source.interaction_type,
+                             source.touched_at,
+                             source.weight
+                  ) attributed
+                ) aged
+                GROUP BY aged.company_id
+              ) w ON w.company_id = c.id
+          </sql>
+
+          <!-- Emitted wherever the aggregate column itself is projected or ordered on. -->
+          <sql id="warmthJoin">
+            <if test="warmth != null">
+              <include refid="warmthAggregate"/>
+            </if>
+          </sql>
+
+          <!-- A warmth sort cannot change which rows match, so counts, id selections, and exports join the
+               aggregate only when a band, the no-history bucket, or a decay horizon actually narrows them. -->
+          <sql id="warmthFilterJoin">
+            <if test="warmth != null and warmth.restrictsRows()">
+              <include refid="warmthAggregate"/>
+            </if>
+          </sql>
+
+          <!-- One bucket per company: the model's band, or __none__ when nothing has ever been logged.
+               The score is strictly increasing in raw weight, so comparing raw weight against the model's
+               published boundaries selects exactly the rows the Java band classifier would. -->
+          <sql id="warmthBandKey">
+            CASE
+              WHEN w.last_touch_at IS NULL THEN '__none__'
+              WHEN w.raw_weight &gt;= #{model.hotMinimumRawWeight} THEN 'hot'
+              WHEN w.raw_weight &gt;= #{model.warmMinimumRawWeight} THEN 'warm'
+              WHEN w.raw_weight &gt;= #{model.coolMinimumRawWeight} THEN 'cool'
+              ELSE 'cold'
+            END
+          </sql>
+
+          <sql id="warmthWhere">
+            <if test="warmth != null">
+              <if test="warmth.bands.size() > 0 or warmth.noWarmth">
+                AND (
+                  <trim prefixOverrides="OR ">
+                    <if test="warmth.bands.size() > 0">
+                      <include refid="warmthBandKey"/> IN
+                      <foreach item="band" collection="warmth.bands" open="(" separator="," close=")">#{band}</foreach>
+                    </if>
+                    <if test="warmth.noWarmth">OR w.last_touch_at IS NULL</if>
+                  </trim>
+                )
+              </if>
+              <if test="warmth.goesColdWithinDays != null">
+                AND w.raw_weight &gt; #{model.coldRawWeight}
+                AND ROUND(#{model.halfLifeDays}
+                  * LOG(#{model.decayBase}, w.raw_weight / #{model.coldRawWeight}))
+                  &lt;= #{warmth.goesColdWithinDays}
+              </if>
+            </if>
+          </sql>
+
+          <sql id="pageWhere">
+            <where>
+              <choose>
+                <when test="archived">AND c.workspace_id = #{workspaceId} AND c.archived_at IS NOT NULL</when>
+                <otherwise>AND <include refid="visible"/></otherwise>
+              </choose>
+              <include refid="warmthWhere"/>
+              <if test="query != null">
+                AND (c.name LIKE #{query} OR c.website LIKE #{query} OR c.industry LIKE #{query}
+                  OR c.phone LIKE #{query} OR c.address LIKE #{query})
+              </if>
+              <if test="(industry != null and industry.size() > 0) or noIndustry">
+                AND (
+                  <trim prefixOverrides="OR ">
+                    <if test="industry != null and industry.size() > 0">
+                      c.industry IN
+                      <foreach item="value" collection="industry" open="(" separator="," close=")">#{value}</foreach>
+                    </if>
+                    <if test="noIndustry">OR (c.industry IS NULL OR c.industry = '')</if>
+                  </trim>
+                )
+              </if>
+              <if test="ids != null and ids.size() > 0">
+                AND c.id IN
+                <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
+              </if>
+            </where>
+          </sql>
+
+          <sql id="memberScopePredicate">
+            <choose>
+              <when test="memberScope.mode.name() == 'ME'">
+                AND c.owner_id = #{memberScope.userId}
+              </when>
+              <when test="memberScope.mode.name() == 'MEMBERS'">
+                AND c.owner_id IN
+                <foreach item="id" collection="memberScope.memberIds" open="(" separator="," close=")">#{id}</foreach>
+              </when>
+              <when test="memberScope.mode.name() == 'UNASSIGNED'">
+                AND c.owner_id IS NULL
+              </when>
+            </choose>
+          </sql>
+
+          <sql id="pageOrderBy">
+            ORDER BY
+            <choose>
+              <when test="sort == 'name'">c.name</when>
+              <when test="sort == 'website'">c.website</when>
+              <when test="sort == 'industry'">c.industry</when>
+              <when test="sort == 'phone'">c.phone</when>
+              <when test="sort == 'address'">c.address</when>
+              <when test="sort == 'createdAt'">c.created_at</when>
+              <when test="sort == 'updatedAt'">c.updated_at</when>
+              <when test="sort == 'warmth' and warmth != null">COALESCE(w.raw_weight, 0.0)</when>
+              <otherwise>c.name</otherwise>
+            </choose>
+            <choose><when test="dir == 'desc'">DESC</when><otherwise>ASC</otherwise></choose>
+            , c.id ASC
+          </sql>
+
+          <!-- The smart-segment statements apply the browser's complete filter contract to the evaluated
+               segment ids: the same warmth predicate as pageWhere, plus memberScopePredicate after it. -->
+          <sql id="segmentPageWhere">
+            <where>
+              AND <include refid="visible"/>
+              <include refid="warmthWhere"/>
+              <if test="query != null">
+                AND (c.name LIKE #{query} OR c.website LIKE #{query} OR c.industry LIKE #{query}
+                  OR c.phone LIKE #{query} OR c.address LIKE #{query})
+              </if>
+              <if test="(industry != null and industry.size() > 0) or noIndustry">
+                AND (
+                  <trim prefixOverrides="OR ">
+                    <if test="industry != null and industry.size() > 0">
+                      c.industry IN
+                      <foreach item="value" collection="industry" open="(" separator="," close=")">#{value}</foreach>
+                    </if>
+                    <if test="noIndustry">OR (c.industry IS NULL OR c.industry = '')</if>
+                  </trim>
+                )
+              </if>
+            </where>
+          </sql>
+
+          <select id="getCompaniesPage" resultType="Company">
+            SELECT <include refid="qualifiedCompanyColumns"/>
+            FROM company c
+            <include refid="warmthJoin"/>
+            <include refid="pageWhere"/>
+            <include refid="memberScopePredicate"/>
+            <include refid="pageOrderBy"/>
+            LIMIT #{limit} OFFSET #{offset}
+          </select>
+
+          <select id="countCompanies" resultType="long">
+            SELECT COUNT(*)
+            FROM company c
+            <include refid="warmthFilterJoin"/>
+            <include refid="pageWhere"/>
+            <include refid="memberScopePredicate"/>
+          </select>
+
+          <select id="getCompanyEngagementCounts"
+                  resultType="ooo.klae.connex.backend.dto.CompanyEngagementCountsDto">
+            SELECT
+              (SELECT COUNT(*) FROM person p
+               WHERE p.workspace_id = #{workspaceId} AND p.company_id = #{companyId}
+                 AND p.archived_at IS NULL) AS person_count,
+              (SELECT COUNT(*) FROM deal d
+               WHERE d.workspace_id = #{workspaceId} AND d.company_id = #{companyId}) AS num_deals,
+              (SELECT COUNT(*) FROM activity a
+               WHERE a.workspace_id = #{workspaceId}
+                 AND (EXISTS (SELECT 1 FROM person p
+                     WHERE p.workspace_id = #{workspaceId} AND p.id = a.person_id AND p.company_id = #{companyId}
+                       AND p.archived_at IS NULL)
+                   OR EXISTS (SELECT 1 FROM deal d
+                       WHERE d.workspace_id = #{workspaceId} AND d.id = a.deal_id AND d.company_id = #{companyId})))
+                AS num_activities,
+              (SELECT COUNT(*) FROM task t
+               WHERE t.workspace_id = #{workspaceId}
+                 AND (EXISTS (SELECT 1 FROM person p
+                     WHERE p.workspace_id = #{workspaceId} AND p.id = t.person_id AND p.company_id = #{companyId}
+                       AND p.archived_at IS NULL)
+                   OR EXISTS (SELECT 1 FROM deal d
+                       WHERE d.workspace_id = #{workspaceId} AND d.id = t.deal_id AND d.company_id = #{companyId})))
+                AS num_tasks,
+              (SELECT COUNT(*) FROM task t
+               WHERE t.workspace_id = #{workspaceId} AND t.completed = FALSE
+                 AND (EXISTS (SELECT 1 FROM person p
+                     WHERE p.workspace_id = #{workspaceId} AND p.id = t.person_id AND p.company_id = #{companyId}
+                       AND p.archived_at IS NULL)
+                   OR EXISTS (SELECT 1 FROM deal d
+                       WHERE d.workspace_id = #{workspaceId} AND d.id = t.deal_id AND d.company_id = #{companyId})))
+                AS open_tasks,
+              (SELECT COUNT(*) FROM note n
+               WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace'
+                 AND (EXISTS (SELECT 1 FROM person p
+                     WHERE p.workspace_id = #{workspaceId} AND p.id = n.person_id AND p.company_id = #{companyId}
+                       AND p.archived_at IS NULL)
+                   OR EXISTS (SELECT 1 FROM deal d
+                       WHERE d.workspace_id = #{workspaceId} AND d.id = n.deal_id AND d.company_id = #{companyId})))
+                AS num_notes
+          </select>
+
+          <select id="getCompanyEngagementUsers"
+                  resultType="ooo.klae.connex.backend.dto.CompanyEngagementUserDto">
+            SELECT related.user_id, COUNT(*) OVER() AS total_users
+            FROM (
+              SELECT touch.user_id, MAX(touch.touched_at) AS last_touched_at
+              FROM (
+                SELECT a.created_by_id AS user_id, a.timestamp AS touched_at
+                FROM activity a
+                WHERE a.workspace_id = #{workspaceId}
+                  AND (EXISTS (SELECT 1 FROM person p
+                      WHERE p.workspace_id = #{workspaceId} AND p.id = a.person_id AND p.company_id = #{companyId}
+                        AND p.archived_at IS NULL)
+                    OR EXISTS (SELECT 1 FROM deal d
+                        WHERE d.workspace_id = #{workspaceId} AND d.id = a.deal_id AND d.company_id = #{companyId}))
+                UNION ALL
+                SELECT t.assigned_to_id AS user_id, t.created_at AS touched_at
+                FROM task t
+                WHERE t.workspace_id = #{workspaceId}
+                  AND (EXISTS (SELECT 1 FROM person p
+                      WHERE p.workspace_id = #{workspaceId} AND p.id = t.person_id AND p.company_id = #{companyId}
+                        AND p.archived_at IS NULL)
+                    OR EXISTS (SELECT 1 FROM deal d
+                        WHERE d.workspace_id = #{workspaceId} AND d.id = t.deal_id AND d.company_id = #{companyId}))
+                UNION ALL
+                SELECT n.author_id AS user_id, n.created_at AS touched_at
+                FROM note n
+                WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace'
+                  AND (EXISTS (SELECT 1 FROM person p
+                      WHERE p.workspace_id = #{workspaceId} AND p.id = n.person_id AND p.company_id = #{companyId}
+                        AND p.archived_at IS NULL)
+                    OR EXISTS (SELECT 1 FROM deal d
+                        WHERE d.workspace_id = #{workspaceId} AND d.id = n.deal_id AND d.company_id = #{companyId}))
+              ) touch
+              WHERE touch.user_id IS NOT NULL
+              GROUP BY touch.user_id
+            ) related
+            ORDER BY related.last_touched_at DESC, related.user_id
+            LIMIT #{limit}
+          </select>
+
+          <select id="getCompanyEngagementWeeks"
+                  resultType="ooo.klae.connex.backend.dto.CompanyEngagementWeekBucketDto">
+            SELECT FLOOR(TIMESTAMPDIFF(SECOND, #{windowStart}, touch.touched_at) / 604800) AS bucket_index,
+                   SUM(touch.kind = 'activities') AS activities,
+                   SUM(touch.kind = 'tasks') AS tasks,
+                   SUM(touch.kind = 'notes') AS notes
+            FROM (
+              SELECT 'activities' AS kind, a.timestamp AS touched_at
+              FROM activity a
+              WHERE a.workspace_id = #{workspaceId}
+                AND a.timestamp &gt;= #{windowStart} AND a.timestamp &lt;= #{windowEnd}
+                AND (EXISTS (SELECT 1 FROM person p
+                    WHERE p.workspace_id = #{workspaceId} AND p.id = a.person_id AND p.company_id = #{companyId}
+                      AND p.archived_at IS NULL)
+                  OR EXISTS (SELECT 1 FROM deal d
+                      WHERE d.workspace_id = #{workspaceId} AND d.id = a.deal_id AND d.company_id = #{companyId}))
+              UNION ALL
+              SELECT 'tasks' AS kind, t.created_at AS touched_at
+              FROM task t
+              WHERE t.workspace_id = #{workspaceId}
+                AND t.created_at &gt;= #{windowStart} AND t.created_at &lt;= #{windowEnd}
+                AND (EXISTS (SELECT 1 FROM person p
+                    WHERE p.workspace_id = #{workspaceId} AND p.id = t.person_id AND p.company_id = #{companyId}
+                      AND p.archived_at IS NULL)
+                  OR EXISTS (SELECT 1 FROM deal d
+                      WHERE d.workspace_id = #{workspaceId} AND d.id = t.deal_id AND d.company_id = #{companyId}))
+              UNION ALL
+              SELECT 'notes' AS kind, n.created_at AS touched_at
+              FROM note n
+              WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace'
+                AND n.created_at &gt;= #{windowStart} AND n.created_at &lt;= #{windowEnd}
+                AND (EXISTS (SELECT 1 FROM person p
+                    WHERE p.workspace_id = #{workspaceId} AND p.id = n.person_id AND p.company_id = #{companyId}
+                      AND p.archived_at IS NULL)
+                  OR EXISTS (SELECT 1 FROM deal d
+                      WHERE d.workspace_id = #{workspaceId} AND d.id = n.deal_id AND d.company_id = #{companyId}))
+            ) touch
+            GROUP BY bucket_index
+            ORDER BY bucket_index
+          </select>
+
+          <select id="getCompanyRevenueByCurrency"
+                  resultType="ooo.klae.connex.backend.dto.CompanyRevenueCurrencyDto">
+            SELECT COALESCE(NULLIF(d.currency, ''), 'USD') AS currency,
+                   COUNT(*) AS deal_count,
+                   COALESCE(SUM(CASE WHEN d.won = TRUE THEN d.actual_value ELSE 0 END), 0) AS past_revenue,
+                   COALESCE(SUM(CASE WHEN d.won IS NULL THEN d.value ELSE 0 END), 0) AS projected_revenue
+            FROM deal d
+            WHERE d.workspace_id = #{workspaceId} AND d.company_id = #{companyId}
+            GROUP BY COALESCE(NULLIF(d.currency, ''), 'USD')
+            ORDER BY deal_count DESC, currency
+          </select>
+
+          <select id="getSegmentCompaniesPage" resultType="Company">
+            SELECT <include refid="qualifiedCompanyColumns"/>
+            FROM company c
+            JOIN JSON_TABLE(#{segmentIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) segment_ids
+              ON segment_ids.id = c.id
+            <include refid="warmthJoin"/>
+            <include refid="segmentPageWhere"/>
+            <include refid="memberScopePredicate"/>
+            <include refid="pageOrderBy"/>
+            LIMIT #{limit} OFFSET #{offset}
+          </select>
+
+          <select id="countSegmentCompanies" resultType="long">
+            SELECT COUNT(*)
+            FROM company c
+            JOIN JSON_TABLE(#{segmentIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) segment_ids
+              ON segment_ids.id = c.id
+            <include refid="warmthFilterJoin"/>
+            <include refid="segmentPageWhere"/>
+            <include refid="memberScopePredicate"/>
+          </select>
+
+          <select id="getSegmentCompanyIdsFiltered" resultType="int">
+            SELECT c.id
+            FROM company c
+            JOIN JSON_TABLE(#{segmentIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) segment_ids
+              ON segment_ids.id = c.id
+            <include refid="warmthFilterJoin"/>
+            <include refid="segmentPageWhere"/>
+            <include refid="memberScopePredicate"/>
+            ORDER BY c.id
+            LIMIT #{limit}
+          </select>
+
+          <select id="getCompanyIdsFiltered" resultType="int">
+            SELECT c.id
+            FROM company c
+            <include refid="warmthFilterJoin"/>
+            <include refid="pageWhere"/>
+            <include refid="memberScopePredicate"/>
+            ORDER BY c.id
+            LIMIT #{limit} OFFSET #{offset}
+          </select>
+
+          <select id="getCompaniesFiltered" resultType="Company">
+            SELECT <include refid="qualifiedCompanyColumns"/>
+            FROM company c
+            <include refid="warmthFilterJoin"/>
+            <include refid="pageWhere"/>
+            <include refid="memberScopePredicate"/>
+            ORDER BY c.name, c.id
+          </select>
+
+          <!-- Aggregates every visible company's attributed decayed touch history, so it costs a full
+               workspace scan of activity, note, and task rows. It is opt-in on the facets endpoint. -->
+          <select id="countsByWarmthBand" timeout="10"
+                  resultType="ooo.klae.connex.backend.dto.FacetCount">
+            SELECT <include refid="warmthBandKey"/> AS `key`,
+                   COUNT(*) AS count, NULL AS label
+            FROM company c
+            <include refid="warmthJoin"/>
+            WHERE <include refid="visible"/>
+            GROUP BY `key`
+          </select>
+
+          <select id="distinctIndustries" resultType="string">
+            SELECT DISTINCT c.industry
+            FROM company c
+            WHERE <include refid="visible"/> AND c.industry IS NOT NULL AND c.industry &lt;&gt; ''
+            ORDER BY c.industry
+          </select>
+
+          <select id="hasCompanyWithoutIndustry" resultType="boolean">
+            SELECT EXISTS(
+              SELECT 1
+              FROM company c
+              WHERE <include refid="visible"/> AND (c.industry IS NULL OR c.industry = '')
+            )
+          </select>
+
+          <select id="countsByOwner" resultType="ooo.klae.connex.backend.dto.FacetCount">
+            SELECT COALESCE(CAST(c.owner_id AS CHAR), '__empty__') AS `key`,
+                   COUNT(*) AS count, NULL AS label
+            FROM company c
+            WHERE c.workspace_id = #{workspaceId} AND c.archived_at IS NULL
+            GROUP BY c.owner_id
+          </select>
+
+          <select id="countArchivedCompanies" resultType="long">
+            SELECT COUNT(*) FROM company c
+            WHERE c.workspace_id = #{workspaceId} AND c.archived_at IS NOT NULL
+          </select>
+
+          <select id="getCompaniesByTagId" resultType="Company">
+            SELECT
+              c.id, c.workspace_id, c.owner_id, c.name, c.website, c.industry, c.phone, c.address,
+              c.created_at, c.updated_at, c.logo_url, c.archived_at
+            FROM company c
+            JOIN company_tag ct ON ct.company_id = c.id
+            WHERE (c.workspace_id = #{workspaceId}
+                   OR EXISTS (SELECT 1 FROM company_share cs
+                      JOIN workspace vws ON vws.id = cs.workspace_id
+                      JOIN workspace ows ON ows.id = c.workspace_id AND ows.org_id = vws.org_id
+                      WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
+              AND ct.tag_id = #{tagId}
+              AND c.archived_at IS NULL
+            ORDER BY c.name, c.id
+          </select>
+
+          <select id="getCompanyById" resultType="Company">
+            SELECT <include refid="qualifiedCompanyColumns"/>
+            FROM company c WHERE <include refid="visible"/> AND c.id = #{id}
+          </select>
+
+          <select id="getVisibleCompanyByIdForUpdate" resultType="Company">
+            SELECT <include refid="qualifiedCompanyColumns"/>
+            FROM company c WHERE <include refid="visible"/> AND c.id = #{id}
+            FOR UPDATE
+          </select>
+
+          <!-- flushCache is required: a caller may read this company through getCompanyById before the
+               lock and re-check it after, and a cached pre-lock answer would defeat that recheck. -->
+          <select id="getOwnedCompanyByIdForUpdate" resultType="Company" flushCache="true">
+            SELECT <include refid="qualifiedCompanyColumns"/>
+            FROM company c
+            WHERE c.workspace_id = #{workspaceId} AND c.id = #{id}
+            FOR UPDATE
+          </select>
+
+          <select id="getOwnedArchivedCompanyById" resultType="Company">
+            SELECT <include refid="qualifiedCompanyColumns"/>
+            FROM company c
+            WHERE c.workspace_id = #{workspaceId} AND c.id = #{id}
+              AND c.archived_at IS NOT NULL
+          </select>
+
+          <select id="getCompaniesWithWebsite" resultType="Company">
+            SELECT id, website FROM company
+            WHERE workspace_id = #{workspaceId} AND website IS NOT NULL AND website != ''
+              AND archived_at IS NULL
+          </select>
+
+          <select id="getCompaniesForDedup" resultType="Company">
+            SELECT id, name, website FROM company
+            WHERE workspace_id = #{workspaceId} AND archived_at IS NULL
+          </select>
+
+          <select id="getByIds" resultType="Company">
+            SELECT <include refid="qualifiedCompanyColumns"/> FROM company c
+            WHERE <include refid="visible"/> AND c.id IN
+            <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+            ORDER BY c.name, c.id
+          </select>
+
+          <select id="exists" resultType="boolean">
+            SELECT EXISTS(
+              SELECT 1 FROM company c WHERE <include refid="visible"/> AND c.id = #{id}
+            )
+          </select>
+
+          <select id="getVisibleIdsIn" resultType="int">
+            SELECT c.id
+            FROM company c
+            WHERE <include refid="visible"/>
+              AND c.id IN
+              <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+            ORDER BY c.id
+          </select>
+          <select id="existsOwned" resultType="boolean">
+            SELECT EXISTS(SELECT 1 FROM company
+              WHERE workspace_id = #{workspaceId} AND id = #{id} AND archived_at IS NULL)
+          </select>
+          <select id="existsOwnedArchived" resultType="boolean">
+            SELECT EXISTS(SELECT 1 FROM company
+              WHERE workspace_id = #{workspaceId} AND id = #{id} AND archived_at IS NOT NULL)
+          </select>
+
+          <select id="search" resultType="Company">
+            SELECT <include refid="qualifiedCompanyColumns"/> FROM company c
+            WHERE <include refid="visible"/>
+              AND (c.name LIKE #{query} OR c.website LIKE #{query} OR c.industry LIKE #{query} OR c.phone LIKE #{query} OR c.address LIKE #{query})
+            ORDER BY c.name, c.id
+            LIMIT 10
+          </select>
+
+          <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+            INSERT INTO company (workspace_id, owner_id, name, ai_identifier_literal_key, ai_identifier_label_key,
+              ai_identifier_source_name, ai_identifier_key_version, website, industry, phone, address, logo_url, created_at)
+            VALUES (#{workspaceId}, #{ownerId,jdbcType=INTEGER}, CONVERT(#{name,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),
+              CONVERT(#{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler} USING utf8mb4),
+              CONVERT(#{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler} USING utf8mb4),
+              CONVERT(#{name,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4), 3, #{website}, #{industry},
+              #{phone}, #{address}, #{logoUrl}, COALESCE(#{createdAt}, CURRENT_TIMESTAMP))
+          </insert>
+
+          <insert id="insertBatch" useGeneratedKeys="true" keyProperty="id">
+            INSERT INTO company (workspace_id, owner_id, name, ai_identifier_literal_key, ai_identifier_label_key,
+              ai_identifier_source_name, ai_identifier_key_version, website, industry, phone, address, logo_url)
+            VALUES
+            <foreach collection="list" item="c" separator=",">
+              (#{c.workspaceId}, #{c.ownerId,jdbcType=INTEGER}, CONVERT(#{c.name,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),
+              CONVERT(#{c.name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler} USING utf8mb4),
+              CONVERT(#{c.name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler} USING utf8mb4),
+              CONVERT(#{c.name,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4), 3, #{c.website}, #{c.industry},
+               #{c.phone}, #{c.address}, #{c.logoUrl})
+            </foreach>
+          </insert>
+
+          <update id="update">
+            UPDATE company
+            SET name = CONVERT(#{name,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),
+                ai_identifier_literal_key = CONVERT(#{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLiteralKeyTypeHandler} USING utf8mb4),
+                ai_identifier_label_key = CONVERT(#{name,jdbcType=LONGVARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierLabelKeyTypeHandler} USING utf8mb4),
+                ai_identifier_source_name = CONVERT(#{name,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),
+                ai_identifier_key_version = 3,
+                website = #{website},
+                industry = #{industry},
+                phone = #{phone},
+                address = #{address}
+            WHERE workspace_id = #{workspaceId} AND id = #{id}
+          </update>
+
+          <update id="updateOwner">
+            UPDATE company
+            SET owner_id = #{ownerId,jdbcType=INTEGER}
+            WHERE workspace_id = #{workspaceId} AND id = #{id}
+          </update>
+
+          <select id="lockById" resultType="java.lang.Integer">
+            SELECT id FROM company
+            WHERE workspace_id = #{workspaceId} AND id = #{id}
+            FOR UPDATE
+          </select>
+
+          <update id="updateLogoUrlIfCurrent">
+            UPDATE company SET logo_url = #{logoUrl}
+            WHERE workspace_id = #{workspaceId} AND id = #{id}
+              AND logo_url &lt;=&gt; #{currentLogoUrl}
+          </update>
+
+          <update id="clearMemberOwnership">
+            UPDATE company SET owner_id = NULL
+            WHERE workspace_id = #{workspaceId} AND owner_id = #{userId}
+          </update>
+
+          <update id="clearOwnershipAnywhere">
+            UPDATE company SET owner_id = NULL WHERE owner_id = #{userId}
+          </update>
+
+          <update id="archive">
+            UPDATE company SET archived_at = CURRENT_TIMESTAMP
+            WHERE workspace_id = #{workspaceId} AND id = #{id} AND archived_at IS NULL
+          </update>
+
+          <update id="restore">
+            UPDATE company SET archived_at = NULL
+            WHERE workspace_id = #{workspaceId} AND id = #{id} AND archived_at IS NOT NULL
+          </update>
+
+          <insert id="addTag">
+            INSERT IGNORE INTO company_tag (company_id, tag_id)
+            SELECT c.id, #{tagId}
+            FROM company c
+            WHERE c.workspace_id = #{workspaceId} AND c.id = #{companyId}
+          </insert>
+
+          <delete id="removeTag">
+            DELETE ct
+            FROM company_tag ct
+            JOIN company c ON c.id = ct.company_id
+            WHERE c.workspace_id = #{workspaceId} AND ct.company_id = #{companyId} AND ct.tag_id = #{tagId}
+          </delete>
+
+          <delete id="clearTags">
+            DELETE ct
+            FROM company_tag ct
+            JOIN company c ON c.id = ct.company_id
+            WHERE c.workspace_id = #{workspaceId} AND ct.company_id = #{companyId}
+          </delete>
+
+          <insert id="insertTags">
+            INSERT IGNORE INTO company_tag (company_id, tag_id)
+            SELECT c.id, t.id
+            FROM company c
+            JOIN tag t ON t.id IN
+            <foreach collection="tagIds" item="tagId" open="(" separator="," close=")">
+              #{tagId}
+            </foreach>
+            WHERE c.workspace_id = #{workspaceId} AND c.id = #{companyId} AND t.workspace_id = #{workspaceId}
+          </insert>
         </mapper>
         """;
 }

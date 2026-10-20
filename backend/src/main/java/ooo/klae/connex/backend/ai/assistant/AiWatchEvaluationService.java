@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
+
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -96,6 +98,8 @@ public class AiWatchEvaluationService {
     private final PlatformTransactionManager transactionManager;
     private final Clock clock;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     /** What one watch evaluation did. */
     public enum Outcome { FIRED, QUIET, SKIPPED }
 
@@ -146,6 +150,14 @@ public class AiWatchEvaluationService {
         if (type == null || !type.subjectKinds().contains(watch.getSubjectKind())) {
             return Outcome.SKIPPED;
         }
+        if (!"company".equals(watch.getSubjectKind())) {
+            return evaluateAsOwnerWithinVisibilityScope(watch, owner, type);
+        }
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            watch.getWorkspaceId(), () -> evaluateAsOwnerWithinVisibilityScope(watch, owner, type));
+    }
+
+    private Outcome evaluateAsOwnerWithinVisibilityScope(AiWatch watch, User owner, AiWatchType type) {
         Optional<String> label = subjectReader.label(watch.getSubjectKind(), watch.getSubjectId());
         if (label.isEmpty()) {
             watchMapper.recordEvaluated(watch.getWorkspaceId(), watch.getId(), nowUtc());

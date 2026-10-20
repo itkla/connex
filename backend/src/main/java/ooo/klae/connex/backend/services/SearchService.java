@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+
 import ooo.klae.connex.backend.mappers.CampaignMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealDocumentMapper;
@@ -147,21 +148,27 @@ public class SearchService {
         if (query == null || query.isBlank()) {
             return empty();
         }
-
-        String trimmed = query.trim();
-        if (trimmed.length() > MAX_QUERY_LENGTH) {
+        if (query.trim().length() > MAX_QUERY_LENGTH) {
             throw new BadRequestException("Search query is too long (max " + MAX_QUERY_LENGTH + " characters)");
         }
+        if (types.stream().noneMatch(Set.of("companies", "pipelines", "deals", "notes", "tasks", "activities")::contains)) {
+            return searchWithinVisibilityScope(query, types);
+        }
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceService.getCurrentWorkspaceId(), () -> searchWithinVisibilityScope(query, types));
+    }
 
+    private SearchResultsDto searchWithinVisibilityScope(String query, Set<String> types) {
+        String trimmed = query.trim();
         String pattern = LikePattern.containing(trimmed);
         String needle = foldSearchText(trimmed);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = workspaceService.getCurrentUserId();
         Set<Permission> permissions = workspaceService.permissionsFor(workspaceId, userId);
-        String orgWorkspaceIdsJson = types.contains("pipelines") || types.contains("notes")
+        String orgWorkspaceIdsJson = types.contains("companies") || types.contains("pipelines") || types.contains("notes")
             ? recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson() : null;
         return new SearchResultsDto(
-            selected(types, "companies", () -> companyMapper.search(workspaceId, pattern)
+            selected(types, "companies", () -> companyMapper.search(workspaceId, orgWorkspaceIdsJson, pattern)
                 .stream().map(CompanyDto::from).toList()),
             selected(types, "people", () -> personMapper.search(workspaceId, pattern)
                 .stream().map(PersonDto::from).toList()),

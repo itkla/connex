@@ -5,6 +5,7 @@ import static org.mockito.Mockito.mock;
 
 import java.util.List;
 
+import ooo.klae.connex.backend.services.RecordVisibilityRead;
 import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
 import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 
@@ -15,8 +16,13 @@ public final class RecordVisibilityScopes {
     /** Supplies a fresh boundary mock without registering unused stubs for unrelated test paths. */
     public static RecordVisibilityScopeControlAccess unfiltered() {
         return mock(RecordVisibilityScopeControlAccess.class, invocation -> {
-            if ("withWorkspaceScope".equals(invocation.getMethod().getName())) {
+            if ("withWorkspaceScope".equals(invocation.getMethod().getName())
+                    || "withDeferredWorkspaceScope".equals(invocation.getMethod().getName())) {
                 return ((java.util.function.Supplier<?>) invocation.getArgument(invocation.getArguments().length - 1)).get();
+            }
+            if ("withWorkspaceScopeRead".equals(invocation.getMethod().getName())
+                    || "withDeferredWorkspaceScopeRead".equals(invocation.getMethod().getName())) {
+                return ((RecordVisibilityRead<?>) invocation.getArgument(invocation.getArguments().length - 1)).read();
             }
             if ("getForWorkspace".equals(invocation.getMethod().getName())) {
                 return new RecordVisibilityScope(90, List.of(7, 8, 9));
@@ -24,4 +30,10 @@ public final class RecordVisibilityScopes {
             return RETURNS_DEFAULTS.answer(invocation);
         });
     }
+    /** Supplies the new constructor dependency in existing Mockito injection fixtures. */
+    public static void install(Object service) {
+        org.springframework.test.util.ReflectionTestUtils.setField(
+            service, "recordVisibilityScopeControlAccess", unfiltered());
+    }
+
 }

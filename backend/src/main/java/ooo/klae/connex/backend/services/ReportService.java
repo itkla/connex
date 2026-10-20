@@ -1539,12 +1539,12 @@ public class ReportService {
                 : Set.of();
         List<RelationshipTemperatureDto> currentCompanyRelationships = companyRelationships
                 ? visibleRelationshipScores(
-                        scoringService.scoreCompanies(workspaceId, period.currentEndInstant()),
+                        scoringService.scoreCompanies(workspaceId, period.currentEndInstant(), orgWorkspaceIdsJson),
                         currentCompanies)
                 : List.of();
         List<RelationshipTemperatureDto> priorCompanyRelationships = companyRelationships
                 ? visibleRelationshipScores(
-                        scoringService.scoreCompanies(workspaceId, period.priorEndInstant()),
+                        scoringService.scoreCompanies(workspaceId, period.priorEndInstant(), orgWorkspaceIdsJson),
                         priorCompanies)
                 : List.of();
         Map<String, String> ownerLabels = new HashMap<>();

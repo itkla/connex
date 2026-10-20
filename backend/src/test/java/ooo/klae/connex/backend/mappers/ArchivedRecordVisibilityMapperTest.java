@@ -482,7 +482,7 @@ class ArchivedRecordVisibilityMapperTest extends AbstractMapperTest {
     }
 
     private List<Integer> companyPageIds(Workspace viewer, boolean archived) {
-        return companyMapper.getCompaniesPage(viewer.getId(), null, "name", "asc", null, false, null,
+        return companyMapper.getCompaniesPage(viewer.getId(), orgWorkspaceIdsJson(workspaceMapper, viewer.getId()), null, "name", "asc", null, false, null,
                 allTeamScope(), archived, null, 500, 0)
             .stream().map(Company::getId).toList();
     }
@@ -501,7 +501,7 @@ class ArchivedRecordVisibilityMapperTest extends AbstractMapperTest {
 
     private List<RelationshipScoreAggregateDto> companyScores(LocalDateTime reference) {
         return companyMapper.getRelationshipScoreAggregates(
-            workspace.getId(), reference, RelationshipWarmthModel.current().sqlParameters());
+            workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), reference, RelationshipWarmthModel.current().sqlParameters());
     }
 
     private RelationshipScoreAggregateDto companyScore(int companyId, LocalDateTime reference) {

@@ -33,7 +33,7 @@ class NotePageScopeTest {
     private final UserMapper users = mock(UserMapper.class);
     private final WorkspaceService workspace = mock(WorkspaceService.class);
     private final ReferenceService references = mock(ReferenceService.class);
-    private final RecordVisibilityScopeControlAccess scopes = mock(RecordVisibilityScopeControlAccess.class);
+    private final RecordVisibilityScopeControlAccess scopes = ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
     private final NoteService service = new NoteService(notes, users, mock(DealMapper.class), mock(PersonMapper.class),
         mock(AuditService.class), workspace, mock(AuthService.class), references, mock(NotificationDelivery.class),
         mock(NotificationPreferenceService.class), mock(ObjectMapper.class), scopes);
@@ -61,6 +61,7 @@ class NotePageScopeTest {
         assertEquals(73, page.total());
         var order = inOrder(scopes, users, notes);
         order.verify(scopes).getForWorkspace(7);
+        order.verify(scopes).withWorkspaceScopeRead(eq(7), org.mockito.ArgumentMatchers.any(RecordVisibilityScopeControlAccess.RecordVisibilityScope.class), org.mockito.ArgumentMatchers.any());
         order.verify(users).findMatchingWorkspaceMemberIds(7, "%needle%");
         if (workspaceOnly) {
             order.verify(notes).getWorkspaceNotesPage(7, "[7,8]", "%needle%", authors, "title", "asc", 25, 50);
@@ -82,6 +83,7 @@ class NotePageScopeTest {
         var page = service.getNotesPage(null, "unknown", "unknown", 10, 0, workspaceOnly);
 
         assertEquals(0, page.total());
+        verify(scopes).withWorkspaceScopeRead(eq(7), org.mockito.ArgumentMatchers.any(RecordVisibilityScopeControlAccess.RecordVisibilityScope.class), org.mockito.ArgumentMatchers.any());
         verify(scopes).getForWorkspace(7);
         verifyNoMoreInteractions(scopes);
         verifyNoInteractions(users);

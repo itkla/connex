@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.integration;
 
+
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -39,6 +40,7 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 @Transactional
 @Import(TenantScopeRefusalIsolationTest.ScopedMapperProbeController.class)
 class TenantScopeRefusalIsolationTest {
+
 
     private static final String PASSWORD = "Tenant-Refusal-Pw1!";
 
@@ -101,7 +103,7 @@ class TenantScopeRefusalIsolationTest {
 
         @GetMapping
         int probe() {
-            return companyMapper.search(1, "%tenant-refusal%").size();
+            return companyMapper.search(1, "[1]", "%tenant-refusal%").size();
         }
     }
 }

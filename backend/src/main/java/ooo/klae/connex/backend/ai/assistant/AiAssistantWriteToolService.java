@@ -204,71 +204,77 @@ public class AiAssistantWriteToolService {
             target = new Target(resource.kind(), resource.id());
         }
         tool.validateFor(target.kind(), args);
-        if (storedArgumentsJson.isEmpty() && tool.requiresOwnedTarget()) {
-            requireOwnedTarget(target);
-        }
-        AiAssistantProposalPins pins = toolCatalog.tier(name) != ToolTier.CONFIRM
-                ? null
-                : storedArgumentsJson.isPresent()
-                        ? storedPins(storedArgumentsJson.get())
-                        : pins(tool, new Target(target.kind(), target.id()), request);
-        Map<String, Object> pinned;
-        if (storedArgumentsJson.isPresent()) {
-            pinned = AiAssistantToolProposalPin.read(objectMapper.readTree(storedArgumentsJson.get()));
-        } else {
-            Target anchor = new Target(target.kind(), target.id());
-            try {
-                if (tool.freshness() == AiAssistantWriteTool.Freshness.NONE) {
-                    requireTargetAccessible(anchor);
-                }
-                AiAssistantWriteTool.Preparation preparation = tool.prepare(anchor, request);
-                pinned = AiAssistantToolProposalPin.copy(preparation.pinned());
-                requireNoKnownDuplicate(tool, preparation.duplicateProbe());
-            } catch (ResourceNotFoundException exception) {
-                throw AiAssistantLoopException.refusedArguments(UNRESOLVED_REFERENCE);
+        java.util.function.Supplier<AiAssistantPreparedWrite> preparedOperation = () -> {
+            if (storedArgumentsJson.isEmpty() && tool.requiresOwnedTarget()) {
+                requireOwnedTarget(target);
             }
-        }
-        ObjectNode storedRequest = objectMapper.valueToTree(request);
-        if (!"workspace".equals(target.kind())) {
-            storedRequest.put("handle", "task".equals(target.kind()) ? "t1" : "r1");
-        }
-        Map<String, Object> targetData = new LinkedHashMap<>();
-        targetData.put("kind", target.kind());
-        targetData.put("id", target.id());
-        Map<String, Object> durable = new LinkedHashMap<>();
-        durable.put("tool", name);
-        durable.put("tier", toolCatalog.tier(name).name().toLowerCase());
-        durable.put("restrictionEpoch", expectedRestrictionEpoch);
-        durable.put("target", targetData);
-        durable.put("request", storedRequest);
-        List<AiAssistantToolResult.Identifier> memberIdentifiers = storedArgumentsJson.isPresent()
-                ? AiAssistantMemberIdentifiers.stored(objectMapper.readTree(storedArgumentsJson.get()))
-                : AiAssistantMemberIdentifiers.inRequest(storedRequest, resources.maskingContext(), parsedMembers);
-        if (!memberIdentifiers.isEmpty()) {
-            durable.put("memberIdentifiers", memberIdentifiers);
-        }
-        if (tool.freshness() == AiAssistantWriteTool.Freshness.TARGET_FINGERPRINT) {
-            String version;
+            AiAssistantProposalPins pins = toolCatalog.tier(name) != ToolTier.CONFIRM
+                    ? null
+                    : storedArgumentsJson.isPresent()
+                            ? storedPins(storedArgumentsJson.get())
+                            : pins(tool, new Target(target.kind(), target.id()), request);
+            Map<String, Object> pinned;
             if (storedArgumentsJson.isPresent()) {
-                version = text(objectMapper.readTree(storedArgumentsJson.get()), "targetVersion");
+                pinned = AiAssistantToolProposalPin.read(objectMapper.readTree(storedArgumentsJson.get()));
             } else {
-                version = taskService.assistantStateVersion(target.id());
-                taskService.getTaskById(target.id());
+                Target anchor = new Target(target.kind(), target.id());
+                try {
+                    if (tool.freshness() == AiAssistantWriteTool.Freshness.NONE) {
+                        requireTargetAccessible(anchor);
+                    }
+                    AiAssistantWriteTool.Preparation preparation = tool.prepare(anchor, request);
+                    pinned = AiAssistantToolProposalPin.copy(preparation.pinned());
+                    requireNoKnownDuplicate(tool, preparation.duplicateProbe());
+                } catch (ResourceNotFoundException exception) {
+                    throw AiAssistantLoopException.refusedArguments(UNRESOLVED_REFERENCE);
+                }
             }
-            durable.put("targetVersion", version);
-        }
-        if (pins != null) {
-            pins.writeTo(durable);
-        }
-        if (!pinned.isEmpty()) {
-            durable.put("pinned", pinned);
-        }
-        return new AiAssistantPreparedWrite(
-                name,
-                toolCatalog.tier(name),
-                target.kind(),
-                target.id(),
-                serialize(durable));
+            ObjectNode storedRequest = objectMapper.valueToTree(request);
+            if (!"workspace".equals(target.kind())) {
+                storedRequest.put("handle", "task".equals(target.kind()) ? "t1" : "r1");
+            }
+            Map<String, Object> targetData = new LinkedHashMap<>();
+            targetData.put("kind", target.kind());
+            targetData.put("id", target.id());
+            Map<String, Object> durable = new LinkedHashMap<>();
+            durable.put("tool", name);
+            durable.put("tier", toolCatalog.tier(name).name().toLowerCase());
+            durable.put("restrictionEpoch", expectedRestrictionEpoch);
+            durable.put("target", targetData);
+            durable.put("request", storedRequest);
+            List<AiAssistantToolResult.Identifier> memberIdentifiers = storedArgumentsJson.isPresent()
+                    ? AiAssistantMemberIdentifiers.stored(objectMapper.readTree(storedArgumentsJson.get()))
+                    : AiAssistantMemberIdentifiers.inRequest(storedRequest, resources.maskingContext(), parsedMembers);
+            if (!memberIdentifiers.isEmpty()) {
+                durable.put("memberIdentifiers", memberIdentifiers);
+            }
+            if (tool.freshness() == AiAssistantWriteTool.Freshness.TARGET_FINGERPRINT) {
+                String version;
+                if (storedArgumentsJson.isPresent()) {
+                    version = text(objectMapper.readTree(storedArgumentsJson.get()), "targetVersion");
+                } else {
+                    version = taskService.assistantStateVersion(target.id());
+                    taskService.getTaskById(target.id());
+                }
+                durable.put("targetVersion", version);
+            }
+            if (pins != null) {
+                pins.writeTo(durable);
+            }
+            if (!pinned.isEmpty()) {
+                durable.put("pinned", pinned);
+            }
+            return new AiAssistantPreparedWrite(
+                    name,
+                    toolCatalog.tier(name),
+                    target.kind(),
+                    target.id(),
+                    serialize(durable));
+        };
+        return storedArgumentsJson.isPresent()
+                ? preparedOperation.get()
+                : recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
+                        workspaceService.getCurrentWorkspaceId(), preparedOperation);
     }
 
     /** Strict assistant-create policy: any visible candidate or truncation refuses a proposal. */
@@ -280,6 +286,9 @@ public class AiAssistantWriteToolService {
                 throw new IllegalStateException("Assistant create has no duplicate probe");
             }
             return;
+        }
+        if ("deal".equals(probe.kind()) && probe.companyId() != null) {
+            recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         }
         boolean candidates;
         try {

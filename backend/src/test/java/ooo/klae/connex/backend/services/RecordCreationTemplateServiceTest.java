@@ -553,7 +553,7 @@ class RecordCreationTemplateServiceTest {
         order.verify(shareMapper).lockPipelineShareForWorkspace(7, 7);
         order.verify(personMapper).getVisiblePersonByIdForUpdate(7, 2);
         order.verify(shareMapper).lockPersonShareForWorkspace(2, 7);
-        order.verify(companyMapper).getVisibleCompanyByIdForUpdate(7, 5);
+        order.verify(companyMapper).getVisibleCompanyByIdForUpdate(7, "[7,8,9]", 5);
         order.verify(shareMapper).lockCompanyShareForWorkspace(5, 7);
         order.verify(resolver).resolveWorkspace(root, version, null, "[7,8,9]");
         order.verify(mapper).setDefault(7, "person", 42, 5);

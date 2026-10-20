@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
+
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.HashMap;
@@ -81,6 +83,8 @@ public class DealDocumentService {
     private final RuleTriggerPublisher ruleTriggers;
     private final ObjectMapper objectMapper;
     private final ApprovalMutationRetryService approvalMutationRetryService;
+
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     private static final Set<String> CLIENT_TARGET_STATUSES = Set.of("draft", "final", "superseded");
     private static final int MAX_VERSION_ATTEMPTS = 5;
@@ -166,13 +170,25 @@ public class DealDocumentService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DEAL_UPDATE)
     public DealDocumentDto generate(int dealId, int templateId) {
-        return generate(dealId, templateId, MutationAdmission.UNRESTRICTED);
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> generateWithinVisibilityScope(dealId, templateId, resolvedVisibilityScope));
+    }
+
+    private DealDocumentDto generateWithinVisibilityScope(int dealId, int templateId, RecordVisibilityScope operationVisibilityScope) {
+        return generateWithinVisibilityScope(dealId, templateId, MutationAdmission.UNRESTRICTED, operationVisibilityScope);
     }
 
     /** Performs the canonical action after its final under-lock mutation admission. */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DEAL_UPDATE)
     public DealDocumentDto generate(int dealId, int templateId, MutationAdmission admission) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> generateWithinVisibilityScope(dealId, templateId, admission, resolvedVisibilityScope));
+    }
+
+    private DealDocumentDto generateWithinVisibilityScope(int dealId, int templateId, MutationAdmission admission, RecordVisibilityScope operationVisibilityScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requireDeal(workspaceId, dealId);
         int actorId = workspaceService.getCurrentUserId();
@@ -187,7 +203,7 @@ public class DealDocumentService {
         }
         String currency = deal.getCurrency() == null || deal.getCurrency().isBlank() ? "USD" : deal.getCurrency();
 
-        Company company = deal.getCompanyId() == null ? null : companyMapper.getCompanyById(workspaceId, deal.getCompanyId());
+        Company company = deal.getCompanyId() == null ? null : companyMapper.getCompanyById(workspaceId, operationVisibilityScope.workspaceIdsJson(), deal.getCompanyId());
         User owner = deal.getOwnerId() == null ? null : userMapper.getUserById(deal.getOwnerId());
         Workspace workspace = workspaceService.getCurrentWorkspace();
         DealLineItemsResponse lines = lineItemService.snapshotForDocument(workspaceId, deal);

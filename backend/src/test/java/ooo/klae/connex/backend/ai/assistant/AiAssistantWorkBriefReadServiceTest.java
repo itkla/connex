@@ -80,7 +80,7 @@ class AiAssistantWorkBriefReadServiceTest {
         service = new AiAssistantWorkBriefReadService(
                 taskMapper, activityMapper, personMapper, mock(CompanyMapper.class), dealMapper,
                 mock(ScoringService.class), workspaceService, workspaceScope,
-                Clock.fixed(Instant.parse("2026-08-23T04:00:00Z"), ZoneOffset.UTC), references);
+                Clock.fixed(Instant.parse("2026-08-23T04:00:00Z"), ZoneOffset.UTC), references, ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
     }
 
     @Test
@@ -141,6 +141,16 @@ class AiAssistantWorkBriefReadServiceTest {
         assertFalse(projected.contains("Former"));
         assertFalse(projected.contains("Pending"));
         org.junit.jupiter.api.Assertions.assertEquals(0, context.tokenBindings().size());
+    }
+
+    @Test
+    void emptyCommitmentsAndMeetingsDoNotReadRecordVisibilityScopes() {
+        try (var operation = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(7)) {
+            org.springframework.test.util.ReflectionTestUtils.setField(service, "recordVisibilityScopeControlAccess", operation.scopes);
+            service.workCommitments(11, 7, 10, new AiChatResourceRegistry());
+            service.upcomingMeetings(11, 7, 10, new AiChatResourceRegistry());
+            org.mockito.Mockito.verifyNoInteractions(operation.control);
+        }
     }
 
 }

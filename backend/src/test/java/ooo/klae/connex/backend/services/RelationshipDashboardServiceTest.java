@@ -83,9 +83,9 @@ class RelationshipDashboardServiceTest {
         deal.setCompanyId(10);
         when(personMapper.getByIds(workspaceId, List.of(1))).thenReturn(List.of(person));
         when(dealMapper.getByIds(workspaceId, List.of(20))).thenReturn(List.of(deal));
-        when(companyMapper.getByIds(workspaceId, List.of(10))).thenReturn(List.of(company));
+        when(companyMapper.getByIds(workspaceId, "[7,8,9]", List.of(10))).thenReturn(List.of(company));
         RelationshipDashboardService service = new RelationshipDashboardService(
-            scoring, riskService, personMapper, companyMapper, dealMapper);
+            scoring, riskService, personMapper, companyMapper, dealMapper, ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
 
         RelationshipDashboardDto dashboard = service.getDashboard(workspaceId);
 
@@ -120,7 +120,7 @@ class RelationshipDashboardServiceTest {
             org.mockito.ArgumentMatchers.eq(6)))
             .thenReturn(new DashboardDealRiskResult(List.of(), false));
         RelationshipDashboardService service = new RelationshipDashboardService(
-            scoring, riskService, personMapper, companyMapper, dealMapper);
+            scoring, riskService, personMapper, companyMapper, dealMapper, ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
 
         RelationshipDashboardDto dashboard = service.getDashboard(workspaceId);
 

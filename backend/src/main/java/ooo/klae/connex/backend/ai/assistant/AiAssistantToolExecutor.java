@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
+
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -77,6 +79,8 @@ public class AiAssistantToolExecutor {
     private final AiAssistantDateResolver dateResolver;
     private final AiAssistantScopeReadService scopeReadService;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     /** Executes one validated, enabled tool call outside any declared query scope. */
     public AiAssistantToolResult execute(
             String name,
@@ -113,6 +117,20 @@ public class AiAssistantToolExecutor {
             throw AiAssistantLoopException.malformed(toolCatalog.unavailableReason(name));
         }
         AiChatScopedToolPolicy.requireHonorsDeclaredScope(name, scope);
+
+        if ("set_todos".equals(name)) {
+            return executeWithinVisibilityScope(name, args, resources, includePrivateNotes, scope);
+        }
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> executeWithinVisibilityScope(name, args, resources, includePrivateNotes, scope));
+    }
+
+    private AiAssistantToolResult executeWithinVisibilityScope(
+            String name,
+            JsonNode args,
+            AiChatResourceRegistry resources,
+            boolean includePrivateNotes,
+            AiChatQueryScope scope) {
         try {
             AiAssistantToolResult shaped = switch (name) {
                 case "search_records" -> search(args, resources);
@@ -187,6 +205,22 @@ public class AiAssistantToolExecutor {
     /** Resolves authorized page context into handles without placing tenant-local ids in prompt data. */
     public AiAssistantToolResult pageContext(
             List<AiChatPageContextDto> pageContext, AiChatResourceRegistry resources) {
+        if (pageContext.isEmpty()) {
+            return result(Map.of("records", List.of()), List.of());
+        }
+        var mission = ooo.klae.connex.backend.ai.mission.AiAgentScopePolicy.current();
+        if (mission != null) {
+            pageContext.forEach(record -> mission.requireRecord(record.kind(), record.id()));
+        } else if (pageContext.stream().noneMatch(record -> record != null && record.kind() != null
+                && RECORD_KINDS.contains(record.kind()) && record.id() > 0)) {
+            return result(Map.of("records", List.of()), List.of());
+        }
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> pageContextWithinVisibilityScope(pageContext, resources));
+    }
+
+    private AiAssistantToolResult pageContextWithinVisibilityScope(
+            List<AiChatPageContextDto> pageContext, AiChatResourceRegistry resources) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         var mission = ooo.klae.connex.backend.ai.mission.AiAgentScopePolicy.current();
         if (mission != null) {
@@ -210,7 +244,7 @@ public class AiAssistantToolExecutor {
                         .collect(java.util.stream.Collectors.toMap(Person::getId, person -> person));
         Map<Integer, Company> companies = companyIds.isEmpty()
                 ? Map.of()
-                : companyMapper.getByIds(workspaceId, companyIds).stream()
+                : companyMapper.getByIds(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), companyIds).stream()
                         .collect(java.util.stream.Collectors.toMap(Company::getId, company -> company));
         Map<Integer, Deal> deals = dealIds.isEmpty()
                 ? Map.of()
@@ -223,7 +257,7 @@ public class AiAssistantToolExecutor {
                 .toList();
         Map<Integer, Company> dealCompanies = dealCompanyIds.isEmpty()
                 ? Map.of()
-                : companyMapper.getByIds(workspaceId, dealCompanyIds)
+                : companyMapper.getByIds(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), dealCompanyIds)
                         .stream()
                         .collect(java.util.stream.Collectors.toMap(Company::getId, company -> company));
         List<Map<String, Object>> records = new ArrayList<>();

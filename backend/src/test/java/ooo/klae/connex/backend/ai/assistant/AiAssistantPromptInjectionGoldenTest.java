@@ -332,7 +332,7 @@ class AiAssistantPromptInjectionGoldenTest {
                 mock(CompanyMapper.class),
                 mock(DealMapper.class),
                 mock(AiAssistantDateResolver.class),
-                mock(AiAssistantScopeReadService.class));
+                mock(AiAssistantScopeReadService.class), ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
         assertThrows(AiAssistantLoopException.class, () ->
                 executor.execute(parsed.tool().name(), parsed.tool().args(), resources, true));
         verifyNoInteractions(

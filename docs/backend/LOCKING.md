@@ -26,7 +26,8 @@ Read the relevant section before adding/changing `FOR UPDATE`, transaction isola
 - Read control-plane data needed only for a response after the tenant write commits. Workspace
   entries prepare immutable record-visibility and active-only organization scopes before tenant
   transactions in both modes (#2165/#2176). Matching prepared reads borrow no connection. Routed
-  lookups without a matching payload refuse inside transactions, including shared placements.
+  lookups without a matching payload throw `TenantScopeSnapshotMissingException` before any query
+  or connection checkout inside transactions, including shared placements with a null catalog.
   Single-database entries inside an actual transaction skip preparation and retain lazy boundary
   fallbacks. Ordinary sharing remains lazy in single-database mode. Control-plane **locks** needed
   through commit stay on the tenant transaction's own connection through `ControlCatalogRoutingInterceptor`;
@@ -45,6 +46,9 @@ Read the relevant section before adding/changing `FOR UPDATE`, transaction isola
   and are not repaired by scope preparation. The active-only boundary's lazy fallback already uses
   an independent control transaction and does not establish the caller's view. Destructive freshness
   is separate: restriction cache erasure retains its same-connection READ COMMITTED fresh scope read.
+  A deferred record-visibility operation's first use checks the prepared payload before its
+  transaction memo or lazy lookup; empty and skipped operations retain their no-read behavior.
+- Company visibility and relationship validation resolve the unfiltered `RecordVisibilityScopeControlAccess` ceiling before the first authorization lock, duplicate-decision mutex or `FOR UPDATE`. This includes reference-hydrating Note/Task/Activity/Introduction writes, record creation and attachment target locks, transcript/turn preparation and document lifecycle activity callbacks. `CompanyMapper.getVisibleCompanyByIdForUpdate` and share-grant locks still run on the original tenant transaction connection; an invisible Company yields no row and cannot become an accepted relationship target. Compound reads bind `withWorkspaceScopeRead` when visibility work is mandatory and `withDeferredWorkspaceScopeRead` when existing guards can skip it. Operations with independent failure handlers, including Radar bootstrap reconciliation, bind `withDeferredWorkspaceScope` so ordinary scope failures reach those handlers; snapshot-invariant refusals still escape. Loops of independently committed mutations bind an explicit operation scope, capture one snapshot when needed, restore it on exit and retain every existing transaction boundary. Lock-taking mutation roots remain eager before their first authorization lock or mutex. Destructive cache purges retain the separately documented `getFreshForWorkspace` exception.
 - Changes to lock order or transaction isolation are Tier 3/high-risk and receive focused concurrency/correctness review.
 
 Interactive and public API requests return HTTP 409 for Spring pessimistic lock failures and exact

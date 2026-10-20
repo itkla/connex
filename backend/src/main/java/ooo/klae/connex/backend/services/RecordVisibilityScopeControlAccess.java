@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException;
+
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Supplier;
@@ -43,6 +45,21 @@ public class RecordVisibilityScopeControlAccess {
     }
 
     /**
+     * Shares this operation's first needed scope read across read-only or independently handled work.
+     * Empty and skipped paths perform no lookup. An ordinary lookup failure is retained for the
+     * operation, so each item's existing handler observes it without retrying the control database.
+     * Callers that take authorization locks must use an eager boundary before their first lock.
+     * Routed reads always validate the prepared context and never use this single-database memo.
+     */
+    public <T> T withDeferredWorkspaceScope(int workspaceId, Supplier<T> operation) {
+        OperationScope previous = operationScope.get();
+        if (previous != null && previous.workspaceId == workspaceId) {
+            return operation.get();
+        }
+        return runWithinScope(workspaceId, null, operation);
+    }
+
+    /**
      * Reuses a caller's trusted snapshot across nested work and restores any enclosing operation.
      * In single-database mode it takes precedence over prepared data, keeping nested reads aligned
      * with the scope explicitly passed to batch statements. Routed scopes must equal the exact
@@ -53,17 +70,104 @@ public class RecordVisibilityScopeControlAccess {
         requireScopeIdentity(workspaceId, scope);
         if (shareWorkspaceControlAccess.isCatalogPerPlacement()
                 && !scope.equals(getFreshForWorkspace(workspaceId))) {
-            throw new IllegalStateException("Operation scope does not match the prepared tenant context");
+            throw new TenantScopeSnapshotException("Operation scope does not match the prepared tenant context");
         }
         return runWithinScope(workspaceId, scope, operation);
     }
 
     private <T> T runWithinScope(int workspaceId, RecordVisibilityScope scope, Supplier<T> operation) {
-        requireScopeIdentity(workspaceId, scope);
+        if (scope != null) {
+            requireScopeIdentity(workspaceId, scope);
+        }
         OperationScope previous = operationScope.get();
-        operationScope.set(new OperationScope(workspaceId, tenantContext.getCatalog(), tenantContext.isResolved(), scope));
+        operationScope.set(new OperationScope(workspaceId, tenantContext.getCatalog(), tenantContext.isResolved(), tenantContext.getOrgId(), scope));
         try {
             return operation.get();
+        } finally {
+            if (previous == null) {
+                operationScope.remove();
+            } else {
+                operationScope.set(previous);
+            }
+        }
+    }
+
+    /**
+     * Shares one eagerly resolved snapshot across an operation that changes no state. Routing,
+     * identity validation and restoration match {@link #withWorkspaceScope(int, Supplier)}, but
+     * the read invokes its own callback directly so it never enters the mutation callback merge.
+     *
+     * @param <T> the read's result type
+     * @param workspaceId workspace anchoring the organization
+     * @param read the read-only operation
+     * @return the read's result
+     */
+    public <T> T withWorkspaceScopeRead(int workspaceId, RecordVisibilityRead<T> read) {
+        RecordVisibilityScope scope = getForWorkspace(workspaceId);
+        requireScopeIdentity(workspaceId, scope);
+        OperationScope previous = operationScope.get();
+        operationScope.set(new OperationScope(workspaceId, tenantContext.getCatalog(), tenantContext.isResolved(), tenantContext.getOrgId(), scope));
+        try {
+            return read.read();
+        } finally {
+            if (previous == null) {
+                operationScope.remove();
+            } else {
+                operationScope.set(previous);
+            }
+        }
+    }
+
+    /**
+     * Reuses a caller's trusted snapshot for a read without joining the mutation callback interface.
+     * Explicit single-database snapshots precede prepared data; routed snapshots must equal the
+     * exact prepared payload. The enclosing operation is restored even when the read fails.
+     *
+     * @param <T> the read's result type
+     * @param workspaceId workspace anchoring the organization
+     * @param scope the trusted snapshot already resolved by the caller
+     * @param read the read-only operation
+     * @return the read's result
+     */
+    public <T> T withWorkspaceScopeRead(int workspaceId, RecordVisibilityScope scope, RecordVisibilityRead<T> read) {
+        Objects.requireNonNull(scope, "scope");
+        requireScopeIdentity(workspaceId, scope);
+        if (shareWorkspaceControlAccess.isCatalogPerPlacement()
+                && !scope.equals(getFreshForWorkspace(workspaceId))) {
+            throw new TenantScopeSnapshotException("Operation scope does not match the prepared tenant context");
+        }
+        OperationScope previous = operationScope.get();
+        operationScope.set(new OperationScope(workspaceId, tenantContext.getCatalog(), tenantContext.isResolved(), tenantContext.getOrgId(), scope));
+        try {
+            return read.read();
+        } finally {
+            if (previous == null) {
+                operationScope.remove();
+            } else {
+                operationScope.set(previous);
+            }
+        }
+    }
+
+    /**
+     * Shares a read-only operation's first needed snapshot and any ordinary lookup failure.
+     * Empty and skipped operations perform no lookup, exactly as
+     * {@link #withDeferredWorkspaceScope(int, Supplier)}. Routed reads still validate their prepared
+     * snapshot on every access. The read never passes through the mutation callback interface.
+     *
+     * @param <T> the read's result type
+     * @param workspaceId workspace anchoring the organization
+     * @param read the read-only operation
+     * @return the read's result
+     */
+    public <T> T withDeferredWorkspaceScopeRead(int workspaceId, RecordVisibilityRead<T> read) {
+        OperationScope previous = operationScope.get();
+        if (previous != null && previous.workspaceId == workspaceId) {
+            return read.read();
+        }
+        operationScope.set(new OperationScope(workspaceId, tenantContext.getCatalog(), tenantContext.isResolved(), tenantContext.getOrgId(), null));
+        try {
+            return read.read();
         } finally {
             if (previous == null) {
                 operationScope.remove();
@@ -77,9 +181,10 @@ public class RecordVisibilityScopeControlAccess {
      * Resolves one immutable, unfiltered record-visibility ceiling for an operation.
      * Both modes serve a payload matching the current workspace, organization and effective catalog.
      * Single-database precedence is explicit operation scope, prepared payload, transaction memo,
-     * then lazy lookup. The memo belongs only to an actual synchronized transaction, is suspended
-     * with it and is discarded on completion. Without any of these scopes, each call reads afresh.
-     * A transaction-first single-database entry retains that lazy behavior; at REPEATABLE READ its
+     * then lazy lookup. A deferred operation's first needed scope follows the same precedence and
+     * retains ordinary lookup failures, while snapshot-invariant refusals always propagate.
+     * The transaction memo is suspended with its transaction and discarded on completion.
+     * A transaction-first single-database entry retains its lazy behavior; at REPEATABLE READ its
      * first consistent scope read can establish a pre-lock read view (see {@code docs/backend/LOCKING.md}).
      * Routed reads bypass both memos and refuse a missing payload inside a transaction before SQL.
      *
@@ -91,21 +196,49 @@ public class RecordVisibilityScopeControlAccess {
     public RecordVisibilityScope getForWorkspace(int workspaceId) {
         boolean routed = shareWorkspaceControlAccess.isCatalogPerPlacement();
         OperationScope operation = operationScope.get();
-        if (!routed && operation != null && operation.workspaceId() == workspaceId) {
-            requireScopeIdentity(workspaceId, operation.scope());
-            if (operation.resolved() && !tenantContext.isResolved()
-                    || !Objects.equals(operation.catalog(), tenantContext.getCatalog())) {
-                throw new IllegalStateException("Operation scope does not match the resolved tenant catalog");
+        if (!routed && operation != null && operation.workspaceId == workspaceId) {
+            if (operation.resolved && !tenantContext.isResolved()
+                    || !Objects.equals(operation.catalog, tenantContext.getCatalog())
+                    || tenantContext.isResolved() && (tenantContext.getWorkspaceId().intValue() != workspaceId
+                        || operation.orgId != null && !Objects.equals(operation.orgId, tenantContext.getOrgId()))) {
+                throw new TenantScopeSnapshotException("Operation scope does not match the resolved tenant catalog");
             }
-            return operation.scope();
+            if (operation.scope != null) {
+                requireScopeIdentity(workspaceId, operation.scope);
+                return operation.scope;
+            }
+            if (operation.failure != null) {
+                throw operation.failure;
+            }
+            try {
+                RecordVisibilityScope scope = preparedOrTransactionScope(workspaceId);
+                requireScopeIdentity(workspaceId, scope);
+                operation.scope = scope;
+                return scope;
+            } catch (TenantScopeSnapshotException exception) {
+                throw exception;
+            } catch (RuntimeException exception) {
+                operation.failure = exception;
+                throw exception;
+            }
         }
+        if (routed) {
+            var prepared = tenantContext.getWorkspaceScopes();
+            return prepared != null && prepared.workspaceId() == workspaceId
+                ? prepared.requireSharing().recordVisibilityScope() : loadScope(workspaceId);
+        }
+        return preparedOrTransactionScope(workspaceId);
+    }
+
+    private RecordVisibilityScope preparedOrTransactionScope(int workspaceId) {
         var prepared = tenantContext.getWorkspaceScopes();
         if (prepared != null && prepared.workspaceId() == workspaceId) {
             return prepared.requireSharing().recordVisibilityScope();
         }
-        if (routed) {
-            return loadScope(workspaceId);
-        }
+        return transactionScope(workspaceId);
+    }
+
+    private RecordVisibilityScope transactionScope(int workspaceId) {
         if (!TransactionSynchronizationManager.isActualTransactionActive()
                 || !TransactionSynchronizationManager.isSynchronizationActive()) {
             return loadScope(workspaceId);
@@ -115,7 +248,7 @@ public class RecordVisibilityScopeControlAccess {
             if (tenantContext.isResolved()
                     && (tenantContext.getWorkspaceId().intValue() != workspaceId
                         || tenantContext.getOrgId().intValue() != scope.orgId())) {
-                throw new IllegalStateException("Workspace scope does not match the resolved tenant context");
+                throw new TenantScopeSnapshotException("Workspace scope does not match the resolved tenant context");
             }
             return scope;
         }
@@ -162,12 +295,27 @@ public class RecordVisibilityScopeControlAccess {
                 || tenantContext.isResolved()
                     && (tenantContext.getWorkspaceId().intValue() != workspaceId
                         || tenantContext.getOrgId().intValue() != scope.orgId())) {
-            throw new IllegalStateException("Workspace scope does not match the resolved tenant context");
+            throw new TenantScopeSnapshotException("Workspace scope does not match the resolved tenant context");
         }
     }
 
     /** A synchronous operation owns this snapshot across its independent transaction boundaries. */
-    private record OperationScope(int workspaceId, String catalog, boolean resolved, RecordVisibilityScope scope) { }
+    private static final class OperationScope {
+        private final int workspaceId;
+        private final String catalog;
+        private final boolean resolved;
+        private final Integer orgId;
+        private RecordVisibilityScope scope;
+        private RuntimeException failure;
+
+        private OperationScope(int workspaceId, String catalog, boolean resolved, Integer orgId, RecordVisibilityScope scope) {
+            this.workspaceId = workspaceId;
+            this.catalog = catalog;
+            this.resolved = resolved;
+            this.orgId = orgId;
+            this.scope = scope;
+        }
+    }
 
     /** Keeps each boundary instance's workspace snapshots distinct within the current transaction. */
     private record TransactionScopeKey(RecordVisibilityScopeControlAccess boundary, int workspaceId) { }

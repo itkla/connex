@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
+
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -60,6 +62,8 @@ public class AiChatMemoryService {
     private final AiWorkspaceGovernanceService governanceService;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     @org.springframework.beans.factory.annotation.Autowired
     private ooo.klae.connex.backend.ai.mission.AiAgentContextBuilder missionContextBuilder;
 
@@ -158,6 +162,23 @@ public class AiChatMemoryService {
         }
         int summaryThroughSeq = summaryThroughSeq(summary);
         List<AiChatMessage> dialogue = dialogueAfter(recent, summaryThroughSeq);
+        if (!shouldCompact(summary, dialogue, budget)) {
+            return new AiChatMemory(
+                    boundedHistory(summary, dialogue, initiatingMessage, budget.historyBytes()),
+                    budget, 0, 0, nativeTools, capabilities.parallelToolCalls());
+        }
+        AiChatMessage retainedInitiatingMessage = initiatingMessage;
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(turn.workspaceId(), () -> compact(
+                turn, context, deadline, ownershipGuard, budget, nativeTools,
+                capabilities.parallelToolCalls(), recent, retainedInitiatingMessage, summary,
+                summaryThroughSeq, dialogue));
+    }
+
+    private AiChatMemory compact(
+            AiChatQueuedTurn turn, MaskingContext context, Instant deadline, Runnable ownershipGuard,
+            AiAssistantPromptBudget budget, boolean nativeTools, int parallelToolCalls,
+            List<AiChatMessage> recent, AiChatMessage initiatingMessage, AiChatMessage summary,
+            int summaryThroughSeq, List<AiChatMessage> dialogue) {
         int inputTokens = 0;
         int outputTokens = 0;
         if (shouldCompact(summary, dialogue, budget)) {
@@ -282,7 +303,7 @@ public class AiChatMemoryService {
                 inputTokens,
                 outputTokens,
                 nativeTools,
-                capabilities.parallelToolCalls());
+                parallelToolCalls);
     }
 
     static List<AiChatMessage> boundedHistory(

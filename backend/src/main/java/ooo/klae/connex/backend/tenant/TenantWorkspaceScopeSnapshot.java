@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.tenant;
 
+import ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException;
+
 import java.util.Objects;
 import java.util.Optional;
 
@@ -36,14 +38,14 @@ public record TenantWorkspaceScopeSnapshot(
 
     /** Returns the unfiltered snapshot, preserving the existing missing-anchor refusal. */
     public OrganizationWorkspaces requireSharing() {
-        return sharing.orElseThrow(() -> new IllegalStateException(
+        return sharing.orElseThrow(() -> new TenantScopeSnapshotException(
             "Workspace " + workspaceId + " does not exist"));
     }
 
     /** Returns the active-only snapshot only when its anchor still existed at preparation. */
     public WorkspaceScope requireActiveWorkspace() {
         if (!active.workspaceIds().contains(workspaceId)) {
-            throw new IllegalStateException("Workspace " + workspaceId + " does not exist");
+            throw new TenantScopeSnapshotException("Workspace " + workspaceId + " does not exist");
         }
         return active;
     }

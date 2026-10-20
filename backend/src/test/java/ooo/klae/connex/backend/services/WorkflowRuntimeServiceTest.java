@@ -149,4 +149,25 @@ class WorkflowRuntimeServiceTest {
             Map.of("limit", 200, "code", "triggered_send_recipient_limit"));
         verify(claimService, never()).claimScheduleRecord(11, 23L, schedule, 201);
     }
+    @Test
+    void oneHundredCompanyDeliveriesKeepOneScopeAcrossIndependentClaims() {
+        try (var operation = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(7)) {
+            WorkflowRuntimeService scoped = new WorkflowRuntimeService(properties, operation.scopes,
+                workflowMapper, workflowRunMapper, claimService, traversalService, principalService,
+                segmentService, ruleEngineService, triggeredSendGate, auditService);
+            when(properties.enabled()).thenReturn(true);
+            when(workflowMapper.getEnabledCanonicalIdsByTrigger(7, "entity_change"))
+                .thenReturn(IntStream.rangeClosed(1, 100).boxed().toList());
+            when(claimService.claimEntity(org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.eq(dispatch)))
+                .thenAnswer(call -> new org.springframework.transaction.support.TransactionTemplate(operation.transactions)
+                    .execute(status -> {
+                        assertEquals(List.of(7, 17), operation.scopes.getForWorkspace(7).workspaceIds());
+                        return WorkflowRuntimeClaimService.CanonicalClaim.rejectedClaim();
+                    }));
+            assertEquals(100, scoped.dispatch(dispatch).candidates());
+            assertEquals(100, operation.transactions.beginCount());
+            verify(operation.control).findOrganizationWorkspacesForShare(7);
+        }
+    }
+
 }

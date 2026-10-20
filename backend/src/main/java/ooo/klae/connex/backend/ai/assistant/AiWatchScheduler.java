@@ -1,5 +1,8 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
+import ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException;
+
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -48,6 +51,8 @@ public class AiWatchScheduler {
     private final JobRunRecorder jobRunRecorder;
     private final Clock clock;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     /** Runs one evaluation sweep across every routed workspace. */
     @Scheduled(
         fixedDelayString = "${connex.ai.watches.sweep-delay-ms:900000}",
@@ -56,6 +61,8 @@ public class AiWatchScheduler {
         for (Integer workspaceId : tenantWorkScope.unrouted(workspaceMapper::findWorkspaceIds)) {
             try {
                 tenantWorkScope.inWorkspace(workspaceId, () -> sweepWorkspace(workspaceId));
+            } catch (TenantScopeSnapshotException exception) {
+                throw exception;
             } catch (RuntimeException exception) {
                 log.warn("Ask Connex watch sweep failed workspace={} exceptionClass={}",
                         workspaceId, exception.getClass().getSimpleName());
@@ -74,6 +81,11 @@ public class AiWatchScheduler {
      * context and can read the calendar the expiry was validated against.
      */
     void sweepWorkspace(int workspaceId) {
+        recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
+            workspaceId, () -> { sweepWorkspaceWithinVisibilityScope(workspaceId); return null; });
+    }
+
+    private void sweepWorkspaceWithinVisibilityScope(int workspaceId) {
         JobRunDetail started = JobRunDetail.startedUtc();
         String today = LocalDate.ofInstant(clock.instant(), ZoneOffset.UTC).minusDays(1).toString();
         int evaluated = 0;
@@ -85,6 +97,8 @@ public class AiWatchScheduler {
                 if (evaluationService.evaluate(watch) == AiWatchEvaluationService.Outcome.FIRED) {
                     fired++;
                 }
+            } catch (TenantScopeSnapshotException exception) {
+                throw exception;
             } catch (RuntimeException exception) {
                 failed++;
                 log.warn("Ask Connex watch evaluation failed workspace={} exceptionClass={}",

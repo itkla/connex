@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException;
+
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -47,6 +49,8 @@ public class DocumentDeliveryScheduler {
     private final SignatureProperties properties;
     private final JobRunRecorder jobRunRecorder;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     /** Sweeps every active placement without opening a transaction at the scheduler entry point. */
     @Scheduled(
         fixedDelayString = "${connex.signature.expiry-delay-ms:300000}",
@@ -55,6 +59,8 @@ public class DocumentDeliveryScheduler {
         for (String catalog : placementRegistry.activeCatalogs()) {
             try {
                 expireCatalog(catalog);
+            } catch (TenantScopeSnapshotException exception) {
+                throw exception;
             } catch (RuntimeException exception) {
                 log.warn(
                     "Document-delivery expiry failed for one catalog exceptionClass={}",
@@ -83,6 +89,8 @@ public class DocumentDeliveryScheduler {
                             started.startedAt(),
                             Map.of("expiredCount", expired == null ? 0 : expired)));
                 });
+            } catch (TenantScopeSnapshotException exception) {
+                throw exception;
             } catch (RuntimeException exception) {
                 log.warn(
                     "Document-delivery expiry failed for workspace {} exceptionClass={}",
@@ -93,6 +101,8 @@ public class DocumentDeliveryScheduler {
                         workspaceId,
                         JobRunStatus.FAILED,
                         new JobRunDetail(started.startedAt(), Map.of("expiredCount", 0))));
+                } catch (TenantScopeSnapshotException recordException) {
+                    throw recordException;
                 } catch (RuntimeException recordException) {
                     log.warn(
                         "Document-delivery expiry failure could not be recorded workspaceId={} "
@@ -110,11 +120,16 @@ public class DocumentDeliveryScheduler {
         }
         LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         int expired = 0;
+        boolean scopeResolved = false;
         for (int deliveryId : deliveryMapper.findDueDeliveryIds(
                 workspaceId, now, properties.getExpiryBatchSize())) {
             DocumentDelivery discovered = deliveryMapper.getById(workspaceId, deliveryId);
             if (discovered == null) {
                 continue;
+            }
+            if (!scopeResolved) {
+                recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+                scopeResolved = true;
             }
             Deal deal = dealMapper.getDealByIdForUpdate(
                 workspaceId, discovered.getDealId());
@@ -164,6 +179,8 @@ public class DocumentDeliveryScheduler {
         try {
             jobRunRecorder.record(
                 JobRunRecorder.DOCUMENT_DELIVERY_EXPIRY, workspaceId, status, detail);
+        } catch (TenantScopeSnapshotException exception) {
+            throw exception;
         } catch (RuntimeException exception) {
             log.warn(
                 "Document-delivery expiry recording failed workspaceId={} exceptionClass={}",

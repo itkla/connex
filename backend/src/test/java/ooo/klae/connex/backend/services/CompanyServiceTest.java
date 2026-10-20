@@ -271,9 +271,9 @@ class CompanyServiceTest extends AbstractServiceTest {
 
         assertNull(created.getLogoUrl());
         assertEquals(currentUser.getId(), created.getOwnerId());
-        assertNull(companyMapper.getCompanyById(workspace.getId(), created.getId()).getLogoUrl());
+        assertNull(companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), created.getId()).getLogoUrl());
         assertEquals(currentUser.getId(),
-            companyMapper.getCompanyById(workspace.getId(), created.getId()).getOwnerId());
+            companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), created.getId()).getOwnerId());
     }
 
     @Test
@@ -293,7 +293,7 @@ class CompanyServiceTest extends AbstractServiceTest {
         assertEquals(managed, updated.getLogoUrl());
         assertEquals(owner.getId(), updated.getOwnerId());
         assertEquals(managed,
-            companyMapper.getCompanyById(workspace.getId(), company.getId()).getLogoUrl());
+            companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), company.getId()).getLogoUrl());
     }
 
     @Test
@@ -328,7 +328,7 @@ class CompanyServiceTest extends AbstractServiceTest {
 
         assertThrows(ooo.klae.connex.backend.exceptions.ForbiddenException.class,
             () -> companyService.updateOwner(company.getId(), outsider.getId()));
-        assertNull(companyMapper.getCompanyById(workspace.getId(), company.getId()).getOwnerId());
+        assertNull(companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), company.getId()).getOwnerId());
     }
 
     @Test

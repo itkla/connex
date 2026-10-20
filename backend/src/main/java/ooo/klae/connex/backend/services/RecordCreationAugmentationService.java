@@ -91,7 +91,7 @@ public class RecordCreationAugmentationService {
 
     void validatePersonReferences(Integer companyId, Integer referrerPersonId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        if (companyId != null && !companyMapper.exists(workspaceId, companyId)) {
+        if (companyId != null && !companyMapper.exists(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), companyId)) {
             throw relatedRecordNotFound();
         }
         if (referrerPersonId != null && !personMapper.exists(workspaceId, referrerPersonId)) {
@@ -110,7 +110,7 @@ public class RecordCreationAugmentationService {
             : pipelineMapper.getStageById(workspaceId, stageId);
         if ((pipelineId != null && pipeline == null)
                 || (stageId != null && stage == null)
-                || (companyId != null && !companyMapper.exists(workspaceId, companyId))) {
+                || (companyId != null && !companyMapper.exists(workspaceId, orgWorkspaceIdsJson, companyId))) {
             throw relatedRecordNotFound();
         }
         if (pipeline != null
@@ -399,7 +399,7 @@ public class RecordCreationAugmentationService {
             shareMapper.lockPersonShareForWorkspace(personId, workspaceId);
         }
         for (int companyId : sortedUnique(companyIds)) {
-            Company company = companyMapper.getVisibleCompanyByIdForUpdate(workspaceId, companyId);
+            Company company = companyMapper.getVisibleCompanyByIdForUpdate(workspaceId, orgWorkspaceIdsJson, companyId);
             if (company == null) {
                 throw relatedRecordNotFound();
             }

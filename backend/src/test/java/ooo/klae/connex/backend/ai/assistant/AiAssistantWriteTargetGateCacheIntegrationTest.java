@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
@@ -160,7 +162,7 @@ class AiAssistantWriteTargetGateCacheIntegrationTest {
         assertGateRereadsCommittedState(
                 "company",
                 company.getId(),
-                id -> companyMapper.getCompanyById(workspace.getId(), id).getName(),
+                id -> companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), id).getName(),
                 id -> companyMapper.getOwnedCompanyByIdForUpdate(workspace.getId(), id).getId());
     }
 

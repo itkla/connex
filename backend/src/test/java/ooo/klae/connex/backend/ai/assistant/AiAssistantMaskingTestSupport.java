@@ -120,7 +120,7 @@ final class AiAssistantMaskingTestSupport {
         AiAssistantScopeReadService service = new AiAssistantScopeReadService(
                 activities, fixtureMock(SegmentService.class), fixtureMock(SegmentMapper.class), fixtureMock(SavedViewService.class),
                 fixtureMock(ScoringService.class), fixtureMock(DealRiskService.class), people, fixtureMock(CompanyMapper.class), fixtureMock(DealMapper.class),
-                workspaceService, scope, mapper, Clock.systemUTC(), references);
+                workspaceService, scope, mapper, Clock.systemUTC(), references, ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
         return new ScopeHarness(service, people, activities,
                 List.copyOf(fixtureMocks.subList(firstMock, fixtureMocks.size())));
     }

@@ -62,6 +62,7 @@ public class RecordCreationTemplateResolver {
 
     private record ResolutionContext(
         int workspaceId,
+        String orgWorkspaceIdsJson,
         int actorId,
         RecordCreationRecordType recordType,
         Integer relatedCompanyId,
@@ -262,7 +263,7 @@ public class RecordCreationTemplateResolver {
                     "TEMPLATE_DEFINITION_INVALID",
                     "Related company context is valid only for contacts and deals");
             }
-            if (!companyMapper.exists(workspaceId, relatedCompanyId)) {
+            if (!companyMapper.exists(workspaceId, orgWorkspaceIdsJson, relatedCompanyId)) {
                 throw RecordCreationTemplateException.of(
                     HttpStatus.NOT_FOUND,
                     "RELATED_RECORD_NOT_FOUND",
@@ -296,6 +297,7 @@ public class RecordCreationTemplateResolver {
             .toList();
         return new ResolutionContext(
             workspaceId,
+            orgWorkspaceIdsJson,
             actorId,
             recordType,
             relatedCompanyId,
@@ -559,7 +561,7 @@ public class RecordCreationTemplateResolver {
             return false;
         }
         return switch (fieldKey) {
-            case "company" -> companyMapper.exists(context.workspaceId(), id);
+            case "company" -> companyMapper.exists(context.workspaceId(), context.orgWorkspaceIdsJson(), id);
             case "referrerPerson" -> personMapper.exists(context.workspaceId(), id);
             case "pipeline" -> findPipeline(context, id) != null;
             case "stage" -> findStage(context, id) != null;

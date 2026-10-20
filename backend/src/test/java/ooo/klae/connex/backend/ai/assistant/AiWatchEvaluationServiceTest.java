@@ -70,6 +70,8 @@ class AiWatchEvaluationServiceTest {
     private final PlatformTransactionManager transactionManager =
             mock(PlatformTransactionManager.class);
 
+    private final ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess recordScopes =
+            ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
     private final AiWatchEvaluationService service = serviceAt(NOW);
 
     /** The same collaborators on a different wall clock, so a later cooldown window can be run. */
@@ -78,7 +80,7 @@ class AiWatchEvaluationServiceTest {
                 watchMapper, featureGate, subjectReader, taskMapper, scoringService, dealRiskService,
                 workspaceScopeControlAccess, notificationDelivery, contextRunner, userService,
                 workspaceService, JsonMapper.builder().build(), transactionManager,
-                Clock.fixed(instant, ZoneOffset.UTC));
+                Clock.fixed(instant, ZoneOffset.UTC), recordScopes);
     }
 
     @BeforeEach
@@ -405,4 +407,21 @@ class AiWatchEvaluationServiceTest {
         verify(contextRunner, never()).run(anyInt(), anyInt(), any(), any(Runnable.class));
         verify(notificationDelivery, never()).deliver(any());
     }
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"disabled", "expired", "unknown", "incompatible", "ownerless"})
+    void skippedCompanyWatchesNeverTouchTheScopeBoundary(String reason) {
+        AiWatch watch = watch(AiWatchType.RELATIONSHIP_COOLING, "company", 42);
+        switch (reason) {
+            case "disabled" -> when(featureGate.isFeatureGoverned(AiFeature.ASSISTANT_CHAT)).thenReturn(false);
+            case "expired" -> watch.setExpiresOn("2026-08-23");
+            case "unknown" -> watch.setWatchType("removed_type");
+            case "incompatible" -> watch.setWatchType(AiWatchType.DEAL_RISK_THRESHOLD.key());
+            case "ownerless" -> when(userService.getActiveWorkspaceUser(7, 11))
+                    .thenThrow(new ResourceNotFoundException("owner unavailable"));
+            default -> throw new AssertionError(reason);
+        }
+        assertEquals(AiWatchEvaluationService.Outcome.SKIPPED, service.evaluate(watch));
+        org.mockito.Mockito.verifyNoInteractions(recordScopes, subjectReader, scoringService, notificationDelivery);
+    }
+
 }

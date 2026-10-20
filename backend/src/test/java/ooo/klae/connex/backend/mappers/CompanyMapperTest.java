@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.mappers;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
+
 import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
@@ -56,7 +58,7 @@ class CompanyMapperTest extends AbstractMapperTest {
         Company company = newCompany();
         assertNotEquals(0, company.getId());
 
-        Company found = companyMapper.getCompanyById(workspace.getId(), company.getId());
+        Company found = companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), company.getId());
 
         assertNotNull(found);
         assertEquals(workspace.getId(), found.getWorkspaceId());
@@ -77,13 +79,13 @@ class CompanyMapperTest extends AbstractMapperTest {
         company.setName("Owned " + unique());
         companyMapper.insert(company);
 
-        assertEquals(41, companyMapper.getCompanyById(workspace.getId(), company.getId()).getOwnerId());
+        assertEquals(41, companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), company.getId()).getOwnerId());
 
         company.setOwnerId(42);
         company.setName("Renamed " + unique());
         companyMapper.update(company);
 
-        Company updated = companyMapper.getCompanyById(workspace.getId(), company.getId());
+        Company updated = companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), company.getId());
         assertEquals(41, updated.getOwnerId());
         assertEquals(company.getName(), updated.getName());
     }
@@ -95,7 +97,7 @@ class CompanyMapperTest extends AbstractMapperTest {
 
         assertEquals(2, companyMapper.insertBatch(List.of(owned, unassigned)));
 
-        List<Company> inserted = companyMapper.getAllCompanies(workspace.getId()).stream()
+        List<Company> inserted = companyMapper.getAllCompanies(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId())).stream()
             .filter(company -> company.getName().endsWith("batch"))
             .toList();
         assertEquals(51, inserted.stream()
@@ -119,13 +121,13 @@ class CompanyMapperTest extends AbstractMapperTest {
 
         assertEquals(0, companyMapper.updateOwner(other.getId(), targetOwned.getId(), 62));
         companyMapper.clearMemberOwnership(target.getId(), 61);
-        assertNull(companyMapper.getCompanyById(target.getId(), targetOwned.getId()).getOwnerId());
-        assertEquals(62, companyMapper.getCompanyById(target.getId(), targetOtherOwner.getId()).getOwnerId());
-        assertEquals(61, companyMapper.getCompanyById(other.getId(), foreignOwned.getId()).getOwnerId());
+        assertNull(companyMapper.getCompanyById(target.getId(), orgWorkspaceIdsJson(workspaceMapper, target.getId()), targetOwned.getId()).getOwnerId());
+        assertEquals(62, companyMapper.getCompanyById(target.getId(), orgWorkspaceIdsJson(workspaceMapper, target.getId()), targetOtherOwner.getId()).getOwnerId());
+        assertEquals(61, companyMapper.getCompanyById(other.getId(), orgWorkspaceIdsJson(workspaceMapper, other.getId()), foreignOwned.getId()).getOwnerId());
 
         companyMapper.clearOwnershipAnywhere(61);
-        assertNull(companyMapper.getCompanyById(other.getId(), foreignOwned.getId()).getOwnerId());
-        assertEquals(62, companyMapper.getCompanyById(target.getId(), targetOtherOwner.getId()).getOwnerId());
+        assertNull(companyMapper.getCompanyById(other.getId(), orgWorkspaceIdsJson(workspaceMapper, other.getId()), foreignOwned.getId()).getOwnerId());
+        assertEquals(62, companyMapper.getCompanyById(target.getId(), orgWorkspaceIdsJson(workspaceMapper, target.getId()), targetOtherOwner.getId()).getOwnerId());
     }
 
     @Test
@@ -155,7 +157,7 @@ class CompanyMapperTest extends AbstractMapperTest {
      */
     @Test
     void getCompanyById_returnsNullWhenMissing() {
-        assertNull(companyMapper.getCompanyById(workspace.getId(), -1));
+        assertNull(companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), -1));
     }
 
     /**
@@ -165,7 +167,7 @@ class CompanyMapperTest extends AbstractMapperTest {
     void getAllCompanies_includesInsertedRow() {
         Company company = newCompany();
 
-        List<Company> allCompanies = companyMapper.getAllCompanies(workspace.getId());
+        List<Company> allCompanies = companyMapper.getAllCompanies(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()));
 
         assertTrue(allCompanies.stream().anyMatch(x -> x.getId() == company.getId()));
     }
@@ -188,7 +190,7 @@ class CompanyMapperTest extends AbstractMapperTest {
         Company foreign = newCompany();
 
         List<Company> page = companyMapper.getCompaniesPage(
-            pageWorkspace.getId(), null, null, null, null, false, null, allTeamScope(), false, null, 2, 0);
+            pageWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, pageWorkspace.getId()), null, null, null, null, false, null, allTeamScope(), false, null, 2, 0);
 
         assertEquals(List.of(first.getId(), second.getId()), page.stream().map(Company::getId).toList());
         List<Integer> stableIds = List.of(first.getId(), second.getId(), third.getId());
@@ -197,7 +199,7 @@ class CompanyMapperTest extends AbstractMapperTest {
             assertEquals(stableIds, companyPageIds(pageWorkspace, sort, "desc"));
         }
         assertEquals(3, companyMapper.countCompanies(
-            pageWorkspace.getId(), null, null, false, null, allTeamScope(), false, null));
+            pageWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, pageWorkspace.getId()), null, null, false, null, allTeamScope(), false, null));
         assertTrue(page.stream().noneMatch(company -> company.getId() == foreign.getId()));
     }
 
@@ -257,9 +259,9 @@ class CompanyMapperTest extends AbstractMapperTest {
         assertEquals(List.of(emptyIndustry.getId(), noIndustry.getId(), technology.getId()),
             filteredCompanyIds(pageWorkspace, null, List.of("Technology"), true, null));
         assertEquals(List.of(finance.getId(), noIndustry.getId()),
-            companyMapper.getCompanyIdsFiltered(pageWorkspace.getId(), null, null, false,
+            companyMapper.getCompanyIdsFiltered(pageWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, pageWorkspace.getId()), null, null, false,
                 List.of(noIndustry.getId(), finance.getId(), foreign.getId()), allTeamScope(), false, null, 100, 0));
-        assertEquals(2, companyMapper.countCompanies(pageWorkspace.getId(), null, null, false,
+        assertEquals(2, companyMapper.countCompanies(pageWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, pageWorkspace.getId()), null, null, false,
             List.of(noIndustry.getId(), finance.getId(), foreign.getId()), allTeamScope(), false, null));
         assertFalse(filteredCompanyIds(pageWorkspace, null, List.of("Finance"), false, null)
             .contains(foreign.getId()));
@@ -278,12 +280,12 @@ class CompanyMapperTest extends AbstractMapperTest {
         List<Integer> ids = List.of(alpha.getId(), bravo.getId(), finance.getId(), different.getId(), foreign.getId());
 
         List<Company> page = companyMapper.getCompaniesPage(
-            pageWorkspace.getId(), "%Target%", "name", "asc", List.of("Technology"), false, ids,
+            pageWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, pageWorkspace.getId()), "%Target%", "name", "asc", List.of("Technology"), false, ids,
             allTeamScope(), false, null, 100, 0);
         long count = companyMapper.countCompanies(
-            pageWorkspace.getId(), "%Target%", List.of("Technology"), false, ids, allTeamScope(), false, null);
+            pageWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, pageWorkspace.getId()), "%Target%", List.of("Technology"), false, ids, allTeamScope(), false, null);
         List<Integer> matchingIds = companyMapper.getCompanyIdsFiltered(
-            pageWorkspace.getId(), "%Target%", List.of("Technology"), false, ids, allTeamScope(), false, null, 100, 0);
+            pageWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, pageWorkspace.getId()), "%Target%", List.of("Technology"), false, ids, allTeamScope(), false, null, 100, 0);
 
         assertEquals(List.of(alpha.getId(), bravo.getId()), page.stream().map(Company::getId).toList());
         assertEquals(2, count);
@@ -305,13 +307,13 @@ class CompanyMapperTest extends AbstractMapperTest {
             + excluded.getId() + "," + foreign.getId() + "]";
 
         List<Company> page = companyMapper.getSegmentCompaniesPage(
-            segmentWorkspace.getId(), idsJson, "%Target%", "name", "asc",
+            segmentWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, segmentWorkspace.getId()), idsJson, "%Target%", "name", "asc",
             List.of("Technology"), false, MemberScope.allTeam(), null, 1, 1);
         long count = companyMapper.countSegmentCompanies(
-            segmentWorkspace.getId(), idsJson, "%Target%", List.of("Technology"), false,
+            segmentWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, segmentWorkspace.getId()), idsJson, "%Target%", List.of("Technology"), false,
             MemberScope.allTeam(), null);
         List<Integer> ids = companyMapper.getSegmentCompanyIdsFiltered(
-            segmentWorkspace.getId(), idsJson, "%Target%", List.of("Technology"), false,
+            segmentWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, segmentWorkspace.getId()), idsJson, "%Target%", List.of("Technology"), false,
             MemberScope.allTeam(), null, 1001);
 
         assertEquals(List.of(bravo.getId()), page.stream().map(Company::getId).toList());
@@ -333,10 +335,10 @@ class CompanyMapperTest extends AbstractMapperTest {
         newCompanyIn(foreignWorkspace, "Foreign", "https://foreign.example.com", "ForeignOnly", "700", "G");
         newCompanyIn(foreignWorkspace, "Foreign Missing", "https://foreign-missing.example.com", null, "800", "H");
 
-        assertEquals(List.of("Alpha", "Zulu"), companyMapper.distinctIndustries(facetWorkspace.getId()));
-        assertTrue(companyMapper.hasCompanyWithoutIndustry(facetWorkspace.getId()));
-        assertEquals(List.of("Complete"), companyMapper.distinctIndustries(completeWorkspace.getId()));
-        assertFalse(companyMapper.hasCompanyWithoutIndustry(completeWorkspace.getId()));
+        assertEquals(List.of("Alpha", "Zulu"), companyMapper.distinctIndustries(facetWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, facetWorkspace.getId())));
+        assertTrue(companyMapper.hasCompanyWithoutIndustry(facetWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, facetWorkspace.getId())));
+        assertEquals(List.of("Complete"), companyMapper.distinctIndustries(completeWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, completeWorkspace.getId())));
+        assertFalse(companyMapper.hasCompanyWithoutIndustry(completeWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, completeWorkspace.getId())));
     }
 
     /**
@@ -351,7 +353,7 @@ class CompanyMapperTest extends AbstractMapperTest {
 
         companyMapper.update(company);
 
-        Company found = companyMapper.getCompanyById(workspace.getId(), company.getId());
+        Company found = companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), company.getId());
         assertEquals("Renamed Co", found.getName());
         assertEquals("Finance", found.getIndustry());
         assertEquals("+1-555-9999", found.getPhone());
@@ -369,7 +371,7 @@ class CompanyMapperTest extends AbstractMapperTest {
         companyMapper.update(company);
 
         assertEquals(first,
-            companyMapper.getCompanyById(workspace.getId(), company.getId()).getLogoUrl());
+            companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), company.getId()).getLogoUrl());
         assertEquals(0, companyMapper.updateLogoUrlIfCurrent(
             workspace.getId(), company.getId(), null, second));
         assertEquals(1, companyMapper.updateLogoUrlIfCurrent(
@@ -385,15 +387,15 @@ class CompanyMapperTest extends AbstractMapperTest {
 
         assertEquals(1, companyMapper.archive(workspace.getId(), company.getId()));
 
-        assertNull(companyMapper.getCompanyById(workspace.getId(), company.getId()));
-        assertFalse(companyMapper.exists(workspace.getId(), company.getId()));
+        assertNull(companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), company.getId()));
+        assertFalse(companyMapper.exists(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), company.getId()));
         assertFalse(companyMapper.existsOwned(workspace.getId(), company.getId()));
         assertTrue(companyMapper.existsOwnedArchived(workspace.getId(), company.getId()));
         assertNotNull(companyMapper.getOwnedArchivedCompanyById(workspace.getId(), company.getId()));
 
         assertEquals(1, companyMapper.restore(workspace.getId(), company.getId()));
 
-        assertNotNull(companyMapper.getCompanyById(workspace.getId(), company.getId()));
+        assertNotNull(companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), company.getId()));
         assertTrue(companyMapper.existsOwned(workspace.getId(), company.getId()));
     }
 
@@ -407,7 +409,7 @@ class CompanyMapperTest extends AbstractMapperTest {
 
         companyMapper.addTag(workspace.getId(), company.getId(), tag.getId());
 
-        List<Company> companies = companyMapper.getCompaniesByTagId(workspace.getId(), tag.getId());
+        List<Company> companies = companyMapper.getCompaniesByTagId(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), tag.getId());
         assertTrue(companies.stream().anyMatch(x -> x.getId() == company.getId()));
     }
 
@@ -422,7 +424,7 @@ class CompanyMapperTest extends AbstractMapperTest {
         companyMapper.addTag(workspace.getId(), company.getId(), tag.getId());
         companyMapper.addTag(workspace.getId(), company.getId(), tag.getId());
 
-        List<Company> companies = companyMapper.getCompaniesByTagId(workspace.getId(), tag.getId());
+        List<Company> companies = companyMapper.getCompaniesByTagId(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), tag.getId());
         long matching = companies.stream().filter(x -> x.getId() == company.getId()).count();
         assertEquals(1, matching);
     }
@@ -438,7 +440,7 @@ class CompanyMapperTest extends AbstractMapperTest {
 
         companyMapper.removeTag(workspace.getId(), company.getId(), tag.getId());
 
-        List<Company> companies = companyMapper.getCompaniesByTagId(workspace.getId(), tag.getId());
+        List<Company> companies = companyMapper.getCompaniesByTagId(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), tag.getId());
         assertTrue(companies.stream().noneMatch(x -> x.getId() == company.getId()));
     }
 
@@ -457,7 +459,7 @@ class CompanyMapperTest extends AbstractMapperTest {
         int affected = companyMapper.addTag(other.getId(), company.getId(), tag.getId());
 
         assertEquals(0, affected, "cross-workspace addTag must affect no rows");
-        List<Company> companies = companyMapper.getCompaniesByTagId(workspace.getId(), tag.getId());
+        List<Company> companies = companyMapper.getCompaniesByTagId(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), tag.getId());
         assertTrue(companies.stream().noneMatch(x -> x.getId() == company.getId()));
     }
 
@@ -494,14 +496,14 @@ class CompanyMapperTest extends AbstractMapperTest {
         Company mine = newCompany();
         Company foreign = newCompanyIn(newWorkspace());
 
-        assertNull(companyMapper.getCompanyById(workspace.getId(), foreign.getId()));
-        assertFalse(companyMapper.exists(workspace.getId(), foreign.getId()));
-        assertTrue(companyMapper.getAllCompanies(workspace.getId()).stream().noneMatch(c -> c.getId() == foreign.getId()));
-        assertTrue(companyMapper.getAllCompanies(workspace.getId()).stream().anyMatch(c -> c.getId() == mine.getId()));
+        assertNull(companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), foreign.getId()));
+        assertFalse(companyMapper.exists(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), foreign.getId()));
+        assertTrue(companyMapper.getAllCompanies(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId())).stream().noneMatch(c -> c.getId() == foreign.getId()));
+        assertTrue(companyMapper.getAllCompanies(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId())).stream().anyMatch(c -> c.getId() == mine.getId()));
 
         // cross-workspace mutation affects zero rows; the foreign row survives
         assertEquals(0, companyMapper.archive(workspace.getId(), foreign.getId()));
-        assertTrue(companyMapper.exists(foreign.getWorkspaceId(), foreign.getId()));
+        assertTrue(companyMapper.exists(foreign.getWorkspaceId(), orgWorkspaceIdsJson(workspaceMapper, foreign.getWorkspaceId()), foreign.getId()));
     }
 
     @Test
@@ -646,7 +648,7 @@ class CompanyMapperTest extends AbstractMapperTest {
             .findFirst().orElseThrow();
         RelationshipScoreAggregateDto companyScore = companyMapper
             .getRelationshipScoreAggregates(
-                workspace.getId(), reference, RelationshipWarmthModel.current().sqlParameters()).stream()
+                workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), reference, RelationshipWarmthModel.current().sqlParameters()).stream()
             .filter(score -> score.id() == company.getId())
             .findFirst().orElseThrow();
 
@@ -665,7 +667,7 @@ class CompanyMapperTest extends AbstractMapperTest {
             .anyMatch(score -> score.id() == person.getId()));
         RelationshipScoreAggregateDto restrictedCompanyScore = companyMapper
             .getRelationshipScoreAggregates(
-                workspace.getId(), reference, RelationshipWarmthModel.current().sqlParameters()).stream()
+                workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), reference, RelationshipWarmthModel.current().sqlParameters()).stream()
             .filter(score -> score.id() == company.getId())
             .findFirst().orElseThrow();
         assertEquals(0, restrictedCompanyScore.recentTouchCount());
@@ -757,11 +759,11 @@ class CompanyMapperTest extends AbstractMapperTest {
 
     private void assertOwnerScope(Workspace ws, MemberScope memberScope, List<Integer> expectedIds) {
         List<Integer> actualIds = companyMapper.getCompaniesPage(
-            ws.getId(), null, "id", "asc", null, false, null, memberScope, false, null, 100, 0)
+            ws.getId(), orgWorkspaceIdsJson(workspaceMapper, ws.getId()), null, "id", "asc", null, false, null, memberScope, false, null, 100, 0)
             .stream().map(Company::getId).toList();
         assertEquals(expectedIds.stream().sorted().toList(), actualIds.stream().sorted().toList());
         assertEquals(expectedIds.size(), companyMapper.countCompanies(
-            ws.getId(), null, null, false, null, memberScope, false, null));
+            ws.getId(), orgWorkspaceIdsJson(workspaceMapper, ws.getId()), null, null, false, null, memberScope, false, null));
     }
 
     private Map<String, Long> facetCounts(List<FacetCount> counts) {
@@ -770,20 +772,20 @@ class CompanyMapperTest extends AbstractMapperTest {
 
     private List<Integer> companyPageIds(Workspace ws, String sort, String dir) {
         return companyMapper.getCompaniesPage(
-            ws.getId(), null, sort, dir, null, false, null, allTeamScope(), false, null, 100, 0)
+            ws.getId(), orgWorkspaceIdsJson(workspaceMapper, ws.getId()), null, sort, dir, null, false, null, allTeamScope(), false, null, 100, 0)
             .stream().map(Company::getId).toList();
     }
 
     private List<Integer> companySearchIds(Workspace ws, String query) {
         return companyMapper.getCompaniesPage(
-            ws.getId(), query, "name", "asc", null, false, null, allTeamScope(), false, null, 100, 0)
+            ws.getId(), orgWorkspaceIdsJson(workspaceMapper, ws.getId()), query, "name", "asc", null, false, null, allTeamScope(), false, null, 100, 0)
             .stream().map(Company::getId).toList();
     }
 
     private List<Integer> filteredCompanyIds(Workspace ws, String query, List<String> industry,
             boolean noIndustry, List<Integer> ids) {
         return companyMapper.getCompaniesPage(
-            ws.getId(), query, "name", "asc", industry, noIndustry, ids, allTeamScope(), false, null, 100, 0)
+            ws.getId(), orgWorkspaceIdsJson(workspaceMapper, ws.getId()), query, "name", "asc", industry, noIndustry, ids, allTeamScope(), false, null, 100, 0)
             .stream().map(Company::getId).toList();
     }
 

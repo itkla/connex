@@ -206,7 +206,7 @@ class AiAssistantWriteToolServiceTest {
                 mock(CompanyMapper.class),
                 mock(DealMapper.class),
                 dateResolver,
-                mock(AiAssistantScopeReadService.class));
+                mock(AiAssistantScopeReadService.class), ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
         service = new AiAssistantWriteToolService(
                 catalog,
                 registry,
@@ -1888,6 +1888,8 @@ class AiAssistantWriteToolServiceTest {
             assertEquals("unresolved_reference", refusal.detailReason());
         }
         clearInvocations(workspaceService, pipelineService, dealService);
+        var recordScopes = mock(ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "recordVisibilityScopeControlAccess", recordScopes);
 
         assertEquals(storedOwner,
                 replayed("assign_owner", ownerCall, "company", 52, storedOwner).argumentsJson());
@@ -1897,6 +1899,7 @@ class AiAssistantWriteToolServiceTest {
         verify(workspaceService, never()).getMembers(anyInt());
         verify(pipelineService, never()).getAllStages();
         verify(dealService, never()).getDealById(anyInt());
+        org.mockito.Mockito.verifyNoInteractions(recordScopes);
 
         String malformed = storedStage.replace("\"principals\":[]", "\"principals\":[0]");
         assertThrows(IllegalStateException.class,

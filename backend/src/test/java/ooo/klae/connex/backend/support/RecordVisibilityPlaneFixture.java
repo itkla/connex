@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.support;
 
+import ooo.klae.connex.backend.mappers.CompanyMapper;
+
 import static org.mockito.Mockito.mock;
 
 import java.io.InputStream;
@@ -63,6 +65,8 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
     public final ReportMapper reportMapper;
     public final SegmentMapper segmentMapper;
     public final PipelineMapper pipelineMapper;
+    public final CompanyMapper companyMapper;
+    public final SqlSessionTemplate companyStatements;
     public final RecordVisibilityScopeControlAccess scopeAccess;
     public final LegacyRecordVisibilitySql legacy;
     public final List<Integer> pipelineIds = new ArrayList<>();
@@ -93,7 +97,7 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
 
     /** Selects one mapper's minimal tenant-table fixture without changing the pilot fixtures. */
     public enum Records {
-        INTRODUCTIONS, DUPLICATE_REVIEW, NOTES, REPORTS, SEGMENTS, PIPELINES
+        INTRODUCTIONS, DUPLICATE_REVIEW, NOTES, REPORTS, SEGMENTS, PIPELINES, COMPANIES
     }
 
     /** Migrates the default schema and clones only the selected statements' tenant tables. */
@@ -125,6 +129,8 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
         tenantCatalog = split ? "cnx_record_plane_" + UUID.randomUUID().toString().replace("-", "")
             : defaultCatalog;
         tables = switch (records) {
+            case COMPANIES -> List.of("company", "person", "company_share", "person_share", "deal", "tag",
+                "activity", "note", "task", "company_tag");
             case PIPELINES -> List.of("pipeline", "pipeline_share", "stage");
             case INTRODUCTIONS -> List.of("company", "person", "company_share", "activity", "note", "task", "person_edge");
             case DUPLICATE_REVIEW -> List.of("company", "person", "company_share", "person_identity", "company_identity",
@@ -155,7 +161,7 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
         configuration.getTypeAliasRegistry().registerAliases("ooo.klae.connex.backend.beans");
         for (String resource : List.of("mappers/IntroductionMapper.xml", "mappers/DuplicateReviewMapper.xml",
                 "mappers/WorkspaceMapper.xml", "mappers/NoteMapper.xml", "mappers/ReportMapper.xml",
-                "mappers/SegmentMapper.xml", "mappers/PipelineMapper.xml")) {
+                "mappers/SegmentMapper.xml", "mappers/PipelineMapper.xml", "mappers/CompanyMapper.xml")) {
             try (InputStream input = getClass().getClassLoader().getResourceAsStream(resource)) {
                 if (input == null) {
                     throw new IllegalStateException("Missing mapper resource " + resource);
@@ -171,6 +177,8 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
         reportMapper = sessions.getMapper(ReportMapper.class);
         segmentMapper = sessions.getMapper(SegmentMapper.class);
         pipelineMapper = sessions.getMapper(PipelineMapper.class);
+        companyMapper = sessions.getMapper(CompanyMapper.class);
+        companyStatements = sessions;
         TenantWorkScope workScope = new TenantWorkScope(
             tenantContext, mock(TenantCatalogResolver.class), mock(WorkspaceMapper.class));
         scopeAccess = new RecordVisibilityScopeControlAccess(new ShareWorkspaceControlAccess(
@@ -178,7 +186,9 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
         legacy = new LegacyRecordVisibilitySql(pool, defaultCatalog);
         try {
             seedControl();
-            if (records == Records.PIPELINES) {
+            if (records == Records.COMPANIES) {
+                seedCompanies();
+            } else if (records == Records.PIPELINES) {
                 seedPipelines();
             } else if (records == Records.NOTES || records == Records.SEGMENTS) {
                 seedNotes();
@@ -411,6 +421,63 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
                 + "VALUES (?, 'person', 'email', ?, ?, 1, 21, '2026-09-02 12:00:00')",
                 workspaceId, fingerprint(101), personIdentity);
         }
+    }
+
+    private void seedCompanies() throws SQLException {
+        int[] owners = {workspaceId, workspaceIds.get(1), workspaceIds.get(2), workspaceIds.get(3),
+            workspaceIds.get(4), workspaceId};
+        String[] names = {"Company A Owned", "Company B Shared", "0 Company Hidden Sibling",
+            "0 Company Hidden Foreign", "Company C Winding", "Company D Archived"};
+        pipelineId = insert("INSERT INTO pipeline (workspace_id, name) VALUES (?, 'Company Evidence Pipeline')", workspaceId);
+        reportStageId = insert("INSERT INTO stage (workspace_id, pipeline_id, name, position) "
+            + "VALUES (?, ?, 'Company Evidence Open', 0)", workspaceId, pipelineId);
+        reportTagId = insert("INSERT INTO tag (workspace_id, name) VALUES (?, 'Company Visibility Tag')", workspaceId);
+        for (int i = 0; i < owners.length; i++) {
+            int company = insert("INSERT INTO company (workspace_id, owner_id, name, website, industry, created_at) "
+                + "VALUES (?, ?, ?, ?, ?, '2026-08-01')", owners[i], i % 2 == 0 ? userId : null,
+                names[i], "company-" + i + ".example.com", i == 1 ? null : "Industry " + i);
+            companyIds.add(company);
+            controlJdbc.update("INSERT INTO company_tag (company_id, tag_id) VALUES (?, ?)", company, reportTagId);
+            if (List.of(1, 3, 4).contains(i)) {
+                controlJdbc.update("INSERT INTO company_share (company_id, workspace_id, granted_by) VALUES (?, ?, ?)",
+                    company, workspaceId, userId);
+            }
+        }
+        for (int i = 0; i < owners.length; i++) {
+            int person = insert("INSERT INTO person (workspace_id, company_id, name) VALUES (?, ?, ?)",
+                owners[i], companyIds.getFirst(), "Company Evidence Person " + i);
+            personIds.add(person);
+            if (List.of(1, 3, 4).contains(i)) {
+                controlJdbc.update("INSERT INTO person_share (person_id, workspace_id, granted_by) VALUES (?, ?, ?)",
+                    person, workspaceId, userId);
+            }
+            int deal = addReportDeal(companyIds.get(i), "Company Evidence Deal " + i, "10", "USD");
+            dealIds.add(deal);
+            addActivity(workspaceId, userId, person, deal, "2026-09-30 12:00:00");
+            addNote(workspaceId, userId, person, deal,
+                "workspace", "Company Evidence Note " + i, "Evidence", "2026-09-30 12:00:00");
+            controlJdbc.update("INSERT INTO task (workspace_id, person_id, deal_id, description, created_at) "
+                + "VALUES (?, ?, ?, ?, '2026-09-30 12:00:00')", workspaceId, person, deal,
+                "Company Evidence Task " + i);
+        }
+        int sharedAccountDeal = addReportDeal(companyIds.get(1), "Company Evidence Shared Account", "10", "USD");
+        dealIds.add(sharedAccountDeal);
+        for (int person : personIds) {
+            addActivity(workspaceId, userId, person, sharedAccountDeal, "2026-09-30 12:00:00");
+            addNote(workspaceId, userId, person, sharedAccountDeal,
+                "workspace", "Deal-attributed company note", "Evidence", "2026-09-30 12:00:00");
+            controlJdbc.update("INSERT INTO task (workspace_id, person_id, deal_id, description, created_at) "
+                + "VALUES (?, ?, ?, 'Deal-attributed company task', '2026-09-30 12:00:00')",
+                workspaceId, person, sharedAccountDeal);
+        }
+        addActivity(workspaceId, userId, null, sharedAccountDeal, "2026-09-30 12:00:00");
+        addNote(workspaceId, userId, null, sharedAccountDeal,
+            "workspace", "Deal-only company note", "Evidence", "2026-09-30 12:00:00");
+        controlJdbc.update("INSERT INTO task (workspace_id, deal_id, description, created_at) "
+            + "VALUES (?, ?, 'Deal-only company task', '2026-09-30 12:00:00')", workspaceId, sharedAccountDeal);
+        controlJdbc.update("UPDATE company SET archived_at = '2026-08-03' WHERE id = ?", companyIds.get(5));
+        controlJdbc.update("UPDATE person SET archived_at = '2026-08-03' WHERE id = ?", personIds.get(5));
+        addNote(workspaceId, userId, personIds.getFirst(), null, "private", "Company Private Note", "Private", "2026-09-30 12:00:00");
     }
 
     private void seedReports() throws SQLException {

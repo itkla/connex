@@ -203,7 +203,11 @@ class WarmthBrowserRequestBindingTest {
 
     @Test
     void theCompaniesPageAndFacetsExposeTheSameWarmthContract() throws Exception {
-        when(companyService.countsByWarmthBand(any())).thenReturn(List.of(facet("cool", 2)));
+        when(companyService.queryCompaniesPage(any(), any(), any(), any(), anyBoolean(), any(), any(),
+            anyBoolean(), any(), anyInt(), anyInt())).thenReturn(
+                new ooo.klae.connex.backend.dto.PageResponse<>(List.of(), 0L));
+        when(companyService.getCompanyFacets(any())).thenReturn(
+            new ooo.klae.connex.backend.dto.CompanyFacets(List.of(), false, List.of(), 0L, List.of(facet("cool", 2))));
 
         companies.perform(get("/api/companies/page")
                 .param("warmthBands", "cool")
@@ -215,7 +219,7 @@ class WarmthBrowserRequestBindingTest {
             .andExpect(jsonPath("$.warmthBands[0].key").value("cool"));
 
         ArgumentCaptor<WarmthFilter> captor = ArgumentCaptor.forClass(WarmthFilter.class);
-        verify(companyService).getCompaniesPage(
+        verify(companyService).queryCompaniesPage(
             any(), any(), any(), any(), anyBoolean(), any(), any(),
             anyBoolean(), captor.capture(),
             anyInt(), anyInt());

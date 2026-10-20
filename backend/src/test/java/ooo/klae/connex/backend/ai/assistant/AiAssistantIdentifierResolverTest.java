@@ -249,7 +249,7 @@ class AiAssistantIdentifierResolverTest {
         when(people.getVisibleIdsIn(7, List.of(1))).thenReturn(List.of(1));
         var references = new ReferenceService(mock(EntityReferenceMapper.class), workspace, people,
                 mock(DealMapper.class), mock(CompanyMapper.class), mock(NoteMapper.class),
-                mock(AttachmentMapper.class), mock(TaskMapper.class), mock(ActivityMapper.class), members);
+                mock(AttachmentMapper.class), mock(TaskMapper.class), mock(ActivityMapper.class), members, ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
         String text = "[First Alias](user&colon;42) [Visible Contact](person:1) "
                 + "[Foreign Alias](user:99) [Hidden Contact](person:999 \"title\") "
                 + "[Second Alias][pending] [Third Alias](user\\:42)\n\n> [pending]:\n> user:43";
@@ -349,7 +349,7 @@ class AiAssistantIdentifierResolverTest {
     private static ReferenceService memberReferences(WorkspaceService workspace, WorkspaceMapper members) {
         return new ReferenceService(mock(EntityReferenceMapper.class), workspace, mock(PersonMapper.class),
                 mock(DealMapper.class), mock(CompanyMapper.class), mock(NoteMapper.class),
-                mock(AttachmentMapper.class), mock(TaskMapper.class), mock(ActivityMapper.class), members);
+                mock(AttachmentMapper.class), mock(TaskMapper.class), mock(ActivityMapper.class), members, ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
     }
 
     @Test

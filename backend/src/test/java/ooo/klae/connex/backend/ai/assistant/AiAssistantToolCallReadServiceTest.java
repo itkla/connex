@@ -1619,7 +1619,7 @@ class AiAssistantToolCallReadServiceTest {
         when(personMapper.getByIds(WORKSPACE_ID, List.of(75))).thenReturn(List.of());
         assertNull(service.list(SESSION_ID, false).getFirst().createdRecord());
         when(personMapper.getByIds(WORKSPACE_ID, List.of(75))).thenReturn(List.of(created));
-        when(companyMapper.getByIds(WORKSPACE_ID, List.of(52))).thenReturn(List.of());
+        when(companyMapper.getByIds(WORKSPACE_ID, "[7,8,9]", List.of(52))).thenReturn(List.of());
         AiAssistantToolCallReadDto inaccessible = service.list(SESSION_ID, false).getFirst();
         assertNull(inaccessible.createdRecord());
         assertEquals(List.of(), inaccessible.outcomeValues());
@@ -1661,12 +1661,12 @@ class AiAssistantToolCallReadServiceTest {
         when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100, null, 1L)).thenReturn(List.of(company, report));
         Company created = new Company();
         created.setId(75);
-        when(companyMapper.getByIds(WORKSPACE_ID, List.of(75))).thenReturn(List.of(created));
+        when(companyMapper.getByIds(WORKSPACE_ID, "[7,8,9]", List.of(75))).thenReturn(List.of(created));
         when(reportMapper.getDefinitionIdsIn(WORKSPACE_ID, List.of(76))).thenReturn(List.of(76));
         List<AiAssistantToolCallReadDto> cards = service.list(SESSION_ID, false);
         assertEquals(new AiAssistantToolCallReadDto.CreatedRecord("company", 75), cards.getFirst().createdRecord());
         assertEquals(new AiAssistantToolCallReadDto.CreatedRecord("report", 76), cards.getLast().createdRecord());
-        when(companyMapper.getByIds(WORKSPACE_ID, List.of(75))).thenReturn(List.of());
+        when(companyMapper.getByIds(WORKSPACE_ID, "[7,8,9]", List.of(75))).thenReturn(List.of());
         when(reportMapper.getDefinitionIdsIn(WORKSPACE_ID, List.of(76))).thenReturn(List.of());
         assertTrue(service.list(SESSION_ID, false).stream().allMatch(card -> card.createdRecord() == null));
         when(reportMapper.getDefinitionIdsIn(WORKSPACE_ID, List.of(76))).thenReturn(List.of(76));
@@ -2529,7 +2529,7 @@ class AiAssistantToolCallReadServiceTest {
     void multiFieldRowsStayCompleteWhileLegacyClientsCannotApplyThem() {
         Company company = fieldCompany();
         AiChatToolCall call = fieldProposal("{\"industry\":\"Old\",\"address\":\"Osaka\"}");
-        when(companyMapper.getByIds(WORKSPACE_ID, List.of(52))).thenReturn(List.of(company));
+        when(companyMapper.getByIds(WORKSPACE_ID, "[7,8,9]", List.of(52))).thenReturn(List.of(company));
         when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100, null, 1L))
                 .thenReturn(List.of(call));
 
@@ -2538,7 +2538,7 @@ class AiAssistantToolCallReadServiceTest {
         assertEquals(List.of("unchanged", "ready"), card.changes().stream().map(AiAssistantToolCallReadDto.Change::state).toList());
         assertEquals("unresolved", card.change().state());
         assertEquals("Tokyo", card.changes().get(1).currentValue());
-        verify(companyMapper).getByIds(WORKSPACE_ID, List.of(52));
+        verify(companyMapper).getByIds(WORKSPACE_ID, "[7,8,9]", List.of(52));
 
         company.setAddress("Osaka");
         assertEquals("unchanged", service.list(SESSION_ID, false).getFirst().change().state());
@@ -2551,7 +2551,7 @@ class AiAssistantToolCallReadServiceTest {
 
     @Test
     void singleFieldLegacyProjectionIsByteIdenticalToItsOnlyModernRow() {
-        when(companyMapper.getByIds(WORKSPACE_ID, List.of(52))).thenReturn(List.of(fieldCompany()));
+        when(companyMapper.getByIds(WORKSPACE_ID, "[7,8,9]", List.of(52))).thenReturn(List.of(fieldCompany()));
         when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100, null, 1L))
                 .thenReturn(List.of(fieldProposal("{\"industry\":\"Software\"}")));
 
@@ -2568,7 +2568,7 @@ class AiAssistantToolCallReadServiceTest {
     @Test
     void screenedFieldTextIsWithheldBeforeBothProjectionsAndOutranksPermissionLoss() {
         Company company = fieldCompany();
-        when(companyMapper.getByIds(WORKSPACE_ID, List.of(52))).thenReturn(List.of(company));
+        when(companyMapper.getByIds(WORKSPACE_ID, "[7,8,9]", List.of(52))).thenReturn(List.of(company));
         AiChatToolCall call = fieldProposal("{\"industry\":\"medical history\",\"address\":\"Osaka\"}");
         when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100, null, 1L))
                 .thenReturn(List.of(call));
@@ -2591,7 +2591,7 @@ class AiAssistantToolCallReadServiceTest {
 
     @Test
     void malformedStoredFieldProposalIsHiddenAndCompletedCardsHaveNoChanges() {
-        when(companyMapper.getByIds(WORKSPACE_ID, List.of(52))).thenReturn(List.of(fieldCompany()));
+        when(companyMapper.getByIds(WORKSPACE_ID, "[7,8,9]", List.of(52))).thenReturn(List.of(fieldCompany()));
         AiChatToolCall call = fieldProposal("{\"title\":\"Director\"}");
         when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100, null, 1L))
                 .thenReturn(List.of(call));
@@ -2628,7 +2628,7 @@ class AiAssistantToolCallReadServiceTest {
         company.setWorkspaceId(WORKSPACE_ID);
         company.setName("Acme company");
         company.setUpdatedAt("2099-01-01 00:00:00");
-        when(companyMapper.getByIds(WORKSPACE_ID, List.of(52))).thenReturn(List.of(company));
+        when(companyMapper.getByIds(WORKSPACE_ID, "[7,8,9]", List.of(52))).thenReturn(List.of(company));
     }
 
     private void stubVisibleTask() {

@@ -204,8 +204,8 @@ class BulkOperationServiceTest extends AbstractServiceTest {
         assertEquals(1, result.getSucceeded());
         assertEquals(2, result.getFailed());
         assertEquals(owner.getId(),
-            companyMapper.getCompanyById(workspace.getId(), local.getId()).getOwnerId());
-        assertNull(companyMapper.getCompanyById(other.getId(), foreign.getId()).getOwnerId());
+            companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), local.getId()).getOwnerId());
+        assertNull(companyMapper.getCompanyById(other.getId(), orgWorkspaceIdsJson(workspaceMapper, other.getId()), foreign.getId()).getOwnerId());
     }
 
     @Test
@@ -236,7 +236,7 @@ class BulkOperationServiceTest extends AbstractServiceTest {
             () -> bulkOperationService.assignOwnerToCompanies(List.of(company.getId()), outsider.getId()));
         assertThrows(ForbiddenException.class,
             () -> bulkOperationService.assignOwnerToPersons(List.of(person.getId()), outsider.getId()));
-        assertNull(companyMapper.getCompanyById(workspace.getId(), company.getId()).getOwnerId());
+        assertNull(companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), company.getId()).getOwnerId());
         assertNull(personMapper.getPersonById(workspace.getId(), person.getId()).getOwnerId());
     }
 

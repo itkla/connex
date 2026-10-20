@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
+
 import java.math.BigDecimal;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -104,7 +106,7 @@ class RuleEngineServiceTest extends AbstractServiceTest {
     }
 
     private boolean tagged(int companyId, int tagId) {
-        return companyMapper.getCompaniesByTagId(workspace.getId(), tagId).stream()
+        return companyMapper.getCompaniesByTagId(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), tagId).stream()
             .anyMatch(company -> company.getId() == companyId);
     }
 

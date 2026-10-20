@@ -25,43 +25,43 @@ import ooo.klae.connex.backend.warmth.RelationshipWarmthModel.SqlParameters;
  */
 
 public interface CompanyMapper {
-    List<Company> getAllCompanies(int workspaceId);
+    List<Company> getAllCompanies(@Param("workspaceId") int workspaceId, @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson);
     List<Company> findVisibleNameCandidates(
-            @Param("workspaceId") int workspaceId,
+            @Param("workspaceId") int workspaceId, @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
             @Param("pattern") String pattern,
             @Param("normalizedName") String normalizedName,
             @Param("limit") int limit);
     List<RelationshipScoreAggregateDto> getRelationshipScoreAggregates(
-            @Param("workspaceId") int workspaceId,
+            @Param("workspaceId") int workspaceId, @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
             @Param("reference") LocalDateTime reference,
             @Param("model") SqlParameters model);
     /** Returns full-corpus aggregates scoped to the requested visible records. */
     List<RelationshipScoreAggregateDto> getRelationshipScoreAggregatesByIds(
-            @Param("workspaceId") int workspaceId,
+            @Param("workspaceId") int workspaceId, @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
             @Param("reference") LocalDateTime reference,
             @Param("model") SqlParameters model,
             @Param("ids") List<Integer> ids);
     RelationshipEvidenceTotalsDto getRelationshipEvidenceTotals(
-            @Param("workspaceId") int workspaceId,
+            @Param("workspaceId") int workspaceId, @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
             @Param("companyId") int companyId,
             @Param("reference") LocalDateTime reference,
             @Param("model") SqlParameters model,
             @Param("sourceLimit") int sourceLimit);
     List<RelationshipEvidenceRowDto> getRelationshipEvidenceContributors(
-            @Param("workspaceId") int workspaceId,
+            @Param("workspaceId") int workspaceId, @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
             @Param("companyId") int companyId,
             @Param("reference") LocalDateTime reference,
             @Param("model") SqlParameters model,
             @Param("sourceLimit") int sourceLimit,
             @Param("limit") int limit);
     /** One page of the browser list; {@code archived} selects the archived set instead of the active one. */
-    List<Company> getCompaniesPage(@Param("workspaceId") int workspaceId, @Param("query") String query,
+    List<Company> getCompaniesPage(@Param("workspaceId") int workspaceId, @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson, @Param("query") String query,
             @Param("sort") String sort, @Param("dir") String dir,
             @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry,
             @Param("ids") List<Integer> ids, @Param("memberScope") MemberScope memberScope,
             @Param("archived") boolean archived, @Param("warmth") WarmthFilter warmth,
             @Param("limit") int limit, @Param("offset") int offset);
-    long countCompanies(@Param("workspaceId") int workspaceId, @Param("query") String query,
+    long countCompanies(@Param("workspaceId") int workspaceId, @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson, @Param("query") String query,
             @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry,
             @Param("ids") List<Integer> ids, @Param("memberScope") MemberScope memberScope,
             @Param("archived") boolean archived, @Param("warmth") WarmthFilter warmth);
@@ -84,25 +84,25 @@ public interface CompanyMapper {
      * One page of a smart segment's evaluated ids, narrowed by the browser's search, industry, owner
      * scope, and warmth filter, and ordered by the browser's sort whitelist including warmth.
      */
-    List<Company> getSegmentCompaniesPage(@Param("workspaceId") int workspaceId,
+    List<Company> getSegmentCompaniesPage(@Param("workspaceId") int workspaceId, @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
             @Param("segmentIdsJson") String segmentIdsJson, @Param("query") String query,
             @Param("sort") String sort, @Param("dir") String dir,
             @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry,
             @Param("memberScope") MemberScope memberScope, @Param("warmth") WarmthFilter warmth,
             @Param("limit") int limit, @Param("offset") int offset);
     /** Total for the segment page; joins the warmth aggregate only when the filter narrows rows. */
-    long countSegmentCompanies(@Param("workspaceId") int workspaceId,
+    long countSegmentCompanies(@Param("workspaceId") int workspaceId, @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
             @Param("segmentIdsJson") String segmentIdsJson, @Param("query") String query,
             @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry,
             @Param("memberScope") MemberScope memberScope, @Param("warmth") WarmthFilter warmth);
     /** Ids behind the segment page; backs "select all matching" while a segment is active. */
-    List<Integer> getSegmentCompanyIdsFiltered(@Param("workspaceId") int workspaceId,
+    List<Integer> getSegmentCompanyIdsFiltered(@Param("workspaceId") int workspaceId, @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
             @Param("segmentIdsJson") String segmentIdsJson, @Param("query") String query,
             @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry,
             @Param("memberScope") MemberScope memberScope, @Param("warmth") WarmthFilter warmth,
             @Param("limit") int limit);
     /** Ids using the browser's filters and member scope; backs "select all matching". */
-    List<Integer> getCompanyIdsFiltered(@Param("workspaceId") int workspaceId, @Param("query") String query,
+    List<Integer> getCompanyIdsFiltered(@Param("workspaceId") int workspaceId, @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson, @Param("query") String query,
             @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry,
             @Param("ids") List<Integer> ids, @Param("memberScope") MemberScope memberScope,
             @Param("archived") boolean archived, @Param("warmth") WarmthFilter warmth,
@@ -111,12 +111,12 @@ public interface CompanyMapper {
      * CSV export using the browser filters and member scope, mirroring the visible list.
      * Callers pass {@code archived = false}: an export is defined as the active working set.
      */
-    List<Company> getCompaniesFiltered(@Param("workspaceId") int workspaceId, @Param("query") String query,
+    List<Company> getCompaniesFiltered(@Param("workspaceId") int workspaceId, @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson, @Param("query") String query,
             @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry,
             @Param("ids") List<Integer> ids, @Param("memberScope") MemberScope memberScope,
             @Param("archived") boolean archived, @Param("warmth") WarmthFilter warmth);
-    List<String> distinctIndustries(int workspaceId);
-    boolean hasCompanyWithoutIndustry(int workspaceId);
+    List<String> distinctIndustries(@Param("workspaceId") int workspaceId, @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson);
+    boolean hasCompanyWithoutIndustry(@Param("workspaceId") int workspaceId, @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson);
     List<FacetCount> countsByOwner(@Param("workspaceId") int workspaceId);
     /**
      * How many visible active companies sit in each relationship-warmth band, computed from the same
@@ -135,12 +135,12 @@ public interface CompanyMapper {
      * @return one bucket per band, plus {@code __none__}
      */
     List<FacetCount> countsByWarmthBand(
-            @Param("workspaceId") int workspaceId, @Param("warmth") WarmthFilter warmth);
+            @Param("workspaceId") int workspaceId, @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson, @Param("warmth") WarmthFilter warmth);
     /** How many companies the workspace currently holds archived; drives the browser's archived toggle. */
     long countArchivedCompanies(@Param("workspaceId") int workspaceId);
-    List<Company> getCompaniesByTagId(@Param("workspaceId") int workspaceId, @Param("tagId") int tagId);
-    Company getCompanyById(@Param("workspaceId") int workspaceId, @Param("id") int id);
-    Company getVisibleCompanyByIdForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    List<Company> getCompaniesByTagId(@Param("workspaceId") int workspaceId, @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson, @Param("tagId") int tagId);
+    Company getCompanyById(@Param("workspaceId") int workspaceId, @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson, @Param("id") int id);
+    Company getVisibleCompanyByIdForUpdate(@Param("workspaceId") int workspaceId, @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson, @Param("id") int id);
     Company getOwnedCompanyByIdForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
     /** The owned company only when it is archived; the restore path's pre-image read. */
     Company getOwnedArchivedCompanyById(@Param("workspaceId") int workspaceId, @Param("id") int id);
@@ -148,11 +148,11 @@ public interface CompanyMapper {
     /** id + name + website for every company in the workspace; for import dedup (normalized in the service). */
     List<Company> getCompaniesForDedup(int workspaceId);
     /** Companies in the workspace with the given ids (workspace-scoped); for export of a selected view. */
-    List<Company> getByIds(@Param("workspaceId") int workspaceId, @Param("ids") List<Integer> ids);
-    List<Company> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
-    boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    List<Company> getByIds(@Param("workspaceId") int workspaceId, @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson, @Param("ids") List<Integer> ids);
+    List<Company> search(@Param("workspaceId") int workspaceId, @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson, @Param("query") String query);
+    boolean exists(@Param("workspaceId") int workspaceId, @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson, @Param("id") int id);
     List<Integer> getVisibleIdsIn(
-        @Param("workspaceId") int workspaceId,
+        @Param("workspaceId") int workspaceId, @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
         @Param("ids") List<Integer> ids
     );
     /**

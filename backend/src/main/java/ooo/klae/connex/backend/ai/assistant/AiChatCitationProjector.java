@@ -340,6 +340,7 @@ public class AiChatCitationProjector {
         List<Integer> personIds = ids(requested, "person");
         List<Integer> companyIds = ids(requested, "company");
         List<Integer> dealIds = ids(requested, "deal");
+        String orgWorkspaceIdsJson = null;
         Map<RecordKey, VisibleRecord> visible = new LinkedHashMap<>();
         if (!personIds.isEmpty()) {
             personMapper.getByIds(workspaceId, personIds).stream()
@@ -354,7 +355,8 @@ public class AiChatCitationProjector {
                                             : person.getCompany().getName()))));
         }
         if (!companyIds.isEmpty()) {
-            companyMapper.getByIds(workspaceId, companyIds)
+            orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+            companyMapper.getByIds(workspaceId, orgWorkspaceIdsJson, companyIds)
                     .forEach(company -> visible.put(
                             new RecordKey("company", company.getId()),
                             new VisibleRecord(
@@ -364,9 +366,12 @@ public class AiChatCitationProjector {
         }
         if (!dealIds.isEmpty()) {
             List<Deal> deals = dealMapper.getByIds(workspaceId, dealIds);
+            if (!deals.isEmpty() && orgWorkspaceIdsJson == null) {
+                orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+            }
             Map<Integer, String> stageNames = deals.isEmpty()
                     ? Map.of()
-                    : stageNames(workspaceId);
+                    : stageNames(workspaceId, orgWorkspaceIdsJson);
             deals.forEach(deal -> visible.put(
                     new RecordKey("deal", deal.getId()),
                     new VisibleRecord(
@@ -379,8 +384,7 @@ public class AiChatCitationProjector {
         return Map.copyOf(visible);
     }
 
-    private Map<Integer, String> stageNames(int workspaceId) {
-        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+    private Map<Integer, String> stageNames(int workspaceId, String orgWorkspaceIdsJson) {
         Map<Integer, String> names = new LinkedHashMap<>();
         for (Stage stage : pipelineMapper.getAllStages(workspaceId, orgWorkspaceIdsJson)) {
             if (stage.getName() != null) {

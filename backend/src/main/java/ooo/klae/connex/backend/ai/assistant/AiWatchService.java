@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
+
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
@@ -67,12 +69,22 @@ public class AiWatchService {
     private final WorkspaceService workspaceService;
     private final Clock clock;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     /** Lists the calling member's watches, newest first, with currently readable subject labels. */
     @Transactional(readOnly = true)
     @RequirePermission(Permission.AI_USE)
     public List<AiWatchDto> list() {
         List<AiWatch> watches = watchMapper.listForOwner(
                 workspaceService.getCurrentWorkspaceId(), workspaceService.getCurrentUserId());
+        if (watches.stream().noneMatch(watch -> "company".equals(watch.getSubjectKind()))) {
+            return project(watches);
+        }
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
+            workspaceService.getCurrentWorkspaceId(), () -> project(watches));
+    }
+
+    private List<AiWatchDto> project(List<AiWatch> watches) {
         List<AiWatchDto> projected = new ArrayList<>(watches.size());
         for (AiWatch watch : watches) {
             projected.add(AiWatchDto.from(
@@ -112,6 +124,14 @@ public class AiWatchService {
             throw new BadRequestException(
                     "Watch type cannot be created against this record kind");
         }
+        if (!"company".equals(request.subjectKind())) {
+            return createWithinVisibilityScope(request, type);
+        }
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> createWithinVisibilityScope(request, type));
+    }
+
+    private AiWatchDto createWithinVisibilityScope(AiWatchCreateRequest request, AiWatchType type) {
         String label = subjectReader.label(request.subjectKind(), request.subjectId())
                 .orElseThrow(() -> new ResourceNotFoundException("Watched record not found"));
         int workspaceId = workspaceService.getCurrentWorkspaceId();
@@ -153,6 +173,11 @@ public class AiWatchService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.AI_USE)
     public AiWatchDto setActive(int id, boolean active) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> setActiveWithinVisibilityScope(id, active));
+    }
+
+    private AiWatchDto setActiveWithinVisibilityScope(int id, boolean active) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = workspaceService.getCurrentUserId();
         if (watchMapper.updateStatus(workspaceId, userId, id, active ? ACTIVE : PAUSED) != 1) {

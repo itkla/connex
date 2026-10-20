@@ -84,7 +84,7 @@ class MapReplayServiceTest {
 
         when(personMapper.getProcessablePersons(WS))
             .thenReturn(List.of(person(CONTACT, "2025-06-01 00:00:00", COMPANY_B)));
-        when(companyMapper.getAllCompanies(WS)).thenReturn(List.of(
+        when(companyMapper.getAllCompanies(WS, "[7,8,9]")).thenReturn(List.of(
             company(COMPANY_A, "2025-01-01 00:00:00"), company(COMPANY_B, "2025-01-01 00:00:00")));
         when(dealMapper.getAllDeals(WS)).thenReturn(List.of(
             deal(DEAL, "2026-02-15 00:00:00", COMPANY_A, "2026-04-15 00:00:00", true)));
@@ -99,8 +99,8 @@ class MapReplayServiceTest {
         Clock clock = Clock.fixed(Instant.parse("2026-06-30T00:00:00Z"), ZoneOffset.UTC);
         ScoringService scoring = new ScoringService(
             personMapper, companyMapper, dealMapper, activityMapper, noteMapper, taskMapper, clock,
-            mock(RecordVisibilityScopeControlAccess.class));
-        return new MapReplayService(scoring, personMapper, companyMapper, dealMapper, employmentMapper, clock);
+            ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
+        return new MapReplayService(scoring, personMapper, companyMapper, dealMapper, employmentMapper, clock, ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
     }
 
     private static ReplayFrameDto frameOn(MapReplayDto out, String asOf) {
