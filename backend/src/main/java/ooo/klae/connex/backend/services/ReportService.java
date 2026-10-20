@@ -76,6 +76,7 @@ import ooo.klae.connex.backend.mappers.GoalMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.ScheduleMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 import ooo.klae.connex.backend.warmth.RelationshipWarmthModel;
@@ -198,6 +199,7 @@ public class ReportService {
     private final ScoringService scoringService;
     private final DealRiskService dealRiskService;
     private final ReportNetworkService reportNetworkService;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
     private final AiReportNarrativeService aiReportNarrativeService;
     private final AiGenerationService aiGenerationService;
     private final AiRestrictionEpoch aiRestrictionEpoch;
@@ -505,8 +507,9 @@ public class ReportService {
         validateAttainmentPeriod(config, period);
         WidgetSelection selected = selectWidget(config, widgetId);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         GenerationInputs inputs = generationInputs(
-                workspaceId, config, List.of(selected.widget()), period, RiskInputScope.KPI_BOUNDED);
+                workspaceId, config, List.of(selected.widget()), period, scope, RiskInputScope.KPI_BOUNDED);
         if (inputs.riskInputLimitExceeded()) {
             ReportWidgetDataDto widget = new ReportWidgetDataDto(
                     selected.widget().id(),
@@ -886,8 +889,9 @@ public class ReportService {
         PeriodWindow period = resolvePeriod(definition.getCadence(), config.range(), request, config.bucket());
         validateAttainmentPeriod(config, period);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         long restrictionEpoch = aiRestrictionEpoch.current(workspaceId);
-        GeneratedFigures figures = generateFigures(workspaceId, config, period);
+        GeneratedFigures figures = generateFigures(workspaceId, config, period, scope);
         return new PreparedReport(
                 toDefinitionDto(definition),
                 definition.getName(),
@@ -930,10 +934,11 @@ public class ReportService {
     }
 
     /** Generates every widget's figures and appendix rows for the resolved reporting period. */
-    private GeneratedFigures generateFigures(int workspaceId, ReportConfig config, PeriodWindow period) {
+    private GeneratedFigures generateFigures(
+            int workspaceId, ReportConfig config, PeriodWindow period, RecordVisibilityScope scope) {
         List<ReportWidgetDataDto> widgets = new ArrayList<>();
         List<ReportAppendixRowDto> appendix = new ArrayList<>();
-        GenerationInputs inputs = generationInputs(workspaceId, config, config.widgets(), period);
+        GenerationInputs inputs = generationInputs(workspaceId, config, config.widgets(), period, scope);
         int widgetIndex = 0;
         for (ReportWidgetConfig widget : config.widgets()) {
             WidgetResult result = generateWidget(
@@ -1030,12 +1035,14 @@ public class ReportService {
             List<ReportAggregateRow> current = reportMapper.aggregateCoverageGaps(query(
                     workspaceId, widget, filters, bucket, period.currentStartUtc(),
                     period.currentEndUtc(), period.zone()),
+                    inputs.orgWorkspaceIdsJson(),
                     period.currentEndUtc().minusNanos(1_000_000),
                     WARMTH_MODEL.sqlParameters());
             List<ReportAggregateRow> prior = priorComparable(widget, filters)
                     ? reportMapper.aggregateCoverageGaps(query(
                             workspaceId, widget, filters, bucket, period.priorStartUtc(),
                             period.priorEndUtc(), period.zone()),
+                            inputs.orgWorkspaceIdsJson(),
                             period.priorEndUtc().minusNanos(1_000_000),
                             WARMTH_MODEL.sqlParameters())
                     : List.of();
@@ -1046,7 +1053,7 @@ public class ReportService {
                 .contains(widget.measure())) {
             List<ReportAggregateRow> current = reportMapper.aggregateSingleThreadedDeals(query(
                     workspaceId, widget, filters, bucket, period.currentStartUtc(),
-                    period.currentEndUtc(), period.zone()));
+                    period.currentEndUtc(), period.zone()), inputs.orgWorkspaceIdsJson());
             return new RowPair(countTotalRow(widget, current), List.of());
         } else if (WARM_INTRO_MEASURES.contains(widget.measure())) {
             return new RowPair(
@@ -1445,8 +1452,9 @@ public class ReportService {
             int workspaceId,
             ReportConfig config,
             List<ReportWidgetConfig> requestedWidgets,
-            PeriodWindow period) {
-        return generationInputs(workspaceId, config, requestedWidgets, period, RiskInputScope.COMPLETE);
+            PeriodWindow period,
+            RecordVisibilityScope scope) {
+        return generationInputs(workspaceId, config, requestedWidgets, period, scope, RiskInputScope.COMPLETE);
     }
 
     private GenerationInputs generationInputs(
@@ -1454,7 +1462,9 @@ public class ReportService {
             ReportConfig config,
             List<ReportWidgetConfig> requestedWidgets,
             PeriodWindow period,
+            RecordVisibilityScope scope,
             RiskInputScope riskInputScope) {
+        String orgWorkspaceIdsJson = scope.workspaceIdsJson();
         boolean contactRelationships = requestedWidgets.stream()
                 .anyMatch(widget -> "relationships".equals(widget.dataSource())
                         && "count".equals(widget.measure()));
@@ -1480,7 +1490,7 @@ public class ReportService {
             networkSnapshot = new ReportNetworkService.NetworkSnapshot(
                     List.of(),
                     includeReverseIntros
-                            ? reportNetworkService.reverseIntroSuggestions(workspaceId)
+                            ? reportNetworkService.reverseIntroSuggestions(workspaceId, scope)
                             : List.of());
         } else {
             ReportWidgetConfig networkWidget = warmIntroWidgets.getFirst();
@@ -1491,16 +1501,18 @@ public class ReportService {
                         config.bucket(),
                         period.currentStartUtc(),
                         period.currentEndUtc(),
-                        period.zone()), includeReverseIntros);
+                        period.zone()), includeReverseIntros, scope);
         }
         Set<Integer> currentPeople = contactRelationships
                 ? new HashSet<>(reportMapper.getVisiblePersonIdsAt(
                         workspaceId,
+                        orgWorkspaceIdsJson,
                         LocalDateTime.ofInstant(period.currentEndInstant(), ZoneOffset.UTC)))
                 : Set.of();
         Set<Integer> priorPeople = contactRelationships
                 ? new HashSet<>(reportMapper.getVisiblePersonIdsAt(
                         workspaceId,
+                        orgWorkspaceIdsJson,
                         LocalDateTime.ofInstant(period.priorEndInstant(), ZoneOffset.UTC)))
                 : Set.of();
         List<RelationshipTemperatureDto> currentRelationships = contactRelationships
@@ -1516,11 +1528,13 @@ public class ReportService {
         Set<Integer> currentCompanies = companyRelationships
                 ? new HashSet<>(reportMapper.getVisibleCompanyIdsAt(
                         workspaceId,
+                        orgWorkspaceIdsJson,
                         LocalDateTime.ofInstant(period.currentEndInstant(), ZoneOffset.UTC)))
                 : Set.of();
         Set<Integer> priorCompanies = companyRelationships
                 ? new HashSet<>(reportMapper.getVisibleCompanyIdsAt(
                         workspaceId,
+                        orgWorkspaceIdsJson,
                         LocalDateTime.ofInstant(period.priorEndInstant(), ZoneOffset.UTC)))
                 : Set.of();
         List<RelationshipTemperatureDto> currentCompanyRelationships = companyRelationships
@@ -1549,6 +1563,7 @@ public class ReportService {
                         ? dealRiskService.assessWorkspace(workspaceId)
                         : boundedRiskAssessment.assessments();
         return new GenerationInputs(
+                orgWorkspaceIdsJson,
                 currentRelationships,
                 priorRelationships,
                 currentCompanyRelationships,
@@ -2205,6 +2220,7 @@ public class ReportService {
     }
 
     private record GenerationInputs(
+            String orgWorkspaceIdsJson,
             List<RelationshipTemperatureDto> currentRelationships,
             List<RelationshipTemperatureDto> priorRelationships,
             List<RelationshipTemperatureDto> currentCompanyRelationships,
