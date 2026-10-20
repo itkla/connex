@@ -75,6 +75,7 @@ import ooo.klae.connex.backend.mappers.AiChatMapper;
         "connex.ai.mission-capabilities[1].capability=missions_v1"
 })
 class AiAgentScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
+    @Autowired private ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard privacyGuard;
     @MockitoBean private AiAgentScheduler scheduler;
     @Autowired private AiAgentRunService service;
     @Autowired private AiAgentSegmentRunner runner;
@@ -82,7 +83,6 @@ class AiAgentScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
     @Autowired private AiAgentRunMapper runs;
     @Autowired private AiChatMapper chat;
     @MockitoSpyBean private AiAgentCapabilityGate capability;
-    @Autowired private AiAgentPrivacyInitializer initializer;
     @Autowired private AiAgentPrivacyService privacy;
     @Autowired private ooo.klae.connex.backend.mappers.AiAgentPrivacyMapper privacyMapper;
     @Autowired private org.springframework.transaction.PlatformTransactionManager transactionManager;
@@ -96,8 +96,6 @@ class AiAgentScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
 
     @BeforeEach
     void prepareMissionBudget() {
-        initializer.reconcile();
-        assertTrue(initializer.isReady(), "mission readiness must be established, not mocked");
         jdbc.update("INSERT INTO organization_ai_budget (org_id, daily_token_limit) VALUES (?, ?)",
                 organizationId(), 1_000_000L);
     }
@@ -169,7 +167,7 @@ class AiAgentScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
         assertAttempts(6, 6);
         assertEquals("failed", runs.getRun(workspaceId(), run.getId()).getStatus());
         assertEquals(original.getPreparationId(), boundActions(run).getFirst().getPreparationId());
-        assertEquals("failed", chat.getMissionToolCall(workspaceId(), run.getId(), original.getId()).getStatus());
+        assertEquals("failed", chat.getMissionToolCallForMaintenance(workspaceId(), run.getId(), original.getId()).getStatus());
         assertEquals(1, count("SELECT COUNT(*) FROM ai_chat_tool_call WHERE workspace_id=? AND mission_run_id=? AND proposal_origin='mission'", workspaceId(), run.getId()));
     }
 
@@ -510,7 +508,8 @@ class AiAgentScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
         AiAgentRun run = create(selected, "mission_privacy_boundary");
         var token = new ooo.klae.connex.backend.ai.assistant.AiChatPrivacyToken(workspaceId(),
                 run.getSessionId(), run.getPrivacyGeneration(),
-                chat.getPrivacySession(workspaceId(), run.getSessionId()).getMissionTaintSeq());
+                chat.getPrivacySession(workspaceId(), run.getSessionId()).getMissionTaintSeq(),
+                privacyGuard.organizationId(workspaceId()), run.getOrganizationPrivacyGeneration());
         onScriptedStep((script, completed) -> {
             UUID operation = UUID.randomUUID();
             var transaction = new org.springframework.transaction.support.TransactionTemplate(transactionManager);
@@ -531,7 +530,7 @@ class AiAgentScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
                     PromptAssembly.builder(context).system("Review the supplied evidence")
                             .userTurn("connex_script_mission_privacy_boundary").build(), 64, 0.1);
             var refused = assertThrows(AiAssistantLoopException.class, () ->
-                    ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard.execute(chat, token,
+                    privacyGuard.execute(chat, token,
                             () -> invocations.complete(invocation)));
             assertEquals("restrictions_changed", refused.detailReason());
         } finally {

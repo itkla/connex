@@ -45,6 +45,7 @@ class AiAgentProposalSetPortTest {
     @BeforeEach
     void setUp() {
         run.setId(31);
+        run.setOrganizationPrivacyGeneration(1L);
         run.setWorkspaceId(7);
         run.setMissionType("record_preparation_v1");
         run.setDefinitionVersion(1);
@@ -108,7 +109,7 @@ class AiAgentProposalSetPortTest {
         when(actions.listByRoot(7, 31)).thenReturn(List.of(bound, unused));
         assertEquals("mission_membership_conflict", assertThrows(ConflictException.class,
                 () -> port.freeze(run, List.of(unused), NOW.plusSeconds(2))).getMessage());
-        when(chat.getMissionToolCall(7, 31, 1)).thenReturn(canonical(bound));
+        when(chat.getMissionToolCall(7, 31, 1, 1L)).thenReturn(canonical(bound));
         when(actions.assignOutputOrdinal(7, 31, 1, 1)).thenReturn(1);
         port.freeze(run, List.of(bound, unused), NOW.plusSeconds(2));
         assertNotNull(run.getReviewExpiresAt());
@@ -122,7 +123,7 @@ class AiAgentProposalSetPortTest {
         for (int index = 1; index <= 50; index++) {
             var action = action(index, "assign_owner", true);
             inventory.add(action);
-            when(chat.getMissionToolCall(7, 31, index)).thenReturn(canonical(action));
+            when(chat.getMissionToolCall(7, 31, index, 1L)).thenReturn(canonical(action));
             when(actions.assignOutputOrdinal(7, 31, index, index)).thenReturn(1);
         }
         when(actions.listByRoot(7, 31)).thenReturn(inventory);
@@ -147,6 +148,32 @@ class AiAgentProposalSetPortTest {
         when(actions.listByRoot(7, 31)).thenReturn(List.of(bound));
         when(actions.lockAction(7, 31, 1)).thenReturn(bound);
         assertThrows(ConflictException.class, () -> port.lockInventory(run));
+    }
+
+    @Test
+    void maintenanceInventoryLocksInvalidatedProposalsForSafeCancellation() {
+        var bound = action(1, "assign_owner", true);
+        when(actions.listByRoot(7, 31)).thenReturn(List.of(bound));
+        when(actions.lockAction(7, 31, 1)).thenReturn(bound);
+        when(chat.getMissionToolCallForMaintenance(7, 31, 1)).thenReturn(canonical(bound));
+        when(chat.lockMissionToolCall(7, 31, 1)).thenReturn(canonical(bound));
+
+        assertEquals(List.of(bound), port.lockInventory(run));
+
+        verify(chat, never()).getMissionToolCall(7, 31, 1, 1L);
+    }
+
+    @Test
+    void frozenMembershipRefusesCanonicalCallFromAnotherOrganizationGeneration() {
+        var bound = action(1, "assign_owner", true);
+        var stale = canonical(bound);
+        stale.setOrganizationPrivacyGeneration(0);
+        when(actions.listByRoot(7, 31)).thenReturn(List.of(bound));
+        when(chat.getMissionToolCall(7, 31, 1, 1L)).thenReturn(stale);
+
+        assertThrows(ConflictException.class, () -> port.freeze(run, List.of(bound), NOW));
+
+        verify(actions, never()).assignOutputOrdinal(7, 31, 1, 1);
     }
 
     private static AiAgentAction action(int id, String tool, boolean bound) {
@@ -178,6 +205,7 @@ class AiAgentProposalSetPortTest {
 
     private static AiChatToolCall canonical(AiAgentAction action) {
         var call = new AiChatToolCall();
+        call.setOrganizationPrivacyGeneration(1L);
         call.setId(action.getId());
         call.setToolName(action.getToolName());
         call.setStatus("proposed");

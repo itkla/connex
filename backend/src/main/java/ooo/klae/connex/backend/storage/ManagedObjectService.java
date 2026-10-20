@@ -34,12 +34,16 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyPublicationGuard;
+import ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard;
+import ooo.klae.connex.backend.ai.assistant.AiChatPrivacyToken;
 import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.businesscard.ValidatedBusinessCardImage;
 import ooo.klae.connex.backend.dto.ActiveObjectReference;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
+import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.storage.ImageUploadValidator.ValidatedImage;
 import ooo.klae.connex.backend.storage.ObjectStorageProperties.LegacyMigrationMode;
 import ooo.klae.connex.backend.storage.UploadContentInspector.InspectedUpload;
@@ -64,6 +68,15 @@ public class ManagedObjectService implements ApplicationRunner {
 
     @Autowired
     private ooo.klae.connex.backend.config.DeploymentProperties deploymentProperties;
+
+    @Autowired
+    private AiChatPrivacyGuard privacyGuard;
+
+    @Autowired
+    private AiChatMapper aiChatMapper;
+
+    @Autowired
+    private AiAssistantPrivacyPublicationGuard publicationGuard;
 
     private final ObjectStorage objectStorage;
     private final ObjectDeletionRetryQueue deletionRetryQueue;
@@ -473,13 +486,24 @@ public class ManagedObjectService implements ApplicationRunner {
     }
 
     public ManagedContent openAttachment(int workspaceId, Attachment attachment) {
+        AiChatPrivacyToken privacyToken = null;
+        if ("ai_chat_session".equals(attachment.getEntityType())) {
+            var session = aiChatMapper.getPrivacySession(workspaceId, attachment.getEntityId());
+            if (session == null) {
+                throw new ResourceNotFoundException("Stored file was not found");
+            }
+            privacyToken = privacyGuard.capture(aiChatMapper, session);
+            privacyGuard.requireCurrent(aiChatMapper, privacyToken);
+        }
         requireCleanAttachment(workspaceId, attachment.getUrl());
         String token = requireManagedToken(attachment.getUrl(), ATTACHMENT_URL_PREFIX);
         StoredObject object = getForResponse(attachmentKey(workspaceId, token));
         return new ManagedContent(
             object,
             uploadPolicy.safeResponseContentType(attachment.getContentType()),
-            uploadPolicy.safeResponseFileName(attachment.getFileName())
+            uploadPolicy.safeResponseFileName(attachment.getFileName()),
+            privacyToken == null ? null : new ContentPublication(
+                publicationGuard, privacyToken.organizationId(), privacyToken.organizationPrivacyGeneration())
         );
     }
 
@@ -913,7 +937,7 @@ public class ManagedObjectService implements ApplicationRunner {
         return managedToken(url, ATTACHMENT_URL_PREFIX).isPresent();
     }
 
-    Optional<String> managedAttachmentKey(int workspaceId, String url) {
+    public Optional<String> managedAttachmentKey(int workspaceId, String url) {
         return managedToken(url, ATTACHMENT_URL_PREFIX).map(token -> attachmentKey(workspaceId, token));
     }
 
@@ -1135,7 +1159,27 @@ public class ManagedObjectService implements ApplicationRunner {
      * @param contentType trusted response media type
      * @param fileName safe response file name
      */
-    public record ManagedContent(StoredObject object, String contentType, String fileName) implements AutoCloseable {
+    public record ManagedContent(StoredObject object, String contentType, String fileName,
+            ContentPublication publication) implements AutoCloseable {
+        public ManagedContent(StoredObject object, String contentType, String fileName) {
+            this(object, contentType, fileName, null);
+        }
+
+        /** Copies bytes while validating original chat authority around each actual response write. */
+        public void writeTo(OutputStream output) throws IOException {
+            byte[] buffer = new byte[16_384];
+            int length;
+            while ((length = inputStream().read(buffer)) != -1) {
+                int count = length;
+                if (publication == null) {
+                    output.write(buffer, 0, count);
+                } else {
+                    publication.guard().withCurrent(publication.organizationId(), publication.generation(),
+                            () -> output.write(buffer, 0, count));
+                }
+            }
+        }
+
         public ManagedContent {
             Objects.requireNonNull(object, "object");
             Objects.requireNonNull(contentType, "contentType");
@@ -1155,6 +1199,9 @@ public class ManagedObjectService implements ApplicationRunner {
             object.close();
         }
     }
+
+    /** Immutable original authority attached only to chat-owned byte responses. */
+    public record ContentPublication(AiAssistantPrivacyPublicationGuard guard, int organizationId, long generation) {}
 
     /**
      * Validated tenant export object with its canonical ZIP-relative key and

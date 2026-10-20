@@ -30,16 +30,23 @@ import ooo.klae.connex.backend.services.WorkspaceService;
 
 class AiAgentMissionWorkItemProviderTest {
     private static final Instant NOW = Instant.parse("2026-10-19T12:00:00Z");
+    private final ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard privacyGuard =
+            mock(ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard.class);
     private final AiAgentRunMapper runs = mock(AiAgentRunMapper.class);
     private final AiAgentRunService missions = mock(AiAgentRunService.class);
     private final AiAgentMissionWorkItemProvider provider = new AiAgentMissionWorkItemProvider(
-            runs, missions, mock(WorkspaceService.class));
+            privacyGuard, runs, missions, mock(WorkspaceService.class));
     private final WorkItemProviderQuery query = new WorkItemProviderQuery(7, 42,
             LocalDate.of(2026, 10, 19), NOW, Set.of(), 25);
 
+    @org.junit.jupiter.api.BeforeEach
+    void privacyAuthority() {
+        when(privacyGuard.currentGeneration(7)).thenReturn(1L);
+    }
+
     @Test
     void projectsOneItemPerWaitingRoot() {
-        when(runs.listRuns(7, 42, null, "waiting_approval", null, 100)).thenReturn(List.of(run(31), run(32)));
+        when(runs.listRuns(7, 42, null, "waiting_approval", null, 100, 1L)).thenReturn(List.of(run(31), run(32)));
         when(missions.output(31)).thenReturn(output(31, NOW.plusSeconds(60), 2));
         when(missions.output(32)).thenReturn(output(32, NOW.plusSeconds(60), 1));
         var result = provider.load(query);
@@ -52,7 +59,7 @@ class AiAgentMissionWorkItemProviderTest {
 
     @Test
     void excludesExpiredStagedWithheldAndNonrequesterRoots() {
-        when(runs.listRuns(7, 42, null, "waiting_approval", null, 100))
+        when(runs.listRuns(7, 42, null, "waiting_approval", null, 100, 1L))
                 .thenReturn(List.of(run(31), run(32), run(33), run(34)));
         when(missions.output(31)).thenReturn(output(31, NOW, 1));
         when(missions.output(32)).thenReturn(output(32, NOW.plusSeconds(60), 0));
@@ -65,7 +72,7 @@ class AiAgentMissionWorkItemProviderTest {
 
     @Test
     void boundedScanReportsIncompleteTotalsHonestly() {
-        when(runs.listRuns(eq(7), eq(42), isNull(), eq("waiting_approval"), any(), eq(100)))
+        when(runs.listRuns(eq(7), eq(42), isNull(), eq("waiting_approval"), any(), eq(100), eq(1L)))
                 .thenAnswer(invocation -> {
                     Integer before = invocation.getArgument(4);
                     int start = before == null ? 2000 : before;

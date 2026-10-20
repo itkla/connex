@@ -242,12 +242,14 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   pairs every `FROM *_share` read with the ceiling; `ShareReadIsolationMapperTest` proves it.
 - **Record-visibility ceiling separation (#485):** `RecordVisibilityScopeControlAccess` exposes an
   immutable, unfiltered organization workspace set by delegating to `ShareWorkspaceControlAccess`'s
-  single control-catalog snapshot, including its transaction suspension and tenant-context checks.
+  single control-catalog snapshot, including its tenant-context checks. Routed operations consume
+  prepared data; single-database operations retain their lazy lookup.
   This preserves legacy `JOIN workspace` ceilings that had no lifecycle predicate; lifecycle
   tightening requires a separate explicit decision. It deliberately differs from the active-only
   `OrganizationWorkspaceScopeControlAccess` used by Identity, PersonEdge and assistant ceilings.
-  `IntroductionMapper`, `DuplicateReviewMapper`, `NoteMapper`, and `SegmentMapper` now bind this set through
-  `JSON_TABLE` and read tenant tables only; duplicate counts omit the optional employer-label joins.
+  `IntroductionMapper`, `DuplicateReviewMapper`, `NoteMapper`, `ReportMapper`, `SegmentMapper`, and
+  `PipelineMapper` now bind this set through `JSON_TABLE` and read tenant tables only; duplicate
+  counts omit the optional employer-label joins.
   Note pages and their counts reuse one scope and author-ID snapshot, and global note search reuses
   one scope across both bounded candidate streams. Private-note evidence resolves its scope after
   the existing subject-visibility refusal. Note assistant history retains its separate active-only
@@ -255,10 +257,79 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   and bounded keyset pages, including both ordinary and restricted person-company field statements.
   Its five converted statements preserve the bounded warm-intro engaged-person provision-ceased
   exception and the unbounded owned-person company-ID projection without a company visibility join.
+  Pipeline's nine visibility statements retain their unfiltered organization ceiling, including
+  `getAllStages`' distinct `stage.workspace_id` anchor. Full visible and owned pipeline reads project
+  the viewer's scope JSON into a private SQL column for the nested ordered `Stage[]` query; its
+  `workspaceId` remains the parent's owning workspace. Empty pipelines retain an empty array and
+  `getAllPipelines` stays lightweight. Import and export keep their per-pipeline stage queries with
+  one scope for the operation; filtering, ordering and search limits remain in tenant SQL.
+  Bulk stage changes pass the same scope into each independently committed mutation and stage-history
+  write. Workflow traversal and workspace batches explicitly reuse one scope across their independent
+  transactions, restoring the synchronous operation binding on exit; routed reads continue to validate
+  the prepared context on every access. Creation and import history reuse their pre-lock scopes.
   These mappers' crossing baseline entries are removed. Segment calls already inside campaign and
   workflow locks retain their transaction shape; #2159 (L-scope) owns the context-installed snapshot
   and fail-fast guard required before catalog routing can be enabled. The routing default
   stays `single-database`; other #485 crossings and the flag-enable gate remain open.
+  Report generation and KPI reads resolve one unfiltered scope for all widgets, current/prior
+  periods, network account values, and reverse-introduction candidates. Historical report populations
+  retain their record/share creation cutoffs inside tenant SQL and use current organization membership,
+  matching the removed workspace joins. Narrative generation consumes the frozen figures without
+  another scope read. Report scope resolution precedes the restriction-epoch read and later snapshot
+  persistence locks; transaction boundaries are unchanged and #2159 remains a flag-enable prerequisite.
+
+  `AiOutputCacheMapper.deleteForPerson` also binds the unfiltered set through `JSON_TABLE` on
+  `ai_output_cache.workspace_id`, with a separate anchor membership check. Its organization ceiling
+  encloses every feature branch, including organization-wide report narrative invalidation; checking
+  only the owned person cannot protect foreign cache rows carrying identical subject IDs. Its
+  crossing baseline entry is removed. In `single-database`, restriction processing obtains
+  `RecordVisibilityScopeControlAccess.getFreshForWorkspace` immediately before the one DELETE,
+  after existing locks and privacy invalidation. This same-connection `READ_COMMITTED` lookup bypasses
+  the #2162 transaction memo without replacing it. A dedicated control statement flushes MyBatis's
+  local cache without changing ordinary sharing reads, preserving current committed workspace membership
+  up to the gap between adjacent SELECT/DELETE statements. The active-only privacy workspace list
+  is unchanged and never substitutes for this ceiling. In routed mode the fresh method serves only
+  the exact #2165 prepared snapshot, with no lookup or suspension. Its destructive-operation
+  staleness remains the flag-enable prerequisite **#2172**, including newly created workspaces missed
+  by erasure and deleted workspaces still present in the prepared set. No fence is implemented here.
+  Full restriction-service split-catalog coverage additionally depends on converting PersonMapper's
+  remaining visibility/company joins; the isolated cache restriction/purge transaction has its own
+  minimal tenant-catalog coverage. Routing remains disabled.
+
+- **Context-installed workspace scopes (#2159 / #485 P5b).** Catalog-routed request resolution,
+  public API authentication and every workspace job entry prepare immutable unfiltered and
+  active-only organization snapshots before tenant transactions. Sharing and record visibility
+  share one control SELECT while retaining distinct types; the active-org ceiling uses its own
+  lifecycle-filtered SELECT. A short read-only control transaction releases its session and
+  connection before routing begins. Boundaries serve only the exact installed workspace,
+  organization and catalog. With no matching payload, an active-transaction scope read throws
+  `TenantScopeSnapshotMissingException` before suspension, mapper execution or checkout, even on a
+  shared placement. Outside transactions the control lookup remains available. `single-database`
+  installs no eager data and preserves its existing lazy reads, query counts and transaction paths.
+  Same-workspace nested `runAs` reuses the payload; different workspace routing remains independent.
+  Fresh-membership entries prepare their target before the `READ_COMMITTED` transaction, including
+  direct `WorkspaceService.ensureActiveMember` and pending-member calls whose target differs from
+  the request workspace. Invitation, invite-link and SSO wrappers reuse the same target preparation;
+  cleanup cannot discover it under membership locks. Single-database member primitives retain their
+  original lazy query path. Request preparation is reached through the interceptor's existing
+  `WorkspaceService` collaborator; the production service requires the preparation boundary, while
+  single-database MVC slices need no additional interceptor or `WebConfig` dependency.
+  Identity-only switches never load scopes and discard unusable bindings. Control-only selections
+  stay unresolved and have no usable snapshot; catalog-only enumeration prepares none.
+  Captured lifecycle routes carry prepared data across root deletion. Inactive or absent anchors
+  are recorded at preparation, with the original boundary refusal deferred until `getForWorkspace`,
+  so tombstone cleanup does not gain an active-lifecycle requirement. Snapshots last for one
+  workspace operation: creation, deletion, renaming and lifecycle changes during it are observed
+  on the next operation, without changing locked authorization or mutation revalidation.
+  Complete identity/selection/override/payload state is saved and restored on nested scopes;
+  request completion and async handoff clear it, and root job exit discards cached routes.
+  State uses plain `ThreadLocal`, with no inheritance or task decorator. Async jobs install their
+  own scope. Routed provisioning submits initialization without waiting in its `AFTER_COMMIT`
+  callback, which still retains the provisioning connection; scheduled reconciliation recovers
+  failed submissions and initialization. Single-database initialization remains synchronous.
+  An explicit source-inspection architecture test pins reviewed installers and restorers, while
+  pool-size-1 integration coverage exercises boundaries against a tenant catalog with no control
+  tables. Routing remains disabled until the rest of #485's enablement gates are satisfied.
 
 ### 0.6 Organization membership & org-level roles (#316)
 
@@ -858,3 +929,13 @@ transport decision (§8.4) to surface early on a small surface.
 ## Ownership consent (#1534 slice 4o)
 
 Existing-scope owner promotions create offers; acceptance grants ownership. The HTTP, MFA, locking, control-plane, notice and cleanup contracts are in [Ownership offers](backend/OWNERSHIP_OFFERS.md). Founding, admin changes and last-owner checks retain their existing behavior. The self-offer card is authoritative on every catalog layout; ordinary inbox delivery retains the existing cross-catalog limitation.
+
+## Assistant privacy coordination ownership (V236/V237)
+
+The control fence, operation and operation-workspace tables contain organization coordination
+metadata only. The workspace ledger retains placement evidence without a workspace FK; ordinary
+workspace deletion must not silently remove pending accepted-operation evidence. Explicit
+organization cleanup owns these tables. Missing workspace evidence still refuses DSR completion.
+The tenant object-obligation table participates in lifecycle/export/residual registries and is
+deleted before its privacy-work parent. No tenant query joins control privacy tables; services pass
+server-resolved organization generations between separately routed statements.

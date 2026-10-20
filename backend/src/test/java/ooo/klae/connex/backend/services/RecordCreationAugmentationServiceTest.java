@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
@@ -69,6 +70,9 @@ class RecordCreationAugmentationServiceTest {
     private final WorkspaceService workspaceService = mock(WorkspaceService.class);
     private final JsonMapper objectMapper = JsonMapper.builder().findAndAddModules().build();
 
+    private final RecordVisibilityScopeControlAccess scopes =
+        unfiltered();
+
     private RecordCreationAugmentationService service;
 
     @BeforeEach
@@ -81,7 +85,7 @@ class RecordCreationAugmentationServiceTest {
             customFieldMapper,
             customFieldValueService,
             tagMapper,
-            pipelineMapper,
+            pipelineMapper, scopes,
             personMapper,
             companyMapper,
             dealMapper,
@@ -93,7 +97,7 @@ class RecordCreationAugmentationServiceTest {
     void stalePreliminarySetRevisionFailsBeforeCanonicalCreateCanStart() {
         RecordCreationTemplateUseDto use = use("system:person:standard", 1, 4);
         when(templateMapper.getSet(7, "person")).thenReturn(set(5));
-        when(resolver.resolveSystem(RecordCreationRecordType.person, use.context()))
+        when(resolver.resolveSystem(RecordCreationRecordType.person, use.context(), "[7,8,9]"))
             .thenReturn(resolved(RecordCreationRecordType.person));
 
         RecordCreationTemplateException exception = assertThrows(
@@ -155,7 +159,7 @@ class RecordCreationAugmentationServiceTest {
             field("custom:9", 9, true),
             field("tags", null, false));
         when(templateMapper.getSetForUpdate(7, "person")).thenReturn(set(2));
-        when(resolver.resolveSystem(RecordCreationRecordType.person, context)).thenReturn(resolved);
+        when(resolver.resolveSystem(RecordCreationRecordType.person, context, "[7,8,9]")).thenReturn(resolved);
         CustomFieldDefinition definition = custom(9, "person");
         when(customFieldMapper.getByIdForUpdate(7, 9)).thenReturn(definition);
         Tag tag = new Tag();
@@ -203,7 +207,7 @@ class RecordCreationAugmentationServiceTest {
             "system:deal:standard", 1, 0, RecordCreationEntryPoint.quick_create,
             context, Map.of(), List.of());
         when(templateMapper.getSetForUpdate(7, "deal")).thenReturn(set(0));
-        when(resolver.resolveSystem(RecordCreationRecordType.deal, context))
+        when(resolver.resolveSystem(RecordCreationRecordType.deal, context, "[7,8,9]"))
             .thenReturn(resolved(RecordCreationRecordType.deal));
         Pipeline selected = new Pipeline();
         selected.setId(8);
@@ -212,18 +216,21 @@ class RecordCreationAugmentationServiceTest {
         Stage stage = new Stage();
         stage.setId(10);
         stage.setPipeline(other);
-        when(pipelineMapper.getVisibleStageByIdForUpdate(7, 10)).thenReturn(stage);
-        when(pipelineMapper.getVisiblePipelineByIdForUpdate(7, 8)).thenReturn(selected);
+        when(pipelineMapper.getVisibleStageByIdForUpdate(7, "[7,8,9]", 10)).thenReturn(stage);
+        when(pipelineMapper.getVisiblePipelineByIdForUpdate(7, "[7,8,9]", 8)).thenReturn(selected);
 
         RecordCreationTemplateException exception = assertThrows(
             RecordCreationTemplateException.class,
-            () -> service.prepareDeal(8, 10, null, augmentation));
+            () -> service.prepareDeal(8, 10, null, augmentation, scopes.getForWorkspace(7)));
 
         assertEquals("VALIDATION_FAILED", exception.error().code());
-        var order = inOrder(pipelineMapper, shareMapper);
-        order.verify(pipelineMapper).getVisibleStageByIdForUpdate(7, 10);
-        order.verify(pipelineMapper).getVisiblePipelineByIdForUpdate(7, 8);
+        var order = inOrder(scopes, templateMapper, pipelineMapper, shareMapper);
+        order.verify(scopes).getForWorkspace(7);
+        order.verify(templateMapper).getSetForUpdate(7, "deal");
+        order.verify(pipelineMapper).getVisibleStageByIdForUpdate(7, "[7,8,9]", 10);
+        order.verify(pipelineMapper).getVisiblePipelineByIdForUpdate(7, "[7,8,9]", 8);
         order.verify(shareMapper).lockPipelineShareForWorkspace(8, 7);
+        verify(scopes, org.mockito.Mockito.times(1)).getForWorkspace(7);
         verify(customFieldValueService, never()).applyJsonValuesForCreate(any(), eq(201), any(), any());
     }
 
@@ -235,7 +242,7 @@ class RecordCreationAugmentationServiceTest {
             "system:deal:standard", 1, 0, RecordCreationEntryPoint.quick_create,
             context, Map.of(), List.of(), "Discovery");
         when(templateMapper.getSetForUpdate(7, "deal")).thenReturn(set(0));
-        when(resolver.resolveSystem(RecordCreationRecordType.deal, context))
+        when(resolver.resolveSystem(RecordCreationRecordType.deal, context, "[7,8,9]"))
             .thenReturn(resolved(RecordCreationRecordType.deal));
         Pipeline pipeline = new Pipeline();
         pipeline.setId(8);
@@ -243,14 +250,14 @@ class RecordCreationAugmentationServiceTest {
         stage.setId(10);
         stage.setName(currentName);
         stage.setPipeline(pipeline);
-        when(pipelineMapper.getVisibleStageByIdForUpdate(7, 10)).thenReturn(stage);
+        when(pipelineMapper.getVisibleStageByIdForUpdate(7, "[7,8,9]", 10)).thenReturn(stage);
 
         ConflictException refused = assertThrows(ConflictException.class,
-            () -> service.prepareDeal(8, 10, null, augmentation));
+            () -> service.prepareDeal(8, 10, null, augmentation, scopes.getForWorkspace(7)));
 
         assertEquals("Assistant proposal target changed", refused.getMessage());
-        verify(pipelineMapper).getVisibleStageByIdForUpdate(7, 10);
-        verify(pipelineMapper, never()).getVisiblePipelineByIdForUpdate(7, 8);
+        verify(pipelineMapper).getVisibleStageByIdForUpdate(7, "[7,8,9]", 10);
+        verify(pipelineMapper, never()).getVisiblePipelineByIdForUpdate(7, "[7,8,9]", 8);
     }
 
     @Test
@@ -260,7 +267,7 @@ class RecordCreationAugmentationServiceTest {
             "system:company:standard", 1, 2, RecordCreationEntryPoint.quick_create,
             context, Map.of(), List.of());
         when(templateMapper.getSetForUpdate(7, "company")).thenReturn(set(3));
-        when(resolver.resolveSystem(RecordCreationRecordType.company, context))
+        when(resolver.resolveSystem(RecordCreationRecordType.company, context, "[7,8,9]"))
             .thenReturn(resolved(RecordCreationRecordType.company));
 
         RecordCreationTemplateException exception = assertThrows(
@@ -270,6 +277,31 @@ class RecordCreationAugmentationServiceTest {
         assertEquals("TEMPLATE_SET_STALE", exception.error().code());
         verify(customFieldValueService, never()).applyJsonValuesForCreate(any(), any(Integer.class), any(), any());
         verify(companyMapper, never()).insertTags(any(Integer.class), any(Integer.class), any());
+    }
+
+    @Test
+    void submittedStageStillRequiresOwnershipAndMustMatchThePipeline() {
+        Pipeline pipeline = new Pipeline();
+        pipeline.setId(8);
+        when(pipelineMapper.getPipelineById(7, "[7,8,9]", 8)).thenReturn(pipeline);
+
+        RecordCreationTemplateException invisible = assertThrows(
+            RecordCreationTemplateException.class, () -> service.validateDealReferences(8, 10, null, scopes.getForWorkspace(7)));
+
+        assertEquals("RELATED_RECORD_NOT_FOUND", invisible.error().code());
+        verify(pipelineMapper).getStageById(7, 10);
+        verify(pipelineMapper, never()).getVisibleStageById(7, "[7,8,9]", 10);
+        Pipeline other = new Pipeline();
+        other.setId(9);
+        Stage stage = new Stage();
+        stage.setId(10);
+        stage.setPipeline(other);
+        when(pipelineMapper.getStageById(7, 10)).thenReturn(stage);
+
+        RecordCreationTemplateException mismatch = assertThrows(
+            RecordCreationTemplateException.class, () -> service.validateDealReferences(8, 10, null, scopes.getForWorkspace(7)));
+
+        assertEquals("VALIDATION_FAILED", mismatch.error().code());
     }
 
     private RecordCreationTemplateUseDto use(String id, int version, int setRevision) {

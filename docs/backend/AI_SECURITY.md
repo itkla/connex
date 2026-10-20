@@ -744,11 +744,19 @@ Streaming remains inside `AiInvocationService`:
 
 ## Read-only missions and durable chat privacy
 
-V232 introduces `record_review_v1` inside an existing Ask Connex session. [AI_MISSIONS.md](AI_MISSIONS.md) defines its durable generation/taint predicate, conservative cleanup enrollment, DSR authority, and drained single-JVM activation boundary. Every ordinary message writer uses the same durable session sequence allocator; every derived execution retains its original privacy token through reads, secondary provider dispatch, writes, and deferred requester publication. Missing barriers and stale tokens fail closed after restart and after purge unblocks.
+V232 introduces `record_review_v1` inside an existing Ask Connex session. [AI_MISSIONS.md](AI_MISSIONS.md) defines its durable generation/taint predicate, conservative cleanup enrollment, DSR authority, and drained single-JVM activation boundary. Every ordinary message writer uses the same durable session sequence allocator; every derived execution retains its original privacy token through reads, secondary provider dispatch, writes, and deferred requester publication. Missing barriers and stale tokens fail closed after restart and after purge unblocks. V237 adds unconditional organization authority before the workspace check, including for never-tainted chats; workspace taint does not exempt any retained content from all-chat invalidation.
 
 Missions use the existing invocation, masking, leak scan, organization budget, audit and provider transport. Read-only runtime-1/2 policy narrows the catalog and execution boundary to five read tools, enforces the selected primary record before retrieval/registration/handle resolution (including preclaim validation), and never enables CONFIRM/AUTO or question tools. Linked tasks are bounded evidence without task handles. Runtime 3 adds only the selected-record CONFIRM allowlist described under [Mission proposal authority](#mission-proposal-authority-v238). One `AGENT_RUN` lease covers each attempt; legacy `CHAT_TURN` routes cannot claim or control it.
 
 Mission realtime sends only requester-authorized metadata invalidations, with fresh membership, permission, session and generation checks inside the local fence. Ordinary content frames revalidate their immutable stored turn provenance and source state at send time. Output is fetched through the canonical owner-only report API; no mission model prose is broadcast.
+
+Ordinary content carries internal organization provenance through the broker executor and into each
+encoded WebSocket frame. The broker session factory retains Spring's concurrent send buffer, limits
+and overflow behavior. A wrapper below that buffer checks fresh control authority under the local
+publication read fence immediately around the delegate socket write. Buffered stale or unavailable
+frames are dropped, including when a different thread later flushes them. Executor admission alone
+cannot authorize a buffered write. Heartbeats and frames without assistant provenance use the
+ordinary transport path. Provenance never becomes a native STOMP header or browser payload.
 
 ## Assistant tools and collaboration
 
@@ -918,7 +926,7 @@ anchor; legacy rows retain null membership columns. BEFORE INSERT/UPDATE trigger
 membership metadata, ordinal bounds and server trust without adding a COPY-requiring CHECK to the
 retained tool-call table; parent constraints remain CHECKs. The guarded online DDL and migration-only
 FK installation procedure are documented in [UPGRADING](../UPGRADING.md#dormant-assistant-proposal-set-storage-tenant-v233).
-Their creation timestamp and privacy generation are copied from the parent, separately from the
+Their creation timestamp and both privacy generations are copied from the parent, separately from the
 earlier preparation anchor. Children remain ordinary reactive chat artifacts with no mission run;
 read-only missions use their separate persistence path and do not produce proposal sets.
 Proposal-key FK columns explicitly use
@@ -926,10 +934,11 @@ the same ASCII binary collation. Account erasure clears the parent's requester b
 authors and turn requesters; membership departure retains attribution and never transfers it.
 The table's `TenantLifecycleRegistry` message cascade supplies tenant export, teardown and
 residual reach while chat messages, tools and turns retain their direct lifecycle declarations.
-Export applies the existing mission privacy barrier and parent message/turn visibility to set
-metadata; residual counts remain unconditional. V232 restriction and DSR cleanup remove sets
-through their message and origin-turn cascades, including sets attached to retained pre-taint
-user input, because the originating turn remains enrolled. The mapper reads no person rows, so
+Export applies organization authority, the mission barrier and consistent parent/message/turn
+provenance to set metadata and children; residual counts remain unconditional. Cleanup explicitly
+drains children before parents, including parents anchored to preserved pre-taint input in v1 work.
+Turn ancestry survives mission cleanup until ordered session cleanup. V2 additionally retires and
+physically removes the entire affected session. The mapper reads no person rows, so
 the person-reader restriction registry does not apply. Account erasure discovers proposal-set
 requester provenance when locking session roots and clears it in the chat-child phase before
 domain mutations, restriction fences and privacy invalidation.
@@ -942,12 +951,13 @@ publication transition. Exact reads return all children in ordinal order, withou
 creation/preparation anchors. It is an integrity check, not authorization or readiness. MySQL
 constraints alone cannot enforce a cross-row child count at commit.
 
-The later creation service must establish current authority, privacy generation and exact
-turn/message association under the session mutex, insert the parent and every member in one
-transaction, and require complete membership before commit. Existing chat readers and writers
-retain their legacy behavior. Production set creation, effective-tier decisions, whole-call
-publication, set-specific privacy admission and discovery remain disabled until their own slices. V233
-preserves the existing V232 rollback floor; activation requires a fresh semantic cutover.
+A future creation service must retain the originating organization/workspace authority and exact
+turn/message association under the session mutex, insert parent and members in one transaction,
+and require complete membership before commit. Storage provenance guards and privacy cleanup are
+active at V237. Production set creation, effective-tier decisions and whole-call publication/decision
+routes remain disabled until their own slices. V233 itself retained its then-V232 floor; the current
+V237 privacy compatibility minimum applies independently of future producer activation; V238 is
+the active release rollback floor.
 
 ### Adding an assistant write tool
 
@@ -1103,6 +1113,23 @@ See [UPGRADING.md](../UPGRADING.md) for the deployment implications.
 
 ## Failure behavior
 
+Processing restrictions purge persisted AI output caches in one tenant DELETE bounded by the
+unfiltered organization workspace set on each cache row's `workspace_id`. The purge covers
+person-keyed introduction rationales, stakeholder/connection deal-risk rationales, current structured
+person-to-deal brief links, and conservative deletion of every organization report narrative.
+Foreign-organization cache rows carrying the same subject IDs are preserved. Lifecycle state does
+not narrow this cache ceiling. Removed links and unlinked free text still lack reliable provenance.
+
+Single-database restrictions read a fresh ceiling on the existing transaction connection immediately
+before deletion, bypassing the record-visibility memo. Existing person-lock and epoch-fence ordering
+is preserved: ordinary domain/identity work finishes before `invalidateAssistantOrganization` retains
+the restriction write fences and advances organization privacy authority, then the fresh scope lookup
+and cache DELETE run with the fences held through transaction completion. The lookup adds no locking
+read, transaction suspension, or connection checkout. Epoch guarantees remain JVM-local (#941).
+Routed restrictions use the prepared operation snapshot without another connection; destructive scope
+freshness remains a flag-enable prerequisite in #2172.
+See [LOCKING.md](LOCKING.md#duplicate-review-record-mutation-and-imports).
+
 Keep provider failure, rate limit, timeout, cancellation, blocked, and unavailable states distinct. Do not recover a lost response by issuing a second generation request when the established handle/polling protocol can continue the original operation.
 
 Deterministic warmth, risk, report figures, and other non-AI behavior remain available without AI.
@@ -1135,6 +1162,91 @@ usage settlement. Continuation never resets organization gates, root caps, deadl
 outbound leak/special-care screening. Slice 2 adds no write, proposal, question or live-evaluation
 surface. See the mission contract for checkpoint-only closing decisions and retry exclusions.
 
+## Organization-wide assistant erasure (V236/V237)
+
+All retained pre-cutover Ask Connex content is unavailable immediately at organization generation
+cutover, including ordinary input, user-set titles, summaries, archived chats, proposal envelopes and
+chat-owned files. Organization provenance is immutable and independent of workspace mission taint.
+Capture authority before admitting input and preserve that token through deferred preparation,
+provider attempts, summaries, proposals, decisions, replay and callbacks. Missing authority fails
+closed without lazy creation. Proposal-set production remains disabled.
+
+New-organization provisioning creates its fence and bootstrap operation before its first workspace,
+without scanning empty workspace ranges. The after-commit initializer enrolls placement evidence;
+periodic reconciliation recovers an interrupted callback. Completion still checks current coverage.
+An additional control-plane organization pass completes zero-workspace bootstraps from V236 and
+retries completion after the last workspace disappears. Historical pending placement evidence is
+preserved and still blocks completion; absence of a workspace alone proves nothing.
+
+Organization S precedes workspace S after existing content/domain roots. Public projection and
+decision paths cannot use a current token to relabel stale execution. Actual realtime, file and export
+output checks original authority under the organization-local publication read fence against fresh
+control metadata. Invalidation retains its write fence through transaction completion. Withdrawals
+contain only invalidation metadata and still require recipient access. These local fences require
+one serving JVM and do not solve distributed provider dispatch (#941).
+
+Realtime content and mission frames carry their original authority in internal broker headers.
+The outbound executor drops stale queued frames; encoded frames retain their provenance through
+Spring's send buffer and reacquire the publication fence at the final socket write. Privacy refusal
+stops export writes immediately, including ZIP finalization; synchronous
+failures unwind the snapshot transaction before resource cancellation, preserving the original failure.
+
+Committed invalidation separately sends workspace ID, invalidation kind and decimal cutoff to
+current active members with `AI_USE` or `AI_SESSION_ADMIN`. It loads no session content or audience
+rows, so physical cleanup cannot suppress withdrawal for invitees or retained-chat administrators.
+Clients compare the session's original decimal authority, retire affected caches and reject late
+responses while preserving newer chats. Missing provenance is withheld after a known cutoff.
+Every successful socket connection, including the first subscription, refreshes the active session,
+transcript and session list so a cutoff missed between initial REST load and subscription is observed.
+Notification generation hydration is limited to recipient candidate workspaces, and the SQL
+predicate hides pointers to sessions invalidated at that captured generation. Brief notifications
+are the only assistant-content-sourced notifications: their titles are the fixed literals
+`Daily brief ready` / `Weekly review ready`, their data keys are exactly `kind` and `sessionId`,
+and their action links point to `/ask-connex/{sessionId}`. They contain no generated title, preview,
+record name or other assistant-derived text; the inbox localizes them from type and kind rather
+than rendering the stored title. Watch notifications use deterministic CRM evidence, not assistant
+output. Notification reads acquire no publication fence. A read racing invalidation may expose
+only that a brief existed, and page items/counts may reflect different generations. Opening the
+pointer still passes through the fully fenced session/transcript read; every content read retains
+its privacy authority through projection. `AiBriefRunServiceTest` pins this content-free payload.
+
+Accepted v1 DSR authority remains unchanged. New all-chat requests require both explicit v2
+acknowledgments and all existing admin, recent-authentication, CSRF, subject-proof and snapshot gates.
+Erasure completion requires positive file-deletion receipts and current placement coverage.
+For a deleted workspace, v2 recovery, progress and C2 use its exact durable verified control receipt
+with verification time and work revision. Active workspaces continue to require routed tenant evidence
+and residual verification, preserving restore detection. An absent or unverified receipt never
+substitutes for deleted tenant work.
+V1 polling may return content-free turn status while mission holdings are withheld; browser withdrawal
+clears cached content but keeps the session reloadable after cleanup. Permanent retirement requires
+v2 organization invalidation. V2 organization checks remain unconditional on every projection.
+
+Verification waiting only on residual obligations stays incomplete and backs off five seconds.
+Due work is selected by next-attempt time, then identity, so older object failures yield to later
+restriction erasure. Organization completion is retried for completed tenant work from both batch
+replay and initializer reconciliation, covering interruption after the placement receipt commits.
+Organization discovery traverses keyset pages rather than relying on the first global page.
+DSR receipt recovery wraps an exhausted cursor once in the same invocation and processes at most
+twenty receipts, so changed deleted-workspace evidence does not wait through an empty scheduled pass.
+
+If a tenant catalog is restored from before cleanup while newer control coordination survives,
+initialization reopens the placement receipt and operation/bootstrap completion whenever local work
+is absent or unfinished. Completed local work with restored residuals is also reopened. The original
+operation identity, cutoff and organization generation remain unchanged; only fresh uncapped local
+holdings, lease and object verification can restore the receipt and completion evidence. Content
+admission continues to reject historical generations throughout recovery.
+
+Assistant session detail and retained-detail reads return the generic 403
+`AI assistant session is not accessible` for historical generations, including restored rows
+before and after initialization reopens cleanup evidence. Reopening never makes those rows readable
+or changes the refusal to 404.
+
+Reconciliation preserves an exact verified receipt while its workspace is terminally
+`tearing_down`, even after the tenant sweep removes local work. Teardown retries skip that
+operation's tenant batch and still run full local lifecycle cleanup and residual verification.
+V2 C2 refuses a surviving terminal workspace root; only root deletion enables receipt-only
+completion. Active workspace restoration still reopens stale local evidence.
+
 ## Mission proposal authority (V238)
 
 Only `record_preparation_v1/1/3` can prepare mission CONFIRM proposals. Its selected-record
@@ -1155,7 +1267,18 @@ item transactions and preserve partial outcomes on later failure. Fresh authoriz
 reconciliation resolves uncertain commit acknowledgments; unresolved outcomes are explicitly
 indeterminate and disarmed until reload. Authority loss suppresses disclosures without erasing
 committed effects. Final mutation admission uses the original deadline after domain contention.
-Source holdings are enrolled in action-first bounded privacy deletion, unconditional residuals
-and validated UTF-8 tenant export. See [AI_MISSIONS](AI_MISSIONS.md) and [LOCKING](LOCKING.md).
+All V238 actions, frozen membership, mission-origin canonical calls and proposal outputs retain
+the original session organization generation. `AiChatPrivacyGuard` and `AiAssistantPrivacyService`
+reject historical generations on reads, freeze and decisions. The ordered admission checkpoint
+takes organization authority after content/domain roots and restriction fences, before workspace
+privacy barriers, audit heads and leases. Source holdings join the existing `AiAgentPrivacyService`
+bootstrap, acknowledged DSR all-chat v2, restriction and lifecycle erasure phases, bounded action-first
+deletion and unconditional residual verification. Positive object receipts and placement evidence
+remain required, and organization invalidation also cancels export publication. Export validates
+UTF-8 source data. See [AI_MISSIONS](AI_MISSIONS.md) and [LOCKING](LOCKING.md).
 After-commit realtime publication retains requester authority, session/root shared locks and
-restriction/privacy fences through local broker enqueue, suppressing revoked or superseded sources.
+ordered restriction/publication/organization/workspace privacy fences through local broker enqueue.
+Mission frames carry mainline organization authority through the outbound queue and encoded
+concurrent-session buffer. The final WebSocket delegate freshly revalidates authority under the
+publication read fence retained through the socket write, including frames flushed on another
+thread; revoked, superseded and invalidated sources produce no content.

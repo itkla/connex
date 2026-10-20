@@ -45,6 +45,7 @@ import tools.jackson.databind.ObjectMapper;
 @Service
 @RequiredArgsConstructor
 public class AiAgentProposalDecisionService {
+    private final AiChatPrivacyGuard privacyGuard;
     private final AiAgentProposalReadService reads;
     private final AiAgentProposalSetPort proposals;
     private final AiAssistantWriteToolService writes;
@@ -124,7 +125,7 @@ public class AiAgentProposalDecisionService {
     @RequirePermission(Permission.AI_USE)
     public ooo.klae.connex.backend.dto.AiAssistantToolCallDto undo(int sessionId, int toolCallId) {
         int workspaceId = workspaces.getCurrentWorkspaceId();
-        AiChatToolCall call = chat.getToolCallBySession(workspaceId, sessionId, toolCallId);
+        AiChatToolCall call = chat.getMissionToolAncestry(workspaceId, sessionId, toolCallId, privacyGuard.currentGeneration(workspaceId));
         if (call == null || !"mission".equals(call.getProposalOrigin()) || call.getMissionRunId() == null
                 || call.getMissionActionId() == null) {
             throw new ResourceNotFoundException("Mission inaccessible");
@@ -151,8 +152,9 @@ public class AiAgentProposalDecisionService {
         if (run.getWithheldAt() != null || run.getPurgedAt() != null) {
             throw new AiAgentGoneException("mission_output_withheld");
         }
-        AiChatPrivacyGuard.requireCurrent(chat, new AiChatPrivacyToken(workspaceId, sessionId,
-                run.getPrivacyGeneration(), session.getMissionTaintSeq()));
+        privacyGuard.requireCurrent(chat, new AiChatPrivacyToken(workspaceId, sessionId,
+                run.getPrivacyGeneration(), session.getMissionTaintSeq(), privacyGuard.organizationId(workspaceId),
+                run.getOrganizationPrivacyGeneration()));
         throw new ConflictException("Assistant tool cannot be undone");
     }
 
@@ -162,7 +164,7 @@ public class AiAgentProposalDecisionService {
         }
         int workspaceId = workspaces.getCurrentWorkspaceId();
         var action = actions.getBySlot(workspaceId, id, selected.actionSlot());
-        var call = action == null ? null : chat.getMissionToolCall(workspaceId, id, action.getId());
+        var call = action == null ? null : chat.getMissionToolCall(workspaceId, id, action.getId(), privacyGuard.currentGeneration(workspaceId));
         if (call == null) {
             throw new ResourceNotFoundException("Mission inaccessible");
         }
@@ -197,7 +199,8 @@ public class AiAgentProposalDecisionService {
         var action = discoveredAction == null ? null : actions.lockAction(workspaceId, id, discoveredAction.getId());
         var call = action == null ? null : chat.lockMissionToolCall(workspaceId, id, action.getId());
         if (action == null || call == null || !Integer.valueOf(action.getId()).equals(call.getMissionActionId())
-                || !Integer.valueOf(id).equals(call.getMissionRunId()) || !"mission".equals(call.getProposalOrigin())) {
+                || !Integer.valueOf(id).equals(call.getMissionRunId()) || !"mission".equals(call.getProposalOrigin())
+                || call.getOrganizationPrivacyGeneration() != run.getOrganizationPrivacyGeneration()) {
             throw new ResourceNotFoundException("Mission inaccessible");
         }
         if (!AiAgentMissionCatalog.proposals(run) || run.getProposalFrozenAt() == null
@@ -209,8 +212,9 @@ public class AiAgentProposalDecisionService {
         if (run.getWithheldAt() != null || run.getPurgedAt() != null) {
             throw new AiAgentGoneException("mission_output_withheld");
         }
-        var token = new AiChatPrivacyToken(workspaceId, session.getId(), run.getPrivacyGeneration(), session.getMissionTaintSeq());
-        AiChatPrivacyGuard.requireCurrent(chat, token);
+        var token = new AiChatPrivacyToken(workspaceId, session.getId(), run.getPrivacyGeneration(), session.getMissionTaintSeq(),
+                privacyGuard.organizationId(workspaceId), run.getOrganizationPrivacyGeneration());
+        privacyGuard.requireCurrent(chat, token);
         long epoch = restriction.current(workspaceId);
         if (!"proposed".equals(call.getStatus())) {
             retain(token, epoch);
@@ -237,7 +241,7 @@ public class AiAgentProposalDecisionService {
                 action.getPreparedAt().toString(), run.getReviewExpiresAt().toInstant(ZoneOffset.UTC), principals), selected.decision());
         long version = run.getStateVersion();
         run.setStateVersion(Math.incrementExact(version));
-        boolean pending = proposals.readFrozen(run).stream().map(member -> chat.getMissionToolCall(workspaceId, id, member.getId()))
+        boolean pending = proposals.readFrozen(run).stream().map(member -> chat.getMissionToolCall(workspaceId, id, member.getId(), run.getOrganizationPrivacyGeneration()))
                 .anyMatch(member -> member != null && "proposed".equals(member.getStatus()));
         if (!pending && "waiting_approval".equals(run.getStatus())) {
             run.setStatus("done");
@@ -253,7 +257,7 @@ public class AiAgentProposalDecisionService {
         if (!restriction.retainReadFenceUntilTransactionCompletionIfCurrent(token.workspaceId(), epoch)) {
             throw new ConflictException("mission_restrictions_changed");
         }
-        AiChatPrivacyGuard.retain(chat, token);
+        privacyGuard.retain(chat, token);
     }
 
     private String outcome(AiChatToolCall call) {

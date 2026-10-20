@@ -40,6 +40,9 @@ public final class TablePlaneRegistry {
         "SPRING_SESSION",
         "SPRING_SESSION_ATTRIBUTES",
         "ai_provider_config",
+        "ai_assistant_privacy_fence",
+        "ai_assistant_privacy_operation",
+        "ai_assistant_privacy_operation_workspace",
         "api_credential",
         "api_credential_scope",
         "organization_ai_budget",
@@ -102,8 +105,12 @@ public final class TablePlaneRegistry {
     /** All physical control-plane tables. */
     public static final Set<String> CONTROL_PLANE_TABLES = controlPlaneTables();
 
-    /** Direct workspace-keyed control state that is not tenant-export content. */
+    /**
+     * Direct workspace-keyed control state that is not tenant-export content.
+     * Privacy placement receipts remain organization-owned evidence through workspace disappearance.
+     */
     public static final Set<String> CONTROL_PLANE_WORKSPACE_STATE_TABLES = Set.of(
+        "ai_assistant_privacy_operation_workspace",
         "api_credential",
         "audit_log",
         "ownership_offer",
@@ -129,6 +136,7 @@ public final class TablePlaneRegistry {
         "ai_agent_segment",
         "ai_agent_privacy_barrier",
         "ai_agent_privacy_work",
+        "ai_agent_privacy_object",
         "ai_chat_message",
         "ai_chat_session",
         "ai_chat_session_participant",

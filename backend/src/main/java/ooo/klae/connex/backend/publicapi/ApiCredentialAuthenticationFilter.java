@@ -40,6 +40,7 @@ import ooo.klae.connex.backend.services.PrivilegedMfaStanding;
 import ooo.klae.connex.backend.util.ClientIpResolver;
 import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
 import ooo.klae.connex.backend.tenant.TenantContext;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import tools.jackson.databind.ObjectMapper;
 
@@ -65,6 +66,7 @@ public class ApiCredentialAuthenticationFilter extends OncePerRequestFilter {
     private final ClientIpResolver clientIpResolver;
     private final TenantCatalogResolver tenantCatalogResolver;
     private final TenantContext tenantContext;
+    private final TenantWorkScope tenantWorkScope;
     private final RouteTransactionModeResolver routeTransactionModeResolver;
     private final TransactionTemplate readTransactionTemplate;
 
@@ -80,6 +82,7 @@ public class ApiCredentialAuthenticationFilter extends OncePerRequestFilter {
             ClientIpResolver clientIpResolver,
             TenantCatalogResolver tenantCatalogResolver,
             TenantContext tenantContext,
+            TenantWorkScope tenantWorkScope,
             RouteTransactionModeResolver routeTransactionModeResolver,
             PlatformTransactionManager transactionManager) {
         this(
@@ -93,6 +96,7 @@ public class ApiCredentialAuthenticationFilter extends OncePerRequestFilter {
             clientIpResolver,
             tenantCatalogResolver,
             tenantContext,
+            tenantWorkScope,
             routeTransactionModeResolver,
             readTransactionTemplate(transactionManager));
     }
@@ -108,6 +112,7 @@ public class ApiCredentialAuthenticationFilter extends OncePerRequestFilter {
             ClientIpResolver clientIpResolver,
             TenantCatalogResolver tenantCatalogResolver,
             TenantContext tenantContext,
+            TenantWorkScope tenantWorkScope,
             RouteTransactionModeResolver routeTransactionModeResolver,
             TransactionTemplate readTransactionTemplate) {
         this.apiCredentialService = apiCredentialService;
@@ -120,6 +125,7 @@ public class ApiCredentialAuthenticationFilter extends OncePerRequestFilter {
         this.clientIpResolver = clientIpResolver;
         this.tenantCatalogResolver = tenantCatalogResolver;
         this.tenantContext = tenantContext;
+        this.tenantWorkScope = tenantWorkScope;
         this.routeTransactionModeResolver = routeTransactionModeResolver;
         this.readTransactionTemplate = readTransactionTemplate;
     }
@@ -166,12 +172,19 @@ public class ApiCredentialAuthenticationFilter extends OncePerRequestFilter {
                     binding.credentialId());
                 return;
             }
-            tenantContext.set(
-                binding.workspaceId(),
-                binding.organizationId(),
-                binding.userId(),
-                "public_api",
-                catalog);
+            var scopes = tenantWorkScope.prepareWorkspaceScopes(
+                binding.workspaceId(), binding.organizationId(), catalog);
+            if (scopes != null) {
+                tenantContext.setWithWorkspaceScopes(binding.workspaceId(), binding.organizationId(),
+                    binding.userId(), "public_api", catalog, scopes);
+            } else {
+                tenantContext.set(
+                    binding.workspaceId(),
+                    binding.organizationId(),
+                    binding.userId(),
+                    "public_api",
+                    catalog);
+            }
             request.setAttribute(
                 TENANT_BINDING_ATTRIBUTE,
                 new TenantBinding(

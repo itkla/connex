@@ -47,6 +47,7 @@
           WHERE tc.workspace_id = t0.workspace_id AND tc.mission_run_id = t0.root_run_id
             AND tc.mission_action_id = t0.id AND tc.proposal_origin = 'mission'
             AND tc.artifact_origin = 'mission' AND tc.server_proposal = TRUE
+            AND tc.organization_privacy_generation = #{organizationPrivacyGeneration}
             AND tc.privacy_generation = t0.privacy_generation AND tc.tool_name = t0.tool_name
             AND tc.proposal_key IS NULL AND tc.proposal_ordinal IS NULL
             AND tc.proposal_prepared_at IS NULL) AS mission_export_canonical_count
@@ -62,6 +63,23 @@
     FROM ${declaration.route.fromClause}
     WHERE ${declaration.route.workspacePredicate} = #{workspaceId}
 
+    <if test="declaration.table == 'ai_chat_session' or declaration.table == 'ai_chat_message'
+        or declaration.table == 'ai_chat_turn' or declaration.table == 'ai_chat_tool_call'
+        or declaration.table == 'ai_assistant_proposal_set' or declaration.table == 'ai_agent_segment'">
+      AND t0.organization_privacy_generation = #{organizationPrivacyGeneration}
+    </if>
+    <if test="declaration.table == 'ai_agent_run'">
+      AND (t0.purged_at IS NOT NULL OR t0.organization_privacy_generation = #{organizationPrivacyGeneration})
+    </if>
+    <if test="declaration.table == 'ai_chat_session_participant'">
+      AND EXISTS (SELECT 1 FROM ai_chat_session s WHERE s.workspace_id = t0.workspace_id
+        AND s.id = t0.session_id AND s.organization_privacy_generation = #{organizationPrivacyGeneration})
+    </if>
+    <if test="declaration.table == 'attachment'">
+      AND (t0.entity_type &lt;&gt; 'ai_chat_session' OR EXISTS (SELECT 1 FROM ai_chat_session s
+        WHERE s.workspace_id = t0.workspace_id AND s.id = t0.entity_id
+          AND s.organization_privacy_generation = #{organizationPrivacyGeneration}))
+    </if>
     <choose>
       <when test="declaration.table == 'ai_agent_run'">
         AND (t0.purged_at IS NOT NULL OR (t0.withheld_at IS NULL AND EXISTS (
@@ -73,13 +91,15 @@
           JOIN ai_agent_run r ON r.workspace_id = b.workspace_id AND r.id = t0.root_run_id
           WHERE b.workspace_id = t0.workspace_id AND b.blocked = FALSE
             AND b.generation = t0.privacy_generation AND r.privacy_generation = t0.privacy_generation
-            AND r.withheld_at IS NULL AND r.purged_at IS NULL)
+            AND r.withheld_at IS NULL AND r.purged_at IS NULL
+            AND r.organization_privacy_generation = #{organizationPrivacyGeneration})
       </when>
       <when test="declaration.table == 'ai_agent_segment'">
         AND EXISTS (SELECT 1 FROM ai_agent_privacy_barrier b
           JOIN ai_agent_run r ON r.workspace_id = b.workspace_id AND r.id = t0.run_id
           WHERE b.workspace_id = t0.workspace_id AND b.blocked = FALSE
-            AND b.generation = t0.privacy_generation AND r.withheld_at IS NULL)
+            AND b.generation = t0.privacy_generation AND r.withheld_at IS NULL
+            AND r.organization_privacy_generation = #{organizationPrivacyGeneration})
       </when>
       <when test="declaration.table == 'ai_chat_session'">
         AND (t0.mission_taint_generation IS NULL OR t0.title_user_set = TRUE OR EXISTS (
@@ -90,6 +110,7 @@
       <when test="declaration.table == 'ai_chat_message'">
         AND EXISTS (SELECT 1 FROM ai_chat_session s
           WHERE s.workspace_id = t0.workspace_id AND s.id = t0.session_id
+            AND s.organization_privacy_generation = #{organizationPrivacyGeneration}
             AND (s.mission_taint_seq IS NULL
               OR (t0.mission_run_id IS NULL AND t0.author_kind = 'user' AND t0.seq &lt; s.mission_taint_seq)
               OR EXISTS (SELECT 1 FROM ai_agent_privacy_barrier b
@@ -101,6 +122,7 @@
       <when test="declaration.table == 'ai_chat_turn'">
         AND EXISTS (SELECT 1 FROM ai_chat_session s
           WHERE s.workspace_id = t0.workspace_id AND s.id = t0.session_id
+            AND s.organization_privacy_generation = #{organizationPrivacyGeneration}
             AND (s.mission_taint_seq IS NULL OR EXISTS (SELECT 1 FROM ai_agent_privacy_barrier b
               WHERE b.workspace_id = t0.workspace_id AND b.blocked = FALSE
                 AND b.generation = COALESCE(t0.privacy_generation, s.mission_taint_generation))))
@@ -112,7 +134,10 @@
           JOIN ai_chat_turn t ON t.workspace_id = s.workspace_id AND t.session_id = s.id
           JOIN ai_chat_message m ON m.workspace_id = s.workspace_id AND m.session_id = s.id
           WHERE s.workspace_id = t0.workspace_id AND s.id = t0.session_id
+            AND s.organization_privacy_generation = #{organizationPrivacyGeneration}
             AND t.id = t0.origin_turn_id AND m.id = t0.message_id
+            AND t.organization_privacy_generation = #{organizationPrivacyGeneration}
+            AND m.organization_privacy_generation = #{organizationPrivacyGeneration}
             AND (s.mission_taint_seq IS NULL OR EXISTS (SELECT 1 FROM ai_agent_privacy_barrier b
               WHERE b.workspace_id = t0.workspace_id AND b.blocked = FALSE
                 AND b.generation = t0.privacy_generation
@@ -125,9 +150,20 @@
               WHERE r.workspace_id = m.workspace_id AND r.id = m.mission_run_id AND r.withheld_at IS NULL)))
       </when>
       <when test="declaration.table == 'ai_chat_tool_call'">
+        AND (t0.proposal_key IS NULL OR EXISTS (SELECT 1 FROM ai_assistant_proposal_set p
+          JOIN ai_chat_turn t ON t.workspace_id = p.workspace_id AND t.id = p.origin_turn_id
+            AND t.session_id = p.session_id
+          WHERE p.workspace_id = t0.workspace_id AND p.proposal_key = t0.proposal_key
+            AND p.message_id = t0.message_id
+            AND p.organization_privacy_generation = #{organizationPrivacyGeneration}
+            AND t.organization_privacy_generation = p.organization_privacy_generation
+            AND p.privacy_generation = t0.privacy_generation
+            AND t.privacy_generation = p.privacy_generation))
         AND EXISTS (SELECT 1 FROM ai_chat_message m
           JOIN ai_chat_session s ON s.workspace_id = m.workspace_id AND s.id = m.session_id
           WHERE m.workspace_id = t0.workspace_id AND m.id = t0.message_id
+            AND m.organization_privacy_generation = #{organizationPrivacyGeneration}
+            AND s.organization_privacy_generation = #{organizationPrivacyGeneration}
             AND (s.mission_taint_seq IS NULL OR EXISTS (SELECT 1 FROM ai_agent_privacy_barrier b
               WHERE b.workspace_id = t0.workspace_id AND b.blocked = FALSE
                 AND b.generation = COALESCE(t0.privacy_generation, s.mission_taint_generation))))
@@ -137,6 +173,7 @@
       <when test="declaration.table == 'notification'">
         AND (t0.source_type IS NULL OR t0.source_type &lt;&gt; 'ai_chat_session' OR EXISTS (
           SELECT 1 FROM ai_chat_session s WHERE s.workspace_id = t0.workspace_id AND s.id = t0.source_id
+            AND s.organization_privacy_generation = #{organizationPrivacyGeneration}
             AND (s.mission_taint_generation IS NULL OR EXISTS (
               SELECT 1 FROM ai_agent_privacy_barrier b WHERE b.workspace_id = t0.workspace_id
                 AND b.blocked = FALSE))))
@@ -172,6 +209,9 @@
     FROM attachment a
     WHERE a.workspace_id = #{workspaceId}
       AND a.url LIKE '/api/attachments/content/%'
+      AND (a.entity_type &lt;&gt; 'ai_chat_session' OR EXISTS (SELECT 1 FROM ai_chat_session s
+        WHERE s.workspace_id = a.workspace_id AND s.id = a.entity_id
+          AND s.organization_privacy_generation = #{organizationPrivacyGeneration}))
     UNION DISTINCT
     SELECT CONCAT('workspaces/', #{workspaceId}, '/person-images/', p.id, '/',
                   SUBSTRING_INDEX(p.image_url, '/', -1)) AS object_key,

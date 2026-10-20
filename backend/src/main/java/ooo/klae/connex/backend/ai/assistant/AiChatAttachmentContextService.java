@@ -82,6 +82,7 @@ public class AiChatAttachmentContextService {
         int remainingContextCharacters = AiChatAttachmentPolicy.MAX_TOTAL_PROMPT_CHARS;
         for (Attachment attachment : attachments) {
             ownershipGuard.run();
+            persistenceService.requirePrivacyCurrent(turn);
             requireBeforeDeadline(deadline);
             if (remainingContextCharacters == 0) {
                 data.add(attachmentData(

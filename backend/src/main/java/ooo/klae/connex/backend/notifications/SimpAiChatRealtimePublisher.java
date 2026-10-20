@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyPublicationGuard;
 import ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard;
 import ooo.klae.connex.backend.ai.assistant.AiChatPrivacyToken;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
@@ -34,6 +35,8 @@ public class SimpAiChatRealtimePublisher implements AiChatRealtimePublisher {
     private final TenantWorkScope tenantWorkScope;
     private final AiChatRealtimeRecipientReader recipientReader;
     private final RealtimeRoutingIdentityResolver routingIdentities;
+    private final AiAssistantPrivacyPublicationGuard publicationGuard;
+    private final AiChatPrivacyGuard privacyGuard;
     private final AiChatMapper chatMapper;
     private final WorkspaceService workspaceService;
     private final AiRestrictionEpoch restrictionEpoch;
@@ -43,7 +46,7 @@ public class SimpAiChatRealtimePublisher implements AiChatRealtimePublisher {
         tenantWorkScope.inWorkspace(frame.workspaceId(), () -> {
             long epoch = restrictionEpoch.current(frame.workspaceId());
             restrictionEpoch.runIfCurrent(frame.workspaceId(), epoch, () -> {
-                var source = chatMapper.getTurnById(frame.workspaceId(), frame.sessionId(), frame.turnId());
+                var source = chatMapper.getTurnById(frame.workspaceId(), frame.sessionId(), frame.turnId(), privacyGuard.currentGeneration(frame.workspaceId()));
                 if (source == null || source.getMissionRunId() != null
                         || !Objects.equals(source.getRequestedByUserId(), userId)
                         || source.getPrivacyGeneration() == null
@@ -52,37 +55,80 @@ public class SimpAiChatRealtimePublisher implements AiChatRealtimePublisher {
                         || !canReceive(userId, frame)) {
                     return;
                 }
-                AiChatPrivacyGuard.requireCurrent(chatMapper, new AiChatPrivacyToken(frame.workspaceId(),
-                        frame.sessionId(), source.getPrivacyGeneration(), source.getPrivacyTaintSeq()));
-                messagingTemplate.convertAndSendToUser(
-                        routingIdentities.destinationFor(userId), AI_CHAT_QUEUE, frame);
+                privacyGuard.requireCurrent(chatMapper, new AiChatPrivacyToken(frame.workspaceId(),
+                        frame.sessionId(), source.getPrivacyGeneration(), source.getPrivacyTaintSeq(), privacyGuard.organizationId(frame.workspaceId()), source.getOrganizationPrivacyGeneration()));
+                publicationGuard.publish(privacyGuard.organizationId(frame.workspaceId()),
+                        source.getOrganizationPrivacyGeneration(), () -> messagingTemplate.convertAndSendToUser(
+                                routingIdentities.destinationFor(userId), AI_CHAT_QUEUE, frame,
+                                AiChatPrivacyOutboundInterceptor.headers(privacyGuard.organizationId(frame.workspaceId()),
+                                        source.getOrganizationPrivacyGeneration())));
             });
         });
     }
 
     @Override
     public void sendSession(int workspaceId, int sessionId, AiChatStepFrameDto frame) {
-        if (frame.text() != null || frame.tool() != null || frame.toolCallId() != null) {
+        if (frame.workspaceId() != workspaceId || frame.sessionId() != sessionId
+                || frame.text() != null || frame.tool() != null || frame.toolCallId() != null) {
             return;
         }
         tenantWorkScope.inWorkspace(workspaceId, () -> {
             long epoch = restrictionEpoch.current(workspaceId);
             restrictionEpoch.runIfCurrent(workspaceId, epoch, () -> {
+                var session = chatMapper.getPrivacySession(workspaceId, sessionId);
+                if (session == null) {
+                    return;
+                }
+                var sourceToken = privacyGuard.capture(chatMapper, session);
                 List<Integer> recipientIds = recipientReader.recipients(workspaceId, sessionId);
                 for (Integer userId : recipientIds) {
                     if (canReceive(userId, frame)) {
-                        messagingTemplate.convertAndSendToUser(
-                                routingIdentities.destinationFor(userId), AI_CHAT_QUEUE, frame);
+                        publicationGuard.publish(sourceToken.organizationId(), sourceToken.organizationPrivacyGeneration(),
+                                () -> messagingTemplate.convertAndSendToUser(
+                                        routingIdentities.destinationFor(userId), AI_CHAT_QUEUE, frame,
+                                        AiChatPrivacyOutboundInterceptor.headers(sourceToken.organizationId(), sourceToken.organizationPrivacyGeneration())));
                     }
                 }
             });
         });
     }
 
+    @Override
+    public void invalidateWorkspace(int workspaceId, long cutoffGeneration) {
+        if (cutoffGeneration < 0) {
+            throw new IllegalArgumentException("Invalid privacy cutoff");
+        }
+        tenantWorkScope.inWorkspace(workspaceId, () -> {
+            var frame = new PrivacyInvalidated(workspaceId, "privacy_invalidated", Long.toString(cutoffGeneration));
+            int after = 0;
+            while (true) {
+                List<Integer> candidates = userMapper.activeAiChatRecipientIdsAfter(workspaceId, after, 100);
+                if (candidates.isEmpty()) {
+                    return;
+                }
+                for (int userId : candidates) {
+                    if (workspaceService.isMember(workspaceId, userId)
+                            && canReceivePrivacyMetadata(workspaceId, userId)
+                            && userMapper.getActiveAiChatRealtimeRecipientsByIds(workspaceId, List.of(userId)).stream()
+                                .anyMatch(recipient -> Objects.equals(recipient.id(), userId))) {
+                        messagingTemplate.convertAndSendToUser(
+                                routingIdentities.destinationFor(userId), AI_CHAT_QUEUE, frame);
+                    }
+                }
+                after = candidates.getLast();
+            }
+        });
+    }
+
+    private boolean canReceivePrivacyMetadata(int workspaceId, int userId) {
+        var permissions = workspaceService.permissionsFor(workspaceId, userId);
+        return permissions.contains(Permission.AI_USE) || permissions.contains(Permission.AI_SESSION_ADMIN);
+    }
+
     private boolean canReceive(int userId, AiChatStepFrameDto frame) {
         return workspaceService.isMember(frame.workspaceId(), userId)
                 && workspaceService.permissionsFor(frame.workspaceId(), userId).contains(Permission.AI_USE)
-                && chatMapper.getAccessibleSessionById(frame.workspaceId(), userId, frame.sessionId()) != null
+                && chatMapper.getAccessibleSessionById(frame.workspaceId(), userId, frame.sessionId(), privacyGuard.currentGeneration(frame.workspaceId())) != null
                 && userMapper.getActiveAiChatRealtimeRecipientsByIds(frame.workspaceId(), List.of(userId)).stream()
                     .anyMatch(recipient -> Objects.equals(recipient.id(), userId));
     }

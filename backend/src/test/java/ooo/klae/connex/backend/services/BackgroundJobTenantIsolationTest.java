@@ -131,7 +131,7 @@ class BackgroundJobTenantIsolationTest {
         PlacementRegistry placementRegistry = mock(PlacementRegistry.class);
         RecordingTenantWorkScope tenantWorkScope = new RecordingTenantWorkScope();
         JobRunRecorder jobRunRecorder = mock(JobRunRecorder.class);
-        WorkflowRuntimeScheduler scheduler = new WorkflowRuntimeScheduler(
+        WorkflowRuntimeScheduler scheduler = new WorkflowRuntimeScheduler(ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered(),
                 outboxMapper,
                 claimTransaction,
                 outboxWorker,

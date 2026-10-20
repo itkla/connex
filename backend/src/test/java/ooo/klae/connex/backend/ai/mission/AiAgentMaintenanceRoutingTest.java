@@ -78,7 +78,8 @@ class AiAgentMaintenanceRoutingTest {
         when(privacy.advanceBarrier(eq(WORKSPACE), eq(1L), any())).thenReturn(1);
         var service = new AiAgentPrivacyService(privacy, mock(AiAgentRunMapper.class), mock(ooo.klae.connex.backend.mappers.AiAgentActionMapper.class), mock(AiChatMapper.class),
                 mock(AiRestrictionEpoch.class), mock(AiRunLeaseService.class), mock(PlatformTransactionManager.class),
-                workspaces, lifecycle, mock(UserMapper.class), scope, catalogs, context, Clock.systemUTC());
+                workspaces, lifecycle, mock(UserMapper.class), scope, catalogs, context, Clock.systemUTC(),
+                mock(ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService.class), mock(ooo.klae.connex.backend.mappers.AiAssistantPrivacyControlMapper.class), mock(ooo.klae.connex.backend.mappers.AttachmentMapper.class), mock(ooo.klae.connex.backend.mappers.AiAgentPrivacyObjectMapper.class), mock(ooo.klae.connex.backend.mappers.ObjectDeletionQueueMapper.class), mock(ooo.klae.connex.backend.storage.ManagedObjectService.class));
         CompletableFuture<Boolean> placementBeforeTransaction = new CompletableFuture<>();
         when(catalogs.resolveCatalog(ORG)).thenAnswer(call -> {
             placementBeforeTransaction.complete(!TransactionSynchronizationManager.isActualTransactionActive());
@@ -177,8 +178,10 @@ class AiAgentMaintenanceRoutingTest {
         user.setId(1);
         when(system.user()).thenReturn(user);
         return new AiAgentPrivacyInitializer(workspaces, scope, privacy,
-                mock(AiAgentStartupRecoveryService.class), recorder, mock(PlatformTransactionManager.class),
-                new AutomationExecutor(context, new AutomationScope(), scope), system);
+                mock(AiAgentStartupRecoveryService.class), mock(ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService.class), recorder, mock(PlatformTransactionManager.class),
+                new AutomationExecutor(context, new AutomationScope(), scope), system,
+                new org.springframework.beans.factory.support.StaticListableBeanFactory()
+                    .getBeanProvider(org.springframework.core.task.TaskExecutor.class));
     }
 
     private record Recorded(String job, String catalog, JobRunStatus status) {}

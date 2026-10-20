@@ -151,6 +151,7 @@ public class AiAgentSingletonProposalSetPort implements AiAgentProposalSetPort {
         call.setMissionRunId(run.getId());
         call.setMissionActionId(action.getId());
         call.setPrivacyGeneration(run.getPrivacyGeneration());
+        call.setOrganizationPrivacyGeneration(run.getOrganizationPrivacyGeneration());
         call.setIdempotencyKey("mission-action-" + action.getActionSlot());
         chat.insertMissionToolCall(call);
         long version = run.getStateVersion();
@@ -181,7 +182,7 @@ public class AiAgentSingletonProposalSetPort implements AiAgentProposalSetPort {
         var canonical = new ArrayList<AiChatToolCall>();
         for (AiAgentAction action : locked) {
             if (action.getPreparationId() != null) {
-                AiChatToolCall call = chat.getMissionToolCall(run.getWorkspaceId(), run.getId(), action.getId());
+                AiChatToolCall call = chat.getMissionToolCallForMaintenance(run.getWorkspaceId(), run.getId(), action.getId());
                 if (call == null || !"mission".equals(call.getProposalOrigin())
                         || !Objects.equals(call.getMissionRunId(), run.getId())
                         || !Objects.equals(call.getMissionActionId(), action.getId())) {
@@ -214,7 +215,7 @@ public class AiAgentSingletonProposalSetPort implements AiAgentProposalSetPort {
         LocalDateTime earliest = null;
         int ordinal = 0;
         for (AiAgentAction action : bound) {
-            AiChatToolCall call = chat.getMissionToolCall(run.getWorkspaceId(), run.getId(), action.getId());
+            AiChatToolCall call = chat.getMissionToolCall(run.getWorkspaceId(), run.getId(), action.getId(), run.getOrganizationPrivacyGeneration());
             validateCanonical(run, action, call);
             if (call == null || !"mission".equals(call.getProposalOrigin()) || !call.isServerProposal()
                     || !"proposed".equals(call.getStatus()) || action.getPreparedAt() == null
@@ -250,7 +251,7 @@ public class AiAgentSingletonProposalSetPort implements AiAgentProposalSetPort {
             if (action.getOutputOrdinal() == null) {
                 throw new ConflictException("mission_membership_conflict");
             }
-            validateCanonical(run, action, chat.getMissionToolCall(run.getWorkspaceId(), run.getId(), action.getId()));
+            validateCanonical(run, action, chat.getMissionToolCall(run.getWorkspaceId(), run.getId(), action.getId(), run.getOrganizationPrivacyGeneration()));
             bound.add(action);
         }
         bound.sort(Comparator.comparingInt(AiAgentAction::getOutputOrdinal));
@@ -268,6 +269,7 @@ public class AiAgentSingletonProposalSetPort implements AiAgentProposalSetPort {
                 || !Objects.equals(call.getMissionActionId(), action.getId())
                 || !Objects.equals(call.getToolName(), action.getToolName())
                 || !Objects.equals(call.getPrivacyGeneration(), run.getPrivacyGeneration())
+                || call.getOrganizationPrivacyGeneration() != run.getOrganizationPrivacyGeneration()
                 || action.getPrivacyGeneration() != run.getPrivacyGeneration()
                 || action.getPreparedAt() == null || action.getSourceObservedAt() == null
                 || action.getOriginSegmentId() == null || action.getOriginExecutionGeneration() == null) {

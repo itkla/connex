@@ -53,6 +53,7 @@ public class ExportService {
     private final CompanyMapper companyMapper;
     private final ProductMapper productMapper;
     private final PipelineMapper pipelineMapper;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
     private final TagMapper tagMapper;
     private final CustomFieldDefinitionMapper customFieldDefinitionMapper;
     private final CustomFieldValueService customFieldValueService;
@@ -212,6 +213,7 @@ public class ExportService {
 
     private String renderDeals(List<Deal> deals) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         List<CustomFieldDefinition> defs = activeDefinitions(workspaceId, "deal");
         Map<Integer, Map<Integer, Object>> custom =
             customFieldValueService.getForEntities("deal", deals.stream().map(Deal::getId).toList());
@@ -221,9 +223,9 @@ public class ExportService {
         for (Company c : companyMapper.getCompaniesForDedup(workspaceId)) companyNames.put(c.getId(), c.getName());
         Map<Integer, String> pipelineNames = new HashMap<>();
         Map<Integer, String> stageNames = new HashMap<>();
-        for (var pipeline : pipelineMapper.getAllPipelines(workspaceId)) {
+        for (var pipeline : pipelineMapper.getAllPipelines(workspaceId, orgWorkspaceIdsJson)) {
             pipelineNames.put(pipeline.getId(), pipeline.getName());
-            for (var stage : pipelineMapper.getStagesByPipelineId(workspaceId, pipeline.getId())) {
+            for (var stage : pipelineMapper.getStagesByPipelineId(workspaceId, orgWorkspaceIdsJson, pipeline.getId())) {
                 stageNames.put(stage.getId(), stage.getName());
             }
         }

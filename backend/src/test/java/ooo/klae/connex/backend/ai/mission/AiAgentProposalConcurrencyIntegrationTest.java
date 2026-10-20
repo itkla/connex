@@ -156,7 +156,7 @@ class AiAgentProposalConcurrencyIntegrationTest extends AbstractAiAgentProposalI
         assertNull(results.getLast().error());
         assertEquals("cancelled", runs.getRun(workspace.getId(), fixture.runId()).getStatus());
         assertEquals(0, pending(fixture));
-        assertEquals("mission_withdrawn", json.readTree(chatMapper.getMissionToolCall(workspace.getId(), fixture.runId(), prepared.action().getId()).getResultJson()).path("reason").asString());
+        assertEquals("mission_withdrawn", json.readTree(chatMapper.getMissionToolCallForMaintenance(workspace.getId(), fixture.runId(), prepared.action().getId()).getResultJson()).path("reason").asString());
     }
 
     @Test
@@ -190,7 +190,7 @@ class AiAgentProposalConcurrencyIntegrationTest extends AbstractAiAgentProposalI
         assertNull(cancelled.getReviewExpiresAt());
         assertNull(actions.getById(workspace.getId(), fixture.runId(), selected.getId()).getOutputOrdinal());
         assertEquals(0, pending(fixture));
-        var canonical = chatMapper.getMissionToolCall(workspace.getId(), fixture.runId(), selected.getId());
+        var canonical = chatMapper.getMissionToolCallForMaintenance(workspace.getId(), fixture.runId(), selected.getId());
         assertEquals("failed", canonical.getStatus());
         var outcome = json.readTree(canonical.getResultJson());
         assertEquals("mission_withdrawn", outcome.path("reason").asString());
@@ -235,7 +235,7 @@ class AiAgentProposalConcurrencyIntegrationTest extends AbstractAiAgentProposalI
                 }));
         assertNull(ordered.getFirst().error());
         assertNull(ordered.getLast().error());
-        assertEquals("executed", chatMapper.getMissionToolCall(workspace.getId(), winner.runId(), winner.selected().getFirst().getId()).getStatus());
+        assertEquals("executed", chatMapper.getMissionToolCallForMaintenance(workspace.getId(), winner.runId(), winner.selected().getFirst().getId()).getStatus());
         assertEquals("Prepared industry", jdbc.queryForObject("SELECT industry FROM company WHERE workspace_id=? AND id=?", String.class, workspace.getId(), primary.getId()));
     }
 
@@ -279,7 +279,7 @@ class AiAgentProposalConcurrencyIntegrationTest extends AbstractAiAgentProposalI
                 () -> decisions.decide(fixture.runId(), request(fixture, "approve", selected)));
         assertNull(results.getFirst().error());
         assertNull(results.getLast().error());
-        assertEquals("rejected", chatMapper.getMissionToolCall(workspace.getId(), fixture.runId(), selected.getId()).getStatus());
+        assertEquals("rejected", chatMapper.getMissionToolCallForMaintenance(workspace.getId(), fixture.runId(), selected.getId()).getStatus());
         assertEquals("done", runs.getRun(workspace.getId(), fixture.runId()).getStatus());
         assertEquals(before + 1, runs.getRun(workspace.getId(), fixture.runId()).getStateVersion());
     }
@@ -301,7 +301,7 @@ class AiAgentProposalConcurrencyIntegrationTest extends AbstractAiAgentProposalI
             assertEquals(selected.getActionSlot(), response.items().getFirst().actionSlot());
             assertEquals("executed", response.items().getFirst().outcome());
         }
-        var canonical = chatMapper.getMissionToolCall(workspace.getId(), fixture.runId(), selected.getId());
+        var canonical = chatMapper.getMissionToolCallForMaintenance(workspace.getId(), fixture.runId(), selected.getId());
         assertEquals("executed", canonical.getStatus());
         assertNotNull(canonical.getResultJson());
         assertEquals("approved", json.readTree(canonical.getResultJson()).path("approval").path("status").asString());

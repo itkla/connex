@@ -7,6 +7,7 @@ import {
     type AiAgentRealtimeFrame,
     type AiChatDeltaFrame,
     type AiChatNarrationFrame,
+    type AiChatPrivacyFrame,
     type AiChatTodo,
     type AiChatTodosFrame,
     type AiChatRealtimeFrame,
@@ -58,6 +59,7 @@ export type AiChatSocketHandlers = {
     onFrame: (frame: AiChatRealtimeFrame) => void;
     onDelta?: (frame: AiChatDeltaFrame) => void;
     onMissionFrame?: (frame: AiAgentRealtimeFrame) => void;
+    onPrivacyFrame?: (frame: AiChatPrivacyFrame) => void;
     onStatusChange?: (status: RealtimeStatus) => void;
 };
 
@@ -196,6 +198,19 @@ function parseAiChatTodosFrame(parsed: unknown): AiChatTodosFrame | null {
     };
 }
 
+/** Validates bounded decimal authority without converting it to an imprecise JavaScript number. */
+export function parseAiChatPrivacyFrame(parsed: unknown): AiChatPrivacyFrame | null {
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const workspaceId = Reflect.get(parsed, "workspaceId");
+    const kind = Reflect.get(parsed, "kind");
+    const cutoffGeneration = Reflect.get(parsed, "cutoffGeneration");
+    if (typeof workspaceId !== "number" || !Number.isSafeInteger(workspaceId) || workspaceId <= 0
+            || kind !== "privacy_invalidated" || typeof cutoffGeneration !== "string"
+            || cutoffGeneration.length > 19 || !/^(0|[1-9][0-9]*)$/.test(cutoffGeneration)
+            || BigInt(cutoffGeneration) > BigInt("9223372036854775807")) return null;
+    return { workspaceId, kind, cutoffGeneration };
+}
+
 function parseAiChatFrame(parsed: unknown): AiChatRealtimeFrame | null {
     if (typeof parsed !== "object" || parsed === null) return null;
     const thinking = parseAiChatThinkingFrame(parsed);
@@ -298,6 +313,11 @@ export function createNotificationSocket(handlers: NotificationSocketHandlers): 
 export function createAiChatSocket(handlers: AiChatSocketHandlers): NotificationSocket {
     return createUserQueueSocket(AI_CHAT_QUEUE, (message) => {
         const parsed = parseJsonBody(message);
+        const privacy = parseAiChatPrivacyFrame(parsed);
+        if (privacy) {
+            handlers.onPrivacyFrame?.(privacy);
+            return;
+        }
         const mission = parseAskConnexMissionFrame(parsed);
         if (mission) {
             handlers.onMissionFrame?.(mission);

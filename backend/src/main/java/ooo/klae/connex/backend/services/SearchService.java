@@ -158,6 +158,8 @@ public class SearchService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = workspaceService.getCurrentUserId();
         Set<Permission> permissions = workspaceService.permissionsFor(workspaceId, userId);
+        String orgWorkspaceIdsJson = types.contains("pipelines") || types.contains("notes")
+            ? recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson() : null;
         return new SearchResultsDto(
             selected(types, "companies", () -> companyMapper.search(workspaceId, pattern)
                 .stream().map(CompanyDto::from).toList()),
@@ -166,13 +168,13 @@ public class SearchService {
             selected(types, "deals", () -> referenceService.hydrateDeals(
                 workspaceId, dealMapper.search(workspaceId, pattern))
                 .stream().map(DealDto::from).toList()),
-            selected(types, "pipelines", () -> pipelineMapper.search(workspaceId, pattern)
+            selected(types, "pipelines", () -> pipelineMapper.search(workspaceId, orgWorkspaceIdsJson, pattern)
                 .stream().map(PipelineDto::from).toList()),
             selected(types, "tags", () -> tagMapper.search(workspaceId, pattern)
                 .stream().map(TagDto::from).toList()),
             selected(types, "activities", () -> searchVisibleActivities(workspaceId, pattern, needle)
                 .stream().map(ActivityDto::from).toList()),
-            selected(types, "notes", () -> searchNotes(workspaceId, pattern, needle, userId)
+            selected(types, "notes", () -> searchNotes(workspaceId, orgWorkspaceIdsJson, pattern, needle, userId)
                 .stream().map(NoteDto::from).toList()),
             selected(types, "tasks", () -> searchVisibleTasks(workspaceId, pattern, needle)
                 .stream().map(TaskDto::from).toList()),
@@ -226,9 +228,8 @@ public class SearchService {
         return visible;
     }
 
-    private List<Note> searchNotes(int workspaceId, String pattern, String needle, int currentUserId) {
-        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId)
-            .workspaceIdsJson();
+    private List<Note> searchNotes(
+            int workspaceId, String orgWorkspaceIdsJson, String pattern, String needle, int currentUserId) {
         return mergeVisibleNotes(
             searchVisibleNotes(workspaceId, orgWorkspaceIdsJson, pattern, needle, currentUserId),
             searchVisibleNotesByAuthor(workspaceId, orgWorkspaceIdsJson, pattern, currentUserId));

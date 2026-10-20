@@ -94,6 +94,15 @@ class FreshMembershipTransactionTest {
         assertNull(FreshMembershipTransaction.class
             .getMethod("execute", int.class, Supplier.class)
             .getAnnotation(Transactional.class));
+        assertNull(FreshMembershipTransaction.class
+            .getMethod("executeWithPreparedScopes", int.class, Supplier.class)
+            .getAnnotation(Transactional.class));
+        assertNull(WorkspaceService.class
+            .getMethod("ensureActiveMember", int.class, int.class, String.class)
+            .getAnnotation(Transactional.class));
+        assertNull(WorkspaceService.class
+            .getMethod("addPendingMember", int.class, User.class, User.class, String.class)
+            .getAnnotation(Transactional.class));
         assertNull(InviteService.class
             .getMethod("createInvite", int.class, User.class, String.class, String.class)
             .getAnnotation(Transactional.class));

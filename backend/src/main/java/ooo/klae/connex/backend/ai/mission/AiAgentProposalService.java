@@ -60,7 +60,7 @@ public class AiAgentProposalService {
         }
         Instant preparedAt = clock.instant().truncatedTo(ChronoUnit.MICROS);
         AiChatToolCall existing = action.getPreparationId() == null ? null
-                : chat.getMissionToolCall(policy.turn().workspaceId(), policy.runId(), action.getId());
+                : chat.getMissionToolCall(policy.turn().workspaceId(), policy.runId(), action.getId(), policy.turn().privacyToken().organizationPrivacyGeneration());
         if (action.getPreparationId() != null && existing == null) {
             throw new ConflictException("mission_action_conflict");
         }

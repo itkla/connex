@@ -24,6 +24,10 @@ import ooo.klae.connex.backend.session.SessionEpochRestampGrant;
  */
 
 public interface UserMapper {
+    /** Bounded control-only discovery for workspace privacy metadata, independent of chat roots. */
+    List<Integer> activeAiChatRecipientIdsAfter(@Param("workspaceId") int workspaceId,
+            @Param("afterId") int afterId, @Param("limit") int limit);
+
     List<User> getAllUsers();
     /** Existing control-plane identities only; callers supply a bounded, nonempty set. */
     List<Integer> findExistingIds(@Param("ids") List<Integer> ids);

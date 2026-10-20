@@ -27,6 +27,7 @@ import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -53,6 +54,8 @@ public class AiChatCitationProjector {
     private final CompanyMapper companyMapper;
     private final DealMapper dealMapper;
     private final PipelineMapper pipelineMapper;
+    private final AiChatPrivacyGuard privacyGuard;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
     private final AiChatMapper chatMapper;
 
     /** Returns authorized citations and messages withheld by current record visibility. */
@@ -112,7 +115,7 @@ public class AiChatCitationProjector {
         }
         Map<Integer, Integer> requesterByTurn = new LinkedHashMap<>();
         for (AiChatTurn turn : chatMapper.listTurnsByIds(
-                workspaceId, sessionId, List.copyOf(turnIds))) {
+                workspaceId, sessionId, List.copyOf(turnIds), privacyGuard.currentGeneration(workspaceId))) {
             if (turn.getRequestedByUserId() != null) {
                 requesterByTurn.put(turn.getId(), turn.getRequestedByUserId());
             }
@@ -263,7 +266,7 @@ public class AiChatCitationProjector {
             int workspaceId, int sessionId, Set<Integer> turnIds) {
         Map<Integer, Integer> requesterByTurn = new LinkedHashMap<>();
         for (AiChatTurn turn : chatMapper.listTurnsByIds(
-                workspaceId, sessionId, List.copyOf(turnIds))) {
+                workspaceId, sessionId, List.copyOf(turnIds), privacyGuard.currentGeneration(workspaceId))) {
             if (turn.getRequestedByUserId() != null) {
                 requesterByTurn.put(turn.getId(), turn.getRequestedByUserId());
             }
@@ -377,8 +380,9 @@ public class AiChatCitationProjector {
     }
 
     private Map<Integer, String> stageNames(int workspaceId) {
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         Map<Integer, String> names = new LinkedHashMap<>();
-        for (Stage stage : pipelineMapper.getAllStages(workspaceId)) {
+        for (Stage stage : pipelineMapper.getAllStages(workspaceId, orgWorkspaceIdsJson)) {
             if (stage.getName() != null) {
                 names.put(stage.getId(), stage.getName());
             }

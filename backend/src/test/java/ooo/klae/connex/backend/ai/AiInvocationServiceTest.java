@@ -2651,7 +2651,15 @@ class AiInvocationServiceTest {
         barrier.setGeneration(1);
         when(mapper.getPrivacySession(WORKSPACE_ID, 7)).thenReturn(session);
         when(mapper.getPrivacyBarrier(WORKSPACE_ID)).thenReturn(barrier);
-        var token = new ooo.klae.connex.backend.ai.assistant.AiChatPrivacyToken(WORKSPACE_ID, 7, 1, 1);
+        session.setId(7);
+        session.setWorkspaceId(WORKSPACE_ID);
+        session.setOrganizationPrivacyGeneration(1L);
+        var authority = mock(ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService.class);
+        when(authority.organizationId(WORKSPACE_ID)).thenReturn(1);
+        when(authority.current(1)).thenReturn(1L);
+        when(authority.freshCurrent(1)).thenReturn(1L);
+        var privacyGuard = new ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard(authority);
+        var token = new ooo.klae.connex.backend.ai.assistant.AiChatPrivacyToken(WORKSPACE_ID, 7, 1, 1, 1, 1L);
         AiInvocation invocation = invocation("Summarize relationship state");
         when(aiInvocationAdmissionService.acquireDirect()).thenReturn(fallbackAdmission);
         when(aiProvider.complete(any(AiCompletionRequest.class))).thenAnswer(call -> {
@@ -2671,7 +2679,7 @@ class AiInvocationServiceTest {
             throw new AssertionError("Durable privacy did not reject fallback egress");
         });
         java.util.function.Supplier<AiStructuredOutcome<IntroRationaleContent>> complete = () ->
-                ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard.execute(mapper, token,
+                privacyGuard.execute(mapper, token,
                         () -> service.completeStructured(invocation, IntroRationaleContent.class, invocationAdmission));
         var refused = assertThrows(ooo.klae.connex.backend.ai.assistant.AiAssistantLoopException.class,
                 () -> {

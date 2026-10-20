@@ -1372,7 +1372,9 @@
         "indeterminate": "Connex couldn't confirm whether this change was saved. Reload before trying again, and check your records.",
         "reload": "Reload changes"
       }
-    }
+    },
+    "privacyUnavailable": "This chat is no longer available following a privacy request. Start a new chat to continue.",
+    "privacyInitializing": "Chat is temporarily unavailable while we prepare a privacy update. Try again shortly."
   },
   "SearchLayout": {
     "title": "Search",

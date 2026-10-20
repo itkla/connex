@@ -50,6 +50,7 @@ class WorkspaceProvisioningLockOrderTest {
     @Mock private SessionSecurityService sessionSecurityService;
     @Mock private PrivilegedMfaLockedAuthorization privilegedMfaLockedAuthorization;
 
+    @Mock private ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService assistantPrivacyService;
     @Mock private OwnershipOfferWriter ownershipOfferWriter;
     @InjectMocks private WorkspaceService workspaceService;
 

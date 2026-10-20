@@ -61,7 +61,14 @@ class AiAgentPersistenceContractTest {
             }
         }
         String privacy = Files.readString(Path.of("src/main/resources/mappers/AiAgentPrivacyMapper.xml"));
-        assertEquals(2, privacy.split("<include refid=\"runHasResidualPayload\" />", -1).length - 1);
+        var privacyDocument = factory.newDocumentBuilder().parse(
+                Path.of("src/main/resources/mappers/AiAgentPrivacyMapper.xml").toFile());
+        for (String statement : Set.of("listAffectedRunIds", "residualCount", "allChatRunIds",
+                "workspaceTeardownRunIds", "allChatResidualCount", "workspaceTeardownResidualCount")) {
+            assertEquals("runHasResidualPayload", xpath.evaluate(
+                    "/mapper/select[@id='" + statement + "']//include[@refid='runHasResidualPayload']/@refid",
+                    privacyDocument), statement);
+        }
         for (String column : Set.of("plan_schema_version", "plan_revision", "plan_json", "checkpoint_schema_version",
                 "checkpoint_revision", "checkpoint_json", "memory_schema_version", "memory_json", "last_committed_segment_no")) {
             assertTrue(privacy.contains("r." + column), column);

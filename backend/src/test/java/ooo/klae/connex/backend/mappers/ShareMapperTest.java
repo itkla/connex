@@ -135,7 +135,7 @@ class ShareMapperTest extends AbstractMapperTest {
                 orgWorkspaceIdsJson(workspaceMapper, workspace.getId()));
 
         assertEquals(0, affected);
-        assertFalse(pipelineMapper.pipelineExists(foreign.getId(), pipeline.getId()));
+        assertFalse(pipelineMapper.pipelineExists(foreign.getId(), orgWorkspaceIdsJson(workspaceMapper, foreign.getId()), pipeline.getId()));
     }
 
     @Test
@@ -148,7 +148,7 @@ class ShareMapperTest extends AbstractMapperTest {
             pipeline.getId(), workspace.getId(), sibling.getId(), newUser().getId(), false,
                 orgWorkspaceIdsJson(workspaceMapper, workspace.getId())));
 
-        assertNotNull(pipelineMapper.getVisibleStageById(sibling.getId(), stage.getId()));
+        assertNotNull(pipelineMapper.getVisibleStageById(sibling.getId(), orgWorkspaceIdsJson(workspaceMapper, sibling.getId()), stage.getId()));
         assertNull(pipelineMapper.getStageById(sibling.getId(), stage.getId()));
     }
 
@@ -166,8 +166,8 @@ class ShareMapperTest extends AbstractMapperTest {
         mismatched.setPosition(0);
         pipelineMapper.insertStage(mismatched);
 
-        assertNull(pipelineMapper.getVisibleStageById(sibling.getId(), mismatched.getId()));
-        assertTrue(pipelineMapper.getStagesByPipelineId(sibling.getId(), pipeline.getId()).isEmpty());
+        assertNull(pipelineMapper.getVisibleStageById(sibling.getId(), orgWorkspaceIdsJson(workspaceMapper, sibling.getId()), mismatched.getId()));
+        assertTrue(pipelineMapper.getStagesByPipelineId(sibling.getId(), orgWorkspaceIdsJson(workspaceMapper, sibling.getId()), pipeline.getId()).isEmpty());
     }
 
     /**
@@ -224,7 +224,7 @@ class ShareMapperTest extends AbstractMapperTest {
         assertEquals(0, shareMapper.sharePipeline(pipeline.getId(), workspace.getId(),
             foreign.getId(), newUser().getId(), false, forged));
         assertFalse(personMapper.exists(foreign.getId(), person.getId()));
-        assertFalse(pipelineMapper.pipelineExists(foreign.getId(), pipeline.getId()));
+        assertFalse(pipelineMapper.pipelineExists(foreign.getId(), orgWorkspaceIdsJson(workspaceMapper, foreign.getId()), pipeline.getId()));
     }
 
     /**

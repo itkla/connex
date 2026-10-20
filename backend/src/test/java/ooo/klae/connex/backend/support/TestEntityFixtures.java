@@ -34,6 +34,16 @@ public final class TestEntityFixtures {
     /** Models an already initialized workspace for tests that insert pre-existing data directly.
      * Provisioning tests must use the production service and must not call this helper. */
     public static void seedExistingWorkspacePrivacy(JdbcTemplate jdbc, int workspaceId) {
+        jdbc.update("INSERT IGNORE INTO ai_assistant_privacy_fence (organization_id,generation,bootstrap_operation_id)"
+                + " SELECT org_id,1,UUID() FROM workspace WHERE id=?", workspaceId);
+        jdbc.update("INSERT IGNORE INTO ai_assistant_privacy_operation"
+                + " (organization_id,operation_key,content_scope,cutoff_generation,invalidated_generation,reason,operation_fingerprint)"
+                + " SELECT f.organization_id,f.bootstrap_operation_id,'organization_assistant_holdings_v2',0,1,'bootstrap',"
+                + " UNHEX(SHA2(CONCAT('assistant-bootstrap-v1|',f.organization_id,'|',f.bootstrap_operation_id),256))"
+                + " FROM ai_assistant_privacy_fence f JOIN workspace w ON w.org_id=f.organization_id WHERE w.id=?", workspaceId);
+        jdbc.update("INSERT IGNORE INTO ai_assistant_privacy_operation_workspace (organization_id,operation_key,workspace_id)"
+                + " SELECT w.org_id,f.bootstrap_operation_id,w.id FROM workspace w"
+                + " JOIN ai_assistant_privacy_fence f ON f.organization_id=w.org_id WHERE w.id=?", workspaceId);
         jdbc.update("INSERT INTO ai_agent_privacy_barrier (workspace_id) VALUES (?)"
                 + " ON DUPLICATE KEY UPDATE workspace_id = workspace_id", workspaceId);
     }
@@ -41,8 +51,16 @@ public final class TestEntityFixtures {
     /** Removes privacy maintenance state after an ordinary-chat fixture's content has been deleted. */
     public static void deleteChatPrivacy(JdbcTemplate jdbc, int workspaceId) {
         jdbc.update("UPDATE ai_agent_privacy_barrier SET latest_operation_key = NULL WHERE workspace_id = ?", workspaceId);
+        jdbc.update("DELETE FROM ai_agent_privacy_object WHERE workspace_id = ?", workspaceId);
         jdbc.update("DELETE FROM ai_agent_privacy_work WHERE workspace_id = ?", workspaceId);
         jdbc.update("DELETE FROM ai_agent_privacy_barrier WHERE workspace_id = ?", workspaceId);
+    }
+
+    /** Removes fixture-owned control coordination after its workspaces and tenant holdings are gone. */
+    public static void deleteOrganizationPrivacy(JdbcTemplate jdbc, int organizationId) {
+        jdbc.update("DELETE FROM ai_assistant_privacy_operation_workspace WHERE organization_id = ?", organizationId);
+        jdbc.update("DELETE FROM ai_assistant_privacy_operation WHERE organization_id = ?", organizationId);
+        jdbc.update("DELETE FROM ai_assistant_privacy_fence WHERE organization_id = ?", organizationId);
     }
 
     /** Inserts a fresh user in the caller's workspace and transaction. */

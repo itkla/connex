@@ -30,6 +30,7 @@ import tools.jackson.databind.ObjectMapper;
 
 /** Database constraints and lifecycle maintenance are exercised independently of execution gates. */
 class AiAgentPrivacyLifecycleIntegrationTest extends AbstractAiAgentPrivacyIntegrationTest {
+    @Autowired private ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService organizationPrivacy;
     @Autowired private AiAgentRunPersistenceService persistence;
     @Autowired private AiAgentRunMapper runs;
     @Autowired private AiAgentCapabilityGate capability;
@@ -40,9 +41,10 @@ class AiAgentPrivacyLifecycleIntegrationTest extends AbstractAiAgentPrivacyInteg
     @Autowired private TenantWorkScope scope;
     @Autowired private ObjectMapper json;
     @Autowired private ooo.klae.connex.backend.services.PersonService people;
+    @Autowired private ooo.klae.connex.backend.services.AiAssistantService assistant;
 
     @Test
-    void restrictionAndInvalidationCommitTogether() {
+    void restrictionRollbackLeavesNoFenceAdvanceOrWork() {
         workspaceMapper.updateMemberRole(workspace.getId(), currentUser.getId(), "owner");
         authenticateAs(currentUser, workspace.getId());
         jdbc.update("INSERT INTO person (workspace_id, name) VALUES (?, 'Restriction transaction subject')", workspace.getId());
@@ -54,15 +56,49 @@ class AiAgentPrivacyLifecycleIntegrationTest extends AbstractAiAgentPrivacyInteg
                 throw new IllegalStateException("Injected crash before restriction commit");
             }));
             assertNull(jdbc.queryForObject("SELECT suspended_at FROM person WHERE id=?", java.sql.Timestamp.class, personId));
+            assertEquals(1, jdbc.queryForObject("SELECT generation FROM ai_assistant_privacy_fence WHERE organization_id=?", Long.class, workspace.getOrgId()));
+            assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM ai_assistant_privacy_operation WHERE organization_id=? AND reason='restriction'", Integer.class, workspace.getOrgId()));
             assertEquals(1, privacyMapper.getBarrier(workspace.getId()).getGeneration());
             assertEquals(0, privacyMapper.countIncompleteWork(workspace.getId()));
             people.updateProcessingRestrictions(personId, true, false);
             assertNotNull(jdbc.queryForObject("SELECT suspended_at FROM person WHERE id=?", java.sql.Timestamp.class, personId));
-            assertEquals(2, privacyMapper.getBarrier(workspace.getId()).getGeneration());
-            assertTrue(privacyMapper.getBarrier(workspace.getId()).isBlocked());
-            assertEquals(1, privacyMapper.countIncompleteWork(workspace.getId()));
+            assertEquals(2, jdbc.queryForObject("SELECT generation FROM ai_assistant_privacy_fence WHERE organization_id=?", Long.class, workspace.getOrgId()));
+            assertEquals(1, privacyMapper.getBarrier(workspace.getId()).getGeneration());
+            assertFalse(privacyMapper.getBarrier(workspace.getId()).isBlocked());
+            assertEquals(0, privacyMapper.countIncompleteWork(workspace.getId()));
+            assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM ai_assistant_privacy_operation WHERE organization_id=? AND reason='restriction'", Integer.class, workspace.getOrgId()));
+            assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM ai_agent_privacy_work WHERE workspace_id=? AND reason='restriction'", Integer.class, workspace.getId()));
             privacyService.initialize(workspace.getId());
-            assertTrue(privacyMapper.getBarrier(workspace.getId()).isBlocked());
+            assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM ai_agent_privacy_work WHERE workspace_id=? AND reason='restriction' AND content_scope='organization_assistant_holdings_v2'", Integer.class, workspace.getId()));
+            assertFalse(privacyMapper.getBarrier(workspace.getId()).isBlocked());
+        } finally {
+            jdbc.update("DELETE FROM person WHERE id=?", personId);
+        }
+    }
+
+    @Test
+    void clearingHoldDoesNotReviveContent() {
+        AiChatSession session = new AiChatSession();
+        session.setWorkspaceId(workspace.getId());
+        session.setCreatedByUserId(currentUser.getId());
+        session.setOrganizationPrivacyGeneration(1);
+        session.setTitle("Never-tainted private free text");
+        session.setVisibility("private");
+        session.setStatus("active");
+        chatMapper.insertSession(session);
+        assertNotNull(assistant.get(session.getId(), 1, 20));
+        jdbc.update("INSERT INTO person (workspace_id,name) VALUES (?,'Hold clearing subject')", workspace.getId());
+        Integer person = jdbc.queryForObject("SELECT MAX(id) FROM person WHERE workspace_id=?", Integer.class, workspace.getId());
+        int personId = java.util.Objects.requireNonNull(person);
+        try {
+            people.updateProcessingRestrictions(personId, true, false);
+            assertEquals(2, jdbc.queryForObject("SELECT generation FROM ai_assistant_privacy_fence WHERE organization_id=?", Long.class, workspace.getOrgId()));
+            assertThrows(RuntimeException.class, () -> assistant.get(session.getId(), 1, 20));
+            people.updateProcessingRestrictions(personId, false, false);
+            assertEquals(2, jdbc.queryForObject("SELECT generation FROM ai_assistant_privacy_fence WHERE organization_id=?", Long.class, workspace.getOrgId()));
+            assertNotNull(chatMapper.getPrivacySession(workspace.getId(), session.getId()));
+            assertThrows(RuntimeException.class, () -> assistant.get(session.getId(), 1, 20));
+            assertEquals(0, assistant.page(1, 20).total());
         } finally {
             jdbc.update("DELETE FROM person WHERE id=?", personId);
         }
@@ -168,6 +204,7 @@ class AiAgentPrivacyLifecycleIntegrationTest extends AbstractAiAgentPrivacyInteg
         AiAgentRun run = create();
         persistence.claim(run, AiAgentCapabilityGate.hash("teardown fixture"),
                 new AiRunLeaseGuard(properties.getRunLeaseTtl()), capability);
+        jdbc.update("UPDATE workspace SET lifecycle_state='tearing_down' WHERE id=?", workspace.getId());
         privacyService.prepareWorkspaceTeardown(workspace.getId());
         var declarations = List.of("ai_chat_tool_call", "ai_chat_message", "ai_chat_turn", "ai_agent_segment",
                 "ai_agent_run", "ai_agent_privacy_work", "ai_agent_privacy_barrier", "ai_chat_session").stream()
@@ -188,6 +225,25 @@ class AiAgentPrivacyLifecycleIntegrationTest extends AbstractAiAgentPrivacyInteg
         for (var declaration : declarations) {
             assertEquals(0, lifecycle.countRows(workspace.getId(), declaration), declaration.table());
         }
+    }
+
+    @Test
+    void missionErasurePreservesProposalAncestryUntilOrderedSessionCleanup() {
+        AiAgentRun run = create();
+        var attempt = persistence.claim(run, AiAgentCapabilityGate.hash("proposal ancestry fixture"),
+                new AiRunLeaseGuard(properties.getRunLeaseTtl()), capability);
+        Integer messageId = jdbc.queryForObject("SELECT id FROM ai_chat_message WHERE workspace_id=? AND mission_run_id=? AND mission_message_kind='goal'",
+                Integer.class, workspace.getId(), run.getId());
+        jdbc.update("INSERT INTO ai_assistant_proposal_set (workspace_id,proposal_key,session_id,origin_turn_id,message_id,step_number,call_ordinal,tool_name,invocation_mode,row_count,intent_fingerprint,scope_revision,privacy_generation,organization_privacy_generation) VALUES (?,'privacy-mission-parent',?,?,?,1,0,'add_tag','scalar',1,REPEAT('a',64),'scope-1',?,?)",
+                workspace.getId(), java.util.Objects.requireNonNull(run.getSessionId()), attempt.turn().turnId(),
+                java.util.Objects.requireNonNull(messageId), run.getPrivacyGeneration(), run.getOrganizationPrivacyGeneration());
+        String operation = invalidate();
+        assertFalse(privacyService.batch(workspace.getId(), operation));
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM ai_agent_segment WHERE workspace_id=? AND run_id=?", Integer.class, workspace.getId(), run.getId()));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM ai_chat_turn WHERE workspace_id=? AND id=? AND mission_run_id IS NULL AND mission_segment_id IS NULL", Integer.class, workspace.getId(), attempt.turn().turnId()));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM ai_assistant_proposal_set WHERE workspace_id=? AND proposal_key='privacy-mission-parent'", Integer.class, workspace.getId()));
+        finish(operation);
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM ai_assistant_proposal_set WHERE workspace_id=? AND proposal_key='privacy-mission-parent'", Integer.class, workspace.getId()));
     }
 
     @Test
@@ -220,9 +276,32 @@ class AiAgentPrivacyLifecycleIntegrationTest extends AbstractAiAgentPrivacyInteg
         assertNull(erased.getGoal());
         assertTrue(runs.listSegments(workspace.getId(), run.getId()).isEmpty());
         assertEquals(0, privacyMapper.residualCount(workspace.getId(), erased.getPrivacyGeneration()));
+        jdbc.update("UPDATE workspace SET lifecycle_state='tearing_down' WHERE id=?", workspace.getId());
         privacyService.prepareWorkspaceTeardown(workspace.getId());
         assertEquals(1, lifecycle.countRows(workspace.getId(), TenantLifecycleRegistry.require("ai_agent_run")));
         assertEquals(0, lifecycle.countRows(workspace.getId(), TenantLifecycleRegistry.require("ai_agent_segment")));
+    }
+
+    @Test
+    void workspaceTeardownErasesCurrentNeverTaintedChatsWithoutAdvancingOrganizationAuthority() {
+        var authority = java.util.Objects.requireNonNull(jdbc.queryForObject(
+                "SELECT generation FROM ai_assistant_privacy_fence WHERE organization_id=?", Long.class, workspace.getOrgId()));
+        jdbc.update("INSERT INTO ai_chat_session (workspace_id,created_by_user_id,title,organization_privacy_generation) VALUES (?,NULL,'Current private chat',?)",
+                workspace.getId(), authority);
+        Integer sessionId = jdbc.queryForObject("SELECT MAX(id) FROM ai_chat_session WHERE workspace_id=?", Integer.class, workspace.getId());
+        jdbc.update("INSERT INTO ai_chat_message (workspace_id,session_id,seq,author_kind,content,organization_privacy_generation) VALUES (?,?,1,'user','Current uncited content',?)",
+                workspace.getId(), java.util.Objects.requireNonNull(sessionId), authority);
+        jdbc.update("UPDATE workspace SET lifecycle_state='tearing_down' WHERE id=?", workspace.getId());
+        privacyService.prepareWorkspaceTeardown(workspace.getId());
+        assertEquals(0, privacyMapper.workspaceTeardownResidualCount(workspace.getId()));
+        assertEquals(authority, jdbc.queryForObject("SELECT generation FROM ai_assistant_privacy_fence WHERE organization_id=?", Long.class, workspace.getOrgId()));
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM ai_assistant_privacy_operation WHERE organization_id=? AND reason='offboarding'", Integer.class, workspace.getOrgId()));
+        var work = jdbc.queryForMap("SELECT content_scope,cutoff_generation,invalidated_generation FROM ai_agent_privacy_work WHERE workspace_id=? AND reason='offboarding'", workspace.getId());
+        assertEquals("organization_mission_holdings_v1", work.get("content_scope"));
+        long workspaceGeneration = privacyMapper.getBarrier(workspace.getId()).getGeneration();
+        privacyService.prepareWorkspaceTeardown(workspace.getId());
+        assertEquals(workspaceGeneration, privacyMapper.getBarrier(workspace.getId()).getGeneration());
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM ai_agent_privacy_work WHERE workspace_id=? AND reason='offboarding'", Integer.class, workspace.getId()));
     }
 
     @Test
@@ -349,7 +428,8 @@ class AiAgentPrivacyLifecycleIntegrationTest extends AbstractAiAgentPrivacyInteg
     private int exportedActions() {
         return java.util.Objects.requireNonNull(transaction().execute(status -> {
             int count = 0;
-            try (var cursor = lifecycle.streamRows(workspace.getId(), TenantLifecycleRegistry.require("ai_agent_action"))) {
+            try (var cursor = lifecycle.streamRows(workspace.getId(), TenantLifecycleRegistry.require("ai_agent_action"),
+                    organizationPrivacy.current(workspace.getOrgId()))) {
                 for (var ignored : cursor) {
                     count++;
                 }
@@ -409,6 +489,7 @@ class AiAgentPrivacyLifecycleIntegrationTest extends AbstractAiAgentPrivacyInteg
     private AiAgentRun create() {
         AiChatSession session = new AiChatSession();
         session.setWorkspaceId(workspace.getId());
+        session.setOrganizationPrivacyGeneration(1L);
         session.setCreatedByUserId(currentUser.getId());
         session.setTitle("Lifecycle mission");
         session.setVisibility("private");

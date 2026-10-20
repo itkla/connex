@@ -102,6 +102,8 @@ public final class ProcessingRestrictionRegistry {
             "Retained activity associations remain reachable for compliance and erasure operations.");
         entries.put(MAPPERS + "AttachmentMapper",
             "Retention and erasure must reach attachments owned by restricted people.");
+        entries.put(MAPPERS + "AiAgentPrivacyMapper",
+            "Erasure checks numeric CRM ownership keys, including restricted owners, before retaining independently saved files.");
         entries.put(MAPPERS + "LegacyTenantUploadMigrationMapper",
             "Offline storage reconciliation must include restricted owners so binaries are not stranded.");
         entries.put(MAPPERS + "NoteMapper",

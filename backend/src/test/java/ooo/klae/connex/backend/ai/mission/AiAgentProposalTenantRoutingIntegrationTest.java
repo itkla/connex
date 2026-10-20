@@ -84,7 +84,7 @@ class AiAgentProposalTenantRoutingIntegrationTest extends AbstractAiAgentProposa
     @Test
     void foreignCatalogWithCollidingRunActionAndToolIdsNeverReadsOrMutatesDefaultTenant() throws Exception {
         Fixture original = frozen("assign_owner");
-        var originalCall = chatMapper.getMissionToolCall(workspace.getId(), original.runId(), original.selected().getFirst().getId());
+        var originalCall = chatMapper.getMissionToolCallForMaintenance(workspace.getId(), original.runId(), original.selected().getFirst().getId());
         foreignOrganization = new Organization();
         foreignOrganization.setName("Foreign mission routing");
         foreignOrganization.setSlug("foreign-mission-" + UUID.randomUUID());
@@ -136,7 +136,7 @@ class AiAgentProposalTenantRoutingIntegrationTest extends AbstractAiAgentProposa
         assertEquals("rejected", jdbc.queryForObject("SELECT status FROM `" + identifier(catalog)
                 + "`.ai_chat_tool_call WHERE workspace_id=? AND id=?", String.class, foreignWorkspace.getId(), originalCall.getId()));
         authenticateAs(currentUser, workspace.getId());
-        assertEquals("proposed", chatMapper.getMissionToolCall(workspace.getId(), original.runId(), original.selected().getFirst().getId()).getStatus());
+        assertEquals("proposed", chatMapper.getMissionToolCallForMaintenance(workspace.getId(), original.runId(), original.selected().getFirst().getId()).getStatus());
         assertEquals(primary.getOwnerId(), companyMapper.getCompanyById(workspace.getId(), primary.getId()).getOwnerId());
         String defaultOutput = http.perform(get(outputPath).session(session).header("X-Workspace-Id", workspace.getId()))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();

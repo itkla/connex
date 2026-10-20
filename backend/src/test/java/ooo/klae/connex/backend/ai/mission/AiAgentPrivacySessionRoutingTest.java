@@ -169,7 +169,8 @@ class AiAgentPrivacySessionRoutingTest {
                 sessions.getMapper(AiAgentRunMapper.class),
                 mock(ooo.klae.connex.backend.mappers.AiAgentActionMapper.class), mock(AiChatMapper.class), mock(AiRestrictionEpoch.class),
                 mock(AiRunLeaseService.class), transactions, sessions.getMapper(WorkspaceMapper.class), lifecycle,
-                mock(UserMapper.class), scope, catalogs, context, Clock.systemUTC());
+                mock(UserMapper.class), scope, catalogs, context, Clock.systemUTC(),
+                mock(ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService.class), mock(ooo.klae.connex.backend.mappers.AiAssistantPrivacyControlMapper.class), mock(ooo.klae.connex.backend.mappers.AttachmentMapper.class), mock(ooo.klae.connex.backend.mappers.AiAgentPrivacyObjectMapper.class), mock(ooo.klae.connex.backend.mappers.ObjectDeletionQueueMapper.class), mock(ooo.klae.connex.backend.storage.ManagedObjectService.class));
         var persistence = mock(AiAgentRunPersistenceService.class);
         when(persistence.settleOrphan(any(), any(), org.mockito.ArgumentMatchers.anyLong())).thenAnswer(call -> {
             assertFalse(TransactionSynchronizationManager.isActualTransactionActive(),
@@ -179,8 +180,10 @@ class AiAgentPrivacySessionRoutingTest {
         var recovery = new AiAgentStartupRecoveryService(sessions.getMapper(AiAgentRunMapper.class),
                 persistence, sessions.getMapper(AiRunLeaseMapper.class), transactions);
         var initializer = new AiAgentPrivacyInitializer(sessions.getMapper(WorkspaceMapper.class), scope,
-                privacy, recovery, mock(JobRunRecorder.class), transactions,
-                new AutomationExecutor(context, new AutomationScope(), scope), system);
+                privacy, recovery, mock(ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService.class), mock(JobRunRecorder.class), transactions,
+                new AutomationExecutor(context, new AutomationScope(), scope), system,
+                new org.springframework.beans.factory.support.StaticListableBeanFactory()
+                    .getBeanProvider(org.springframework.core.task.TaskExecutor.class));
 
         initializer.initialize(7);
 
@@ -206,7 +209,7 @@ class AiAgentPrivacySessionRoutingTest {
         when(control.missionPurgeOperation(11, 19, 5, accepted.operationId())).thenReturn(accepted);
         var service = proxied(new AiAgentDsrPurgeService(mock(DataSubjectRequestService.class), control,
                 sessions.getMapper(AiAgentDsrControlMapper.class), sessions.getMapper(AiAgentPrivacyMapper.class),
-                mock(AiAgentPrivacyService.class), lifecycle, scope, context, system, transactions,
+                mock(AiAgentPrivacyService.class), mock(ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService.class), lifecycle, scope, context, system, transactions,
                 new ObjectMapper(), mock(JobRunRecorder.class)), AiAgentDsrPurgeService.class);
         if (resolvedCaller) {
             context.set(99, 22, 5, "member", "cnx_request");
@@ -275,7 +278,7 @@ class AiAgentPrivacySessionRoutingTest {
         }).when(privacy).invalidateWorkspaces(any(), any(), any(), any(), any());
         var service = proxied(new AiAgentDsrPurgeService(requests, control,
                 sessions.getMapper(AiAgentDsrControlMapper.class), sessions.getMapper(AiAgentPrivacyMapper.class),
-                privacy, lifecycle, scope, context, system, transactions, json, mock(JobRunRecorder.class)), AiAgentDsrPurgeService.class);
+                privacy, mock(ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService.class), lifecycle, scope, context, system, transactions, json, mock(JobRunRecorder.class)), AiAgentDsrPurgeService.class);
 
         if (scheduled) {
             service.recoverAccepted();

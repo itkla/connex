@@ -53,7 +53,7 @@ class AiAssistantTurnAuthorizationTest extends AbstractServiceTest {
                 turnService.start(session.getId(), request("Blocked")));
         assertThrows(ForbiddenException.class, () -> turnService.get(session.getId(), 1));
 
-        assertEquals(0, chatMapper.countMessages(workspace.getId(), session.getId()));
+        assertEquals(0, chatMapper.countMessages(workspace.getId(), session.getId(), 1L));
         assertEquals(0, chatMapper.countActiveTurns(workspace.getId(), session.getId()));
         verifyNoInteractions(generationService);
     }
@@ -87,6 +87,7 @@ class AiAssistantTurnAuthorizationTest extends AbstractServiceTest {
         chatMapper.insertParticipant(workspace.getId(), session.getId(), requester.getId());
         AiChatTurn turn = new AiChatTurn();
         turn.setWorkspaceId(workspace.getId());
+        turn.setOrganizationPrivacyGeneration(1L);
         turn.setSessionId(session.getId());
         turn.setRequestedByUserId(requester.getId());
         turn.setStatus("running");
@@ -94,6 +95,7 @@ class AiAssistantTurnAuthorizationTest extends AbstractServiceTest {
         chatMapper.insertTurn(turn);
         AiChatMessage message = new AiChatMessage();
         message.setWorkspaceId(workspace.getId());
+        message.setOrganizationPrivacyGeneration(1L);
         message.setSessionId(session.getId());
         message.setSeq(1);
         message.setAuthorKind("user");
@@ -103,6 +105,7 @@ class AiAssistantTurnAuthorizationTest extends AbstractServiceTest {
         chatMapper.insertMessage(message);
         AiChatToolCall call = new AiChatToolCall();
         call.setWorkspaceId(workspace.getId());
+        call.setOrganizationPrivacyGeneration(1L);
         call.setMessageId(message.getId());
         call.setToolName("list_tasks");
         call.setStatus("executed");
@@ -150,7 +153,7 @@ class AiAssistantTurnAuthorizationTest extends AbstractServiceTest {
             () -> turnService.start(session.getId(), request("Retained")));
 
         assertEquals(INACCESSIBLE, inaccessible.getMessage());
-        assertEquals(0, chatMapper.countMessages(workspace.getId(), session.getId()));
+        assertEquals(0, chatMapper.countMessages(workspace.getId(), session.getId(), 1L));
         assertEquals(0, chatMapper.countActiveTurns(workspace.getId(), session.getId()));
         verifyNoInteractions(generationService);
     }
@@ -166,6 +169,7 @@ class AiAssistantTurnAuthorizationTest extends AbstractServiceTest {
         AiChatSession active = session(currentUser, workspace);
         AiChatTurn running = new AiChatTurn();
         running.setWorkspaceId(workspace.getId());
+        running.setOrganizationPrivacyGeneration(1L);
         running.setSessionId(active.getId());
         running.setRequestedByUserId(currentUser.getId());
         running.setStatus("running");
@@ -179,6 +183,7 @@ class AiAssistantTurnAuthorizationTest extends AbstractServiceTest {
     private AiChatSession session(User owner, Workspace owningWorkspace) {
         AiChatSession session = new AiChatSession();
         session.setWorkspaceId(owningWorkspace.getId());
+        session.setOrganizationPrivacyGeneration(1L);
         session.setCreatedByUserId(owner.getId());
         session.setTitle("Turn " + unique());
         session.setVisibility("private");

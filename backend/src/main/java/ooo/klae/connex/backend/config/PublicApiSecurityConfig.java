@@ -42,6 +42,7 @@ import ooo.klae.connex.backend.services.DenialAuditRateLimiter;
 import ooo.klae.connex.backend.services.PrivilegedAccountService;
 import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
 import ooo.klae.connex.backend.tenant.TenantContext;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 import ooo.klae.connex.backend.util.ClientIpResolver;
 import tools.jackson.databind.ObjectMapper;
 
@@ -99,6 +100,7 @@ public class PublicApiSecurityConfig {
             ClientIpResolver clientIpResolver,
             TenantCatalogResolver tenantCatalogResolver,
             TenantContext tenantContext,
+            TenantWorkScope tenantWorkScope,
             CorsConfigurationSource corsConfigurationSource,
             PlatformTransactionManager transactionManager) throws Exception {
         ApiCredentialAuthenticationFilter authenticationFilter =
@@ -113,6 +115,7 @@ public class PublicApiSecurityConfig {
                 clientIpResolver,
                 tenantCatalogResolver,
                 tenantContext,
+                tenantWorkScope,
                 PublicApiSecurityConfig::transactionMode,
                 transactionManager);
         CorsFilter corsFilter = new CorsFilter(corsConfigurationSource);

@@ -104,6 +104,19 @@ describe('Ask Connex mission API contracts', () => {
         }
     });
 
+    it('submits the explicit all-chat acknowledgments and preserves v1 progress identity', async () => {
+        const requests = backend(() => json({ schemaVersion: 1, scope: 'organization_mission_holdings_v1' }));
+        const { purgeAiAgentHoldings, getAiAgentHoldingsPurge } = await import('@/app/lib/api');
+        const body = { idempotencyKey: crypto.randomUUID(), snapshotToken: 'dsr1.snapshot',
+            scopeAcknowledgement: 'organization_assistant_holdings_v2',
+            cutoffPolicyAcknowledgement: 'organization_generation_at_acceptance_v2' } satisfies import('@/app/lib/types').AiAgentHoldingsPurgeRequest;
+        await purgeAiAgentHoldings(3, 41, body);
+        const recovered = await getAiAgentHoldingsPurge(3, 41, 'b59be6ec-4c63-4e65-a329-70b36e78b98b');
+        expect(requests.find((item) => item.method === 'POST')).toMatchObject({ body, csrf: 'csrf' });
+        expect(recovered.schemaVersion).toBe(1);
+        expect(recovered.scope).toBe('organization_mission_holdings_v1');
+    });
+
     it('reports mission workspace refusal without replaying against a healed cookie', async () => {
         const requests = backend(() => json({ code: 'FORBIDDEN', message: 'Not a member of workspace 9' }, 403));
         const { createAiAgentRun, isWorkspaceUnavailableError } = await import('@/app/lib/api');

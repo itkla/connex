@@ -42,6 +42,10 @@ import ooo.klae.connex.backend.services.WorkspaceService;
 import tools.jackson.databind.json.JsonMapper;
 
 class AiAgentProposalDecisionServiceTest {
+    private final ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService authority =
+            mock(ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService.class);
+    private final ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard privacyGuard =
+            new ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard(authority);
     private final AiAgentProposalReadService reads = mock(AiAgentProposalReadService.class);
     private final AiAgentProposalSetPort proposals = mock(AiAgentProposalSetPort.class);
     private final AiAssistantWriteToolService writes = mock(AiAssistantWriteToolService.class);
@@ -58,7 +62,7 @@ class AiAgentProposalDecisionServiceTest {
             return transaction;
         }
     };
-    private final AiAgentProposalDecisionService service = new AiAgentProposalDecisionService(reads, proposals,
+    private final AiAgentProposalDecisionService service = new AiAgentProposalDecisionService(privacyGuard, reads, proposals,
             writes, actions, runs, chat, workspaces, new AiRestrictionEpoch(), realtime, gate,
             Clock.fixed(Instant.parse("2026-10-19T00:00:00Z"), ZoneOffset.UTC), JsonMapper.builder().build(), self);
     private final AiAgentProposalDecisionRequest.Item first = item("approve");
@@ -66,6 +70,8 @@ class AiAgentProposalDecisionServiceTest {
 
     @BeforeEach
     void setUp() {
+        when(authority.organizationId(7)).thenReturn(1);
+        when(authority.current(1)).thenReturn(1L);
         when(workspaces.getCurrentWorkspaceId()).thenReturn(7);
         when(workspaces.getCurrentUserId()).thenReturn(11);
         when(reads.currentVersion(31)).thenReturn("17");
@@ -204,12 +210,56 @@ class AiAgentProposalDecisionServiceTest {
         verify(actions, never()).getBySlot(7, 31, discard.actionSlot());
     }
 
+    @Test
+    void organizationInvalidationRefusesDecisionBeforeAnyProposalMutation() {
+        var run = new ooo.klae.connex.backend.beans.AiAgentRun();
+        run.setId(31);
+        run.setWorkspaceId(7);
+        run.setSessionId(13);
+        run.setOwnerUserId(11);
+        run.setMissionType("record_preparation_v1");
+        run.setDefinitionVersion(1);
+        run.setRuntimeContractVersion(3);
+        run.setPrivacyGeneration(4);
+        run.setOrganizationPrivacyGeneration(1);
+        run.setProposalFrozenAt(java.time.LocalDateTime.of(2026, 10, 19, 0, 0));
+        run.setProposalMembershipRevision(3);
+        var session = new ooo.klae.connex.backend.beans.AiChatSession();
+        session.setId(13);
+        session.setCreatedByUserId(11);
+        session.setStatus("active");
+        var action = new AiAgentAction();
+        action.setId(1);
+        action.setPrivacyGeneration(4);
+        action.setOutputOrdinal(1);
+        action.setPreparationId(first.expectedPreparationId());
+        var call = new AiChatToolCall();
+        call.setMissionActionId(1);
+        call.setMissionRunId(31);
+        call.setProposalOrigin("mission");
+        call.setOrganizationPrivacyGeneration(1);
+        when(workspaces.isMember(7, 11)).thenReturn(true);
+        when(runs.getRun(7, 31)).thenReturn(run);
+        when(runs.lockRun(7, 31)).thenReturn(run);
+        when(chat.getSessionByIdForUpdate(7, 11, 13)).thenReturn(session);
+        when(actions.getBySlot(7, 31, first.actionSlot())).thenReturn(action);
+        when(actions.lockAction(7, 31, 1)).thenReturn(action);
+        when(chat.lockMissionToolCall(7, 31, 1)).thenReturn(call);
+        when(authority.current(1)).thenReturn(2L);
+
+        assertThrows(ooo.klae.connex.backend.ai.assistant.AiAssistantLoopException.class,
+                () -> service.decideOne(31, "3", first, new PreliminaryPrincipals(List.of())));
+
+        verify(proposals, never()).decideLocked(any(), anyString());
+        verify(gate, never()).requireReady();
+    }
+
     private void prepare(AiAgentProposalDecisionRequest.Item selected, int id) {
         var action = new AiAgentAction();
         action.setId(id);
         when(actions.getBySlot(7, 31, selected.actionSlot())).thenReturn(action);
         var call = new AiChatToolCall();
-        when(chat.getMissionToolCall(7, 31, id)).thenReturn(call);
+        when(chat.getMissionToolCall(7, 31, id, 1L)).thenReturn(call);
         when(writes.missionPrincipals(call)).thenReturn(new PreliminaryPrincipals(List.of()));
     }
 

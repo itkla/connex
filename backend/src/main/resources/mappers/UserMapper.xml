@@ -2,6 +2,11 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="ooo.klae.connex.backend.mappers.UserMapper">
+  <select id="activeAiChatRecipientIdsAfter" resultType="int" useCache="false" flushCache="true">
+    SELECT user_id FROM workspace_member WHERE workspace_id = #{workspaceId}
+      AND status = 'active' AND user_id &gt; #{afterId} ORDER BY user_id LIMIT #{limit}
+  </select>
+
 
   <sql id="userColumns">
     id, username, display_name, email, email_verified, password_hash, session_epoch, timezone, locale, last_login_at, profile_picture_url, created_at, updated_at

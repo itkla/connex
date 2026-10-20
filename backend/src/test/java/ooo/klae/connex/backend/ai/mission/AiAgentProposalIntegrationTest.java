@@ -27,7 +27,7 @@ class AiAgentProposalIntegrationTest extends AbstractAiAgentProposalIntegrationT
     void stagedRowsCannotBeReadOrApprovedByKnownId() {
         var fixture = staged("assign_owner");
         var action = fixture.selected().getFirst();
-        var call = chatMapper.getMissionToolCall(workspace.getId(), fixture.runId(), action.getId());
+        var call = chatMapper.getMissionToolCallForMaintenance(workspace.getId(), fixture.runId(), action.getId());
         assertThrows(ConflictException.class, () -> reads.item(fixture.runId(), action.getActionSlot()));
         assertThrows(ConflictException.class, () -> decisions.decide(fixture.runId(), request(fixture, "approve", action)));
         assertThrows(ResourceNotFoundException.class, () -> legacyReads.get(fixture.sessionId(), call.getId()));
@@ -59,7 +59,7 @@ class AiAgentProposalIntegrationTest extends AbstractAiAgentProposalIntegrationT
         assertNull(runs.getRun(workspace.getId(), fixture.runId()).getReportMessageId());
         var live = runs.getRun(workspace.getId(), fixture.runId());
         persistence.interrupt(live, "source_changed");
-        assertEquals("failed", chatMapper.getMissionToolCall(workspace.getId(), fixture.runId(), fixture.selected().getFirst().getId()).getStatus());
+        assertEquals("failed", chatMapper.getMissionToolCallForMaintenance(workspace.getId(), fixture.runId(), fixture.selected().getFirst().getId()).getStatus());
     }
 
     @Test
@@ -97,7 +97,7 @@ class AiAgentProposalIntegrationTest extends AbstractAiAgentProposalIntegrationT
         assertEquals(List.of("executed", "refused"), response.items().stream().map(item -> item.outcome()).toList());
         assertEquals("Prepared industry", companyMapper.getCompanyById(workspace.getId(), primary.getId()).getIndustry());
         assertEquals(preparedAt, actions.getById(workspace.getId(), fixture.runId(), sibling.getId()).getPreparedAt());
-        assertEquals("proposed", chatMapper.getMissionToolCall(workspace.getId(), fixture.runId(), sibling.getId()).getStatus());
+        assertEquals("proposed", chatMapper.getMissionToolCallForMaintenance(workspace.getId(), fixture.runId(), sibling.getId()).getStatus());
         decisions.decide(fixture.runId(), request(fixture, "discard", sibling));
         assertEquals("done", runs.getRun(workspace.getId(), fixture.runId()).getStatus());
     }
@@ -131,7 +131,7 @@ class AiAgentProposalIntegrationTest extends AbstractAiAgentProposalIntegrationT
         assertEquals(2, fixture.selected().size());
         service.control(fixture.runId(), new AiAgentRunControlRequest(Long.toString(run.getStateVersion())), "cancel");
         for (var action : fixture.selected()) {
-            var call = chatMapper.getMissionToolCall(workspace.getId(), fixture.runId(), action.getId());
+            var call = chatMapper.getMissionToolCallForMaintenance(workspace.getId(), fixture.runId(), action.getId());
             assertEquals("failed", call.getStatus());
             assertEquals("mission_withdrawn", json.readTree(call.getResultJson()).path("reason").asString());
         }
@@ -150,7 +150,7 @@ class AiAgentProposalIntegrationTest extends AbstractAiAgentProposalIntegrationT
         var response = decisions.decide(fixture.runId(), request(fixture, "discard", fixture.selected().getFirst()));
         assertTrue(response.contentWithheld());
         assertTrue(response.items().isEmpty());
-        assertEquals("rejected", chatMapper.getMissionToolCall(workspace.getId(), fixture.runId(), fixture.selected().getFirst().getId()).getStatus());
+        assertEquals("rejected", chatMapper.getMissionToolCallForMaintenance(workspace.getId(), fixture.runId(), fixture.selected().getFirst().getId()).getStatus());
         assertEquals("done", runs.getRun(workspace.getId(), fixture.runId()).getStatus());
     }
 
@@ -169,7 +169,7 @@ class AiAgentProposalIntegrationTest extends AbstractAiAgentProposalIntegrationT
         assertTrue(listed.getFirst().contentWithheld());
         service.control(fixture.runId(), new AiAgentRunControlRequest(metadata.stateVersion()), "cancel");
         assertEquals("cancelled", runs.getRun(workspace.getId(), fixture.runId()).getStatus());
-        assertEquals("failed", chatMapper.getMissionToolCall(workspace.getId(), fixture.runId(), fixture.selected().getFirst().getId()).getStatus());
+        assertEquals("failed", chatMapper.getMissionToolCallForMaintenance(workspace.getId(), fixture.runId(), fixture.selected().getFirst().getId()).getStatus());
     }
 
     @Test
@@ -182,7 +182,7 @@ class AiAgentProposalIntegrationTest extends AbstractAiAgentProposalIntegrationT
         assertTrue(metadata.availableActions().contains("cancel"));
         service.control(fixture.runId(), new AiAgentRunControlRequest(metadata.stateVersion()), "cancel");
         assertEquals("cancelled", runs.getRun(workspace.getId(), fixture.runId()).getStatus());
-        assertEquals("failed", chatMapper.getMissionToolCall(workspace.getId(), fixture.runId(), fixture.selected().getFirst().getId()).getStatus());
+        assertEquals("failed", chatMapper.getMissionToolCallForMaintenance(workspace.getId(), fixture.runId(), fixture.selected().getFirst().getId()).getStatus());
     }
 
     @Test

@@ -42,6 +42,7 @@ import tools.jackson.databind.ObjectMapper;
 /** Production preparation, publication and decision fixtures with a controllable server clock. */
 @Import(AbstractAiAgentProposalIntegrationTest.ProposalClockConfiguration.class)
 abstract class AbstractAiAgentProposalIntegrationTest extends AbstractAiAgentPrivacyIntegrationTest {
+    @Autowired private ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService organizationPrivacy;
     @Autowired protected AiAgentRunPersistenceService persistence;
     @Autowired protected AiAgentRunService service;
     @Autowired protected AiAgentProposalService preparation;
@@ -81,6 +82,7 @@ abstract class AbstractAiAgentProposalIntegrationTest extends AbstractAiAgentPri
     protected Fixture staged(String... toolNames) {
         AiChatSession session = new AiChatSession();
         session.setWorkspaceId(workspace.getId());
+        session.setOrganizationPrivacyGeneration(organizationPrivacy.current(workspace.getOrgId()));
         session.setCreatedByUserId(currentUser.getId());
         session.setTitle("Mission proposed changes");
         session.setVisibility("private");
@@ -136,7 +138,7 @@ abstract class AbstractAiAgentProposalIntegrationTest extends AbstractAiAgentPri
 
     protected void assertPending(Fixture fixture) {
         for (AiAgentAction action : fixture.selected()) {
-            assertEquals("proposed", chatMapper.getMissionToolCall(workspace.getId(), fixture.runId(), action.getId()).getStatus());
+            assertEquals("proposed", chatMapper.getMissionToolCallForMaintenance(workspace.getId(), fixture.runId(), action.getId()).getStatus());
         }
     }
 

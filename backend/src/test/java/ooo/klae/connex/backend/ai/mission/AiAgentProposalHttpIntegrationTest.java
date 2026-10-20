@@ -180,14 +180,14 @@ class AiAgentProposalHttpIntegrationTest extends AbstractAiAgentProposalIntegrat
         assertEquals(404, send(browser, "GET", output.replace("/output", "/proposals/" + fixture.selected().getFirst().getActionSlot()), null, workspace.getId()).statusCode());
         assertEquals(404, send(browser, "POST", path(fixture), json.writeValueAsString(request(fixture, "discard", fixture.selected().getFirst())), workspace.getId()).statusCode());
         assertEquals(404, send(browser, "GET", "/api/ai/assistant/sessions/" + fixture.sessionId() + "/tool-calls/"
-                + chatMapper.getMissionToolCall(workspace.getId(), fixture.runId(), fixture.selected().getFirst().getId()).getId(), null, workspace.getId()).statusCode());
+                + chatMapper.getMissionToolCallForMaintenance(workspace.getId(), fixture.runId(), fixture.selected().getFirst().getId()).getId(), null, workspace.getId()).statusCode());
     }
 
     @Test
     void legacyKnownIdApproveRejectAndReadRefuseMissionOrigin() throws Exception {
         var fixture = frozen("assign_owner");
         Browser browser = login(currentUser);
-        var call = chatMapper.getMissionToolCall(workspace.getId(), fixture.runId(), fixture.selected().getFirst().getId());
+        var call = chatMapper.getMissionToolCallForMaintenance(workspace.getId(), fixture.runId(), fixture.selected().getFirst().getId());
         String base = "/api/ai/assistant/sessions/" + fixture.sessionId() + "/tool-calls/" + call.getId();
         assertEquals(404, send(browser, "GET", base, null, workspace.getId()).statusCode());
         assertEquals(409, send(browser, "POST", base + "/approve", null, workspace.getId()).statusCode());
@@ -206,7 +206,7 @@ class AiAgentProposalHttpIntegrationTest extends AbstractAiAgentProposalIntegrat
                 workspace.getId(), workspace.getId(), administrator.getId());
         jdbc.update("UPDATE ai_chat_session SET created_by_user_id=NULL WHERE workspace_id=? AND id=?",
                 workspace.getId(), fixture.sessionId());
-        var call = chatMapper.getMissionToolCall(workspace.getId(), fixture.runId(), fixture.selected().getFirst().getId());
+        var call = chatMapper.getMissionToolCallForMaintenance(workspace.getId(), fixture.runId(), fixture.selected().getFirst().getId());
         Browser browser = login(administrator);
         String base = "/api/ai/assistant/sessions/" + fixture.sessionId() + "/tool-calls";
 
@@ -343,7 +343,7 @@ class AiAgentProposalHttpIntegrationTest extends AbstractAiAgentProposalIntegrat
         assertEquals("refused", response.path("items").get(1).path("outcome").asString());
         authenticateAs(currentUser, workspace.getId());
         assertEquals("Prepared industry", companyMapper.getCompanyById(workspace.getId(), primary.getId()).getIndustry());
-        assertEquals("proposed", chatMapper.getMissionToolCall(workspace.getId(), fixture.runId(), fixture.selected().getLast().getId()).getStatus());
+        assertEquals("proposed", chatMapper.getMissionToolCallForMaintenance(workspace.getId(), fixture.runId(), fixture.selected().getLast().getId()).getStatus());
     }
 
     @Test
@@ -372,8 +372,8 @@ class AiAgentProposalHttpIntegrationTest extends AbstractAiAgentProposalIntegrat
         authenticateAs(currentUser, workspace.getId());
         assertEquals("Prepared industry", jdbc.queryForObject("SELECT industry FROM company WHERE workspace_id=? AND id=?",
                 String.class, workspace.getId(), primary.getId()));
-        assertEquals("executed", chatMapper.getMissionToolCall(workspace.getId(), fixture.runId(), fixture.selected().getFirst().getId()).getStatus());
-        assertEquals("proposed", chatMapper.getMissionToolCall(workspace.getId(), fixture.runId(), fixture.selected().getLast().getId()).getStatus());
+        assertEquals("executed", chatMapper.getMissionToolCallForMaintenance(workspace.getId(), fixture.runId(), fixture.selected().getFirst().getId()).getStatus());
+        assertEquals("proposed", chatMapper.getMissionToolCallForMaintenance(workspace.getId(), fixture.runId(), fixture.selected().getLast().getId()).getStatus());
     }
 
     @Test
@@ -410,7 +410,7 @@ class AiAgentProposalHttpIntegrationTest extends AbstractAiAgentProposalIntegrat
         assertTrue(response.path("contentWithheld").asBoolean());
         assertTrue(response.path("items").isEmpty());
         authenticateAs(currentUser, workspace.getId());
-        assertEquals("rejected", chatMapper.getMissionToolCall(workspace.getId(), fixture.runId(), fixture.selected().getFirst().getId()).getStatus());
+        assertEquals("rejected", chatMapper.getMissionToolCallForMaintenance(workspace.getId(), fixture.runId(), fixture.selected().getFirst().getId()).getStatus());
     }
 
     private Browser login(User user) throws Exception {

@@ -107,7 +107,7 @@ public class AiAgentContextBuilder {
         if (policy.proposalCapable()) {
             continuation.put("preparedChanges", actionInventory.stream().filter(action -> action.getPreparationId() != null)
                     .map(action -> {
-                        var call = chat.getMissionToolCall(policy.turn().workspaceId(), policy.runId(), action.getId());
+                        var call = chat.getMissionToolCall(policy.turn().workspaceId(), policy.runId(), action.getId(), policy.turn().privacyToken().organizationPrivacyGeneration());
                         if (call == null) {
                             throw new AiAssistantLoopException("mission_content_refused", "mission_content_refused");
                         }

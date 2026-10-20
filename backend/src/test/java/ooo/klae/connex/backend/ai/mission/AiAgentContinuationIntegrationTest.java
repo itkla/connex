@@ -45,6 +45,7 @@ import tools.jackson.databind.ObjectMapper;
 
 /** Real transactions exercise continuation commits and refusals without provider I/O. */
 class AiAgentContinuationIntegrationTest extends AbstractAiAgentPrivacyIntegrationTest {
+    @Autowired private ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard privacyGuard;
     @Autowired private org.mybatis.spring.SqlSessionTemplate sqlSessions;
     @Autowired private AiAgentRunPersistenceService persistence;
     @MockitoSpyBean private AiAgentRunMapper runs;
@@ -105,7 +106,7 @@ class AiAgentContinuationIntegrationTest extends AbstractAiAgentPrivacyIntegrati
         var before = stored(run);
         var factory = new StaticListableBeanFactory();
         factory.addBean("persistence", persistence);
-        var recreated = new AiAgentRunPersistenceService(runs, chat, workspaces, restriction, leases,
+        var recreated = new AiAgentRunPersistenceService(runs, privacyGuard, chat, workspaces, restriction, leases,
                 json, clock, factory.getBeanProvider(AiAgentRunPersistenceService.class));
         org.springframework.test.util.ReflectionTestUtils.setField(recreated, "proposals",
                 org.mockito.Mockito.mock(AiAgentProposalSetPort.class));
@@ -311,6 +312,7 @@ class AiAgentContinuationIntegrationTest extends AbstractAiAgentPrivacyIntegrati
 
     private AiAgentRun create() {
         AiChatSession session = new AiChatSession();
+        session.setOrganizationPrivacyGeneration(1L);
         session.setWorkspaceId(workspace.getId());
         session.setCreatedByUserId(currentUser.getId());
         session.setTitle("Continuation fixture");

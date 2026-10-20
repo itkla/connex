@@ -20,12 +20,14 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.tenant.ControlPlaneRead;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
+import ooo.klae.connex.backend.tenant.TenantWorkspaceScopeSnapshot;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 
 /**
  * Loads the owning organization's workspace snapshot for record sharing. Share rows are tenant
  * data; the organization a workspace belongs to and the name it displays are control data, so the
- * lookup suspends any routed tenant transaction, reads on the default catalog, and restores the
- * tenant transaction afterwards (#811).
+ * routed operations prepare this data with their workspace route and serve it without borrowing
+ * inside a tenant transaction (#2159). Single-database operations retain the lazy #811 lookup.
  *
  * <p>The snapshot is taken once per operation and is immutable, so the same workspace set backs
  * the grant ceiling, the listing filter, the workspace-name hydration and the name ordering. A
@@ -71,20 +73,47 @@ public class ShareWorkspaceControlAccess {
      *     context
      */
     public OrganizationWorkspaces getForWorkspace(int workspaceId) {
+        if (tenantWorkScope.isCatalogPerPlacement()) {
+            TenantWorkspaceScopeSnapshot prepared = tenantContext.getWorkspaceScopes();
+            if (prepared != null && prepared.workspaceId() == workspaceId) {
+                return prepared.requireSharing();
+            }
+            tenantWorkScope.requireScopePreparationAllowed("workspace " + workspaceId);
+        }
         OrganizationWorkspaces organizationWorkspaces = execute(() -> snapshot(workspaceId));
+        validateSnapshot(workspaceId, organizationWorkspaces);
+        return organizationWorkspaces;
+    }
+
+    /**
+     * Reads the cache-purge snapshot on the caller's default-catalog connection. The separate
+     * control statement flushes MyBatis's local cache as well as bypassing the visibility memo;
+     * ordinary sharing reads retain their existing statement and caching behavior.
+     */
+    OrganizationWorkspaces getFreshForWorkspace(int workspaceId) {
+        OrganizationWorkspaces organizationWorkspaces = tenantWorkScope.unroutedRead(() ->
+            snapshot(workspaceId, workspaceMapper.findOrganizationWorkspacesForCachePurge(workspaceId)));
+        validateSnapshot(workspaceId, organizationWorkspaces);
+        return organizationWorkspaces;
+    }
+
+    private void validateSnapshot(int workspaceId, OrganizationWorkspaces organizationWorkspaces) {
         if (tenantContext.isResolved()
                 && (tenantContext.getWorkspaceId().intValue() != workspaceId
                     || tenantContext.getOrgId().intValue() != organizationWorkspaces.orgId())) {
             throw new IllegalStateException(
                 "Workspace scope does not match the resolved tenant context");
         }
-        return organizationWorkspaces;
     }
 
     private OrganizationWorkspaces snapshot(int workspaceId) {
+        return snapshot(workspaceId, workspaceMapper.findOrganizationWorkspacesForShare(workspaceId));
+    }
+
+    private OrganizationWorkspaces snapshot(int workspaceId, List<Workspace> rows) {
         LinkedHashMap<Integer, String> orderedNamesById = new LinkedHashMap<>();
         Integer orgId = null;
-        for (Workspace row : workspaceMapper.findOrganizationWorkspacesForShare(workspaceId)) {
+        for (Workspace row : rows) {
             orderedNamesById.putIfAbsent(row.getId(), row.getName());
             orgId = row.getOrgId();
         }
@@ -120,6 +149,7 @@ public class ShareWorkspaceControlAccess {
         private final Map<Integer, String> namesById;
         private final Map<Integer, Integer> ranksById;
         private final String workspaceIdsJson;
+        private final RecordVisibilityScope recordVisibilityScope;
 
         OrganizationWorkspaces(int orgId, LinkedHashMap<Integer, String> orderedNamesById) {
             this.orgId = orgId;
@@ -132,6 +162,7 @@ public class ShareWorkspaceControlAccess {
             this.namesById = Map.copyOf(orderedNamesById);
             this.ranksById = Map.copyOf(ranks);
             this.workspaceIdsJson = ids.toString();
+            this.recordVisibilityScope = new RecordVisibilityScope(orgId, workspaceIds());
         }
 
         /**
@@ -140,13 +171,18 @@ public class ShareWorkspaceControlAccess {
          *
          * @return the owning organization id
          */
-        int orgId() {
+        public int orgId() {
             return orgId;
         }
 
         /** Returns immutable sorted IDs for the unfiltered record-visibility boundary. */
         List<Integer> workspaceIds() {
             return namesById.keySet().stream().sorted().toList();
+        }
+
+        /** Returns the separately typed unfiltered ID projection of this immutable snapshot. */
+        RecordVisibilityScope recordVisibilityScope() {
+            return recordVisibilityScope;
         }
 
         /**

@@ -60,6 +60,7 @@ class AiAgentRunConcurrencyIntegrationTest extends AbstractAiAgentPrivacyIntegra
     void twoSchedulersClaimOneAttempt() throws Exception {
         AiChatSession session = new AiChatSession();
         session.setWorkspaceId(workspace.getId());
+        session.setOrganizationPrivacyGeneration(1L);
         session.setCreatedByUserId(currentUser.getId());
         session.setTitle("Claim race fixture");
         session.setVisibility("private");
@@ -116,6 +117,7 @@ class AiAgentRunConcurrencyIntegrationTest extends AbstractAiAgentPrivacyIntegra
     void claimRootLocksFenceStaleMaintenanceWithoutAuthorizationLocks() throws Exception {
         AiChatSession session = new AiChatSession();
         session.setWorkspaceId(workspace.getId());
+        session.setOrganizationPrivacyGeneration(1L);
         session.setCreatedByUserId(currentUser.getId());
         session.setTitle("Claim maintenance race fixture");
         session.setVisibility("private");
@@ -332,6 +334,7 @@ class AiAgentRunConcurrencyIntegrationTest extends AbstractAiAgentPrivacyIntegra
     private AiAgentRun drillRun() {
         AiChatSession session = new AiChatSession();
         session.setWorkspaceId(workspace.getId());
+        session.setOrganizationPrivacyGeneration(1L);
         session.setCreatedByUserId(currentUser.getId());
         session.setTitle("Continuation lock drill");
         session.setVisibility("private");
@@ -364,6 +367,7 @@ class AiAgentRunConcurrencyIntegrationTest extends AbstractAiAgentPrivacyIntegra
     private void assertAdmissionRace(boolean missionFirst) throws Exception {
         AiChatSession session = new AiChatSession();
         session.setWorkspaceId(workspace.getId());
+        session.setOrganizationPrivacyGeneration(1L);
         session.setCreatedByUserId(currentUser.getId());
         session.setTitle("Admission race fixture");
         session.setVisibility("private");

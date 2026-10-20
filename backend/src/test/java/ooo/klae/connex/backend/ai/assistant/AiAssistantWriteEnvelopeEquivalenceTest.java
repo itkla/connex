@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import static ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -125,7 +126,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
     private static final AiChatQueuedTurn TURN = new AiChatQueuedTurn(
             7, 11, 13, 17, 19, 1, 23L, true, List.of(), List.of(),
             AiPrivacyMode.MASKED, false, AiChatQueryScope.none(),
-            new AiChatPrivacyToken(7, 13, 1, null));
+            new AiChatPrivacyToken(7, 13, 1, null, 1, 1L));
     private static final String TASK_ARGUMENTS = "{\"tool\":\"create_task\",\"tier\":\"auto\","
             + "\"restrictionEpoch\":23,\"target\":{\"kind\":\"person\",\"id\":31},"
             + "\"request\":{\"handle\":\"r1\",\"description\":\"Prepare agenda\","
@@ -167,6 +168,8 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
 
     private final ObjectMapper objectMapper = JsonMapper.builder().build();
     private AiChatMapper chatMapper;
+    private AiAssistantPrivacyService organizationAuthority;
+    private AiChatPrivacyGuard privacyGuard;
     private WorkspaceService workspaceService;
     private PersonService personService;
     private CompanyService companyService;
@@ -195,6 +198,11 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
     void setUp() {
         AiAssistantAdmissionTestSupport.beginTransaction();
         chatMapper = mock(AiChatMapper.class);
+        organizationAuthority = mock(AiAssistantPrivacyService.class);
+        when(organizationAuthority.organizationId(org.mockito.ArgumentMatchers.anyInt())).thenReturn(1);
+        when(organizationAuthority.current(1)).thenReturn(1L);
+        when(organizationAuthority.freshCurrent(1)).thenReturn(1L);
+        privacyGuard = new AiChatPrivacyGuard(organizationAuthority);
         workspaceService = mock(WorkspaceService.class);
         personService = AiAssistantAdmissionTestSupport.admittingMock(PersonService.class);
         dealService = AiAssistantAdmissionTestSupport.admittingMock(DealService.class);
@@ -265,8 +273,9 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 catalog,
                 registry,
                 readExecutor,
+                privacyGuard,
                 chatMapper,
-                workspaceService,
+                workspaceService, unfiltered(),
                 taskService,
                 personService,
                 companyService,
@@ -283,6 +292,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         AiChatSession session = new AiChatSession();
         session.setId(TURN.sessionId());
         session.setWorkspaceId(TURN.workspaceId());
+        session.setOrganizationPrivacyGeneration(1L);
         session.setCreatedByUserId(TURN.userId());
         session.setVisibility("private");
         session.setStatus("active");
@@ -293,16 +303,18 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         when(chatMapper.lockPrivacyBarrierForShare(TURN.workspaceId())).thenReturn(barrier);
         when(chatMapper.getPrivacySession(TURN.workspaceId(), TURN.sessionId())).thenReturn(session);
         AiChatTurn turn = new AiChatTurn();
+        turn.setOrganizationPrivacyGeneration(1L);
         turn.setId(TURN.turnId());
         turn.setRequestedByUserId(TURN.userId());
         turn.setStatus("running");
         when(chatMapper.getSessionByIdForUpdate(
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
         when(chatMapper.getAccessibleSessionById(
-                TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId(), 1L)).thenReturn(session);
         when(chatMapper.getTurnByIdForUpdate(
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId())).thenReturn(turn);
         storedToolCall = new AiChatToolCall();
+        storedToolCall.setOrganizationPrivacyGeneration(1L);
         storedToolCall.setServerProposal(true);
         storedToolCall.setId(29);
         storedToolCall.setWorkspaceId(TURN.workspaceId());
@@ -315,7 +327,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         when(chatMapper.getToolCallBySessionForUpdate(
                 TURN.workspaceId(), TURN.sessionId(), 29)).thenReturn(storedToolCall);
         when(chatMapper.getToolCallBySession(
-                TURN.workspaceId(), TURN.sessionId(), 29)).thenReturn(storedToolCall);
+                TURN.workspaceId(), TURN.sessionId(), 29, 1L)).thenReturn(storedToolCall);
         when(chatMapper.updateToolCall(
                 eq(TURN.workspaceId()), eq(TURN.userMessageId()), eq(29),
                 any(), any(), eq(TURN.userId()))).thenReturn(1);
@@ -504,11 +516,13 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         when(readWorkspace.permissionsFor(TURN.workspaceId(), TURN.userId()))
                 .thenReturn(EnumSet.allOf(Permission.class));
         AiChatSession session = new AiChatSession();
+        session.setOrganizationPrivacyGeneration(1L);
         session.setId(TURN.sessionId());
         session.setCreatedByUserId(TURN.userId());
         session.setStatus("active");
         when(readChatMapper.getAccessibleSessionById(
-                TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId(), 1L)).thenReturn(session);
+        prepareReadPrivacy(readChatMapper, session);
         String taskResult = "{\"tier\":\"auto\",\"outcome\":{\"status\":\"executed\","
                 + "\"recordType\":\"task\",\"description\":\"Prepare agenda\","
                 + "\"dueDate\":\"2026-03-12\"},\"undo\":{\"status\":\"available\","
@@ -531,9 +545,9 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 + "\"at\":\"2026-03-06T15:00:00Z\"}}"),
                 card(48, TURN.userId(), "failed", STAGE_ARGUMENTS, null));
         when(readChatMapper.listToolCallsBySession(
-                TURN.workspaceId(), TURN.sessionId(), false, 100, null)).thenReturn(cards);
+                TURN.workspaceId(), TURN.sessionId(), false, 100, null, 1L)).thenReturn(cards);
         when(readChatMapper.listAssistantMessagesBySessionAndTurnIds(
-                TURN.workspaceId(), TURN.sessionId(), List.of(TURN.turnId()), 100))
+                TURN.workspaceId(), TURN.sessionId(), List.of(TURN.turnId()), 100, 1L))
                 .thenReturn(List.of());
         Person person = new Person();
         person.setId(31);
@@ -543,7 +557,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         deal.setStageId(5);
         deal.setUpdatedAt("2026-03-06 14:00:00.000000");
         when(dealMapper.getByIds(TURN.workspaceId(), List.of(44))).thenReturn(List.of(deal));
-        when(pipelineMapper.getAllStages(TURN.workspaceId())).thenReturn(List.of(
+        when(pipelineMapper.getAllStages(TURN.workspaceId(), "[7,8,9]")).thenReturn(List.of(
                 stage(5, "Qualified"), stage(6, "Proposal")));
         when(taskMapper.getVisibleIdsIn(TURN.workspaceId(), List.of(74))).thenReturn(List.of(74));
         AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
@@ -571,12 +585,13 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                         new AiAssistantSetResponseDueWriteTool(AiAssistantAdmissionTestSupport.admittingMock(LeadResponseSlaService.class)),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
+                privacyGuard,
                 readChatMapper,
                 readWorkspace,
                 personMapper,
                 mock(CompanyMapper.class),
                 dealMapper,
-                pipelineMapper,
+                pipelineMapper, unfiltered(),
                 mock(TagMapper.class),
                 mock(DocumentTemplateMapper.class),
                 AiAssistantAdmissionTestSupport.admittingMock(DealDocumentService.class),
@@ -979,11 +994,13 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         when(readWorkspace.permissionsFor(TURN.workspaceId(), TURN.userId()))
                 .thenReturn(EnumSet.allOf(Permission.class));
         AiChatSession session = new AiChatSession();
+        session.setOrganizationPrivacyGeneration(1L);
         session.setId(TURN.sessionId());
         session.setCreatedByUserId(TURN.userId());
         session.setStatus("active");
         when(readChatMapper.getAccessibleSessionById(
-                TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId(), 1L)).thenReturn(session);
+        prepareReadPrivacy(readChatMapper, session);
         String meetingResult = "{\"tier\":\"auto\",\"outcome\":" + MEETING_OUTCOME
                 + ",\"undo\":{\"status\":\"available\","
                 + "\"expiresAt\":\"2026-03-06T15:10:00Z\",\"entityKind\":\"activity\","
@@ -993,7 +1010,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 + "\"expiresAt\":\"2026-03-06T15:10:00Z\",\"entityKind\":\"note\","
                 + "\"entityId\":75,\"fingerprint\":\"f\"}}";
         when(readChatMapper.listToolCallsBySession(
-                TURN.workspaceId(), TURN.sessionId(), false, 100, null)).thenReturn(List.of(
+                TURN.workspaceId(), TURN.sessionId(), false, 100, null, 1L)).thenReturn(List.of(
                 card(41, TURN.userId(), "executed", "create_activity",
                         MEETING_ARGUMENTS, meetingResult),
                 card(42, TURN.userId(), "executed", "create_activity", MEETING_ARGUMENTS,
@@ -1005,7 +1022,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                         noteResult.replace("\"available\"", "\"undone\"")),
                 card(47, 99, "executed", "create_note", NOTE_ARGUMENTS, noteResult)));
         when(readChatMapper.listAssistantMessagesBySessionAndTurnIds(
-                TURN.workspaceId(), TURN.sessionId(), List.of(TURN.turnId()), 100))
+                TURN.workspaceId(), TURN.sessionId(), List.of(TURN.turnId()), 100, 1L))
                 .thenReturn(List.of());
         when(readPersonMapper.getByIds(TURN.workspaceId(), List.of(31)))
                 .thenReturn(List.of(person(31)));
@@ -1039,12 +1056,13 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                         new AiAssistantSetResponseDueWriteTool(AiAssistantAdmissionTestSupport.admittingMock(LeadResponseSlaService.class)),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
+                privacyGuard,
                 readChatMapper,
                 readWorkspace,
                 readPersonMapper,
                 mock(CompanyMapper.class),
                 dealMapper,
-                mock(PipelineMapper.class),
+                mock(PipelineMapper.class), unfiltered(),
                 mock(TagMapper.class),
                 mock(DocumentTemplateMapper.class),
                 AiAssistantAdmissionTestSupport.admittingMock(DealDocumentService.class),
@@ -1253,13 +1271,15 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         when(readWorkspace.permissionsFor(TURN.workspaceId(), TURN.userId()))
                 .thenReturn(EnumSet.allOf(Permission.class));
         AiChatSession session = new AiChatSession();
+        session.setOrganizationPrivacyGeneration(1L);
         session.setId(TURN.sessionId());
         session.setCreatedByUserId(TURN.userId());
         session.setStatus("active");
         when(readChatMapper.getAccessibleSessionById(
-                TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId(), 1L)).thenReturn(session);
+        prepareReadPrivacy(readChatMapper, session);
         when(readChatMapper.listToolCallsBySession(
-                TURN.workspaceId(), TURN.sessionId(), false, 100, null)).thenReturn(List.of(
+                TURN.workspaceId(), TURN.sessionId(), false, 100, null, 1L)).thenReturn(List.of(
                 card(51, TURN.userId(), "executed", "add_tag",
                         tagArguments("person", 31), tagResult("person", 31, true)),
                 card(52, TURN.userId(), "executed", "add_tag",
@@ -1275,7 +1295,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                         "{\"tier\":\"auto\",\"outcome\":{\"status\":\"executed\"}}"),
                 card(57, TURN.userId(), "failed", "add_tag", tagArguments("person", 31), null)));
         when(readChatMapper.listAssistantMessagesBySessionAndTurnIds(
-                TURN.workspaceId(), TURN.sessionId(), List.of(TURN.turnId()), 100))
+                TURN.workspaceId(), TURN.sessionId(), List.of(TURN.turnId()), 100, 1L))
                 .thenReturn(List.of());
         when(readPersonMapper.getByIds(TURN.workspaceId(), List.of(31)))
                 .thenReturn(List.of(person(31)));
@@ -1310,12 +1330,13 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                         new AiAssistantSetResponseDueWriteTool(AiAssistantAdmissionTestSupport.admittingMock(LeadResponseSlaService.class)),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
+                privacyGuard,
                 readChatMapper,
                 readWorkspace,
                 readPersonMapper,
                 companyMapper,
                 dealMapper,
-                mock(PipelineMapper.class),
+                mock(PipelineMapper.class), unfiltered(),
                 mock(TagMapper.class),
                 mock(DocumentTemplateMapper.class),
                 AiAssistantAdmissionTestSupport.admittingMock(DealDocumentService.class),
@@ -1567,11 +1588,13 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 .thenReturn(EnumSet.allOf(Permission.class));
         when(readWorkspace.getMembers(TURN.workspaceId())).thenReturn(members());
         AiChatSession session = new AiChatSession();
+        session.setOrganizationPrivacyGeneration(1L);
         session.setId(TURN.sessionId());
         session.setCreatedByUserId(TURN.userId());
         session.setStatus("active");
         when(readChatMapper.getAccessibleSessionById(
-                TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId(), 1L)).thenReturn(session);
+        prepareReadPrivacy(readChatMapper, session);
         String assignCompany = ownerArguments("company", 52, "grace hopper ");
         String unassignDeal = ownerArguments("deal", 44, "Unassigned");
         String assignedResult = "{\"tier\":\"confirm\",\"approval\":{\"status\":\"approved\","
@@ -1581,7 +1604,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 + "\"at\":\"2026-03-06T15:00:00Z\"},\"outcome\":{\"status\":\"executed\","
                 + "\"recordType\":\"deal\",\"owner\":\"unassigned\"}}";
         when(readChatMapper.listToolCallsBySession(
-                TURN.workspaceId(), TURN.sessionId(), false, 100, null)).thenReturn(List.of(
+                TURN.workspaceId(), TURN.sessionId(), false, 100, null, 1L)).thenReturn(List.of(
                 card(61, TURN.userId(), "proposed", "assign_owner", assignCompany, null),
                 card(62, TURN.userId(), "proposed", "assign_owner",
                         ownerArguments("person", 31, "ghopper"), null),
@@ -1600,7 +1623,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 + "\"at\":\"2026-03-06T15:00:00Z\"}}"),
                 card(71, TURN.userId(), "failed", "assign_owner", assignCompany, null)));
         when(readChatMapper.listAssistantMessagesBySessionAndTurnIds(
-                TURN.workspaceId(), TURN.sessionId(), List.of(TURN.turnId()), 100))
+                TURN.workspaceId(), TURN.sessionId(), List.of(TURN.turnId()), 100, 1L))
                 .thenReturn(List.of());
         when(readPersonMapper.getByIds(TURN.workspaceId(), List.of(31)))
                 .thenReturn(List.of(ownedPerson(31, 21)));
@@ -1633,12 +1656,13 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                         new AiAssistantSetResponseDueWriteTool(AiAssistantAdmissionTestSupport.admittingMock(LeadResponseSlaService.class)),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
+                privacyGuard,
                 readChatMapper,
                 readWorkspace,
                 readPersonMapper,
                 companyMapper,
                 dealMapper,
-                pipelineMapper,
+                pipelineMapper, unfiltered(),
                 mock(TagMapper.class),
                 mock(DocumentTemplateMapper.class),
                 AiAssistantAdmissionTestSupport.admittingMock(DealDocumentService.class),
@@ -1750,7 +1774,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                                 + "\"outcomeSummary\":\"Request failed\",\"change\":null,"
                                 + "\"outcomeValues\":[]," + noUndo + TIMES + "}")) + "]",
                 legacyCardJson(readService.list(TURN.sessionId(), false)));
-        verify(pipelineMapper, never()).getAllStages(anyInt());
+        verify(pipelineMapper, never()).getAllStages(anyInt(), org.mockito.ArgumentMatchers.anyString());
     }
 
     /**
@@ -1773,23 +1797,25 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         when(readWorkspace.getMembers(TURN.workspaceId())).thenReturn(List.of(
                 member(11, "Ada Owner", "ada-owner"), member(23, "Christian Weber", "cweber")));
         AiChatSession session = new AiChatSession();
+        session.setOrganizationPrivacyGeneration(1L);
         session.setId(TURN.sessionId());
         session.setCreatedByUserId(TURN.userId());
         session.setStatus("active");
         when(readChatMapper.getAccessibleSessionById(
-                TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId(), 1L)).thenReturn(session);
+        prepareReadPrivacy(readChatMapper, session);
         String assignCompany = ownerArguments("company", 52, "christian weber");
         String assignedResult = "{\"tier\":\"confirm\",\"approval\":{\"status\":\"approved\","
                 + "\"at\":\"2026-03-06T15:00:00Z\"},\"outcome\":{\"status\":\"executed\","
                 + "\"recordType\":\"company\",\"owner\":\"Christian Weber\"}}";
         when(readChatMapper.listToolCallsBySession(
-                TURN.workspaceId(), TURN.sessionId(), false, 100, null)).thenReturn(List.of(
+                TURN.workspaceId(), TURN.sessionId(), false, 100, null, 1L)).thenReturn(List.of(
                 card(81, TURN.userId(), "proposed", "assign_owner", assignCompany, null),
                 card(82, TURN.userId(), "executed", "assign_owner", assignCompany,
                         assignedResult),
                 card(83, 99, "proposed", "assign_owner", assignCompany, null)));
         when(readChatMapper.listAssistantMessagesBySessionAndTurnIds(
-                TURN.workspaceId(), TURN.sessionId(), List.of(TURN.turnId()), 100))
+                TURN.workspaceId(), TURN.sessionId(), List.of(TURN.turnId()), 100, 1L))
                 .thenReturn(List.of());
         when(companyMapper.getByIds(TURN.workspaceId(), List.of(52)))
                 .thenReturn(List.of(ownedCompany(52, 11)));
@@ -1818,12 +1844,13 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                         new AiAssistantSetResponseDueWriteTool(AiAssistantAdmissionTestSupport.admittingMock(LeadResponseSlaService.class)),
                         new AiAssistantAssignOwnerWriteTool(
                                 personService, companyService, dealService))),
+                privacyGuard,
                 readChatMapper,
                 readWorkspace,
                 mock(PersonMapper.class),
                 companyMapper,
                 mock(DealMapper.class),
-                pipelineMapper,
+                pipelineMapper, unfiltered(),
                 mock(TagMapper.class),
                 mock(DocumentTemplateMapper.class),
                 AiAssistantAdmissionTestSupport.admittingMock(DealDocumentService.class),
@@ -2030,6 +2057,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         AiChatToolCall toolCall = new AiChatToolCall();
         toolCall.setId(id);
         toolCall.setWorkspaceId(TURN.workspaceId());
+        toolCall.setOrganizationPrivacyGeneration(1L);
         toolCall.setMessageId(TURN.userMessageId());
         toolCall.setSessionId(TURN.sessionId());
         toolCall.setRequestedByUserId(requestedBy);
@@ -2098,4 +2126,16 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
                 .digest(value.getBytes(StandardCharsets.UTF_8)));
     }
+    private void prepareReadPrivacy(AiChatMapper mapper, AiChatSession session) {
+        session.setWorkspaceId(TURN.workspaceId());
+        session.setOrganizationPrivacyGeneration(1L);
+        var barrier = new AiAgentPrivacyBarrier();
+        barrier.setWorkspaceId(TURN.workspaceId());
+        barrier.setGeneration(1L);
+        when(mapper.getPrivacySession(TURN.workspaceId(), TURN.sessionId())).thenReturn(session);
+        when(mapper.getPrivacyBarrier(TURN.workspaceId())).thenReturn(barrier);
+        when(mapper.lockPrivacyBarrierForShare(TURN.workspaceId())).thenReturn(barrier);
+    }
+
+
 }

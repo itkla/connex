@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -63,7 +64,7 @@ class RecordCreationTemplateValidatorTest {
             personMapper,
             pipelineMapper,
             workspaceService,
-            objectMapper);
+            objectMapper, unfiltered());
     }
 
     @Test
@@ -285,8 +286,8 @@ class RecordCreationTemplateValidatorTest {
         Stage stage = new Stage();
         stage.setId(5);
         stage.setPipeline(other);
-        when(pipelineMapper.pipelineExists(7, 3)).thenReturn(true);
-        when(pipelineMapper.getVisibleStageById(7, 5)).thenReturn(stage);
+        when(pipelineMapper.pipelineExists(7, "[7,8,9]", 3)).thenReturn(true);
+        when(pipelineMapper.getVisibleStageById(7, "[7,8,9]", 5)).thenReturn(stage);
         RecordCreationTemplateDefinitionDto mismatched = new RecordCreationTemplateDefinitionDto(
             1,
             List.of(group(

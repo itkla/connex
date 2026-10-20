@@ -52,6 +52,8 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.UserOffboardingService.DepartureReferences;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.TenantContext;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
+import ooo.klae.connex.backend.tenant.TenantWorkspaceScopeSnapshot;
 
 /**
  * Resolves the active workspace for the current request and exposes membership /
@@ -71,12 +73,15 @@ public class WorkspaceService {
     private final WorkspaceMapper workspaceMapper;
     private final UserMapper userMapper;
     private final OrganizationMapper organizationMapper;
+    private final ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService assistantPrivacyService;
     private final OrgMemberService orgMemberService;
     private final OrgAllowedDomainService orgAllowedDomainService;
     private final RoleMapper roleMapper;
     private final NotificationMapper notificationMapper;
     private final UserOffboardingService userOffboardingService;
     private final WorkspaceMembershipRemovalTransaction membershipRemovalTransaction;
+    private final FreshMembershipTransaction freshMembershipTransaction;
+    private final TenantWorkScope tenantWorkScope;
     private final NotificationDelivery notificationDelivery;
     private final NotificationStateVersionService notificationStateVersionService;
     private final TenantContext tenantContext;
@@ -172,6 +177,11 @@ public class WorkspaceService {
             throw new ResourceNotFoundException("Workspace not found: " + workspaceId);
         }
         return orgId;
+    }
+
+    /** Prepares immutable routed request scopes through the workspace-resolution collaborator. */
+    public TenantWorkspaceScopeSnapshot prepareWorkspaceScopes(int workspaceId, int orgId, String catalog) {
+        return tenantWorkScope.prepareWorkspaceScopes(workspaceId, orgId, catalog);
     }
 
     public Workspace getCurrentWorkspace() {
@@ -423,6 +433,7 @@ public class WorkspaceService {
         organization.setName(name.trim());
         organization.setSlug(generateSlug(name));
         organizationMapper.insert(organization);
+        assistantPrivacyService.provision(organization.getId());
         int foundingPasskeys = orgMemberService.addFoundingOwner(organization.getId(), ownerUserId);
         auditService.record("org.create", "organization", organization.getId(), organization.getName(),
                 "Organization created", Map.of("ownerUserId", ownerUserId));
@@ -2215,8 +2226,12 @@ public class WorkspaceService {
      * increment 3) a row inserted while a removal was committing could otherwise
      * resurface in the re-invited member's inbox.
      */
-    @Transactional(isolation = Isolation.READ_COMMITTED)
     public MemberDto addPendingMember(int workspaceId, User actor, User target, String role) {
+        return freshMembershipTransaction.executeWithPreparedScopes(workspaceId,
+            () -> addPendingMemberInWorkspace(workspaceId, actor, target, role));
+    }
+
+    private MemberDto addPendingMemberInWorkspace(int workspaceId, User actor, User target, String role) {
         refuseInternalOwnerGrant(role);
         userOffboardingService.prepareFreshMembership(workspaceId, target.getId());
         workspaceMapper.addPendingMember(workspaceId, target.getId(), role);
@@ -2236,8 +2251,14 @@ public class WorkspaceService {
      * @param userId the user to add
      * @param role the role to grant on a fresh join
      */
-    @Transactional(isolation = Isolation.READ_COMMITTED)
     public void ensureActiveMember(int workspaceId, int userId, String role) {
+        freshMembershipTransaction.executeWithPreparedScopes(workspaceId, () -> {
+            ensureActiveMemberInWorkspace(workspaceId, userId, role);
+            return null;
+        });
+    }
+
+    private void ensureActiveMemberInWorkspace(int workspaceId, int userId, String role) {
         refuseInternalOwnerGrant(role);
         int orgId = getOrgId(workspaceId);
         if (isMember(workspaceId, userId)) {

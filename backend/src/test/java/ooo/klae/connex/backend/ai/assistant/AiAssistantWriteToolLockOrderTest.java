@@ -72,7 +72,8 @@ class AiAssistantWriteToolLockOrderTest extends AbstractAiAssistantWriteToolTest
         service.executeAuto(TURN, TOOL_CALL_ID, result -> { });
 
         InOrder order = inOrder(
-                workspaceService, chatMapper, taskService, personService, restrictionEpoch);
+                recordScopes, workspaceService, chatMapper, taskService, personService, restrictionEpoch);
+        order.verify(recordScopes).getForWorkspace(TURN.workspaceId());
         order.verify(workspaceService).lockAndRequirePermissionsSnapshot(
                 TURN.workspaceId(), Map.of(TURN.userId(), Set.of(Permission.AI_USE)));
         order.verify(chatMapper).getSessionByIdForUpdate(
@@ -106,7 +107,7 @@ class AiAssistantWriteToolLockOrderTest extends AbstractAiAssistantWriteToolTest
 
         InOrder order = inOrder(workspaceService, chatMapper, dealService, restrictionEpoch);
         order.verify(chatMapper).getAccessibleSessionById(
-                TURN.workspaceId(), TURN.userId(), TURN.sessionId());
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId(), 1L);
         order.verify(workspaceService).lockAndRequirePermissionsSnapshot(
                 TURN.workspaceId(), Map.of(TURN.userId(), Set.of(Permission.AI_USE)));
         order.verify(chatMapper).getSessionByIdForUpdate(
@@ -382,7 +383,7 @@ class AiAssistantWriteToolLockOrderTest extends AbstractAiAssistantWriteToolTest
 
         InOrder order = inOrder(workspaceService, chatMapper, personService, restrictionEpoch);
         order.verify(chatMapper).getAccessibleSessionById(
-                TURN.workspaceId(), TURN.userId(), TURN.sessionId());
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId(), 1L);
         order.verify(workspaceService).getMembers(TURN.workspaceId());
         order.verify(workspaceService).lockAndRequirePermissionsSnapshot(
                 TURN.workspaceId(),

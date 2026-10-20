@@ -7,6 +7,8 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
@@ -24,6 +26,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCallReadService;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService;
+import ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolExecutor;
 import ooo.klae.connex.backend.ai.assistant.AiChatCitationProjector;
 import ooo.klae.connex.backend.beans.AiAgentAction;
@@ -40,6 +44,8 @@ import tools.jackson.databind.json.JsonMapper;
 
 class AiAgentProposalReadServiceTest {
     private static final Instant NOW = Instant.parse("2026-10-19T00:00:00Z");
+    private final AiAssistantPrivacyService organizationPrivacy = mock(AiAssistantPrivacyService.class);
+    private final AiChatPrivacyGuard privacyGuard = new AiChatPrivacyGuard(organizationPrivacy);
     private final WorkspaceService workspaces = mock(WorkspaceService.class);
     private final AiChatMapper chat = mock(AiChatMapper.class);
     private final AiAgentRunMapper runs = mock(AiAgentRunMapper.class);
@@ -47,7 +53,7 @@ class AiAgentProposalReadServiceTest {
     private final AiAgentProposalSetPort proposals = mock(AiAgentProposalSetPort.class);
     private final AiAssistantToolCallReadService cards = mock(AiAssistantToolCallReadService.class);
     private final AiAssistantToolExecutor tools = mock(AiAssistantToolExecutor.class);
-    private final AiAgentProposalReadService service = spy(new AiAgentProposalReadService(workspaces, chat, runs,
+    private final AiAgentProposalReadService service = spy(new AiAgentProposalReadService(privacyGuard, workspaces, chat, runs,
             actions, proposals, cards, mock(AiChatCitationProjector.class), tools,
             JsonMapper.builder().build(), Clock.fixed(NOW, ZoneOffset.UTC)));
     private final AiAgentRun run = new AiAgentRun();
@@ -65,6 +71,7 @@ class AiAgentProposalReadServiceTest {
         run.setRuntimeContractVersion(3);
         run.setLocale("en");
         run.setPrivacyGeneration(4);
+        run.setOrganizationPrivacyGeneration(1);
         run.setScopeJson("{\"kind\":\"record\",\"recordKind\":\"company\",\"recordId\":41}");
         run.setScopeFingerprint(AiAgentCapabilityGate.hash(run.getScopeJson()));
         new AiAgentContinuationCodec().initialize(run);
@@ -72,6 +79,7 @@ class AiAgentProposalReadServiceTest {
         run.setProposalFrozenAt(LocalDateTime.ofInstant(NOW, ZoneOffset.UTC));
         session.setId(13);
         session.setWorkspaceId(7);
+        session.setOrganizationPrivacyGeneration(1);
         session.setCreatedByUserId(11);
         session.setStatus("active");
         session.setVisibility("private");
@@ -80,6 +88,8 @@ class AiAgentProposalReadServiceTest {
         action.setPreparationId(UUID.randomUUID().toString());
         action.setOutputOrdinal(1);
         action.setPreparedAt(LocalDateTime.ofInstant(NOW.minusSeconds(1), ZoneOffset.UTC));
+        when(organizationPrivacy.organizationId(7)).thenReturn(19);
+        when(organizationPrivacy.retain(19, 1)).thenReturn(1L);
         when(workspaces.getCurrentWorkspaceId()).thenReturn(7);
         when(workspaces.getCurrentUserId()).thenReturn(11);
         when(workspaces.isMember(7, 11)).thenReturn(true);
@@ -124,6 +134,46 @@ class AiAgentProposalReadServiceTest {
         assertDoesNotThrow(() -> service.validateBatch(31, request()));
         verify(proposals).readFrozen(run);
         verify(tools, never()).pageContext(anyList(), any());
+    }
+
+    @Test
+    void organizationInvalidationWithholdsMetadataWhileWorkspaceBarrierRemainsCurrent() {
+        doThrow(new ooo.klae.connex.backend.exceptions.ConflictException("assistant_privacy_unavailable"))
+                .when(organizationPrivacy).retain(19, 1);
+        var metadata = service.metadata(run);
+        org.junit.jupiter.api.Assertions.assertTrue(metadata.contentWithheld());
+        org.junit.jupiter.api.Assertions.assertNull(metadata.counts());
+        verify(chat, never()).lockPrivacyBarrierForShare(anyInt());
+        verify(proposals, never()).readFrozen(any());
+    }
+
+    @Test
+    void preCutoverMissionCannotProjectKnownProposalOrCounts() {
+        run.setOrganizationPrivacyGeneration(0);
+        session.setOrganizationPrivacyGeneration(0);
+        assertThrows(AiAgentGoneException.class, () -> service.item(31, action.getActionSlot()));
+        org.junit.jupiter.api.Assertions.assertTrue(service.metadata(run).contentWithheld());
+        verify(proposals, never()).readFrozen(any());
+        verify(cards, never()).projectMission(any(), any(), anyInt(), anyString(), any());
+    }
+
+    @Test
+    void organizationInvalidationRefusesDecisionBatchBeforeProposalMaterialization() {
+        doThrow(new ooo.klae.connex.backend.exceptions.ConflictException("assistant_privacy_unavailable"))
+                .when(organizationPrivacy).retain(19, 1);
+        assertThrows(AiAgentGoneException.class, () -> service.validateBatch(31, request()));
+        verify(proposals, never()).readFrozen(any());
+        verify(tools, never()).pageContext(anyList(), any());
+        verify(cards, never()).projectMission(any(), any(), anyInt(), anyString(), any());
+    }
+
+    @Test
+    void decisionPrevalidationRetainsOriginalOrganizationBeforeWorkspaceAuthority() {
+        when(proposals.readFrozen(run)).thenReturn(List.of(action));
+        assertDoesNotThrow(() -> service.validateBatch(31, request()));
+        var ordered = inOrder(organizationPrivacy, chat);
+        ordered.verify(organizationPrivacy).retain(19, 1);
+        ordered.verify(chat).lockPrivacyBarrierForShare(7);
     }
 
     private AiAgentProposalDecisionRequest request() {

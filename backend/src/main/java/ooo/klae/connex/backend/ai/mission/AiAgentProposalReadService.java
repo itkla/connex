@@ -39,6 +39,7 @@ import tools.jackson.databind.ObjectMapper;
 @Service
 @RequiredArgsConstructor
 public class AiAgentProposalReadService {
+    private final ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard privacyGuard;
     private final WorkspaceService workspaces;
     private final AiChatMapper chat;
     private final AiAgentRunMapper runs;
@@ -64,7 +65,7 @@ public class AiAgentProposalReadService {
             if (run.getReportMessageId() == null) {
                 return new Metadata(false, null);
             }
-            var session = chat.getAccessibleSessionById(run.getWorkspaceId(), workspaces.getCurrentUserId(), run.getSessionId());
+            var session = chat.getAccessibleSessionById(run.getWorkspaceId(), workspaces.getCurrentUserId(), run.getSessionId(), run.getOrganizationPrivacyGeneration());
             if (session == null) {
                 throw inaccessible();
             }
@@ -96,6 +97,7 @@ public class AiAgentProposalReadService {
                 || !Objects.equals(run.getOwnerUserId(), owner) || session.getCreatedByUserId() == null
                 || !workspaces.isMember(workspaceId, session.getCreatedByUserId())
                 || !"active".equals(session.getStatus())
+                || session.getOrganizationPrivacyGeneration() != run.getOrganizationPrivacyGeneration()
                 || (!Objects.equals(session.getCreatedByUserId(), owner)
                     && (!"shared".equals(session.getVisibility()) || !chat.isParticipant(workspaceId, session.getId(), owner)))) {
             throw inaccessible();
@@ -105,6 +107,11 @@ public class AiAgentProposalReadService {
     }
 
     private void requireContent(AiAgentRun run, boolean requireSource) {
+        try {
+            privacyGuard.retainOrganization(run.getWorkspaceId(), run.getOrganizationPrivacyGeneration());
+        } catch (ooo.klae.connex.backend.ai.assistant.AiAssistantLoopException stale) {
+            throw new AiAgentGoneException("mission_output_withheld");
+        }
         var barrier = chat.lockPrivacyBarrierForShare(run.getWorkspaceId());
         if (barrier == null || barrier.isBlocked() || barrier.getGeneration() != run.getPrivacyGeneration()
                 || run.getWithheldAt() != null || run.getPurgedAt() != null) {
@@ -243,7 +250,7 @@ public class AiAgentProposalReadService {
     private AiAgentOutputDto.ProposalItem project(Authorized authorized, AiAgentAction action) {
         AiAgentRun run = authorized.run();
         requireFrozen(run, action);
-        AiChatToolCall call = chat.getMissionToolCall(run.getWorkspaceId(), run.getId(), action.getId());
+        AiChatToolCall call = chat.getMissionToolCall(run.getWorkspaceId(), run.getId(), action.getId(), run.getOrganizationPrivacyGeneration());
         if (call == null || !Integer.valueOf(action.getId()).equals(call.getMissionActionId())
                 || !Integer.valueOf(run.getId()).equals(call.getMissionRunId()) || !"mission".equals(call.getProposalOrigin())) {
             throw new ConflictException("mission_proposal_conflict");
@@ -251,6 +258,7 @@ public class AiAgentProposalReadService {
         var segment = action.getOriginSegmentId() == null ? null
                 : runs.getSegment(run.getWorkspaceId(), action.getOriginSegmentId());
         if (segment == null || segment.getTurnId() == null || segment.getRunId() != run.getId()
+                || segment.getOrganizationPrivacyGeneration() != run.getOrganizationPrivacyGeneration()
                 || !Long.valueOf(segment.getExecutionGeneration()).equals(action.getOriginExecutionGeneration())) {
             throw new ConflictException("mission_proposal_conflict");
         }

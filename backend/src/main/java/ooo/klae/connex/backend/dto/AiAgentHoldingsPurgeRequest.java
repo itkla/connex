@@ -8,8 +8,8 @@ import jakarta.validation.constraints.Pattern;
 public record AiAgentHoldingsPurgeRequest(
         @NotBlank @Pattern(regexp = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}") String idempotencyKey,
         @NotBlank @Pattern(regexp = "dsr1\\.[A-Za-z0-9_-]{43}") String snapshotToken,
-        @NotBlank @Pattern(regexp = "organization_mission_holdings_v1") String scopeAcknowledgement,
-        @NotBlank @Pattern(regexp = "contents_at_each_workspace_first_invalidation_v1") String cutoffPolicyAcknowledgement) {
+        @NotBlank @Pattern(regexp = "organization_mission_holdings_v1|organization_assistant_holdings_v2") String scopeAcknowledgement,
+        @NotBlank @Pattern(regexp = "contents_at_each_workspace_first_invalidation_v1|organization_generation_at_acceptance_v2") String cutoffPolicyAcknowledgement) {
     /** Refuses request fields outside the accepted contract. */
     @JsonAnySetter
     public void rejectUnknown(String key, Object value) {

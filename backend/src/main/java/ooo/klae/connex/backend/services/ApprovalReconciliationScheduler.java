@@ -90,7 +90,7 @@ public class ApprovalReconciliationScheduler {
         catalogs.forEach(catalog -> grouped.put(catalog, new ArrayList<>()));
         for (int workspaceId : tenantWorkScope.unrouted(workspaceMapper::findWorkspaceIds)) {
             try {
-                tenantWorkScope.withWorkspacePlacement(workspaceId, (orgId, catalog) -> {
+                tenantWorkScope.readWorkspacePlacement(workspaceId, (orgId, catalog) -> {
                     List<Integer> workspaces = grouped.get(catalog);
                     if (workspaces == null) {
                         throw new IllegalStateException(

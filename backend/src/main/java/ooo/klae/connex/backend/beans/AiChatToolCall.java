@@ -14,6 +14,7 @@ public class AiChatToolCall {
     private String artifactOrigin = "reactive";
     private Long privacyGeneration;
     private int workspaceId;
+    private long organizationPrivacyGeneration;
     private int messageId;
     private int sessionId;
     private Integer requestedByUserId;

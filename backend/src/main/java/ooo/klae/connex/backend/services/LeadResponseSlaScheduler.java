@@ -91,7 +91,7 @@ public class LeadResponseSlaScheduler {
         Set<String> known = grouped.keySet();
         for (int workspaceId : tenantWorkScope.unrouted(workspaceMapper::findWorkspaceIds)) {
             try {
-                tenantWorkScope.withWorkspacePlacement(workspaceId, (orgId, catalog) -> {
+                tenantWorkScope.readWorkspacePlacement(workspaceId, (orgId, catalog) -> {
                     if (!known.contains(catalog)) {
                         throw new IllegalStateException(
                             "Workspace is stored outside its active placement");

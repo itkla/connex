@@ -12,6 +12,8 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyPublicationGuard;
+import ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.beans.AiAgentRun;
 import ooo.klae.connex.backend.mappers.AiAgentRunMapper;
@@ -26,6 +28,8 @@ import ooo.klae.connex.backend.tenant.Permission;
 @RequiredArgsConstructor
 public class AiAgentRealtimePublisher {
     private final ObjectProvider<SimpMessagingTemplate> messaging;
+    private final AiAssistantPrivacyPublicationGuard publicationGuard;
+    private final AiChatPrivacyGuard privacyGuard;
     private final AiAgentRunMapper runs;
     private final AiChatMapper chat;
     private final UserMapper users;
@@ -85,8 +89,14 @@ public class AiAgentRealtimePublisher {
         long version = source.getStateVersion();
         long generation = source.getPrivacyGeneration();
         long epoch = restriction.current(workspaceId);
-        restriction.runIfCurrent(workspaceId, epoch, () -> {
+        restriction.runIfCurrent(workspaceId, epoch, () -> publicationGuard.publish(
+                privacyGuard.organizationId(workspaceId), source.getOrganizationPrivacyGeneration(), () -> {
             AiAgentRun current = runs.getRun(workspaceId, id);
+            if (current == null || current.getOrganizationPrivacyGeneration() != source.getOrganizationPrivacyGeneration()
+                    || lockedSession.getOrganizationPrivacyGeneration() != source.getOrganizationPrivacyGeneration()) {
+                return;
+            }
+            privacyGuard.retainOrganization(workspaceId, source.getOrganizationPrivacyGeneration());
             var barrier = chat.lockPrivacyBarrierForShare(workspaceId);
             if (current == null || current.getSessionId() == null || current.getOwnerUserId() == null
                     || current.getStateVersion() != version || current.getPrivacyGeneration() != generation
@@ -95,7 +105,7 @@ public class AiAgentRealtimePublisher {
                 return;
             }
             int owner = current.getOwnerUserId();
-            var session = chat.getAccessibleSessionById(workspaceId, owner, current.getSessionId());
+            var session = chat.getAccessibleSessionById(workspaceId, owner, current.getSessionId(), privacyGuard.currentGeneration(workspaceId));
             if (!workspaces.isMember(workspaceId, owner)
                     || !workspaces.permissionsFor(workspaceId, owner).contains(Permission.AI_USE)
                     || session == null || session.getCreatedByUserId() == null
@@ -107,8 +117,10 @@ public class AiAgentRealtimePublisher {
             SimpMessagingTemplate template = messaging.getIfAvailable();
             if (template != null) {
                 template.convertAndSendToUser(identities.destinationFor(owner), "/queue/ai-chat",
-                        new Frame(workspaceId, current.getSessionId(), id, Long.toString(version), kind, current.getStatus()));
+                                new Frame(workspaceId, current.getSessionId(), id, Long.toString(version), kind, current.getStatus()),
+                                ooo.klae.connex.backend.notifications.AiChatPrivacyOutboundInterceptor.headers(
+                                        privacyGuard.organizationId(workspaceId), source.getOrganizationPrivacyGeneration()));
             }
-        });
+        }));
     }
 }

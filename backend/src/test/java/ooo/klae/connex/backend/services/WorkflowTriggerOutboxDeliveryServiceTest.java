@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -74,6 +75,9 @@ class WorkflowTriggerOutboxDeliveryServiceTest {
     @Mock private WorkflowTriggeredSendGate triggeredSendGate;
     @Mock private AuditService auditService;
 
+    private final RecordVisibilityScopeControlAccess scopes =
+        unfiltered();
+
     private WorkflowTriggerOutboxDeliveryService service;
     private WorkflowExecutionPrincipal principal;
     private final TenantContext tenantContext = new TenantContext();
@@ -97,7 +101,7 @@ class WorkflowTriggerOutboxDeliveryServiceTest {
             ruleEngineService,
             properties,
             triggeredSendGate,
-            auditService);
+            auditService, scopes);
         lenient().when(triggeredSendGate.recipientLimit()).thenReturn(200);
         User actor = new User();
         actor.setId(17);
@@ -128,6 +132,7 @@ class WorkflowTriggerOutboxDeliveryServiceTest {
             WorkflowTriggerOutboxDeliveryService.DeliveryResult.COMPLETED,
             result);
         InOrder order = inOrder(
+            scopes,
             workflowMapper,
             versionMapper,
             principalService,
@@ -136,6 +141,7 @@ class WorkflowTriggerOutboxDeliveryServiceTest {
             outboxMapper);
         order.verify(outboxMapper).getById(7, 31L);
         order.verify(workflowMapper).getById(7, 11);
+        order.verify(scopes).getForWorkspace(7);
         order.verify(versionMapper).getById(7, 11, 23L);
         order.verify(principalService).resolveLocked(7, version);
         order.verify(outboxMapper).ensureWorkspaceGate(7);
@@ -375,7 +381,7 @@ class WorkflowTriggerOutboxDeliveryServiceTest {
     private WorkflowTriggerOutboxDeliveryService transactionalDelivery(TestTransactionManager manager, SegmentService evaluator) {
         WorkflowTriggerOutboxDeliveryService target = new WorkflowTriggerOutboxDeliveryService(
             outboxMapper, workflowMapper, versionMapper, segmentMapper, evaluator, claimService, principalService,
-            ruleEngineService, properties, triggeredSendGate, auditService);
+            ruleEngineService, properties, triggeredSendGate, auditService, scopes);
         ProxyFactory proxy = new ProxyFactory(target);
         proxy.addAdvice(new TransactionInterceptor(manager, new AnnotationTransactionAttributeSource()));
         return (WorkflowTriggerOutboxDeliveryService) proxy.getProxy();

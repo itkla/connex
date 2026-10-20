@@ -42,6 +42,7 @@ public class AiChatAttachmentService {
     private static final Set<String> AUDIT_FIELDS =
             Set.of("fileName", "entityType", "entityId", "url", "contentType", "size");
 
+    private final AiChatPrivacyGuard privacyGuard;
     private final AiChatMapper chatMapper;
     private final AttachmentMapper attachmentMapper;
     private final AttachmentScanMapper attachmentScanMapper;
@@ -62,8 +63,8 @@ public class AiChatAttachmentService {
     public List<AiChatAttachmentDto> list(int sessionId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = workspaceService.getCurrentUserId();
-        requireAccessibleSession(workspaceId, userId, sessionId);
-        return attachmentMapper.getAssistantSessionAttachments(workspaceId, sessionId).stream()
+        AiChatSession session = requireAccessibleSession(workspaceId, userId, sessionId);
+        return attachmentMapper.getAssistantSessionAttachments(workspaceId, sessionId, privacyGuard.currentGeneration(workspaceId)).stream()
                 .map(AiChatAttachmentDto::from)
                 .toList();
     }
@@ -82,15 +83,16 @@ public class AiChatAttachmentService {
     private UploadSnapshot precheckUpload(int sessionId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = workspaceService.getCurrentUserId();
-        requireAccessibleSession(workspaceId, userId, sessionId);
+        AiChatSession session = requireAccessibleSession(workspaceId, userId, sessionId);
+        AiChatPrivacyToken token = privacyGuard.capture(chatMapper, session);
         workspaceService.requirePermission(
                 workspaceId, userId, Permission.ATTACHMENT_CREATE);
         int attachmentCount = attachmentMapper.countAssistantSessionAttachments(
-                workspaceId, sessionId);
+                workspaceId, sessionId, privacyGuard.currentGeneration(workspaceId));
         if (attachmentCount >= AiChatAttachmentPolicy.MAX_ATTACHMENTS) {
             throw new ConflictException("Assistant sessions accept at most ten attachments");
         }
-        return new UploadSnapshot(workspaceId, userId);
+        return new UploadSnapshot(workspaceId, userId, token);
     }
 
     private AiChatAttachmentDto persistUpload(
@@ -103,7 +105,7 @@ public class AiChatAttachmentService {
         lockAndRequireAccessibleSession(workspaceId, userId, sessionId);
         requireNoActiveTurn(workspaceId, sessionId);
         int attachmentCount = attachmentMapper.countAssistantSessionAttachments(
-                workspaceId, sessionId);
+                workspaceId, sessionId, privacyGuard.currentGeneration(workspaceId));
         if (attachmentCount >= AiChatAttachmentPolicy.MAX_ATTACHMENTS) {
             throw new ConflictException("Assistant sessions accept at most ten attachments");
         }
@@ -111,7 +113,8 @@ public class AiChatAttachmentService {
                 workspaceId,
                 sessionId,
                 scanned,
-                authService.getCurrentUser());
+                authService.getCurrentUser(),
+                () -> privacyGuard.retain(chatMapper, snapshot.privacyToken()));
         realtimeDispatcher.sessionAfterCommit(
                 workspaceId,
                 sessionId,
@@ -147,7 +150,7 @@ public class AiChatAttachmentService {
                 workspaceId, userId, Permission.ATTACHMENT_DELETE);
         requireNoActiveTurn(workspaceId, sessionId);
         Attachment attachment = attachmentMapper.getAssistantSessionAttachment(
-                workspaceId, sessionId, attachmentId);
+                workspaceId, sessionId, attachmentId, privacyGuard.currentGeneration(workspaceId));
         if (attachment == null) {
             throw inaccessible();
         }
@@ -160,6 +163,8 @@ public class AiChatAttachmentService {
         if (locked == null || !Objects.equals(locked.getUrl(), attachment.getUrl())) {
             throw inaccessible();
         }
+        AiChatSession privacySession = chatMapper.getPrivacySession(workspaceId, sessionId);
+        AiChatPrivacyToken token = privacyGuard.capture(chatMapper, privacySession);
         boolean quarantineDeletion =
                 AttachmentQuarantineService.requiresQuarantineAuthority(locked, managedObjectService);
         if (quarantineDeletion) {
@@ -170,6 +175,7 @@ public class AiChatAttachmentService {
             managedObjectService.deleteAttachmentAfterCommit(
                     workspaceId, attachment.getUrl());
         }
+        privacyGuard.retain(chatMapper, token);
         attachmentMapper.delete(workspaceId, attachmentId);
         if (quarantineDeletion) {
             auditService.recordStrict(
@@ -205,6 +211,7 @@ public class AiChatAttachmentService {
             throw inaccessible();
         }
         requireActiveSessionAndAuthor(workspaceId, userId, session);
+        privacyGuard.capture(chatMapper, session);
     }
 
     private AiChatSession requireAccessibleSession(
@@ -212,11 +219,13 @@ public class AiChatAttachmentService {
             int userId,
             int sessionId) {
         AiChatSession session = chatMapper.getAccessibleSessionById(
-                workspaceId, userId, sessionId);
+                workspaceId, userId, sessionId, privacyGuard.currentGeneration(workspaceId));
         if (session == null) {
             throw inaccessible();
         }
         requireActiveSessionAndAuthor(workspaceId, userId, session);
+        sessionReadAudit.retainTranscriptAuditParents(workspaceId, userId);
+        privacyGuard.retain(chatMapper, privacyGuard.capture(chatMapper, session));
         sessionReadAudit.recordAccessible(workspaceId, userId, session);
         return session;
     }
@@ -266,6 +275,6 @@ public class AiChatAttachmentService {
         return new ResourceNotFoundException("Assistant session attachment is not accessible");
     }
 
-    private record UploadSnapshot(int workspaceId, int userId) {
+    private record UploadSnapshot(int workspaceId, int userId, AiChatPrivacyToken privacyToken) {
     }
 }

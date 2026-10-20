@@ -40,6 +40,7 @@ import ooo.klae.connex.backend.tenant.Permission;
 public class AiAgentMissionWorkItemProvider implements WorkItemProvider {
     private static final int PAGE_SIZE = 100;
     private static final int MAX_RAW_ROWS = 1000;
+    private final ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard privacyGuard;
     private final AiAgentRunMapper runs;
     private final AiAgentRunService missions;
     private final WorkspaceService workspaces;
@@ -56,7 +57,7 @@ public class AiAgentMissionWorkItemProvider implements WorkItemProvider {
         Integer before = null;
         boolean exhausted = false;
         for (int scanned = 0; scanned < MAX_RAW_ROWS; scanned += PAGE_SIZE) {
-            var page = runs.listRuns(query.workspaceId(), query.actorId(), null, "waiting_approval", before, PAGE_SIZE);
+            var page = runs.listRuns(query.workspaceId(), query.actorId(), null, "waiting_approval", before, PAGE_SIZE, privacyGuard.currentGeneration(query.workspaceId()));
             for (var candidate : page) {
                 try {
                     AiAgentOutputDto output = missions.output(candidate.getId());
