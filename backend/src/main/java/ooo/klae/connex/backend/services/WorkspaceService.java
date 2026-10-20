@@ -146,7 +146,7 @@ public class WorkspaceService {
     }
 
     public int getCurrentWorkspaceId() {
-        if (tenantContext.isResolved()) {
+        if (tenantContext.isResolved() || tenantContext.hasControlSelection()) {
             return tenantContext.getWorkspaceId();
         }
         return fallbackWorkspaceId(currentUser().getId());
@@ -159,7 +159,7 @@ public class WorkspaceService {
 
     /** The organization owning the active workspace. */
     public int getCurrentOrgId() {
-        if (tenantContext.isResolved()) {
+        if (tenantContext.isResolved() || tenantContext.hasControlSelection()) {
             return tenantContext.getOrgId();
         }
         return getOrgId(fallbackWorkspaceId(currentUser().getId()));

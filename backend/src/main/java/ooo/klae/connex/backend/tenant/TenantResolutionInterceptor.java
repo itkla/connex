@@ -43,6 +43,11 @@ import ooo.klae.connex.backend.services.WorkspaceService;
  * resolved by the credential filter and deliberately ignore both browser
  * selection mechanisms.
  *
+ * <p>In catalog-routing mode, {@link ControlOnlyHandlerPolicy}'s exact handlers retain an initially
+ * valid membership as a control selection without resolving placement. The request capability
+ * forbids tenant SQL even if a nested operation replaces the context. Revoked-selection recovery
+ * and all single-database resolution keep their existing placement checks.
+ *
  * <p>A stale matching cookie/header pair, cookie-only pin, or implicit remembered
  * selection with no header or cookie that fails membership after the caller was
  * removed from that workspace falls back on
@@ -163,6 +168,16 @@ public class TenantResolutionInterceptor implements AsyncHandlerInterceptor {
      */
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
+        ControlOnlyHandlerPolicy.clear(request);
+        try {
+            return resolveRequest(request, response, handler);
+        } catch (RuntimeException | Error failure) {
+            ControlOnlyHandlerPolicy.clear(request);
+            throw failure;
+        }
+    }
+
+    private boolean resolveRequest(HttpServletRequest request, HttpServletResponse response, Object handler) {
         request.removeAttribute(ORGANIZATION_ID_ATTRIBUTE);
         if (isLifecycleRequest(request)) {
             tenantContext.clear();
@@ -183,12 +198,18 @@ public class TenantResolutionInterceptor implements AsyncHandlerInterceptor {
             return true;
         }
 
+        boolean controlOnly = ControlOnlyHandlerPolicy.allows(request.getMethod(), handler)
+            && tenantCatalogResolver.isCatalogPerPlacement();
+        if (controlOnly) {
+            ControlOnlyHandlerPolicy.activate(request);
+        }
         Integer candidate = workspaceRequestResolver.resolve(request, user.getId());
         if (candidate == null) {
             return true;
         }
 
         String role = workspaceService.getRole(candidate, user.getId());
+        boolean validSelection = role != null;
         if (role == null) {
             if ("POST".equals(request.getMethod())
                     && "/api/workspaces".equals(normalizedPathOrNull(request))
@@ -222,8 +243,12 @@ public class TenantResolutionInterceptor implements AsyncHandlerInterceptor {
         }
 
         int orgId = workspaceService.getOrgId(candidate);
-        String catalog = tenantCatalogResolver.resolveCatalog(orgId);
-        tenantContext.set(candidate, orgId, user.getId(), role, catalog);
+        if (controlOnly && validSelection) {
+            tenantContext.setControlSelection(candidate, orgId, user.getId(), role);
+        } else {
+            String catalog = tenantCatalogResolver.resolveCatalog(orgId);
+            tenantContext.set(candidate, orgId, user.getId(), role, catalog);
+        }
         request.setAttribute(ORGANIZATION_ID_ATTRIBUTE, orgId);
         return true;
     }
@@ -309,6 +334,7 @@ public class TenantResolutionInterceptor implements AsyncHandlerInterceptor {
             emitJournalRecord(request, response, handler);
         } finally {
             tenantContext.clear();
+            ControlOnlyHandlerPolicy.clear(request);
         }
     }
 
@@ -328,6 +354,7 @@ public class TenantResolutionInterceptor implements AsyncHandlerInterceptor {
             HttpServletRequest request, HttpServletResponse response, Object handler) {
         request.setAttribute(ASYNC_JOURNAL_EXCLUDED_ATTRIBUTE, Boolean.TRUE);
         tenantContext.clear();
+        ControlOnlyHandlerPolicy.clear(request);
     }
 
     private void emitJournalRecord(
