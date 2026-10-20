@@ -130,7 +130,21 @@ class AiAgentProposalHttpIntegrationTest extends AbstractAiAgentProposalIntegrat
         foreign.setSlug("proposal-http-" + UUID.randomUUID());
         workspaceMapper.insert(foreign);
         workspaceMapper.addMember(foreign.getId(), currentUser.getId(), "member");
-        assertEquals(404, send(browser, "POST", path(fixture), body, foreign.getId()).statusCode());
+        var withoutAiPermission = send(browser, "POST", path(fixture), body, foreign.getId());
+        assertEquals(403, withoutAiPermission.statusCode(), withoutAiPermission.body());
+        assertTrue(withoutAiPermission.body().contains("AI_USE"), withoutAiPermission.body());
+        jdbc.update("INSERT INTO workspace_role (workspace_id,name) VALUES (?, 'Mission HTTP reviewer')", foreign.getId());
+        Integer role = jdbc.queryForObject("SELECT id FROM workspace_role WHERE workspace_id=? AND name='Mission HTTP reviewer'",
+                Integer.class, foreign.getId());
+        assertNotNull(role);
+        jdbc.update("INSERT INTO workspace_role_permission (workspace_role_id,permission) VALUES (?, 'AI_USE')", role);
+        jdbc.update("UPDATE workspace_member SET role_id=? WHERE workspace_id=? AND user_id=?",
+                role, foreign.getId(), currentUser.getId());
+        var foreignMission = send(browser, "POST", path(fixture), body, foreign.getId());
+        assertEquals(404, foreignMission.statusCode(), foreignMission.body());
+        workspaceMapper.removeMember(foreign.getId(), currentUser.getId());
+        var unavailablePin = send(browser, "POST", path(fixture), body, foreign.getId());
+        assertEquals(403, unavailablePin.statusCode(), unavailablePin.body());
         authenticateAs(currentUser, workspace.getId());
         assertPending(fixture);
     }

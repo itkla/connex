@@ -54,8 +54,27 @@ class AiAgentCapabilityGateTest {
         var declaration = bound.getMissionCapabilities().getFirst();
         assertEquals("openai_compatible", declaration.getProvider());
         assertEquals("http://127.0.0.1:8080/v1", declaration.getEndpoint());
-        assertEquals("scripted-native", declaration.getModel());
+        assertEquals("scripted-json", declaration.getModel());
         assertEquals("missions_v1", declaration.getCapability());
+
+        String browserSpec = java.nio.file.Files.readString(java.nio.file.Path.of(
+                "../frontend/test/e2e/ask-connex-mission-proposals.spec.ts"));
+        var model = java.util.regex.Pattern.compile(
+                "configureScriptedAiProvider\\(api, workspaceId, csrf, '([^']+)'\\)").matcher(browserSpec);
+        assertTrue(model.find(), "Mission browser spec must explicitly select its scripted model");
+        String providerSetup = java.nio.file.Files.readString(java.nio.file.Path.of(
+                "../frontend/test/e2e/support/api.ts"));
+        var provider = java.util.regex.Pattern.compile("provider: \"([^\"]+)\"").matcher(providerSetup);
+        var endpoint = java.util.regex.Pattern.compile("endpoint: \"([^\"]+)\"").matcher(providerSetup);
+        assertTrue(provider.find());
+        assertTrue(endpoint.find());
+        var fixture = tools.jackson.databind.json.JsonMapper.builder().build().readTree(
+                java.nio.file.Files.readString(java.nio.file.Path.of(
+                        "../frontend/test/e2e/fixtures/ai-scripted/e2e_mission_proposals.json")));
+        assertEquals(fixture.path("capabilityClass").asString(), model.group(1));
+        var browserGate = new AiAgentCapabilityGate(bound, initializer, featureGate, invocation,
+                providers, governance, workspaces);
+        assertDoesNotThrow(() -> browserGate.requireTarget(target(provider.group(1), endpoint.group(1), model.group(1))));
     }
     private final AiProperties properties = new AiProperties();
     private final AiAgentPrivacyInitializer initializer = mock(AiAgentPrivacyInitializer.class);
