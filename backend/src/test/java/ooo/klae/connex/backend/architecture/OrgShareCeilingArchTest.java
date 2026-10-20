@@ -319,6 +319,36 @@ class OrgShareCeilingArchTest {
                 + "looks misconfigured and the ceiling guard above would pass vacuously");
     }
 
+    @Test
+    void cacheRestrictionPurgeCeilingCoversEveryFeatureOnTheCacheWorkspace() throws Exception {
+        Document document = loadMapper("mappers/AiOutputCacheMapper.xml");
+        NodeList deletes = document.getElementsByTagName("delete");
+        int purges = 0;
+        for (int index = 0; index < deletes.getLength(); index++) {
+            Element statement = (Element) deletes.item(index);
+            if (!statement.getAttribute("id").equals("deleteForPerson")) {
+                continue;
+            }
+            purges++;
+            String sql = statement.getTextContent().replaceAll("\\s+", " ").trim();
+            String ceiling = "DELETE c FROM ai_output_cache c "
+                + "JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) owner_workspace "
+                + "ON owner_workspace.id = #{workspaceId} "
+                + "JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) org_workspace "
+                + "ON org_workspace.id = c.workspace_id WHERE ( ";
+            assertTrue(sql.startsWith(ceiling), sql);
+            assertTrue(sql.endsWith(")"));
+            assertEquals(4, count(Pattern.compile("c\\.feature LIKE"), sql));
+            for (String feature : List.of("report.narrative:%", "intro.rationale:%",
+                    "deal.risk_rationale:%", "deal.brief:%")) {
+                assertEquals(1, count(Pattern.compile(Pattern.quote("c.feature LIKE '" + feature + "'")), sql));
+            }
+            assertEquals(2, count(CONTROL_DERIVED_READ_CEILING, sql));
+        }
+        assertEquals(1, purges);
+        assertEquals(0, count(CONTROL_PLANE_WORKSPACE_TABLE, loadMapperText("mappers/AiOutputCacheMapper.xml")));
+    }
+
     private Document loadShareMapper() throws Exception {
         return loadMapper("mappers/ShareMapper.xml");
     }
