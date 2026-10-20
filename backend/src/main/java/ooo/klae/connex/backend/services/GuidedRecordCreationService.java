@@ -30,6 +30,7 @@ import ooo.klae.connex.backend.exceptions.RecordCreationTemplateException;
 import ooo.klae.connex.backend.recordcreation.RecordCreationAugmentation;
 import ooo.klae.connex.backend.recordcreation.RecordCreationRecordType;
 import ooo.klae.connex.backend.tenant.Permission;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 
 @Service
@@ -114,9 +115,9 @@ public class GuidedRecordCreationService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DEAL_CREATE)
     public Deal createDeal(GuidedDealCreateRequestDto request, String reviewedStageName, MutationAdmission admission) {
-        lockPermission(Permission.DEAL_CREATE);
+        RecordVisibilityScope scope = lockPermission(Permission.DEAL_CREATE);
         ResolvedCreationTemplateDto resolved = augmentationService.resolvePreliminary(
-            RecordCreationRecordType.deal, request.templateUse());
+            RecordCreationRecordType.deal, request.templateUse(), scope);
         Map<Integer, JsonNode> customFields = submittedCustomFields(request.customFields());
         List<Integer> tagIds = submittedTagIds(request.tagIds());
         var record = request.record();
@@ -125,20 +126,21 @@ public class GuidedRecordCreationService {
         applyDealDefaults(deal, customFields, tagIds, resolved);
         validateRequiredDeal(deal, customFields, tagIds, resolved);
         augmentationService.validateDealReferences(
-            deal.getPipelineId(), deal.getStageId(), deal.getCompanyId());
+            deal.getPipelineId(), deal.getStageId(), deal.getCompanyId(), scope);
         return dealService.createReviewed(
             deal,
             duplicateReviewToken,
-            augmentation(request.templateUse(), customFields, tagIds, reviewedStageName), admission);
+            augmentation(request.templateUse(), customFields, tagIds, reviewedStageName), admission, scope);
     }
 
-    private void lockPermission(Permission permission) {
+    private RecordVisibilityScope lockPermission(Permission permission) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = workspaceService.getCurrentUserId();
-        recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         workspaceService.lockAndRequirePermissions(
             workspaceId,
             Map.of(actorId, Set.of(permission)));
+        return scope;
     }
 
     private void applyPersonDefaults(

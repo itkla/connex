@@ -30,6 +30,7 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 import ooo.klae.connex.backend.util.RecordInsertBatches;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.CustomFieldDefinition;
@@ -1009,13 +1010,14 @@ public class ImportService {
     @RequirePermission(Permission.DEAL_CREATE)
     public ImportPreviewResult previewDeals(ImportRequest request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         String action = resolveAction(request.getOnDuplicate());
         ImportAnalysis analysis = analyzeDeals(
             request,
             workspaceId,
             ImportPhase.PREVIEW,
             null,
-            importReviewContext("deal", workspaceId, request));
+            importReviewContext("deal", workspaceId, request), scope);
         List<PlanRow> plan = analysis.plan();
         try {
             preflightPreview(
@@ -1048,7 +1050,7 @@ public class ImportService {
         DuplicatePreflightService.ImportCommitAdmission admission =
             duplicatePreflightService.claimImportCommit(
                 request.getDuplicateReviewProof(), reviewContext);
-        recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         lockImportPermission(workspaceId, Permission.DEAL_CREATE);
         duplicateDecisionLockService.lockCurrentOrganization();
         int actorId = authService.getCurrentUser().getId();
@@ -1057,7 +1059,7 @@ public class ImportService {
             workspaceId,
             ImportPhase.COMMIT,
             admission,
-            reviewContext);
+            reviewContext, scope);
         List<PlanRow> plan = analysis.plan();
         List<PlanRow> mutations = analysis.mutations();
         requireUpdatePermission(mutations, action, Permission.DEAL_UPDATE);
@@ -1101,7 +1103,7 @@ public class ImportService {
                         companyByName,
                         personByEmail,
                         stageOutcome,
-                        lockedTargets)) {
+                        lockedTargets, scope)) {
                     updated++;
                 }
                 continue;
@@ -1130,7 +1132,7 @@ public class ImportService {
                 PlanRow row = toCreate.get(i);
                 if (bean.getStageId() != null) {
                     dealStageHistoryService.recordInitial(
-                        workspaceId, bean.getId(), bean.getStageId(), bean.getWon());
+                        workspaceId, bean.getId(), bean.getStageId(), bean.getWon(), scope);
                 }
                 attachDealTags(workspaceId, bean.getId(), row.tagNames, tagByName);
                 linkDealPeople(workspaceId, bean.getId(), row.peopleEmails, personByEmail);
@@ -1161,7 +1163,7 @@ public class ImportService {
             int workspaceId,
             ImportPhase phase,
             DuplicatePreflightService.ImportCommitAdmission admission,
-            String reviewContext) {
+            String reviewContext, RecordVisibilityScope scope) {
         Map<String, ColumnMapping> byColumn = mappingByColumn(request.getMapping(), DEAL_FIELDS);
         Map<String, CustomFieldDefinition> defs = customDefsByColumn("deal", request.getMapping());
         List<PlanRow> plan = collectRows(request, byColumn, defs, "company", "pipeline", "stage", "people");
@@ -1228,7 +1230,7 @@ public class ImportService {
             String action = resolveAction(request.getOnDuplicate());
             List<PlanRow> mutations = coalesceByCanonicalTarget(
                 plan, action, row -> List.of(dealCanonicalKey(row)));
-            resolveStages(workspaceId, mutations);
+            resolveStages(workspaceId, mutations, scope);
             applyCompanyDependencyFailures(
                 mutations,
                 row -> dealCompanyDependencyRequired(
@@ -1296,7 +1298,7 @@ public class ImportService {
             Map<String, Integer> companyByName,
             Map<String, Integer> personByEmail,
             Map<Integer, String> stageOutcome,
-            Map<Integer, Deal> lockedTargets) {
+            Map<Integer, Deal> lockedTargets, RecordVisibilityScope scope) {
         Deal existing = Objects.requireNonNull(lockedTargets.get(row.matchedId));
         Integer beforeStageId = existing.getStageId();
         Boolean beforeOutcome = existing.getWon();
@@ -1346,7 +1348,7 @@ public class ImportService {
         }
         if (afterStageId != null && !afterStageId.equals(beforeStageId)) {
             dealStageHistoryService.recordTransition(
-                workspaceId, existing.getId(), afterStageId, beforeOutcome, existing.getWon());
+                workspaceId, existing.getId(), afterStageId, beforeOutcome, existing.getWon(), scope);
         }
         boolean tagsChanged = attachDealTags(
             workspaceId, existing.getId(), row.tagNames, tagByName);
@@ -1403,8 +1405,8 @@ public class ImportService {
         return new DealUpdateValues(currency, parsedValue, shouldUpdateValue);
     }
 
-    private void resolveStages(int workspaceId, List<PlanRow> plan) {
-        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+    private void resolveStages(int workspaceId, List<PlanRow> plan, RecordVisibilityScope scope) {
+        String orgWorkspaceIdsJson = scope.workspaceIdsJson();
         var pipelines = pipelineMapper.getAllPipelines(workspaceId, orgWorkspaceIdsJson);
         Map<String, Integer> pipelineByName = new HashMap<>();
         Map<Integer, Map<String, Integer>> stageByName = new HashMap<>();

@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.CustomFieldDefinition;
 import ooo.klae.connex.backend.beans.Person;
@@ -65,6 +66,13 @@ public class RecordCreationAugmentationService {
     ResolvedCreationTemplateDto resolvePreliminary(
             RecordCreationRecordType recordType,
             RecordCreationTemplateUseDto templateUse) {
+        return resolvePreliminary(recordType, templateUse, recordVisibilityScopeControlAccess.getForWorkspace(
+            workspaceService.getCurrentWorkspaceId()));
+    }
+
+    ResolvedCreationTemplateDto resolvePreliminary(
+            RecordCreationRecordType recordType, RecordCreationTemplateUseDto templateUse,
+            RecordVisibilityScope scope) {
         if (recordType == RecordCreationRecordType.company
                 && templateUse.context().relatedCompanyId() != null) {
             throw RecordCreationTemplateException.of(
@@ -73,7 +81,7 @@ public class RecordCreationAugmentationService {
                 "Company creation does not accept related-company context");
         }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        String orgWorkspaceIdsJson = scope.workspaceIdsJson();
         RecordCreationTemplateSet set = templateMapper.getSet(workspaceId, recordType.name());
         int currentSetRevision = set == null ? 0 : set.getRevision();
         ExactTemplate exact = resolveExact(workspaceId, recordType, templateUse, false, orgWorkspaceIdsJson);
@@ -91,9 +99,9 @@ public class RecordCreationAugmentationService {
         }
     }
 
-    void validateDealReferences(Integer pipelineId, Integer stageId, Integer companyId) {
+    void validateDealReferences(Integer pipelineId, Integer stageId, Integer companyId, RecordVisibilityScope scope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        String orgWorkspaceIdsJson = scope.workspaceIdsJson();
         Pipeline pipeline = pipelineId == null
             ? null
             : pipelineMapper.getPipelineById(workspaceId, orgWorkspaceIdsJson, pipelineId);
@@ -126,7 +134,7 @@ public class RecordCreationAugmentationService {
             List.of(),
             List.of(),
             nullable(referrerPersonId),
-            companies(companyId, augmentation));
+            companies(companyId, augmentation), null);
     }
 
     PreparedAugmentation prepareCompany(RecordCreationAugmentation augmentation) {
@@ -136,21 +144,21 @@ public class RecordCreationAugmentationService {
             List.of(),
             List.of(),
             List.of(),
-            List.of());
+            List.of(), null);
     }
 
     PreparedAugmentation prepareDeal(
             Integer pipelineId,
             Integer stageId,
             Integer companyId,
-            RecordCreationAugmentation augmentation) {
+            RecordCreationAugmentation augmentation, RecordVisibilityScope scope) {
         return prepare(
             RecordCreationRecordType.deal,
             augmentation,
             nullable(pipelineId),
             nullable(stageId),
             List.of(),
-            companies(companyId, augmentation));
+            companies(companyId, augmentation), scope);
     }
 
     Map<String, Object> applyPerson(int personId, PreparedAugmentation prepared) {
@@ -192,9 +200,11 @@ public class RecordCreationAugmentationService {
             List<Integer> pipelineIds,
             List<Integer> stageIds,
             List<Integer> personIds,
-            List<Integer> companyIds) {
+            List<Integer> companyIds, RecordVisibilityScope suppliedScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        RecordVisibilityScope scope = suppliedScope == null
+            ? recordVisibilityScopeControlAccess.getForWorkspace(workspaceId) : suppliedScope;
+        String orgWorkspaceIdsJson = scope.workspaceIdsJson();
         templateMapper.insertSetIfAbsent(workspaceId, recordType.name());
         RecordCreationTemplateSet set = templateMapper.getSetForUpdate(workspaceId, recordType.name());
         if (set == null) {

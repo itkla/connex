@@ -29,6 +29,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.ObjectMapper;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
@@ -901,6 +902,7 @@ public class DealService {
         private final int dealId;
         private final int stageId;
         private final Stage stage;
+        private final RecordVisibilityScope scope;
         private final List<Deal> lockedDeals;
 
         private LockedStageChange(
@@ -908,11 +910,13 @@ public class DealService {
                 int dealId,
                 int stageId,
                 Stage stage,
+                RecordVisibilityScope scope,
                 List<Deal> lockedDeals) {
             this.workspaceId = workspaceId;
             this.dealId = dealId;
             this.stageId = stageId;
             this.stage = stage;
+            this.scope = scope;
             this.lockedDeals = List.copyOf(lockedDeals);
         }
 
@@ -937,7 +941,8 @@ public class DealService {
     @Transactional(propagation = Propagation.MANDATORY)
     public LockedStageChange lockStageChangeRowsForUpdate(int dealId, int stageId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        return lockStageChangeRows(workspaceId, dealId, stageId, true);
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        return lockStageChangeRows(workspaceId, dealId, stageId, true, scope);
     }
 
     /** Applies a prepared stage change without performing another board-row lock pass. */
@@ -1023,10 +1028,10 @@ public class DealService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DEAL_CREATE)
     public Deal create(Deal deal) {
-        recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         lockCreatePermission();
         duplicateDecisionLockService.lockCurrentOrganization();
-        return createAfterDuplicateDecisionLock(deal, null);
+        return createAfterDuplicateDecisionLock(deal, null, MutationAdmission.UNRESTRICTED, scope);
     }
 
     /**
@@ -1039,7 +1044,7 @@ public class DealService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DEAL_CREATE)
     public Deal createReviewed(Deal deal, String duplicateReviewToken) {
-        recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         lockCreatePermission();
         duplicatePreflightService.requireReviewedDealCreation(
             new DealDuplicatePreflightRequest(
@@ -1047,22 +1052,14 @@ public class DealService {
                 deal.getCompanyId(),
                 null),
             duplicateReviewToken);
-        return createAfterDuplicateDecisionLock(deal, null);
-    }
-
-    Deal createReviewed(
-            Deal deal,
-            String duplicateReviewToken,
-            RecordCreationAugmentation augmentation) {
-        return createReviewed(deal, duplicateReviewToken, augmentation, MutationAdmission.UNRESTRICTED);
+        return createAfterDuplicateDecisionLock(deal, null, MutationAdmission.UNRESTRICTED, scope);
     }
 
     /** Performs the canonical action after its final under-lock mutation admission. */
     Deal createReviewed(
             Deal deal,
             String duplicateReviewToken,
-            RecordCreationAugmentation augmentation, MutationAdmission admission) {
-        recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
+            RecordCreationAugmentation augmentation, MutationAdmission admission, RecordVisibilityScope scope) {
         duplicatePreflightService.requireReviewedDealCreation(
             new DealDuplicatePreflightRequest(
                 deal.getName(),
@@ -1074,22 +1071,17 @@ public class DealService {
                 deal.getPipelineId(),
                 deal.getStageId(),
                 deal.getCompanyId(),
-                augmentation);
-        return createAfterDuplicateDecisionLock(deal, prepared, admission);
-    }
-
-    private Deal createAfterDuplicateDecisionLock(
-            Deal deal,
-            RecordCreationAugmentationService.PreparedAugmentation prepared) {
-        return createAfterDuplicateDecisionLock(deal, prepared, MutationAdmission.UNRESTRICTED);
+                augmentation, scope);
+        return createAfterDuplicateDecisionLock(deal, prepared, admission, scope);
     }
 
     /** Performs the canonical action after its final under-lock mutation admission. */
     private Deal createAfterDuplicateDecisionLock(
             Deal deal,
-            RecordCreationAugmentationService.PreparedAugmentation prepared, MutationAdmission admission) {
+            RecordCreationAugmentationService.PreparedAugmentation prepared, MutationAdmission admission,
+            RecordVisibilityScope scope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        String orgWorkspaceIdsJson = scope.workspaceIdsJson();
         deal.setWorkspaceId(workspaceId);
         deal.setOwnerId(authService.getCurrentUser().getId());
         requireVisibleRelations(workspaceId, orgWorkspaceIdsJson, deal);
@@ -1103,7 +1095,7 @@ public class DealService {
         dealOutcomeWriter.create(deal, requestedActualValue, stageOutcome);
         if (deal.getStageId() != null) {
             dealStageHistoryService.recordInitial(
-                workspaceId, deal.getId(), deal.getStageId(), deal.getWon());
+                workspaceId, deal.getId(), deal.getStageId(), deal.getWon(), scope);
         }
         Map<String, Object> auditChanges = auditService.diff(null, deal, AUDIT_FIELDS);
         if (prepared != null) {
@@ -1150,7 +1142,8 @@ public class DealService {
     @RequirePermission(Permission.DEAL_UPDATE)
     public Deal update(int id, Deal deal) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        String orgWorkspaceIdsJson = scope.workspaceIdsJson();
         duplicateDecisionLockService.lockCurrentOrganization();
         Deal before = requireDealForUpdate(workspaceId, id);
         boolean currencyChanged = deal.getCurrency() != null
@@ -1181,7 +1174,7 @@ public class DealService {
         boolean reopened = previousOutcome != null && deal.getWon() == null;
         if ((stageChanged || reopened) && newStage != null) {
             dealStageHistoryService.recordTransition(
-                workspaceId, id, newStage, previousOutcome, deal.getWon());
+                workspaceId, id, newStage, previousOutcome, deal.getWon(), scope);
         }
         auditService.record("deal.update", "deal", id, deal.getName(),
             "Updated deal " + deal.getName(),
@@ -1357,7 +1350,7 @@ public class DealService {
     @RequirePermission(Permission.DEAL_UPDATE)
     public Deal reopen(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         int actorId = workspaceService.getCurrentUserId();
         WorkspaceService.LockedPermissionSnapshot permissions =
             workspaceService.lockAndRequirePermissionsSnapshot(
@@ -1384,7 +1377,7 @@ public class DealService {
         dealOutcomeWriter.writeOutcome(workspaceId, deal, previousOutcome);
         if (wasClosed && deal.getStageId() != null) {
             dealStageHistoryService.recordTransition(
-                workspaceId, id, deal.getStageId(), previousOutcome, deal.getWon());
+                workspaceId, id, deal.getStageId(), previousOutcome, deal.getWon(), scope);
         }
         auditService.record("deal.reopen", "deal", id, deal.getName(),
             "Reopened deal " + deal.getName(),
@@ -1779,7 +1772,18 @@ public class DealService {
     @Transactional
     @RequirePermission(Permission.DEAL_UPDATE)
     public Deal changeStage(int dealId, int stageId) {
-        return moveInternal(dealId, stageId, Integer.MAX_VALUE, true);
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(
+            workspaceService.getCurrentWorkspaceId());
+        return moveInternal(dealId, stageId, Integer.MAX_VALUE, true, scope);
+    }
+
+    /** Reuses a batch's pre-lock scope while keeping this mutation in its own transaction. */
+    @Transactional
+    @RequirePermission(Permission.DEAL_UPDATE)
+    public Deal changeStage(int dealId, int stageId, RecordVisibilityScope scope) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), scope,
+            () -> moveInternal(dealId, stageId, Integer.MAX_VALUE, true, scope));
     }
 
     /**
@@ -1797,7 +1801,8 @@ public class DealService {
     @Transactional
     @RequirePermission(Permission.DEAL_UPDATE)
     public Deal move(int dealId, int stageId, int position) {
-        return moveInternal(dealId, stageId, position, false);
+        return moveInternal(dealId, stageId, position, false,
+            recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId()));
     }
 
     /**
@@ -1807,16 +1812,17 @@ public class DealService {
      * callers; the board {@code move} endpoint passes {@code false} so a pure reorder publishes
      * {@code deal.updated} instead.
      */
-    private Deal moveInternal(int dealId, int stageId, int position, boolean forceStageChanged) {
+    private Deal moveInternal(
+            int dealId, int stageId, int position, boolean forceStageChanged, RecordVisibilityScope scope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         LockedStageChange lockedStageChange = lockStageChangeRows(
-            workspaceId, dealId, stageId, false);
+            workspaceId, dealId, stageId, false, scope);
         return moveLocked(lockedStageChange, position, forceStageChanged);
     }
 
     private LockedStageChange lockStageChangeRows(
-            int workspaceId, int dealId, int stageId, boolean requireStableSourceStage) {
-        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+            int workspaceId, int dealId, int stageId, boolean requireStableSourceStage, RecordVisibilityScope scope) {
+        String orgWorkspaceIdsJson = scope.workspaceIdsJson();
         Deal discovered = requireDeal(workspaceId, dealId);
         Stage stage = pipelineMapper.getVisibleStageById(workspaceId, orgWorkspaceIdsJson, stageId);
         if (stage == null) throw new ResourceNotFoundException("Stage not found");
@@ -1831,7 +1837,7 @@ public class DealService {
             throw new ConflictException("Deal stage changed while preparing the mutation");
         }
         return new LockedStageChange(
-            workspaceId, dealId, stageId, stage, lockedDeals);
+            workspaceId, dealId, stageId, stage, scope, lockedDeals);
     }
 
     private Deal moveLocked(
@@ -1887,7 +1893,7 @@ public class DealService {
         dealOutcomeWriter.write(workspaceId, deal, previousOutcome, null);
         if (stageChanged) {
             dealStageHistoryService.recordTransition(
-                workspaceId, dealId, stageId, previousOutcome, deal.getWon());
+                workspaceId, dealId, stageId, previousOutcome, deal.getWon(), lockedStageChange.scope);
         }
         setPositionBatches(
             workspaceId,

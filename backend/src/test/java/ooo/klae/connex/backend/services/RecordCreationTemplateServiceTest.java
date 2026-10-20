@@ -561,6 +561,49 @@ class RecordCreationTemplateServiceTest {
     }
 
     @Test
+    void revokedPipelineShareAfterCachedDependencyReadsRetainsTheCatalogUnavailableRefusal() throws Exception {
+        RecordCreationTemplate root = root(42, "deal", "enabled", 0, 1);
+        RecordCreationTemplateVersion version = version(42, 1, "deal");
+        ResolvedCreationTemplateDto visible = new ResolvedCreationTemplateDto(
+            "workspace:42", RecordCreationRecordType.deal, false, 1, names(), null,
+            RecordCreationTemplateAvailability.available,
+            List.of(new ResolvedCreationGroupDto("basics", names(), null, List.of(
+                resolvedField("pipeline", null, JsonMapper.builder().build().valueToTree(7)),
+                resolvedField("stage", null, JsonMapper.builder().build().valueToTree(6))))), List.of());
+        ResolvedCreationTemplateDto revoked = new ResolvedCreationTemplateDto(
+            "workspace:42", RecordCreationRecordType.deal, false, 1, names(), null,
+            RecordCreationTemplateAvailability.unavailable, List.of(), List.of());
+        ResolvedCreationTemplateDto systemRevoked = new ResolvedCreationTemplateDto(
+            "system:deal:standard", RecordCreationRecordType.deal, true, 1, names(), null,
+            RecordCreationTemplateAvailability.unavailable, List.of(), List.of());
+        when(mapper.getSetForUpdate(7, "deal")).thenReturn(set(1, null));
+        when(mapper.getRootForUpdate(7, 42)).thenReturn(root);
+        when(mapper.getCurrentVersion(7, 42)).thenReturn(version);
+        when(resolver.resolveWorkspace(root, version, null, "[7,8,9]"))
+            .thenReturn(visible, visible, revoked);
+        when(mapper.setDefault(7, "deal", 42, 1)).thenReturn(1);
+        when(mapper.getSet(7, "deal")).thenReturn(set(2, 42));
+        when(mapper.listRoots(7, "deal", false)).thenReturn(List.of(root));
+        when(resolver.resolveSystem(RecordCreationRecordType.deal, null, "[7,8,9]"))
+            .thenReturn(systemRevoked);
+
+        RecordCreationTemplateException refused = assertThrows(RecordCreationTemplateException.class,
+            () -> service.setDefault(new RecordCreationTemplateDefaultRequestDto(
+                RecordCreationRecordType.deal, "workspace:42", 1)));
+
+        assertEquals("TEMPLATE_CATALOG_UNAVAILABLE", refused.error().code());
+        InOrder order = inOrder(resolver, pipelineMapper, shareMapper, mapper);
+        order.verify(resolver).resolveWorkspace(root, version, null, "[7,8,9]");
+        order.verify(pipelineMapper).getVisibleStageByIdForUpdate(7, "[7,8,9]", 6);
+        order.verify(pipelineMapper).getVisiblePipelineByIdForUpdate(7, "[7,8,9]", 7);
+        order.verify(shareMapper).lockPipelineShareForWorkspace(7, 7);
+        order.verify(resolver).resolveWorkspace(root, version, null, "[7,8,9]");
+        order.verify(mapper).setDefault(7, "deal", 42, 1);
+        order.verify(resolver).resolveWorkspace(root, version, null, "[7,8,9]");
+        verify(scopes, times(1)).getForWorkspace(7);
+    }
+
+    @Test
     void updateCanEnableAndDisableWithoutPublishingContent() throws Exception {
         assertStatusOnlyUpdate("disabled", true, "enabled");
         assertStatusOnlyUpdate("enabled", false, "disabled");

@@ -1786,6 +1786,25 @@ their outer authorization locks so nested Pipeline reads reuse the transaction m
 prepared routed snapshot. No authorization or `FOR UPDATE` lock moves off its original connection,
 and no transaction boundary or isolation level changes.
 
+Bulk stage changes carry one unfiltered scope into every independently committed Deal mutation and
+its stage-history write. Ordinary creation, reviewed/guided creation, update, reopen and move also
+pass their pre-lock scope to history instead of loading it again after mutation. Deal imports pass
+one scope through name resolution and both initial and transition history writes within their
+existing import transaction.
+
+Workflow traversal, immediate workflow dispatch, legacy rule dispatch and scheduler workspace sweeps use the explicit
+`RecordVisibilityScopeControlAccess.withWorkspaceScope` operation boundary. In `single-database`
+mode it reuses the caller's immutable snapshot across nested calls and independent step/outbox
+transactions on that thread. It restores an enclosing operation on every exit, clears the binding
+after the outermost operation, and rejects workspace, organization or catalog drift. It does not
+propagate into asynchronous work. Transaction propagation, per-record commits and authorization
+locks remain unchanged. This is explicit operation reuse, separate from the default transaction
+memo: ordinary `REQUIRES_NEW`, completion callbacks and nontransactional reads outside that boundary
+retain their fresh-read contract. In routed mode every boundary read still validates the prepared
+context payload before considering any memo, so a missing or stale payload still fails inside an
+open transaction without a control query. Assistant parallel tool batches reject writes; one
+auto/approved write is one transaction, and its nested Pipeline reads share the existing memo.
+
 The locked call chains are:
 
 - `NotificationReconciliationService.reconcileWorkspace`: preload the scope before opening its

@@ -352,6 +352,77 @@ class RecordVisibilityScopeControlAccessTest {
         verify(delegate, times(2)).getForWorkspace(7);
     }
 
+    @Test
+    void anOperationSharesOneScopeAcrossIndependentCommitsAndRestoresFreshReadsAfterward() {
+        ShareWorkspaceControlAccess delegate = mock(ShareWorkspaceControlAccess.class);
+        when(delegate.getForWorkspace(7)).thenReturn(snapshot(900, 7, 11), snapshot(900, 7, 13));
+        RecordVisibilityScopeControlAccess access = new RecordVisibilityScopeControlAccess(delegate, tenantContext);
+        TestTransactionManager manager = new TestTransactionManager();
+        TransactionTemplate transaction = new TransactionTemplate(manager);
+        access.withWorkspaceScope(7, () -> {
+            for (int index = 0; index < 10; index++) {
+                transaction.executeWithoutResult(status ->
+                    assertEquals("[7,11]", access.getForWorkspace(7).workspaceIdsJson()));
+            }
+            return null;
+        });
+        assertEquals(10, manager.beginCount());
+        verify(delegate, times(1)).getForWorkspace(7);
+        assertEquals("[7,13]", access.getForWorkspace(7).workspaceIdsJson());
+        verify(delegate, times(2)).getForWorkspace(7);
+    }
+
+    @Test
+    void aFailedNestedOperationRestoresTheEnclosingScopeAndThenDiscardsIt() {
+        ShareWorkspaceControlAccess delegate = mock(ShareWorkspaceControlAccess.class);
+        when(delegate.getForWorkspace(7)).thenReturn(snapshot(900, 7, 11), snapshot(900, 7, 17));
+        RecordVisibilityScopeControlAccess access = new RecordVisibilityScopeControlAccess(delegate, tenantContext);
+        access.withWorkspaceScope(7, () -> {
+            assertThrows(IllegalArgumentException.class, () -> access.withWorkspaceScope(
+                7, new RecordVisibilityScope(900, List.of(7, 13)), () -> {
+                    assertEquals("[7,13]", access.getForWorkspace(7).workspaceIdsJson());
+                    throw new IllegalArgumentException("mutation refused");
+                }));
+            assertEquals("[7,11]", access.getForWorkspace(7).workspaceIdsJson());
+            return null;
+        });
+        assertEquals("[7,17]", access.getForWorkspace(7).workspaceIdsJson());
+    }
+
+    @Test
+    void operationReuseRejectsWorkspaceOrganizationAndCatalogDrift() {
+        ShareWorkspaceControlAccess delegate = mock(ShareWorkspaceControlAccess.class);
+        when(delegate.getForWorkspace(7)).thenReturn(snapshot(900, 7, 11));
+        RecordVisibilityScopeControlAccess access = new RecordVisibilityScopeControlAccess(delegate, tenantContext);
+        tenantContext.set(7, 900, 11, "member", null);
+        access.withWorkspaceScope(7, () -> {
+            tenantContext.set(7, 901, 11, "member", null);
+            assertThrows(IllegalStateException.class, () -> access.getForWorkspace(7));
+            tenantContext.set(11, 900, 11, "member", null);
+            assertThrows(IllegalStateException.class, () -> access.getForWorkspace(7));
+            tenantContext.set(7, 900, 11, "member", "different_catalog");
+            assertThrows(IllegalStateException.class, () -> access.getForWorkspace(7));
+            tenantContext.clear();
+            assertThrows(IllegalStateException.class, () -> access.getForWorkspace(7));
+            return null;
+        });
+    }
+
+    @Test
+    void routedOperationsCannotMemoizePastAMissingPreparedSnapshot() {
+        ShareWorkspaceControlAccess delegate = mock(ShareWorkspaceControlAccess.class);
+        when(delegate.isCatalogPerPlacement()).thenReturn(true);
+        IllegalStateException missing = new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotMissingException("workspace 7");
+        when(delegate.getForWorkspace(7)).thenReturn(snapshot(900, 7, 11)).thenThrow(missing);
+        RecordVisibilityScopeControlAccess access = new RecordVisibilityScopeControlAccess(delegate, tenantContext);
+        access.withWorkspaceScope(7, () -> {
+            new TransactionTemplate(new TestTransactionManager()).executeWithoutResult(status ->
+                assertSame(missing, assertThrows(IllegalStateException.class, () -> access.getForWorkspace(7))));
+            return null;
+        });
+        verify(delegate, times(2)).getForWorkspace(7);
+    }
+
     private static ShareWorkspaceControlAccess.OrganizationWorkspaces snapshot(int orgId, int... workspaceIds) {
         LinkedHashMap<Integer, String> names = new LinkedHashMap<>();
         for (int workspaceId : workspaceIds) {

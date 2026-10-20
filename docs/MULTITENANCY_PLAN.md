@@ -263,6 +263,10 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   `workspaceId` remains the parent's owning workspace. Empty pipelines retain an empty array and
   `getAllPipelines` stays lightweight. Import and export keep their per-pipeline stage queries with
   one scope for the operation; filtering, ordering and search limits remain in tenant SQL.
+  Bulk stage changes pass the same scope into each independently committed mutation and stage-history
+  write. Workflow traversal and workspace batches explicitly reuse one scope across their independent
+  transactions, restoring the synchronous operation binding on exit; routed reads continue to validate
+  the prepared context on every access. Creation and import history reuse their pre-lock scopes.
   These mappers' crossing baseline entries are removed. Segment calls already inside campaign and
   workflow locks retain their transaction shape; #2159 (L-scope) owns the context-installed snapshot
   and fail-fast guard required before catalog routing can be enabled. The routing default

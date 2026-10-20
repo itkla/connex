@@ -221,7 +221,7 @@ class RecordCreationAugmentationServiceTest {
 
         RecordCreationTemplateException exception = assertThrows(
             RecordCreationTemplateException.class,
-            () -> service.prepareDeal(8, 10, null, augmentation));
+            () -> service.prepareDeal(8, 10, null, augmentation, scopes.getForWorkspace(7)));
 
         assertEquals("VALIDATION_FAILED", exception.error().code());
         var order = inOrder(scopes, templateMapper, pipelineMapper, shareMapper);
@@ -253,7 +253,7 @@ class RecordCreationAugmentationServiceTest {
         when(pipelineMapper.getVisibleStageByIdForUpdate(7, "[7,8,9]", 10)).thenReturn(stage);
 
         ConflictException refused = assertThrows(ConflictException.class,
-            () -> service.prepareDeal(8, 10, null, augmentation));
+            () -> service.prepareDeal(8, 10, null, augmentation, scopes.getForWorkspace(7)));
 
         assertEquals("Assistant proposal target changed", refused.getMessage());
         verify(pipelineMapper).getVisibleStageByIdForUpdate(7, "[7,8,9]", 10);
@@ -286,7 +286,7 @@ class RecordCreationAugmentationServiceTest {
         when(pipelineMapper.getPipelineById(7, "[7,8,9]", 8)).thenReturn(pipeline);
 
         RecordCreationTemplateException invisible = assertThrows(
-            RecordCreationTemplateException.class, () -> service.validateDealReferences(8, 10, null));
+            RecordCreationTemplateException.class, () -> service.validateDealReferences(8, 10, null, scopes.getForWorkspace(7)));
 
         assertEquals("RELATED_RECORD_NOT_FOUND", invisible.error().code());
         verify(pipelineMapper).getStageById(7, 10);
@@ -299,7 +299,7 @@ class RecordCreationAugmentationServiceTest {
         when(pipelineMapper.getStageById(7, 10)).thenReturn(stage);
 
         RecordCreationTemplateException mismatch = assertThrows(
-            RecordCreationTemplateException.class, () -> service.validateDealReferences(8, 10, null));
+            RecordCreationTemplateException.class, () -> service.validateDealReferences(8, 10, null, scopes.getForWorkspace(7)));
 
         assertEquals("VALIDATION_FAILED", mismatch.error().code());
     }
