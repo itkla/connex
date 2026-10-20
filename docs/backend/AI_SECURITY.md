@@ -1182,3 +1182,10 @@ Verification waiting only on residual obligations stays incomplete and backs off
 Due work is selected by next-attempt time, then identity, so older object failures yield to later
 restriction erasure. Organization completion is retried for completed tenant work from both batch
 replay and initializer reconciliation, covering interruption after the placement receipt commits.
+
+If a tenant catalog is restored from before cleanup while newer control coordination survives,
+initialization reopens the placement receipt and operation/bootstrap completion whenever local work
+is absent or unfinished. Completed local work with restored residuals is also reopened. The original
+operation identity, cutoff and organization generation remain unchanged; only fresh uncapped local
+holdings, lease and object verification can restore the receipt and completion evidence. Content
+admission continues to reject historical generations throughout recovery.

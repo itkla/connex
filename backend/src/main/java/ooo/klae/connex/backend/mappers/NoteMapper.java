@@ -30,6 +30,7 @@ public interface NoteMapper {
     Note getNoteById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Note> getVisibleNotesPage(
         @Param("workspaceId") int workspaceId,
+        @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
         @Param("currentUserId") int currentUserId,
         @Param("query") String query,
         @Param("authorIds") List<Integer> authorIds,
@@ -49,11 +50,13 @@ public interface NoteMapper {
     );
     long countVisibleNotes(
         @Param("workspaceId") int workspaceId,
+        @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
         @Param("currentUserId") int currentUserId,
         @Param("query") String query,
         @Param("authorIds") List<Integer> authorIds
     );
     List<Note> getWorkspaceNotesPage(@Param("workspaceId") int workspaceId,
+        @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
         @Param("query") String query,
         @Param("authorIds") List<Integer> authorIds,
         @Param("sort") String sort,
@@ -63,6 +66,7 @@ public interface NoteMapper {
     );
     long countWorkspaceNotes(
         @Param("workspaceId") int workspaceId,
+        @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
         @Param("query") String query,
         @Param("authorIds") List<Integer> authorIds
     );
@@ -128,12 +132,14 @@ public interface NoteMapper {
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
     int countOwnPrivateNotesForPersonEvidence(
             @Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
             @Param("personId") int personId,
             @Param("currentUserId") int currentUserId,
             @Param("reference") LocalDateTime reference,
             @Param("sourceLimit") int sourceLimit);
     int countOwnPrivateNotesForCompanyEvidence(
             @Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
             @Param("companyId") int companyId,
             @Param("currentUserId") int currentUserId,
             @Param("reference") LocalDateTime reference,
@@ -143,6 +149,7 @@ public interface NoteMapper {
             @Param("currentUserId") int currentUserId);
     List<Note> searchVisible(
         @Param("workspaceId") int workspaceId,
+        @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
         @Param("query") String query,
         @Param("currentUserId") int currentUserId,
         @Param("limit") int limit,

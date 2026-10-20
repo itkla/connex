@@ -7,6 +7,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 
 import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Service;
@@ -22,6 +23,7 @@ import ooo.klae.connex.backend.beans.PersonLeadSource;
 import ooo.klae.connex.backend.beans.PersonLifecycleStage;
 import ooo.klae.connex.backend.beans.Product;
 import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.dto.ProductFacetFilter;
 import ooo.klae.connex.backend.dto.WarmthFilter;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
@@ -141,11 +143,15 @@ public class ExportService {
         return sb.toString();
     }
 
-    /** CSV of products matching the current catalog search (all products when unfiltered). */
-    public String exportProducts(String query) {
+    /**
+     * CSV of products matching the catalog search and the browser's Billing, Availability, and
+     * Effective dates facets (all products when unfiltered).
+     */
+    public String exportProducts(String query, ProductFacetFilter facets) {
+        Objects.requireNonNull(facets, "facets");
         requireExportStepUp();
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        List<Product> products = productMapper.getFiltered(workspaceId, query);
+        List<Product> products = productMapper.getFiltered(workspaceId, query, facets);
 
         StringBuilder sb = new StringBuilder();
         writeRow(sb, List.of(

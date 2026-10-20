@@ -494,6 +494,10 @@ public class AiAssistantScopeReadService {
      * executable segment for another leaves every check above satisfied while the cohort silently
      * becomes a different set from the one the preview counted and the persisted echo names, so the
      * admitted definition's digest is compared and a changed view is refused outright.
+     *
+     * <p>A scope carrying a view without {@code savedViewFingerprint} never passed through the
+     * authorizing path and provides no admitted digest to compare with the current definition.
+     * Refusing it prevents unverified execution of the view.
      */
     private SegmentDefinition savedViewDefinition(String kind, AiChatQueryScope scope) {
         Integer savedViewId = scope.savedViewId();
@@ -509,9 +513,6 @@ public class AiAssistantScopeReadService {
                         AiChatSavedViewScope.UNSUPPORTED));
         String admitted = scope.savedViewFingerprint();
         if (admitted == null) {
-            // A scope carrying a view but no admission digest was never resolved through the
-            // authorizing path, so there is nothing to compare the current definition against.
-            // Reading it anyway would restore exactly the unverified execution above closes.
             throw AiAssistantLoopException.malformed(AiChatSavedViewScope.UNSUPPORTED);
         }
         if (!admitted.equals(

@@ -199,7 +199,12 @@ public class AiAgentPrivacyService {
         }
     }
 
-    /** Installs original organization authority without advancing or blocking the mission barrier. */
+    /**
+     * Installs original organization authority without advancing or blocking the mission barrier.
+     *
+     * <p>Control receipts can outlive a tenant-catalog restore. Missing or unfinished local work
+     * reopens placement and organization completion until fresh residual verification succeeds.
+     */
     @Transactional(propagation = Propagation.MANDATORY)
     public void enrollOperation(int workspaceId, ooo.klae.connex.backend.beans.AiAssistantPrivacyOperation operation) {
         int organizationId = organizationId(workspaceId);
@@ -228,16 +233,20 @@ public class AiAgentPrivacyService {
                     || !MessageDigest.isEqual(existing.getOperationFingerprint(), fingerprint)) {
                 throw new ConflictException("mission_privacy_operation_conflict");
             }
-            if ("complete".equals(existing.getPhase())
-                    && privacyMapper.allChatResidualCount(workspaceId, existing.getCutoffGeneration(), existing.getOperationKey()) != 0) {
-                assistantControlMapper.reopenOperation(organizationId, operation.getOperationKey());
-                assistantControlMapper.reopenBootstrap(organizationId, operation.getOperationKey());
-                assistantControlMapper.reopenWorkspace(organizationId, operation.getOperationKey(), workspaceId);
+        }
+        if (existing == null || !"complete".equals(existing.getPhase())
+                || privacyMapper.allChatResidualCount(workspaceId, existing.getCutoffGeneration(), existing.getOperationKey()) != 0) {
+            assistantControlMapper.reopenOperation(organizationId, operation.getOperationKey());
+            assistantControlMapper.reopenBootstrap(organizationId, operation.getOperationKey());
+            assistantControlMapper.reopenWorkspace(organizationId, operation.getOperationKey(), workspaceId);
+            if (existing != null && "complete".equals(existing.getPhase())) {
                 existing.setPhase("runs");
                 existing.setCompletedAt(null);
                 existing.setNextAttemptAt(now());
                 save(existing);
             }
+        }
+        if (existing != null) {
             return;
         }
         AiAgentPrivacyWatermarks bounds = privacyMapper.watermarks(workspaceId);

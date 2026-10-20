@@ -31,7 +31,8 @@ public final class LegacyRecordVisibilitySql {
         Configuration configuration = new Configuration(
             new Environment("pre-485-record-visibility", new JdbcTransactionFactory(), dataSource));
         configuration.setMapUnderscoreToCamelCase(true);
-        for (String xml : List.of(INTRODUCTION, DUPLICATE_REVIEW)) {
+        configuration.getTypeAliasRegistry().registerAliases("ooo.klae.connex.backend.beans");
+        for (String xml : List.of(INTRODUCTION, DUPLICATE_REVIEW, NOTE, SEGMENT)) {
             String resource = "pre-485-" + configuration.getMappedStatementNames().size();
             new XMLMapperBuilder(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)),
                 configuration, resource, configuration.getSqlFragments()).parse();
@@ -51,7 +52,8 @@ public final class LegacyRecordVisibilitySql {
     public long count(String statement, Map<String, Object> parameters) {
         try (SqlSession session = sessions.openSession()) {
             requireMigratedDefaultCatalog(session);
-            return session.selectOne("ooo.klae.connex.backend.mappers." + statement, parameters);
+            Number count = session.selectOne("ooo.klae.connex.backend.mappers." + statement, parameters);
+            return count.longValue();
         }
     }
 
@@ -363,6 +365,579 @@ public final class LegacyRecordVisibilitySql {
             WHERE <include refid="visibleCurrentReviewPredicate"/>
               AND d.id = #{id}
           </select>
+        </mapper>
+        """;
+    private static final String NOTE = """
+        <?xml version="1.0" encoding="UTF-8" ?>
+        <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+                "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+        <mapper namespace="ooo.klae.connex.backend.mappers.NoteMapper">
+
+          <resultMap id="NoteResult" type="Note">
+            <id     property="id"        column="id"/>
+            <result property="workspaceId" column="workspace_id"/>
+            <result property="content"   column="content"/>
+            <result property="title"     column="title"/>
+            <result property="visibility" column="visibility"/>
+            <result property="createdAt" column="created_at"/>
+            <result property="updatedAt" column="updated_at"/>
+            <association property="author" javaType="User">
+              <id property="id" column="author_id"/>
+            </association>
+            <association property="person" javaType="Person">
+              <id property="id" column="person_id"/>
+            </association>
+            <association property="deal" javaType="Deal">
+              <id property="id" column="deal_id"/>
+            </association>
+          </resultMap>
+
+          <resultMap id="SearchNoteResult" type="Note">
+            <id property="id" column="id"/>
+            <result property="workspaceId" column="workspace_id"/>
+            <result property="content" column="content"/>
+            <result property="title" column="title"/>
+            <result property="visibility" column="visibility"/>
+            <result property="createdAt" column="created_at"/>
+            <result property="updatedAt" column="updated_at"/>
+            <association property="author" javaType="User">
+              <id property="id" column="author_id"/>
+            </association>
+            <association property="person" javaType="Person">
+              <id property="id" column="person_id"/>
+              <result property="name" column="person_name"/>
+            </association>
+            <association property="deal" javaType="Deal">
+              <id property="id" column="deal_id"/>
+              <result property="name" column="deal_name"/>
+            </association>
+          </resultMap>
+
+          <sql id="noteColumns">
+            id, workspace_id, content, title, visibility, author_id, person_id, deal_id, created_at, updated_at
+          </sql>
+
+          <sql id="qualifiedNoteColumns">
+            n.id, n.workspace_id, n.content, n.title, n.visibility, n.author_id, n.person_id, n.deal_id, n.created_at, n.updated_at
+          </sql>
+
+          <sql id="searchNoteColumns">
+            <include refid="qualifiedNoteColumns"/>,
+            p.name AS person_name,
+            d.name AS deal_name
+          </sql>
+
+          <sql id="visiblePerson">
+            (p.workspace_id = #{workspaceId}
+             OR EXISTS (SELECT 1 FROM person_share ps
+                JOIN workspace pvws ON pvws.id = ps.workspace_id
+                JOIN workspace pows ON pows.id = p.workspace_id AND pows.org_id = pvws.org_id
+                WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId}))
+          </sql>
+
+          <sql id="visibleCompany">
+            (c.workspace_id = #{workspaceId}
+             OR EXISTS (SELECT 1 FROM company_share cs
+                JOIN workspace cvws ON cvws.id = cs.workspace_id
+                JOIN workspace cows ON cows.id = c.workspace_id AND cows.org_id = cvws.org_id
+                WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
+          </sql>
+
+          <sql id="internalInlineReferencePattern">
+            '\\\\[[^]\\\\r\\\\n]*\\\\][[:space:]]*\\\\([[:space:]]*&lt;?(user|person|deal|company|note|file|task|activity)(:|&amp;colon;|&amp;#0*58;|&amp;#x0*3a;|\\\\\\\\:)[0-9]+&gt;?([[:space:]]+[^)]*)?\\\\)'
+          </sql>
+
+          <sql id="internalReferenceTargetPattern">
+            '(user|person|deal|company|note|file|task|activity)(:|&amp;colon;|&amp;#0*58;|&amp;#x0*3a;|\\\\\\\\:)[0-9]+'
+          </sql>
+
+          <sql id="notePageQuery">
+            <if test="query != null">
+              AND (
+                n.title LIKE #{query}
+                <if test="authorIds != null and !authorIds.isEmpty()">
+                  OR n.author_id IN
+                  <foreach item="authorId" collection="authorIds" open="(" separator="," close=")">
+                    #{authorId}
+                  </foreach>
+                </if>
+                OR (
+                  NOT REGEXP_LIKE(
+                    REGEXP_REPLACE(
+                      n.content,
+                      <include refid="internalInlineReferencePattern"/>,
+                      '', 1, 0, 'i'
+                    ),
+                    <include refid="internalReferenceTargetPattern"/>,
+                    'i'
+                  )
+                  AND REGEXP_REPLACE(
+                    n.content,
+                    <include refid="internalInlineReferencePattern"/>,
+                    '', 1, 0, 'i'
+                  ) LIKE #{query}
+                )
+                OR EXISTS (
+                  SELECT 1
+                  FROM person p
+                  WHERE p.id = n.person_id
+                    AND p.archived_at IS NULL
+                    AND <include refid="visiblePerson"/>
+                    AND p.name LIKE #{query}
+                )
+                OR EXISTS (
+                  SELECT 1
+                  FROM deal d
+                  WHERE d.workspace_id = #{workspaceId}
+                    AND d.id = n.deal_id
+                    AND d.name LIKE #{query}
+                )
+              )
+            </if>
+          </sql>
+
+          <sql id="notePageSortDirection">
+            <choose>
+              <when test="dir == 'asc'">ASC</when>
+              <otherwise>DESC</otherwise>
+            </choose>
+          </sql>
+
+          <sql id="notePageOrder">
+            <choose>
+              <when test="sort == 'title'">
+                ORDER BY (n.title IS NULL OR n.title = '') ASC,
+                  n.title <include refid="notePageSortDirection"/>,
+                  n.id <include refid="notePageSortDirection"/>
+              </when>
+              <when test="sort == 'created'">
+                ORDER BY n.created_at <include refid="notePageSortDirection"/>,
+                  n.id <include refid="notePageSortDirection"/>
+              </when>
+              <otherwise>
+                ORDER BY COALESCE(n.updated_at, n.created_at) <include refid="notePageSortDirection"/>,
+                  n.id <include refid="notePageSortDirection"/>
+              </otherwise>
+            </choose>
+          </sql>
+
+          <select id="getVisibleNotesPage" resultMap="NoteResult">
+            SELECT <include refid="qualifiedNoteColumns"/> FROM note n
+            WHERE n.workspace_id = #{workspaceId}
+              AND (n.visibility = 'workspace' OR n.author_id = #{currentUserId})
+            <include refid="notePageQuery"/>
+            <include refid="notePageOrder"/>
+            LIMIT #{limit} OFFSET #{offset}
+          </select>
+
+          <select id="countVisibleNotes" resultType="long">
+            SELECT COUNT(*) FROM note n
+            WHERE n.workspace_id = #{workspaceId}
+              AND (n.visibility = 'workspace' OR n.author_id = #{currentUserId})
+            <include refid="notePageQuery"/>
+          </select>
+
+          <select id="getWorkspaceNotesPage" resultMap="NoteResult">
+            SELECT <include refid="qualifiedNoteColumns"/> FROM note n
+            WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace'
+            <include refid="notePageQuery"/>
+            <include refid="notePageOrder"/>
+            LIMIT #{limit} OFFSET #{offset}
+          </select>
+
+          <select id="countWorkspaceNotes" resultType="long">
+            SELECT COUNT(*) FROM note n
+            WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace'
+            <include refid="notePageQuery"/>
+          </select>
+
+          <select id="countOwnPrivateNotesForPersonEvidence" timeout="10" resultType="int">
+            SELECT COUNT(*)
+            FROM (
+              SELECT n.id
+              FROM note n
+              JOIN person p ON p.id = n.person_id
+              WHERE n.workspace_id = #{workspaceId}
+                AND n.person_id = #{personId}
+                AND n.author_id = #{currentUserId}
+                AND n.visibility = 'private'
+                AND n.created_at IS NOT NULL
+                AND n.created_at &lt;= #{reference}
+                AND p.suspended_at IS NULL
+                AND <include refid="visiblePerson"/>
+              LIMIT #{sourceLimit}
+            ) capped
+          </select>
+
+          <select id="countOwnPrivateNotesForCompanyEvidence" timeout="10" resultType="int">
+            SELECT COUNT(*)
+            FROM (
+              SELECT n.id
+              FROM note n
+              WHERE n.workspace_id = #{workspaceId}
+                AND n.author_id = #{currentUserId}
+                AND n.visibility = 'private'
+                AND n.created_at IS NOT NULL
+                AND n.created_at &lt;= #{reference}
+                AND (
+                  EXISTS (
+                    SELECT 1
+                    FROM person p
+                    WHERE p.id = n.person_id
+                      AND p.company_id = #{companyId}
+                      AND p.suspended_at IS NULL
+                      AND <include refid="visiblePerson"/>
+                  )
+                  OR EXISTS (
+                    SELECT 1
+                    FROM deal d
+                    WHERE d.id = n.deal_id
+                      AND d.workspace_id = #{workspaceId}
+                      AND d.company_id = #{companyId}
+                      AND (n.person_id IS NULL OR EXISTS (
+                        SELECT 1
+                        FROM person p
+                        WHERE p.id = n.person_id
+                          AND p.suspended_at IS NULL
+                          AND <include refid="visiblePerson"/>
+                      ))
+                  )
+                )
+                AND EXISTS (
+                  SELECT 1
+                  FROM company c
+                  WHERE c.id = #{companyId}
+                    AND <include refid="visibleCompany"/>
+                )
+              LIMIT #{sourceLimit}
+            ) capped
+          </select>
+
+          <select id="searchVisible" resultMap="SearchNoteResult">
+            SELECT <include refid="searchNoteColumns"/>
+            FROM note n
+            LEFT JOIN person p ON p.id = n.person_id AND p.archived_at IS NULL
+              AND <include refid="visiblePerson"/>
+            LEFT JOIN deal d ON d.workspace_id = #{workspaceId} AND d.id = n.deal_id
+            WHERE n.workspace_id = #{workspaceId}
+              AND (n.visibility = 'workspace' OR n.author_id = #{currentUserId})
+              AND (n.content LIKE #{query}
+              OR n.title LIKE #{query}
+              OR p.name LIKE #{query}
+              OR d.name LIKE #{query})
+            ORDER BY n.created_at DESC, n.id DESC
+            LIMIT #{limit} OFFSET #{offset}
+          </select>
+        </mapper>
+        """;
+
+    private static final String SEGMENT = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+        <mapper namespace="ooo.klae.connex.backend.mappers.SegmentMapper">
+
+            <select id="companyIdsNoActivitySince" resultType="int">
+                SELECT c.id
+                FROM company c
+                WHERE c.workspace_id = #{workspaceId}
+                  AND c.archived_at IS NULL
+                  <if test="candidateIds != null">
+                    AND c.id IN
+                    <foreach item="candidateId" collection="candidateIds" open="(" separator="," close=")">
+                      #{candidateId}
+                    </foreach>
+                  </if>
+                  AND NOT EXISTS (
+                      SELECT 1 FROM activity a
+                      WHERE a.workspace_id = #{workspaceId}
+                        AND a.timestamp &gt;= DATE_SUB(NOW(), INTERVAL #{days} DAY)
+                        AND (a.person_id IS NULL OR EXISTS (
+                            SELECT 1 FROM person processable
+                            WHERE processable.id = a.person_id
+                              AND processable.suspended_at IS NULL
+                              AND processable.provision_ceased_at IS NULL
+                              AND processable.archived_at IS NULL
+                              AND (processable.workspace_id = #{workspaceId}
+                                OR EXISTS (
+                                  SELECT 1 FROM person_share processable_share
+                                  JOIN workspace viewer_workspace
+                                    ON viewer_workspace.id = processable_share.workspace_id
+                                  JOIN workspace owner_workspace
+                                    ON owner_workspace.id = processable.workspace_id
+                                   AND owner_workspace.org_id = viewer_workspace.org_id
+                                  WHERE processable_share.person_id = processable.id
+                                    AND processable_share.workspace_id = #{workspaceId}
+                                ))
+                        ))
+                        AND (
+                            a.person_id IN (SELECT p.id FROM person p
+                                WHERE p.workspace_id = #{workspaceId} AND p.company_id = c.id
+                                  AND p.archived_at IS NULL)
+                            OR a.deal_id IN (SELECT d.id FROM deal d WHERE d.workspace_id = #{workspaceId} AND d.company_id = c.id)
+                        )
+                  )
+            </select>
+
+            <select id="companyIdsForPersonsWithoutUserActivity" resultType="int">
+                SELECT DISTINCT p.company_id
+                FROM person p
+                WHERE p.workspace_id = #{workspaceId}
+                  AND p.suspended_at IS NULL
+                  AND p.provision_ceased_at IS NULL
+                  AND p.archived_at IS NULL
+                  AND p.company_id IS NOT NULL
+                  <if test="candidateIds != null">
+                    AND p.company_id IN
+                    <foreach item="candidateId" collection="candidateIds" open="(" separator="," close=")">
+                      #{candidateId}
+                    </foreach>
+                  </if>
+                  AND p.id IN
+                  <foreach item="pid" collection="personIds" open="(" separator="," close=")">#{pid}</foreach>
+                  AND NOT EXISTS (
+                      SELECT 1 FROM activity a
+                      WHERE a.workspace_id = #{workspaceId}
+                        AND a.created_by_id = #{userId}
+                        AND (a.person_id IS NULL OR EXISTS (
+                            SELECT 1 FROM person processable
+                            WHERE processable.id = a.person_id
+                              AND processable.suspended_at IS NULL
+                              AND processable.provision_ceased_at IS NULL
+                              AND processable.archived_at IS NULL
+                              AND (processable.workspace_id = #{workspaceId}
+                                OR EXISTS (
+                                  SELECT 1 FROM person_share processable_share
+                                  JOIN workspace viewer_workspace
+                                    ON viewer_workspace.id = processable_share.workspace_id
+                                  JOIN workspace owner_workspace
+                                    ON owner_workspace.id = processable.workspace_id
+                                   AND owner_workspace.org_id = viewer_workspace.org_id
+                                  WHERE processable_share.person_id = processable.id
+                                    AND processable_share.workspace_id = #{workspaceId}
+                                ))
+                        ))
+                        AND (
+                            a.person_id IN (SELECT p2.id FROM person p2
+                                WHERE p2.workspace_id = #{workspaceId}
+                                  AND p2.company_id = p.company_id
+                                  AND p2.suspended_at IS NULL
+                                  AND p2.provision_ceased_at IS NULL
+                                  AND p2.archived_at IS NULL)
+                            OR a.deal_id IN (SELECT d.id FROM deal d WHERE d.workspace_id = #{workspaceId} AND d.company_id = p.company_id)
+                        )
+                  )
+            </select>
+
+            <select id="companyIdsWithWarmIntro" resultType="int">
+                SELECT DISTINCT candidate.company_id
+                FROM person_edge edge
+                JOIN person candidate
+                  ON (candidate.id = edge.source_person_id OR candidate.id = edge.target_person_id)
+                 AND candidate.workspace_id = #{workspaceId}
+                 AND candidate.suspended_at IS NULL
+                 AND candidate.provision_ceased_at IS NULL
+                 AND candidate.archived_at IS NULL
+                 AND candidate.company_id IN
+                  <foreach item="candidateId" collection="candidateIds" open="(" separator="," close=")">
+                    #{candidateId}
+                  </foreach>
+                JOIN person engaged
+                  ON engaged.id = IF(candidate.id = edge.source_person_id,
+                                     edge.target_person_id, edge.source_person_id)
+                 AND engaged.archived_at IS NULL
+                 AND engaged.suspended_at IS NULL
+                 AND (engaged.workspace_id = #{workspaceId}
+                   OR EXISTS (
+                     SELECT 1 FROM person_share engaged_share
+                     JOIN workspace viewer_workspace
+                       ON viewer_workspace.id = engaged_share.workspace_id
+                     JOIN workspace owner_workspace
+                       ON owner_workspace.id = engaged.workspace_id
+                      AND owner_workspace.org_id = viewer_workspace.org_id
+                     WHERE engaged_share.person_id = engaged.id
+                       AND engaged_share.workspace_id = #{workspaceId}
+                   ))
+                WHERE edge.workspace_id = #{workspaceId}
+                  AND edge.strength &gt;= #{strongEdge}
+                  AND edge.source_person_id &lt;&gt; edge.target_person_id
+                  AND EXISTS (
+                    SELECT 1 FROM activity engaged_activity
+                    WHERE engaged_activity.workspace_id = #{workspaceId}
+                      AND engaged_activity.person_id = engaged.id
+                    UNION ALL
+                    SELECT 1 FROM note engaged_note
+                    WHERE engaged_note.workspace_id = #{workspaceId}
+                      AND engaged_note.visibility = 'workspace'
+                      AND engaged_note.person_id = engaged.id
+                    UNION ALL
+                    SELECT 1 FROM task engaged_task
+                    WHERE engaged_task.workspace_id = #{workspaceId}
+                      AND engaged_task.person_id = engaged.id
+                  )
+                  AND NOT EXISTS (
+                    SELECT 1 FROM activity user_activity
+                    WHERE user_activity.workspace_id = #{workspaceId}
+                      AND user_activity.created_by_id = #{userId}
+                      AND (user_activity.person_id IS NULL OR EXISTS (
+                        SELECT 1 FROM person processable
+                        WHERE processable.id = user_activity.person_id
+                          AND processable.suspended_at IS NULL
+                          AND processable.provision_ceased_at IS NULL
+                          AND processable.archived_at IS NULL
+                          AND (processable.workspace_id = #{workspaceId}
+                            OR EXISTS (
+                              SELECT 1 FROM person_share processable_share
+                              JOIN workspace processable_viewer_workspace
+                                ON processable_viewer_workspace.id = processable_share.workspace_id
+                              JOIN workspace processable_owner_workspace
+                                ON processable_owner_workspace.id = processable.workspace_id
+                               AND processable_owner_workspace.org_id = processable_viewer_workspace.org_id
+                              WHERE processable_share.person_id = processable.id
+                                AND processable_share.workspace_id = #{workspaceId}
+                            ))
+                      ))
+                      AND (
+                        user_activity.person_id IN (
+                          SELECT company_person.id FROM person company_person
+                          WHERE company_person.workspace_id = #{workspaceId}
+                            AND company_person.company_id = candidate.company_id
+                            AND company_person.suspended_at IS NULL
+                            AND company_person.provision_ceased_at IS NULL
+                            AND company_person.archived_at IS NULL
+                        )
+                        OR user_activity.deal_id IN (
+                          SELECT company_deal.id FROM deal company_deal
+                          WHERE company_deal.workspace_id = #{workspaceId}
+                            AND company_deal.company_id = candidate.company_id
+                        )
+                      )
+                  )
+            </select>
+
+            <sql id="stringOp">
+                <choose>
+                    <when test="op == 'equals'">AND ${col} = #{value}</when>
+                    <when test="op == 'contains' or op == 'starts_with'">AND ${col} LIKE #{pattern}</when>
+                    <when test="op == 'is_set'">AND ${col} IS NOT NULL AND ${col} &lt;&gt; ''</when>
+                    <otherwise>AND 1 = 0</otherwise>
+                </choose>
+            </sql>
+
+            <sql id="numberOp">
+                <choose>
+                    <when test="op == 'equals'">AND ${col} = #{number}</when>
+                    <when test="op == 'gt'">AND ${col} &gt; #{number}</when>
+                    <when test="op == 'gte'">AND ${col} &gt;= #{number}</when>
+                    <when test="op == 'lt'">AND ${col} &lt; #{number}</when>
+                    <when test="op == 'lte'">AND ${col} &lt;= #{number}</when>
+                    <otherwise>AND 1 = 0</otherwise>
+                </choose>
+            </sql>
+
+            <sql id="idOp">
+                <choose>
+                    <when test="op == 'is'">AND ${col} = #{id}</when>
+                    <when test="op == 'in'">
+                        AND ${col} IN
+                        <foreach item="v" collection="ids" open="(" separator="," close=")">#{v}</foreach>
+                    </when>
+                    <otherwise>AND 1 = 0</otherwise>
+                </choose>
+            </sql>
+
+            <sql id="dateOp">
+                <choose>
+                    <when test="op == 'before'">AND ${col} IS NOT NULL AND ${col} &lt; #{value}</when>
+                    <when test="op == 'after'">AND ${col} IS NOT NULL AND ${col} &gt; #{value}</when>
+                    <when test="op == 'within_days'">AND ${col} IS NOT NULL AND ${col} &gt;= #{dateFrom} AND ${col} &lt;= #{dateTo}</when>
+                    <when test="op == 'is_set'">AND ${col} IS NOT NULL</when>
+                    <otherwise>AND 1 = 0</otherwise>
+                </choose>
+            </sql>
+
+            <sql id="personCompanyOp">
+                <include refid="idOp"><property name="col" value="company_id"/></include>
+                AND EXISTS (
+                    SELECT 1 FROM company visible_company
+                    WHERE visible_company.id = person.company_id
+                      AND visible_company.archived_at IS NULL
+                      AND (visible_company.workspace_id = #{workspaceId}
+                        OR EXISTS (
+                            SELECT 1 FROM company_share visible_share
+                            JOIN workspace viewer_workspace ON viewer_workspace.id = visible_share.workspace_id
+                            JOIN workspace owner_workspace
+                              ON owner_workspace.id = visible_company.workspace_id
+                             AND owner_workspace.org_id = viewer_workspace.org_id
+                            WHERE visible_share.company_id = visible_company.id
+                              AND visible_share.workspace_id = #{workspaceId}
+                        ))
+                )
+            </sql>
+
+            <select id="personIdsMatching" resultType="int">
+                SELECT id FROM person
+                WHERE workspace_id = #{workspaceId} AND suspended_at IS NULL
+                  AND provision_ceased_at IS NULL AND archived_at IS NULL
+                <if test="candidateIds != null">
+                  AND id IN
+                  <foreach item="candidateId" collection="candidateIds" open="(" separator="," close=")">
+                    #{candidateId}
+                  </foreach>
+                </if>
+                <choose>
+                    <when test="field == 'name'"><include refid="stringOp"><property name="col" value="name"/></include></when>
+                    <when test="field == 'title'"><include refid="stringOp"><property name="col" value="title"/></include></when>
+                    <when test="field == 'email'"><include refid="stringOp"><property name="col" value="email"/></include></when>
+                    <when test="field == 'phone'"><include refid="stringOp"><property name="col" value="phone"/></include></when>
+                    <when test="field == 'company'"><include refid="personCompanyOp"/></when>
+                    <when test="field == 'owner'"><include refid="idOp"><property name="col" value="owner_id"/></include></when>
+                    <when test="field == 'created'"><include refid="dateOp"><property name="col" value="created_at"/></include></when>
+                    <when test="field == 'updated'"><include refid="dateOp"><property name="col" value="updated_at"/></include></when>
+                    <when test="field == 'tag'">
+                        AND id IN (
+                            SELECT person_tag.person_id
+                            FROM person_tag
+                            JOIN tag segment_tag
+                              ON segment_tag.id = person_tag.tag_id
+                             AND segment_tag.workspace_id = #{workspaceId}
+                            WHERE person_tag.tag_id = #{id}
+                        )
+                    </when>
+                    <otherwise>AND 1 = 0</otherwise>
+                </choose>
+            </select>
+
+            <select id="personIdsMatchingIncludingRestricted" resultType="int">
+                SELECT id FROM person
+                WHERE workspace_id = #{workspaceId} AND archived_at IS NULL
+                <if test="candidateIds != null">
+                  AND id IN
+                  <foreach item="candidateId" collection="candidateIds" open="(" separator="," close=")">
+                    #{candidateId}
+                  </foreach>
+                </if>
+                <choose>
+                    <when test="field == 'name'"><include refid="stringOp"><property name="col" value="name"/></include></when>
+                    <when test="field == 'title'"><include refid="stringOp"><property name="col" value="title"/></include></when>
+                    <when test="field == 'email'"><include refid="stringOp"><property name="col" value="email"/></include></when>
+                    <when test="field == 'phone'"><include refid="stringOp"><property name="col" value="phone"/></include></when>
+                    <when test="field == 'company'"><include refid="personCompanyOp"/></when>
+                    <when test="field == 'owner'"><include refid="idOp"><property name="col" value="owner_id"/></include></when>
+                    <when test="field == 'created'"><include refid="dateOp"><property name="col" value="created_at"/></include></when>
+                    <when test="field == 'updated'"><include refid="dateOp"><property name="col" value="updated_at"/></include></when>
+                    <when test="field == 'tag'">
+                        AND id IN (
+                            SELECT person_tag.person_id
+                            FROM person_tag
+                            JOIN tag segment_tag
+                              ON segment_tag.id = person_tag.tag_id
+                             AND segment_tag.workspace_id = #{workspaceId}
+                            WHERE person_tag.tag_id = #{id}
+                        )
+                    </when>
+                    <otherwise>AND 1 = 0</otherwise>
+                </choose>
+            </select>
         </mapper>
         """;
 }

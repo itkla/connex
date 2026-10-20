@@ -102,6 +102,11 @@ public class TenantWorkScope {
         this.lifecycleOrgResolver = workspaceMapper::getOrgId;
     }
 
+    /** Whether this deployment routes tenant catalogs independently of the control catalog. */
+    public boolean isCatalogPerPlacement() {
+        return tenantCatalogResolver.isCatalogPerPlacement();
+    }
+
     /**
      * Runs control-plane work on the default catalog regardless of any routed
      * scope or override active on the thread.

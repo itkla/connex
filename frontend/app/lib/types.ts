@@ -99,6 +99,17 @@ export type ProductSearchParams = {
     q?: string;
 };
 
+/**
+ * The product export's filter: the catalog search plus the products browser's facets. Values are
+ * the browser's own facet keys (`one_time`/`recurring`, `true`/`false`, `bounded`/`__empty__`),
+ * matched exactly; the server rejects anything else.
+ */
+export type ProductExportParams = ProductSearchParams & {
+    billingFrequency?: string[];
+    active?: string[];
+    effectiveDates?: string[];
+};
+
 export type ImportDuplicateAction = 'fill_empty' | 'skip' | 'overwrite';
 
 export type ImportColumnMapping = {

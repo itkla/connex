@@ -73,6 +73,7 @@ class WarmthReconciliationIntegrationTest {
     @Autowired private CompanyMapper companyMapper;
     @Autowired private DealMapper dealMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
     @Autowired private NoteMapper noteMapper;
     @Autowired private PersonMapper personMapper;
     @Autowired private PipelineMapper pipelineMapper;
@@ -281,7 +282,8 @@ class WarmthReconciliationIntegrationTest {
         LocalDateTime reference = LocalDateTime.of(2026, 6, 30, 0, 0);
         Instant asOf = reference.toInstant(ZoneOffset.UTC);
         ScoringService service = new ScoringService(personMapper, companyMapper, dealMapper,
-            activityMapper, noteMapper, taskMapper, Clock.fixed(asOf, ZoneOffset.UTC));
+            activityMapper, noteMapper, taskMapper, Clock.fixed(asOf, ZoneOffset.UTC),
+            recordVisibilityScopeControlAccess);
         Company company = company("Boundary");
         Person person = person("Boundary", company);
         Pipeline pipeline = pipeline();

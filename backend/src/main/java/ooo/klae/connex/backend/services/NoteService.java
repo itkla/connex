@@ -18,6 +18,7 @@ import tools.jackson.databind.ObjectMapper;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.DealMapper;
@@ -54,6 +55,7 @@ public class NoteService {
     private final NotificationDelivery notificationDelivery;
     private final NotificationPreferenceService notificationPreferenceService;
     private final ObjectMapper objectMapper;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     private static final Set<String> AUDIT_FIELDS = Set.of("content", "title", "visibility");
     private static final Set<String> PRIVATE_AUDIT_FIELDS = Set.of("visibility");
@@ -67,21 +69,8 @@ public class NoteService {
     private static final int SNIPPET_LENGTH = 140;
     private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
-    public List<Note> getAllNotes() {
-        return getNotesPage(25, 0);
-    }
-
-    public List<Note> getNotesPage(int limit, int offset) {
-        return getNotesPage(limit, offset, false);
-    }
-
-    /** Returns a bounded note page, optionally excluding every private note. */
-    public List<Note> getNotesPage(int limit, int offset, boolean workspaceOnly) {
-        return getNotesPage(null, null, null, limit, offset, workspaceOnly);
-    }
-
-    /** Returns a bounded, searchable, and sortable note page. */
-    public List<Note> getNotesPage(
+    /** Returns a bounded note page and total using one visibility scope and author snapshot. */
+    public PageResponse<Note> getNotesPage(
             String query,
             String sort,
             String dir,
@@ -89,37 +78,25 @@ public class NoteService {
             int offset,
             boolean workspaceOnly) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId)
+            .workspaceIdsJson();
         List<Integer> authorIds = matchingAuthorIds(workspaceId, query);
         String sortKey = canonicalPageSort(sort);
         String direction = canonicalPageDirection(sortKey, dir);
+        List<Note> notes;
+        long total;
         if (workspaceOnly) {
-            return referenceService.hydrate(
+            notes = referenceService.hydrate(
                 workspaceId, noteMapper.getWorkspaceNotesPage(
-                    workspaceId, query, authorIds, sortKey, direction, limit, offset));
+                    workspaceId, orgWorkspaceIdsJson, query, authorIds, sortKey, direction, limit, offset));
+            total = noteMapper.countWorkspaceNotes(workspaceId, orgWorkspaceIdsJson, query, authorIds);
+        } else {
+            int currentUserId = workspaceService.getCurrentUserId();
+            notes = referenceService.hydrate(workspaceId, noteMapper.getVisibleNotesPage(
+                workspaceId, orgWorkspaceIdsJson, currentUserId, query, authorIds, sortKey, direction, limit, offset));
+            total = noteMapper.countVisibleNotes(workspaceId, orgWorkspaceIdsJson, currentUserId, query, authorIds);
         }
-        int currentUserId = workspaceService.getCurrentUserId();
-        return referenceService.hydrate(workspaceId, noteMapper.getVisibleNotesPage(
-            workspaceId, currentUserId, query, authorIds, sortKey, direction, limit, offset));
-    }
-
-    public long countNotes() {
-        return countNotes(false);
-    }
-
-    /** Counts notes in the active workspace, optionally excluding every private note. */
-    public long countNotes(boolean workspaceOnly) {
-        return countNotes(null, workspaceOnly);
-    }
-
-    /** Counts notes matching the same visibility and query contract as the paged list. */
-    public long countNotes(String query, boolean workspaceOnly) {
-        int workspaceId = workspaceService.getCurrentWorkspaceId();
-        List<Integer> authorIds = matchingAuthorIds(workspaceId, query);
-        if (workspaceOnly) {
-            return noteMapper.countWorkspaceNotes(workspaceId, query, authorIds);
-        }
-        int currentUserId = workspaceService.getCurrentUserId();
-        return noteMapper.countVisibleNotes(workspaceId, currentUserId, query, authorIds);
+        return new PageResponse<>(notes, total);
     }
 
     /** Returns a bounded filtered page with previews derived only after reader-specific redaction. */

@@ -8,13 +8,17 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.List;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService;
 import ooo.klae.connex.backend.beans.AiAssistantPrivacyOperation;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AiAssistantPrivacyControlMapper;
 import ooo.klae.connex.backend.services.AiAssistantService;
 
@@ -89,6 +93,58 @@ class AiAssistantPrivacyResidualIntegrationTest extends AbstractAiAgentPrivacyIn
         assertEquals(0, jdbc.queryForObject("SELECT organization_privacy_generation FROM ai_chat_session WHERE workspace_id=? AND id=?", Long.class, workspace.getId(), restored));
         finish(bootstrap);
         assertEquals(0, privacyMapper.allChatResidualCount(workspace.getId(), 0, bootstrap));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"bootstrap,missing", "bootstrap,runs", "bootstrap,verify",
+            "restriction,missing", "restriction,runs", "restriction,verify"})
+    void restoreBeforeCleanupReopensVerifiedControlEvidence(String reason, String phase) {
+        String key = "bootstrap".equals(reason)
+                ? control.getFence(workspace.getOrgId()).getBootstrapOperationId()
+                : invalidateAll().getOperationKey();
+        finish(key);
+        var accepted = control.getOperation(workspace.getOrgId(), key);
+        assertNotNull(accepted.getCompletedAt());
+        assertEquals(0, control.countUnverified(workspace.getOrgId(), key));
+        if ("bootstrap".equals(reason)) {
+            assertNotNull(control.getFence(workspace.getOrgId()).getBootstrapCompletedAt());
+        }
+        int restored = restoreHistoricalSession();
+        if ("missing".equals(phase)) {
+            jdbc.update("DELETE FROM ai_agent_privacy_work WHERE workspace_id=? AND operation_key=?",
+                    workspace.getId(), key);
+        } else {
+            jdbc.update("UPDATE ai_agent_privacy_work SET phase=?,completed_at=NULL,verified_at=NULL,last_residual_count=NULL"
+                    + " WHERE workspace_id=? AND operation_key=?", phase, workspace.getId(), key);
+        }
+        assertNotNull(chatMapper.getRetainedSessionById(workspace.getId(), currentUser.getId(), restored,
+                List.of(currentUser.getId()), 0));
+        assertThrows(ResourceNotFoundException.class, () -> assistant.getRetained(restored, 1, 100));
+
+        privacyService.initialize(workspace.getId());
+
+        assertEquals(1, control.countUnverified(workspace.getOrgId(), key));
+        assertNull(control.getOperation(workspace.getOrgId(), key).getCompletedAt());
+        if ("bootstrap".equals(reason)) {
+            assertNull(control.getFence(workspace.getOrgId()).getBootstrapCompletedAt());
+        }
+        assertEquals(Boolean.FALSE,
+                transaction().execute(status -> organizationPrivacy.reconcileCompletion(workspace.getOrgId(), key)));
+        assertThrows(ResourceNotFoundException.class, () -> assistant.getRetained(restored, 1, 100));
+        var resumed = privacyMapper.getWork(workspace.getId(), key);
+        assertNotEquals("complete", resumed.getPhase());
+        assertEquals(accepted.getCutoffGeneration(), resumed.getCutoffGeneration());
+        assertEquals(accepted.getInvalidatedGeneration(), resumed.getInvalidatedGeneration());
+
+        finish(key);
+
+        assertEquals(0, privacyMapper.allChatResidualCount(workspace.getId(), accepted.getCutoffGeneration(), key));
+        assertNull(chatMapper.getPrivacySession(workspace.getId(), restored));
+        assertEquals(0, control.countUnverified(workspace.getOrgId(), key));
+        assertNotNull(control.getOperation(workspace.getOrgId(), key).getCompletedAt());
+        if ("bootstrap".equals(reason)) {
+            assertNotNull(control.getFence(workspace.getOrgId()).getBootstrapCompletedAt());
+        }
     }
 
     @Test

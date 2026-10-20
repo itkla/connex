@@ -80,7 +80,7 @@
             "exportCurrentCompanies": "Export current company view",
             "exportCurrentContacts": "Export current contact view",
             "exportCurrentDeals": "Export current deal view",
-            "exportCurrentProducts": "Export products matching this search"
+            "exportCurrentProducts": "Export current product view"
         },
         "description": {
             "record": {
@@ -90,7 +90,7 @@
                 "exportCurrentCompanies": "Download all companies matching this view's search, filters, and segment.",
                 "exportCurrentContacts": "Download all contacts matching this view's search and filters.",
                 "exportCurrentDeals": "Download all deals matching this view's search, filters, and currency.",
-                "exportCurrentProducts": "Download every product matching this view's search. The Billing, Availability, and Effective dates filters aren't applied."
+                "exportCurrentProducts": "Download all products matching this view's search and filters."
             }
         },
         "feedback": {
@@ -146,7 +146,7 @@
                 "exportCurrentCompanies": "export companies, download companies, csv, current view, filtered companies, segment",
                 "exportCurrentContacts": "export contacts, download contacts, people, persons, csv, current view, filtered contacts",
                 "exportCurrentDeals": "export deals, download deals, opportunities, csv, current view, filtered deals",
-                "exportCurrentProducts": "export products, download products, catalog, services, csv, search results"
+                "exportCurrentProducts": "export products, download products, catalog, services, csv, current view, filtered products"
             }
         }
     }

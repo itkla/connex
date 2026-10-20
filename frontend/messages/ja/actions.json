@@ -80,7 +80,7 @@
             "exportCurrentCompanies": "現在の会社ビューをエクスポート",
             "exportCurrentContacts": "現在の連絡先ビューをエクスポート",
             "exportCurrentDeals": "現在の案件ビューをエクスポート",
-            "exportCurrentProducts": "この検索に一致する商品をエクスポート"
+            "exportCurrentProducts": "現在の商品ビューをエクスポート"
         },
         "description": {
             "record": {
@@ -90,7 +90,7 @@
                 "exportCurrentCompanies": "このビューの検索・フィルター・セグメントに一致する会社をすべてダウンロードします。",
                 "exportCurrentContacts": "このビューの検索とフィルターに一致する連絡先をすべてダウンロードします。",
                 "exportCurrentDeals": "このビューの検索・フィルター・通貨に一致する案件をすべてダウンロードします。",
-                "exportCurrentProducts": "このビューの検索に一致する商品をすべてダウンロードします。配信種別・提供状況・有効期間の絞り込みは反映されません。"
+                "exportCurrentProducts": "このビューの検索・フィルターに一致する商品をすべてダウンロードします。"
             }
         },
         "feedback": {
@@ -146,7 +146,7 @@
                 "exportCurrentCompanies": "会社をエクスポート, 会社をダウンロード, 企業, csv, 現在のビュー, フィルター, 絞り込み, セグメント",
                 "exportCurrentContacts": "連絡先をエクスポート, 連絡先をダウンロード, コンタクト, 人, 担当者, csv, 現在のビュー, フィルター, 絞り込み",
                 "exportCurrentDeals": "案件をエクスポート, 案件をダウンロード, 商談, csv, 現在のビュー, フィルター, 絞り込み",
-                "exportCurrentProducts": "商品をエクスポート, 商品をダウンロード, カタログ, サービス, csv, 検索結果"
+                "exportCurrentProducts": "商品をエクスポート, 商品をダウンロード, カタログ, サービス, csv, 現在のビュー, フィルター, 絞り込み"
             }
         }
     }
