@@ -28,7 +28,7 @@ import org.w3c.dom.NodeList;
  * which: every write grant now receives a trusted control-derived workspace
  * allowlist instead of joining the control table (#811), while on the read path
  * {@code AiAssistantIdentifierMapper}, {@code IdentityMapper}, {@code PersonEdgeMapper},
- * {@code IntroductionMapper} and {@code DuplicateReviewMapper} bind that allowlist — the remaining four mappers in
+ * {@code IntroductionMapper}, {@code DuplicateReviewMapper} and {@code SegmentMapper} bind that allowlist — the remaining four mappers in
  * {@code SHARE_READERS} still join the control-plane {@code workspace} table and
  * match {@code ows.org_id = vws.org_id}.
  * Note fragments are checked separately because their legacy unfiltered record ceilings and
@@ -69,7 +69,8 @@ class OrgShareCeilingArchTest {
         "mappers/IntroductionMapper.xml", Pattern.compile("FROM company_share"),
         "mappers/PersonEdgeMapper.xml", Pattern.compile("FROM (?:person|company)_share"),
         "mappers/PersonMapper.xml", Pattern.compile("FROM (?:person|company)_share"),
-        "mappers/PipelineMapper.xml", Pattern.compile("FROM pipeline_share")
+        "mappers/PipelineMapper.xml", Pattern.compile("FROM pipeline_share"),
+        "mappers/SegmentMapper.xml", Pattern.compile("FROM (?:person|company)_share")
     );
 
     @Test
@@ -83,6 +84,7 @@ class OrgShareCeilingArchTest {
                     || entry.getKey().equals("mappers/IdentityMapper.xml")
                     || entry.getKey().equals("mappers/IntroductionMapper.xml")
                     || entry.getKey().equals("mappers/DuplicateReviewMapper.xml")
+                    || entry.getKey().equals("mappers/SegmentMapper.xml")
                 ? CONTROL_DERIVED_READ_CEILING
                 : READ_CEILING;
             int ceilings = count(ceiling, xml);
@@ -205,6 +207,45 @@ class OrgShareCeilingArchTest {
         assertEquals(5, statements);
         assertEquals(6, shares);
         assertEquals(0, count(CONTROL_PLANE_WORKSPACE_TABLE, loadMapperText("mappers/ReportMapper.xml")));
+    }
+
+    @Test
+    void every_segment_share_read_binds_the_owning_workspace_to_the_unfiltered_scope() throws Exception {
+        Document document = loadMapper("mappers/SegmentMapper.xml");
+        Pattern shareRead = Pattern.compile("(?:FROM|JOIN)\\s+\\w+_share\\b", Pattern.CASE_INSENSITIVE);
+        Map<String, List<String>> owners = Map.of(
+            "companyIdsNoActivitySince", List.of("processable"),
+            "companyIdsForPersonsWithoutUserActivity", List.of("processable"),
+            "companyIdsWithWarmIntro", List.of("engaged", "processable"),
+            "personCompanyOp", List.of("visible_company"));
+        int shareReads = 0;
+        int fragments = 0;
+        NodeList children = document.getDocumentElement().getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            if (!(children.item(i) instanceof Element element)) {
+                continue;
+            }
+            String sql = element.getTextContent().replaceAll("\\s+", " ").trim();
+            int reads = count(shareRead, sql);
+            if (reads == 0) {
+                continue;
+            }
+            String id = element.getAttribute("id");
+            assertTrue(owners.containsKey(id), "Unreviewed Segment share read: " + id);
+            assertEquals(owners.get(id).size(), reads, id);
+            assertEquals(reads, count(CONTROL_DERIVED_READ_CEILING, sql), id);
+            for (String owner : owners.get(id)) {
+                Pattern ownerCeiling = Pattern.compile(
+                    "JOIN JSON_TABLE\\( #\\{orgWorkspaceIdsJson}, '\\$\\[\\*]' COLUMNS\\(id INT PATH '\\$'\\) "
+                        + "\\) org_workspace ON org_workspace\\.id = " + owner + "\\.workspace_id");
+                assertEquals(1, count(ownerCeiling, sql), id + ": " + owner);
+            }
+            shareReads += reads;
+            fragments++;
+        }
+        assertEquals(5, shareReads);
+        assertEquals(owners.size(), fragments);
+        assertEquals(0, count(CONTROL_PLANE_WORKSPACE_TABLE, loadMapperText("mappers/SegmentMapper.xml")));
     }
 
     private int count(Pattern pattern, String text) {

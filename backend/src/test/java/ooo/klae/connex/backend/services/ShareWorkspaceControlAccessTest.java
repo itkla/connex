@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
@@ -14,6 +15,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.transaction.TransactionDefinition;
@@ -48,6 +51,19 @@ class ShareWorkspaceControlAccessTest {
     void tearDown() {
         tenantContext.clear();
         TransactionSynchronizationManager.clear();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void routingModeComesFromTheResolverRatherThanThePinnedCatalog(boolean routed) {
+        when(tenantCatalogResolver.isCatalogPerPlacement()).thenReturn(routed);
+        ShareWorkspaceControlAccess controlAccess = controlAccess(new TestTransactionManager());
+
+        assertEquals(routed, controlAccess.isCatalogPerPlacement());
+        tenantContext.set(7, 900, 42, "member", "cnx_tenant");
+        assertEquals(routed, controlAccess.isCatalogPerPlacement());
+
+        verifyNoInteractions(workspaceMapper);
     }
 
     @Test

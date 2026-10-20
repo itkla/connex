@@ -56,6 +56,11 @@ public class ShareWorkspaceControlAccess {
     private final TenantContext tenantContext;
     private final PlatformTransactionManager transactionManager;
 
+    /** Whether record-visibility reads must validate a routed prepared snapshot on every call. */
+    boolean isCatalogPerPlacement() {
+        return tenantWorkScope.isCatalogPerPlacement();
+    }
+
     /**
      * Loads every workspace in the anchor workspace's organization.
      *
