@@ -114,7 +114,7 @@ class ProviderCaptureReviewServiceTest {
         PlatformTransactionManager transactionManager =
             mock(PlatformTransactionManager.class);
         RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess =
-            mock(RecordVisibilityScopeControlAccess.class);
+            ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
         DuplicateDecisionLockService duplicateDecisionLockService = mock(DuplicateDecisionLockService.class);
         when(recordVisibilityScopeControlAccess.getForWorkspace(7))
             .thenReturn(new RecordVisibilityScope(1, List.of(7)));

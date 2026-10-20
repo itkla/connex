@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -90,7 +91,7 @@ class ReportServiceScopeTest {
     private final IntroductionMapper introductions = mock(IntroductionMapper.class);
     private final PersonEdgeReadService edges = mock(PersonEdgeReadService.class);
     private final ScoringService scoring = mock(ScoringService.class);
-    private final RecordVisibilityScopeControlAccess scopes = ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
+    private final RecordVisibilityScopeControlAccess scopes = unfiltered();
     private final ReportNetworkService network = spy(new ReportNetworkService(reports, people, edges, introductions, scoring));
     private final WorkspaceService workspace = mock(WorkspaceService.class);
     private final AuthService auth = mock(AuthService.class);

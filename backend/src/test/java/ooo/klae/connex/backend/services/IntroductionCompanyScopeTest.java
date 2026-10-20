@@ -30,7 +30,7 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
 class IntroductionCompanyScopeTest {
     private final IntroductionMapper mapper = mock(IntroductionMapper.class);
     private final WorkspaceService workspaceService = mock(WorkspaceService.class);
-    private final RecordVisibilityScopeControlAccess scopes = mock(RecordVisibilityScopeControlAccess.class);
+    private final RecordVisibilityScopeControlAccess scopes = ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
     private final IntroductionService service = new IntroductionService(
         mapper, mock(UserMapper.class), mock(PersonEdgeMapper.class), mock(PersonEdgeReadService.class),
         mock(PersonMapper.class), mock(ScoringService.class), mock(WarmPathService.class), workspaceService,

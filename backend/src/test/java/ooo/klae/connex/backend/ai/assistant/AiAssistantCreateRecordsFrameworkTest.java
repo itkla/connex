@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.ai.assistant;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -210,6 +211,43 @@ class AiAssistantCreateRecordsFrameworkTest extends AbstractAiAssistantWriteTool
         assertEquals("unavailable", result.path("undo").path("status").asString());
         assertEquals("person", result.path("undo").path("entityKind").asString());
         assertFalse(result.has("verification"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"snapshot", "missing", "ordinary"})
+    void dealPreparationPropagatesScopeFailuresBeforeDuplicateErrorTranslation(String kind) throws Exception {
+        stubDeal();
+        RuntimeException failure = switch (kind) {
+            case "snapshot" -> new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException("scope mismatch");
+            case "missing" -> new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotMissingException("missing payload");
+            case "ordinary" -> new DataAccessResourceFailureException("control unavailable");
+            default -> throw new AssertionError(kind);
+        };
+        try (var fixture = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(TURN.workspaceId())) {
+            when(fixture.control.findOrganizationWorkspacesForShare(TURN.workspaceId())).thenThrow(failure);
+            AiAssistantWriteToolService service = service();
+            org.springframework.test.util.ReflectionTestUtils.setField(
+                service, "recordVisibilityScopeControlAccess", fixture.scopes);
+
+            assertSame(failure, assertThrows(RuntimeException.class,
+                () -> propose(service, "create_deal", DEAL, "company", 31)));
+
+            verify(fixture.control).findOrganizationWorkspacesForShare(TURN.workspaceId());
+            verifyNoInteractions(duplicatePreflightService, creationService);
+        }
+    }
+
+    @Test
+    void aDealDuplicateQueryFailureStillUsesTheDuplicateUnavailableRefusal() throws Exception {
+        stubDeal();
+        when(duplicatePreflightService.dealCandidatesExist(any()))
+            .thenThrow(new DataAccessResourceFailureException("duplicate query unavailable"));
+        AiAssistantWriteToolService service = service();
+
+        assertRefusal("duplicate_check_unavailable",
+            () -> propose(service, "create_deal", DEAL, "company", 31));
+
+        verifyNoInteractions(creationService);
     }
 
     @Test

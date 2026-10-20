@@ -37,7 +37,7 @@ class ProviderCaptureBodyAccessTest {
                 mock(DuplicateDecisionLockService.class),
                 mock(WorkspaceService.class),
                 mock(ProviderCaptureHistoricalBaselineService.class),
-                mock(RecordVisibilityScopeControlAccess.class));
+                ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
         ProviderCaptureItem privateItem = new ProviderCaptureItem(
             "event-1",
             "version-1",

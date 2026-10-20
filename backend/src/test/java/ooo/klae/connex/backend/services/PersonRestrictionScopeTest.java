@@ -42,7 +42,8 @@ class PersonRestrictionScopeTest {
     @Mock private DuplicateDecisionLockService duplicateLocks;
     @Mock private WorkspaceService.LockedPermissionSnapshot authority;
     @Mock private AiAgentPrivacyService privacy;
-    @Mock private RecordVisibilityScopeControlAccess scopes;
+    private final RecordVisibilityScopeControlAccess scopes =
+        ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
     @Mock private ProviderCaptureMapper capture;
     @Mock private ShareMapper shares;
     @Mock private AuditService audits;
@@ -53,6 +54,7 @@ class PersonRestrictionScopeTest {
 
     @BeforeEach
     void setUp() {
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "recordVisibilityScopeControlAccess", scopes);
         when(scopes.getForWorkspace(7)).thenReturn(
             new RecordVisibilityScopeControlAccess.RecordVisibilityScope(3, List.of(7, 8, 9)));
         person = new Person();

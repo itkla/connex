@@ -499,7 +499,7 @@ class DealRiskServiceTest extends AbstractServiceTest {
         touch(stakeholder, "2126-06-23 15:30:01");
         ScoringService actualScoring = new ScoringService(
             personMapper, companyMapper, dealMapper, activityMapper, noteMapper, taskMapper, CLOCK,
-            Mockito.mock(RecordVisibilityScopeControlAccess.class));
+            ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
         DealRiskService actualService = new DealRiskService(
             dealMapper, scopes, activityMapper, noteMapper, taskMapper, actualScoring, CLOCK);
 

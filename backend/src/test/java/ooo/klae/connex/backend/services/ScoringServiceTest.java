@@ -79,7 +79,7 @@ class ScoringServiceTest {
 
     @Test
     void emptyOrNullOnlyCompanySelectionsDoNotTouchTheScopeBoundary() {
-        var scopes = mock(RecordVisibilityScopeControlAccess.class);
+        var scopes = ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
         var companies = mock(CompanyMapper.class);
         var service = new ScoringService(mock(PersonMapper.class), companies, mock(DealMapper.class),
             mock(ActivityMapper.class), mock(NoteMapper.class), mock(TaskMapper.class), Clock.systemUTC(), scopes);

@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -73,13 +74,82 @@ class SearchServiceUnitTest {
         companies, people, deals, pipelines, tags, activities, notes, tasks, users, attachments,
         products, campaigns, reports, templates, documents, workflows, workspace, references, scopes);
 
+    @ParameterizedTest
+    @ValueSource(strings = {"activities", "tasks", "deals"})
+    void emptyCandidateGroupsKeepGuardsAndRequireTheDealScope(String type) {
+        authorize(EnumSet.allOf(Permission.class));
+        try (var fixture = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(7)) {
+            var failure = new org.springframework.dao.DataAccessResourceFailureException("control unavailable");
+            when(fixture.control.findOrganizationWorkspacesForShare(7)).thenThrow(failure);
+            SearchService reader = new SearchService(
+                companies, people, deals, pipelines, tags, activities, notes, tasks, users, attachments,
+                products, campaigns, reports, templates, documents, workflows, workspace, references, fixture.scopes);
+
+            if (type.equals("deals")) {
+                assertSame(failure, assertThrows(org.springframework.dao.DataAccessResourceFailureException.class,
+                    () -> reader.search("needle", Set.of(type))));
+                verify(fixture.control).findOrganizationWorkspacesForShare(7);
+                verifyNoMoreInteractions(fixture.control);
+                verifyNoInteractions(deals, companies, references);
+                return;
+            }
+            SearchResultsDto result = reader.search("needle", Set.of(type));
+
+            assertTrue(result.getActivities().isEmpty());
+            assertTrue(result.getTasks().isEmpty());
+            assertTrue(result.getDeals().isEmpty());
+            verifyNoInteractions(fixture.control, companies);
+            verifyNoInteractions(references);
+        }
+    }
+
+    @Test
+    void emptyDealSearchBindsOneScopeBeforeTheTenantQuery() {
+        authorize(EnumSet.allOf(Permission.class));
+        try (var fixture = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(7)) {
+            SearchService reader = new SearchService(
+                companies, people, deals, pipelines, tags, activities, notes, tasks, users, attachments,
+                products, campaigns, reports, templates, documents, workflows, workspace, references, fixture.scopes);
+
+            assertTrue(reader.search("needle", Set.of("deals")).getDeals().isEmpty());
+
+            var order = org.mockito.Mockito.inOrder(fixture.control, deals);
+            order.verify(fixture.control).findOrganizationWorkspacesForShare(7);
+            order.verify(deals).search(7, "[7,17]", "%needle%");
+            verifyNoMoreInteractions(fixture.control, deals);
+            verify(references).hydrateDeals(7, List.of());
+            verifyNoInteractions(companies, people, pipelines, notes);
+        }
+    }
+
+    @Test
+    void activityCandidatesWithoutCompanyReferencesSkipTheScope() {
+        authorize(EnumSet.allOf(Permission.class));
+        Activity activity = new Activity();
+        activity.setId(23);
+        activity.setSubject("needle activity");
+        when(activities.search(7, "%needle%", 25, 0)).thenReturn(List.of(activity));
+        when(references.hydrateActivities(7, List.of(activity))).thenReturn(List.of(activity));
+        try (var fixture = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(7)) {
+            when(fixture.control.findOrganizationWorkspacesForShare(7))
+                .thenThrow(new org.springframework.dao.DataAccessResourceFailureException("control unavailable"));
+            SearchService reader = new SearchService(
+                companies, people, deals, pipelines, tags, activities, notes, tasks, users, attachments,
+                products, campaigns, reports, templates, documents, workflows, workspace, references, fixture.scopes);
+
+            assertEquals(23, reader.search("needle", Set.of("activities")).getActivities().getFirst().getId());
+
+            verifyNoInteractions(fixture.control, companies);
+        }
+    }
+
     @Test
     void defaultSearchRunsEveryGroup() {
         authorize(EnumSet.allOf(Permission.class));
 
         service.search("needle");
 
-        verify(scopes).withWorkspaceScopeRead(eq(7), org.mockito.ArgumentMatchers.any(RecordVisibilityScopeControlAccess.RecordVisibilityScope.class), org.mockito.ArgumentMatchers.any());
+        verify(scopes).withDeferredWorkspaceScopeRead(eq(7), org.mockito.ArgumentMatchers.any());
         verify(scopes).getForWorkspace(7);
         verifyNoMoreInteractions(scopes);
         verify(companies).search(7, "[7,8]", "%needle%");
@@ -120,7 +190,7 @@ class SearchServiceUnitTest {
         verify(products).search(7, "%needle%");
         verifyNoInteractions(people, deals, pipelines, tags, activities, notes, tasks, users,
             attachments, campaigns, reports, templates, documents, workflows, references);
-        verify(scopes).withWorkspaceScopeRead(eq(7), org.mockito.ArgumentMatchers.any(RecordVisibilityScopeControlAccess.RecordVisibilityScope.class), org.mockito.ArgumentMatchers.any());
+        verify(scopes).withDeferredWorkspaceScopeRead(eq(7), org.mockito.ArgumentMatchers.any());
         verify(scopes).getForWorkspace(7);
         verifyNoMoreInteractions(scopes, companies, products);
     }
@@ -134,6 +204,7 @@ class SearchServiceUnitTest {
                 service.search("needle", Set.of(type));
                 verify(deals).search(7, "[7,8]", "%needle%");
                 verify(references).hydrateDeals(7, List.of());
+                verify(scopes).getForWorkspace(7);
             }
             case "activities" -> {
                 Activity activity = new Activity();
@@ -149,8 +220,8 @@ class SearchServiceUnitTest {
                 verify(notes).searchVisible(7, "[7,8]", "%needle%", 11, 25, 0);
                 verify(notes).getVisibleNotesPage(7, "[7,8]", 11, null, List.of(), "created", "desc", 25, 0);
                 verify(references).hydrate(7, List.of(note));
-                verify(scopes).withWorkspaceScopeRead(eq(7), org.mockito.ArgumentMatchers.any(RecordVisibilityScopeControlAccess.RecordVisibilityScope.class), org.mockito.ArgumentMatchers.any());
-        verify(scopes).getForWorkspace(7);
+                verify(scopes).withDeferredWorkspaceScopeRead(eq(7), org.mockito.ArgumentMatchers.any());
+                verify(scopes).getForWorkspace(7);
                 verifyNoMoreInteractions(scopes);
             }
             case "tasks" -> {
@@ -163,8 +234,8 @@ class SearchServiceUnitTest {
             default -> throw new AssertionError("Unexpected fixture type");
         }
         if (!type.equals("notes")) {
-            verify(scopes).getForWorkspace(7);
-            verify(scopes).withWorkspaceScopeRead(eq(7), org.mockito.ArgumentMatchers.any(RecordVisibilityScopeControlAccess.RecordVisibilityScope.class), org.mockito.ArgumentMatchers.any());
+            verify(scopes).withDeferredWorkspaceScopeRead(eq(7), org.mockito.ArgumentMatchers.any());
+            verifyNoMoreInteractions(scopes);
         }
         verifyNoMoreInteractions(allGroupDependencies());
     }
@@ -221,7 +292,7 @@ class SearchServiceUnitTest {
         SearchResultsDto result = service.search("needle", Set.of("notes"));
 
         assertTrue(result.getNotes().isEmpty());
-        verify(scopes).withWorkspaceScopeRead(eq(7), org.mockito.ArgumentMatchers.any(RecordVisibilityScopeControlAccess.RecordVisibilityScope.class), org.mockito.ArgumentMatchers.any());
+        verify(scopes).withDeferredWorkspaceScopeRead(eq(7), org.mockito.ArgumentMatchers.any());
         verify(scopes).getForWorkspace(7);
         verifyNoMoreInteractions(scopes);
         for (int offset = 0; offset < 250; offset += 25) {
@@ -250,7 +321,7 @@ class SearchServiceUnitTest {
         assertEquals(List.of(14, 13, 12, 11, 10, 9, 8, 7, 6, 5),
             result.getNotes().stream().map(note -> note.getId()).toList());
         assertEquals("needle body", result.getNotes().get(6).getContent());
-        verify(scopes).withWorkspaceScopeRead(eq(7), org.mockito.ArgumentMatchers.any(RecordVisibilityScopeControlAccess.RecordVisibilityScope.class), org.mockito.ArgumentMatchers.any());
+        verify(scopes).withDeferredWorkspaceScopeRead(eq(7), org.mockito.ArgumentMatchers.any());
         verify(scopes).getForWorkspace(7);
         verifyNoMoreInteractions(scopes);
     }

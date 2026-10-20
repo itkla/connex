@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -75,7 +76,7 @@ class ReportServiceTest {
     private final ScheduleMapper scheduleMapper = mock(ScheduleMapper.class);
     private final UserMapper userMapper = mock(UserMapper.class);
     private final AuthService authService = mock(AuthService.class);
-    private final RecordVisibilityScopeControlAccess scopeAccess = mock(RecordVisibilityScopeControlAccess.class);
+    private final RecordVisibilityScopeControlAccess scopeAccess = unfiltered();
     private ReportService service;
 
     @BeforeEach

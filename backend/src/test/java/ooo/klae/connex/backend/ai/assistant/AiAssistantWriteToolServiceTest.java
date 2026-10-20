@@ -1888,7 +1888,7 @@ class AiAssistantWriteToolServiceTest {
             assertEquals("unresolved_reference", refusal.detailReason());
         }
         clearInvocations(workspaceService, pipelineService, dealService);
-        var recordScopes = mock(ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.class);
+        var recordScopes = ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
         org.springframework.test.util.ReflectionTestUtils.setField(service, "recordVisibilityScopeControlAccess", recordScopes);
 
         assertEquals(storedOwner,

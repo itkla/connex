@@ -398,7 +398,7 @@ class AiChatCitationProjectorTest {
     }
     @Test
     void projectionsWithoutRecordTargetsNeverReadControlScopes() {
-        var scopes = mock(ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.class);
+        var scopes = ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
         org.springframework.test.util.ReflectionTestUtils.setField(projector, "recordVisibilityScopeControlAccess", scopes);
         assertEquals(Map.of(), projector.project(3, List.of()).citationsByMessage());
         AiChatMessage prose = new AiChatMessage();

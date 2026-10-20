@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import org.jspecify.annotations.Nullable;
+
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.nio.ByteBuffer;
@@ -205,13 +207,11 @@ public class ImportService {
      */
     @RequirePermission(Permission.PERSON_CREATE)
     public ImportPreviewResult previewPersons(ImportRequest request) {
-        int workspaceId = workspaceService.getCurrentWorkspaceId();
-        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceId, scope, () -> previewPersonsWithinVisibilityScope(request, scope));
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> previewPersonsWithinVisibilityScope(request, null));
     }
 
-    private ImportPreviewResult previewPersonsWithinVisibilityScope(ImportRequest request, RecordVisibilityScope scope) {
+    private ImportPreviewResult previewPersonsWithinVisibilityScope(ImportRequest request, @Nullable RecordVisibilityScope scope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         String action = resolveAction(request.getOnDuplicate());
         ImportAnalysis analysis =
@@ -361,7 +361,7 @@ public class ImportService {
             ImportRequest request,
             int workspaceId,
             ImportPhase phase,
-            DuplicatePreflightService.ImportCommitAdmission admission, RecordVisibilityScope scope) {
+            DuplicatePreflightService.ImportCommitAdmission admission, @Nullable RecordVisibilityScope scope) {
         return analyzePersons(
             request,
             workspaceId,
@@ -375,7 +375,7 @@ public class ImportService {
             int workspaceId,
             ImportPhase phase,
             DuplicatePreflightService.ImportCommitAdmission admission,
-            String reviewContext, RecordVisibilityScope scope) {
+            String reviewContext, @Nullable RecordVisibilityScope scope) {
         Map<String, ColumnMapping> byColumn = mappingByColumn(request.getMapping(), PERSON_FIELDS);
         Map<String, CustomFieldDefinition> defs = customDefsByColumn("person", request.getMapping());
         List<PlanRow> plan = collectRows(request, byColumn, defs, "company", null, null, null);
@@ -392,7 +392,7 @@ public class ImportService {
                 if (INVALID.equals(row.status)) continue;
                 Integer linked = links.get(row.rowIndex);
                 if (linked != null) {
-                    Person existing = getOwnedPerson(workspaceId, linked, scope.workspaceIdsJson());
+                    Person existing = getOwnedPerson(workspaceId, linked, scope);
                     if (existing == null) {
                         fail(row, "Linked contact #" + linked + " not found");
                         continue;
@@ -421,7 +421,7 @@ public class ImportService {
             applyCompanyDependencyFailures(
                 mutations,
                 row -> personCompanyDependencyRequired(
-                    workspaceId, row, action, scope.workspaceIdsJson()));
+                    workspaceId, row, action, scope));
             return new ImportAnalysis(plan, mutations, reviewProof);
         } catch (RuntimeException exception) {
             cancelPreviewAnalysis(phase, reviewProof);
@@ -493,15 +493,17 @@ public class ImportService {
             || customChanged;
     }
 
-    private Person getOwnedPerson(int workspaceId, int personId, String personWorkspaceIdsJson) {
+    private Person getOwnedPerson(int workspaceId, int personId, @Nullable RecordVisibilityScope scope) {
         if (!personMapper.existsOwned(workspaceId, personId)) return null;
+        String personWorkspaceIdsJson = (scope == null
+            ? recordVisibilityScopeControlAccess.getForWorkspace(workspaceId) : scope).workspaceIdsJson();
         return personMapper.getPersonById(workspaceId, personWorkspaceIdsJson, personId);
     }
 
     private boolean personCompanyDependencyRequired(
             int workspaceId,
             PlanRow row,
-            String action, String personWorkspaceIdsJson) {
+            String action, @Nullable RecordVisibilityScope scope) {
         if (row.companyName == null || !willWrite(row, action)) {
             return false;
         }
@@ -511,7 +513,7 @@ public class ImportService {
         if (row.matchedId == null) {
             return true;
         }
-        Person existing = getOwnedPerson(workspaceId, row.matchedId, personWorkspaceIdsJson);
+        Person existing = getOwnedPerson(workspaceId, row.matchedId, scope);
         return existing == null || existing.getCompany() == null;
     }
 
@@ -576,16 +578,15 @@ public class ImportService {
      */
     @RequirePermission(Permission.COMPANY_CREATE)
     public ImportPreviewResult previewCompanies(ImportRequest request) {
-        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> previewCompaniesWithinVisibilityScope(request, resolvedVisibilityScope));
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> previewCompaniesWithinVisibilityScope(request));
     }
 
-    private ImportPreviewResult previewCompaniesWithinVisibilityScope(ImportRequest request, RecordVisibilityScope operationVisibilityScope) {
+    private ImportPreviewResult previewCompaniesWithinVisibilityScope(ImportRequest request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         String action = resolveAction(request.getOnDuplicate());
         ImportAnalysis analysis =
-            analyzeCompanies(request, workspaceId, ImportPhase.PREVIEW, null, operationVisibilityScope);
+            analyzeCompanies(request, workspaceId, ImportPhase.PREVIEW, null, null);
         List<PlanRow> plan = analysis.plan();
         try {
             preflightPreview(
@@ -717,7 +718,7 @@ public class ImportService {
             ImportRequest request,
             int workspaceId,
             ImportPhase phase,
-            DuplicatePreflightService.ImportCommitAdmission admission, RecordVisibilityScope operationVisibilityScope) {
+            DuplicatePreflightService.ImportCommitAdmission admission, @Nullable RecordVisibilityScope operationVisibilityScope) {
         return analyzeCompanies(
             request,
             workspaceId,
@@ -731,7 +732,7 @@ public class ImportService {
             int workspaceId,
             ImportPhase phase,
             DuplicatePreflightService.ImportCommitAdmission admission,
-            String reviewContext, RecordVisibilityScope operationVisibilityScope) {
+            String reviewContext, @Nullable RecordVisibilityScope operationVisibilityScope) {
         Map<String, ColumnMapping> byColumn = mappingByColumn(request.getMapping(), COMPANY_FIELDS);
         Map<String, CustomFieldDefinition> defs = customDefsByColumn("company", request.getMapping());
         List<PlanRow> plan = collectRows(request, byColumn, defs, null, null, null, null);
@@ -833,9 +834,11 @@ public class ImportService {
             || customChanged;
     }
 
-    private Company getOwnedCompany(int workspaceId, int companyId, RecordVisibilityScope operationVisibilityScope) {
+    private Company getOwnedCompany(int workspaceId, int companyId, @Nullable RecordVisibilityScope operationVisibilityScope) {
         if (!companyMapper.existsOwned(workspaceId, companyId)) return null;
-        return companyMapper.getCompanyById(workspaceId, operationVisibilityScope.workspaceIdsJson(), companyId);
+        return companyMapper.getCompanyById(workspaceId, (operationVisibilityScope == null
+            ? recordVisibilityScopeControlAccess.getForWorkspace(workspaceId)
+            : operationVisibilityScope).workspaceIdsJson(), companyId);
     }
 
     private String applyCompanyDuplicatePreflight(
@@ -1193,7 +1196,7 @@ public class ImportService {
             int workspaceId,
             ImportPhase phase,
             DuplicatePreflightService.ImportCommitAdmission admission,
-            String reviewContext, RecordVisibilityScope scope) {
+            String reviewContext, @Nullable RecordVisibilityScope scope) {
         Map<String, ColumnMapping> byColumn = mappingByColumn(request.getMapping(), DEAL_FIELDS);
         Map<String, CustomFieldDefinition> defs = customDefsByColumn("deal", request.getMapping());
         List<PlanRow> plan = collectRows(request, byColumn, defs, "company", "pipeline", "stage", "people");

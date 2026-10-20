@@ -1037,7 +1037,7 @@ class AiAssistantToolExecutorTest {
 
     @Test
     void emptyContextAndTenantFreeTodosNeverTouchTheScopeBoundary() throws Exception {
-        var scopes = mock(ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.class);
+        var scopes = ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
         org.springframework.test.util.ReflectionTestUtils.setField(executor, "recordVisibilityScopeControlAccess", scopes);
         assertEquals(List.of(), executor.pageContext(List.of(), new AiChatResourceRegistry()).data().get("records"));
         assertEquals(List.of(), executor.pageContext(

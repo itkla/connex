@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import org.jspecify.annotations.Nullable;
+
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -831,18 +833,21 @@ public class DealService {
     }
 
     public DealTopDto getTopDeals(String currency, MemberScope memberScope) {
-        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
-        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> getTopDealsWithinVisibilityScope(currency, memberScope, resolvedVisibilityScope));
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceService.getCurrentWorkspaceId(), () -> getTopDealsWithinVisibilityScope(currency, memberScope));
     }
 
-    private DealTopDto getTopDealsWithinVisibilityScope(String currency, MemberScope memberScope, RecordVisibilityScope operationVisibilityScope) {
+    private DealTopDto getTopDealsWithinVisibilityScope(String currency, MemberScope memberScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        String orgWorkspaceIdsJson = operationVisibilityScope.workspaceIdsJson();
-        List<DealSummaryDto> topOpen = dealMapper.topOpenDeals(workspaceId, currency, memberScope).stream()
+        List<Deal> open = dealMapper.topOpenDeals(workspaceId, currency, memberScope);
+        List<Deal> won = dealMapper.topWonDeals(workspaceId, currency, memberScope);
+        String orgWorkspaceIdsJson = java.util.stream.Stream.concat(open.stream(), won.stream())
+            .anyMatch(DealService::summaryNeedsVisibilityScope)
+                ? recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson() : null;
+        List<DealSummaryDto> topOpen = open.stream()
             .map(deal -> toDealSummary(workspaceId, orgWorkspaceIdsJson, deal))
             .toList();
-        List<DealSummaryDto> topWon = dealMapper.topWonDeals(workspaceId, currency, memberScope).stream()
+        List<DealSummaryDto> topWon = won.stream()
             .map(deal -> toDealSummary(workspaceId, orgWorkspaceIdsJson, deal))
             .toList();
         return new DealTopDto(topOpen, topWon);
@@ -1063,21 +1068,25 @@ public class DealService {
      * @return the workspace-scoped {@link DealSummaryDto}
      */
     public DealSummaryDto getDealSummary(int id) {
-        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
-        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> getDealSummaryWithinVisibilityScope(id, resolvedVisibilityScope));
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceService.getCurrentWorkspaceId(), () -> getDealSummaryWithinVisibilityScope(id));
     }
 
-    private DealSummaryDto getDealSummaryWithinVisibilityScope(int id, RecordVisibilityScope operationVisibilityScope) {
+    private DealSummaryDto getDealSummaryWithinVisibilityScope(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, id);
         if (deal == null) throw new ResourceNotFoundException("Deal not found");
 
-        String orgWorkspaceIdsJson = operationVisibilityScope.workspaceIdsJson();
+        String orgWorkspaceIdsJson = summaryNeedsVisibilityScope(deal)
+            ? recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson() : null;
         return toDealSummary(workspaceId, orgWorkspaceIdsJson, deal);
     }
 
-    private DealSummaryDto toDealSummary(int workspaceId, String orgWorkspaceIdsJson, Deal deal) {
+    private static boolean summaryNeedsVisibilityScope(Deal deal) {
+        return deal.getPipelineId() != null || deal.getStageId() != null || deal.getCompanyId() != null;
+    }
+
+    private DealSummaryDto toDealSummary(int workspaceId, @Nullable String orgWorkspaceIdsJson, Deal deal) {
         String status = deal.getWon() == null ? "open" : deal.getWon() ? "won" : "lost";
         String pipelineName = null;
         if (deal.getPipelineId() != null) {

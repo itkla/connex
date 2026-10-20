@@ -22,7 +22,7 @@ class SegmentServiceCatalogTest {
         mock(WorkspaceService.class), mock(AuthService.class), mock(ScoringService.class),
         mock(DealRiskService.class), mock(SegmentMapper.class), mock(PersonEdgeReadService.class),
         mock(PersonMapper.class), mock(TagMapper.class), new SegmentCatalog(),
-        mock(RecordVisibilityScopeControlAccess.class));
+        ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
 
     @Test
     void catalog_company_exposesFieldsPredicatesAndLimits() {

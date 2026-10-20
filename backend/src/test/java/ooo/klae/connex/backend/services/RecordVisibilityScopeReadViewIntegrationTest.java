@@ -171,7 +171,8 @@ class RecordVisibilityScopeReadViewIntegrationTest {
         BigDecimal original = new BigDecimal("100.00");
         BigDecimal requested = changeValue ? new BigDecimal("125.00") : original;
         String reason = "Discuss [" + company.getName() + "](company:" + company.getId() + ")";
-        jdbc.update("UPDATE deal SET value = ?, closed_reason = ? WHERE workspace_id = ? AND id = ?",
+        jdbc.update("UPDATE deal SET value = ?, closed_at = CURRENT_TIMESTAMP, won = FALSE, closed_reason = ? "
+            + "WHERE workspace_id = ? AND id = ?",
             original, reason, viewer.getId(), deal.getId());
         var reference = new EntityReference();
         reference.setWorkspaceId(viewer.getId());

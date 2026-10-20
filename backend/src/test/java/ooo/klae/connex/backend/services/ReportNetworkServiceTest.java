@@ -373,7 +373,7 @@ class ReportNetworkServiceTest {
         PersonEdgeReadService edgeReader = mock(PersonEdgeReadService.class);
         IntroductionMapper introductionMapper = mock(IntroductionMapper.class);
         ScoringService scoringService = mock(ScoringService.class);
-        RecordVisibilityScopeControlAccess scopeAccess = mock(RecordVisibilityScopeControlAccess.class);
+        RecordVisibilityScopeControlAccess scopeAccess = ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
         ReportNetworkService service = new ReportNetworkService(
                 reportMapper, personMapper, edgeReader, introductionMapper, scoringService);
         List<IntroCandidatePerson> candidates = new ArrayList<>();

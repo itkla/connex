@@ -168,7 +168,7 @@ public class AiChatMemoryService {
                     budget, 0, 0, nativeTools, capabilities.parallelToolCalls());
         }
         AiChatMessage retainedInitiatingMessage = initiatingMessage;
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(turn.workspaceId(), () -> compact(
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(turn.workspaceId(), () -> compact(
                 turn, context, deadline, ownershipGuard, budget, nativeTools,
                 capabilities.parallelToolCalls(), recent, retainedInitiatingMessage, summary,
                 summaryThroughSeq, dialogue));

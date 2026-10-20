@@ -340,13 +340,13 @@ public class PersonService {
      * Retrieves a workspace-scoped {@code Person} by ID, throwing if absent.
      */
     public Person getPersonById(int id) {
-        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
-        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceService.getCurrentWorkspaceId(), scope, () -> getPersonByIdWithinVisibilityScope(id, scope));
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceService.getCurrentWorkspaceId(), () -> getPersonByIdWithinVisibilityScope(id));
     }
 
-    private Person getPersonByIdWithinVisibilityScope(int id, RecordVisibilityScope scope) {
+    private Person getPersonByIdWithinVisibilityScope(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         Person person = personMapper.getPersonById(workspaceId, scope.workspaceIdsJson(), id);
         if (person == null) throw new ResourceNotFoundException("Contact not found");
         Person hydrated = hydrateScopedRelationships(person, workspaceId, scope);

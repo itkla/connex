@@ -1,6 +1,5 @@
 package ooo.klae.connex.backend.services;
 
-import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -78,18 +77,17 @@ public class TagService {
      * Retrieves a workspace-scoped {@code Tag} by ID, throwing if absent.
      */
     public Tag getTagById(int id) {
-        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
-        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> getTagByIdWithinVisibilityScope(id, resolvedVisibilityScope));
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceService.getCurrentWorkspaceId(), () -> getTagByIdWithinVisibilityScope(id));
     }
 
-    private Tag getTagByIdWithinVisibilityScope(int id, RecordVisibilityScope operationVisibilityScope) {
+    private Tag getTagByIdWithinVisibilityScope(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Tag tag = tagMapper.getTagById(workspaceId, id);
         if (tag == null) throw new ResourceNotFoundException("Tag not found with id: " + id);
-        tag.setPeople(personMapper.getPersonsByTagId(workspaceId, operationVisibilityScope.workspaceIdsJson(), id).toArray(Person[]::new));
-        tag.setCompanies(companyMapper.getCompaniesByTagId(workspaceId,
-            operationVisibilityScope.workspaceIdsJson(), id).toArray(Company[]::new));
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        tag.setPeople(personMapper.getPersonsByTagId(workspaceId, orgWorkspaceIdsJson, id).toArray(Person[]::new));
+        tag.setCompanies(companyMapper.getCompaniesByTagId(workspaceId, orgWorkspaceIdsJson, id).toArray(Company[]::new));
         tag.setDeals(dealMapper.getDealsByTagId(workspaceId, id).toArray(Deal[]::new));
         return tag;
     }
@@ -165,7 +163,7 @@ public class TagService {
      * Retrieves the deals labelled with a tag, in the active workspace.
      */
     public List<Deal> getDealsByTagId(int tagId) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
             workspaceService.getCurrentWorkspaceId(), () -> getDealsByTagIdWithinVisibilityScope(tagId));
     }
 
@@ -189,15 +187,14 @@ public class TagService {
      * Retrieves the companies labelled with a tag, in the active workspace.
      */
     public List<Company> getCompaniesByTagId(int tagId) {
-        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
-        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> getCompaniesByTagIdWithinVisibilityScope(tagId, resolvedVisibilityScope));
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceService.getCurrentWorkspaceId(), () -> getCompaniesByTagIdWithinVisibilityScope(tagId));
     }
 
-    private List<Company> getCompaniesByTagIdWithinVisibilityScope(int tagId, RecordVisibilityScope operationVisibilityScope) {
+    private List<Company> getCompaniesByTagIdWithinVisibilityScope(int tagId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requireTag(workspaceId, tagId);
-        return companyMapper.getCompaniesByTagId(workspaceId, operationVisibilityScope.workspaceIdsJson(), tagId);
+        return companyMapper.getCompaniesByTagId(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), tagId);
     }
 
     /**

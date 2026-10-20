@@ -80,7 +80,8 @@ class InteractionHistoryImportServiceTest {
     @Mock private TaskMapper taskMapper;
     @Mock private NotificationReconciliationService notificationReconciliationService;
     @Mock private AuditService auditService;
-    @Mock private RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess =
+        ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
 
     private final Deque<DuplicatePreflightService.ImportPreviewSession> previews =
         new ArrayDeque<>();

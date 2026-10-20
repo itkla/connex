@@ -43,7 +43,7 @@ class PersonRestrictionEpochTest {
             mock(DuplicateDecisionLockService.class);
     private final ProviderCaptureMapper providerCaptureMapper = mock(ProviderCaptureMapper.class);
     private final AiAgentPrivacyService restrictionEpoch = mock(AiAgentPrivacyService.class);
-    private final RecordVisibilityScopeControlAccess scopeAccess = mock(RecordVisibilityScopeControlAccess.class);
+    private final RecordVisibilityScopeControlAccess scopeAccess = ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
     private final PersonService personService = new PersonService(
             personMapper,
             mock(ShareMapper.class),

@@ -341,8 +341,8 @@ class CompanyOperationScopeTest {
         assertArrayEquals(companyRows.toArray(), tag.getCompanies());
         assertArrayEquals(dealRows.toArray(), tag.getDeals());
         var order = inOrder(control, tags, people, companies, deals);
-        order.verify(control).findOrganizationWorkspacesForShare(7);
         order.verify(tags).getTagById(7, 23);
+        order.verify(control).findOrganizationWorkspacesForShare(7);
         order.verify(people).getPersonsByTagId(7, "[7,11]", 23);
         order.verify(companies).getCompaniesByTagId(7, "[7,11]", 23);
         order.verify(deals).getDealsByTagId(7, 23);

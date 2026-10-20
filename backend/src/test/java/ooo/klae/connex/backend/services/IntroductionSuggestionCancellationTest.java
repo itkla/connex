@@ -56,7 +56,8 @@ class IntroductionSuggestionCancellationTest {
     @Mock private ObjectMapper objectMapper;
     @Mock private TenantWorkScope tenantWorkScope;
 
-    @Mock private RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess =
+        ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
 
     private IntroductionService service;
 
