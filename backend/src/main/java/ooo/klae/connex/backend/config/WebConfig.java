@@ -5,6 +5,7 @@ import java.util.Locale;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.Ordered;
 import org.springframework.web.servlet.LocaleResolver;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
@@ -15,8 +16,8 @@ import ooo.klae.connex.backend.tenant.TenantResolutionInterceptor;
 
 /**
  * Spring MVC configuration.
- * Registers the tenant-resolution interceptor that pins the active workspace
- * for each authenticated request, including post-security credential binding for {@code /api/v1}.
+ * Registers tenant resolution and the final handler commit-tracking boundary. Resolution pins the
+ * active workspace, including post-security credential binding for {@code /api/v1}.
  *
  * <p>Interceptors run in the {@code DispatcherServlet}, after whichever Spring Security chain
  * served the request, so the excluded paths are excluded here as well as in their chains. The
@@ -29,6 +30,7 @@ import ooo.klae.connex.backend.tenant.TenantResolutionInterceptor;
 @RequiredArgsConstructor
 public class WebConfig implements WebMvcConfigurer {
     private final TenantResolutionInterceptor tenantResolutionInterceptor;
+    private final RequestTransactionCommitListener requestTransactionCommitListener;
 
     @Bean
     LocaleResolver localeResolver() {
@@ -45,5 +47,6 @@ public class WebConfig implements WebMvcConfigurer {
                 .excludePathPatterns(
                         "/api/auth/**", "/api/mail/managed", "/api/health", "/api/health/ready",
                         "/api/metrics", "/api/version", "/api/capabilities", "/api/csp-reports");
+        registry.addInterceptor(requestTransactionCommitListener).order(Ordered.LOWEST_PRECEDENCE);
     }
 }
