@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
+import java.util.concurrent.atomic.AtomicBoolean;
+
 import javax.sql.DataSource;
 
 import org.junit.jupiter.api.Test;
@@ -80,6 +82,42 @@ class TenantRoutingDecorationContextTest {
                 assertThat(context).hasNotFailed();
                 assertThat(context.getBean(DataSource.class)).isInstanceOf(HikariDataSource.class);
                 assertThat(context.getBean(CONTROL_POOL)).isInstanceOf(HikariDataSource.class);
+                assertFalse(context.containsBean("tenantRoutingDataSourceDecorator"));
+                assertFalse(context.containsBean("tenantRoutingDecorationVerifier"));
+            });
+    }
+
+    @Test
+    void catalogRoutingRefusesDisabledScopeEnforcementBeforeInitializingAnyPool() {
+        AtomicBoolean initialized = new AtomicBoolean();
+        contextRunner.withPropertyValues("connex.tenancy.enforce-scope=false")
+            .withBean(TenantRoutingConfig.TENANT_DATASOURCE_BEAN, DataSource.class, () -> {
+                initialized.set(true);
+                return pool("tenant-pool");
+            })
+            .run(context -> {
+                assertThat(context).hasFailed();
+                assertThat(context.getStartupFailure()).hasRootCauseInstanceOf(IllegalStateException.class)
+                    .hasStackTraceContaining("connex.tenancy.routing.mode=catalog-per-placement requires "
+                        + "connex.tenancy.enforce-scope=true");
+                assertFalse(initialized.get(), "invalid routing must fail before creating any pool");
+            });
+    }
+
+    @Test
+    void catalogRoutingAcceptsExplicitScopeEnforcement() {
+        contextRunner.withUserConfiguration(TwoPools.class)
+            .withPropertyValues("connex.tenancy.enforce-scope=true")
+            .run(context -> assertThat(context).hasNotFailed());
+    }
+
+    @Test
+    void singleDatabaseModeStillPermitsDisabledScopeEnforcement() {
+        contextRunner.withUserConfiguration(TwoPools.class)
+            .withPropertyValues("connex.tenancy.routing.mode=single-database", "connex.tenancy.enforce-scope=false")
+            .run(context -> {
+                assertThat(context).hasNotFailed();
+                assertThat(context.getBean(DataSource.class)).isInstanceOf(HikariDataSource.class);
                 assertFalse(context.containsBean("tenantRoutingDataSourceDecorator"));
                 assertFalse(context.containsBean("tenantRoutingDecorationVerifier"));
             });

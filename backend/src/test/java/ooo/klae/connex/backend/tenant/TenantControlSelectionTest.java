@@ -62,18 +62,21 @@ class TenantControlSelectionTest {
     }
 
     @Test
-    void anIdentitySnapshotRestoresControlSelectionWithoutOverwritingTheWorkspaceOverride() {
+    void copyingControlIdentityDoesNotCreateAResolvedScope() {
         context.setControlSelection(19, 5, 7, "admin");
-        TenantContext.IdentitySnapshot snapshot = context.snapshotIdentity();
-        context.set(11, 3, 7, "member", "cnx_tenant");
-        context.swapCatalogOverride(java.util.Optional.of("cnx_own_span"));
+        int workspaceId = context.getWorkspaceId();
+        int orgId = context.getOrgId();
+        int userId = context.getUserId();
+        String role = context.getRole();
+        context.clear();
 
-        context.restoreIdentity(snapshot);
+        context.setControlSelection(workspaceId, orgId, userId, role);
 
         assertFalse(context.isResolved());
         assertTrue(context.hasControlSelection());
         assertEquals(19, context.getWorkspaceId());
         assertEquals(5, context.getOrgId());
-        assertEquals("cnx_own_span", context.getCatalog());
+        assertNull(context.getCatalog());
+        assertFalse(context.hasCatalogOverride());
     }
 }

@@ -191,16 +191,20 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   restricts MyBatis execution to `ControlCatalogRoutingInterceptor`'s physical-control registry before
   ordinary scope exemptions, including when general scope enforcement is disabled. Clearing or
   replacing the tenant context does not remove that request restriction. Completion and async handoff
-  release both the control selection and capability; an interceptor refusal also releases its origin.
-  Child threads inherit the control-only origin, and the application `TaskDecorator` captures it for
-  pooled `@Async` helpers and event listeners. The explicit managed-content executor uses the same
-  decorator. This carries the restriction without granting a descendant the request's identity or
-  catalog. Even a propagated or manually installed tenant identity, a catalog-only override, or disabled
-  ordinary scope enforcement cannot admit tenant SQL. A descendant must enter its own
-  `TenantWorkScope.inWorkspace`/`AutomationExecutor.runAs` placement-validated span; that first entry
-  resolves placement afresh instead of trusting a propagated identity, and restores the restriction on
-  exit. That permission never propagates to further children. The HTTP handler itself remains restricted
-  even inside such a span. Header parsing, membership refusals, selection-route
+  release both the control selection and capability; an interceptor refusal also removes its capability.
+  The capability belongs only to its request thread. Neither tenant identity nor a restriction is
+  thread-inherited, and no task decorator copies either into pooled async helpers or event listeners.
+  The control selection is never resolved: even copying that typed selection cannot grant a tenant
+  route. Descendants without their own scope are refused by ordinary tenant-scope enforcement.
+  `catalog-per-placement` therefore requires `connex.tenancy.enforce-scope=true`; startup refuses a
+  disabled guard before any datasource initializes, because an unscoped tenant statement could otherwise
+  silently use the default catalog. This invariant does not affect `single-database` deployments.
+  Descendants use their own explicit `TenantWorkScope.inWorkspace`/`AutomationExecutor.runAs` span,
+  which resolves placement fail-closed; an unservable placement still refuses tenant SQL. Scope is
+  restored on exit and never inherited by further children. Cold and pre-warmed pool workers retain
+  no restriction for later unrelated scoped work. The HTTP handler itself remains restricted even
+  inside an explicit workspace span, including when ordinary enforcement is disabled in a unit test.
+  Header parsing, membership refusals, selection-route
   target authorization and revoked-selection recovery retain their existing behavior; a recovered
   fallback still resolves its placement. Single-database mode retains eager placement resolution and
   its existing 503s. `GET /api/auth/me` keeps its existing MVC exclusion. `PATCH /api/users/me` is excluded
@@ -212,9 +216,12 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   architecture contract is a pinned-handler and direct-dependency tripwire, including simple local
   aliases and method references. Reviewed dependency entries and their source-local helpers also
   reject event publication or async submission. It is not a general transitive containment proof;
-  the runtime SQL guard and descendant propagation enforce that control. Real-handler integration
-  tests copy control tables into a scratch catalog with no tenant tables after the normal Flyway
-  initializer has migrated the source schema, so they can run alone against a fresh CI schema.
+  the request-thread SQL guard and ordinary descendant enforcement, required by the startup invariant,
+  enforce the runtime boundary. Real-handler integration tests keep the normally migrated default
+  catalog as control, including Spring Session JDBC tables, and create only a minimal tenant scratch
+  catalog without control tables. An injected tenant call proves the request guard refuses SQL before
+  execution. Normal Flyway initialization makes the class independent of earlier tests on a fresh
+  CI schema; committed fixture workspaces, organizations, users and scratch catalogs are cleaned up.
 - **Enforced seams:** (1) share grants are `INSERT..SELECT` with an ownership + same-org ceiling in SQL —
   0 affected rows means structurally refused (`ShareMapperTest`), and `ShareService` additionally throws;
   (2) **workspace→org placement**: a new workspace joins the active workspace's org only when its creator

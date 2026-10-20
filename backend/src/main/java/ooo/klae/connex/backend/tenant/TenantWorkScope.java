@@ -48,7 +48,6 @@ public class TenantWorkScope {
         private final WorkspaceRoute route;
         private final boolean root;
         private final Optional<String> previous;
-        private final ControlOnlyHandlerPolicy.WorkspacePermission permission;
 
         private WorkspaceRouteScope(
                 WorkspaceRoutes routes, WorkspaceRoute route, boolean root) {
@@ -56,7 +55,6 @@ public class TenantWorkScope {
             this.route = route;
             this.root = root;
             this.previous = beginOverride(Optional.ofNullable(route.catalog()));
-            this.permission = ControlOnlyHandlerPolicy.independentlyResolvedWorkspace(tenantContext, route.catalog());
         }
 
         @Override
@@ -64,7 +62,6 @@ public class TenantWorkScope {
             try {
                 tenantContext.swapCatalogOverride(previous);
             } finally {
-                permission.close();
                 routes.depth--;
                 if (root && routes.depth == 0) {
                     CURRENT_WORKSPACE_ROUTES.remove();
@@ -222,7 +219,7 @@ public class TenantWorkScope {
         boolean root = routes == null;
         if (root) {
             routes = new WorkspaceRoutes();
-            if (tenantContext.isResolved() && !ControlOnlyHandlerPolicy.isActive()) {
+            if (tenantContext.isResolved()) {
                 routes.routes.put(tenantContext.getWorkspaceId(),
                     new WorkspaceRoute(tenantContext.getOrgId(), tenantContext.getScopeCatalog()));
             }

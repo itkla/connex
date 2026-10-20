@@ -49,8 +49,9 @@ import ooo.klae.connex.backend.dto.UserDto;
 /**
  * A pinned-handler and direct-dependency tripwire, including simple aliases and method references.
  * Selected dependency entries and their source-local helpers also reject event publication and
- * async submission. This is not a transitive containment proof: the runtime SQL guard, inherited
- * origin and executor task decoration enforce descendants' restrictions independently of this scan.
+ * async submission. This is not a transitive containment proof: the request-thread SQL guard and
+ * ordinary descendant scope enforcement, required by catalog-routing startup validation, enforce
+ * the runtime boundary independently of this scan.
  */
 class ControlOnlyHandlerArchTest {
     private static final Path ROOT = Path.of("src/main/java/ooo/klae/connex/backend");

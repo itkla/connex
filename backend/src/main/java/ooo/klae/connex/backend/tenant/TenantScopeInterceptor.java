@@ -35,8 +35,9 @@ import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
  * physical-control registry may execute, including when scope enforcement is disabled. Existing
  * tenant-statement exemptions, manually installed identities and catalog-only overrides cannot
  * override that restriction.
- * Descendants carry the restriction independently of servlet attributes and tenant identity;
- * only their own placement-validated TenantWorkScope span can admit tenant statements.
+ * Descendants receive no resolved tenant scope from a control selection. Ordinary enforcement
+ * requires their own explicit TenantWorkScope or runAs span; catalog-per-placement startup
+ * refuses disabled scope enforcement. Neither the capability nor tenant identity is inherited.
  *
  * <p>The signatures below must cover <em>every</em> statement-executing method
  * on {@link Executor}, including {@code queryCursor} — the streaming reads

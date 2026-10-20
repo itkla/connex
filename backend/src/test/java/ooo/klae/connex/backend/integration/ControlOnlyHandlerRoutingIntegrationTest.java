@@ -16,20 +16,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.TreeSet;
 import java.util.UUID;
 
 import jakarta.servlet.Filter;
 import jakarta.servlet.http.Cookie;
 
-import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,10 +33,6 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.flyway.autoconfigure.FlywayMigrationStrategy;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Import;
 import org.flywaydb.core.Flyway;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -69,6 +60,7 @@ import ooo.klae.connex.backend.mappers.OrgPlacementMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.services.IdentityBackfillRunner;
 import ooo.klae.connex.backend.services.LegacyWorkflowBackfillRunner;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.support.AuthenticatedSessions;
@@ -78,32 +70,18 @@ import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 
 /**
- * Runs real security, handlers, services and mappers against a minimal control catalog with no
- * tenant tables. Only the unrelated startup rule backfill is replaced: it enumerates tenant rules
- * before any HTTP request. The normal Flyway initializer migrates the source schema before the listed control tables are copied,
- * so selecting this class alone does not depend on any earlier test.
+ * Runs real security, handlers, services and mappers on the normally migrated default control
+ * catalog, including Spring Session storage. Only the tenant side uses a minimal scratch catalog.
+ * The runtime-guard probe refuses tenant SQL before execution; startup backfills are replaced so
+ * selecting this class alone neither needs prior migrations nor sweeps unrelated tenant fixtures.
  */
 @SpringBootTest(properties = {
     "connex.tenancy.routing.mode=catalog-per-placement",
     "connex.workflows.runtime.scheduling-enabled=false",
     "connex.signature.enabled=false"
 })
-@Import(ControlOnlyHandlerRoutingIntegrationTest.ScratchControlConfiguration.class)
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class ControlOnlyHandlerRoutingIntegrationTest {
-    private static final List<String> CONTROL_TABLES = List.of(
-        "app_user", "organization", "org_member", "org_placement", "workspace", "workspace_member",
-        "workspace_role", "workspace_role_permission", "audit_log", "audit_log_integrity_head",
-        "secret_value", "workspace_mail_config", "sso_connection", "webauthn_user_entity",
-        "webauthn_credential", "privileged_credential_attestation", "object_storage_backend_identity",
-        "client_error");
-    private static String sourceUrl;
-    private static String sourceCatalog;
-    private static String username;
-    private static String password;
-    private static String controlCatalog;
-    private static boolean controlCatalogCreated;
-
     @Autowired private WebApplicationContext application;
     @Autowired @Qualifier("springSecurityFilterChain") private Filter security;
     @Autowired private UserMapper users;
@@ -117,8 +95,12 @@ class ControlOnlyHandlerRoutingIntegrationTest {
     @Autowired private TagMapper tags;
     @MockitoSpyBean private WorkspaceService workspaceService;
     @MockitoBean private LegacyWorkflowBackfillRunner startupRuleBackfill;
+    @MockitoBean private IdentityBackfillRunner startupIdentityBackfill;
 
     private final List<String> tenantCatalogs = new ArrayList<>();
+    private final List<Integer> workspaceIds = new ArrayList<>();
+    private final List<Integer> organizationIds = new ArrayList<>();
+    private final List<Integer> userIds = new ArrayList<>();
     private MockMvc http;
     private User user;
     private Workspace unavailable;
@@ -126,66 +108,23 @@ class ControlOnlyHandlerRoutingIntegrationTest {
     private Workspace pending;
 
     @DynamicPropertySource
-    static void controlOnlyDatabase(DynamicPropertyRegistry properties) throws SQLException {
-        sourceUrl = System.getenv("CONNEX_DB_URL");
-        username = System.getenv("CONNEX_DB_USERNAME");
-        password = System.getenv("CONNEX_DB_PASSWORD");
-        assertNotNull(sourceUrl, "CONNEX_DB_URL is required for control-only HTTP routing tests");
-        assertNotNull(username, "CONNEX_DB_USERNAME is required for control-only HTTP routing tests");
-        assertNotNull(password, "CONNEX_DB_PASSWORD is required for control-only HTTP routing tests");
-        sourceCatalog = TenantRoutingConfig.databaseFromJdbcUrl(sourceUrl);
-        assertNotNull(sourceCatalog, "The source JDBC URL must name a catalog");
-        controlCatalog = "connexdb_routing_control_it_" + UUID.randomUUID().toString().replace("-", "");
-        try (Connection connection = DriverManager.getConnection(sourceUrl, username, password);
-                Statement statement = connection.createStatement()) {
-            statement.execute("CREATE DATABASE " + controlCatalog);
-            controlCatalogCreated = true;
-        }
-        properties.add("spring.datasource.url", () -> sourceUrl.replace(
-            "/" + sourceCatalog, "/" + controlCatalog));
-        properties.add("connex.tenancy.routing.default-catalog", () -> controlCatalog);
-        properties.add("spring.flyway.url", () -> sourceUrl);
-        properties.add("spring.flyway.user", () -> username);
-        properties.add("spring.flyway.password", () -> password);
+    static void routingProperties(DynamicPropertyRegistry properties) {
+        properties.add("connex.tenancy.routing.default-catalog",
+            ControlOnlyHandlerRoutingIntegrationTest::defaultCatalog);
     }
 
-    /** Migrates the CI schema normally before copying only control tables into the HTTP catalog. */
-    @TestConfiguration(proxyBeanMethods = false)
-    static class ScratchControlConfiguration {
-        @Bean
-        FlywayMigrationStrategy migrateThenCloneControlTables() {
-            return flyway -> {
-                flyway.migrate();
-                try (Connection connection = DriverManager.getConnection(sourceUrl, username, password);
-                        Statement statement = connection.createStatement()) {
-                    for (String table : CONTROL_TABLES) {
-                        assertTrue(TablePlaneRegistry.CONTROL_PLANE_TABLES.contains(table), table);
-                        statement.execute("CREATE TABLE " + controlCatalog + "." + table
-                            + " LIKE " + sourceCatalog + "." + table);
-                    }
-                } catch (SQLException failure) {
-                    throw new IllegalStateException("Cannot prepare the control-only scratch catalog", failure);
-                }
-            };
-        }
-    }
-
-    @AfterAll
-    static void dropControlDatabase() throws SQLException {
-        if (controlCatalogCreated) {
-            try (Connection connection = DriverManager.getConnection(sourceUrl, username, password);
-                    Statement statement = connection.createStatement()) {
-                statement.execute("DROP DATABASE " + controlCatalog);
-                controlCatalogCreated = false;
-            }
-        }
+    private static String defaultCatalog() {
+        String catalog = TenantRoutingConfig.databaseFromJdbcUrl(System.getenv("CONNEX_DB_URL"));
+        assertNotNull(catalog, "CONNEX_DB_URL must name the migrated control catalog");
+        assertTrue(catalog.matches("[A-Za-z0-9_]{1,64}"), "The test catalog must be a safe identifier");
+        return catalog;
     }
 
     @BeforeEach
     void setUp() {
-        clearContexts();
+        clearThreadContexts();
         http = MockMvcBuilders.webAppContextSetup(application).addFilters(security).build();
-        user = AuthenticatedSessions.account(users, "control-only");
+        user = account("control-only");
         unavailable = workspace("Unavailable");
         available = workspace("Available");
         pending = workspace("Pending");
@@ -196,31 +135,52 @@ class ControlOnlyHandlerRoutingIntegrationTest {
         placement(unavailable, "connex_operated_silo", null);
     }
 
-    @AfterEach
-    void clearContexts() {
+    private void clearThreadContexts() {
         if (tenantContext != null) {
             tenantContext.clear();
         }
         SecurityContextHolder.clearContext();
         RequestContextHolder.resetRequestAttributes();
-        for (String catalog : tenantCatalogs) {
-            jdbc.execute("DROP DATABASE " + catalog);
+    }
+
+    @AfterEach
+    void cleanUp() {
+        clearThreadContexts();
+        try {
+            for (int workspaceId : workspaceIds) {
+                jdbc.update("DELETE FROM workspace_member WHERE workspace_id = ?", workspaceId);
+                jdbc.update("DELETE FROM workspace WHERE id = ?", workspaceId);
+            }
+            for (int organizationId : organizationIds) {
+                jdbc.update("DELETE FROM org_placement WHERE org_id = ?", organizationId);
+                jdbc.update("DELETE FROM organization WHERE id = ?", organizationId);
+            }
+            for (int userId : userIds) {
+                jdbc.update("DELETE FROM notification_recipient_state WHERE recipient_id = ?", userId);
+                jdbc.update("DELETE FROM app_user WHERE id = ?", userId);
+            }
+        } finally {
+            for (String catalog : tenantCatalogs) {
+                jdbc.execute("DROP DATABASE IF EXISTS " + catalog);
+            }
         }
-        tenantCatalogs.clear();
     }
 
     @Test
-    void normalFlywayPreparesTheSourceBeforeTheScratchCatalogIsUsed() {
+    void normalFlywayPreparesTheControlCatalogIncludingSpringSessionStorage() {
         assertNotNull(flyway.info().current());
-        assertNoTenantTables();
+        assertEquals(defaultCatalog(), jdbc.queryForObject("SELECT DATABASE()", String.class));
+        assertEquals(2, jdbc.queryForObject(
+            "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? "
+                + "AND TABLE_NAME IN ('SPRING_SESSION', 'SPRING_SESSION_ATTRIBUTES')",
+            Integer.class, defaultCatalog()));
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"listing", "pending", "switch", "profile", "update", "locale",
         "listing-head", "pending-head", "profile-head"})
-    void eachReviewedHandlerWorksWithAnUnservableRememberedPlacementAndNoTenantTables(String operation)
+    void eachReviewedHandlerWorksWithAnUnservableRememberedPlacement(String operation)
             throws Exception {
-        assertNoTenantTables();
         assertThrows(ServiceUnavailableException.class, () -> catalogs.resolveCatalog(unavailable.getOrgId()));
 
         http.perform(authenticated(operation(operation))).andExpect(status().isOk());
@@ -269,7 +229,7 @@ class ControlOnlyHandlerRoutingIntegrationTest {
 
     @Test
     void profileTargetAuthorizationAndImmutableEmailRemainIntact() throws Exception {
-        User other = AuthenticatedSessions.account(users, "control-outsider");
+        User other = account("control-outsider");
         http.perform(authenticated(get("/api/users/" + other.getId())))
             .andExpect(status().isNotFound());
         http.perform(authenticated(put("/api/users/" + other.getId()).contentType(MediaType.APPLICATION_JSON)
@@ -298,7 +258,7 @@ class ControlOnlyHandlerRoutingIntegrationTest {
 
     @Test
     void aCookieOnlySelectionControlsMemberProfileVisibility() throws Exception {
-        User sibling = AuthenticatedSessions.account(users, "control-sibling");
+        User sibling = account("control-sibling");
         workspaces.addMember(available.getId(), sibling.getId(), "member");
 
         http.perform(authenticated(get("/api/users/" + sibling.getId()))
@@ -408,7 +368,7 @@ class ControlOnlyHandlerRoutingIntegrationTest {
         String catalog = "connexdb_routing_control_tags_" + UUID.randomUUID().toString().replace("-", "");
         jdbc.execute("CREATE DATABASE " + catalog);
         tenantCatalogs.add(catalog);
-        jdbc.execute("CREATE TABLE " + catalog + ".tag LIKE " + sourceCatalog + ".tag");
+        jdbc.execute("CREATE TABLE " + catalog + ".tag LIKE " + defaultCatalog() + ".tag");
         jdbc.update("INSERT INTO " + catalog + ".tag (workspace_id, name, color) VALUES (?, 'Routed tag', '#123456')",
             available.getId());
         jdbc.update("INSERT INTO " + catalog + ".tag (workspace_id, name, color) VALUES (?, 'Hidden tag', '#654321')",
@@ -430,11 +390,10 @@ class ControlOnlyHandlerRoutingIntegrationTest {
         assertTrue(Collections.disjoint(tables, TablePlaneRegistry.CONTROL_PLANE_TABLES));
     }
 
-    private void assertNoTenantTables() {
-        List<String> tables = jdbc.queryForList(
-            "SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = ?", String.class, controlCatalog);
-        assertEquals(new TreeSet<>(CONTROL_TABLES), new TreeSet<>(tables));
-        assertTrue(Collections.disjoint(tables, TablePlaneRegistry.ORG_DATA_TABLES));
+    private User account(String prefix) {
+        User account = AuthenticatedSessions.account(users, prefix);
+        userIds.add(account.getId());
+        return account;
     }
 
     private Workspace workspace(String prefix) {
@@ -443,11 +402,13 @@ class ControlOnlyHandlerRoutingIntegrationTest {
         organization.setName(prefix + " organization " + suffix);
         organization.setSlug("control-" + suffix);
         organizations.insert(organization);
+        organizationIds.add(organization.getId());
         Workspace workspace = new Workspace();
         workspace.setOrgId(organization.getId());
         workspace.setName(prefix + " " + suffix);
         workspace.setSlug("control-workspace-" + suffix);
         workspaces.insert(workspace);
+        workspaceIds.add(workspace.getId());
         return workspace;
     }
 

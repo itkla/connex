@@ -2,12 +2,8 @@ package ooo.klae.connex.backend.config;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Bean;
-import org.springframework.core.task.TaskDecorator;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
-
-import ooo.klae.connex.backend.tenant.ControlOnlyHandlerPolicy;
 
 /**
  * Enables scheduled and asynchronous application work outside isolated maintenance invocations.
@@ -21,9 +17,4 @@ import ooo.klae.connex.backend.tenant.ControlOnlyHandlerPolicy;
     havingValue = "off",
     matchIfMissing = true)
 public class BackgroundExecutionConfiguration {
-    /** Carries the control-only origin into pooled @Async helpers and event listeners. */
-    @Bean
-    TaskDecorator controlOnlyTaskDecorator() {
-        return ControlOnlyHandlerPolicy::decorate;
-    }
 }

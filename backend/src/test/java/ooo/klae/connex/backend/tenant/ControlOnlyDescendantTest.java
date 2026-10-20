@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.tenant;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -11,11 +12,14 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.Map;
-import java.util.Optional;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 
 import org.apache.ibatis.executor.Executor;
 import org.apache.ibatis.mapping.MappedStatement;
@@ -35,8 +39,6 @@ import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.scheduling.annotation.Async;
-import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
-import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.context.request.RequestContextHolder;
@@ -45,7 +47,6 @@ import org.springframework.web.method.HandlerMethod;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.config.BackgroundExecutionConfiguration;
-import ooo.klae.connex.backend.config.ManagedContentAsyncConfiguration;
 import ooo.klae.connex.backend.controllers.WorkspaceController;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
@@ -53,9 +54,8 @@ import ooo.klae.connex.backend.observability.ClientAssertedCorrelationPseudonymi
 import ooo.klae.connex.backend.services.AutomationExecutor;
 import ooo.klae.connex.backend.services.AutomationScope;
 import ooo.klae.connex.backend.services.WorkspaceService;
-import ooo.klae.connex.backend.storage.ObjectStorageProperties;
 
-/** Exercises real Spring async helpers and event listeners without a database or web application. */
+/** Exercises ordinary scope enforcement in real async, event and raw-pool descendants without a database. */
 class ControlOnlyDescendantTest {
     private AnnotationConfigApplicationContext application;
     private Probe probe;
@@ -70,9 +70,11 @@ class ControlOnlyDescendantTest {
         application.register(BackgroundExecutionConfiguration.class, TaskExecutionAutoConfiguration.class,
             Fixtures.class);
         application.refresh();
-        application.getBean(AsyncTaskExecutor.class).submit(() -> {}).get(10, TimeUnit.SECONDS);
         probe = application.getBean(Probe.class);
+        startRequest();
+    }
 
+    private void startRequest() throws Exception {
         WorkspaceService memberships = mock(WorkspaceService.class);
         when(memberships.rememberedWorkspaceIdFor(9)).thenReturn(11);
         when(memberships.getRole(11, 9)).thenReturn("member");
@@ -90,143 +92,131 @@ class ControlOnlyDescendantTest {
         interceptor.preHandle(request, new MockHttpServletResponse(),
             new HandlerMethod(mock(WorkspaceController.class), WorkspaceController.class.getMethod("myWorkspaces")));
         assertTrue(ControlOnlyHandlerPolicy.isActive());
+        assertTrue(probe.context.hasControlSelection());
+        assertFalse(probe.context.isResolved());
+        assertFalse(probe.context.hasCatalogOverride());
     }
 
     @AfterEach
     void cleanUp() {
+        endRequest();
+        if (application != null) {
+            application.close();
+        }
+    }
+
+    private void endRequest() {
         if (request != null) {
             ControlOnlyHandlerPolicy.clear(request);
         }
         new TenantContext().clear();
         RequestContextHolder.resetRequestAttributes();
         SecurityContextHolder.clearContext();
-        if (application != null) {
-            application.close();
-        }
     }
 
     @ParameterizedTest
-    @CsvSource({"async,true", "async,false", "event,true", "event,false"})
-    void aDescendantCannotUseInheritedOrManuallyInstalledTenantIdentity(String delivery, boolean enforce)
+    @CsvSource({"async,none", "event,none", "async,copied", "event,copied"})
+    void ordinaryEnforcementRefusesUnscopedDescendantsIncludingACopiedControlSelection(String delivery, String scope)
             throws Exception {
-        CompletableFuture<String> result = dispatch(delivery, "none", enforce);
-        ExecutionException failure = assertThrows(ExecutionException.class, () -> result.get(10, TimeUnit.SECONDS));
+        ExecutionException failure = assertThrows(ExecutionException.class,
+            () -> dispatch(delivery, scope).get(10, TimeUnit.SECONDS));
 
-        assertInstanceOf(ServiceUnavailableException.class, failure.getCause());
+        assertInstanceOf(IllegalStateException.class, failure.getCause());
+        assertTrue(failure.getCause().getMessage().contains("no catalog scope"));
         verifyNoInteractions(probe.executor);
     }
 
     @ParameterizedTest
-    @CsvSource({"async,workspace,true", "async,workspace,false", "event,workspace,true", "event,workspace,false",
-        "async,runAs,true", "async,runAs,false", "event,runAs,true", "event,runAs,false"})
-    void aDescendantCanUseOnlyItsOwnPlacementValidatedWorkspaceSpan(String delivery, String scope, boolean enforce)
-            throws Exception {
+    @CsvSource({"async,workspace", "event,workspace", "async,runAs", "event,runAs"})
+    void aDescendantCanEnterItsOwnPlacementValidatedScope(String delivery, String scope) throws Exception {
         when(probe.workspaces.getOrgId(7)).thenReturn(42);
         when(probe.catalogs.resolveCatalog(42)).thenReturn("cnx_own");
 
-        assertEquals("cnx_own", dispatch(delivery, scope, enforce).get(10, TimeUnit.SECONDS));
+        assertEquals("cnx_own", dispatch(delivery, scope).get(10, TimeUnit.SECONDS));
 
         verify(probe.catalogs).resolveCatalog(42);
         verify(probe.executor).update(probe.statement, null);
         assertTrue(ControlOnlyHandlerPolicy.isActive());
         assertTrue(probe.context.hasControlSelection());
+        assertFalse(probe.context.isResolved());
     }
 
     @ParameterizedTest
     @CsvSource({"async,workspace", "event,workspace", "async,runAs", "event,runAs"})
-    void anExplicitDescendantWorkspaceStillRefusesUnservablePlacement(String delivery, String scope)
-            throws Exception {
+    void anExplicitDescendantScopeStillRefusesUnservablePlacement(String delivery, String scope) throws Exception {
         when(probe.workspaces.getOrgId(7)).thenReturn(42);
         when(probe.catalogs.resolveCatalog(42)).thenThrow(new ServiceUnavailableException("Unservable placement"));
 
         ExecutionException failure = assertThrows(ExecutionException.class,
-            () -> dispatch(delivery, scope, false).get(10, TimeUnit.SECONDS));
-
-        assertInstanceOf(ServiceUnavailableException.class, failure.getCause());
-        verifyNoInteractions(probe.executor);
-    }
-
-    @ParameterizedTest
-    @CsvSource({"async,workspace", "event,workspace", "async,runAs", "event,runAs"})
-    void ordinaryOffRequestDescendantsResolvePlacementWithoutInheritingRequestIdentity(String delivery, String scope)
-            throws Exception {
-        when(probe.workspaces.getOrgId(7)).thenReturn(42);
-        when(probe.catalogs.resolveCatalog(42)).thenReturn("cnx_own");
-        Check check = new Check(scope, true, null, new CompletableFuture<>());
-        CompletableFuture<String> result;
-        if (delivery.equals("event")) {
-            application.publishEvent(check);
-            result = check.result();
-        } else {
-            result = application.getBean(Descendants.class).async(check);
-        }
-
-        assertEquals("cnx_own", result.get(10, TimeUnit.SECONDS));
-        verify(probe.catalogs).resolveCatalog(42);
-        verify(probe.executor).update(probe.statement, null);
-    }
-
-    @ParameterizedTest
-    @CsvSource({"async,clear", "event,clear", "async,repoint", "event,repoint"})
-    void clearingOrRepointingAnIndependentSpanCannotFallBackToUnrestrictedTenantSql(String delivery, String scope)
-            throws Exception {
-        when(probe.workspaces.getOrgId(7)).thenReturn(42);
-        when(probe.catalogs.resolveCatalog(42)).thenReturn("cnx_own");
-
-        ExecutionException failure = assertThrows(ExecutionException.class,
-            () -> dispatch(delivery, scope, false).get(10, TimeUnit.SECONDS));
+            () -> dispatch(delivery, scope).get(10, TimeUnit.SECONDS));
 
         assertInstanceOf(ServiceUnavailableException.class, failure.getCause());
         verify(probe.catalogs).resolveCatalog(42);
         verifyNoInteractions(probe.executor);
     }
 
-    @Test
-    void theExplicitStreamingExecutorAlsoDecoratesAlreadyCreatedWorkers() throws Exception {
-        ControlOnlyHandlerPolicy.clear(request);
-        RequestContextHolder.resetRequestAttributes();
-        try (var streaming = new AnnotationConfigApplicationContext()) {
-            streaming.registerBean(ObjectStorageProperties.class, () -> {
-                ObjectStorageProperties properties = new ObjectStorageProperties();
-                properties.setMaxConcurrentReads(1);
-                return properties;
-            });
-            streaming.register(ManagedContentAsyncConfiguration.class);
-            streaming.refresh();
-            var configuration = streaming.getBean(ManagedContentAsyncConfiguration.class);
-            var executor = (ThreadPoolTaskExecutor) ReflectionTestUtils.getField(configuration, "executor");
-            org.junit.jupiter.api.Assertions.assertNotNull(executor);
-            assertEquals(false, executor.submit(ControlOnlyHandlerPolicy::isActive).get(10, TimeUnit.SECONDS));
-            RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
-            ControlOnlyHandlerPolicy.activate(request);
+    @ParameterizedTest
+    @CsvSource({"raw,false", "raw,true", "spring,false", "spring,true"})
+    void coldAndPrewarmedWorkersRunOrdinaryWorkAfterAControlOnlyRequest(String delivery, boolean prewarmed)
+            throws Exception {
+        when(probe.workspaces.getOrgId(7)).thenReturn(42);
+        when(probe.catalogs.resolveCatalog(42)).thenReturn("cnx_own");
+        try (var raw = Executors.newSingleThreadExecutor()) {
+            Function<Callable<String>, Future<String>> submit = delivery.equals("raw")
+                ? raw::submit : application.getBean(AsyncTaskExecutor.class)::submit;
+            AtomicReference<Thread> worker = new AtomicReference<>();
+            if (prewarmed) {
+                endRequest();
+                submit.apply(() -> {
+                    assertFalse(ControlOnlyHandlerPolicy.isActive());
+                    worker.set(Thread.currentThread());
+                    return "warm";
+                }).get(10, TimeUnit.SECONDS);
+                startRequest();
+            }
+            Check check = check("none");
+            ExecutionException failure = assertThrows(ExecutionException.class, () -> submit.apply(() -> {
+                if (prewarmed) {
+                    assertEquals(worker.get(), Thread.currentThread());
+                } else {
+                    worker.set(Thread.currentThread());
+                }
+                return probe.handle(check);
+            }).get(10, TimeUnit.SECONDS));
+            assertInstanceOf(IllegalStateException.class, failure.getCause());
+            verifyNoInteractions(probe.executor);
+            endRequest();
 
-            assertEquals(true, executor.submit(ControlOnlyHandlerPolicy::isActive).get(10, TimeUnit.SECONDS));
+            assertEquals("cnx_own", submit.apply(() -> {
+                assertEquals(worker.get(), Thread.currentThread());
+                return probe.handle(new Check("workspace", null, new CompletableFuture<>()));
+            }).get(10, TimeUnit.SECONDS));
+            verify(probe.executor).update(probe.statement, null);
         }
     }
 
     @Test
-    void anIndependentWorkspacePermissionIsNotInheritedByFurtherChildren() throws Exception {
+    void aFurtherChildDoesNotInheritItsParentsExplicitWorkspaceScope() throws Exception {
         when(probe.workspaces.getOrgId(7)).thenReturn(42);
         when(probe.catalogs.resolveCatalog(42)).thenReturn("cnx_own");
         AtomicReference<Throwable> refusal = new AtomicReference<>();
         Thread child = probe.scope.inWorkspace(7, () -> Thread.ofPlatform().unstarted(() -> {
             try {
-                probe.execute(false);
+                probe.execute(true);
             } catch (Throwable failure) {
                 refusal.set(failure);
             }
         }));
-
         child.start();
         child.join(10_000);
 
         assertFalse(child.isAlive());
-        assertInstanceOf(ServiceUnavailableException.class, refusal.get());
+        assertInstanceOf(IllegalStateException.class, refusal.get());
         verifyNoInteractions(probe.executor);
     }
 
     @Test
-    void theHttpOwnerCannotLiftItsRestrictionWithAnExplicitWorkspaceSpan() {
+    void theHttpOwnerCannotLiftItsRequestRestrictionWithAnExplicitWorkspaceScope() {
         when(probe.workspaces.getOrgId(7)).thenReturn(42);
         when(probe.catalogs.resolveCatalog(42)).thenReturn("cnx_own");
 
@@ -235,41 +225,8 @@ class ControlOnlyDescendantTest {
         verifyNoInteractions(probe.executor);
     }
 
-    @Test
-    void childThreadsInheritTheRestrictionAfterTheHttpRequestCompletes() throws Exception {
-        AtomicReference<Throwable> refusal = new AtomicReference<>();
-        Thread child = Thread.ofPlatform().unstarted(() -> {
-            try {
-                probe.execute(false);
-            } catch (Throwable failure) {
-                refusal.set(failure);
-            }
-        });
-        ControlOnlyHandlerPolicy.clear(request);
-        RequestContextHolder.resetRequestAttributes();
-
-        child.start();
-        child.join(10_000);
-
-        assertFalse(child.isAlive());
-        assertInstanceOf(ServiceUnavailableException.class, refusal.get());
-        verifyNoInteractions(probe.executor);
-    }
-
-    @Test
-    void aReusedWorkerDoesNotRestrictTheNextUnrelatedSubmission() throws Exception {
-        ExecutionException failure = assertThrows(ExecutionException.class,
-            () -> dispatch("async", "none", false).get(10, TimeUnit.SECONDS));
-        assertInstanceOf(ServiceUnavailableException.class, failure.getCause());
-        ControlOnlyHandlerPolicy.clear(request);
-        RequestContextHolder.resetRequestAttributes();
-
-        assertEquals(false, application.getBean(AsyncTaskExecutor.class)
-            .submit(ControlOnlyHandlerPolicy::isActive).get(10, TimeUnit.SECONDS));
-    }
-
-    private CompletableFuture<String> dispatch(String delivery, String scope, boolean enforce) {
-        Check check = new Check(scope, enforce, new ServletRequestAttributes(request), new CompletableFuture<>());
+    private CompletableFuture<String> dispatch(String delivery, String scope) {
+        Check check = check(scope);
         if (delivery.equals("event")) {
             application.publishEvent(check);
             return check.result();
@@ -277,7 +234,14 @@ class ControlOnlyDescendantTest {
         return application.getBean(Descendants.class).async(check);
     }
 
-    record Check(String scope, boolean enforce, ServletRequestAttributes request, CompletableFuture<String> result) {}
+    private Check check(String scope) {
+        Selection selection = new Selection(probe.context.getWorkspaceId(), probe.context.getOrgId(),
+            probe.context.getUserId(), probe.context.getRole());
+        return new Check(scope, selection, new CompletableFuture<>());
+    }
+
+    record Selection(int workspaceId, int orgId, int userId, String role) {}
+    record Check(String scope, Selection selection, CompletableFuture<String> result) {}
 
     @Configuration(proxyBeanMethods = false)
     static class Fixtures {
@@ -320,28 +284,30 @@ class ControlOnlyDescendantTest {
         }
 
         String handle(Check check) {
-            if (check.request() != null) {
-                RequestContextHolder.setRequestAttributes(check.request());
-                context.set(7, 42, 9, "member", "cnx_forged");
-                context.swapCatalogOverride(Optional.of("cnx_forged"));
+            assertNull(RequestContextHolder.getRequestAttributes());
+            assertFalse(ControlOnlyHandlerPolicy.isActive());
+            assertFalse(context.isResolved());
+            assertFalse(context.hasControlSelection());
+            assertFalse(context.hasCatalogOverride());
+            if (check.scope().equals("copied")) {
+                Selection selection = check.selection();
+                context.setControlSelection(selection.workspaceId(), selection.orgId(), selection.userId(),
+                    selection.role());
+                assertFalse(context.isResolved());
+                assertNull(context.getCatalog());
+                assertFalse(context.hasCatalogOverride());
             }
             try {
                 String catalog = switch (check.scope()) {
-                    case "workspace" -> scope.inWorkspace(7, () -> execute(check.enforce()));
-                    case "clear" -> scope.inWorkspace(7, () -> {
-                        context.clear();
-                        return execute(check.enforce());
-                    });
-                    case "repoint" -> scope.inWorkspace(7, () ->
-                        scope.withCatalog("cnx_forged", () -> execute(check.enforce())));
+                    case "workspace" -> scope.inWorkspace(7, () -> execute(true));
                     case "runAs" -> {
                         User user = new User();
                         user.setId(9);
-                        yield automation.runAs(7, user, "member", () -> execute(check.enforce()));
+                        yield automation.runAs(7, user, "member", () -> execute(true));
                     }
-                    default -> scope.withCatalog("cnx_forged", () -> execute(check.enforce()));
+                    default -> execute(true);
                 };
-                assertThrows(ServiceUnavailableException.class, () -> execute(check.enforce()));
+                assertThrows(IllegalStateException.class, () -> execute(true));
                 return catalog;
             } finally {
                 context.clear();
