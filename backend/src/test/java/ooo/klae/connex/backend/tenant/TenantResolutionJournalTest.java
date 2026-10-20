@@ -70,7 +70,8 @@ class TenantResolutionJournalTest {
             catalogResolver,
             requestResolver,
             workspaceCookie,
-            correlationPseudonymizer);
+            correlationPseudonymizer,
+            new TenantRoutingProperties());
         User user = new User();
         user.setId(7);
         Authentication authentication = mock(Authentication.class);

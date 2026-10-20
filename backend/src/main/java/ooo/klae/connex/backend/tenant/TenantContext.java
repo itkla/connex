@@ -10,14 +10,18 @@ import org.springframework.stereotype.Component;
  * {@code WorkspaceService.getCurrentWorkspaceId()}. Off the request thread (tests,
  * scheduled jobs) it stays unresolved and callers fall back to membership lookup.
  * The optional catalog pins the org's placement-routed database for the whole
- * request span; {@code null} means the default (shared) catalog.
+ * request span; {@code null} means the default (shared) catalog for a resolved scope.
+ * A validated control selection retains identity and audit attribution without resolving a tenant
+ * catalog. It never satisfies {@link #isResolved()} and cannot authorize tenant SQL.
  */
 @Component
 public class TenantContext {
 
     private record Scope(int workspaceId, int orgId, int userId, String role, String catalog) {}
+    private record ValidatedControlSelection(int workspaceId, int orgId, int userId, String role) {}
 
     private static final ThreadLocal<Scope> CURRENT = new ThreadLocal<>();
+    private static final ThreadLocal<ValidatedControlSelection> CONTROL_SELECTION = new ThreadLocal<>();
     private static final ThreadLocal<Optional<String>> CATALOG_OVERRIDE = new ThreadLocal<>();
 
     /**
@@ -27,7 +31,19 @@ public class TenantContext {
      * so every installer decides routing explicitly.
      */
     public void set(int workspaceId, int orgId, int userId, String role, String catalog) {
+        CONTROL_SELECTION.remove();
         CURRENT.set(new Scope(workspaceId, orgId, userId, role, catalog));
+    }
+
+    /** Installs membership-validated identity for a handler restricted to control-plane SQL. */
+    void setControlSelection(int workspaceId, int orgId, int userId, String role) {
+        clear();
+        CONTROL_SELECTION.set(new ValidatedControlSelection(workspaceId, orgId, userId, role));
+    }
+
+    /** Whether control-only handling has a validated workspace selection, without a tenant route. */
+    public boolean hasControlSelection() {
+        return CONTROL_SELECTION.get() != null;
     }
 
     public boolean isResolved() {
@@ -36,22 +52,38 @@ public class TenantContext {
 
     public Integer getWorkspaceId() {
         Scope s = CURRENT.get();
-        return s == null ? null : s.workspaceId();
+        if (s != null) {
+            return s.workspaceId();
+        }
+        ValidatedControlSelection selection = CONTROL_SELECTION.get();
+        return selection == null ? null : selection.workspaceId();
     }
 
     public Integer getOrgId() {
         Scope s = CURRENT.get();
-        return s == null ? null : s.orgId();
+        if (s != null) {
+            return s.orgId();
+        }
+        ValidatedControlSelection selection = CONTROL_SELECTION.get();
+        return selection == null ? null : selection.orgId();
     }
 
     public Integer getUserId() {
         Scope s = CURRENT.get();
-        return s == null ? null : s.userId();
+        if (s != null) {
+            return s.userId();
+        }
+        ValidatedControlSelection selection = CONTROL_SELECTION.get();
+        return selection == null ? null : selection.userId();
     }
 
     public String getRole() {
         Scope s = CURRENT.get();
-        return s == null ? null : s.role();
+        if (s != null) {
+            return s.role();
+        }
+        ValidatedControlSelection selection = CONTROL_SELECTION.get();
+        return selection == null ? null : selection.role();
     }
 
     /**
@@ -115,6 +147,7 @@ public class TenantContext {
      */
     public void clear() {
         CURRENT.remove();
+        CONTROL_SELECTION.remove();
         CATALOG_OVERRIDE.remove();
     }
 }

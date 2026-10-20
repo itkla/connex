@@ -181,6 +181,25 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   (`db/migration/control|tenant`; root frozen at V65), the pinned mapper-crossing baseline (= the Phase-4
   hydration work-list), and user-reference index survival. Routing mode defaults to `single-database`
   (the only mode on-prem/silo) and stays off until the flag-enable gate (#485) clears.
+- **Control-only recovery during catalog routing (#485).** The exact `HandlerMethod` allowlist in
+  `ControlOnlyHandlerPolicy` covers workspace listing, pending memberships, switching, member-profile
+  reads, self-profile updates and self-locale updates, plus implicit HEAD for those GET handlers.
+  In `catalog-per-placement` mode an initially valid membership installs a typed validated control
+  selection without resolving its placement. `TenantContext.isResolved()` remains false; the selection
+  preserves the server-validated workspace/organization identity for profile authorization and audit
+  attribution, and never authorizes tenant SQL. A server-owned request capability independently
+  restricts MyBatis execution to `ControlCatalogRoutingInterceptor`'s physical-control registry before
+  ordinary scope exemptions, including when general scope enforcement is disabled. Clearing or
+  replacing the tenant context does not remove that request restriction. Completion and async handoff
+  release both the control selection and capability. Header parsing, membership refusals, selection-route
+  target authorization and revoked-selection recovery retain their existing behavior; a recovered
+  fallback still resolves its placement. Single-database mode retains eager placement resolution and
+  its existing 503s. `GET /api/auth/me` keeps its existing MVC exclusion. Timezone updates, workspace
+  creation/offboarding and the notification inbox are not allowlisted; the inbox remains 503 when its
+  remembered placement is unservable until recipient-catalog routing is implemented. The handler
+  architecture contract pins signatures, mappings and direct dependencies; real-handler integration
+  tests use a control-only scratch catalog with no tenant tables. This is not a general static
+  transitive-call proof across framework callbacks.
 - **Enforced seams:** (1) share grants are `INSERT..SELECT` with an ownership + same-org ceiling in SQL —
   0 affected rows means structurally refused (`ShareMapperTest`), and `ShareService` additionally throws;
   (2) **workspace→org placement**: a new workspace joins the active workspace's org only when its creator

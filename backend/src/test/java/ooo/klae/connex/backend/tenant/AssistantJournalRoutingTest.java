@@ -121,7 +121,8 @@ class AssistantJournalRoutingTest {
             catalogResolver,
             requestResolver,
             workspaceCookie,
-            correlationPseudonymizer);
+            correlationPseudonymizer,
+            new TenantRoutingProperties());
         when(requestResolver.resolve(any(), eq(7))).thenReturn(11);
         when(workspaceService.getRole(11, 7)).thenReturn("owner");
         when(workspaceService.getOrgId(11)).thenReturn(3);
