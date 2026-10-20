@@ -36,8 +36,9 @@ import org.junit.jupiter.api.Test;
  * authoring chain locks next.
  *
  * <p>Because the check is file-scoped, a cycle spread over two sources is invisible to it. Final
- * erasure retains the deleting user's memberships before organization roots, so its
- * {@code app_user} cascade meets only retained membership rows; this grep cannot establish that
+ * erasure retains the deleting user's {@code workspace_member} rows before organization roots and
+ * each {@code org_member} row after its organization root, so its {@code app_user} cascade meets
+ * only retained membership rows; this grep cannot establish that
  * runtime footprint, which {@code AccountDeletionMembershipTailConcurrencyIntegrationTest} proves
  * against real MySQL.
  */

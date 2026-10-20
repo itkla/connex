@@ -547,9 +547,10 @@ service-level cleanup.
 #### Ordering rules recorded here so round 17 does not reopen them
 
 - **No path may take an `organization` root EXCLUSIVELY and then lock a `workspace_member` row.**
-  Final account deletion has no carve-out: it retains every membership of the deleting account
-  before its organization, credential and audit-head phases, so the `app_user` cascade meets only
-  retained rows (#2156). `AccountDeletionMembershipTailConcurrencyIntegrationTest` proves that
+  Final account deletion has no carve-out: it retains every `workspace_member` row of the deleting
+  account before its organization phase, then each organization root before that account's
+  `org_member` row, and all of them before the credential and audit-head phases, so the `app_user`
+  cascade meets only retained rows (#2156). `AccountDeletionMembershipTailConcurrencyIntegrationTest` proves that
   runtime footprint against real MySQL, including pending, suspended, inactive-scope and
   concurrently inserted memberships; the file-scoped grep cannot see it across services.
   Management takes the organization root before the membership row, while removal and owner leave
