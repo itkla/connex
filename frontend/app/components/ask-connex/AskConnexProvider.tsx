@@ -1334,7 +1334,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             && !isInvalidatedAiChatSession(session, workspacePrivacyCutoffsRef.current.get(session.workspaceId));
         const current = page.items.filter(eligible);
         setSessions(current.filter((session) => !session.archived));
-        setInvitations(invitationPage.items.filter(eligible).filter((session) => !session.archived));
+        setInvitations(invitationPage.items.filter((session) => eligible(session) && !session.archived));
         return current;
     }, []);
 
