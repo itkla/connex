@@ -65,6 +65,35 @@ class OrgMemberServiceLockOrderTest {
     @InjectMocks private OrgMemberService service;
 
     @Test
+    void finalErasureRetainsAdminMembershipsAndChecksCurrentCompletenessAfterTheRootUnion() {
+        when(userMapper.lockById(9)).thenReturn(9);
+        when(orgMemberMapper.orgIdsOwnedBy(9)).thenReturn(List.of(7));
+        when(orgMemberMapper.lockOwnerIds(7)).thenReturn(List.of(9, 12));
+        when(orgMemberMapper.lockAccountMembershipOrgIds(9)).thenReturn(List.of(3, 7));
+
+        service.assertAccountDeletionOrganizationRecovery(9, List.of(), List.of(7, 3));
+
+        InOrder order = inOrder(organizationMapper, orgMemberMapper);
+        order.verify(organizationMapper).lockByIdForShare(3);
+        order.verify(organizationMapper).lockById(7);
+        order.verify(orgMemberMapper).lockOwnerIds(7);
+        order.verify(orgMemberMapper).lockExactRole(3, 9);
+        order.verify(orgMemberMapper).lockAccountMembershipOrgIds(9);
+        verify(orgMemberMapper, never()).lockExactRole(7, 9);
+    }
+
+    @Test
+    void finalErasureRefusesAnUnplannedOrganizationMembership() {
+        when(userMapper.lockById(9)).thenReturn(9);
+        when(orgMemberMapper.lockAccountMembershipOrgIds(9)).thenReturn(List.of(3, 7));
+
+        assertThrows(ooo.klae.connex.backend.exceptions.ConflictException.class,
+            () -> service.assertAccountDeletionOrganizationRecovery(9, List.of(3), List.of(3)));
+
+        verifyNoInteractions(auditService);
+    }
+
+    @Test
     void setMemberLocksOrganizationAndSortedUsersBeforeOwnerRowsAndUpsert() {
         User target = targetUser(1);
         when(orgMemberMapper.getRole(7, 9)).thenReturn("owner");

@@ -65,7 +65,10 @@ class ApiCredentialLifecycleServiceTest {
                 .map(audit -> List.of(audit.workspaceId(), audit.organizationId()))
                 .toList());
         pending.forEach(PendingCredentialAudit::emit);
-        InOrder auditOrder = inOrder(auditService);
+        InOrder auditOrder = inOrder(mapper, auditService);
+        auditOrder.verify(mapper).deleteById(3, 11);
+        auditOrder.verify(mapper).deleteById(3, 12);
+        auditOrder.verify(mapper).deleteById(9, 22);
         auditOrder.verify(auditService).recordStrictScoped(
             "api_credential.account_erased",
             "api_credential",
