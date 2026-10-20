@@ -246,10 +246,19 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   This preserves legacy `JOIN workspace` ceilings that had no lifecycle predicate; lifecycle
   tightening requires a separate explicit decision. It deliberately differs from the active-only
   `OrganizationWorkspaceScopeControlAccess` used by Identity, PersonEdge and assistant ceilings.
-  `IntroductionMapper` and `DuplicateReviewMapper` now bind this set through `JSON_TABLE` and read
-  tenant tables only; duplicate counts omit the optional employer-label joins. Their crossing
-  baseline entries are removed. The routing default stays `single-database`; other #485 crossings
-  and the flag-enable gate remain open.
+  `IntroductionMapper`, `DuplicateReviewMapper`, `NoteMapper`, and `SegmentMapper` now bind this set through
+  `JSON_TABLE` and read tenant tables only; duplicate counts omit the optional employer-label joins.
+  Note pages and their counts reuse one scope and author-ID snapshot, and global note search reuses
+  one scope across both bounded candidate streams. Private-note evidence resolves its scope after
+  the existing subject-visibility refusal. Note assistant history retains its separate active-only
+  organization scope. Segment evaluation reuses one unfiltered scope across nested groups, negation,
+  and bounded keyset pages, including both ordinary and restricted person-company field statements.
+  Its five converted statements preserve the bounded warm-intro engaged-person provision-ceased
+  exception and the unbounded owned-person company-ID projection without a company visibility join.
+  These mappers' crossing baseline entries are removed. Segment calls already inside campaign and
+  workflow locks retain their transaction shape; #2159 (L-scope) owns the context-installed snapshot
+  and fail-fast guard required before catalog routing can be enabled. The routing default
+  stays `single-database`; other #485 crossings and the flag-enable gate remain open.
 
 ### 0.6 Organization membership & org-level roles (#316)
 

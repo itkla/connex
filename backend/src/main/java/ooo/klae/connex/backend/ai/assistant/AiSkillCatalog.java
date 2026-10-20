@@ -322,14 +322,17 @@ public class AiSkillCatalog {
         return true;
     }
 
+    /**
+     * Builds the catalog in recognition order.
+     *
+     * <p>{@code dailyWorkBrief} precedes {@code relationshipBrief} because its triggers are narrower.
+     * The Japanese relationship-brief trigger accepts the bare word "ブリーフ", which would otherwise
+     * swallow "今日のブリーフ" and answer a request about the member's day by asking for a record.
+     */
     private static Map<String, SkillSpec> buildSkills() {
         Map<String, SkillSpec> skills = new LinkedHashMap<>();
         add(skills, coolingExplanation());
         add(skills, activityDigest());
-        // The personal work brief is recognized before the relationship brief because its triggers
-        // are strictly narrower: the Japanese relationship-brief trigger accepts the bare word
-        // "ブリーフ", which would otherwise swallow "今日のブリーフ" and answer a request about the
-        // member's own day by asking which record they meant.
         add(skills, dailyWorkBrief());
         add(skills, relationshipBrief());
         add(skills, pipelineAttentionReview());
@@ -347,6 +350,11 @@ public class AiSkillCatalog {
         return Collections.unmodifiableMap(skills);
     }
 
+    /**
+     * Declares the cooling explanation, requiring explanatory framing rather than a warmth word
+     * alone. "List activity for cool accounts" requests a bounded digest, so it must not collide
+     * with a request to explain one relationship.
+     */
     private static SkillSpec coolingExplanation() {
         return new SkillSpec(
                 COOLING,
@@ -379,9 +387,6 @@ public class AiSkillCatalog {
                 PartialBehavior.BOUNDED_PARTIAL,
                 new Evaluation(
                         COOLING, 1, Set.of("factuality", "citation_correctness")),
-                // Recognition deliberately requires an explanatory framing rather than the mere
-                // presence of a warmth word: "list activity for cool accounts" is a bounded digest,
-                // not a request to explain one relationship, and the two must not collide.
                 List.of(
                         Pattern.compile(
                                 "\\b(why|explain|reason|cause)\\b[^?.]{0,80}"
@@ -463,6 +468,12 @@ public class AiSkillCatalog {
                 partial with bounded_results whenever the result declares truncation.""");
     }
 
+    /**
+     * Declares the relationship brief, requiring briefing framing that names a record or
+     * relationship rather than merely a briefing verb. "Tell me about the pricing on this deal"
+     * asks about a field; the generic loop handles it better than a whole relationship brief on a
+     * three-step synthesis budget.
+     */
     private static SkillSpec relationshipBrief() {
         return new SkillSpec(
                 BRIEF,
@@ -495,10 +506,6 @@ public class AiSkillCatalog {
                 Integer.MAX_VALUE,
                 PartialBehavior.BOUNDED_PARTIAL,
                 new Evaluation(BRIEF, 1, Set.of("factuality", "citation_correctness")),
-                // Recognition requires the briefing framing to name a record or relationship, not
-                // merely to open with a briefing verb: "tell me about the pricing on this deal" is a
-                // question about a field, and answering it with a whole relationship brief on a
-                // three-step synthesis budget is worse than letting the generic loop handle it.
                 List.of(
                         Pattern.compile(
                                 "\\b(?:catch me up|bring me up to speed)\\b",
@@ -587,6 +594,18 @@ public class AiSkillCatalog {
      * <p>The commitment step is the only required one. If the task projection cannot be read the
      * brief has no spine and the generic loop is a better answer than a brief that silently omits
      * the member's work; every other section degrades to a stated gap.
+     *
+     * <p>Recognition requires the member's own period of work. "Brief me on Acme" belongs to
+     * {@code relationshipBrief}, and "which deals need attention" to {@code pipelineAttentionReview};
+     * capturing either here would answer a record question with a personal day plan. "Catch me up"
+     * is absent because {@code relationshipBrief} already claims it.
+     *
+     * <p>Because the catalog matches this skill before {@code relationshipBrief}, every
+     * pattern must end at the member's own period rather than run on into a record. The trailing
+     * lookahead and bare Japanese forms let "today's summary of Acme" and 「今日のAcme社のまとめ」
+     * fall through to the record skill that can anchor them, while "my daily brief" and
+     * 「今日のブリーフ」 match here. The {@code review} alternative preserves the same routing for
+     * a scheduled "Give me my weekly review." as for a typed request.
      */
     private static SkillSpec dailyWorkBrief() {
         return new SkillSpec(
@@ -637,20 +656,6 @@ public class AiSkillCatalog {
                 Integer.MAX_VALUE,
                 PartialBehavior.BOUNDED_PARTIAL,
                 new Evaluation(WORK_BRIEF, 1, Set.of("factuality", "tool_selection")),
-                // Recognition requires the request to be about the member's own period of work.
-                // "brief me on Acme" is a relationship brief and "which deals need attention" is a
-                // pipeline review; capturing either here would answer a record question with a
-                // personal day plan. "Catch me up" is deliberately absent: the relationship brief
-                // already claims it, and two skills competing for one phrase is worse than one.
-                //
-                // Because this skill is matched before the relationship brief, every pattern must
-                // end at the member's own period rather than run on into a record. That is what the
-                // trailing lookahead and the bare Japanese forms enforce: "today's summary of Acme"
-                // and 「今日のAcme社のまとめ」 name a record immediately after the period word, so
-                // they fall through to the record skill that can actually anchor them, while "my
-                // daily brief" and 「今日のブリーフ」 do not and are recognized here. "review" stays
-                // in the alternation because a scheduled weekly run sends the literal sentence
-                // "Give me my weekly review." and must take the same routed path a typed one does.
                 List.of(
                         Pattern.compile(
                                 "\\b(?:daily|morning|weekly|today'?s|this\\s+week'?s)\\s+"

@@ -96,6 +96,7 @@ public class SearchService {
     private final WorkflowMapper workflowMapper;
     private final WorkspaceService workspaceService;
     private final ReferenceService referenceService;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     /**
      * Runs one bounded global search in the active workspace.
@@ -171,9 +172,7 @@ public class SearchService {
                 .stream().map(TagDto::from).toList()),
             selected(types, "activities", () -> searchVisibleActivities(workspaceId, pattern, needle)
                 .stream().map(ActivityDto::from).toList()),
-            selected(types, "notes", () -> mergeVisibleNotes(
-                searchVisibleNotes(workspaceId, pattern, needle, userId),
-                searchVisibleNotesByAuthor(workspaceId, pattern, userId))
+            selected(types, "notes", () -> searchNotes(workspaceId, pattern, needle, userId)
                 .stream().map(NoteDto::from).toList()),
             selected(types, "tasks", () -> searchVisibleTasks(workspaceId, pattern, needle)
                 .stream().map(TaskDto::from).toList()),
@@ -227,14 +226,22 @@ public class SearchService {
         return visible;
     }
 
+    private List<Note> searchNotes(int workspaceId, String pattern, String needle, int currentUserId) {
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId)
+            .workspaceIdsJson();
+        return mergeVisibleNotes(
+            searchVisibleNotes(workspaceId, orgWorkspaceIdsJson, pattern, needle, currentUserId),
+            searchVisibleNotesByAuthor(workspaceId, orgWorkspaceIdsJson, pattern, currentUserId));
+    }
+
     private List<Note> searchVisibleNotes(
-            int workspaceId, String pattern, String needle, int currentUserId) {
+            int workspaceId, String orgWorkspaceIdsJson, String pattern, String needle, int currentUserId) {
         List<Note> visible = new ArrayList<>();
         int offset = 0;
         while (visible.size() < RESULT_LIMIT && offset < MAX_CANDIDATES) {
             int limit = Math.min(CANDIDATE_BATCH_SIZE, MAX_CANDIDATES - offset);
             List<Note> batch = noteMapper.searchVisible(
-                workspaceId, pattern, currentUserId, limit, offset);
+                workspaceId, orgWorkspaceIdsJson, pattern, currentUserId, limit, offset);
             if (batch.isEmpty()) {
                 return visible;
             }
@@ -251,13 +258,13 @@ public class SearchService {
     }
 
     private List<Note> searchVisibleNotesByAuthor(
-            int workspaceId, String pattern, int currentUserId) {
+            int workspaceId, String orgWorkspaceIdsJson, String pattern, int currentUserId) {
         List<Note> visible = new ArrayList<>();
         int offset = 0;
         while (visible.size() < RESULT_LIMIT && offset < MAX_CANDIDATES) {
             int limit = Math.min(CANDIDATE_BATCH_SIZE, MAX_CANDIDATES - offset);
             List<Note> batch = noteMapper.getVisibleNotesPage(
-                workspaceId, currentUserId, null, List.of(), "created", "desc", limit, offset);
+                workspaceId, orgWorkspaceIdsJson, currentUserId, null, List.of(), "created", "desc", limit, offset);
             if (batch.isEmpty()) {
                 return visible;
             }

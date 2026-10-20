@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.mappers;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
+
 import java.math.BigDecimal;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -301,11 +303,11 @@ class ArchivedRecordVisibilityMapperTest extends AbstractMapperTest {
         int readerId = java.util.Objects.requireNonNull(note.getAuthor()).getId();
         String query = "%" + contact.getName() + "%";
 
-        assertFalse(noteMapper.searchVisible(workspace.getId(), query, readerId, 10, 0).isEmpty());
+        assertFalse(noteMapper.searchVisible(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), query, readerId, 10, 0).isEmpty());
 
         assertEquals(1, personMapper.archive(workspace.getId(), contact.getId()));
 
-        assertTrue(noteMapper.searchVisible(workspace.getId(), query, readerId, 10, 0).isEmpty());
+        assertTrue(noteMapper.searchVisible(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), query, readerId, 10, 0).isEmpty());
     }
 
     /**
