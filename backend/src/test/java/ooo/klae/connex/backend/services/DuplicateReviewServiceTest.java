@@ -1,12 +1,17 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -19,6 +24,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -28,6 +34,11 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.aop.framework.ProxyFactory;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource;
+import org.springframework.transaction.interceptor.TransactionInterceptor;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import ooo.klae.connex.backend.dto.DuplicateMatchKind;
 import ooo.klae.connex.backend.dto.DuplicateMatchStrength;
@@ -42,6 +53,8 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.DuplicateReviewMapper;
 import ooo.klae.connex.backend.mappers.IdentityCollisionMapper;
+import ooo.klae.connex.backend.support.TestTransactionManager;
+import ooo.klae.connex.backend.support.TestTransactionManager.TestTransaction;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 
@@ -60,6 +73,7 @@ class DuplicateReviewServiceTest {
 
     @Mock private RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
+    private final TestTransactionManager transactionManager = spy(new TestTransactionManager());
     private DuplicateReviewService service;
 
     @BeforeEach
@@ -70,7 +84,8 @@ class DuplicateReviewServiceTest {
             duplicateDecisionLockService,
             workspaceService,
             CLOCK,
-            recordVisibilityScopeControlAccess);
+            recordVisibilityScopeControlAccess,
+            transactionManager);
     }
 
     @Test
@@ -83,6 +98,55 @@ class DuplicateReviewServiceTest {
         order.verify(recordVisibilityScopeControlAccess).getForWorkspace(7);
         order.verify(duplicateReviewMapper).countVisibleItems(7, null, null, "open", 20);
         order.verify(duplicateReviewMapper).findVisibleItems(7, "[7,11]", null, null, "open", 50, 0L, 20);
+        verify(recordVisibilityScopeControlAccess).getForWorkspace(7);
+    }
+
+    @Test
+    void listResolvesScopeWithoutATransactionAndSharesOneRepeatableReadSnapshot() {
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
+        when(recordVisibilityScopeControlAccess.getForWorkspace(7)).thenAnswer(invocation -> {
+            assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
+            assertNull(transactionManager.currentTransaction());
+            assertEquals(0, transactionManager.beginCount());
+            return new RecordVisibilityScopeControlAccess.RecordVisibilityScope(1, List.of(7, 11));
+        });
+        AtomicReference<TestTransaction> snapshot = new AtomicReference<>();
+        when(duplicateReviewMapper.countVisibleItems(7, null, null, "open", 20))
+            .thenAnswer(invocation -> {
+                assertTrue(TransactionSynchronizationManager.isActualTransactionActive());
+                assertTrue(TransactionSynchronizationManager.isCurrentTransactionReadOnly());
+                assertEquals(TransactionDefinition.ISOLATION_REPEATABLE_READ,
+                    TransactionSynchronizationManager.getCurrentTransactionIsolationLevel());
+                snapshot.set(transactionManager.currentTransaction());
+                return 1L;
+            });
+        when(duplicateReviewMapper.findVisibleItems(7, "[7,11]", null, null, "open", 50, 0L, 20))
+            .thenAnswer(invocation -> {
+                assertTrue(TransactionSynchronizationManager.isActualTransactionActive());
+                assertTrue(TransactionSynchronizationManager.isCurrentTransactionReadOnly());
+                assertEquals(TransactionDefinition.ISOLATION_REPEATABLE_READ,
+                    TransactionSynchronizationManager.getCurrentTransactionIsolationLevel());
+                assertSame(snapshot.get(), transactionManager.currentTransaction());
+                return List.of(row("open", EMAIL_FINGERPRINT));
+            });
+        ProxyFactory proxy = new ProxyFactory(service);
+        proxy.addAdvice(new TransactionInterceptor(transactionManager, new AnnotationTransactionAttributeSource()));
+
+        PageResponse<DuplicateReviewItemDto> result = ((DuplicateReviewService) proxy.getProxy())
+            .list(new DuplicateReviewQuery());
+
+        assertEquals(1L, result.total());
+        assertEquals(1, result.items().size());
+        ArgumentCaptor<TransactionDefinition> definition = ArgumentCaptor.forClass(TransactionDefinition.class);
+        verify(transactionManager).getTransaction(definition.capture());
+        assertEquals(TransactionDefinition.PROPAGATION_REQUIRED, definition.getValue().getPropagationBehavior());
+        assertEquals(TransactionDefinition.ISOLATION_REPEATABLE_READ, definition.getValue().getIsolationLevel());
+        assertTrue(definition.getValue().isReadOnly());
+        assertEquals(4, definition.getValue().getTimeout());
+        assertEquals(1, transactionManager.beginCount());
+        assertEquals(0, transactionManager.suspendCount());
+        assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
+        assertNull(transactionManager.currentTransaction());
         verify(recordVisibilityScopeControlAccess).getForWorkspace(7);
     }
 

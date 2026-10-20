@@ -1659,6 +1659,12 @@ connection, or tenant record lock. A routed scope lookup suspends the tenant tra
 a second pooled connection; doing that while holding a mutex can exhaust the pool with waiters and
 leave the mutex owner waiting for its own second connection. Thread the same immutable
 `RecordVisibilityScope` through the locked operation instead of resolving it again in a nested read.
+
+In `catalog-per-placement` mode, a scope read inside an open tenant transaction borrows a second
+connection. `DuplicateReviewService.list` resolves its scope before opening the repeatable-read
+transaction shared by count and page. The general guarantee of a context-installed scope snapshot
+and a fail-fast guard is tracked in #485 as lane L-scope and must land before the flag can be enabled.
+
 The locked call chains are:
 
 - `NotificationReconciliationService.reconcileWorkspace`: preload the scope before opening its
