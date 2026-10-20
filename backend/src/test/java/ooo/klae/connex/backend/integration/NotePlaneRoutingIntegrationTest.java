@@ -97,9 +97,8 @@ class NotePlaneRoutingIntegrationTest {
         Map<String, Object> parameters = fixture.noteParameters();
         parameters.put("query", "%LinkedNeedle%");
         Map<String, Object> expected = legacy(parameters);
-        WorkspaceMapper workspaces = mock(WorkspaceMapper.class);
+        WorkspaceMapper workspaces = fixture.workspaceMapper;
         TenantCatalogResolver resolver = mock(TenantCatalogResolver.class);
-        when(workspaces.getOrgId(fixture.workspaceId)).thenReturn(fixture.orgId);
         when(resolver.resolveCatalog(fixture.orgId)).thenReturn(fixture.tenantCatalog);
         new TenantWorkScope(fixture.tenantContext, resolver, workspaces).inWorkspace(fixture.workspaceId, () -> {
             assertFalse(fixture.tenantContext.isResolved());

@@ -73,6 +73,24 @@ class RecordVisibilityScopeControlAccessTest {
             () -> new RecordVisibilityScopeControlAccess(delegate, tenantContext).getForWorkspace(7));
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void matchingPreparedMissingAnchorRefusesWithoutALazyFallbackInBothModes(boolean routed) {
+        ShareWorkspaceControlAccess delegate = mock(ShareWorkspaceControlAccess.class);
+        when(delegate.isCatalogPerPlacement()).thenReturn(routed);
+        String catalog = routed ? "cnx_tenant" : null;
+        var prepared = new TenantWorkspaceScopeSnapshot(7, 900, catalog, Optional.empty(),
+            new WorkspaceScope(900, List.of(11), "[11]"));
+        tenantContext.setWithWorkspaceScopes(7, 900, 5, "system", catalog, prepared);
+
+        var failure = assertThrows(IllegalStateException.class,
+            () -> new RecordVisibilityScopeControlAccess(delegate, tenantContext).getForWorkspace(7));
+
+        assertEquals("Workspace 7 does not exist", failure.getMessage());
+        verify(delegate).isCatalogPerPlacement();
+        org.mockito.Mockito.verifyNoMoreInteractions(delegate);
+    }
+
     @Test
     void scopeCannotBeChangedThroughItsInputOrAccessor() {
         List<Integer> workspaceIds = new ArrayList<>(List.of(7, 11));

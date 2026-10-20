@@ -123,9 +123,8 @@ class SegmentPlaneRoutingIntegrationTest {
     void unresolvedBackgroundContextReadsOneScopeAndRestoresRouting() throws Exception {
         Map<String, Object> parameters = parameters();
         Map<String, List<Integer>> expected = legacy(parameters);
-        WorkspaceMapper workspaces = mock(WorkspaceMapper.class);
+        WorkspaceMapper workspaces = fixture.workspaceMapper;
         TenantCatalogResolver resolver = mock(TenantCatalogResolver.class);
-        when(workspaces.getOrgId(fixture.workspaceId)).thenReturn(fixture.orgId);
         when(resolver.resolveCatalog(fixture.orgId)).thenReturn(fixture.tenantCatalog);
         new TenantWorkScope(fixture.tenantContext, resolver, workspaces).inWorkspace(fixture.workspaceId, () -> {
             assertFalse(fixture.tenantContext.isResolved());
