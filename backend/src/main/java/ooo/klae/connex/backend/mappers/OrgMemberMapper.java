@@ -86,6 +86,10 @@ public interface OrgMemberMapper {
     int countOwners(@Param("orgId") int orgId);
     List<Integer> lockOwnerIds(@Param("orgId") int orgId);
     List<Integer> orgIdsOwnedBy(@Param("userId") int userId);
+    /** Discovers every organization membership, including inactive scopes, for account erasure. */
+    List<Integer> discoverAccountMembershipOrgIds(@Param("userId") int userId);
+    /** Current completeness fence after exact organization memberships have been retained. */
+    List<Integer> lockAccountMembershipOrgIds(@Param("userId") int userId);
     List<OrgMemberDto> getMembers(@Param("orgId") int orgId);
     List<OrganizationLayoutAuthorityMemberDto> findLayoutAuthorityMemberships(
         @Param("orgId") int orgId,

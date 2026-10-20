@@ -52,6 +52,7 @@ import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 
@@ -88,6 +89,7 @@ public class InteractionHistoryImportService {
     private final NotificationReconciliationService notificationReconciliationService;
     private final AuditService auditService;
     private final Clock clock;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     /** Previews an activity-history import using {@code ACTIVITY_CREATE}. */
     @Transactional(readOnly = true)
@@ -166,6 +168,7 @@ public class InteractionHistoryImportService {
         DuplicatePreflightService.ImportCommitAdmission admission =
             duplicatePreflightService.claimImportCommit(
                 request.getDuplicateReviewProof(), reviewContext);
+        RecordVisibilityScope recordVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         duplicateDecisionLockService.lockCurrentOrganization();
         Mapping mapping = validateRequest(kind, request);
         List<PlanRow> plan = parseRows(kind, request, mapping);
@@ -194,7 +197,7 @@ public class InteractionHistoryImportService {
         if (!creates.isEmpty()) {
             before =
                 notificationReconciliationService.historicalExpectationSnapshot(
-                    workspaceId, evaluationInstant);
+                    workspaceId, evaluationInstant, recordVisibilityScope);
         }
         List<HistoryImportWrite> writes =
             writes(kind, workspaceId, actorId, creates);
@@ -204,10 +207,10 @@ public class InteractionHistoryImportService {
                 baselineScope(kind, workspaceId, writes);
             NotificationReconciliationService.HistoricalExpectationSnapshot after =
                 notificationReconciliationService.historicalExpectationSnapshot(
-                    workspaceId, evaluationInstant);
+                    workspaceId, evaluationInstant, recordVisibilityScope);
             NotificationReconciliationService.HistoricalExpectationSnapshot counterfactual =
                 notificationReconciliationService.historicalExpectationSnapshot(
-                    workspaceId, evaluationInstant, scope);
+                    workspaceId, evaluationInstant, scope, recordVisibilityScope);
             if (!scope.sameRelevantExpectations(
                     Objects.requireNonNull(before), counterfactual)) {
                 throw new ConflictException(

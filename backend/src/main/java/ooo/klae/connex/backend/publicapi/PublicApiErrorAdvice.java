@@ -30,8 +30,10 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.ConstraintViolationException;
 import ooo.klae.connex.backend.config.SecurityResponseHeaders;
+import ooo.klae.connex.backend.config.RequestTransactionCommitListener;
 import ooo.klae.connex.backend.controllers.v1.PublicApiIdentityController;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.DatabaseFailureClassifier;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.PrivilegedMfaAttestationRequiredException;
 import ooo.klae.connex.backend.exceptions.PrivilegedMfaEnrollmentRequiredException;
@@ -96,8 +98,19 @@ public class PublicApiErrorAdvice {
         return response(HttpStatus.METHOD_NOT_ALLOWED, "method_not_allowed", "Request method is not supported");
     }
 
-    /** Maps unexpected public failures without returning exception details. */
+    /** Maps exact lock contention to a retryable conflict, preserving all other internal errors. */
     @ExceptionHandler(Exception.class)
+    public ResponseEntity<ErrorEnvelope> unexpectedFailure(Exception exception) {
+        if (!DatabaseFailureClassifier.isLockContention(exception)
+                || RequestTransactionCommitListener.committedDuringRequest()) {
+            return internalError(exception);
+        }
+        log.warn("Public API request conflict: exception={}", exception.getClass().getName());
+        return response(HttpStatus.CONFLICT, "conflict",
+            "The request conflicts with another operation; try again");
+    }
+
+    /** Maps unexpected public failures without returning exception details. */
     public ResponseEntity<ErrorEnvelope> internalError(Exception exception) {
         log.error("Public API request failed: exception={}", exception.getClass().getName());
         return response(HttpStatus.INTERNAL_SERVER_ERROR, "internal_error", "An unexpected error occurred");

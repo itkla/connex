@@ -26,8 +26,11 @@ import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.DealReminderCandidate;
@@ -45,6 +48,7 @@ import ooo.klae.connex.backend.mappers.PreferenceMapper;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
 import ooo.klae.connex.backend.notifications.NotificationProperties;
 import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -89,6 +93,8 @@ public class NotificationReconciliationService {
     private final DealRiskService dealRiskService;
     private final Clock clock;
     private final ObjectMapper objectMapper;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+    private final PlatformTransactionManager transactionManager;
 
     /**
      * Reconciles a workspace's reminder notifications. The {@code includeRelationshipNudges} flag
@@ -109,8 +115,22 @@ public class NotificationReconciliationService {
      * {@code @Transactional}: a caught exception that crossed a joined proxy would mark the
      * transaction rollback-only and void this isolation.
      */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void reconcileWorkspace(int workspaceId, boolean includeRelationshipNudges) {
+        RecordVisibilityScope recordVisibilityScope = includeRelationshipNudges
+                && properties.isIntroOpportunitiesEnabled()
+            ? preloadRecordVisibilityScope(workspaceId)
+            : null;
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        transaction.executeWithoutResult(status ->
+            reconcileWorkspace(workspaceId, includeRelationshipNudges, recordVisibilityScope));
+    }
+
+    /** Opens the reminder snapshot only after the organization mutex has been acquired. */
+    private void reconcileWorkspace(
+            int workspaceId,
+            boolean includeRelationshipNudges,
+            RecordVisibilityScope recordVisibilityScope) {
         duplicateDecisionLockService.lockBackgroundOrganization(workspaceId);
         reconcileSourcePayloads(workspaceId);
         Instant evaluationInstant = clock.instant();
@@ -155,8 +175,9 @@ public class NotificationReconciliationService {
                     temperatures,
                     evaluationInstant));
             runManagedPass(workspaceId, expected, managedTypes, INTRO_OPPORTUNITY_TYPE,
-                properties.isIntroOpportunitiesEnabled(), scored, "Intro-opportunity",
-                staged -> addIntroOpportunities(workspaceId, staged, preferences, triggeredAt, temperatures));
+                properties.isIntroOpportunitiesEnabled(), scored && recordVisibilityScope != null, "Intro-opportunity",
+                staged -> addIntroOpportunities(
+                    workspaceId, staged, preferences, triggeredAt, temperatures, recordVisibilityScope));
             Map<ReminderKey, String> stagedDealRiskSourceStates =
                 new LinkedHashMap<>();
             runManagedPass(workspaceId, expected, managedTypes, DEAL_RISK_TYPE,
@@ -220,19 +241,23 @@ public class NotificationReconciliationService {
         }
     }
 
+    /** Uses a record-visibility scope resolved before the historical writer acquired any locks. */
     HistoricalExpectationSnapshot historicalExpectationSnapshot(
             int workspaceId,
-            Instant evaluationInstant) {
+            Instant evaluationInstant,
+            RecordVisibilityScope recordVisibilityScope) {
         return historicalExpectationSnapshot(
             workspaceId,
             evaluationInstant,
-            HistoricalBaselineScope.empty());
+            HistoricalBaselineScope.empty(),
+            recordVisibilityScope);
     }
 
     HistoricalExpectationSnapshot historicalExpectationSnapshot(
             int workspaceId,
             Instant evaluationInstant,
-            HistoricalBaselineScope exclusion) {
+            HistoricalBaselineScope exclusion,
+            RecordVisibilityScope recordVisibilityScope) {
         String triggeredAt = utcTimestamp(evaluationInstant);
         Map<ReminderKey, Notification> existing = loadExisting(workspaceId);
         Map<PreferenceKey, Boolean> preferences = Map.of();
@@ -269,7 +294,7 @@ public class NotificationReconciliationService {
             evaluationInstant);
         if (properties.isIntroOpportunitiesEnabled()) {
             addIntroOpportunities(
-                workspaceId, expected, preferences, triggeredAt, temperatures);
+                workspaceId, expected, preferences, triggeredAt, temperatures, recordVisibilityScope);
         }
         if (properties.isDealRiskEnabled()) {
             Map<ReminderKey, String> dealRiskSourceStates = new LinkedHashMap<>();
@@ -734,6 +759,16 @@ public class NotificationReconciliationService {
         return notification;
     }
 
+    /** Preserves pass isolation when the pre-lock control snapshot is unavailable. */
+    private RecordVisibilityScope preloadRecordVisibilityScope(int workspaceId) {
+        try {
+            return recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        } catch (RuntimeException exception) {
+            log.warn("Intro-opportunity reconciliation failed for workspace={}", workspaceId, exception);
+            return null;
+        }
+    }
+
     /**
      * Surfaces the workspace's top reverse-introduction opportunities (issue #43) as info-level
      * nudges to every member — anyone can make the intro. Each opportunity is deduped per recipient
@@ -746,10 +781,11 @@ public class NotificationReconciliationService {
         Map<ReminderKey, Notification> expected,
         Map<PreferenceKey, Boolean> preferences,
         String triggeredAt,
-        Map<Integer, RelationshipTemperatureDto> temperatures
+        Map<Integer, RelationshipTemperatureDto> temperatures,
+        RecordVisibilityScope recordVisibilityScope
     ) {
         List<IntroSuggestionDto> suggestions = introductionService.computeSuggestions(
-            workspaceId, properties.getIntroOpportunityLimit(), temperatures);
+            workspaceId, properties.getIntroOpportunityLimit(), temperatures, recordVisibilityScope);
         if (suggestions.isEmpty()) {
             return;
         }

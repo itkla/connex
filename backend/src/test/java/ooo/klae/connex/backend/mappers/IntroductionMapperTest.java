@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.IntroCandidatePerson;
 import ooo.klae.connex.backend.beans.Note;
@@ -15,6 +16,7 @@ import ooo.klae.connex.backend.beans.PersonEdge;
 import ooo.klae.connex.backend.beans.User;
 
 class IntroductionMapperTest extends AbstractMapperTest {
+    @Autowired private RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     @Autowired IntroductionMapper introductionMapper;
     @Autowired ActivityMapper activityMapper;
@@ -82,13 +84,15 @@ class IntroductionMapperTest extends AbstractMapperTest {
     }
 
     private List<Integer> candidateIds() {
-        return introductionMapper.findCandidatePersons(workspace.getId()).stream()
+        return introductionMapper.findCandidatePersons(workspace.getId(),
+                recordVisibilityScopeControlAccess.getForWorkspace(workspace.getId()).workspaceIdsJson()).stream()
             .map(IntroCandidatePerson::getId)
             .toList();
     }
 
     private List<Integer> reportCandidateIds() {
-        return introductionMapper.findCandidatePersonsForReport(workspace.getId(), 1_000).stream()
+        return introductionMapper.findCandidatePersonsForReport(workspace.getId(),
+                recordVisibilityScopeControlAccess.getForWorkspace(workspace.getId()).workspaceIdsJson(), 1_000).stream()
             .map(IntroCandidatePerson::getId)
             .toList();
     }

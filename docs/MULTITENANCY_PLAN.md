@@ -240,6 +240,16 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   (`Company`/`Person`/`Pipeline` `visible`) carry the same-org ceiling the write path enforces, so a
   legacy or out-of-band cross-org share row grants no read visibility either. `OrgShareCeilingArchTest`
   pairs every `FROM *_share` read with the ceiling; `ShareReadIsolationMapperTest` proves it.
+- **Record-visibility ceiling separation (#485):** `RecordVisibilityScopeControlAccess` exposes an
+  immutable, unfiltered organization workspace set by delegating to `ShareWorkspaceControlAccess`'s
+  single control-catalog snapshot, including its transaction suspension and tenant-context checks.
+  This preserves legacy `JOIN workspace` ceilings that had no lifecycle predicate; lifecycle
+  tightening requires a separate explicit decision. It deliberately differs from the active-only
+  `OrganizationWorkspaceScopeControlAccess` used by Identity, PersonEdge and assistant ceilings.
+  `IntroductionMapper` and `DuplicateReviewMapper` now bind this set through `JSON_TABLE` and read
+  tenant tables only; duplicate counts omit the optional employer-label joins. Their crossing
+  baseline entries are removed. The routing default stays `single-database`; other #485 crossings
+  and the flag-enable gate remain open.
 
 ### 0.6 Organization membership & org-level roles (#316)
 

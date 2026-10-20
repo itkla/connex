@@ -67,6 +67,7 @@ public class ReportNetworkService {
     private final PersonEdgeReadService personEdgeReader;
     private final IntroductionMapper introductionMapper;
     private final ScoringService scoringService;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     NetworkSnapshot snapshot(ReportAggregateQuery query, boolean includeReverseIntros) {
         int workspaceId = query.workspaceId();
@@ -92,8 +93,10 @@ public class ReportNetworkService {
     }
 
     List<IntroSuggestionDto> reverseIntroSuggestions(int workspaceId) {
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId)
+            .workspaceIdsJson();
         List<IntroCandidatePerson> candidates = introductionMapper.findCandidatePersonsForReport(
-                workspaceId, MAX_REVERSE_CANDIDATES + 1);
+                workspaceId, orgWorkspaceIdsJson, MAX_REVERSE_CANDIDATES + 1);
         requireReverseCandidateBounds(candidates);
         if (candidates.size() < 2) {
             return List.of();
@@ -279,8 +282,10 @@ public class ReportNetworkService {
             List<RelationshipTemperatureDto> temperatures,
             List<PersonEdge> edges,
             List<Introduction> existingPairs) {
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId)
+            .workspaceIdsJson();
         List<IntroCandidatePerson> candidates = introductionMapper.findCandidatePersonsForReport(
-                workspaceId, MAX_REVERSE_CANDIDATES + 1);
+                workspaceId, orgWorkspaceIdsJson, MAX_REVERSE_CANDIDATES + 1);
         requireReverseCandidateBounds(candidates);
         if (candidates.size() < 2) {
             return List.of();

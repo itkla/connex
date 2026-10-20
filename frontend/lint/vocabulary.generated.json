@@ -138,6 +138,22 @@
             ]
         },
         {
+            "id": "en:autopilot",
+            "term": "autopilot",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\b(?:autopilotting|autopiloting|autopilotted|autopiloted|autopilotes|autopilots|autopilot)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 glossary row \"A member's pre-authorization for Ask Connex to apply bounded changes\""
+            ]
+        },
+        {
             "id": "en:canonical",
             "term": "canonical",
             "locale": "en",
@@ -399,6 +415,22 @@
             },
             "sources": [
                 "§4 glossary row \"The automation object\""
+            ]
+        },
+        {
+            "id": "en:mandate",
+            "term": "mandate",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\b(?:mandating|mandated|mandates|mandate)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 glossary row \"A member's pre-authorization for Ask Connex to apply bounded changes\""
             ]
         },
         {
