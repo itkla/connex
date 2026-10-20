@@ -154,7 +154,7 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
         TenantWorkScope workScope = new TenantWorkScope(
             tenantContext, mock(TenantCatalogResolver.class), mock(WorkspaceMapper.class));
         scopeAccess = new RecordVisibilityScopeControlAccess(new ShareWorkspaceControlAccess(
-            sessions.getMapper(WorkspaceMapper.class), workScope, tenantContext, transactionManager));
+            sessions.getMapper(WorkspaceMapper.class), workScope, tenantContext, transactionManager), tenantContext);
         legacy = new LegacyRecordVisibilitySql(pool, defaultCatalog);
         try {
             seedControl();

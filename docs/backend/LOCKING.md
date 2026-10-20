@@ -1745,6 +1745,16 @@ connection. `DuplicateReviewService.list` resolves its scope before opening the 
 transaction shared by count and page. The general guarantee of a context-installed scope snapshot
 and a fail-fast guard is tracked in #485 as lane L-scope and must land before the flag can be enabled.
 
+The lazy `RecordVisibilityScopeControlAccess` path memoizes one successful snapshot per workspace
+within an actual synchronized transaction. A durable outbox delivery page is one `REQUIRES_NEW`,
+`READ_COMMITTED` transaction, so its per-record segment checks and repeated legacy checks share one
+control read; simulation conditions likewise share their read-only transaction's snapshot. The memo
+is unbound on transaction suspension, restored only on resume, and discarded on commit or rollback
+before deferred completion callbacks can open independent work.
+`REQUIRES_NEW` and nontransactional work cannot reuse a suspended transaction's memo. Cached scopes
+still enforce the resolved workspace/organization identity. This removes repeated reads while locks
+are held; it does not replace L-scope's prepared payload and fail-fast guard for the first routed read.
+
 The locked call chains are:
 
 - `NotificationReconciliationService.reconcileWorkspace`: preload the scope before opening its

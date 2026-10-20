@@ -16,6 +16,10 @@ Evaluation returns workspace- and current-user-scoped record ids through `Segmen
 Each evaluation resolves one unfiltered organization workspace scope through
 `RecordVisibilityScopeControlAccess` for Segment SQL's shared-person and related-company ceilings
 (#485). Nested groups, condition/group negation, and every bounded keyset page reuse that snapshot.
+An actual transaction also memoizes that scope per workspace: every record in one durable outbox
+page, repeated entity-delivery condition checks, and all simulated condition nodes share one lazy
+control read. Suspension removes the memo until the same transaction resumes; commit and rollback
+discard it. Independent transactions and nontransactional evaluations read fresh scopes.
 The existing candidate universe, upper watermark, result limit, and per-context signal caching remain
 unchanged. Campaign/workflow callers that already hold locks retain their transaction shape; #2159
 owns the context-installed snapshot and fail-fast guard required before enabling catalog routing.
