@@ -354,14 +354,15 @@ class ReportMapperXmlTest {
                 java.util.List.of(1), java.util.List.of(2), java.util.List.of("open"), java.util.List.of(3));
         String networkSql = configuration.getMappedStatement(
                         ReportMapper.class.getName() + ".getNetworkAccountValues")
-                .getBoundSql(Map.of("query", networkQuery, "limit", 101))
+                .getBoundSql(Map.of("query", networkQuery, "orgWorkspaceIdsJson", "[7]", "limit", 101))
                 .getSql();
         assertTrue(networkSql.contains("network_deal.workspace_id = ?"));
         assertTrue(networkSql.contains("network_deal.won IS NULL"));
         assertTrue(networkSql.contains("SUM(GREATEST(network_deal.value, 0))"));
         assertTrue(networkSql.contains("network_company.workspace_id = ?"));
         assertTrue(networkSql.contains("FROM company_share network_company_share"));
-        assertTrue(networkSql.contains("ows.org_id = vws.org_id"));
+        assertTrue(networkSql.contains("JOIN JSON_TABLE(?, '$[*]' COLUMNS(id INT PATH '$')) org_workspace"));
+        assertTrue(networkSql.contains("ON org_workspace.id = network_company.workspace_id"));
         assertTrue(networkSql.contains("network_deal.pipeline_id IN"));
         assertTrue(networkSql.contains("network_deal.owner_id IN"));
         assertTrue(networkSql.contains("AND 'open' IN"));
@@ -384,6 +385,7 @@ class ReportMapperXmlTest {
             assertNotNull(configuration.getMappedStatement(ReportMapper.class.getName() + "." + statement)
                     .getBoundSql(Map.of(
                             "workspaceId", 7,
+                            "orgWorkspaceIdsJson", "[7]",
                             "asOf", LocalDateTime.of(2026, 2, 1, 0, 0)))
                     .getSql());
         }
@@ -619,6 +621,7 @@ class ReportMapperXmlTest {
         String sql = configuration.getMappedStatement(ReportMapper.class.getName() + "." + statement)
                 .getBoundSql(Map.of(
                     "query", query,
+                    "orgWorkspaceIdsJson", "[7]",
                     "warmthReference", query.endUtc().minusNanos(1_000_000),
                     "model", RelationshipWarmthModel.current().sqlParameters()))
                 .getSql();
@@ -679,6 +682,7 @@ class ReportMapperXmlTest {
         String sql = configuration.getMappedStatement(ReportMapper.class.getName() + "." + statement)
                 .getBoundSql(Map.of(
                         "query", query(measure, group, bucket, null, null, null, null),
+                        "orgWorkspaceIdsJson", "[7]",
                         "warmthReference", LocalDateTime.of(2026, 2, 1, 0, 0),
                         "model", RelationshipWarmthModel.current().sqlParameters()))
                 .getSql();

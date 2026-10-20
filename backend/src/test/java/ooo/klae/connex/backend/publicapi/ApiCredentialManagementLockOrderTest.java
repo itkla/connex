@@ -85,6 +85,8 @@ class ApiCredentialManagementLockOrderTest {
             mock(NotificationMapper.class),
             mock(UserOffboardingService.class),
             mock(WorkspaceMembershipRemovalTransaction.class),
+            mock(ooo.klae.connex.backend.services.FreshMembershipTransaction.class),
+            mock(ooo.klae.connex.backend.tenant.TenantWorkScope.class),
             mock(NotificationDelivery.class),
             mock(NotificationStateVersionService.class),
             tenantContext,

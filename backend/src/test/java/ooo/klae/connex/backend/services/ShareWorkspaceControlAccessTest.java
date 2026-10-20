@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -27,6 +28,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.ShareDto;
+import ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.ShareWorkspaceControlAccess.OrganizationWorkspaces;
 import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
@@ -34,10 +36,9 @@ import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /**
- * Verifies the share workspace snapshot reads the control catalog, suspends and restores a routed
- * tenant transaction, fails loudly on an impossible anchor, and hydrates listings from the
- * snapshot it took. The two-catalog routing test covers the same suspend/restore against a real
- * database; these cases pin the branches it cannot reach.
+ * Verifies single-database sharing retains its lazy control reads, including suspension when a
+ * catalog is explicitly pinned, anchor refusals and snapshot-based listing hydration. Routing-mode
+ * checks are independent of the catalog pin; prepared routed reads are covered by the scope tests.
  */
 @ExtendWith(MockitoExtension.class)
 class ShareWorkspaceControlAccessTest {
@@ -57,7 +58,10 @@ class ShareWorkspaceControlAccessTest {
     @ValueSource(booleans = {false, true})
     void routingModeComesFromTheResolverRatherThanThePinnedCatalog(boolean routed) {
         when(tenantCatalogResolver.isCatalogPerPlacement()).thenReturn(routed);
-        ShareWorkspaceControlAccess controlAccess = controlAccess(new TestTransactionManager());
+        TenantWorkScope workScope = new TenantWorkScope(tenantContext, tenantCatalogResolver, workspaceMapper,
+            mock(TenantLifecycleControlMapper.class), mock(TenantWorkspaceScopeControlOperations.class));
+        ShareWorkspaceControlAccess controlAccess = new ShareWorkspaceControlAccess(
+            workspaceMapper, workScope, tenantContext, new TestTransactionManager());
 
         assertEquals(routed, controlAccess.isCatalogPerPlacement());
         tenantContext.set(7, 900, 42, "member", "cnx_tenant");

@@ -20,6 +20,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import ooo.klae.connex.backend.beans.IntroCandidatePerson;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.support.RecordVisibilityPlaneFixture;
+import ooo.klae.connex.backend.support.RecordVisibilityPlaneFixture.Records;
 import ooo.klae.connex.backend.support.LegacyRecordVisibilitySql;
 import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
@@ -30,7 +31,7 @@ class IntroductionCandidatePlaneRoutingIntegrationTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        fixture = new RecordVisibilityPlaneFixture(true, true);
+        fixture = new RecordVisibilityPlaneFixture(Records.INTRODUCTIONS, true);
     }
 
     @AfterEach

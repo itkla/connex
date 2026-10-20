@@ -58,7 +58,7 @@ public class TenantDiagnosticsTenantAccess {
             throw new IllegalArgumentException("An empty organization has no tenant catalog");
         }
         int anchorWorkspaceId = scope.workspaceIds().getFirst();
-        return tenantWorkScope.withWorkspacePlacement(anchorWorkspaceId, (resolvedOrgId, catalog) -> {
+        return tenantWorkScope.withWorkspacePlacement(anchorWorkspaceId, scope, (resolvedOrgId, catalog) -> {
             if (resolvedOrgId != scope.orgId()) {
                 throw new IllegalStateException("Organization placement changed during diagnostics");
             }
@@ -74,34 +74,12 @@ public class TenantDiagnosticsTenantAccess {
             String role,
             String catalog,
             Supplier<T> work) {
-        boolean hadTenant = tenantContext.isResolved();
-        int previousWorkspace = hadTenant
-                ? Objects.requireNonNull(tenantContext.getWorkspaceId(), "previousWorkspace")
-                : 0;
-        int previousOrg = hadTenant
-                ? Objects.requireNonNull(tenantContext.getOrgId(), "previousOrg")
-                : 0;
-        int previousUser = hadTenant
-                ? Objects.requireNonNull(tenantContext.getUserId(), "previousUser")
-                : 0;
-        String previousRole = hadTenant
-                ? Objects.requireNonNull(tenantContext.getRole(), "previousRole")
-                : null;
-        String previousCatalog = hadTenant ? tenantContext.getScopeCatalog() : null;
+        TenantContext.State previousTenant = tenantContext.snapshot();
         tenantContext.set(workspaceId, orgId, actorId, role, catalog);
         try {
             return work.get();
         } finally {
-            if (hadTenant) {
-                tenantContext.set(
-                        previousWorkspace,
-                        previousOrg,
-                        previousUser,
-                        previousRole,
-                        previousCatalog);
-            } else {
-                tenantContext.clear();
-            }
+            tenantContext.restore(previousTenant);
         }
     }
 }

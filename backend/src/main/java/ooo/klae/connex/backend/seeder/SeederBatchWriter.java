@@ -157,7 +157,7 @@ public class SeederBatchWriter {
         }
         flush();
 
-        TenantScope previous = captureTenantScope();
+        TenantContext.State previous = tenantContext.snapshot();
         tenantContext.set(
             workspace.getId(),
             organization.getId(),
@@ -176,7 +176,7 @@ public class SeederBatchWriter {
                 users
             );
         } finally {
-            restoreTenantScope(previous);
+            tenantContext.restore(previous);
         }
     }
 
@@ -532,32 +532,6 @@ public class SeederBatchWriter {
         }
     }
 
-    private TenantScope captureTenantScope() {
-        if (!tenantContext.isResolved()) {
-            return null;
-        }
-        return new TenantScope(
-            tenantContext.getWorkspaceId(),
-            tenantContext.getOrgId(),
-            tenantContext.getUserId(),
-            tenantContext.getRole(),
-            tenantContext.getScopeCatalog()
-        );
-    }
-
-    private void restoreTenantScope(TenantScope previous) {
-        tenantContext.clear();
-        if (previous != null) {
-            tenantContext.set(
-                previous.workspaceId(),
-                previous.orgId(),
-                previous.userId(),
-                previous.role(),
-                previous.catalog()
-            );
-        }
-    }
-
     private void flushEvery(int zeroBasedIndex) {
         if ((zeroBasedIndex + 1) % BATCH_SIZE == 0) {
             flush();
@@ -580,11 +554,4 @@ public class SeederBatchWriter {
     private record DealWriteResult(List<Deal> deals, int personLinkCount, int stageHistoryCount) {
     }
 
-    private record TenantScope(
-            int workspaceId,
-            int orgId,
-            int userId,
-            String role,
-            String catalog) {
-    }
 }

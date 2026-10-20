@@ -75,6 +75,7 @@ class ReportServiceTest {
     private final ScheduleMapper scheduleMapper = mock(ScheduleMapper.class);
     private final UserMapper userMapper = mock(UserMapper.class);
     private final AuthService authService = mock(AuthService.class);
+    private final RecordVisibilityScopeControlAccess scopeAccess = mock(RecordVisibilityScopeControlAccess.class);
     private ReportService service;
 
     @BeforeEach
@@ -91,6 +92,7 @@ class ReportServiceTest {
                 mock(ScoringService.class),
                 dealRiskService,
                 mock(ReportNetworkService.class),
+                scopeAccess,
                 aiReportNarrativeService,
                 mock(AiGenerationService.class),
                 aiRestrictionEpoch,
@@ -100,6 +102,8 @@ class ReportServiceTest {
                 new ObjectMapper(),
                 CLOCK,
                 mock(TransactionTemplate.class));
+        when(scopeAccess.getForWorkspace(WORKSPACE_ID)).thenReturn(
+                new RecordVisibilityScopeControlAccess.RecordVisibilityScope(1, List.of(WORKSPACE_ID)));
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(WORKSPACE_ID);
         when(workspaceService.getCurrentAnalyticsTimezone()).thenReturn("UTC");
         when(reportPermissionPolicy.requiredFor(any(ReportDefinition.class)))

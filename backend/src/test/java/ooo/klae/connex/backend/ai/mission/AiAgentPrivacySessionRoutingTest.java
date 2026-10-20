@@ -180,7 +180,9 @@ class AiAgentPrivacySessionRoutingTest {
                 persistence, sessions.getMapper(AiRunLeaseMapper.class), transactions);
         var initializer = new AiAgentPrivacyInitializer(sessions.getMapper(WorkspaceMapper.class), scope,
                 privacy, recovery, mock(JobRunRecorder.class), transactions,
-                new AutomationExecutor(context, new AutomationScope(), scope), system);
+                new AutomationExecutor(context, new AutomationScope(), scope), system,
+                new org.springframework.beans.factory.support.StaticListableBeanFactory()
+                    .getBeanProvider(org.springframework.core.task.TaskExecutor.class));
 
         initializer.initialize(7);
 
