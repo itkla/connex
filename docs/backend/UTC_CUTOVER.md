@@ -58,7 +58,7 @@ A zero candidate count does not establish that older or negative-offset data was
    Run the workflow SQL below once per tenant catalog and the DSR review once in the control catalog
    (the same physical catalog in single-database mode). It freezes a database UTC cutoff, previews candidates, and
    leaves the transaction open for verification. Do not use a client mode that continues after errors.
-5. Commit only when the safety flag is `1`, changed-row counts match the candidate counts, all four
+5. Commit only when the safety flag is `1`, changed-row counts match the candidate counts, all
    mismatch/remaining counts are zero, and the preview agrees with the backup and expected workload.
    On any SQL error or unexpected result, roll back and keep writers paused. Do not disable checks,
    invent a different offset, or repair Flyway history to force this procedure through.
@@ -156,10 +156,11 @@ The source list is closed: the counts below total 33, rather than searching only
 
 | Table / Java-written columns on these paths | Cross-clock constraint or reader | Survives deploy / action |
 |---|---|---|
-| `workflow_run`: `started_at`, `finished_at`, `cancel_requested_at` | V143 `chk_workflow_run_timing` requires finish >= start; `WorkflowRunMapper` history uses DB `asOf`; `WorkflowOperationsMapper` backlog compares starts to `CURRENT_TIMESTAMP(6)`. | Queued/running/waiting survive. Repair future active event cells; finish must remain NULL. |
-| `workflow_step_run`: `started_at`, `finished_at` | V143 `chk_workflow_step_timing` requires finish >= start; state CHECK requires NULL finish while active. | Queued/running/waiting survive. Repair future starts under active parents. A failed retry step is already terminal; reservation later replaces start/clears finish together. |
-| `workflow_invocation`: `created_at`, `expires_at`, `confirmed_at`, `completed_at` | V145 `chk_workflow_invocation_timing` compares expiry/confirmation/completion to creation. Confirmation compares expiry to new Java now; pending dispatch sorts by confirmation. | Prepared/confirmed/running survive. Expire prepared scopes; repair future active creation/confirmation as described below. |
-| `data_subject_request`: default/caller `received_at`; caller `identity_verified_at`, `due_at`, `responded_at`, `closed_at` | Java `validateChronology` requires lifecycle dates >= receipt. V74 has no temporal CHECK; mapper sorts receipt, with no automatic expiry/claim. | Received/verifying/in_progress can survive and reject a new UTC lifecycle date. Use the separately reviewed control-catalog receipt repair; never infer caller provenance from future time alone. |
+| `workflow_run`: `started_at`, `finished_at`, `cancel_requested_at` | V143 `chk_workflow_run_timing` requires finish >= start; `WorkflowRunMapper` history uses DB `asOf`; `WorkflowOperationsMapper` backlog compares starts to `CURRENT_TIMESTAMP(6)`. | Any state survives, including succeeded history and intervention_required rows that manual retry reopens. Repair every future event cell together, in any status. |
+| `workflow_step_run`: `started_at`, `finished_at` | V143 `chk_workflow_step_timing` requires finish >= start; state CHECK requires NULL finish while active. | Repair future start/finish cells in every status, regardless of the parent status; a later retry does not justify leaving future history behind. |
+| `workflow_step_attempt`: `started_at`, `finished_at` | V144 checks lifecycle NULL/state but has no timing CHECK or timestamp claim filter. | Repair future event cells in every status to preserve durable start/finish ordering, including attempts under terminal parents. |
+| `workflow_invocation`: `created_at`, `expires_at`, `confirmed_at`, `completed_at` | V145 `chk_workflow_invocation_timing` compares expiry/confirmation/completion to creation. Confirmation compares expiry to new Java now; pending dispatch sorts by confirmation. | Repair future creation/confirmation/completion events and their future expiry together in every status. Separately expire every prepared scope as described below. |
+| `data_subject_request`: default/caller `received_at`; caller `identity_verified_at`, `due_at`, `responded_at`, `closed_at` | Java `validateChronology` requires lifecycle dates >= receipt. V74 has no temporal CHECK; mapper sorts receipt, with no automatic expiry/claim. | Every status except closed/refused, with closed_at NULL, is open; this includes responded. Such rows can reject a new UTC lifecycle date. Use the separately reviewed control-catalog receipt repair; never infer caller provenance from future time alone. |
 
 Evidence: [`WorkflowRunMapper.xml`](../../backend/src/main/resources/mappers/WorkflowRunMapper.xml),
 [`WorkflowOperationsMapper.xml`](../../backend/src/main/resources/mappers/WorkflowOperationsMapper.xml),
@@ -177,7 +178,6 @@ host-zone value. Existing caller/business dates and immutable evidence remain in
 
 | Table / Java-written values on these paths | CHECK / clock comparison / across deploy | Reason for no cutover action |
 |---|---|---|
-| `workflow_step_attempt`: `started_at`, `finished_at` | Running attempts survive. V144 checks lifecycle NULL/state only; no timing CHECK, timestamp ordering, lease/deadline/claim predicate over these columns. | Completion is identity/status-based. A negative historical duration can remain, but cannot reject or prevent completion. |
 | `workflow`: no affected Java-written stored time; `archived_at` is DB-authored | V143 archive CHECK is enabled/nullability only; archived rows survive. | The converted read only updates the returned bean after the DB archive write. |
 | `rule_execution`: no affected Java timestamp; `executed_at` is DB-authored | Legacy claims survive; schedule bucket contributes to a hashed dedupe identity, not a timestamp comparison. | DB clock was already UTC. Production scheduler already supplies its explicit UTC bucket; do not rewrite hashes. |
 | `workflow_trigger_outbox`: independent UTC `occurred_at`; DB availability/lease/completion times | Pending/leased rows survive and are claimed against DB time. Converted retention read supplies a terminal-row DELETE cutoff only. | No active timestamp derives from the converted clock. Earlier retention deletions cannot be reconstructed by this procedure. |
@@ -209,48 +209,48 @@ of a Java chronology or ordering hazard.
 
 ## Repair scope and invocation policy
 
-The runtime step table is `workflow_step_run`. Active runs and steps are exactly `queued`,
-`running`, or `waiting`; a step is eligible only while its parent run is also active. Active
-invocations are `prepared`, `confirmed`, or `running` independently of their linked run states.
-Pre-existing terminal rows in every table remain unchanged.
+The runtime step table is `workflow_step_run`. **Workflow timestamp repair has no status or
+parent-status filter.** A future Java event is impossible under a correct UTC clock in any state.
+A supposedly terminal row can be reopened: `WorkflowRunOperationService.retry()` calls
+`WorkflowRunMapper.scheduleManualRetry`, which reopens `intervention_required` to `waiting`, clears
+`finished_at`, and preserves `started_at`. Even succeeded history must keep a coherent time pair.
 
 | Column or state | Treatment |
 |---|---|
-| `workflow_run.started_at`, `workflow_run.cancel_requested_at` | Subtract the old offset only from future event values on active runs. |
-| `workflow_step_run.started_at` | Subtract only from future values on active steps under active runs. |
-| Run/step `finished_at` | V143 requires NULL while active; validate and preserve. |
-| `workflow_invocation.created_at` | Subtract only from future values on active invocations, so new UTC confirmation/completion can satisfy V145. |
-| `workflow_invocation.confirmed_at` | Subtract only from future values on confirmed/running invocations; clamp to corrected `created_at` if necessary. |
-| Prepared invocations | Expire **every** prepared scope, including a valid UTC scope created during deployment smoke, after repairing a future creation time. Set `completed_at` to the frozen cutoff. Users prepare a fresh preview after maintenance. |
-| `workflow_invocation.expires_at` | Preserve. Expired scopes cannot confirm; expiry is not consulted for confirmed/running invocations. |
+| `workflow_run.started_at`, `finished_at`, `cancel_requested_at` | Select by any future event; shift every future cell by the same old offset in one UPDATE, in every status. |
+| `workflow_step_run.started_at`, `finished_at` | Same future-only rule in every status, without a parent filter. |
+| `workflow_step_attempt.started_at`, `finished_at` | Same future-only rule in every status, including durable failed/succeeded attempts. |
+| `workflow_invocation.created_at`, `confirmed_at`, `completed_at` | Select by any future event and shift every future cell together, in every status. |
+| `workflow_invocation.expires_at` | Shift a future expiry in that same event-selected row. Never select a row by expiry alone. |
+| Prepared invocations | After timestamp repair, separately expire **every** prepared scope, including valid UTC scopes created during deployment smoke. Set `completed_at` to the frozen cutoff; users prepare a fresh preview after maintenance. |
 | Database `updated_at`, run `resume_at`/`lease_until` | Preserve explicitly. Future database deadlines are legitimate. |
 
 The manual preparation lifetime is fifteen minutes (`WorkflowManualRunService.invocation`). An
-expiry can legitimately remain future after subtracting the old offset, and correct UTC scopes
-can exist alongside old scopes after staging deployment. Therefore expiry alone cannot identify
-an affected row or make repeated subtraction idempotent. This runbook chooses the permitted
-**expire prepared scopes** policy instead of rewriting their expiry. It preserves confirmation
-identities and does not cancel confirmed/running invocations or their linked runs.
+expiry can legitimately remain future after subtraction. Expiry alone cannot distinguish an old
+scope whose creation is already nonfuture from a correct UTC scope, or make repeated subtraction
+idempotent. The separately snapshotted prepared-expiry policy closes that ambiguity without
+shifting expiry-only rows. It preserves confirmation identities and does not cancel confirmed or
+running invocations or their linked runs. Prepared invalidation is the sole status-specific
+lifecycle operation; status never limits timestamp repair.
 
-V145 checks `expires_at`, `confirmed_at`, and `completed_at` against `created_at`; pending dispatch
-also sorts by `confirmed_at`. If an old creation value is already at/before the cutoff but its
-confirmation is still future, exact subtraction could place confirmation before that unchanged
-creation value. The future-only rule forbids rewriting the past creation. In that boundary case,
-`GREATEST(corrected creation, confirmation minus offset)` preserves the CHECK and removes the
-future dispatch-ordering hazard. The clamped confirmation is a conservative chronology repair,
-not a reconstruction of historical elapsed time. Already nonfuture cells remain unchanged.
+The event candidates must lie in `(cutoff, cutoff + old offset]`. With all writers stopped and
+clocks synchronized, a valid UTC event cannot be after the frozen cutoff. Every future event
+then moves to at/before the cutoff, making the repair idempotent. Expiry alone is excluded from
+both candidate selection and remaining event hazards because it is a legitimate future deadline.
 
-The event-time candidates otherwise lie in `(cutoff, cutoff + old offset]`: with all writers
-stopped and clocks synchronized, a valid UTC event cannot be after the frozen cutoff. The guard
-refuses event values that would remain future after subtraction. Corrected values and clamped
-confirmations are at/before the cutoff, and expired scopes are terminal, so a second execution
-cannot alter them again. All assignments use the original temporary snapshots where fields
-interact, avoiding dependence on MySQL assignment evaluation order.
+**Fail closed on a boundary inversion.** A nonfuture lower timestamp and future upper timestamp
+can straddle the cutoff. Subtracting only the upper value could put it before the unchanged lower
+value. The guard validates the complete corrected run/step/attempt pairs and V145 invocation
+chronology before changing any row. On failure, roll back and reconcile individually from the
+backup and source evidence; do not clamp a value, rewrite a nonfuture cell, or disable a CHECK.
+All timestamp assignments use frozen snapshots, so every future cell in a row shifts in the
+same UPDATE without relying on assignment evaluation order.
 
-Older historical rows **stay shifted and are not rewritten**, including terminal runs/steps,
-steps under terminal runs, terminal invocations, and already nonfuture event values. Other
-inventoried data is preserved for the reasons below; this is an active cutover repair, not a
-historical normalization.
+Already nonfuture event cells stay unchanged. Future workflow events are repaired even in
+terminal history; no state is an exclusion. Outside these workflow event columns, the inventory
+above distinguishes unaffected DB/independent clocks and caller/business dates requiring provenance
+review. Integrity-fingerprinted or immutable evidence, including audit rows and disclosure
+fingerprints, is never rewritten.
 
 ## Per-catalog SQL
 
@@ -266,166 +266,218 @@ SET @utc_cutover_offset_seconds = 32400;
 SET @utc_cutover_as_of = UTC_TIMESTAMP(6);
 SET @utc_cutover_ceiling = TIMESTAMPADD(SECOND, @utc_cutover_offset_seconds, @utc_cutover_as_of);
 
-DROP TEMPORARY TABLE IF EXISTS utc_cutover_run_before, utc_cutover_step_before, utc_cutover_invocation_before;
+DROP TEMPORARY TABLE IF EXISTS utc_cutover_run_before, utc_cutover_step_before, utc_cutover_attempt_before, utc_cutover_invocation_before, utc_cutover_prepared_before;
 START TRANSACTION;
 
-SET @utc_cutover_safe =
-    @utc_cutover_offset_seconds BETWEEN 1 AND 50400
-    AND NOT EXISTS (
-        SELECT 1 FROM workflow_run
-        WHERE status IN ('queued', 'running', 'waiting')
-          AND (finished_at IS NOT NULL
-               OR started_at > @utc_cutover_ceiling
-               OR cancel_requested_at > @utc_cutover_ceiling)
-    )
-    AND NOT EXISTS (
-        SELECT 1 FROM workflow_step_run s
-        JOIN workflow_run r ON r.workspace_id = s.workspace_id AND r.id = s.workflow_run_id
-        WHERE r.status IN ('queued', 'running', 'waiting')
-          AND s.status IN ('queued', 'running', 'waiting')
-          AND (s.finished_at IS NOT NULL OR s.started_at > @utc_cutover_ceiling)
-    )
-    AND NOT EXISTS (
-        SELECT 1 FROM workflow_invocation
-        WHERE status IN ('prepared', 'confirmed', 'running')
-          AND (completed_at IS NOT NULL
-               OR created_at > @utc_cutover_ceiling
-               OR confirmed_at > @utc_cutover_ceiling)
-    );
-
 CREATE TEMPORARY TABLE utc_cutover_run_before ENGINE=InnoDB AS
-SELECT workspace_id, id, status, started_at, cancel_requested_at, finished_at,
-       updated_at, resume_at, lease_until
-FROM workflow_run
-WHERE status IN ('queued', 'running', 'waiting')
-  AND (started_at > @utc_cutover_as_of OR cancel_requested_at > @utc_cutover_as_of);
+SELECT t.*,
+       CASE WHEN started_at > @utc_cutover_as_of
+           THEN TIMESTAMPADD(SECOND, -@utc_cutover_offset_seconds, started_at) ELSE started_at END AS expected_started_at,
+       CASE WHEN finished_at > @utc_cutover_as_of
+           THEN TIMESTAMPADD(SECOND, -@utc_cutover_offset_seconds, finished_at) ELSE finished_at END AS expected_finished_at,
+       CASE WHEN cancel_requested_at > @utc_cutover_as_of
+           THEN TIMESTAMPADD(SECOND, -@utc_cutover_offset_seconds, cancel_requested_at) ELSE cancel_requested_at END AS expected_cancel_requested_at
+FROM workflow_run t
+WHERE started_at > @utc_cutover_as_of OR finished_at > @utc_cutover_as_of OR cancel_requested_at > @utc_cutover_as_of;
 
 CREATE TEMPORARY TABLE utc_cutover_step_before ENGINE=InnoDB AS
-SELECT s.workspace_id, s.id, s.status, s.started_at, s.finished_at
-FROM workflow_step_run s
-JOIN workflow_run r ON r.workspace_id = s.workspace_id AND r.id = s.workflow_run_id
-WHERE r.status IN ('queued', 'running', 'waiting')
-  AND s.status IN ('queued', 'running', 'waiting')
-  AND s.started_at > @utc_cutover_as_of;
+SELECT t.*,
+       CASE WHEN started_at > @utc_cutover_as_of
+           THEN TIMESTAMPADD(SECOND, -@utc_cutover_offset_seconds, started_at) ELSE started_at END AS expected_started_at,
+       CASE WHEN finished_at > @utc_cutover_as_of
+           THEN TIMESTAMPADD(SECOND, -@utc_cutover_offset_seconds, finished_at) ELSE finished_at END AS expected_finished_at
+FROM workflow_step_run t
+WHERE started_at > @utc_cutover_as_of OR finished_at > @utc_cutover_as_of;
+
+CREATE TEMPORARY TABLE utc_cutover_attempt_before ENGINE=InnoDB AS
+SELECT t.*,
+       CASE WHEN started_at > @utc_cutover_as_of
+           THEN TIMESTAMPADD(SECOND, -@utc_cutover_offset_seconds, started_at) ELSE started_at END AS expected_started_at,
+       CASE WHEN finished_at > @utc_cutover_as_of
+           THEN TIMESTAMPADD(SECOND, -@utc_cutover_offset_seconds, finished_at) ELSE finished_at END AS expected_finished_at
+FROM workflow_step_attempt t
+WHERE started_at > @utc_cutover_as_of OR finished_at > @utc_cutover_as_of;
 
 CREATE TEMPORARY TABLE utc_cutover_invocation_before ENGINE=InnoDB AS
-SELECT workspace_id, id, status, created_at, confirmed_at, expires_at, completed_at,
-       confirmation_key, updated_at
-FROM workflow_invocation
-WHERE status = 'prepared'
-   OR (status IN ('confirmed', 'running')
-       AND (created_at > @utc_cutover_as_of OR confirmed_at > @utc_cutover_as_of));
+SELECT t.*,
+       CASE WHEN created_at > @utc_cutover_as_of
+           THEN TIMESTAMPADD(SECOND, -@utc_cutover_offset_seconds, created_at) ELSE created_at END AS expected_created_at,
+       CASE WHEN confirmed_at > @utc_cutover_as_of
+           THEN TIMESTAMPADD(SECOND, -@utc_cutover_offset_seconds, confirmed_at) ELSE confirmed_at END AS expected_confirmed_at,
+       CASE WHEN completed_at > @utc_cutover_as_of
+           THEN TIMESTAMPADD(SECOND, -@utc_cutover_offset_seconds, completed_at) ELSE completed_at END AS expected_completed_at,
+       CASE WHEN expires_at > @utc_cutover_as_of
+           THEN TIMESTAMPADD(SECOND, -@utc_cutover_offset_seconds, expires_at) ELSE expires_at END AS expected_expires_at
+FROM workflow_invocation t
+WHERE created_at > @utc_cutover_as_of OR confirmed_at > @utc_cutover_as_of OR completed_at > @utc_cutover_as_of;
+
+CREATE TEMPORARY TABLE utc_cutover_prepared_before ENGINE=InnoDB AS
+SELECT workspace_id, id, confirmation_key, updated_at,
+       CASE WHEN created_at > @utc_cutover_as_of
+           THEN TIMESTAMPADD(SECOND, -@utc_cutover_offset_seconds, created_at) ELSE created_at END AS expected_created_at,
+       CASE WHEN created_at > @utc_cutover_as_of THEN
+           CASE WHEN expires_at > @utc_cutover_as_of
+           THEN TIMESTAMPADD(SECOND, -@utc_cutover_offset_seconds, expires_at) ELSE expires_at END
+           ELSE expires_at END AS expected_expires_at
+FROM workflow_invocation WHERE status = 'prepared';
+
+SET @utc_cutover_safe = @utc_cutover_offset_seconds BETWEEN 1 AND 50400
+    AND NOT EXISTS (
+        SELECT 1 FROM utc_cutover_run_before
+        WHERE started_at > @utc_cutover_ceiling
+           OR finished_at > @utc_cutover_ceiling
+           OR cancel_requested_at > @utc_cutover_ceiling
+           OR expected_finished_at < expected_started_at
+    )
+    AND NOT EXISTS (
+        SELECT 1 FROM utc_cutover_step_before
+        WHERE started_at > @utc_cutover_ceiling
+           OR finished_at > @utc_cutover_ceiling
+           OR expected_finished_at < expected_started_at
+    )
+    AND NOT EXISTS (
+        SELECT 1 FROM utc_cutover_attempt_before
+        WHERE started_at > @utc_cutover_ceiling
+           OR finished_at > @utc_cutover_ceiling
+           OR expected_finished_at < expected_started_at
+    )
+    AND NOT EXISTS (
+        SELECT 1 FROM utc_cutover_invocation_before
+        WHERE created_at > @utc_cutover_ceiling
+           OR confirmed_at > @utc_cutover_ceiling
+           OR completed_at > @utc_cutover_ceiling
+           OR expected_expires_at < expected_created_at
+           OR expected_confirmed_at < expected_created_at
+           OR expected_completed_at < expected_created_at
+    );
 
 SELECT DATABASE() AS catalog, @utc_cutover_as_of AS cutoff_utc,
        @utc_cutover_offset_seconds AS old_offset_seconds, @utc_cutover_safe AS safe_to_shift;
 SELECT COUNT(*) AS expected_run_rows,
        COALESCE(SUM(started_at > @utc_cutover_as_of), 0) AS run_start_values,
-       COALESCE(SUM(cancel_requested_at > @utc_cutover_as_of), 0) AS cancellation_values
+       COALESCE(SUM(finished_at > @utc_cutover_as_of), 0) AS run_finish_values,
+       COALESCE(SUM(cancel_requested_at > @utc_cutover_as_of), 0) AS run_cancellation_values
 FROM utc_cutover_run_before;
-SELECT COUNT(*) AS expected_step_rows FROM utc_cutover_step_before;
+SELECT COUNT(*) AS expected_step_rows,
+       COALESCE(SUM(started_at > @utc_cutover_as_of), 0) AS step_start_values,
+       COALESCE(SUM(finished_at > @utc_cutover_as_of), 0) AS step_finish_values
+FROM utc_cutover_step_before;
+SELECT COUNT(*) AS expected_attempt_rows,
+       COALESCE(SUM(started_at > @utc_cutover_as_of), 0) AS attempt_start_values,
+       COALESCE(SUM(finished_at > @utc_cutover_as_of), 0) AS attempt_finish_values
+FROM utc_cutover_attempt_before;
 SELECT COUNT(*) AS expected_invocation_rows,
-       COALESCE(SUM(status = 'prepared'), 0) AS prepared_scopes_to_expire,
        COALESCE(SUM(created_at > @utc_cutover_as_of), 0) AS invocation_creation_values,
-       COALESCE(SUM(confirmed_at > @utc_cutover_as_of), 0) AS invocation_confirmation_values
+       COALESCE(SUM(confirmed_at > @utc_cutover_as_of), 0) AS invocation_confirmation_values,
+       COALESCE(SUM(completed_at > @utc_cutover_as_of), 0) AS invocation_completion_values,
+       COALESCE(SUM(expires_at > @utc_cutover_as_of), 0) AS invocation_expiry_values
 FROM utc_cutover_invocation_before;
+SELECT COUNT(*) AS prepared_scopes_to_expire FROM utc_cutover_prepared_before;
 
-UPDATE workflow_run
-SET started_at = CASE
-        WHEN started_at > @utc_cutover_as_of AND started_at <= @utc_cutover_ceiling
-        THEN TIMESTAMPADD(SECOND, -@utc_cutover_offset_seconds, started_at)
-        ELSE started_at END,
-    cancel_requested_at = CASE
-        WHEN cancel_requested_at > @utc_cutover_as_of AND cancel_requested_at <= @utc_cutover_ceiling
-        THEN TIMESTAMPADD(SECOND, -@utc_cutover_offset_seconds, cancel_requested_at)
-        ELSE cancel_requested_at END,
-    updated_at = updated_at
-WHERE @utc_cutover_safe = 1
-  AND status IN ('queued', 'running', 'waiting')
-  AND (started_at > @utc_cutover_as_of OR cancel_requested_at > @utc_cutover_as_of);
+UPDATE workflow_run t
+JOIN utc_cutover_run_before b ON b.workspace_id = t.workspace_id AND b.id = t.id
+SET t.started_at = b.expected_started_at,
+    t.finished_at = b.expected_finished_at,
+    t.cancel_requested_at = b.expected_cancel_requested_at,
+    t.updated_at = b.updated_at
+WHERE @utc_cutover_safe = 1;
 SET @utc_cutover_changed_runs = ROW_COUNT();
 
-UPDATE workflow_step_run s
-JOIN workflow_run r ON r.workspace_id = s.workspace_id AND r.id = s.workflow_run_id
-SET s.started_at = TIMESTAMPADD(SECOND, -@utc_cutover_offset_seconds, s.started_at)
-WHERE @utc_cutover_safe = 1
-  AND r.status IN ('queued', 'running', 'waiting')
-  AND s.status IN ('queued', 'running', 'waiting')
-  AND s.started_at > @utc_cutover_as_of
-  AND s.started_at <= @utc_cutover_ceiling;
+UPDATE workflow_step_run t
+JOIN utc_cutover_step_before b ON b.workspace_id = t.workspace_id AND b.id = t.id
+SET t.started_at = b.expected_started_at,
+    t.finished_at = b.expected_finished_at
+WHERE @utc_cutover_safe = 1;
 SET @utc_cutover_changed_steps = ROW_COUNT();
 
-UPDATE workflow_invocation i
-JOIN utc_cutover_invocation_before b ON b.workspace_id = i.workspace_id AND b.id = i.id
-SET i.created_at = CASE WHEN b.created_at > @utc_cutover_as_of
-        THEN TIMESTAMPADD(SECOND, -@utc_cutover_offset_seconds, b.created_at) ELSE b.created_at END,
-    i.confirmed_at = CASE WHEN b.confirmed_at > @utc_cutover_as_of
-        THEN GREATEST(
-            CASE WHEN b.created_at > @utc_cutover_as_of
-                THEN TIMESTAMPADD(SECOND, -@utc_cutover_offset_seconds, b.created_at) ELSE b.created_at END,
-            TIMESTAMPADD(SECOND, -@utc_cutover_offset_seconds, b.confirmed_at))
-        ELSE b.confirmed_at END,
-    i.status = CASE WHEN b.status = 'prepared' THEN 'expired' ELSE b.status END,
-    i.completed_at = CASE WHEN b.status = 'prepared' THEN @utc_cutover_as_of ELSE b.completed_at END,
-    i.updated_at = b.updated_at
-WHERE @utc_cutover_safe = 1
-  AND i.status IN ('prepared', 'confirmed', 'running');
+UPDATE workflow_step_attempt t
+JOIN utc_cutover_attempt_before b ON b.workspace_id = t.workspace_id AND b.id = t.id
+SET t.started_at = b.expected_started_at,
+    t.finished_at = b.expected_finished_at
+WHERE @utc_cutover_safe = 1;
+SET @utc_cutover_changed_attempts = ROW_COUNT();
+
+UPDATE workflow_invocation t
+JOIN utc_cutover_invocation_before b ON b.workspace_id = t.workspace_id AND b.id = t.id
+SET t.created_at = b.expected_created_at,
+    t.confirmed_at = b.expected_confirmed_at,
+    t.completed_at = b.expected_completed_at,
+    t.expires_at = b.expected_expires_at,
+    t.updated_at = b.updated_at
+WHERE @utc_cutover_safe = 1;
 SET @utc_cutover_changed_invocations = ROW_COUNT();
 
-SELECT @utc_cutover_changed_runs AS changed_run_rows, @utc_cutover_changed_steps AS changed_step_rows,
-       @utc_cutover_changed_invocations AS changed_invocation_rows;
+UPDATE workflow_invocation i
+JOIN utc_cutover_prepared_before b ON b.workspace_id = i.workspace_id AND b.id = i.id
+SET i.status = 'expired', i.completed_at = @utc_cutover_as_of, i.updated_at = b.updated_at
+WHERE @utc_cutover_safe = 1;
+SET @utc_cutover_expired_prepared = ROW_COUNT();
+
+SELECT @utc_cutover_changed_runs AS changed_run_rows,
+       @utc_cutover_changed_steps AS changed_step_rows,
+       @utc_cutover_changed_attempts AS changed_attempt_rows,
+       @utc_cutover_changed_invocations AS changed_invocation_rows,
+       @utc_cutover_expired_prepared AS expired_prepared_scopes;
 
 SELECT COUNT(*) AS run_mismatches
-FROM workflow_run r
-JOIN utc_cutover_run_before b ON b.workspace_id = r.workspace_id AND b.id = r.id
-WHERE NOT (r.started_at <=> CASE WHEN b.started_at > @utc_cutover_as_of
-           THEN TIMESTAMPADD(SECOND, -@utc_cutover_offset_seconds, b.started_at) ELSE b.started_at END)
-   OR NOT (r.cancel_requested_at <=> CASE WHEN b.cancel_requested_at > @utc_cutover_as_of
-           THEN TIMESTAMPADD(SECOND, -@utc_cutover_offset_seconds, b.cancel_requested_at)
-           ELSE b.cancel_requested_at END)
-   OR NOT (r.status <=> b.status)
-   OR NOT (r.finished_at <=> b.finished_at)
-   OR NOT (r.updated_at <=> b.updated_at)
-   OR NOT (r.resume_at <=> b.resume_at)
-   OR NOT (r.lease_until <=> b.lease_until);
+FROM workflow_run t
+JOIN utc_cutover_run_before b ON b.workspace_id = t.workspace_id AND b.id = t.id
+WHERE NOT (t.started_at <=> b.expected_started_at)
+   OR NOT (t.finished_at <=> b.expected_finished_at)
+   OR NOT (t.cancel_requested_at <=> b.expected_cancel_requested_at)
+   OR NOT (t.status <=> b.status)
+   OR NOT (t.updated_at <=> b.updated_at)
+   OR NOT (t.resume_at <=> b.resume_at)
+   OR NOT (t.lease_until <=> b.lease_until);
 
 SELECT COUNT(*) AS step_mismatches
-FROM workflow_step_run s
-JOIN utc_cutover_step_before b ON b.workspace_id = s.workspace_id AND b.id = s.id
-WHERE NOT (s.started_at <=> TIMESTAMPADD(SECOND, -@utc_cutover_offset_seconds, b.started_at))
-   OR NOT (s.status <=> b.status)
-   OR NOT (s.finished_at <=> b.finished_at);
+FROM workflow_step_run t
+JOIN utc_cutover_step_before b ON b.workspace_id = t.workspace_id AND b.id = t.id
+WHERE NOT (t.started_at <=> b.expected_started_at)
+   OR NOT (t.finished_at <=> b.expected_finished_at)
+   OR NOT (t.status <=> b.status);
+
+SELECT COUNT(*) AS attempt_mismatches
+FROM workflow_step_attempt t
+JOIN utc_cutover_attempt_before b ON b.workspace_id = t.workspace_id AND b.id = t.id
+WHERE NOT (t.started_at <=> b.expected_started_at)
+   OR NOT (t.finished_at <=> b.expected_finished_at)
+   OR NOT (t.status <=> b.status);
 
 SELECT COUNT(*) AS invocation_mismatches
+FROM workflow_invocation t
+JOIN utc_cutover_invocation_before b ON b.workspace_id = t.workspace_id AND b.id = t.id
+WHERE NOT (t.created_at <=> b.expected_created_at)
+   OR NOT (t.confirmed_at <=> b.expected_confirmed_at)
+   OR NOT (t.completed_at <=> CASE WHEN b.status = 'prepared' THEN @utc_cutover_as_of ELSE b.expected_completed_at END)
+   OR NOT (t.expires_at <=> b.expected_expires_at)
+   OR NOT (t.status <=> CASE WHEN b.status = 'prepared' THEN 'expired' ELSE b.status END)
+   OR NOT (t.confirmation_key <=> b.confirmation_key)
+   OR NOT (t.updated_at <=> b.updated_at);
+
+SELECT COUNT(*) AS prepared_mismatches
 FROM workflow_invocation i
-JOIN utc_cutover_invocation_before b ON b.workspace_id = i.workspace_id AND b.id = i.id
-WHERE NOT (i.created_at <=> CASE WHEN b.created_at > @utc_cutover_as_of
-           THEN TIMESTAMPADD(SECOND, -@utc_cutover_offset_seconds, b.created_at) ELSE b.created_at END)
-   OR NOT (i.confirmed_at <=> CASE WHEN b.confirmed_at > @utc_cutover_as_of
-           THEN GREATEST(
-               CASE WHEN b.created_at > @utc_cutover_as_of
-                   THEN TIMESTAMPADD(SECOND, -@utc_cutover_offset_seconds, b.created_at) ELSE b.created_at END,
-               TIMESTAMPADD(SECOND, -@utc_cutover_offset_seconds, b.confirmed_at)) ELSE b.confirmed_at END)
-   OR NOT (i.status <=> CASE WHEN b.status = 'prepared' THEN 'expired' ELSE b.status END)
-   OR NOT (i.completed_at <=> CASE WHEN b.status = 'prepared' THEN @utc_cutover_as_of ELSE b.completed_at END)
-   OR NOT (i.expires_at <=> b.expires_at)
+JOIN utc_cutover_prepared_before b ON b.workspace_id = i.workspace_id AND b.id = i.id
+WHERE i.status <> 'expired' OR NOT (i.completed_at <=> @utc_cutover_as_of)
+   OR NOT (i.created_at <=> b.expected_created_at)
+   OR NOT (i.expires_at <=> b.expected_expires_at)
    OR NOT (i.confirmation_key <=> b.confirmation_key)
-   OR NOT (i.updated_at <=> b.updated_at);
+   OR i.confirmed_at IS NOT NULL OR NOT (i.updated_at <=> b.updated_at);
 
 SELECT
     (SELECT COUNT(*) FROM workflow_run
-     WHERE status IN ('queued', 'running', 'waiting')
-       AND (started_at > @utc_cutover_as_of OR cancel_requested_at > @utc_cutover_as_of))
+     WHERE started_at > @utc_cutover_as_of OR finished_at > @utc_cutover_as_of OR cancel_requested_at > @utc_cutover_as_of)
     +
-    (SELECT COUNT(*) FROM workflow_step_run s
-     JOIN workflow_run r ON r.workspace_id = s.workspace_id AND r.id = s.workflow_run_id
-     WHERE r.status IN ('queued', 'running', 'waiting')
-       AND s.status IN ('queued', 'running', 'waiting')
-       AND s.started_at > @utc_cutover_as_of)
+    (SELECT COUNT(*) FROM workflow_step_run
+     WHERE started_at > @utc_cutover_as_of OR finished_at > @utc_cutover_as_of)
+    +
+    (SELECT COUNT(*) FROM workflow_step_attempt
+     WHERE started_at > @utc_cutover_as_of OR finished_at > @utc_cutover_as_of)
     +
     (SELECT COUNT(*) FROM workflow_invocation
-     WHERE status = 'prepared'
-        OR (status IN ('confirmed', 'running')
-            AND (created_at > @utc_cutover_as_of OR confirmed_at > @utc_cutover_as_of))) AS remaining_hazards;
+     WHERE created_at > @utc_cutover_as_of OR confirmed_at > @utc_cutover_as_of OR completed_at > @utc_cutover_as_of)
+    +
+    (SELECT COUNT(*) FROM workflow_invocation WHERE status = 'prepared') AS remaining_hazards;
 ```
 
 After successful verification, finish the open transaction with `COMMIT;`. Otherwise use
@@ -442,14 +494,17 @@ Do not substitute ordinary tables or `TRUNCATE` inside the transaction.
 ## Control-catalog DSR provenance review
 
 `data_subject_request.received_at` is caller-supplied when present, otherwise the converted Java
-clock supplies it. An open request with an old future server-default receipt can reject a new UTC
+clock supplies it. The lifecycle queries in `TenantLifecycleControlMapper` define open status as
+`status NOT IN ('closed', 'refused')`; this repair additionally requires `closed_at IS NULL`.
+This includes `responded` requests awaiting closure. An open request with an old future server-default receipt can reject a new UTC
 identity-verification, response, or closure date through `DataSubjectRequestService.validateChronology`.
 The column has no provenance flag: a future value cannot distinguish a server default from a
 legitimate caller business date. Never blanket-shift it or edit its append-only audit evidence.
 
 While every writer remains stopped, select the **control catalog**, verify `DATABASE()`, and run
 this setup/preview. Include that catalog in the final backup. Inspect API/audit/source evidence for
-every returned request. Populate the temporary review table with its exact `(org_id, id, received_at)`
+every open returned request. The preview deliberately lists all future receipts, including closed/refused
+rows, to make exclusions visible. Populate the temporary review table with its exact `(org_id, id, received_at)`
 and `shift_received_at=TRUE` only when the old server default is verified. Use `FALSE` for a verified
 caller date that must remain unchanged. If provenance is uncertain, keep maintenance active and
 resolve the request individually; do not guess. Record each decision in the maintenance record.
@@ -469,8 +524,7 @@ CREATE TEMPORARY TABLE IF NOT EXISTS utc_cutover_dsr_review (
 SELECT DATABASE() AS catalog, org_id, id, status, received_at,
        identity_verified_at, responded_at, closed_at
 FROM data_subject_request
-WHERE status IN ('received', 'verifying', 'in_progress') AND closed_at IS NULL
-  AND received_at > @utc_dsr_as_of
+WHERE received_at > @utc_dsr_as_of
 ORDER BY org_id, id;
 ```
 
@@ -478,7 +532,9 @@ Insert the reviewed decisions on this same connection before running the next bl
 closed if any future open request lacks a matching decision, if a shift approval is stale, or if
 an approved event exceeds the verified offset. Deliberately preserved caller dates can exceed
 that offset. Only a verified future server-default `received_at` is shifted; all caller lifecycle
-dates, database timestamps, and terminal requests remain unchanged. Completed prior shifts are
+dates, database timestamps, closed/refused requests, and requests with a non-null closure remain unchanged.
+If a caller lifecycle date is itself future, shifting the receipt alone may not allow a new UTC
+closure; resolve that caller date separately from verified source evidence before resuming. Completed prior shifts are
 recognized on rerun. A new connection requires repeating setup and provenance review.
 
 ```sql
@@ -488,14 +544,14 @@ SET @utc_dsr_review_complete = NOT EXISTS (
         SELECT 1 FROM data_subject_request r
         LEFT JOIN utc_cutover_dsr_review v ON v.org_id = r.org_id AND v.id = r.id
             AND v.reviewed_received_at = r.received_at
-        WHERE r.status IN ('received', 'verifying', 'in_progress') AND r.closed_at IS NULL
+        WHERE r.status NOT IN ('closed', 'refused') AND r.closed_at IS NULL
           AND r.received_at > @utc_dsr_as_of AND v.id IS NULL
     );
 SET @utc_dsr_approvals_current = NOT EXISTS (
         SELECT 1 FROM utc_cutover_dsr_review v
         LEFT JOIN data_subject_request r ON r.org_id = v.org_id AND r.id = v.id
         WHERE v.shift_received_at = TRUE
-          AND (r.id IS NULL OR r.status NOT IN ('received', 'verifying', 'in_progress')
+          AND (r.id IS NULL OR r.status IN ('closed', 'refused')
                OR r.closed_at IS NOT NULL OR v.reviewed_received_at > @utc_dsr_ceiling
                OR (r.received_at <> v.reviewed_received_at
                    AND r.received_at <> TIMESTAMPADD(SECOND, -@utc_cutover_offset_seconds, v.reviewed_received_at)))
@@ -508,7 +564,7 @@ SELECT r.org_id, r.id, r.status, r.received_at, r.identity_verified_at, r.due_at
 FROM data_subject_request r
 JOIN utc_cutover_dsr_review v ON v.org_id = r.org_id AND v.id = r.id
     AND v.reviewed_received_at = r.received_at AND v.shift_received_at = TRUE
-WHERE r.status IN ('received', 'verifying', 'in_progress') AND r.closed_at IS NULL
+WHERE r.status NOT IN ('closed', 'refused') AND r.closed_at IS NULL
   AND r.received_at > @utc_dsr_as_of AND r.received_at <= @utc_dsr_ceiling;
 SELECT @utc_dsr_safe AS dsr_safe_to_shift, COUNT(*) AS expected_dsr_rows
 FROM utc_cutover_dsr_before;
@@ -517,7 +573,7 @@ JOIN utc_cutover_dsr_before b ON b.org_id = r.org_id AND b.id = r.id
 SET r.received_at = TIMESTAMPADD(SECOND, -@utc_cutover_offset_seconds, b.received_at),
     r.updated_at = b.updated_at
 WHERE @utc_dsr_safe = 1 AND r.received_at = b.received_at
-  AND r.status IN ('received', 'verifying', 'in_progress') AND r.closed_at IS NULL
+  AND r.status NOT IN ('closed', 'refused') AND r.closed_at IS NULL
   AND r.received_at > @utc_dsr_as_of AND r.received_at <= @utc_dsr_ceiling;
 SELECT ROW_COUNT() AS changed_dsr_rows;
 SELECT COUNT(*) AS dsr_mismatches
@@ -535,7 +591,7 @@ SELECT COUNT(*) AS dsr_remaining_hazards
 FROM data_subject_request r
 LEFT JOIN utc_cutover_dsr_review v ON v.org_id = r.org_id AND v.id = r.id
     AND v.reviewed_received_at = r.received_at
-WHERE r.status IN ('received', 'verifying', 'in_progress') AND r.closed_at IS NULL
+WHERE r.status NOT IN ('closed', 'refused') AND r.closed_at IS NULL
   AND r.received_at > @utc_dsr_as_of AND (v.id IS NULL OR v.shift_received_at = TRUE);
 ```
 
