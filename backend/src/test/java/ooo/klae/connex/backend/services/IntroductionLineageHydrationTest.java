@@ -48,6 +48,8 @@ class IntroductionLineageHydrationTest {
     @Mock private ObjectMapper objectMapper;
     @Mock private TenantWorkScope tenantWorkScope;
 
+    @Mock private RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     private IntroductionService service;
 
     @BeforeEach
@@ -71,7 +73,8 @@ class IntroductionLineageHydrationTest {
             notificationDelivery,
             notificationPreferenceService,
             objectMapper,
-            tenantWorkScope);
+            tenantWorkScope,
+            recordVisibilityScopeControlAccess);
     }
 
     @Test

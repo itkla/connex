@@ -40,13 +40,14 @@ import ooo.klae.connex.backend.dto.ReferenceDto;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
 import ooo.klae.connex.backend.dto.UserDisplayNameDto;
 import ooo.klae.connex.backend.dto.WarmPathDto;
-import ooo.klae.connex.backend.notifications.NotificationDelivery;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.IntroductionMapper;
 import ooo.klae.connex.backend.mappers.PersonEdgeMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.notifications.NotificationDelivery;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
@@ -80,6 +81,7 @@ public class IntroductionService {
     private final NotificationPreferenceService notificationPreferenceService;
     private final ObjectMapper objectMapper;
     private final TenantWorkScope tenantWorkScope;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     private static final String MENTION_TYPE = "introduction.mention";
     private static final String MENTION_CATEGORY = "introduction";
@@ -136,6 +138,8 @@ public class IntroductionService {
     public IntroOverviewDto getOverview(int suggestionLimit, int pathLimit) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Instant asOf = clock.instant();
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId)
+            .workspaceIdsJson();
         int resolvedSuggestions = suggestionLimit <= 0
             ? DEFAULT_SUGGESTION_LIMIT
             : Math.min(suggestionLimit, MAX_SUGGESTION_LIMIT);
@@ -149,13 +153,13 @@ public class IntroductionService {
         List<PersonEdge> edges = eligibleEdges(allEdges, excludedPersonIds);
         List<IntroEmploymentRow> employment = introductionMapper.findWorkspaceEmployment(workspaceId);
         List<IntroCandidatePerson> suggestionCandidates =
-            introductionMapper.findCandidatePersons(workspaceId);
+            introductionMapper.findCandidatePersons(workspaceId, orgWorkspaceIdsJson);
         Set<Long> existingPairs =
             existingPairKeys(introductionMapper.findExistingPairs(workspaceId));
         List<IntroSuggestionDto> suggestions = rankSuggestions(
             suggestionCandidates, edges, employment, existingPairs, warmth, resolvedSuggestions);
         List<IntroCandidatePerson> pathCandidates =
-            introductionMapper.findWarmPathCandidates(workspaceId);
+            introductionMapper.findWarmPathCandidates(workspaceId, orgWorkspaceIdsJson);
         List<WarmPathDismissal> pathDismissals =
             introductionMapper.findWarmPathDismissals(workspaceId);
         List<WarmPathDto> paths = WarmPathService.rankPaths(
@@ -209,6 +213,18 @@ public class IntroductionService {
     }
 
     /**
+     * Ranks suggestions using the scope resolved before the caller acquired any authorization,
+     * organization, or record lock. This overload performs no record-visibility control lookup.
+     */
+    public List<IntroSuggestionDto> computeSuggestions(
+            int workspaceId,
+            int limit,
+            Map<Integer, RelationshipTemperatureDto> temperatures,
+            RecordVisibilityScope scope) {
+        return computeSuggestions(workspaceId, limit, temperatures, scope, NO_CANCELLATION_CHECKPOINT);
+    }
+
+    /**
      * As {@link #computeSuggestions(int, int)}, for introduction rationales, which run this ranking
      * on a fixed-size AI generation worker: an interrupted worker stops immediately after each
      * workspace-wide load and after the rescore instead of finishing a ranking whose result has
@@ -231,7 +247,26 @@ public class IntroductionService {
         if (limit <= 0) {
             return List.of();
         }
-        List<IntroCandidatePerson> candidates = introductionMapper.findCandidatePersons(workspaceId);
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        cancellationCheckpoint.run();
+        return computeSuggestions(workspaceId, limit, temperatures, scope, cancellationCheckpoint);
+    }
+
+    private List<IntroSuggestionDto> computeSuggestions(
+            int workspaceId,
+            int limit,
+            Map<Integer, RelationshipTemperatureDto> temperatures,
+            RecordVisibilityScope scope,
+            Runnable cancellationCheckpoint) {
+        if (limit <= 0) {
+            return List.of();
+        }
+        if (!scope.workspaceIds().contains(workspaceId)) {
+            throw new IllegalArgumentException("Record visibility scope does not include the workspace");
+        }
+        String orgWorkspaceIdsJson = scope.workspaceIdsJson();
+        List<IntroCandidatePerson> candidates =
+            introductionMapper.findCandidatePersons(workspaceId, orgWorkspaceIdsJson);
         cancellationCheckpoint.run();
         if (candidates.size() < 2) {
             return List.of();

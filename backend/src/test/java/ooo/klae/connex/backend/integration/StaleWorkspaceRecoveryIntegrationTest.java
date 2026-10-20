@@ -9,7 +9,10 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.head;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.cookie;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -43,6 +46,7 @@ import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.context.request.RequestContextHolder;
 
 import ooo.klae.connex.backend.beans.Organization;
+import ooo.klae.connex.backend.beans.OrgPlacement;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.beans.WorkspaceInvite;
@@ -54,12 +58,14 @@ import ooo.klae.connex.backend.mappers.InviteMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.OrgAllowedDomainMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.mappers.OrgPlacementMapper;
 import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.OneTimeLinkFlowService;
 import ooo.klae.connex.backend.support.OwnershipOfferTestFixtures;
 import ooo.klae.connex.backend.tenant.TenantContext;
+import ooo.klae.connex.backend.tenant.TenantRoutingProperties;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 import tools.jackson.databind.ObjectMapper;
@@ -83,6 +89,8 @@ class StaleWorkspaceRecoveryIntegrationTest {
     @Autowired private TenantContext tenantContext;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private ObjectMapper objectMapper;
+    @Autowired private OrgPlacementMapper orgPlacementMapper;
+    @Autowired private TenantRoutingProperties routingProperties;
 
     private final List<Integer> workspaceIds = new ArrayList<>();
     private final List<Integer> organizationIds = new ArrayList<>();
@@ -131,6 +139,49 @@ class StaleWorkspaceRecoveryIntegrationTest {
         organizationIds.clear();
         userIds.clear();
         inviteTokenHashes.clear();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"listing", "pending", "switch", "profile", "update", "locale",
+        "listing-head", "pending-head", "profile-head", "tenant"})
+    void singleDatabaseRetainsEager503ForEveryReviewedHandlerAndTenantWork(String operation) throws Exception {
+        assertFalse(routingProperties.isCatalogPerPlacement());
+        Workspace selected = newWorkspaceInNewOrganization();
+        Workspace target = newWorkspaceInNewOrganization();
+        User actor = newUser();
+        workspaceMapper.addMember(selected.getId(), actor.getId(), "member");
+        workspaceMapper.addMember(target.getId(), actor.getId(), "member");
+        workspaceMapper.setLastActiveWorkspaceId(actor.getId(), selected.getId());
+        OrgPlacement placement = OrgPlacement.sharedDefault(selected.getOrgId());
+        placement.setPlacementMode("connex_operated_silo");
+        placement.setDatabaseHandle("cnx_single_unavailable_" + selected.getId());
+        orgPlacementMapper.insert(placement);
+        String originalLocale = userMapper.getUserById(actor.getId()).getLocale();
+        MockHttpSession session = login(actor);
+        MockHttpServletRequestBuilder request = switch (operation) {
+            case "listing" -> get("/api/workspaces");
+            case "pending" -> get("/api/workspaces/pending");
+            case "switch" -> post("/api/workspaces/" + target.getId() + "/switch");
+            case "profile" -> get("/api/users/" + actor.getId());
+            case "update" -> put("/api/users/" + actor.getId()).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"username\":\"" + actor.getUsername() + "\",\"displayName\":\"Retained profile\","
+                    + "\"email\":\"" + actor.getEmail() + "\"}");
+            case "locale" -> patch("/api/users/me/locale").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"locale\":\"ja\"}");
+            case "listing-head" -> head("/api/workspaces");
+            case "pending-head" -> head("/api/workspaces/pending");
+            case "profile-head" -> head("/api/users/" + actor.getId());
+            case "tenant" -> get("/api/tags");
+            default -> throw new IllegalArgumentException(operation);
+        };
+
+        mockMvc.perform(request.session(session).with(csrf().asHeader()))
+            .andExpect(status().isServiceUnavailable());
+        mockMvc.perform(get("/api/auth/me").session(session))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(actor.getId()));
+        RequestContextHolder.resetRequestAttributes();
+        assertEquals(selected.getId(), workspaceMapper.getLastActiveWorkspaceId(actor.getId()));
+        assertEquals(originalLocale, userMapper.getUserById(actor.getId()).getLocale());
     }
 
     @ParameterizedTest

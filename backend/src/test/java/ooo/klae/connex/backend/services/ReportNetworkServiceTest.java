@@ -373,19 +373,23 @@ class ReportNetworkServiceTest {
         PersonEdgeReadService edgeReader = mock(PersonEdgeReadService.class);
         IntroductionMapper introductionMapper = mock(IntroductionMapper.class);
         ScoringService scoringService = mock(ScoringService.class);
+        RecordVisibilityScopeControlAccess scopeAccess = mock(RecordVisibilityScopeControlAccess.class);
         ReportNetworkService service = new ReportNetworkService(
-                reportMapper, personMapper, edgeReader, introductionMapper, scoringService);
+                reportMapper, personMapper, edgeReader, introductionMapper, scoringService, scopeAccess);
         List<IntroCandidatePerson> candidates = new ArrayList<>();
         for (int id = 1; id <= 501; id++) {
             IntroCandidatePerson candidate = new IntroCandidatePerson();
             candidate.setId(id);
             candidates.add(candidate);
         }
-        when(introductionMapper.findCandidatePersonsForReport(7, 501)).thenReturn(candidates);
+        when(scopeAccess.getForWorkspace(7)).thenReturn(
+                new RecordVisibilityScopeControlAccess.RecordVisibilityScope(1, List.of(7)));
+        when(introductionMapper.findCandidatePersonsForReport(7, "[7]", 501)).thenReturn(candidates);
 
         assertThrows(BadRequestException.class, () -> service.reverseIntroSuggestions(7));
 
-        verify(introductionMapper).findCandidatePersonsForReport(7, 501);
+        verify(scopeAccess).getForWorkspace(7);
+        verify(introductionMapper).findCandidatePersonsForReport(7, "[7]", 501);
         verify(introductionMapper, never()).findWorkspaceEmploymentForReport(
                 org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyList(),
                 org.mockito.ArgumentMatchers.anyInt());
@@ -399,8 +403,9 @@ class ReportNetworkServiceTest {
         PersonEdgeReadService edgeReader = mock(PersonEdgeReadService.class);
         IntroductionMapper introductionMapper = mock(IntroductionMapper.class);
         ScoringService scoringService = mock(ScoringService.class);
+        RecordVisibilityScopeControlAccess scopeAccess = mock(RecordVisibilityScopeControlAccess.class);
         ReportNetworkService service = new ReportNetworkService(
-                reportMapper, personMapper, edgeReader, introductionMapper, scoringService);
+                reportMapper, personMapper, edgeReader, introductionMapper, scoringService, scopeAccess);
         ReportAggregateQuery query = mock(ReportAggregateQuery.class);
         when(query.workspaceId()).thenReturn(7);
         List<Person> people = new ArrayList<>();
@@ -419,6 +424,41 @@ class ReportNetworkServiceTest {
         verify(edgeReader).getEdgesForNetworkReport(7, 100_001);
         verify(introductionMapper).findExistingPairsForReport(7, 250_001);
         verify(reportMapper).getNetworkAccountValues(query, 50_001);
+    }
+
+    @Test
+    void mixedSnapshotResolvesOneCompanyScopeForReverseCandidates() {
+        ReportMapper reportMapper = mock(ReportMapper.class);
+        PersonMapper personMapper = mock(PersonMapper.class);
+        PersonEdgeReadService edgeReader = mock(PersonEdgeReadService.class);
+        IntroductionMapper introductionMapper = mock(IntroductionMapper.class);
+        ScoringService scoringService = mock(ScoringService.class);
+        RecordVisibilityScopeControlAccess scopeAccess = mock(RecordVisibilityScopeControlAccess.class);
+        when(scopeAccess.getForWorkspace(7)).thenReturn(
+            new RecordVisibilityScopeControlAccess.RecordVisibilityScope(1, List.of(7, 11)));
+        ReportNetworkService service = new ReportNetworkService(
+            reportMapper, personMapper, edgeReader, introductionMapper, scoringService, scopeAccess);
+        ReportAggregateQuery query = mock(ReportAggregateQuery.class);
+        when(query.workspaceId()).thenReturn(7);
+        service.snapshot(query, true);
+        verify(scopeAccess).getForWorkspace(7);
+        verify(introductionMapper).findCandidatePersonsForReport(7, "[7,11]", 501);
+    }
+
+    @Test
+    void warmOnlySnapshotDoesNotResolveCompanyScope() {
+        ReportMapper reportMapper = mock(ReportMapper.class);
+        PersonMapper personMapper = mock(PersonMapper.class);
+        PersonEdgeReadService edgeReader = mock(PersonEdgeReadService.class);
+        IntroductionMapper introductionMapper = mock(IntroductionMapper.class);
+        ScoringService scoringService = mock(ScoringService.class);
+        RecordVisibilityScopeControlAccess scopeAccess = mock(RecordVisibilityScopeControlAccess.class);
+        ReportNetworkService service = new ReportNetworkService(
+            reportMapper, personMapper, edgeReader, introductionMapper, scoringService, scopeAccess);
+        ReportAggregateQuery query = mock(ReportAggregateQuery.class);
+        when(query.workspaceId()).thenReturn(7);
+        service.snapshot(query, false);
+        verifyNoInteractions(scopeAccess);
     }
 
     private static Person person(int id, String name, Integer companyId, boolean excluded) {

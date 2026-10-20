@@ -24,8 +24,8 @@ import org.w3c.dom.NodeList;
  * (read path). The two paths express it differently and this test knows which is
  * which: every write grant now receives a trusted control-derived workspace
  * allowlist instead of joining the control table (#811), while on the read path
- * only {@code AiAssistantIdentifierMapper}, {@code IdentityMapper} and
- * {@code PersonEdgeMapper} bind that allowlist — the remaining five mappers in
+ * {@code AiAssistantIdentifierMapper}, {@code IdentityMapper}, {@code PersonEdgeMapper},
+ * {@code IntroductionMapper} and {@code DuplicateReviewMapper} bind that allowlist — the remaining four mappers in
  * {@code SHARE_READERS} still join the control-plane {@code workspace} table and
  * match {@code ows.org_id = vws.org_id}.
  * The workspace-predicate scan cannot see either model (it only checks
@@ -60,6 +60,7 @@ class OrgShareCeilingArchTest {
         "mappers/DealMapper.xml", Pattern.compile("FROM (?:company|person|pipeline)_share"),
         "mappers/DuplicateReviewMapper.xml", Pattern.compile("FROM company_share"),
         "mappers/IdentityMapper.xml", Pattern.compile("FROM (?:person|company)_share"),
+        "mappers/IntroductionMapper.xml", Pattern.compile("FROM company_share"),
         "mappers/PersonEdgeMapper.xml", Pattern.compile("FROM (?:person|company)_share"),
         "mappers/PersonMapper.xml", Pattern.compile("FROM (?:person|company)_share"),
         "mappers/PipelineMapper.xml", Pattern.compile("FROM pipeline_share")
@@ -74,6 +75,8 @@ class OrgShareCeilingArchTest {
             Pattern ceiling = entry.getKey().equals("mappers/AiAssistantIdentifierMapper.xml")
                     || entry.getKey().equals("mappers/PersonEdgeMapper.xml")
                     || entry.getKey().equals("mappers/IdentityMapper.xml")
+                    || entry.getKey().equals("mappers/IntroductionMapper.xml")
+                    || entry.getKey().equals("mappers/DuplicateReviewMapper.xml")
                 ? CONTROL_DERIVED_READ_CEILING
                 : READ_CEILING;
             int ceilings = count(ceiling, xml);
