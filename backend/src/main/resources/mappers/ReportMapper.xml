@@ -965,12 +965,8 @@
           OR EXISTS (
             SELECT 1
             FROM person_share gap_person_share
-            JOIN workspace gap_person_viewer
-              ON gap_person_viewer.id = gap_person_share.workspace_id
-              AND gap_person_viewer.id = #{query.workspaceId}
-            JOIN workspace gap_person_owner
-              ON gap_person_owner.id = gap_person.workspace_id
-              AND gap_person_owner.org_id = gap_person_viewer.org_id
+            JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) org_workspace
+              ON org_workspace.id = gap_person.workspace_id
             WHERE gap_person_share.person_id = gap_person.id
               AND gap_person_share.workspace_id = #{query.workspaceId}
               AND gap_person_share.created_at &lt; #{query.endUtc}
@@ -1023,12 +1019,8 @@
           OR EXISTS (
             SELECT 1
             FROM company_share gap_company_share
-            JOIN workspace gap_company_viewer
-              ON gap_company_viewer.id = gap_company_share.workspace_id
-              AND gap_company_viewer.id = #{query.workspaceId}
-            JOIN workspace gap_company_owner
-              ON gap_company_owner.id = c.workspace_id
-              AND gap_company_owner.org_id = gap_company_viewer.org_id
+            JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) org_workspace
+              ON org_workspace.id = c.workspace_id
             WHERE gap_company_share.company_id = c.id
               AND gap_company_share.workspace_id = #{query.workspaceId}
               AND gap_company_share.created_at &lt; #{query.endUtc}
@@ -1134,12 +1126,8 @@
         OR EXISTS (
           SELECT 1
           FROM company_share single_company_share
-          JOIN workspace single_company_viewer
-            ON single_company_viewer.id = single_company_share.workspace_id
-            AND single_company_viewer.id = #{query.workspaceId}
-          JOIN workspace single_company_owner
-            ON single_company_owner.id = single_company.workspace_id
-            AND single_company_owner.org_id = single_company_viewer.org_id
+          JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) org_workspace
+            ON org_workspace.id = single_company.workspace_id
           WHERE single_company_share.company_id = single_company.id
             AND single_company_share.workspace_id = #{query.workspaceId}
         )
@@ -1162,10 +1150,8 @@
         OR EXISTS (
           SELECT 1
           FROM company_share network_company_share
-          JOIN workspace vws ON vws.id = network_company_share.workspace_id
-            AND vws.id = #{query.workspaceId}
-          JOIN workspace ows ON ows.id = network_company.workspace_id
-            AND ows.org_id = vws.org_id
+          JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) org_workspace
+            ON org_workspace.id = network_company.workspace_id
           WHERE network_company_share.company_id = network_company.id
             AND network_company_share.workspace_id = #{query.workspaceId}
         )
@@ -1210,10 +1196,8 @@
         OR EXISTS (
           SELECT 1
           FROM person_share ps
-          JOIN workspace viewer_workspace ON viewer_workspace.id = ps.workspace_id
-            AND viewer_workspace.id = #{workspaceId}
-          JOIN workspace owner_workspace ON owner_workspace.id = p.workspace_id
-            AND owner_workspace.org_id = viewer_workspace.org_id
+          JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) org_workspace
+            ON org_workspace.id = p.workspace_id
           WHERE ps.person_id = p.id
             AND ps.workspace_id = #{workspaceId}
             AND ps.created_at &lt;= #{asOf}
@@ -1231,10 +1215,8 @@
         OR EXISTS (
           SELECT 1
           FROM company_share cs
-          JOIN workspace viewer_workspace ON viewer_workspace.id = cs.workspace_id
-            AND viewer_workspace.id = #{workspaceId}
-          JOIN workspace owner_workspace ON owner_workspace.id = c.workspace_id
-            AND owner_workspace.org_id = viewer_workspace.org_id
+          JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) org_workspace
+            ON org_workspace.id = c.workspace_id
           WHERE cs.company_id = c.id
             AND cs.workspace_id = #{workspaceId}
             AND cs.created_at &lt;= #{asOf}

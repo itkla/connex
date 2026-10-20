@@ -33,6 +33,7 @@ import org.w3c.dom.NodeList;
  * match {@code ows.org_id = vws.org_id}.
  * Note fragments are checked separately because their legacy unfiltered record ceilings and
  * active-only assistant ceiling deliberately consume different scope types.
+ * Report statements are checked separately to pin each aggregate owner and historical share cutoff.
  * The workspace-predicate scan cannot see either model (it only checks
  * {@code #{workspaceId}} is bound). These tests assert both paths carry their
  * reviewed ceiling, so a future shareable entity type copied without it fails
@@ -148,6 +149,62 @@ class OrgShareCeilingArchTest {
         assertEquals(2, recordCeilings);
         assertEquals(1, assistantCeilings);
         assertEquals(0, count(CONTROL_PLANE_WORKSPACE_TABLE, loadMapperText("mappers/NoteMapper.xml")));
+    }
+
+    @Test
+    void every_report_share_branch_carries_its_reviewed_scope_and_cutoff() throws Exception {
+        Document document = loadMapper("mappers/ReportMapper.xml");
+        Map<String, List<String>> owners = Map.of(
+            "aggregateCoverageGaps", List.of("gap_person", "c"),
+            "aggregateSingleThreadedDeals", List.of("single_company"),
+            "getNetworkAccountValues", List.of("network_company"),
+            "getVisiblePersonIdsAt", List.of("p"),
+            "getVisibleCompanyIdsAt", List.of("c"));
+        Pattern branch = Pattern.compile("FROM\\s+(person|company)_share\\s+(\\w+)\\s+"
+            + "JOIN\\s+JSON_TABLE\\(#\\{orgWorkspaceIdsJson}, '\\$\\[\\*]' COLUMNS\\(id INT PATH '\\$'\\)\\)"
+            + "\\s+org_workspace\\s+ON org_workspace.id = (\\w+).workspace_id\\s+"
+            + "WHERE \\2\\.(person|company)_id = \\3.id\\s+AND \\2.workspace_id = #\\{(query\\.)?workspaceId}"
+            + "(?:\\s+AND \\2.created_at (<=|<) #\\{(asOf|query.endUtc)})?\\s*\\)");
+        int statements = 0;
+        int shares = 0;
+        NodeList children = document.getDocumentElement().getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            if (!(children.item(i) instanceof Element element)) {
+                continue;
+            }
+            String sql = element.getTextContent().replaceAll("\\s+", " ").trim();
+            int reads = count(Pattern.compile("FROM (?:person|company)_share\\b"), sql);
+            if (reads == 0) {
+                continue;
+            }
+            String id = element.getAttribute("id");
+            assertEquals("select", element.getTagName(), id);
+            assertTrue(owners.containsKey(id), "Unreviewed Report share reader: " + id);
+            assertEquals(owners.get(id).size(), reads, id);
+            assertEquals(reads, count(CONTROL_DERIVED_READ_CEILING, sql), id);
+            var matcher = branch.matcher(sql);
+            List<String> actualOwners = new ArrayList<>();
+            while (matcher.find()) {
+                actualOwners.add(matcher.group(3));
+                assertEquals(matcher.group(1), matcher.group(4), id);
+                if (id.equals("aggregateCoverageGaps")) {
+                    assertEquals("<", matcher.group(6), id);
+                    assertEquals("query.endUtc", matcher.group(7), id);
+                } else if (id.startsWith("getVisible")) {
+                    assertEquals("<=", matcher.group(6), id);
+                    assertEquals("asOf", matcher.group(7), id);
+                    assertTrue(sql.contains(matcher.group(3) + ".created_at <= #{asOf}"), id);
+                } else {
+                    assertEquals(null, matcher.group(6), id);
+                }
+            }
+            assertEquals(owners.get(id), actualOwners, id);
+            shares += reads;
+            statements++;
+        }
+        assertEquals(5, statements);
+        assertEquals(6, shares);
+        assertEquals(0, count(CONTROL_PLANE_WORKSPACE_TABLE, loadMapperText("mappers/ReportMapper.xml")));
     }
 
     private int count(Pattern pattern, String text) {
