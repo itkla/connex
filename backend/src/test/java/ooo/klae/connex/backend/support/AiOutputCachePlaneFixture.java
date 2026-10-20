@@ -21,6 +21,7 @@ import org.apache.ibatis.builder.xml.XMLMapperBuilder;
 import org.apache.ibatis.mapping.Environment;
 import org.apache.ibatis.session.Configuration;
 import org.apache.ibatis.session.SqlSessionFactoryBuilder;
+import org.flywaydb.core.Flyway;
 import org.mybatis.spring.SqlSessionTemplate;
 import org.mybatis.spring.transaction.SpringManagedTransactionFactory;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
@@ -31,6 +32,7 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
 
 import com.zaxxer.hikari.HikariDataSource;
 
+import ooo.klae.connex.backend.config.AuditLogV126MigrationCallback;
 import ooo.klae.connex.backend.config.TenantRoutingConfig;
 import ooo.klae.connex.backend.mappers.AiOutputCacheMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
@@ -79,18 +81,28 @@ public final class AiOutputCachePlaneFixture implements AutoCloseable {
     private final List<Integer> dealIds = new ArrayList<>();
     private boolean scratchCreated;
 
-    /** Uses an already migrated default catalog; scratch catalogs receive no Flyway or control tables. */
+    /** Migrates the default catalog; scratch catalogs receive no Flyway or control tables. */
     public AiOutputCachePlaneFixture(boolean split, int maximumPoolSize) throws Exception {
         String url = required("CONNEX_DB_URL");
+        String username = required("CONNEX_DB_USERNAME");
+        String password = required("CONNEX_DB_PASSWORD");
         defaultCatalog = TenantRoutingConfig.databaseFromJdbcUrl(url);
         if (defaultCatalog == null || !defaultCatalog.matches("[A-Za-z0-9_]+")) {
             throw new IllegalStateException("A migrated default catalog is required");
         }
+        Flyway.configure()
+            .dataSource(url, username, password)
+            .locations("classpath:db/migration")
+            .callbacks(new AuditLogV126MigrationCallback())
+            .baselineOnMigrate(true)
+            .baselineVersion("0")
+            .load()
+            .migrate();
         tenantCatalog = split ? "cnx_cache_plane_" + UUID.randomUUID().toString().replace("-", "") : defaultCatalog;
         pool = new HikariDataSource();
         pool.setJdbcUrl(url);
-        pool.setUsername(required("CONNEX_DB_USERNAME"));
-        pool.setPassword(required("CONNEX_DB_PASSWORD"));
+        pool.setUsername(username);
+        pool.setPassword(password);
         pool.setMaximumPoolSize(maximumPoolSize);
         pool.setConnectionTimeout(5_000);
         pool.setPoolName("cache-plane");
