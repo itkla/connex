@@ -168,16 +168,16 @@ public class AiAgentDsrPurgeService {
 
     /** Installs only frozen accepted workspace authority and restores the caller after every tenant phase. */
     private <T> T inAcceptedScope(AiAgentPurgeAcceptance accepted, int workspaceId, Supplier<T> work) {
-        TenantIdentity previous = installAcceptedIdentity(accepted, workspaceId);
+        TenantContext.State previous = installAcceptedIdentity(accepted, workspaceId);
         try {
             return work.get();
         } finally {
-            restoreIdentity(previous);
+            tenantContext.restore(previous);
         }
     }
 
     private AiAgentPrivacyWork readAcceptedWork(AiAgentPurgeAcceptance accepted, int workspaceId) {
-        TenantIdentity previous = installAcceptedIdentity(accepted, workspaceId);
+        TenantContext.State previous = installAcceptedIdentity(accepted, workspaceId);
         try {
             TransactionTemplate read = new TransactionTemplate(transactionManager);
             read.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
@@ -185,26 +185,15 @@ public class AiAgentDsrPurgeService {
             read.setReadOnly(true);
             return read.execute(status -> privacyMapper.getWork(workspaceId, accepted.operationId()));
         } finally {
-            restoreIdentity(previous);
+            tenantContext.restore(previous);
         }
     }
 
-    private TenantIdentity installAcceptedIdentity(AiAgentPurgeAcceptance accepted, int workspaceId) {
-        TenantIdentity previous = new TenantIdentity(tenantContext.getWorkspaceId(), tenantContext.getOrgId(),
-                tenantContext.getUserId(), tenantContext.getRole(), tenantContext.getScopeCatalog());
+    private TenantContext.State installAcceptedIdentity(AiAgentPurgeAcceptance accepted, int workspaceId) {
+        TenantContext.State previous = tenantContext.snapshot();
         int systemUserId = tenantWorkScope.unroutedRead(systemActor::readUser).getId();
         tenantContext.set(workspaceId, accepted.orgId(), systemUserId, "system", tenantContext.getCatalog());
         return previous;
     }
 
-    private void restoreIdentity(TenantIdentity previous) {
-        if (previous.workspaceId() != null) {
-            tenantContext.set(previous.workspaceId(), previous.orgId(), previous.userId(),
-                    previous.role(), previous.catalog());
-        } else {
-            tenantContext.clear();
-        }
-    }
-
-    private record TenantIdentity(Integer workspaceId, Integer orgId, Integer userId, String role, String catalog) {}
 }

@@ -13,6 +13,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import ooo.klae.connex.backend.dto.DuplicateReviewItemRow;
 import ooo.klae.connex.backend.support.RecordVisibilityPlaneFixture;
+import ooo.klae.connex.backend.support.RecordVisibilityPlaneFixture.Records;
 
 /** Verifies optional employer joins never change the decision set, counts, ordering, or pagination. */
 class DuplicateReviewCompanyVisibilityMapperTest {
@@ -21,7 +22,7 @@ class DuplicateReviewCompanyVisibilityMapperTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        fixture = new RecordVisibilityPlaneFixture(false, false);
+        fixture = new RecordVisibilityPlaneFixture(Records.DUPLICATE_REVIEW, false);
         controlJdbc = fixture.controlJdbc;
         fixture.installTenant();
     }

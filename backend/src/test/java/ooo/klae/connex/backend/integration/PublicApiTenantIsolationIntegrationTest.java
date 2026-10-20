@@ -1,7 +1,9 @@
 package ooo.klae.connex.backend.integration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doReturn;
@@ -57,6 +59,7 @@ import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.tenant.TenantRoutingProperties;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -82,6 +85,7 @@ class PublicApiTenantIsolationIntegrationTest {
     @Autowired private ObjectMapper objectMapper;
     @Autowired private TenantContext tenantContext;
     @Autowired private WorkspaceService workspaceService;
+    @Autowired private TenantWorkScope tenantWorkScope;
     @MockitoSpyBean private TenantCatalogResolver tenantCatalogResolver;
 
     private PublicApiFixtureSupport fixtures;
@@ -221,6 +225,35 @@ class PublicApiTenantIsolationIntegrationTest {
                 + " AND workspace_id = ?",
             Integer.class,
             workspace.getId()));
+    }
+
+    @Test
+    void freshMembershipPreparesItsTargetBeforeTheTransactionAndRestoresAnotherRequestWorkspace() {
+        Workspace requestWorkspace = newWorkspace("membership-request");
+        Workspace targetWorkspace = newWorkspace("membership-target");
+        User target = newUser("membership-cross-workspace");
+        workspaceMapper.addMember(requestWorkspace.getId(), target.getId(), "member");
+        assertFalse(workspaceService.isMember(targetWorkspace.getId(), target.getId()));
+        tenantWorkScope.inWorkspace(requestWorkspace.getId(), () -> {
+            tenantContext.set(requestWorkspace.getId(), requestWorkspace.getOrgId(), target.getId(), "member",
+                tenantContext.getCatalog());
+            String catalog = tenantContext.getCatalog();
+            var requestScopes = tenantContext.getWorkspaceScopes();
+            assertNotNull(requestScopes);
+
+            workspaceService.ensureActiveMember(targetWorkspace.getId(), target.getId(), "member");
+
+            assertTrue(tenantContext.isResolved());
+            assertFalse(tenantContext.hasControlSelection());
+            assertEquals(requestWorkspace.getId(), tenantContext.getWorkspaceId());
+            assertEquals(requestWorkspace.getOrgId(), tenantContext.getOrgId());
+            assertEquals(target.getId(), tenantContext.getUserId());
+            assertEquals("member", tenantContext.getRole());
+            assertEquals(catalog, tenantContext.getScopeCatalog());
+            assertEquals(catalog, tenantContext.getCatalog());
+            assertSame(requestScopes, tenantContext.getWorkspaceScopes());
+            assertTrue(workspaceService.isMember(targetWorkspace.getId(), target.getId()));
+        });
     }
 
     @Test

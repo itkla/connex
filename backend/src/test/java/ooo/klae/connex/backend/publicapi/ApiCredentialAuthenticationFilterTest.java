@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -103,6 +104,7 @@ class ApiCredentialAuthenticationFilterTest {
             clientIpResolver,
             mock(TenantCatalogResolver.class),
             new TenantContext(),
+            org.mockito.Mockito.mock(ooo.klae.connex.backend.tenant.TenantWorkScope.class),
             requestToClassify -> RouteTransactionMode.READ,
             mock(PlatformTransactionManager.class));
         String token = "cnx_pat_" + "a".repeat(39) + "last";
@@ -139,6 +141,7 @@ class ApiCredentialAuthenticationFilterTest {
             clientIpResolver,
             mock(TenantCatalogResolver.class),
             new TenantContext(),
+            org.mockito.Mockito.mock(ooo.klae.connex.backend.tenant.TenantWorkScope.class),
             requestToClassify -> RouteTransactionMode.READ,
             mock(PlatformTransactionManager.class));
         String token = token();
@@ -486,6 +489,7 @@ class ApiCredentialAuthenticationFilterTest {
             clientIpResolver,
             tenantCatalogResolver,
             new TenantContext(),
+            org.mockito.Mockito.mock(ooo.klae.connex.backend.tenant.TenantWorkScope.class),
             request -> RouteTransactionMode.READ,
             new TestTransactionManager());
         MockHttpServletResponse response = new MockHttpServletResponse();
@@ -552,6 +556,7 @@ class ApiCredentialAuthenticationFilterTest {
             clientIpResolver,
             tenantCatalogResolver,
             new TenantContext(),
+            org.mockito.Mockito.mock(ooo.klae.connex.backend.tenant.TenantWorkScope.class),
             request -> RouteTransactionMode.READ,
             new TestTransactionManager());
         MockHttpServletRequest request = authenticatedRequest("GET");
@@ -709,6 +714,42 @@ class ApiCredentialAuthenticationFilterTest {
     private ApiCredentialAuthenticationFilter authenticatedFilter(
             RouteTransactionMode transactionMode,
             TransactionTemplate transactionTemplate) {
+        return authenticatedFilter(transactionMode, transactionTemplate,
+            mock(ooo.klae.connex.backend.tenant.TenantWorkScope.class), new TenantContext());
+    }
+
+    @ParameterizedTest
+    @EnumSource(RouteTransactionMode.class)
+    void preparesWorkspaceScopesBeforeCredentialTransactionsAndClearsThemAfterward(RouteTransactionMode mode) throws Exception {
+        TenantContext context = new TenantContext();
+        var scopes = new ooo.klae.connex.backend.tenant.TenantWorkspaceScopeSnapshot(
+            11, 13, "connexdb", Optional.empty(),
+            new ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlOperations.WorkspaceScope(
+                13, List.of(11), "[11]"));
+        var workScope = mock(ooo.klae.connex.backend.tenant.TenantWorkScope.class);
+        when(workScope.prepareWorkspaceScopes(11, 13, "connexdb")).thenAnswer(call -> {
+            assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
+            assertFalse(context.isResolved());
+            return scopes;
+        });
+        var transaction = new TransactionTemplate(new TestTransactionManager());
+        transaction.setReadOnly(true);
+        transaction.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+        var filter = authenticatedFilter(mode, transaction, workScope, context);
+        var response = new MockHttpServletResponse();
+        filter.doFilter(authenticatedRequest(mode == RouteTransactionMode.READ ? "GET" : "POST"), response,
+            (request, servletResponse) -> {
+                assertSame(scopes, context.getWorkspaceScopes());
+                assertEquals(mode == RouteTransactionMode.READ, TransactionSynchronizationManager.isActualTransactionActive());
+            });
+        assertEquals(200, response.getStatus());
+        assertFalse(context.isResolved());
+        assertNull(context.getWorkspaceScopes());
+    }
+
+    private ApiCredentialAuthenticationFilter authenticatedFilter(
+            RouteTransactionMode transactionMode, TransactionTemplate transactionTemplate,
+            ooo.klae.connex.backend.tenant.TenantWorkScope workScope, TenantContext context) {
         String token = token();
         RoutingBinding binding = new RoutingBinding(7, 11, 13, 17, "a".repeat(64));
         User user = new User();
@@ -752,7 +793,8 @@ class ApiCredentialAuthenticationFilterTest {
             mock(DenialAuditRateLimiter.class),
             clientIpResolver,
             tenantCatalogResolver,
-            new TenantContext(),
+            context,
+            workScope,
             request -> transactionMode,
             transactionTemplate);
     }
@@ -834,6 +876,7 @@ class ApiCredentialAuthenticationFilterTest {
             clientIpResolver,
             tenantCatalogResolver,
             tenantContext,
+            org.mockito.Mockito.mock(ooo.klae.connex.backend.tenant.TenantWorkScope.class),
             request -> transactionMode,
             new TestTransactionManager());
         return new StandingFixture(filter, limiter, privilegedAccountService, binding, tenantContext);

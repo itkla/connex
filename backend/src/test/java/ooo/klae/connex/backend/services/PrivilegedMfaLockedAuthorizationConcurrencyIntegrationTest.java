@@ -830,6 +830,7 @@ class PrivilegedMfaLockedAuthorizationConcurrencyIntegrationTest {
         when(resolver.resolveCatalog(organization.getId())).thenReturn(jdbc.queryForObject("SELECT DATABASE()", String.class));
         var filter = new ApiCredentialAuthenticationFilter(credentials, apiLimiter, new ObjectMapper(), properties,
             privilegedAccountService, auditService, limiter, new ClientIpResolver(""), resolver, tenantContext,
+            org.mockito.Mockito.mock(ooo.klae.connex.backend.tenant.TenantWorkScope.class),
             request -> ApiCredentialAuthenticationFilter.RouteTransactionMode.WRITE, transactionManager);
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/locked-mfa-fixture");
         request.addHeader("Authorization", "Bearer " + token);
