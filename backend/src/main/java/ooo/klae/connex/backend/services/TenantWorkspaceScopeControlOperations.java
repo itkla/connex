@@ -20,7 +20,7 @@ import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
 import ooo.klae.connex.backend.tenant.TenantWorkspaceScopeSnapshot;
 
 /**
- * Releases control-read resources before tenant routing begins, including under empty transaction
+ * Releases control-read resources before workspace transactions in both modes, including under empty transaction
  * synchronization. Each prepared kind uses one existing control statement; record visibility shares
  * the unfiltered sharing statement. No routing scope or thread state is installed by these reads.
  */

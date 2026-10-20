@@ -14,7 +14,7 @@ import org.springframework.stereotype.Component;
  * request span; {@code null} means the default (shared) catalog for a resolved scope.
  * A validated control selection retains identity and audit attribution without resolving a tenant
  * catalog. It never satisfies {@link #isResolved()} and cannot authorize tenant SQL.
- * Routed workspace operations also install immutable control-derived scopes before tenant
+ * Workspace operations in both modes install immutable control-derived scopes before tenant
  * transactions; catalog-only operations and validated control selections have no usable snapshot.
  */
 @Component

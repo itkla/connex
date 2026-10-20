@@ -56,6 +56,7 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
     public final TenantRoutingDataSource routing;
     public final DataSourceTransactionManager transactionManager;
     public final JdbcTemplate controlJdbc;
+    public final WorkspaceMapper workspaceMapper;
     public final IntroductionMapper introductionMapper;
     public final DuplicateReviewMapper duplicateReviewMapper;
     public final NoteMapper noteMapper;
@@ -163,6 +164,7 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
             }
         }
         SqlSessionTemplate sessions = new SqlSessionTemplate(new SqlSessionFactoryBuilder().build(configuration));
+        workspaceMapper = sessions.getMapper(WorkspaceMapper.class);
         introductionMapper = sessions.getMapper(IntroductionMapper.class);
         duplicateReviewMapper = sessions.getMapper(DuplicateReviewMapper.class);
         noteMapper = sessions.getMapper(NoteMapper.class);
@@ -172,7 +174,7 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
         TenantWorkScope workScope = new TenantWorkScope(
             tenantContext, mock(TenantCatalogResolver.class), mock(WorkspaceMapper.class));
         scopeAccess = new RecordVisibilityScopeControlAccess(new ShareWorkspaceControlAccess(
-            sessions.getMapper(WorkspaceMapper.class), workScope, tenantContext, transactionManager), tenantContext);
+            workspaceMapper, workScope, tenantContext, transactionManager), tenantContext);
         legacy = new LegacyRecordVisibilitySql(pool, defaultCatalog);
         try {
             seedControl();

@@ -11,6 +11,8 @@ import java.util.function.Supplier;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -127,6 +129,40 @@ class FreshMembershipTransactionTest {
                 String.class,
                 String.class)
             .getAnnotation(Transactional.class));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void preparesBeforeTheMembershipTransactionInBothModes(boolean routed) {
+        var operations = org.mockito.Mockito.mock(TenantWorkspaceScopeControlOperations.class);
+        var lifecycle = org.mockito.Mockito.mock(ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper.class);
+        var prepared = new ooo.klae.connex.backend.tenant.TenantWorkspaceScopeSnapshot(7, 13, null,
+            java.util.Optional.empty(), new OrganizationWorkspaceScopeControlOperations.WorkspaceScope(13,
+                java.util.List.of(7), "[7]"));
+        when(tenantCatalogResolver.isCatalogPerPlacement()).thenReturn(routed);
+        if (routed) {
+            when(operations.forWorkspace(7, false, null)).thenAnswer(call -> {
+                assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
+                return prepared;
+            });
+        } else {
+            when(workspaceMapper.getOrgId(7)).thenReturn(13);
+            when(operations.load(7, 13, null, null)).thenAnswer(call -> {
+                assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
+                return prepared;
+            });
+        }
+        var workScope = new TenantWorkScope(tenantContext, tenantCatalogResolver, workspaceMapper, lifecycle, operations);
+        var manager = new ooo.klae.connex.backend.support.TestTransactionManager();
+        var transaction = new FreshMembershipTransaction(workScope, new TransactionTemplate(manager));
+        assertNull(transaction.executeWithPreparedScopes(7, () -> {
+            assertTrue(TransactionSynchronizationManager.isActualTransactionActive());
+            org.junit.jupiter.api.Assertions.assertSame(prepared, tenantContext.getWorkspaceScopes());
+            return null;
+        }));
+        assertNull(tenantContext.getWorkspaceScopes());
+        assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
+        assertEquals(1, manager.beginCount());
     }
 
     private FreshMembershipTransaction transaction(TestTransactionManager transactionManager) {

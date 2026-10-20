@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -19,6 +20,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.sql.DataSource;
 
@@ -180,51 +182,91 @@ class WorkspaceFreshMembershipRoutingTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void singleDatabaseKeepsItsLazyQueriesAndOwnerRefusal(boolean owner) throws Exception {
+    void singleDatabasePreparesBeforeItsTransactionAndPreservesOwnerRefusal(boolean owner) throws Exception {
         prepareConnection();
+        var target = snapshot(7, 13, null);
+        var lookups = new AtomicInteger();
         when(workspaces.getOrgId(7)).thenAnswer(invocation -> {
-            assertTrue(TransactionSynchronizationManager.isActualTransactionActive());
+            assertEquals(lookups.getAndIncrement() > 0, TransactionSynchronizationManager.isActualTransactionActive(),
+                "Only the business lookup after preparation may run inside the transaction");
             assertNull(context.getCatalog());
             return 13;
         });
+        when(preparation.load(7, 13, null, null)).thenAnswer(invocation -> {
+            assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
+            return target;
+        });
         if (owner) {
-            assertThrows(BadRequestException.class, () -> service.ensureActiveMember(7, 42, "owner"));
-            verifyNoInteractions(workspaces, offboarding, versions, audit);
+            var refusal = assertThrows(BadRequestException.class, () -> service.ensureActiveMember(7, 42, "owner"));
+            assertEquals("Ownership requires an accepted offer", refusal.getMessage());
+            verify(workspaces, times(1)).getOrgId(7);
+            verify(workspaces, never()).isMember(7, 42);
+            verify(workspaces, never()).addMember(7, 42, "owner");
+            verifyNoInteractions(offboarding, versions, audit);
             verify(connection).rollback();
         } else {
+            doAnswer(invocation -> {
+                assertTrue(TransactionSynchronizationManager.isActualTransactionActive());
+                assertEquals(TransactionDefinition.ISOLATION_READ_COMMITTED,
+                    TransactionSynchronizationManager.getCurrentTransactionIsolationLevel());
+                assertSame(target, context.getWorkspaceScopes());
+                return null;
+            }).when(offboarding).prepareFreshMembership(7, 42);
             service.ensureActiveMember(7, 42, "member");
-            verify(workspaces, times(1)).getOrgId(7);
+            verify(workspaces, times(2)).getOrgId(7);
             verify(workspaces, times(1)).isMember(7, 42);
             verify(offboarding).prepareFreshMembership(7, 42);
             verify(workspaces).addMember(7, 42, "member");
             verify(versions).markChanged(42);
             verify(connection).commit();
         }
-        verifyNoInteractions(preparation, lifecycle);
-        verify(catalogs, never()).resolveCatalog(13);
+        var order = inOrder(workspaces, catalogs, preparation, dataSource, connection);
+        order.verify(workspaces).getOrgId(7);
+        order.verify(catalogs).resolveCatalog(13);
+        order.verify(preparation).load(7, 13, null, null);
+        order.verify(dataSource).getConnection();
+        if (!owner) {
+            order.verify(workspaces).getOrgId(7);
+            order.verify(workspaces).isMember(7, 42);
+            order.verify(workspaces).addMember(7, 42, "member");
+            order.verify(connection).commit();
+        } else {
+            order.verify(connection).rollback();
+        }
+        verify(preparation, times(1)).load(7, 13, null, null);
+        verify(catalogs, times(1)).resolveCatalog(13);
+        verifyNoInteractions(lifecycle);
         assertNull(context.getWorkspaceScopes());
         verify(dataSource, times(1)).getConnection();
     }
 
-    @Test
-    void requestPreparationUsesTheMandatoryWorkspaceCollaboratorAndIsInertInSingleDatabase() {
-        assertNull(service.prepareWorkspaceScopes(7, 13, null));
-        verifyNoInteractions(preparation, workspaces, lifecycle, dataSource);
-        when(catalogs.isCatalogPerPlacement()).thenReturn(true);
-        var target = snapshot(7, 13, "cnx_target");
-        when(preparation.load(7, 13, "cnx_target", null)).thenReturn(target);
-        assertSame(target, service.prepareWorkspaceScopes(7, 13, "cnx_target"));
-        verify(preparation).load(7, 13, "cnx_target", null);
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void requestPreparationUsesTheMandatoryWorkspaceCollaboratorInBothModes(boolean routed) {
+        when(catalogs.isCatalogPerPlacement()).thenReturn(routed);
+        String catalog = routed ? "cnx_target" : null;
+        var target = snapshot(7, 13, catalog);
+        when(preparation.load(7, 13, catalog, null)).thenReturn(target);
+        assertSame(target, service.prepareWorkspaceScopes(7, 13, catalog));
+        verify(preparation, times(1)).load(7, 13, catalog, null);
+        verify(catalogs, never()).resolveCatalog(13);
+        verifyNoInteractions(workspaces, lifecycle, dataSource);
     }
 
     @Test
-    void singleDatabasePendingMembershipRetainsNullableResultAndLazyCleanup() throws Exception {
+    void singleDatabasePendingMembershipRetainsNullableResultAndPreparesBeforeCleanup() throws Exception {
         prepareConnection();
+        var target = snapshot(7, 13, null);
+        when(workspaces.getOrgId(7)).thenReturn(13);
+        when(preparation.load(7, 13, null, null)).thenAnswer(invocation -> {
+            assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
+            return target;
+        });
         doAnswer(invocation -> {
             assertTrue(TransactionSynchronizationManager.isActualTransactionActive());
             assertEquals(TransactionDefinition.ISOLATION_READ_COMMITTED,
                 TransactionSynchronizationManager.getCurrentTransactionIsolationLevel());
-            assertNull(context.getWorkspaceScopes());
+            assertSame(target, context.getWorkspaceScopes());
             return null;
         }).when(offboarding).prepareFreshMembership(7, 42);
 
@@ -233,8 +275,18 @@ class WorkspaceFreshMembershipRoutingTest {
         verify(offboarding).prepareFreshMembership(7, 42);
         verify(workspaces).addPendingMember(7, 42, "member");
         verify(workspaces).getMember(7, 42);
-        verify(workspaces, never()).getOrgId(7);
-        verifyNoInteractions(preparation, lifecycle);
+        verify(workspaces, times(1)).getOrgId(7);
+        verify(preparation, times(1)).load(7, 13, null, null);
+        verify(catalogs, times(1)).resolveCatalog(13);
+        verifyNoInteractions(lifecycle);
+        var order = inOrder(workspaces, preparation, dataSource, offboarding, connection);
+        order.verify(workspaces).getOrgId(7);
+        order.verify(preparation).load(7, 13, null, null);
+        order.verify(dataSource).getConnection();
+        order.verify(offboarding).prepareFreshMembership(7, 42);
+        order.verify(workspaces).addPendingMember(7, 42, "member");
+        order.verify(workspaces).getMember(7, 42);
+        order.verify(connection).commit();
         verify(dataSource, times(1)).getConnection();
         verify(connection).commit();
     }

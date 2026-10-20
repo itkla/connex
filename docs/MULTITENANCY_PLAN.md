@@ -241,9 +241,9 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   legacy or out-of-band cross-org share row grants no read visibility either. `OrgShareCeilingArchTest`
   pairs every `FROM *_share` read with the ceiling; `ShareReadIsolationMapperTest` proves it.
 - **Record-visibility ceiling separation (#485):** `RecordVisibilityScopeControlAccess` exposes an
-  immutable, unfiltered organization workspace set by delegating to `ShareWorkspaceControlAccess`'s
-  single control-catalog snapshot, including its tenant-context checks. Routed operations consume
-  prepared data; single-database operations retain their lazy lookup.
+  immutable, unfiltered organization workspace set. Both modes consume matching context-prepared
+  sharing data directly; `ShareWorkspaceControlAccess` remains the lazy fallback with its existing
+  tenant-context checks. Ordinary single-database sharing grants and listings remain lazy.
   This preserves legacy `JOIN workspace` ceilings that had no lifecycle predicate; lifecycle
   tightening requires a separate explicit decision. It deliberately differs from the active-only
   `OrganizationWorkspaceScopeControlAccess` used by Identity, PersonEdge and assistant ceilings.
@@ -285,7 +285,7 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   crossing baseline entry is removed. In `single-database`, restriction processing obtains
   `RecordVisibilityScopeControlAccess.getFreshForWorkspace` immediately before the one DELETE,
   after existing locks and privacy invalidation. This same-connection `READ_COMMITTED` lookup bypasses
-  the #2162 transaction memo without replacing it. A dedicated control statement flushes MyBatis's
+  prepared data, explicit operation scopes and the #2162 transaction memo without replacing them. A dedicated control statement flushes MyBatis's
   local cache without changing ordinary sharing reads, preserving current committed workspace membership
   up to the gap between adjacent SELECT/DELETE statements. The active-only privacy workspace list
   is unchanged and never substitutes for this ceiling. In routed mode the fresh method serves only
@@ -296,31 +296,50 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   remaining visibility/company joins; the isolated cache restriction/purge transaction has its own
   minimal tenant-catalog coverage. Routing remains disabled.
 
-- **Context-installed workspace scopes (#2159 / #485 P5b).** Catalog-routed request resolution,
-  public API authentication and every workspace job entry prepare immutable unfiltered and
-  active-only organization snapshots before tenant transactions. Sharing and record visibility
-  share one control SELECT while retaining distinct types; the active-org ceiling uses its own
-  lifecycle-filtered SELECT. A short read-only control transaction releases its session and
-  connection before routing begins. Boundaries serve only the exact installed workspace,
-  organization and catalog. With no matching payload, an active-transaction scope read throws
-  `TenantScopeSnapshotMissingException` before suspension, mapper execution or checkout, even on a
-  shared placement. Outside transactions the control lookup remains available. `single-database`
-  installs no eager data and preserves its existing lazy reads, query counts and transaction paths.
-  Same-workspace nested `runAs` reuses the payload; different workspace routing remains independent.
-  Fresh-membership entries prepare their target before the `READ_COMMITTED` transaction, including
-  direct `WorkspaceService.ensureActiveMember` and pending-member calls whose target differs from
-  the request workspace. Invitation, invite-link and SSO wrappers reuse the same target preparation;
-  cleanup cannot discover it under membership locks. Single-database member primitives retain their
-  original lazy query path. Request preparation is reached through the interceptor's existing
-  `WorkspaceService` collaborator; the production service requires the preparation boundary, while
-  single-database MVC slices need no additional interceptor or `WebConfig` dependency.
-  Identity-only switches never load scopes and discard unusable bindings. Control-only selections
-  stay unresolved and have no usable snapshot; catalog-only enumeration prepares none.
-  Captured lifecycle routes carry prepared data across root deletion. Inactive or absent anchors
-  are recorded at preparation, with the original boundary refusal deferred until `getForWorkspace`,
-  so tombstone cleanup does not gain an active-lifecycle requirement. Snapshots last for one
-  workspace operation: creation, deletion, renaming and lifecycle changes during it are observed
-  on the next operation, without changing locked authorization or mutation revalidation.
+- **Context-installed workspace scopes (#2159 / #2176 / #485 P5b).** In both modes, request
+  resolution, public API authentication and workspace job entries prepare immutable unfiltered and
+  active-only organization snapshots before tenant transactions. A short read-only control transaction
+  releases its session and connection before tenant work. The interceptor passes its already-resolved
+  workspace, organization and catalog to `load`: one unfiltered SELECT supplies sharing data and
+  record visibility, and one active-only SELECT supplies read ceilings. There is no extra organization
+  or placement lookup. Other workspace entries add the same two scope SELECTs beyond their existing
+  route resolution; diagnostics with a known active scope add only the unfiltered SELECT. Same-workspace
+  nested entries and captured prepared routes add none. No selection, unresolved/control-only requests,
+  auth endpoints and static resources prepare none; this is never deferred to first use in a transaction.
+  Boundaries match the exact installed workspace, organization and effective catalog. Single-database
+  record visibility uses explicit operation scope → matching prepared payload → transaction memo → lazy
+  lookup. A trusted supplied operation scope overrides prepared data to keep batch mapper arguments
+  and nested lookups aligned. Routed supplied scopes must equal the prepared payload; memos cannot
+  bypass context validation. Active-only boundaries serve matching prepared data in both modes and
+  retain their independent control-transaction fallback in single-database mode; that fallback does
+  not establish the caller's read view.
+  Preparation inside an actual single-database transaction reuses an exact existing payload or skips
+  loading and retains lazy behavior. Routed mode still refuses a missing payload before suspension,
+  mapper execution or checkout, including on a shared placement. Outside transactions its ordinary
+  boundary fallback remains available. A single-database lazy scope SELECT can establish an InnoDB
+  REPEATABLE READ view before a later lock wait; the rule and retained fallback are documented in
+  [LOCKING.md](backend/LOCKING.md#duplicate-review-record-mutation-and-imports).
+  Fresh-membership entries prepare their target before the `READ_COMMITTED` transaction in both modes,
+  including direct `WorkspaceService.ensureActiveMember` and pending-member calls whose target differs
+  from the request workspace. Invitation, invite-link and SSO wrappers reuse the same target preparation.
+  Request preparation uses the interceptor's existing `WorkspaceService` collaborator. Same-workspace
+  nested `runAs` reuses the payload; different-workspace routes remain independent. Identity-only notice
+  delivery and accepted DSR identity switches never prepare under locks; incompatible bindings are
+  discarded. Seeder identity installation is inside a transaction with uncommitted roots and uses
+  direct mappers, so it prepares none. Control-only selections and catalog-only enumeration have no
+  usable snapshot. Async executors install their own workspace entry.
+  Captured lifecycle routes carry prepared data across root deletion. Inactive or absent anchors are
+  recorded at preparation, with refusal deferred until the corresponding boundary is used, so cleanup
+  does not gain an active-lifecycle requirement. Creation, seeding, user-membership changes and lifecycle
+  transitions currently have no subsequent targeted scope read requiring refresh; post-provision privacy
+  initialization enters the new workspace after commit. No workspace organization-transfer path exists.
+  Prepared data lasts one workspace operation. Structural changes become visible at the next entry;
+  a new same-operation consumer needing those changes must explicitly refresh outside a transaction
+  or use its own fresh inventory. Locked authorization and mutation revalidation never use these scopes.
+  Restriction cache erasure is the sole destructive consumer of these organization allowlists and
+  retains `getFreshForWorkspace`; its active privacy inventory also remains a direct, transaction-fresh
+  read. DSR acceptance/current-set checks, recovery, offboarding, capture erasure, retention and teardown
+  retain their separate explicit inventories. Routed destructive staleness remains #2172, not fixed here.
   Complete identity/selection/override/payload state is saved and restored on nested scopes;
   request completion and async handoff clear it, and root job exit discards cached routes.
   State uses plain `ThreadLocal`, with no inheritance or task decorator. Async jobs install their

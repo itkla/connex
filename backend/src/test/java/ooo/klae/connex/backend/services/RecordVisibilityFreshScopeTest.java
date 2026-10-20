@@ -65,6 +65,32 @@ class RecordVisibilityFreshScopeTest {
     }
 
     @Test
+    void singleDatabaseFreshReadBypassesPreparedAndExplicitScopesWithoutReplacingAnySnapshot() {
+        var delegate = mock(ShareWorkspaceControlAccess.class);
+        when(delegate.getForWorkspace(7)).thenReturn(snapshot(7));
+        when(delegate.getFreshForWorkspace(7)).thenReturn(snapshot(7, 19));
+        var access = new RecordVisibilityScopeControlAccess(delegate, tenantContext);
+        var prepared = new TenantWorkspaceScopeSnapshot(7, 3, null, Optional.of(snapshot(7, 11)),
+            new WorkspaceScope(3, List.of(7), "[7]"));
+        var explicit = new RecordVisibilityScopeControlAccess.RecordVisibilityScope(3, List.of(7, 13));
+        new TransactionTemplate(new TestTransactionManager()).executeWithoutResult(status -> {
+            var memo = access.getForWorkspace(7);
+            tenantContext.setWithWorkspaceScopes(7, 3, 29, "owner", null, prepared);
+            access.withWorkspaceScope(7, explicit, () -> {
+                assertEquals("[7,19]", access.getFreshForWorkspace(7).workspaceIdsJson());
+                assertSame(explicit, access.getForWorkspace(7));
+                assertSame(prepared, tenantContext.getWorkspaceScopes());
+                return null;
+            });
+            assertSame(prepared.requireSharing().recordVisibilityScope(), access.getForWorkspace(7));
+            tenantContext.clear();
+            assertSame(memo, access.getForWorkspace(7));
+        });
+        verify(delegate).getForWorkspace(7);
+        verify(delegate).getFreshForWorkspace(7);
+    }
+
+    @Test
     void freshReadDoesNotCreateAMemoAndRetainsTheDefaultCatalogTransaction() {
         WorkspaceMapper workspaces = mock(WorkspaceMapper.class);
         var manager = new TestTransactionManager();

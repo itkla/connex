@@ -16,7 +16,10 @@ import java.sql.Connection;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
@@ -38,8 +41,8 @@ import org.apache.ibatis.session.RowBounds;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.apache.ibatis.session.SqlSessionFactoryBuilder;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mybatis.spring.MyBatisSystemException;
 import org.mybatis.spring.SqlSessionTemplate;
@@ -59,6 +62,7 @@ import ooo.klae.connex.backend.beans.AiAgentPrivacyBarrier;
 import ooo.klae.connex.backend.beans.AiAgentPrivacyWork;
 import ooo.klae.connex.backend.beans.AuditLog;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.AiAgentHoldingsPurgeRequest;
 import ooo.klae.connex.backend.dto.WorkspaceLifecycleRef;
 import ooo.klae.connex.backend.mappers.AiAgentDsrControlMapper;
@@ -75,6 +79,7 @@ import ooo.klae.connex.backend.services.AutomationScope;
 import ooo.klae.connex.backend.services.DataSubjectRequestControlOperations;
 import ooo.klae.connex.backend.services.DataSubjectRequestService;
 import ooo.klae.connex.backend.services.SystemActor;
+import ooo.klae.connex.backend.services.TenantWorkspaceScopeControlOperations;
 import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.tenant.TenantScopeInterceptor;
@@ -96,16 +101,25 @@ class AiAgentPrivacySessionRoutingTest {
     private SqlSessionTemplate sessions;
     private TenantWorkScope scope;
 
-    private void prepare(Function<String, List<?>> results) throws Exception {
+    private void prepare(boolean routed, Function<String, List<?>> results) throws Exception {
         when(dataSource.getConnection()).thenAnswer(call -> connection(context.getCatalog()));
-        queries.results = results;
+        var workspace = new Workspace();
+        workspace.setId(7);
+        workspace.setOrgId(11);
+        workspace.setName("workspace");
+        queries.results = id -> switch (id) {
+            case "findOrganizationWorkspacesForShare", "findByOrgId" -> List.of(workspace);
+            default -> results.apply(id);
+        };
         configuration.addInterceptor(queries);
         configuration.addInterceptor(new TenantScopeInterceptor(context, true, true));
         for (Class<?> mapper : List.of(WorkspaceMapper.class, AiAgentPrivacyMapper.class,
                 AiAgentRunMapper.class, AiRunLeaseMapper.class, AiAgentDsrControlMapper.class)) {
             configuration.addMapper(mapper);
         }
-        for (String statement : List.of("WorkspaceMapper.getOrgId", "AiAgentPrivacyMapper.lockBarrier",
+        for (String statement : List.of("WorkspaceMapper.getOrgId",
+                "WorkspaceMapper.findOrganizationWorkspacesForShare", "WorkspaceMapper.findByOrgId",
+                "AiAgentPrivacyMapper.lockBarrier",
                 "AiAgentPrivacyMapper.countIncompleteWork", "AiAgentPrivacyMapper.legacyActiveTurns",
                 "AiAgentRunMapper.countInconsistentActiveRuns", "AiRunLeaseMapper.findExpiredLeases",
                 "AiAgentRunMapper.orphanedRuns", "AiAgentRunMapper.dueRuns", "AiAgentRunMapper.interruptedReadRuns", "AiAgentRunMapper.getRun", "AiAgentDsrControlMapper.pendingAcceptances",
@@ -117,7 +131,11 @@ class AiAgentPrivacySessionRoutingTest {
         }
         factory = new SqlSessionFactoryBuilder().build(configuration);
         sessions = new SqlSessionTemplate(factory);
-        scope = new TenantWorkScope(context, catalogs, sessions.getMapper(WorkspaceMapper.class), lifecycle);
+        var workspaces = sessions.getMapper(WorkspaceMapper.class);
+        var preparation = proxied(new TenantWorkspaceScopeControlOperations(workspaces, lifecycle, catalogs),
+                TenantWorkspaceScopeControlOperations.class);
+        when(catalogs.isCatalogPerPlacement()).thenReturn(routed);
+        scope = new TenantWorkScope(context, catalogs, workspaces, lifecycle, preparation);
         when(catalogs.resolveCatalog(11)).thenReturn("cnx_dedicated");
         when(lifecycle.findWorkspaceOrgIdForLifecycle(7)).thenReturn(11);
         when(lifecycle.lockWorkspaceForShare(7)).thenReturn(new WorkspaceLifecycleRef(7, 11, "", "", "active"));
@@ -145,8 +163,9 @@ class AiAgentPrivacySessionRoutingTest {
         }
     }
 
-    @Test
-    void dedicatedStartupReadsNeverResumePlacementConnection() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void dedicatedStartupReadsNeverResumePlacementConnection(boolean routed) throws Exception {
         var barrier = new AiAgentPrivacyBarrier();
         barrier.setWorkspaceId(7);
         barrier.setGeneration(4);
@@ -157,7 +176,7 @@ class AiAgentPrivacySessionRoutingTest {
         var lease = new ooo.klae.connex.backend.beans.AiRunLeaseRow();
         lease.setSubjectId(31);
         lease.setEpoch(4);
-        prepare(id -> switch (id) {
+        prepare(routed, id -> switch (id) {
             case "getOrgId" -> List.of(11);
             case "getRun" -> List.of(orphan);
             case "findExpiredLeases" -> List.of(lease);
@@ -192,14 +211,15 @@ class AiAgentPrivacySessionRoutingTest {
         verify(persistence).settleOrphan(org.mockito.ArgumentMatchers.eq(orphan), any(),
                 org.mockito.ArgumentMatchers.eq(4L));
         assertFalse(context.isResolved());
+        assertPreparationReads(1);
     }
 
     @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    void dedicatedDsrProgressRestoresCallerAfterReadFailure(boolean resolvedCaller) throws Exception {
+    @CsvSource({"false, false", "false, true", "true, false", "true, true"})
+    void dedicatedDsrProgressRestoresCallerAfterReadFailure(boolean routed, boolean resolvedCaller) throws Exception {
         var accepted = new AiAgentPurgeAcceptance(42, 11, 19, UUID.randomUUID().toString(),
                 UUID.randomUUID().toString(), List.of(7), "2026-10-18T00:00:00Z");
-        prepare(id -> {
+        prepare(routed, id -> {
             if ("getWork".equals(id)) {
                 throw new IllegalStateException("Read failed");
             }
@@ -231,11 +251,12 @@ class AiAgentPrivacySessionRoutingTest {
             assertNull(context.getCatalog());
         }
         assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
+        assertPreparationReads(1);
     }
 
     @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    void dedicatedDsrRecoveryAndProjectionUseFreshSystemScopedSessions(boolean scheduled) throws Exception {
+    @CsvSource({"false, false", "false, true", "true, false", "true, true"})
+    void dedicatedDsrRecoveryAndProjectionUseFreshSystemScopedSessions(boolean routed, boolean scheduled) throws Exception {
         var json = new ObjectMapper();
         var accepted = new AiAgentPurgeAcceptance(42, 11, 19, UUID.randomUUID().toString(),
                 UUID.randomUUID().toString(), List.of(7), "2026-10-18T00:00:00Z");
@@ -250,7 +271,7 @@ class AiAgentPrivacySessionRoutingTest {
         work.setVerifiedAt(LocalDateTime.now());
         work.setCompletedAt(LocalDateTime.now());
         var completed = new AtomicBoolean();
-        prepare(id -> switch (id) {
+        prepare(routed, id -> switch (id) {
             case "getOrgId" -> List.of(11);
             case "pendingAcceptances" -> List.of(receipt);
             case "findCompletion" -> completed.get() ? List.of(receipt) : List.of();
@@ -289,6 +310,14 @@ class AiAgentPrivacySessionRoutingTest {
         verify(control).completeMissionPurge(accepted);
         assertTrue(queries.tenantReads.contains("getWork"));
         assertFalse(context.isResolved());
+        assertPreparationReads(scheduled ? 3 : 4);
+    }
+
+    private void assertPreparationReads(int entries) {
+        assertEquals(java.util.stream.IntStream.range(0, entries)
+            .boxed().flatMap(index -> List.of("findOrganizationWorkspacesForShare", "findByOrgId").stream())
+            .toList(), queries.preparationReads);
+        assertEquals(entries, queries.preparationConnections.size());
     }
 
     private <T> T proxied(T target, Class<T> type) {
@@ -320,13 +349,25 @@ class AiAgentPrivacySessionRoutingTest {
     private final class Queries implements Interceptor {
         private Function<String, List<?>> results;
         private final List<String> tenantReads = new ArrayList<>();
+        private final List<String> preparationReads = new ArrayList<>();
+        private final Set<Connection> preparationConnections = Collections.newSetFromMap(new IdentityHashMap<>());
 
         @Override
         public Object intercept(Invocation invocation) throws Throwable {
             var statement = (MappedStatement) invocation.getArgs()[0];
             String id = statement.getId().substring(statement.getId().lastIndexOf('.') + 1);
             var connection = ((Executor) invocation.getTarget()).getTransaction().getConnection();
-            if (!List.of("getOrgId", "pendingAcceptances", "findCompletion").contains(id)) {
+            if (List.of("findOrganizationWorkspacesForShare", "findByOrgId").contains(id)) {
+                assertNull(context.getCatalog(), id);
+                assertNull(connection.getCatalog(), id);
+                assertTrue(TransactionSynchronizationManager.isActualTransactionActive(), id);
+                assertTrue(TransactionSynchronizationManager.isCurrentTransactionReadOnly(), id);
+                assertEquals(Connection.TRANSACTION_REPEATABLE_READ,
+                    TransactionSynchronizationManager.getCurrentTransactionIsolationLevel(), id);
+                preparationReads.add(id);
+                preparationConnections.add(connection);
+            } else if (!List.of("getOrgId", "pendingAcceptances", "findCompletion").contains(id)) {
+                assertFalse(preparationConnections.contains(connection), id);
                 assertEquals("cnx_dedicated", connection.getCatalog(), id);
                 assertTrue(TransactionSynchronizationManager.isActualTransactionActive(), id);
                 assertEquals(7, context.getWorkspaceId());

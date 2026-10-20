@@ -30,11 +30,11 @@ public class TenantLifecycleAccess {
         if (workspace == null || workspace.orgId() != expectedOrgId) {
             throw new ResourceNotFoundException("Workspace not found");
         }
-        if (tenantWorkScope.isCatalogPerPlacement()) {
-            var scopes = tenantWorkScope.prepareLifecycleWorkspace(workspace.id(), workspace.orgId());
+        var scopes = tenantWorkScope.prepareLifecycleWorkspace(workspace.id(), workspace.orgId());
+        if (scopes != null) {
             return new Route(workspace.orgId(), workspace.id(), scopes.catalog(), scopes);
         }
-        String catalog = tenantWorkScope.unrouted(
+        String catalog = tenantWorkScope.unroutedRead(
             () -> tenantCatalogResolver.resolveCatalog(workspace.orgId()));
         return new Route(workspace.orgId(), workspace.id(), catalog);
     }

@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.Optional;
@@ -184,7 +185,10 @@ class TenantWorkScopeTest {
 
         assertEquals("cnx_request", workScope.inWorkspace(7, () -> tenantContext.getCatalog()));
 
-        verifyNoInteractions(workspaceMapper, tenantCatalogResolver);
+        verify(workspaceMapper).findOrganizationWorkspacesForShare(7);
+        verify(workspaceMapper).findByOrgId(42);
+        verifyNoMoreInteractions(workspaceMapper);
+        verifyNoInteractions(tenantCatalogResolver);
     }
 
     @Test
@@ -281,7 +285,9 @@ class TenantWorkScopeTest {
         assertEquals(
             "cnx_cleanup",
             workScope.inLifecycleWorkspace(7, () -> tenantContext.getCatalog()));
-        verifyNoInteractions(workspaceMapper);
+        verify(workspaceMapper).findOrganizationWorkspacesForShare(7);
+        verify(workspaceMapper).findByOrgId(42);
+        verifyNoMoreInteractions(workspaceMapper);
     }
 
     @Test
@@ -312,7 +318,9 @@ class TenantWorkScopeTest {
         assertNull(tenantContext.getCatalog());
         verify(tenantLifecycleControlMapper).findWorkspaceOrgIdForLifecycle(7);
         verify(tenantCatalogResolver).resolveCatalog(42);
-        verifyNoInteractions(workspaceMapper);
+        verify(workspaceMapper).findOrganizationWorkspacesForShare(7);
+        verify(workspaceMapper).findByOrgId(42);
+        verifyNoMoreInteractions(workspaceMapper);
     }
 
     @Test
@@ -333,7 +341,10 @@ class TenantWorkScopeTest {
         assertNull(tenantContext.getCatalog());
         assertEquals("cnx_next", workScope.inLifecycleWorkspaceRead(7, tenantContext::getCatalog));
         assertNull(tenantContext.getCatalog());
-        verifyNoInteractions(workspaceMapper);
+        verify(workspaceMapper, times(2)).findOrganizationWorkspacesForShare(7);
+        verify(workspaceMapper).findByOrgId(42);
+        verify(workspaceMapper).findByOrgId(43);
+        verifyNoMoreInteractions(workspaceMapper);
     }
 
     @Test
