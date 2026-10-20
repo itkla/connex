@@ -75,7 +75,7 @@ public class DealRiskRationaleAssembler {
      * @throws java.util.concurrent.CancellationException when the current thread is interrupted
      */
     public RationaleAssembly assemble(int workspaceId, int dealId, DealRiskDto risk) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
             workspaceId, () -> assembleWithinVisibilityScope(workspaceId, dealId, risk));
     }
 

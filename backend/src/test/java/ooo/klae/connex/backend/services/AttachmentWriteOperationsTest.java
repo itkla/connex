@@ -89,6 +89,28 @@ class AttachmentWriteOperationsTest {
             shareMapper, ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void plainAttachmentCreationSkipsCompanyScopeForPersonTargets(boolean managed) {
+        try (var fixture = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(5)) {
+            org.mockito.Mockito.lenient().when(fixture.control.findOrganizationWorkspacesForShare(5))
+                .thenThrow(new org.springframework.dao.DataAccessResourceFailureException("control unavailable"));
+            org.springframework.test.util.ReflectionTestUtils.setField(
+                operations, "recordVisibilityScopeControlAccess", fixture.scopes);
+            Attachment attachment = attachment("person", 41, "https://example.com/file.pdf");
+            attachment.setId(77);
+            when(personMapper.exists(5, 41)).thenReturn(true);
+            when(attachmentMapper.getCreatedById(5, 77)).thenReturn(attachment);
+
+            assertEquals(attachment, managed
+                ? operations.createManaged(5, attachment)
+                : operations.createExternal(5, attachment));
+
+            org.mockito.Mockito.verifyNoInteractions(fixture.control, companyMapper);
+            verify(attachmentMapper).insert(attachment);
+        }
+    }
+
     @Test
     void createExternalPinsWorkspaceAndValidatesTenantTargetBeforeInsert() {
         Attachment attachment = attachment("company", 41, "https://example.com/file.pdf");

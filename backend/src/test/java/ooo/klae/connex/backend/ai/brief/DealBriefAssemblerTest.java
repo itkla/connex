@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.ai.brief;
 import java.math.BigDecimal;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -92,6 +93,53 @@ class DealBriefAssemblerTest {
             }
             return people;
         });
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"snapshot", "missing", "ordinary"})
+    void companyProfileScopeFailuresPropagateBeforeOptionalEnrichment(String kind) {
+        RuntimeException failure = switch (kind) {
+            case "snapshot" -> new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException("scope mismatch");
+            case "missing" -> new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotMissingException("missing payload");
+            case "ordinary" -> new org.springframework.dao.DataAccessResourceFailureException("control unavailable");
+            default -> throw new AssertionError(kind);
+        };
+        Deal deal = deal();
+        deal.setCompanyId(31);
+        when(dealService.getDealById(DEAL_ID)).thenReturn(deal);
+        try (var fixture = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(WORKSPACE_ID)) {
+            when(fixture.control.findOrganizationWorkspacesForShare(WORKSPACE_ID)).thenThrow(failure);
+            var companies = mock(ooo.klae.connex.backend.services.CompanyService.class);
+            lenient().when(companies.getCompanyById(31)).thenAnswer(call -> {
+                fixture.scopes.getForWorkspace(WORKSPACE_ID);
+                return new ooo.klae.connex.backend.beans.Company();
+            });
+            var relationships = new AiRelationshipContext(dealService,
+                mock(ooo.klae.connex.backend.services.PersonService.class),
+                mock(ooo.klae.connex.backend.services.ConnectionService.class), companies, java.time.Clock.systemUTC());
+            var guarded = new DealBriefAssembler(
+                dealService, scoringService, dealRiskService, relationships, personMapper, fixture.scopes);
+
+            assertSame(failure, assertThrows(RuntimeException.class, () -> guarded.assemble(WORKSPACE_ID, DEAL_ID)));
+
+            verify(fixture.control).findOrganizationWorkspacesForShare(WORKSPACE_ID);
+            verify(companies, never()).getCompanyById(31);
+        }
+    }
+
+    @Test
+    void briefsWithoutCompanyWorkStillSkipFailingScopeReads() {
+        when(dealService.getDealById(DEAL_ID)).thenReturn(deal());
+        try (var fixture = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(WORKSPACE_ID)) {
+            lenient().when(fixture.control.findOrganizationWorkspacesForShare(WORKSPACE_ID))
+                .thenThrow(new org.springframework.dao.DataAccessResourceFailureException("control unavailable"));
+            var guarded = new DealBriefAssembler(
+                dealService, scoringService, dealRiskService, aiRelationshipContext, personMapper, fixture.scopes);
+
+            guarded.assemble(WORKSPACE_ID, DEAL_ID);
+
+            org.mockito.Mockito.verifyNoInteractions(fixture.control);
+        }
     }
 
     /**

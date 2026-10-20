@@ -273,7 +273,7 @@ public class AiAssistantWriteToolService {
         };
         return storedArgumentsJson.isPresent()
                 ? preparedOperation.get()
-                : recordVisibilityScopeControlAccess.withWorkspaceScope(
+                : recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
                         workspaceService.getCurrentWorkspaceId(), preparedOperation);
     }
 
@@ -286,6 +286,9 @@ public class AiAssistantWriteToolService {
                 throw new IllegalStateException("Assistant create has no duplicate probe");
             }
             return;
+        }
+        if ("deal".equals(probe.kind()) && probe.companyId() != null) {
+            recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         }
         boolean candidates;
         try {

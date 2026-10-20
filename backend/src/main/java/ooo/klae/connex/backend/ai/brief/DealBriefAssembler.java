@@ -77,7 +77,7 @@ public class DealBriefAssembler {
      * @throws java.util.concurrent.CancellationException when the current thread is interrupted
      */
     public BriefAssembly assemble(int workspaceId, int dealId) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
             workspaceId, () -> assembleWithinVisibilityScope(workspaceId, dealId));
     }
 
@@ -122,7 +122,7 @@ public class DealBriefAssembler {
         List<Note> promptNotes = first(allowedNotes(notes, allowedPersonIds), MAX_NOTES);
         List<Task> promptTasks = promptTasks(allowedTasks(tasks, allowedPersonIds));
         DealBriefSourceRegistry sourceRegistry = new DealBriefSourceRegistry();
-        PromptResult promptResult = userPrompt(deal, summary, stageHistory, stakeholders, warmth, risk,
+        PromptResult promptResult = userPrompt(workspaceId, deal, summary, stageHistory, stakeholders, warmth, risk,
                 promptActivities, promptNotes, promptTasks,
                 companyToken, context, sourceRegistry);
         MaskedPrompt prompt = PromptAssembly.builder(context)
@@ -139,6 +139,7 @@ public class DealBriefAssembler {
     }
 
     private PromptResult userPrompt(
+            int workspaceId,
             Deal deal,
             DealSummaryDto summary,
             List<DealStageHistory> stageHistory,
@@ -172,6 +173,9 @@ public class DealBriefAssembler {
         appendValue(prompt, "Stage", stage);
         appendValue(prompt, "Expected close", expectedClose);
         appendValue(prompt, "Value", value);
+        if (companyId > 0) {
+            recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        }
         boolean degraded = aiRelationshipContext.appendCompanyProfile(prompt, companyId, context);
         AiCancellation.throwIfInterrupted();
 

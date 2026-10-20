@@ -2,6 +2,8 @@ package ooo.klae.connex.backend.services;
 
 import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 
+import org.jspecify.annotations.Nullable;
+
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -59,12 +61,11 @@ public class AttachmentWriteOperations {
     /** Persists an externally stored attachment after tenant target validation. */
     @Transactional
     public Attachment createExternal(int workspaceId, Attachment attachment) {
-        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceId, resolvedVisibilityScope, () -> createExternalWithinVisibilityScope(workspaceId, attachment, resolvedVisibilityScope));
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
+            workspaceId, () -> createExternalWithinVisibilityScope(workspaceId, attachment, null));
     }
 
-    private Attachment createExternalWithinVisibilityScope(int workspaceId, Attachment attachment, RecordVisibilityScope operationVisibilityScope) {
+    private Attachment createExternalWithinVisibilityScope(int workspaceId, Attachment attachment, @Nullable RecordVisibilityScope operationVisibilityScope) {
         requireTenantTarget(workspaceId, attachment.getEntityType(), attachment.getEntityId(), operationVisibilityScope);
         return persist(workspaceId, attachment, false);
     }
@@ -72,12 +73,11 @@ public class AttachmentWriteOperations {
     /** Persists a trusted managed-object reference after tenant target validation. */
     @Transactional
     public Attachment createManaged(int workspaceId, Attachment attachment) {
-        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceId, resolvedVisibilityScope, () -> createManagedWithinVisibilityScope(workspaceId, attachment, resolvedVisibilityScope));
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
+            workspaceId, () -> createManagedWithinVisibilityScope(workspaceId, attachment, null));
     }
 
-    private Attachment createManagedWithinVisibilityScope(int workspaceId, Attachment attachment, RecordVisibilityScope operationVisibilityScope) {
+    private Attachment createManagedWithinVisibilityScope(int workspaceId, Attachment attachment, @Nullable RecordVisibilityScope operationVisibilityScope) {
         requireTenantTarget(workspaceId, attachment.getEntityType(), attachment.getEntityId(), operationVisibilityScope);
         return persist(workspaceId, attachment, true);
     }
@@ -255,9 +255,11 @@ public class AttachmentWriteOperations {
         }
     }
 
-    private void requireTenantTarget(int workspaceId, String entityType, int entityId, RecordVisibilityScope operationVisibilityScope) {
+    private void requireTenantTarget(int workspaceId, String entityType, int entityId, @Nullable RecordVisibilityScope operationVisibilityScope) {
         boolean exists = switch (entityType) {
-            case "company" -> companyMapper.exists(workspaceId, operationVisibilityScope.workspaceIdsJson(), entityId);
+            case "company" -> companyMapper.exists(workspaceId, (operationVisibilityScope == null
+                ? recordVisibilityScopeControlAccess.getForWorkspace(workspaceId)
+                : operationVisibilityScope).workspaceIdsJson(), entityId);
             case "person" -> personMapper.exists(workspaceId, entityId);
             case "deal" -> dealMapper.exists(workspaceId, entityId);
             case "note" -> noteMapper.exists(workspaceId, entityId);

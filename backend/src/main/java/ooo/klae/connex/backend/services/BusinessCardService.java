@@ -374,7 +374,7 @@ public class BusinessCardService {
     @Transactional(readOnly = true)
     @RequirePermission(Permission.PERSON_CREATE)
     public BusinessCardImportResponse importStatus(String idempotencyKey) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
             workspaceService.getCurrentWorkspaceId(), () -> importStatusWithinVisibilityScope(idempotencyKey));
     }
 

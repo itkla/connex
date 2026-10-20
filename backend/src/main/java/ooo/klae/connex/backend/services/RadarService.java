@@ -91,15 +91,14 @@ public class RadarService {
             List<String> familyFilters,
             List<String> stateFilters,
             @Nullable String query) {
-        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> getWithinVisibilityScope(familyFilters, stateFilters, query, resolvedVisibilityScope));
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> getWithinVisibilityScope(familyFilters, stateFilters, query, null));
     }
 
     private RadarResponseDto getWithinVisibilityScope(
             List<String> familyFilters,
             List<String> stateFilters,
-            @Nullable String query, RecordVisibilityScope operationVisibilityScope) {
+            @Nullable String query, @Nullable RecordVisibilityScope operationVisibilityScope) {
         return getWithinVisibilityScope(familyFilters, stateFilters, query, null, null, operationVisibilityScope);
     }
 
@@ -120,9 +119,8 @@ public class RadarService {
             @Nullable String query,
             @Nullable String subjectType,
             @Nullable Integer subjectId) {
-        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> getWithinVisibilityScope(familyFilters, stateFilters, query, subjectType, subjectId, resolvedVisibilityScope));
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> getWithinVisibilityScope(familyFilters, stateFilters, query, subjectType, subjectId, null));
     }
 
     private RadarResponseDto getWithinVisibilityScope(
@@ -130,7 +128,7 @@ public class RadarService {
             List<String> stateFilters,
             @Nullable String query,
             @Nullable String subjectType,
-            @Nullable Integer subjectId, RecordVisibilityScope operationVisibilityScope) {
+            @Nullable Integer subjectId, @Nullable RecordVisibilityScope operationVisibilityScope) {
         String scopedSubjectType = validatedSubjectType(subjectType, subjectId);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = workspaceService.getCurrentUserId();
@@ -310,12 +308,11 @@ public class RadarService {
 
     /** Returns current authorized navigation context without trusting persisted labels. */
     public RadarContextDto context(long signalId) {
-        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
-        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> contextWithinVisibilityScope(signalId, resolvedVisibilityScope));
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceService.getCurrentWorkspaceId(), () -> contextWithinVisibilityScope(signalId, null));
     }
 
-    private RadarContextDto contextWithinVisibilityScope(long signalId, RecordVisibilityScope operationVisibilityScope) {
+    private RadarContextDto contextWithinVisibilityScope(long signalId, @Nullable RecordVisibilityScope operationVisibilityScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = workspaceService.getCurrentUserId();
         RelationshipSignal signal = signalMapper.getActiveForActor(
@@ -506,7 +503,7 @@ public class RadarService {
         return false;
     }
 
-    private RadarResponseDto.Signal requireDto(long signalId, RecordVisibilityScope operationVisibilityScope) {
+    private RadarResponseDto.Signal requireDto(long signalId, @Nullable RecordVisibilityScope operationVisibilityScope) {
         return getWithinVisibilityScope(List.of(), List.of(), null, operationVisibilityScope).items().stream()
             .filter(item -> item.id() == signalId)
             .findFirst()
@@ -523,7 +520,7 @@ public class RadarService {
             boolean familyUnavailable,
             Set<Integer> processablePersonIds,
             Map<Integer, String> personLabels,
-            Set<Integer> visibleEdgeIds, RecordVisibilityScope operationVisibilityScope) {
+            Set<Integer> visibleEdgeIds, @Nullable RecordVisibilityScope operationVisibilityScope) {
         RankPayload rank = objectMapper.readValue(
             signal.getRankExplanationJson(), RANK_TYPE);
         return new RadarResponseDto.Signal(
@@ -552,7 +549,7 @@ public class RadarService {
             List<RadarResponseDto.Evidence> evidence,
             Set<Integer> processablePersonIds,
             Map<Integer, String> personLabels,
-            Set<Integer> visibleEdgeIds, RecordVisibilityScope operationVisibilityScope) {
+            Set<Integer> visibleEdgeIds, @Nullable RecordVisibilityScope operationVisibilityScope) {
         List<RadarResponseDto.Evidence> current = new ArrayList<>();
         for (RadarResponseDto.Evidence item : evidence) {
             Integer requiredPersonId = requiredPersonId(item);
@@ -597,13 +594,13 @@ public class RadarService {
             int workspaceId,
             RadarResponseDto.Reference reference,
             Map<Integer, String> personLabels,
-            Set<Integer> visibleEdgeIds, RecordVisibilityScope operationVisibilityScope) {
+            Set<Integer> visibleEdgeIds, @Nullable RecordVisibilityScope operationVisibilityScope) {
         return switch (reference.type()) {
             case "person" -> personLabels.containsKey(reference.id())
                 ? reference.withLabel(personLabels.get(reference.id()))
                 : null;
             case "company" -> {
-                Company company = companyMapper.getCompanyById(workspaceId, operationVisibilityScope.workspaceIdsJson(), reference.id());
+                Company company = companyMapper.getCompanyById(workspaceId, companyScopeJson(workspaceId, operationVisibilityScope), reference.id());
                 yield company == null
                     ? null
                     : reference.withLabel(label(company.getName(), company.getId()));
@@ -615,6 +612,12 @@ public class RadarService {
             case "person_edge" -> visibleEdgeIds.contains(reference.id()) ? reference : null;
             default -> null;
         };
+    }
+
+    private String companyScopeJson(int workspaceId, @Nullable RecordVisibilityScope operationVisibilityScope) {
+        return (operationVisibilityScope == null
+            ? recordVisibilityScopeControlAccess.getForWorkspace(workspaceId)
+            : operationVisibilityScope).workspaceIdsJson();
     }
 
     /**
@@ -698,7 +701,7 @@ public class RadarService {
     }
 
     private CurrentSubject requireCurrentSubject(
-            int workspaceId, RelationshipSignal signal, RecordVisibilityScope operationVisibilityScope) {
+            int workspaceId, RelationshipSignal signal, @Nullable RecordVisibilityScope operationVisibilityScope) {
         CurrentSubject subject = currentSubject(
             workspaceId,
             signal,
@@ -712,7 +715,7 @@ public class RadarService {
     private CurrentSubject currentSubject(
             int workspaceId,
             RelationshipSignal signal,
-            Set<Integer> processablePersonIds, RecordVisibilityScope operationVisibilityScope) {
+            Set<Integer> processablePersonIds, @Nullable RecordVisibilityScope operationVisibilityScope) {
         return switch (signal.getSubjectType()) {
             case "person" -> {
                 Person person = personMapper.getPersonById(workspaceId, signal.getSubjectId());
@@ -722,7 +725,7 @@ public class RadarService {
                         "person", person.getId(), label(person.getName(), person.getId()));
             }
             case "company" -> {
-                Company company = companyMapper.getCompanyById(workspaceId, operationVisibilityScope.workspaceIdsJson(), signal.getSubjectId());
+                Company company = companyMapper.getCompanyById(workspaceId, companyScopeJson(workspaceId, operationVisibilityScope), signal.getSubjectId());
                 yield company == null ? null : new CurrentSubject(
                     "company", company.getId(), label(company.getName(), company.getId()));
             }
