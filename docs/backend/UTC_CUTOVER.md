@@ -41,7 +41,7 @@ A zero candidate count does not establish that older or negative-offset data was
 
 1. Inventory every affected tenant catalog: the shared/default catalog where it holds tenant tables,
    plus every dedicated placement catalog. Record the old offset for each. A control-only catalog
-   without workflow tables is not a repair target.
+   uses the DSR review below; do not run tenant workflow SQL in a control-only catalog.
 2. Pause workflow runtime and outbox delivery on **every** replica. The existing
    `connex.workflows.runtime.enabled=false` and
    `connex.workflows.runtime.scheduling-enabled=false` settings stop canonical runtime/outbox
@@ -55,9 +55,10 @@ A zero candidate count does not establish that older or negative-offset data was
    Take a restorable backup of this final quiescent state before changing any data. For staging,
    use the two-quiesce sequence below instead: its normal deployment transaction needs live services.
 4. Select one affected tenant catalog on a maintenance connection and verify `SELECT DATABASE()`.
-   Run the SQL below once per catalog. It freezes a database UTC cutoff, previews candidates, and
+   Run the workflow SQL below once per tenant catalog and the DSR review once in the control catalog
+   (the same physical catalog in single-database mode). It freezes a database UTC cutoff, previews candidates, and
    leaves the transaction open for verification. Do not use a client mode that continues after errors.
-5. Commit only when the safety flag is `1`, changed-row counts match the candidate counts, all three
+5. Commit only when the safety flag is `1`, changed-row counts match the candidate counts, all four
    mismatch/remaining counts are zero, and the preview agrees with the backup and expected workload.
    On any SQL error or unexpected result, roll back and keep writers paused. Do not disable checks,
    invent a different offset, or repair Flyway history to force this procedure through.
@@ -117,43 +118,144 @@ of this runbook. Remove only the temporary environment edits once the safe relea
 then verify readiness and effective UTC behavior again. Preserve the original offset and SQL
 results independently of the deployment's marker history.
 
-## Eligible columns and deliberately preserved data
+## Complete converted-clock inventory
 
-The runtime step table is `workflow_step_run`. Nonterminal means exactly `queued`, `running`, or
-`waiting`. A step is eligible only while its parent run is also nonterminal.
+This inventory follows all **33** no-argument reads changed in `8596b6c35`, including values passed
+through downstream services/mappers and independently timed writes on those paths. A Java-written
+column below means a value bound by Java, including caller input; DB-authored columns and already-UTC
+independent clocks are identified separately. It does not infer provenance from a timestamp's shape.
+The source list is closed: the counts below total 33, rather than searching only workflow table names.
 
-| Column | Writer and treatment |
+| Original sites | Source and use | Persistent timestamp/value lineage |
+|---|---|---|
+| 1 | `CampaignDispatchService`, quiet hours | Decision only; no affected timestamp persisted. |
+| 2 | `ActivityService.resolveTimestamp` | `activity.timestamp`, copied into audit changes. |
+| 3 | `AiProviderConfigService.attestedAt` | `ai_provider_config.attested_at`. |
+| 4–5 | `DataSubjectRequestService`, disclosure generation / default receipt | Disclosure `generatedAt` in response JSON and its immutable audit fingerprint; `data_subject_request.received_at`. |
+| 6–7 | `DealDocumentService.generate`, template date / generation time | Business text in document title/content; JSON `content.generatedAt`. |
+| 8 | `DeliveryUnsubscribeService`, revocation capture | `contact_channel_consent.captured_at` through `ConsentService`. |
+| 9 | `DeliveryWebhookService`, revocation capture | Same consent lineage. |
+| 10–11 | `RuleActionExecutor`, task date / notification time | `task.due_date` and audit changes; `notification.triggered_at`. |
+| 12 | `RuleEngineService.scheduleBucket` | Hashed legacy schedule identity; no timestamp column. |
+| 13 | `SegmentService.today` | Read-only UTC query bounds, cached across pages. |
+| 14 | `SequenceService.archive` | `sequence.archived_at`. |
+| 15 | `WorkflowActionAttemptReservationService.reserve` | Step/attempt `started_at`, abandoned attempt `finished_at`. |
+| 16 | `WorkflowDelayResumeService` | Step `finished_at`. |
+| 17 | `WorkflowManualRunConfirmationTransaction.confirm` | Invocation expiry comparison; `confirmed_at` / expiry completion. |
+| 18–20 | `WorkflowManualRunService`, cancellation / completion / preparation | Invocation `completed_at`, `created_at`, derived `expires_at`. |
+| 21 | `WorkflowRunCancellationService` | Run/step/attempt completion times. |
+| 22–24 | `WorkflowRunFailureService` | Run/step/attempt completion times; terminal diagnostic-step start. |
+| 25–26 | `WorkflowRunOperationService` | Run/step/attempt completion; run `cancel_requested_at`. |
+| 27 | `WorkflowRuntimeClaimService` | Run `started_at`. |
+| 28–29 | `WorkflowRuntimeClaimTransaction` | Run/step/attempt completion times. |
+| 30 | `WorkflowRuntimeRetentionService.purge` | DELETE cutoff only; no timestamp write. |
+| 31 | `WorkflowService.archive` | Returned bean/audit state; stored archive time uses the DB clock. |
+| 32–33 | `WorkflowStepTransactionService`, start / finish | Run/step/attempt start/completion bindings. |
+
+### Inventoried rows requiring cutover action
+
+| Table / Java-written columns on these paths | Cross-clock constraint or reader | Survives deploy / action |
+|---|---|---|
+| `workflow_run`: `started_at`, `finished_at`, `cancel_requested_at` | V143 `chk_workflow_run_timing` requires finish >= start; `WorkflowRunMapper` history uses DB `asOf`; `WorkflowOperationsMapper` backlog compares starts to `CURRENT_TIMESTAMP(6)`. | Queued/running/waiting survive. Repair future active event cells; finish must remain NULL. |
+| `workflow_step_run`: `started_at`, `finished_at` | V143 `chk_workflow_step_timing` requires finish >= start; state CHECK requires NULL finish while active. | Queued/running/waiting survive. Repair future starts under active parents. A failed retry step is already terminal; reservation later replaces start/clears finish together. |
+| `workflow_invocation`: `created_at`, `expires_at`, `confirmed_at`, `completed_at` | V145 `chk_workflow_invocation_timing` compares expiry/confirmation/completion to creation. Confirmation compares expiry to new Java now; pending dispatch sorts by confirmation. | Prepared/confirmed/running survive. Expire prepared scopes; repair future active creation/confirmation as described below. |
+| `data_subject_request`: default/caller `received_at`; caller `identity_verified_at`, `due_at`, `responded_at`, `closed_at` | Java `validateChronology` requires lifecycle dates >= receipt. V74 has no temporal CHECK; mapper sorts receipt, with no automatic expiry/claim. | Received/verifying/in_progress can survive and reject a new UTC lifecycle date. Use the separately reviewed control-catalog receipt repair; never infer caller provenance from future time alone. |
+
+Evidence: [`WorkflowRunMapper.xml`](../../backend/src/main/resources/mappers/WorkflowRunMapper.xml),
+[`WorkflowOperationsMapper.xml`](../../backend/src/main/resources/mappers/WorkflowOperationsMapper.xml),
+[V143](../../backend/src/main/resources/db/migration/tenant/V143__workflow_runtime.sql),
+[V144](../../backend/src/main/resources/db/migration/tenant/V144__workflow_durability.sql),
+[V145](../../backend/src/main/resources/db/migration/tenant/V145__workflow_operations_scope.sql),
+[`DataSubjectRequestService`](../../backend/src/main/java/ooo/klae/connex/backend/services/DataSubjectRequestService.java#L383),
+and [V74](../../backend/src/main/resources/db/migration/control/V74__data_subject_request.sql).
+
+### Inventoried, no action needed
+
+“No action” means no automatic cutover rewrite, not that old historical wall times become accurate.
+This table includes transitive writers, so an independent UTC clock is not mistaken for a converted
+host-zone value. Existing caller/business dates and immutable evidence remain intact.
+
+| Table / Java-written values on these paths | CHECK / clock comparison / across deploy | Reason for no cutover action |
+|---|---|---|
+| `workflow_step_attempt`: `started_at`, `finished_at` | Running attempts survive. V144 checks lifecycle NULL/state only; no timing CHECK, timestamp ordering, lease/deadline/claim predicate over these columns. | Completion is identity/status-based. A negative historical duration can remain, but cannot reject or prevent completion. |
+| `workflow`: no affected Java-written stored time; `archived_at` is DB-authored | V143 archive CHECK is enabled/nullability only; archived rows survive. | The converted read only updates the returned bean after the DB archive write. |
+| `rule_execution`: no affected Java timestamp; `executed_at` is DB-authored | Legacy claims survive; schedule bucket contributes to a hashed dedupe identity, not a timestamp comparison. | DB clock was already UTC. Production scheduler already supplies its explicit UTC bucket; do not rewrite hashes. |
+| `workflow_trigger_outbox`: independent UTC `occurred_at`; DB availability/lease/completion times | Pending/leased rows survive and are claimed against DB time. Converted retention read supplies a terminal-row DELETE cutoff only. | No active timestamp derives from the converted clock. Earlier retention deletions cannot be reconstructed by this procedure. |
+| `workflow_runtime_workspace`, `workflow_invocation_record`, `workflow_intervention`: DB-authored timestamps | Gates, pending records and open interventions survive; lifecycle checks use state/NULL and DB-authored times. | No affected Java timestamp binding. Preserve DB dates. |
+| `activity.timestamp` and its audit JSON copy | Persistent events have no terminal lifecycle. `ActivityMapper` and `SegmentMapper` compare it to `NOW()`/UTC bounds for history, analytics and upcoming meetings; no temporal CHECK/lease/claim. | Mixed caller/default provenance and intentionally future meetings prohibit blanket shifting. Old fallback events can temporarily misbucket; review individually if needed, and preserve audit evidence. |
+| `ai_provider_config.attested_at`; independently UTC `zdr_attested_at` | Config survives. V167 checks attestation co-presence/version, not ordering; readiness uses booleans/configuration, no age/expiry comparison. | Historical attestation evidence; no deadline or claim. |
+| `deal_document.title/content`, including JSON `generatedAt`; no Java binding for DB `generated_at` | Documents in every status survive; no temporal CHECK or clock gate over content. | Immutable/commercial evidence and workspace-calendar business text. DB generation ordering already uses UTC. |
+| `contact_channel_consent.captured_at` | Consent survives until changed. V93 checks channel/status, not time; no expiry/deadline/claim comparison. | Mixed caller/event provenance; consent state is not time-gated. |
+| `task.due_date` and audit JSON copy | Open tasks survive. DATE values drive business overdue/urgency comparisons; no timestamp timing CHECK or lease. | Workspace/user commitments, also caller-editable. An hour offset cannot safely identify or correct a business date. |
+| `notification.triggered_at` | Unresolved notifications survive; affects display ordering, with no temporal CHECK or claim gate. | Historical ordering only. Mention notification clocks already explicitly used UTC; email claims use a separate DB clock. |
+| `sequence.archived_at` | Archived rows are terminal. V198 only checks archived/null co-presence. | Terminal history; no ordering/deadline/claim predicate. |
+| `audit_log.created_at`, changes/context; integrity head/checkpoint metadata | UTC injected `Clock` supplies creation (DB fallback); old business/event values may be copied into changes. Rows survive and are append-only. | The independent clock was UTC before this fix. Never rewrite signed/hashed audit evidence. |
+| `notification_recipient_state.updated_at`: DB-authored | Notification delivery bumps a recipient state version via insert/upsert. The triggered time is not copied into this control table. | No affected Java timestamp value. |
+| `secret_value.created_at` / `updated_at` / `rotated_at`: DB-authored metadata | Config save can replace stored material; rotation uses DB `CURRENT_TIMESTAMP`, not the attestation read. | No affected timestamp binding or expiry/claim lineage. |
+| `entity_reference.created_at` | Reference rows survive; DB default, not the activity timestamp. | No affected Java clock value. |
+| `person` / `person_lifecycle_pass`: first-response start/due/responded/breached times | Active SLA deadlines and lifecycle checks survive and compare UTC clocks. Activity response writes read `Instant.now(clock)` and the pass copies those values. | Independent injected clock was already UTC; the activity's fallback `timestamp` is not passed to the SLA writer. |
+| `suppression_entry`, `contact_channel_consent_event`, `campaign_delivery_event`: DB creation times | Current suppression and historical event rows survive; consent/delivery state uses status, not the old capture timestamp. | Inserts do not copy converted capture time into their clocks. |
+| `campaign_delivery` / `campaign_send` dispatch metadata; `notification.email_delivery_claimed_at` | Pending/dispatching rows survive; availability, lease, expiry and claim clocks are DB/independent UTC. Quiet-hours read itself writes no timestamp. | No affected timestamp lineage. Quiet hours are currently disabled; the read is reevaluated after deployment. |
+| `campaign_delivery_unsubscribe_token`: no timestamp columns | Dispatch can create the hash/workspace/delivery lookup row (V227). | No time value to shift. |
+| Disclosure generation and segment bounds | Generated time is returned in disclosure JSON and contributes to an audit JSON hash/byte count; segment bounds are read-only. No persisted recoverable old date or temporal predicate. | Preserve audit fingerprints; nothing to repair in segment bounds. Workspace-local segment dates and the existing `CURDATE()` overdue predicate remain a separate follow-up. |
+
+Evidence for the non-workflow rows is in `ActivityMapper`, `AiProviderConfigMapper`,
+`DataSubjectRequestMapper`, `DealDocumentMapper`, `ConsentMapper`, `TaskMapper`, `NotificationMapper`,
+`SequenceMapper`, `EntityReferenceMapper`, `PersonMapper`, and `PersonLifecyclePassMapper` under
+[`resources/mappers`](../../backend/src/main/resources/mappers). The inventory searched all migration
+`CHECK (` bodies for these columns and all mapper clock comparisons (`NOW`, `CURRENT_TIMESTAMP`,
+`UTC_TIMESTAMP`, Java `now`/`asOf` bindings); it did not treat the absence of a CHECK as the absence
+of a Java chronology or ordering hazard.
+
+## Repair scope and invocation policy
+
+The runtime step table is `workflow_step_run`. Active runs and steps are exactly `queued`,
+`running`, or `waiting`; a step is eligible only while its parent run is also active. Active
+invocations are `prepared`, `confirmed`, or `running` independently of their linked run states.
+Pre-existing terminal rows in every table remain unchanged.
+
+| Column or state | Treatment |
 |---|---|
-| `workflow_run.started_at` | Java run creation in `WorkflowRuntimeClaimService`; shift only a future value. |
-| `workflow_run.cancel_requested_at` | Java cancellation in `WorkflowRunOperationService`, added by V144; shift only a future value. |
-| `workflow_step_run.started_at` | Java creation/reservation in `WorkflowStepTransactionService` and `WorkflowActionAttemptReservationService`; shift only a future value. |
-| Both tables' `finished_at` | Java completion/failure/cancellation writers supply these, but V143 requires them to be NULL on nonterminal rows. Validate and leave unchanged. |
-| `workflow_run.updated_at` | Database `CURRENT_TIMESTAMP(6)` with automatic updates. Preserve explicitly during the repair. |
-| `workflow_run.resume_at`, `workflow_run.lease_until` | Database-clock delay/retry and lease deadlines. Legitimately future; never shift them. |
+| `workflow_run.started_at`, `workflow_run.cancel_requested_at` | Subtract the old offset only from future event values on active runs. |
+| `workflow_step_run.started_at` | Subtract only from future values on active steps under active runs. |
+| Run/step `finished_at` | V143 requires NULL while active; validate and preserve. |
+| `workflow_invocation.created_at` | Subtract only from future values on active invocations, so new UTC confirmation/completion can satisfy V145. |
+| `workflow_invocation.confirmed_at` | Subtract only from future values on confirmed/running invocations; clamp to corrected `created_at` if necessary. |
+| Prepared invocations | Expire **every** prepared scope, including a valid UTC scope created during deployment smoke, after repairing a future creation time. Set `completed_at` to the frozen cutoff. Users prepare a fresh preview after maintenance. |
+| `workflow_invocation.expires_at` | Preserve. Expired scopes cannot confirm; expiry is not consulted for confirmed/running invocations. |
+| Database `updated_at`, run `resume_at`/`lease_until` | Preserve explicitly. Future database deadlines are legitimate. |
 
-The Java-supplied start/completion bindings and cancellation bindings are in
-[`WorkflowRunMapper.xml`](../../backend/src/main/resources/mappers/WorkflowRunMapper.xml). Their
-state and timing constraints are in
-[V143](../../backend/src/main/resources/db/migration/tenant/V143__workflow_runtime.sql) and
-[V144](../../backend/src/main/resources/db/migration/tenant/V144__workflow_durability.sql).
+The manual preparation lifetime is fifteen minutes (`WorkflowManualRunService.invocation`). An
+expiry can legitimately remain future after subtracting the old offset, and correct UTC scopes
+can exist alongside old scopes after staging deployment. Therefore expiry alone cannot identify
+an affected row or make repeated subtraction idempotent. This runbook chooses the permitted
+**expire prepared scopes** policy instead of rewriting their expiry. It preserves confirmation
+identities and does not cancel confirmed/running invocations or their linked runs.
 
-The three eligible columns record an event happening now, not a scheduled future event. With all
-writers stopped and synchronized clocks, valid UTC event values cannot exceed the frozen database
-UTC cutoff. A value in `(cutoff, cutoff + old offset]` therefore self-identifies the remaining
-positive-offset cutover hazard. Subtracting the old offset puts it at or before the cutoff.
-The upper-bound guard refuses values that would still be future after one subtraction.
-Consequently a second execution while writers remain stopped cannot shift a corrected value again.
+V145 checks `expires_at`, `confirmed_at`, and `completed_at` against `created_at`; pending dispatch
+also sorts by `confirmed_at`. If an old creation value is already at/before the cutoff but its
+confirmation is still future, exact subtraction could place confirmation before that unchanged
+creation value. The future-only rule forbids rewriting the past creation. In that boundary case,
+`GREATEST(corrected creation, confirmation minus offset)` preserves the CHECK and removes the
+future dispatch-ordering hazard. The clamped confirmation is a conservative chronology repair,
+not a reconstruction of historical elapsed time. Already nonfuture cells remain unchanged.
 
-Older historical rows **stay shifted and are not rewritten**. This includes terminal runs, terminal
-steps, steps under terminal runs, `workflow_step_attempt`, other Java-written tables, and active
-values that are no longer future. Those values cannot reliably be distinguished from valid UTC
-history. An untouched active start at or before the cutoff can accept a later UTC completion without
-violating the timing check, although its historical duration may remain inaccurate.
+The event-time candidates otherwise lie in `(cutoff, cutoff + old offset]`: with all writers
+stopped and clocks synchronized, a valid UTC event cannot be after the frozen cutoff. The guard
+refuses event values that would remain future after subtraction. Corrected values and clamped
+confirmations are at/before the cutoff, and expired scopes are terminal, so a second execution
+cannot alter them again. All assignments use the original temporary snapshots where fields
+interact, avoiding dependence on MySQL assignment evaluation order.
+
+Older historical rows **stay shifted and are not rewritten**, including terminal runs/steps,
+steps under terminal runs, terminal invocations, and already nonfuture event values. Other
+inventoried data is preserved for the reasons below; this is an active cutover repair, not a
+historical normalization.
 
 ## Per-catalog SQL
 
 The example offset is staging's `+09:00`. Replace it only with the verified positive old offset.
-The safety flag gates both updates. Temporary snapshots preserve the candidate values for exact
+The safety flag gates every update. Temporary snapshots preserve the candidate values for exact
 postflight comparisons; they disappear when the maintenance connection closes. Start with a
 fresh connection and no open transaction. Commit or roll back an execution before rerunning it;
 `START TRANSACTION` can implicitly commit an earlier transaction on the same connection.
@@ -164,7 +266,7 @@ SET @utc_cutover_offset_seconds = 32400;
 SET @utc_cutover_as_of = UTC_TIMESTAMP(6);
 SET @utc_cutover_ceiling = TIMESTAMPADD(SECOND, @utc_cutover_offset_seconds, @utc_cutover_as_of);
 
-DROP TEMPORARY TABLE IF EXISTS utc_cutover_run_before, utc_cutover_step_before;
+DROP TEMPORARY TABLE IF EXISTS utc_cutover_run_before, utc_cutover_step_before, utc_cutover_invocation_before;
 START TRANSACTION;
 
 SET @utc_cutover_safe =
@@ -182,6 +284,13 @@ SET @utc_cutover_safe =
         WHERE r.status IN ('queued', 'running', 'waiting')
           AND s.status IN ('queued', 'running', 'waiting')
           AND (s.finished_at IS NOT NULL OR s.started_at > @utc_cutover_ceiling)
+    )
+    AND NOT EXISTS (
+        SELECT 1 FROM workflow_invocation
+        WHERE status IN ('prepared', 'confirmed', 'running')
+          AND (completed_at IS NOT NULL
+               OR created_at > @utc_cutover_ceiling
+               OR confirmed_at > @utc_cutover_ceiling)
     );
 
 CREATE TEMPORARY TABLE utc_cutover_run_before ENGINE=InnoDB AS
@@ -199,6 +308,14 @@ WHERE r.status IN ('queued', 'running', 'waiting')
   AND s.status IN ('queued', 'running', 'waiting')
   AND s.started_at > @utc_cutover_as_of;
 
+CREATE TEMPORARY TABLE utc_cutover_invocation_before ENGINE=InnoDB AS
+SELECT workspace_id, id, status, created_at, confirmed_at, expires_at, completed_at,
+       confirmation_key, updated_at
+FROM workflow_invocation
+WHERE status = 'prepared'
+   OR (status IN ('confirmed', 'running')
+       AND (created_at > @utc_cutover_as_of OR confirmed_at > @utc_cutover_as_of));
+
 SELECT DATABASE() AS catalog, @utc_cutover_as_of AS cutoff_utc,
        @utc_cutover_offset_seconds AS old_offset_seconds, @utc_cutover_safe AS safe_to_shift;
 SELECT COUNT(*) AS expected_run_rows,
@@ -206,6 +323,11 @@ SELECT COUNT(*) AS expected_run_rows,
        COALESCE(SUM(cancel_requested_at > @utc_cutover_as_of), 0) AS cancellation_values
 FROM utc_cutover_run_before;
 SELECT COUNT(*) AS expected_step_rows FROM utc_cutover_step_before;
+SELECT COUNT(*) AS expected_invocation_rows,
+       COALESCE(SUM(status = 'prepared'), 0) AS prepared_scopes_to_expire,
+       COALESCE(SUM(created_at > @utc_cutover_as_of), 0) AS invocation_creation_values,
+       COALESCE(SUM(confirmed_at > @utc_cutover_as_of), 0) AS invocation_confirmation_values
+FROM utc_cutover_invocation_before;
 
 UPDATE workflow_run
 SET started_at = CASE
@@ -232,7 +354,25 @@ WHERE @utc_cutover_safe = 1
   AND s.started_at <= @utc_cutover_ceiling;
 SET @utc_cutover_changed_steps = ROW_COUNT();
 
-SELECT @utc_cutover_changed_runs AS changed_run_rows, @utc_cutover_changed_steps AS changed_step_rows;
+UPDATE workflow_invocation i
+JOIN utc_cutover_invocation_before b ON b.workspace_id = i.workspace_id AND b.id = i.id
+SET i.created_at = CASE WHEN b.created_at > @utc_cutover_as_of
+        THEN TIMESTAMPADD(SECOND, -@utc_cutover_offset_seconds, b.created_at) ELSE b.created_at END,
+    i.confirmed_at = CASE WHEN b.confirmed_at > @utc_cutover_as_of
+        THEN GREATEST(
+            CASE WHEN b.created_at > @utc_cutover_as_of
+                THEN TIMESTAMPADD(SECOND, -@utc_cutover_offset_seconds, b.created_at) ELSE b.created_at END,
+            TIMESTAMPADD(SECOND, -@utc_cutover_offset_seconds, b.confirmed_at))
+        ELSE b.confirmed_at END,
+    i.status = CASE WHEN b.status = 'prepared' THEN 'expired' ELSE b.status END,
+    i.completed_at = CASE WHEN b.status = 'prepared' THEN @utc_cutover_as_of ELSE b.completed_at END,
+    i.updated_at = b.updated_at
+WHERE @utc_cutover_safe = 1
+  AND i.status IN ('prepared', 'confirmed', 'running');
+SET @utc_cutover_changed_invocations = ROW_COUNT();
+
+SELECT @utc_cutover_changed_runs AS changed_run_rows, @utc_cutover_changed_steps AS changed_step_rows,
+       @utc_cutover_changed_invocations AS changed_invocation_rows;
 
 SELECT COUNT(*) AS run_mismatches
 FROM workflow_run r
@@ -255,6 +395,22 @@ WHERE NOT (s.started_at <=> TIMESTAMPADD(SECOND, -@utc_cutover_offset_seconds, b
    OR NOT (s.status <=> b.status)
    OR NOT (s.finished_at <=> b.finished_at);
 
+SELECT COUNT(*) AS invocation_mismatches
+FROM workflow_invocation i
+JOIN utc_cutover_invocation_before b ON b.workspace_id = i.workspace_id AND b.id = i.id
+WHERE NOT (i.created_at <=> CASE WHEN b.created_at > @utc_cutover_as_of
+           THEN TIMESTAMPADD(SECOND, -@utc_cutover_offset_seconds, b.created_at) ELSE b.created_at END)
+   OR NOT (i.confirmed_at <=> CASE WHEN b.confirmed_at > @utc_cutover_as_of
+           THEN GREATEST(
+               CASE WHEN b.created_at > @utc_cutover_as_of
+                   THEN TIMESTAMPADD(SECOND, -@utc_cutover_offset_seconds, b.created_at) ELSE b.created_at END,
+               TIMESTAMPADD(SECOND, -@utc_cutover_offset_seconds, b.confirmed_at)) ELSE b.confirmed_at END)
+   OR NOT (i.status <=> CASE WHEN b.status = 'prepared' THEN 'expired' ELSE b.status END)
+   OR NOT (i.completed_at <=> CASE WHEN b.status = 'prepared' THEN @utc_cutover_as_of ELSE b.completed_at END)
+   OR NOT (i.expires_at <=> b.expires_at)
+   OR NOT (i.confirmation_key <=> b.confirmation_key)
+   OR NOT (i.updated_at <=> b.updated_at);
+
 SELECT
     (SELECT COUNT(*) FROM workflow_run
      WHERE status IN ('queued', 'running', 'waiting')
@@ -264,7 +420,12 @@ SELECT
      JOIN workflow_run r ON r.workspace_id = s.workspace_id AND r.id = s.workflow_run_id
      WHERE r.status IN ('queued', 'running', 'waiting')
        AND s.status IN ('queued', 'running', 'waiting')
-       AND s.started_at > @utc_cutover_as_of) AS remaining_future_rows;
+       AND s.started_at > @utc_cutover_as_of)
+    +
+    (SELECT COUNT(*) FROM workflow_invocation
+     WHERE status = 'prepared'
+        OR (status IN ('confirmed', 'running')
+            AND (created_at > @utc_cutover_as_of OR confirmed_at > @utc_cutover_as_of))) AS remaining_hazards;
 ```
 
 After successful verification, finish the open transaction with `COMMIT;`. Otherwise use
@@ -277,3 +438,111 @@ idempotence resolves whether the first commit landed without applying the shift 
 this repair. MySQL documents both [automatic timestamp updates](https://dev.mysql.com/doc/refman/8.4/en/timestamp-initialization.html)
 and the [temporary-table exception to implicit commits](https://dev.mysql.com/doc/refman/8.4/en/implicit-commit.html).
 Do not substitute ordinary tables or `TRUNCATE` inside the transaction.
+
+## Control-catalog DSR provenance review
+
+`data_subject_request.received_at` is caller-supplied when present, otherwise the converted Java
+clock supplies it. An open request with an old future server-default receipt can reject a new UTC
+identity-verification, response, or closure date through `DataSubjectRequestService.validateChronology`.
+The column has no provenance flag: a future value cannot distinguish a server default from a
+legitimate caller business date. Never blanket-shift it or edit its append-only audit evidence.
+
+While every writer remains stopped, select the **control catalog**, verify `DATABASE()`, and run
+this setup/preview. Include that catalog in the final backup. Inspect API/audit/source evidence for
+every returned request. Populate the temporary review table with its exact `(org_id, id, received_at)`
+and `shift_received_at=TRUE` only when the old server default is verified. Use `FALSE` for a verified
+caller date that must remain unchanged. If provenance is uncertain, keep maintenance active and
+resolve the request individually; do not guess. Record each decision in the maintenance record.
+
+```sql
+SET time_zone = '+00:00';
+SET @utc_cutover_offset_seconds = 32400;
+SET @utc_dsr_as_of = UTC_TIMESTAMP(6);
+SET @utc_dsr_ceiling = TIMESTAMPADD(SECOND, @utc_cutover_offset_seconds, @utc_dsr_as_of);
+CREATE TEMPORARY TABLE IF NOT EXISTS utc_cutover_dsr_review (
+    org_id INT NOT NULL,
+    id BIGINT NOT NULL,
+    reviewed_received_at DATETIME NOT NULL,
+    shift_received_at BOOLEAN NOT NULL CHECK (shift_received_at IN (FALSE, TRUE)),
+    PRIMARY KEY (org_id, id)
+) ENGINE=InnoDB;
+SELECT DATABASE() AS catalog, org_id, id, status, received_at,
+       identity_verified_at, responded_at, closed_at
+FROM data_subject_request
+WHERE status IN ('received', 'verifying', 'in_progress') AND closed_at IS NULL
+  AND received_at > @utc_dsr_as_of
+ORDER BY org_id, id;
+```
+
+Insert the reviewed decisions on this same connection before running the next block. It fails
+closed if any future open request lacks a matching decision, if a shift approval is stale, or if
+an approved event exceeds the verified offset. Deliberately preserved caller dates can exceed
+that offset. Only a verified future server-default `received_at` is shifted; all caller lifecycle
+dates, database timestamps, and terminal requests remain unchanged. Completed prior shifts are
+recognized on rerun. A new connection requires repeating setup and provenance review.
+
+```sql
+DROP TEMPORARY TABLE IF EXISTS utc_cutover_dsr_before;
+START TRANSACTION;
+SET @utc_dsr_review_complete = NOT EXISTS (
+        SELECT 1 FROM data_subject_request r
+        LEFT JOIN utc_cutover_dsr_review v ON v.org_id = r.org_id AND v.id = r.id
+            AND v.reviewed_received_at = r.received_at
+        WHERE r.status IN ('received', 'verifying', 'in_progress') AND r.closed_at IS NULL
+          AND r.received_at > @utc_dsr_as_of AND v.id IS NULL
+    );
+SET @utc_dsr_approvals_current = NOT EXISTS (
+        SELECT 1 FROM utc_cutover_dsr_review v
+        LEFT JOIN data_subject_request r ON r.org_id = v.org_id AND r.id = v.id
+        WHERE v.shift_received_at = TRUE
+          AND (r.id IS NULL OR r.status NOT IN ('received', 'verifying', 'in_progress')
+               OR r.closed_at IS NOT NULL OR v.reviewed_received_at > @utc_dsr_ceiling
+               OR (r.received_at <> v.reviewed_received_at
+                   AND r.received_at <> TIMESTAMPADD(SECOND, -@utc_cutover_offset_seconds, v.reviewed_received_at)))
+    );
+SET @utc_dsr_safe = @utc_cutover_offset_seconds BETWEEN 1 AND 50400
+    AND @utc_dsr_review_complete AND @utc_dsr_approvals_current;
+CREATE TEMPORARY TABLE utc_cutover_dsr_before ENGINE=InnoDB AS
+SELECT r.org_id, r.id, r.status, r.received_at, r.identity_verified_at, r.due_at,
+       r.responded_at, r.closed_at, r.created_at, r.updated_at
+FROM data_subject_request r
+JOIN utc_cutover_dsr_review v ON v.org_id = r.org_id AND v.id = r.id
+    AND v.reviewed_received_at = r.received_at AND v.shift_received_at = TRUE
+WHERE r.status IN ('received', 'verifying', 'in_progress') AND r.closed_at IS NULL
+  AND r.received_at > @utc_dsr_as_of AND r.received_at <= @utc_dsr_ceiling;
+SELECT @utc_dsr_safe AS dsr_safe_to_shift, COUNT(*) AS expected_dsr_rows
+FROM utc_cutover_dsr_before;
+UPDATE data_subject_request r
+JOIN utc_cutover_dsr_before b ON b.org_id = r.org_id AND b.id = r.id
+SET r.received_at = TIMESTAMPADD(SECOND, -@utc_cutover_offset_seconds, b.received_at),
+    r.updated_at = b.updated_at
+WHERE @utc_dsr_safe = 1 AND r.received_at = b.received_at
+  AND r.status IN ('received', 'verifying', 'in_progress') AND r.closed_at IS NULL
+  AND r.received_at > @utc_dsr_as_of AND r.received_at <= @utc_dsr_ceiling;
+SELECT ROW_COUNT() AS changed_dsr_rows;
+SELECT COUNT(*) AS dsr_mismatches
+FROM data_subject_request r
+JOIN utc_cutover_dsr_before b ON b.org_id = r.org_id AND b.id = r.id
+WHERE NOT (r.received_at <=> TIMESTAMPADD(SECOND, -@utc_cutover_offset_seconds, b.received_at))
+   OR NOT (r.status <=> b.status)
+   OR NOT (r.identity_verified_at <=> b.identity_verified_at)
+   OR NOT (r.due_at <=> b.due_at)
+   OR NOT (r.responded_at <=> b.responded_at)
+   OR NOT (r.closed_at <=> b.closed_at)
+   OR NOT (r.created_at <=> b.created_at)
+   OR NOT (r.updated_at <=> b.updated_at);
+SELECT COUNT(*) AS dsr_remaining_hazards
+FROM data_subject_request r
+LEFT JOIN utc_cutover_dsr_review v ON v.org_id = r.org_id AND v.id = r.id
+    AND v.reviewed_received_at = r.received_at
+WHERE r.status IN ('received', 'verifying', 'in_progress') AND r.closed_at IS NULL
+  AND r.received_at > @utc_dsr_as_of AND (v.id IS NULL OR v.shift_received_at = TRUE);
+```
+
+Commit only when `dsr_safe_to_shift` is `1`, changed/expected counts match, and both postflight
+counts are zero. Otherwise roll back and keep writers stopped. The same fresh-session,
+ambiguous-commit, positive-offset and no-rerun-after-resume rules apply. Do not run this block in
+a tenant-only catalog or turn a preserved caller date into a shift approval merely to clear a gate.
+
+The DSR review-completeness and approval-currentness predicates intentionally use separate SQL
+statements: MySQL [cannot reopen one temporary table twice in a query](https://dev.mysql.com/doc/refman/8.4/en/temporary-table-problems.html).
