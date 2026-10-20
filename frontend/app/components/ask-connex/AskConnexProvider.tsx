@@ -617,7 +617,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const durableFollowerRef = useRef<number | null>(null);
     const workspaceReturnRef = useRef(false);
     const workspaceSessionIdRef = useRef(workspaceSessionId);
-    const workspaceRouteNavigationRef = useRef(renderedWorkspaceNavigationVersion());
+    const workspaceRouteNavigationRef = useRef<number | null>(null);
+    if (workspaceRouteNavigationRef.current === null) {
+        workspaceRouteNavigationRef.current = renderedWorkspaceNavigationVersion();
+    }
 
     /** Cleanup-returning refs receive no null callback; React's ref type still requires nullability. */
     const registerDesktopRoot = useCallback((node: HTMLElement | null) => {
@@ -1886,6 +1889,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         const load = async () => {
             try {
                 const detail = await refreshTranscript(workspaceSessionId, signal, false);
+                if (signal.aborted || navigationVersion !== renderedWorkspaceNavigationVersion()) return;
                 if (detail?.activeTurn) void followDurableTurn(detail.activeTurn, signal);
             } catch (error) {
                 if (signal.aborted) return;

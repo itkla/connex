@@ -35,8 +35,12 @@ function mergeMissionDecisionResult(
     items: AiAgentProposalDecisionRequest['items'],
 ): MissionDecisionResult {
     const outcomes = new Map(previous?.outcomes);
+    const batchOutcomes = new Map<string, AiAgentProposalDecisionResult['items'][number]>();
+    for (const outcome of batch.items) {
+        if (!batchOutcomes.has(outcome.actionSlot)) batchOutcomes.set(outcome.actionSlot, outcome);
+    }
     for (const item of items) {
-        const outcome = batch.items.find((result) => result.actionSlot === item.actionSlot);
+        const outcome = batchOutcomes.get(item.actionSlot);
         if (outcome) outcomes.set(`${item.actionSlot}:${item.expectedPreparationId}`, outcome);
     }
     return { batch, outcomes };
@@ -394,11 +398,17 @@ export function useAskConnexMissions({
         const output = current?.output;
         if (!enabled || !output || !reviewKey || !proposalGroup || operationRef.current || !signal || signal.aborted) return;
         const action = decision === 'approve' ? 'approve' : 'reject';
-        const allowed = new Set(proposalGroup.cards.filter((card) =>
-            toolCallIds.includes(card.id) && askConnexToolCardAffordances(card, now).includes(action)).map((card) => card.id));
-        const items = output.proposalSet.items.filter((item) => allowed.has(item.card.id)).map((item) => ({
-            actionSlot: item.actionSlot, expectedPreparationId: item.preparationId, decision,
-        }));
+        const requested = new Set(toolCallIds);
+        const allowed = new Set<number>();
+        for (const card of proposalGroup.cards) {
+            if (requested.has(card.id) && askConnexToolCardAffordances(card, now).includes(action)) allowed.add(card.id);
+        }
+        const items: AiAgentProposalDecisionRequest['items'] = [];
+        for (const item of output.proposalSet.items) {
+            if (allowed.has(item.card.id)) items.push({
+                actionSlot: item.actionSlot, expectedPreparationId: item.preparationId, decision,
+            });
+        }
         if (items.length === 0) return;
         const pinned = workspacePinnedRequest(workspaceId, { signal });
         let settled: AiAgentProposalDecisionResult | null = null;

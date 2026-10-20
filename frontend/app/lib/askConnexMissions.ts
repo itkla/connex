@@ -112,7 +112,14 @@ export function askConnexMissionProposalGroup(
     decisions: AiAgentProposalDecisionResult | null,
     now: number,
 ): AskConnexProposalGroup {
-    const cards: AskConnexToolCardState[] = output.proposalSet.items.map((item) => {
+    const cards: AskConnexToolCardState[] = [];
+    const included = new Set<number>();
+    let applicable = 0;
+    let selected = 0;
+    let applied = 0;
+    let discarded = 0;
+    let failed = 0;
+    for (const item of output.proposalSet.items) {
         const decision = decisions?.items.find((result) => result.actionSlot === item.actionSlot);
         const canonicalStatus = item.card.reviewState === 'withdrawn' ? 'withdrawn'
             : item.card.reviewState === 'undone' ? 'undone' : item.card.status;
@@ -121,20 +128,24 @@ export function askConnexMissionProposalGroup(
             ? decision.outcome : canonicalStatus;
         const reviewState = status !== item.card.status ? status === 'executed' ? 'applied'
             : status === 'rejected' ? 'discarded' : status === 'withdrawn' ? 'withdrawn' : 'undone' : item.card.reviewState;
-        return { ...item.card, status, reviewState, reviewExpiresAt: output.proposalSet.reviewExpiresAt,
+        const card: AskConnexToolCardState = { ...item.card, status, reviewState, reviewExpiresAt: output.proposalSet.reviewExpiresAt,
             pendingAction: pending.get(item.card.id) ?? null, undoBlocked: false,
             failure: decision?.outcome === 'refused' || decision?.outcome === 'indeterminate'
                 ? decision.outcome === 'indeterminate' ? 'proposalUnavailable' : askConnexMissionDecisionFailure(decision.code) : null };
-    });
-    const included = new Set(cards.filter((card) => !excluded.has(card.id)).map((card) => card.id));
+        cards.push(card);
+        const isIncluded = !excluded.has(card.id);
+        if (isIncluded) included.add(card.id);
+        if (askConnexProposalAppliable(card, now)) {
+            applicable++;
+            if (isIncluded) selected++;
+        }
+        if (card.status === 'executed') applied++;
+        if (card.status === 'rejected') discarded++;
+        if (card.failure !== null) failed++;
+    }
     return {
         turnId: cards[0]?.turnId ?? 0,
         messageId: output.report.messageId,
-        cards, included,
-        applicable: cards.filter((card) => askConnexProposalAppliable(card, now)).length,
-        selected: cards.filter((card) => included.has(card.id) && askConnexProposalAppliable(card, now)).length,
-        applied: cards.filter((card) => card.status === 'executed').length,
-        discarded: cards.filter((card) => card.status === 'rejected').length,
-        failed: cards.filter((card) => card.failure !== null).length,
+        cards, included, applicable, selected, applied, discarded, failed,
     };
 }

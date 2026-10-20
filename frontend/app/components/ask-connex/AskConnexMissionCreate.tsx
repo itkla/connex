@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useState } from 'react';
+import { useId, useReducer } from 'react';
 import { useTranslations } from 'next-intl';
 
 import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';
@@ -13,6 +13,37 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import type { AskConnexMissionProblem } from '@/app/lib/askConnexMissions';
 
+type MissionCreateState = {
+    open: boolean;
+    missionType: AiAgentMissionType;
+    goal: string;
+    originalGoal: string;
+    saving: boolean;
+    failed: boolean;
+};
+
+type MissionCreateAction =
+    | { type: 'open'; goal: string }
+    | { type: 'close' }
+    | { type: 'changeGoal'; goal: string }
+    | { type: 'changeMissionType'; missionType: AiAgentMissionType; goal: string }
+    | { type: 'startSubmission' }
+    | { type: 'submissionResult'; created: boolean }
+    | { type: 'finishSubmission' };
+
+function missionCreateReducer(state: MissionCreateState, action: MissionCreateAction): MissionCreateState {
+    switch (action.type) {
+        case 'open': return { ...state, open: true, missionType: 'record_review_v1',
+            goal: action.goal, originalGoal: action.goal, failed: false };
+        case 'close': return { ...state, open: false };
+        case 'changeGoal': return { ...state, goal: action.goal };
+        case 'changeMissionType': return { ...state, missionType: action.missionType, goal: action.goal };
+        case 'startSubmission': return { ...state, saving: true, failed: false };
+        case 'submissionResult': return { ...state, open: action.created ? false : state.open, failed: !action.created };
+        case 'finishSubmission': return { ...state, saving: false };
+    }
+}
+
 /** Confirms the bounded request against the selected record before creation. */
 export default function AskConnexMissionCreate({ recordLabel, initialGoal, disabled, problem, onCreate }: {
     recordLabel: string;
@@ -23,34 +54,24 @@ export default function AskConnexMissionCreate({ recordLabel, initialGoal, disab
 }) {
     const t = useTranslations('AskConnex.missions');
     const id = useId();
-    const [open, setOpen] = useState(false);
-    const [missionType, setMissionType] = useState<AiAgentMissionType>('record_review_v1');
+    const [{ open, missionType, goal, originalGoal, saving, failed }, dispatch] = useReducer(missionCreateReducer, {
+        open: false, missionType: 'record_review_v1', goal: '', originalGoal: '', saving: false, failed: false,
+    });
     const preparing = missionType === 'record_preparation_v1';
-    const [goal, setGoal] = useState('');
-    const [originalGoal, setOriginalGoal] = useState('');
-    const [saving, setSaving] = useState(false);
-    const [failed, setFailed] = useState(false);
     const guard = useUnsavedChangesGuard({ isDirty: open && (goal !== originalGoal || preparing),
-        onClose: () => setOpen(false), enabled: !saving });
+        onClose: () => dispatch({ type: 'close' }), enabled: !saving });
     async function submit() {
         if (saving || disabled || !goal.trim() || goal.trim().length > 16_000) return;
-        setSaving(true);
-        setFailed(false);
+        dispatch({ type: 'startSubmission' });
         try {
-            if (await onCreate(goal.trim(), missionType)) setOpen(false);
-            else setFailed(true);
+            dispatch({ type: 'submissionResult', created: await onCreate(goal.trim(), missionType) });
         }
-        finally { setSaving(false); }
+        finally { dispatch({ type: 'finishSubmission' }); }
     }
     return (
         <>
             <Button type="button" variant="ghost" size="inline" disabled={disabled} onClick={() => {
-                const value = initialGoal.trim() || t('defaultGoal');
-                setMissionType('record_review_v1');
-                setGoal(value);
-                setOriginalGoal(value);
-                setFailed(false);
-                setOpen(true);
+                dispatch({ type: 'open', goal: initialGoal.trim() || t('defaultGoal') });
             }}>{t('create')}</Button>
             <Dialog open={open} onOpenChange={(value) => { if (!saving) guard.onOpenChange(value); }}>
                 <DialogContent aria-busy={saving}>
@@ -62,15 +83,15 @@ export default function AskConnexMissionCreate({ recordLabel, initialGoal, disab
                         { value: 'record_review_v1', label: t('title'), disabled: saving },
                         { value: 'record_preparation_v1', label: t('preparation.title'), disabled: saving },
                     ]} onChange={(next) => {
-                        setMissionType(next);
-                        if (goal === originalGoal || goal === t('defaultGoal') || goal === t('preparation.defaultGoal')) {
-                            setGoal(next === 'record_preparation_v1' ? t('preparation.defaultGoal') : initialGoal.trim() || t('defaultGoal'));
-                        }
+                        const replaceGoal = goal === originalGoal || goal === t('defaultGoal') || goal === t('preparation.defaultGoal');
+                        dispatch({ type: 'changeMissionType', missionType: next, goal: replaceGoal
+                            ? next === 'record_preparation_v1' ? t('preparation.defaultGoal') : initialGoal.trim() || t('defaultGoal')
+                            : goal });
                     }} />
                     <div className="space-y-2">
                         <Label htmlFor={id}>{t('goal')}</Label>
                         <Textarea id={id} value={goal} maxLength={16_000} disabled={saving}
-                            onChange={(event) => setGoal(event.target.value)} />
+                            onChange={(event) => dispatch({ type: 'changeGoal', goal: event.target.value })} />
                         <p className="text-sm text-muted-foreground">{t(preparing ? 'preparation.bounds' : 'bounds')}</p>
                         {problem || failed ? <p role="alert" className="text-sm text-destructive">{t(`problems.${problem ?? 'failed'}`)}</p> : null}
                     </div>

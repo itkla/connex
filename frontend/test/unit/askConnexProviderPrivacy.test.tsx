@@ -27,13 +27,14 @@ const harness = vi.hoisted(() => ({
     router: { push: vi.fn(), replace: vi.fn(), back: vi.fn() },
     context: { user: { id: 1, displayName: 'Member' }, record: null, selection: null },
     workspace: { activeWorkspaceId: 1, switching: false },
+    sessionId: '7',
 }));
 
 vi.mock('@/app/components/ask-connex/AskConnexDrawer', () => ({ default: harness.drawer }));
 vi.mock('@/app/components/ask-connex/AskConnexMissionCreate', () => ({ default: () => null }));
 vi.mock('@/app/components/ask-connex/AskConnexMissionProgress', () => ({ default: () => null }));
 vi.mock('next-intl', () => ({ useLocale: () => 'en', useTranslations: () => harness.translate }));
-vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams(), useParams: () => ({ sessionId: '7' }), usePathname: () => '/ask-connex/7', useRouter: () => harness.router }));
+vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams(), useParams: () => ({ sessionId: harness.sessionId }), usePathname: () => `/ask-connex/${harness.sessionId}`, useRouter: () => harness.router }));
 vi.mock('@/app/hooks/useActions', () => ({ useActions: () => ({ context: harness.context }), useRegisterActions: () => {} }));
 vi.mock('@/app/hooks/useWorkspace', () => ({ useWorkspace: () => harness.workspace }));
 vi.mock('@/app/hooks/usePermissions', () => ({ usePermissionCheck: () => 'granted' }));
@@ -137,6 +138,7 @@ describe('Ask Connex provider privacy withdrawal', () => {
         vi.useFakeTimers();
         vi.clearAllMocks();
         harness.workspace = { activeWorkspaceId: 1, switching: false };
+        harness.sessionId = '7';
         harness.getSessions.mockResolvedValue({ items: [] });
         harness.getMissions.mockResolvedValue({ items: [], nextCursor: null });
     });
@@ -152,6 +154,25 @@ describe('Ask Connex provider privacy withdrawal', () => {
         });
         await mounted.render();
         expect(harness.getSession).not.toHaveBeenCalled();
+        expect(harness.router.replace).toHaveBeenCalledExactlyOnceWith('/dashboard');
+        await mounted.unmount();
+    });
+
+    it('does not follow a route-loaded turn after workspace navigation supersedes the route', async () => {
+        const mounted = await mount(false);
+        let resolveDetail: (value: AiChatSessionDetail) => void = () => { throw new Error('Request not initialized'); };
+        harness.getSession.mockReturnValue(new Promise<AiChatSessionDetail>((resolve) => { resolveDetail = resolve; }));
+        harness.getSession.mockClear();
+        harness.sessionId = '8';
+        await mounted.render();
+        expect(harness.getSession).toHaveBeenCalledOnce();
+        await act(async () => {
+            navigateAfterWorkspaceSelection(() => harness.router.replace('/dashboard'));
+            resolveDetail({ ...detail({ turnId: 10, sessionId: 8, status: 'running', terminalReason: null, progress: [] }),
+                session: { ...session, id: 8 } });
+        });
+        expect(props().turn.turnId).toBeNull();
+        expect(props().working).toBe(false);
         expect(harness.router.replace).toHaveBeenCalledExactlyOnceWith('/dashboard');
         await mounted.unmount();
     });
