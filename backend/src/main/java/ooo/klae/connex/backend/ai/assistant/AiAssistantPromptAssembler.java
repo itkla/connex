@@ -1471,7 +1471,12 @@ public class AiAssistantPromptAssembler {
                 skill, narration, todos, Map.of("/text", memberIdentifiers));
     }
 
-    /** Persists raw member provenance at its retained answer-text or suggestion JSON pointer. */
+    /**
+     * Persists raw member provenance at its retained answer-text or suggestion JSON pointer.
+     *
+     * <p>The skill reference uses {@code LinkedHashMap} to preserve field order in the durable
+     * answer document; {@code Map.of} randomizes iteration order per JVM.
+     */
     public String finalMetadata(
             int turnId,
             List<String> citations,
@@ -1541,8 +1546,6 @@ public class AiAssistantPromptAssembler {
                 metadata.put("todos", List.copyOf(todos));
             }
             if (skill != null) {
-                // A LinkedHashMap, not Map.of: this object is written into the durable answer
-                // document, and Map.of's iteration order is randomized per JVM.
                 Map<String, Object> skillReference = new LinkedHashMap<>();
                 skillReference.put("key", skill.key());
                 skillReference.put("version", skill.version());

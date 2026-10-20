@@ -311,6 +311,13 @@ public class AiChatQueryScopeResolver {
         return List.copyOf(references);
     }
 
+    /**
+     * Re-resolves the saved-view label under the reader's current access.
+     *
+     * <p>A deleted or no-longer-shared view keeps its identifier but loses its name. Dropping the
+     * whole scope would erase a breadth statement the reader remains entitled to because of a
+     * label they are not entitled to read.
+     */
     private AiChatScopeReferenceDto relabelledSavedView(AiChatScopeReferenceDto savedView) {
         if (savedView == null) {
             return null;
@@ -319,9 +326,6 @@ public class AiChatQueryScopeResolver {
             return new AiChatScopeReferenceDto(
                     savedView.id(), label(savedViewService.getById(savedView.id()).getName()));
         } catch (ResourceNotFoundException | ForbiddenException exception) {
-            // A view deleted, or no longer shared with this reader, keeps its identifier and loses
-            // its name. Dropping the whole scope would erase a breadth statement the reader is
-            // still entitled to, over a label they were never entitled to.
             return new AiChatScopeReferenceDto(savedView.id(), "");
         }
     }
