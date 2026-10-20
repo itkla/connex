@@ -87,6 +87,7 @@ public class PersonService {
     private final RecordCreationAugmentationService recordCreationAugmentationService;
     private final ProviderCaptureMapper providerCaptureMapper;
     private final ooo.klae.connex.backend.ai.mission.AiAgentPrivacyService aiAgentPrivacyService;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "email", "phone", "title", "imageUrl");
@@ -757,7 +758,8 @@ public class PersonService {
         if (suspended || provisionCeased) {
             aiAgentPrivacyService.invalidateAssistantOrganization(
                     orgId, restrictionWorkspaceIds, java.util.UUID.randomUUID(), "restriction", null, null);
-            purgedAiOutputs = aiOutputCacheMapper.deleteForPerson(workspaceId, id);
+            var purgeScope = recordVisibilityScopeControlAccess.getFreshForWorkspace(workspaceId);
+            purgedAiOutputs = aiOutputCacheMapper.deleteForPerson(workspaceId, purgeScope.workspaceIdsJson(), id);
         }
         Map<String, Object> diff = auditService.diff(before, after, RESTRICTION_AUDIT_FIELDS);
         if (diff != null || revokedShares > 0 || purgedAiOutputs > 0) {

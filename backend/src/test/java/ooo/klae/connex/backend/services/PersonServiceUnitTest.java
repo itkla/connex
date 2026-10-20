@@ -51,7 +51,8 @@ class PersonServiceUnitTest {
             mock(DuplicateDecisionLockService.class),
             mock(RecordCreationAugmentationService.class),
             mock(ooo.klae.connex.backend.mappers.ProviderCaptureMapper.class),
-            mock(ooo.klae.connex.backend.ai.mission.AiAgentPrivacyService.class)
+            mock(ooo.klae.connex.backend.ai.mission.AiAgentPrivacyService.class),
+            mock(RecordVisibilityScopeControlAccess.class)
         );
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(mapper.countPersons(

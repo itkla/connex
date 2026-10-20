@@ -9,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 
@@ -206,8 +208,8 @@ class AiAssistantPrivacyRemediationIntegrationTest extends AbstractAiAgentPrivac
         }).when(cache).upsert(any());
         doAnswer(call -> {
             assertTrue(upserted.get(), "Restriction must obtain its write fence before touching cache rows");
-            return real.deleteForPerson(call.getArgument(0), call.getArgument(1));
-        }).when(cache).deleteForPerson(workspace.getId(), person.getId());
+            return real.deleteForPerson(call.getArgument(0), call.getArgument(1), call.getArgument(2));
+        }).when(cache).deleteForPerson(eq(workspace.getId()), anyString(), eq(person.getId()));
         doAnswer(call -> {
             if (named("cache-restriction")) {
                 restrictionThread.set(Thread.currentThread());

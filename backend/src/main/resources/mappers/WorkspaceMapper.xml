@@ -347,12 +347,20 @@
        RecordVisibilityScopeControlAccess also delegates to the unfiltered snapshot to preserve
        legacy record-visibility ceilings (#485). Neither statement may be swapped for the other;
        see ShareWorkspaceControlAccess for the full argument. -->
-  <select id="findOrganizationWorkspacesForShare" resultType="Workspace">
+  <sql id="unfilteredOrganizationWorkspaces">
     SELECT peer.id, peer.org_id, peer.name
     FROM workspace anchor
     JOIN workspace peer ON peer.org_id = anchor.org_id
     WHERE anchor.id = #{workspaceId}
     ORDER BY peer.name, peer.id
+  </sql>
+
+  <select id="findOrganizationWorkspacesForShare" resultType="Workspace">
+    <include refid="unfilteredOrganizationWorkspaces"/>
+  </select>
+
+  <select id="findOrganizationWorkspacesForCachePurge" resultType="Workspace" flushCache="true" useCache="false">
+    <include refid="unfilteredOrganizationWorkspaces"/>
   </select>
 
   <!-- Read-path organization scope. OrganizationWorkspaceScopeControlAccess turns this into the

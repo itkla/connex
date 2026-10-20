@@ -9,6 +9,7 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.exceptions.TenantScopeSnapshotMissingException;
 import ooo.klae.connex.backend.tenant.TenantContext;
 
 /**
@@ -61,6 +62,32 @@ public class RecordVisibilityScopeControlAccess {
         TransactionSynchronizationManager.bindResource(key, scope);
         TransactionSynchronizationManager.registerSynchronization(new TransactionScopeMemo(key, scope));
         return scope;
+    }
+
+    /**
+     * Resolves the destructive cache-purge ceiling immediately before its tenant delete.
+     * In single-database mode this bypasses, and never replaces, the transaction memo. The
+     * default-catalog caller retains its existing connection and locks: under READ_COMMITTED,
+     * this read observes workspace creation committed since an earlier visibility lookup.
+     * This is the cache purge's explicit exception to scope-before-locks ordering.
+     *
+     * <p>Routed calls require the exact prepared #2165 snapshot and never query, suspend, or
+     * borrow a connection, even outside a transaction. Its operation-level staleness for
+     * destructive consumers remains a routing flag-enable prerequisite in #2172.
+     *
+     * @param workspaceId workspace anchoring the organization
+     * @return the immutable unfiltered organization workspace set
+     * @throws IllegalStateException when the anchor or prepared tenant scope is invalid
+     */
+    public RecordVisibilityScope getFreshForWorkspace(int workspaceId) {
+        if (shareWorkspaceControlAccess.isCatalogPerPlacement()) {
+            var prepared = tenantContext.getWorkspaceScopes();
+            if (prepared == null || prepared.workspaceId() != workspaceId) {
+                throw new TenantScopeSnapshotMissingException("workspace " + workspaceId);
+            }
+            return prepared.requireSharing().recordVisibilityScope();
+        }
+        return shareWorkspaceControlAccess.getFreshForWorkspace(workspaceId).recordVisibilityScope();
     }
 
     private RecordVisibilityScope loadScope(int workspaceId) {

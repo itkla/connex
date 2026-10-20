@@ -81,19 +81,39 @@ public class ShareWorkspaceControlAccess {
             tenantWorkScope.requireScopePreparationAllowed("workspace " + workspaceId);
         }
         OrganizationWorkspaces organizationWorkspaces = execute(() -> snapshot(workspaceId));
+        validateSnapshot(workspaceId, organizationWorkspaces);
+        return organizationWorkspaces;
+    }
+
+    /**
+     * Reads the cache-purge snapshot on the caller's default-catalog connection. The separate
+     * control statement flushes MyBatis's local cache as well as bypassing the visibility memo;
+     * ordinary sharing reads retain their existing statement and caching behavior.
+     */
+    OrganizationWorkspaces getFreshForWorkspace(int workspaceId) {
+        OrganizationWorkspaces organizationWorkspaces = tenantWorkScope.unroutedRead(() ->
+            snapshot(workspaceId, workspaceMapper.findOrganizationWorkspacesForCachePurge(workspaceId)));
+        validateSnapshot(workspaceId, organizationWorkspaces);
+        return organizationWorkspaces;
+    }
+
+    private void validateSnapshot(int workspaceId, OrganizationWorkspaces organizationWorkspaces) {
         if (tenantContext.isResolved()
                 && (tenantContext.getWorkspaceId().intValue() != workspaceId
                     || tenantContext.getOrgId().intValue() != organizationWorkspaces.orgId())) {
             throw new IllegalStateException(
                 "Workspace scope does not match the resolved tenant context");
         }
-        return organizationWorkspaces;
     }
 
     private OrganizationWorkspaces snapshot(int workspaceId) {
+        return snapshot(workspaceId, workspaceMapper.findOrganizationWorkspacesForShare(workspaceId));
+    }
+
+    private OrganizationWorkspaces snapshot(int workspaceId, List<Workspace> rows) {
         LinkedHashMap<Integer, String> orderedNamesById = new LinkedHashMap<>();
         Integer orgId = null;
-        for (Workspace row : workspaceMapper.findOrganizationWorkspacesForShare(workspaceId)) {
+        for (Workspace row : rows) {
             orderedNamesById.putIfAbsent(row.getId(), row.getName());
             orgId = row.getOrgId();
         }
