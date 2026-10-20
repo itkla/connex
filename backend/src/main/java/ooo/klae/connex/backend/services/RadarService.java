@@ -302,7 +302,7 @@ public class RadarService {
 
     /** Returns current authorized navigation context without trusting persisted labels. */
     public RadarContextDto context(long signalId) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
             workspaceService.getCurrentWorkspaceId(), () -> contextWithinVisibilityScope(signalId));
     }
 

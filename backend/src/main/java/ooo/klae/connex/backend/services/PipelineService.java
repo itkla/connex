@@ -52,7 +52,7 @@ public class PipelineService {
     }
 
     public Pipeline getPipelineById(int id) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
             workspaceService.getCurrentWorkspaceId(), () -> getPipelineByIdWithinVisibilityScope(id));
     }
 
@@ -103,7 +103,7 @@ public class PipelineService {
     // Stage operations (will likely move to separate StageService in the future)
 
     public List<Stage> getStagesByPipelineId(int pipelineId) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
             workspaceService.getCurrentWorkspaceId(), () -> getStagesByPipelineIdWithinVisibilityScope(pipelineId));
     }
 
@@ -123,7 +123,7 @@ public class PipelineService {
     }
 
     public Stage getStageById(int id) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
             workspaceService.getCurrentWorkspaceId(), () -> getStageByIdWithinVisibilityScope(id));
     }
 
@@ -360,7 +360,7 @@ public class PipelineService {
      * Retrieves the deals associated with a pipeline in the active workspace.
      */
     public List<Deal> getDealsByPipelineId(int pipelineId) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
             workspaceService.getCurrentWorkspaceId(), () -> getDealsByPipelineIdWithinVisibilityScope(pipelineId));
     }
 
@@ -376,7 +376,7 @@ public class PipelineService {
      * Retrieves the deals associated with a stage in the active workspace.
      */
     public List<Deal> getDealsByStageId(int stageId) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
             workspaceService.getCurrentWorkspaceId(), () -> getDealsByStageIdWithinVisibilityScope(stageId));
     }
 

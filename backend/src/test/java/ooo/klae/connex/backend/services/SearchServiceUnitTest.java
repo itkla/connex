@@ -79,7 +79,7 @@ class SearchServiceUnitTest {
 
         service.search("needle");
 
-        verify(scopes).withWorkspaceScope(eq(7), org.mockito.ArgumentMatchers.any());
+        verify(scopes).withWorkspaceScopeRead(eq(7), org.mockito.ArgumentMatchers.any());
         verify(scopes).getForWorkspace(7);
         verifyNoMoreInteractions(scopes);
         verify(companies).search(7, "[7,8]", "%needle%");
@@ -120,7 +120,7 @@ class SearchServiceUnitTest {
         verify(products).search(7, "%needle%");
         verifyNoInteractions(people, deals, pipelines, tags, activities, notes, tasks, users,
             attachments, campaigns, reports, templates, documents, workflows, references);
-        verify(scopes).withWorkspaceScope(eq(7), org.mockito.ArgumentMatchers.any());
+        verify(scopes).withWorkspaceScopeRead(eq(7), org.mockito.ArgumentMatchers.any());
         verify(scopes).getForWorkspace(7);
         verifyNoMoreInteractions(scopes, companies, products);
     }
@@ -149,7 +149,7 @@ class SearchServiceUnitTest {
                 verify(notes).searchVisible(7, "[7,8]", "%needle%", 11, 25, 0);
                 verify(notes).getVisibleNotesPage(7, "[7,8]", 11, null, List.of(), "created", "desc", 25, 0);
                 verify(references).hydrate(7, List.of(note));
-                verify(scopes).withWorkspaceScope(eq(7), org.mockito.ArgumentMatchers.any());
+                verify(scopes).withWorkspaceScopeRead(eq(7), org.mockito.ArgumentMatchers.any());
         verify(scopes).getForWorkspace(7);
                 verifyNoMoreInteractions(scopes);
             }
@@ -163,7 +163,7 @@ class SearchServiceUnitTest {
             default -> throw new AssertionError("Unexpected fixture type");
         }
         if (!type.equals("notes")) {
-            verify(scopes).withWorkspaceScope(eq(7), org.mockito.ArgumentMatchers.any());
+            verify(scopes).withWorkspaceScopeRead(eq(7), org.mockito.ArgumentMatchers.any());
         }
         verifyNoMoreInteractions(allGroupDependencies());
     }
@@ -220,7 +220,7 @@ class SearchServiceUnitTest {
         SearchResultsDto result = service.search("needle", Set.of("notes"));
 
         assertTrue(result.getNotes().isEmpty());
-        verify(scopes).withWorkspaceScope(eq(7), org.mockito.ArgumentMatchers.any());
+        verify(scopes).withWorkspaceScopeRead(eq(7), org.mockito.ArgumentMatchers.any());
         verify(scopes).getForWorkspace(7);
         verifyNoMoreInteractions(scopes);
         for (int offset = 0; offset < 250; offset += 25) {
@@ -249,7 +249,7 @@ class SearchServiceUnitTest {
         assertEquals(List.of(14, 13, 12, 11, 10, 9, 8, 7, 6, 5),
             result.getNotes().stream().map(note -> note.getId()).toList());
         assertEquals("needle body", result.getNotes().get(6).getContent());
-        verify(scopes).withWorkspaceScope(eq(7), org.mockito.ArgumentMatchers.any());
+        verify(scopes).withWorkspaceScopeRead(eq(7), org.mockito.ArgumentMatchers.any());
         verify(scopes).getForWorkspace(7);
         verifyNoMoreInteractions(scopes);
     }

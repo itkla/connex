@@ -129,7 +129,7 @@ public class ScoringService {
 
     /** Scores all contacts and companies from compact aggregates computed by the database. */
     public WorkspaceScores scoreWorkspace(int workspaceId) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
             workspaceId, () -> scoreWorkspaceWithinVisibilityScope(workspaceId));
     }
 
@@ -448,7 +448,7 @@ public class ScoringService {
      * links target the same company, the touch is counted once.
      */
     public List<RelationshipTemperatureDto> scoreCompanies(int workspaceId) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
             workspaceId, () -> scoreCompaniesWithinVisibilityScope(workspaceId));
     }
 
@@ -468,7 +468,7 @@ public class ScoringService {
      * {@link AttributionRule#PRESENT_DAY_PERSON_COMPANY_OR_DEAL_COMPANY}.
      */
     public List<RelationshipTemperatureDto> coolingCompanies(int workspaceId, int limit) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
             workspaceId, () -> coolingCompaniesWithinVisibilityScope(workspaceId, limit));
     }
 
@@ -490,7 +490,7 @@ public class ScoringService {
     public List<RelationshipTemperatureDto> scoreCompanies(int workspaceId, Set<Integer> companyIds) {
         List<Integer> requested = requestedCompanyIds(companyIds);
         if (requested.isEmpty()) return List.of();
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(workspaceId,
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(workspaceId,
             () -> scoreCompanyIds(workspaceId, requested,
                 recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson()));
     }
@@ -530,7 +530,7 @@ public class ScoringService {
      * workspace cap.
      */
     public List<RelationshipTemperatureDto> scoreCompaniesForMap(int workspaceId) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
             workspaceId, () -> scoreCompaniesForMapWithinVisibilityScope(workspaceId));
     }
 
@@ -555,7 +555,7 @@ public class ScoringService {
      * as-of-{@code asOf} employment when it assembles frames.
      */
     public List<RelationshipTemperatureDto> scoreCompanies(int workspaceId, Instant asOf) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
             workspaceId, () -> scoreCompaniesWithinVisibilityScope(workspaceId, asOf));
     }
 
@@ -582,7 +582,7 @@ public class ScoringService {
      */
     @Transactional(readOnly = true)
     public RelationshipEvidenceDto companyEvidence(int workspaceId, int companyId, int currentUserId) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
             workspaceId, () -> companyEvidenceWithinVisibilityScope(workspaceId, companyId, currentUserId));
     }
 
@@ -625,7 +625,7 @@ public class ScoringService {
     }
 
     public WarmthSummaryDto summarize(int workspaceId) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
             workspaceId, () -> summarizeWithinVisibilityScope(workspaceId));
     }
 

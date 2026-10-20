@@ -262,7 +262,7 @@ public class PersonService {
      * Retrieves a workspace-scoped {@code Person} by ID, throwing if absent.
      */
     public Person getPersonById(int id) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
             workspaceService.getCurrentWorkspaceId(), () -> getPersonByIdWithinVisibilityScope(id));
     }
 

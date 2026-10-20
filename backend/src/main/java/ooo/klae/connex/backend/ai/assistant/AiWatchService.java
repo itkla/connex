@@ -80,7 +80,7 @@ public class AiWatchService {
         if (watches.stream().noneMatch(watch -> "company".equals(watch.getSubjectKind()))) {
             return project(watches);
         }
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
             workspaceService.getCurrentWorkspaceId(), () -> project(watches));
     }
 

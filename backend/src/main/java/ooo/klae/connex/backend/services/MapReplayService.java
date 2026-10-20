@@ -68,7 +68,7 @@ public class MapReplayService {
      * final frame is always exactly {@code to}.
      */
     public MapReplayDto buildReplay(int workspaceId, LocalDate from, LocalDate to, Period step) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
             workspaceId, () -> buildReplayWithinVisibilityScope(workspaceId, from, to, step));
     }
 

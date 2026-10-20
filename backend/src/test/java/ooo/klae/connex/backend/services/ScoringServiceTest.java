@@ -878,7 +878,7 @@ class ScoringServiceTest {
             when(companies.getByIds(WS, "[1]", List.of(10))).thenReturn(List.of(company));
             service.companyEvidence(WS, 10, 42);
             var order = inOrder(companies, scopes, notes);
-            order.verify(scopes).withWorkspaceScope(eq(WS), any());
+            order.verify(scopes).withWorkspaceScopeRead(eq(WS), any());
             order.verify(scopes).getForWorkspace(WS);
             order.verify(companies).getByIds(WS, "[1]", List.of(10));
             order.verify(companies).getRelationshipEvidenceTotals(
@@ -916,7 +916,7 @@ class ScoringServiceTest {
         });
 
         if (companyEvidence) {
-            verify(scopes).withWorkspaceScope(eq(WS), any());
+            verify(scopes).withWorkspaceScopeRead(eq(WS), any());
             verify(scopes).getForWorkspace(WS);
             verifyNoMoreInteractions(scopes);
         } else {

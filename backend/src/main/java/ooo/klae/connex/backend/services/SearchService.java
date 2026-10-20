@@ -153,7 +153,7 @@ public class SearchService {
         if (types.stream().noneMatch(Set.of("companies", "pipelines", "deals", "notes", "tasks", "activities")::contains)) {
             return searchWithinVisibilityScope(query, types);
         }
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
             workspaceService.getCurrentWorkspaceId(), () -> searchWithinVisibilityScope(query, types));
     }
 

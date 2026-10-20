@@ -1277,3 +1277,27 @@ an uncached SELECT, keeping the control-plane read free of shared-state mutation
 transaction catalog guards, current administrator checks, and identity restoration remain
 fail-closed. Routing tests cover dedicated placement and restoration after read failure. No
 suppression or dismissal is added; clearance requires a subsequent Security workflow scan.
+
+### `java/csrf-unprotected-request-type` — record-visibility callback split (#2175)
+
+PR [#2175](https://github.com/itkla/connex/pull/2175) introduced record-visibility operation scopes
+around company reads and writes. Its merge-ref scan reports 87 CSRF results, with 77 sharing the
+same 100-location merged sink set; 64 new alerts (#203–#266) start at GET handlers. Their traces
+enter `RecordVisibilityScopeControlAccess` and merge read callbacks with mutation callbacks through
+`Supplier.get`, repeating the mechanism structurally separated in #2003 above.
+
+**The change.** `RecordVisibilityRead` gives eager and deferred read operations their own direct
+callback invocation. Neither read entry adapts into a `Supplier`, and mutation entries never adapt
+into the read interface. Read callers retain the same identity checks, prepared routed-snapshot
+validation, operation memo, deferred failure replay and restoration. The converted paths cover
+company projections, scoring, dashboard, replay, search, tags, pipeline projections, comments,
+reference hydration, person/deal projections and watch listings. Company-logo authorization uses
+the read entry; stream opening remains outside it because storage admission and readiness tracking
+change shared state through their existing callbacks.
+
+Radar feed bootstrap and AI transcript access retain mutation callbacks: they really persist
+signal-family state or access-audit evidence and retain authorization locks. No suppression,
+dismissal, CSRF policy change or audit removal accompanies this split. Unit tests cover both read
+entries, and a source-scan architecture guard rejects cross-interface adapters, including adapters
+through helpers. CodeQL clearance and the resulting sink sets require the next CI Security scan;
+local compilation and unit tests cannot establish that result.

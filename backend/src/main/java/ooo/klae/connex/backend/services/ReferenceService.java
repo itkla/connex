@@ -226,7 +226,7 @@ public class ReferenceService {
         if (notes == null || notes.isEmpty()) {
             return notes;
         }
-        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
             workspaceId, () -> hydrateWithinVisibilityScope(workspaceId, notes));
     }
 
@@ -245,7 +245,7 @@ public class ReferenceService {
         if (notes == null || notes.isEmpty()) {
             return notes == null ? List.of() : notes;
         }
-        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
             workspaceId, () -> hydrateNotePreviewsWithinVisibilityScope(workspaceId, notes));
     }
 
@@ -275,7 +275,7 @@ public class ReferenceService {
         if (tasks == null || tasks.isEmpty()) {
             return tasks;
         }
-        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
             workspaceId, () -> hydrateTasksWithinVisibilityScope(workspaceId, tasks));
     }
 
@@ -301,7 +301,7 @@ public class ReferenceService {
         if (deals == null || deals.isEmpty()) {
             return deals;
         }
-        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
             workspaceId, () -> hydrateDealsWithinVisibilityScope(workspaceId, deals));
     }
 
@@ -336,7 +336,7 @@ public class ReferenceService {
         if (activities == null || activities.isEmpty()) {
             return activities;
         }
-        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
             workspaceId, () -> hydrateActivitiesWithinVisibilityScope(workspaceId, activities));
     }
 
@@ -407,7 +407,7 @@ public class ReferenceService {
         if (!containsTarget) {
             return List.copyOf(items);
         }
-        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(workspaceId,
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(workspaceId,
             () -> redactInvisibleTargetsWithinVisibilityScope(workspaceId, items, targets, readings));
     }
 
@@ -498,7 +498,7 @@ public class ReferenceService {
         if (canonicalType == null || refId <= 0) {
             throw new ResourceNotFoundException("Reference target not found");
         }
-        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
             workspaceId, () -> requireVisibleTargetWithinVisibilityScope(workspaceId, canonicalType, refId, currentUserId));
     }
 

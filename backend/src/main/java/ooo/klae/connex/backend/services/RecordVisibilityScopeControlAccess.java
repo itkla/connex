@@ -88,6 +88,60 @@ public class RecordVisibilityScopeControlAccess {
     }
 
     /**
+     * Shares one eagerly resolved snapshot across an operation that changes no state. Routing,
+     * identity validation and restoration match {@link #withWorkspaceScope(int, Supplier)}, but
+     * the read invokes its own callback directly so it never enters the mutation callback merge.
+     *
+     * @param <T> the read's result type
+     * @param workspaceId workspace anchoring the organization
+     * @param read the read-only operation
+     * @return the read's result
+     */
+    public <T> T withWorkspaceScopeRead(int workspaceId, RecordVisibilityRead<T> read) {
+        RecordVisibilityScope scope = getForWorkspace(workspaceId);
+        requireScopeIdentity(workspaceId, scope);
+        OperationScope previous = operationScope.get();
+        operationScope.set(new OperationScope(workspaceId, tenantContext.getCatalog(), tenantContext.isResolved(), tenantContext.getOrgId(), scope));
+        try {
+            return read.read();
+        } finally {
+            if (previous == null) {
+                operationScope.remove();
+            } else {
+                operationScope.set(previous);
+            }
+        }
+    }
+
+    /**
+     * Shares a read-only operation's first needed snapshot and any ordinary lookup failure.
+     * Empty and skipped operations perform no lookup, exactly as
+     * {@link #withDeferredWorkspaceScope(int, Supplier)}. Routed reads still validate their prepared
+     * snapshot on every access. The read never passes through the mutation callback interface.
+     *
+     * @param <T> the read's result type
+     * @param workspaceId workspace anchoring the organization
+     * @param read the read-only operation
+     * @return the read's result
+     */
+    public <T> T withDeferredWorkspaceScopeRead(int workspaceId, RecordVisibilityRead<T> read) {
+        OperationScope previous = operationScope.get();
+        if (previous != null && previous.workspaceId == workspaceId) {
+            return read.read();
+        }
+        operationScope.set(new OperationScope(workspaceId, tenantContext.getCatalog(), tenantContext.isResolved(), tenantContext.getOrgId(), null));
+        try {
+            return read.read();
+        } finally {
+            if (previous == null) {
+                operationScope.remove();
+            } else {
+                operationScope.set(previous);
+            }
+        }
+    }
+
+    /**
      * Resolves one immutable, unfiltered record-visibility ceiling for an operation.
      * Routed operations serve the immutable payload prepared before their first tenant transaction.
      * A missing or mismatched payload inside a routed transaction fails before any control read.

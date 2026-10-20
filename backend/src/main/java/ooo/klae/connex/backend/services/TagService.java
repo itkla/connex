@@ -76,7 +76,7 @@ public class TagService {
      * Retrieves a workspace-scoped {@code Tag} by ID, throwing if absent.
      */
     public Tag getTagById(int id) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
             workspaceService.getCurrentWorkspaceId(), () -> getTagByIdWithinVisibilityScope(id));
     }
 
@@ -162,7 +162,7 @@ public class TagService {
      * Retrieves the deals labelled with a tag, in the active workspace.
      */
     public List<Deal> getDealsByTagId(int tagId) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
             workspaceService.getCurrentWorkspaceId(), () -> getDealsByTagIdWithinVisibilityScope(tagId));
     }
 
@@ -185,7 +185,7 @@ public class TagService {
      * Retrieves the companies labelled with a tag, in the active workspace.
      */
     public List<Company> getCompaniesByTagId(int tagId) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
             workspaceService.getCurrentWorkspaceId(), () -> getCompaniesByTagIdWithinVisibilityScope(tagId));
     }
 

@@ -48,7 +48,7 @@ public class RelationshipDashboardService {
     /** Computes and hydrates the bounded dashboard relationship snapshot. */
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public RelationshipDashboardDto getDashboard(int workspaceId) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
             workspaceId, () -> getDashboardWithinVisibilityScope(workspaceId));
     }
 

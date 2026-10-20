@@ -765,7 +765,7 @@ public class DealService {
     }
 
     public DealTopDto getTopDeals(String currency, MemberScope memberScope) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
             workspaceService.getCurrentWorkspaceId(), () -> getTopDealsWithinVisibilityScope(currency, memberScope));
     }
 
@@ -990,7 +990,7 @@ public class DealService {
      * @return the workspace-scoped {@link DealSummaryDto}
      */
     public DealSummaryDto getDealSummary(int id) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
             workspaceService.getCurrentWorkspaceId(), () -> getDealSummaryWithinVisibilityScope(id));
     }
 

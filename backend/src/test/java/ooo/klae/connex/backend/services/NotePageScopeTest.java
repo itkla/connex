@@ -60,7 +60,7 @@ class NotePageScopeTest {
         assertSame(hydrated, page.items());
         assertEquals(73, page.total());
         var order = inOrder(scopes, users, notes);
-        order.verify(scopes).withWorkspaceScope(eq(7), org.mockito.ArgumentMatchers.any());
+        order.verify(scopes).withWorkspaceScopeRead(eq(7), org.mockito.ArgumentMatchers.any());
         order.verify(scopes).getForWorkspace(7);
         order.verify(users).findMatchingWorkspaceMemberIds(7, "%needle%");
         if (workspaceOnly) {
@@ -83,7 +83,7 @@ class NotePageScopeTest {
         var page = service.getNotesPage(null, "unknown", "unknown", 10, 0, workspaceOnly);
 
         assertEquals(0, page.total());
-        verify(scopes).withWorkspaceScope(eq(7), org.mockito.ArgumentMatchers.any());
+        verify(scopes).withWorkspaceScopeRead(eq(7), org.mockito.ArgumentMatchers.any());
         verify(scopes).getForWorkspace(7);
         verifyNoMoreInteractions(scopes);
         verifyNoInteractions(users);

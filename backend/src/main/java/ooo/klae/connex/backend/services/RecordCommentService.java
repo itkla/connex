@@ -92,7 +92,7 @@ public class RecordCommentService {
             String stateRaw,
             int limit,
             int offset) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
             workspaceService.getCurrentWorkspaceId(), () -> listThreadsWithinVisibilityScope(targetTypeRaw, targetId, stateRaw, limit, offset));
     }
 
@@ -115,7 +115,7 @@ public class RecordCommentService {
 
     /** Counts threads for a currently visible record and state filter. */
     public long countThreads(String targetTypeRaw, int targetId, String stateRaw) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
             workspaceService.getCurrentWorkspaceId(), () -> countThreadsWithinVisibilityScope(targetTypeRaw, targetId, stateRaw));
     }
 
@@ -131,7 +131,7 @@ public class RecordCommentService {
 
     /** Returns one thread after revalidating current target visibility. */
     public RecordCommentThread getThread(long threadId) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
             workspaceService.getCurrentWorkspaceId(), () -> getThreadWithinVisibilityScope(threadId));
     }
 
@@ -147,7 +147,7 @@ public class RecordCommentService {
     public List<RecordCommentIndicatorDto> getIndicators(
             String targetTypeRaw,
             List<Integer> targetIds) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
             workspaceService.getCurrentWorkspaceId(), () -> getIndicatorsWithinVisibilityScope(targetTypeRaw, targetIds));
     }
 
