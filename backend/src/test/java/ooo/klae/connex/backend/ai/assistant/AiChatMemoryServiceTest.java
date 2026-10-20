@@ -68,7 +68,7 @@ class AiChatMemoryServiceTest {
         Instant now = Instant.parse("2026-08-12T00:00:00Z");
         MemoryFixture fixture = memoryFixture(1_024, Clock.fixed(now, ZoneOffset.UTC));
         AiChatQueuedTurn turn = new AiChatQueuedTurn(
-                3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null));
+                3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null, 1, 1L));
         AiChatMessage early = message(
                 101, 1, "user", "EARLY " + "quarterly planning preference ".repeat(200));
         AiChatMessage middle = message(
@@ -145,7 +145,7 @@ class AiChatMemoryServiceTest {
         Instant now = Instant.parse("2026-08-12T00:00:00Z");
         MemoryFixture fixture = memoryFixture(1_024, Clock.fixed(now, ZoneOffset.UTC));
         AiChatQueuedTurn turn = new AiChatQueuedTurn(
-                3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null));
+                3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null, 1, 1L));
         AiChatMessage early = message(
                 101, 1, "user",
                 "EARLY_FACT_BEGIN " + "quarterly planning preference ".repeat(200)
@@ -284,7 +284,7 @@ class AiChatMemoryServiceTest {
         Instant now = Instant.parse("2026-08-12T00:00:00Z");
         MemoryFixture fixture = memoryFixture(8_192, Clock.fixed(now, ZoneOffset.UTC));
         AiChatQueuedTurn turn = new AiChatQueuedTurn(
-                3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null));
+                3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null, 1, 1L));
         AiChatMessage initiating = message(104, 4, "user", "Summarize the pipeline");
         when(fixture.invocationService().currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
                 .thenReturn(new AiProviderCapabilities(
@@ -349,7 +349,7 @@ class AiChatMemoryServiceTest {
         Instant now = Instant.parse("2026-08-12T00:00:00Z");
         MemoryFixture fixture = memoryFixture(8_192, Clock.fixed(now, ZoneOffset.UTC));
         AiChatQueuedTurn turn = new AiChatQueuedTurn(
-                3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null));
+                3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null, 1, 1L));
         when(fixture.invocationService().currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
                 .thenReturn(new AiProviderCapabilities(
                         AiStructuredOutputEnforcement.JSON_SCHEMA,
@@ -433,7 +433,7 @@ class AiChatMemoryServiceTest {
         Instant now = Instant.parse("2026-08-12T00:00:00Z");
         MemoryFixture fixture = memoryFixture(16_384, Clock.fixed(now, ZoneOffset.UTC));
         AiChatQueuedTurn turn = new AiChatQueuedTurn(
-                3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null));
+                3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null, 1, 1L));
         String content = "a".repeat(60_000);
         AiChatMessage initiating = message(104, 4, "user", content);
         when(fixture.invocationService().currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
@@ -475,7 +475,7 @@ class AiChatMemoryServiceTest {
         Instant now = Instant.parse("2026-08-12T00:00:00Z");
         MemoryFixture fixture = memoryFixture(8_192, Clock.fixed(now, ZoneOffset.UTC));
         AiChatQueuedTurn turn = new AiChatQueuedTurn(
-                3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null));
+                3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null, 1, 1L));
         String originalContent = "界".repeat(16_000);
         AiChatMessage initiating = message(104, 4, "user", originalContent);
         when(fixture.invocationService().currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
@@ -531,7 +531,7 @@ class AiChatMemoryServiceTest {
         when(clock.instant()).thenReturn(start, start, start, start, start, deadline);
         MemoryFixture fixture = memoryFixture(1_024, clock);
         AiChatQueuedTurn turn = new AiChatQueuedTurn(
-                3, 12, 5, 7, 102, 2, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null));
+                3, 12, 5, 7, 102, 2, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null, 1, 1L));
         AiChatMessage early = message(101, 1, "user", "history ".repeat(4_000));
         AiChatMessage initiating = message(102, 2, "user", "Continue");
         when(fixture.invocationService().currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
@@ -582,7 +582,7 @@ class AiChatMemoryServiceTest {
         Instant now = Instant.parse("2026-08-12T00:00:00Z");
         MemoryFixture fixture = memoryFixture(1_024, Clock.fixed(now, ZoneOffset.UTC));
         AiChatQueuedTurn turn = new AiChatQueuedTurn(
-                3, 12, 5, 7, 102, 2, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null));
+                3, 12, 5, 7, 102, 2, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null, 1, 1L));
         String oversizedContent = "OVERSIZED_PRIVATE_HISTORY_" + "x".repeat(25_000);
         AiChatMessage oversized = message(101, 1, "user", oversizedContent);
         AiChatMessage initiating = message(102, 2, "user", "Continue");
@@ -685,7 +685,7 @@ class AiChatMemoryServiceTest {
             });
             MemoryFixture fixture = memoryFixture(1_024, Clock.fixed(now, ZoneOffset.UTC), operation.scopes, executor);
             AiChatQueuedTurn turn = new AiChatQueuedTurn(
-                    3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null));
+                    3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null, 1, 1L));
             AiChatMessage early = message(
                     101, 1, "user",
                     "EARLY_FACT_BEGIN " + "quarterly planning preference ".repeat(200)
@@ -897,7 +897,7 @@ class AiChatMemoryServiceTest {
                 objectMapper,
                 clock, ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
         AiChatQueuedTurn turn = new AiChatQueuedTurn(
-                3, 12, 5, 7, 102, 2, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null));
+                3, 12, 5, 7, 102, 2, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null, 1, 1L));
         AiChatMessage early = message(101, 1, "user", "history ".repeat(4_000));
         AiChatMessage initiating = message(102, 2, "user", "Continue");
         when(invocationService.currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
@@ -1036,7 +1036,7 @@ class AiChatMemoryServiceTest {
         String member = emojiCount == 0 ? "Member Continuity" : "😀".repeat(emojiCount);
         Instant now = Instant.parse("2026-08-12T00:00:00Z");
         MemoryFixture fixture = memoryFixture(1_024, Clock.fixed(now, ZoneOffset.UTC));
-        AiChatQueuedTurn turn = new AiChatQueuedTurn(3, 12, 5, 7, 102, 2, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null));
+        AiChatQueuedTurn turn = new AiChatQueuedTurn(3, 12, 5, 7, 102, 2, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null, 1, 1L));
         AiChatMessage early = message(101, 1, "user", member + " " + "history ".repeat(4_000));
         AiChatMessage initiating = message(102, 2, "user", "Continue");
         when(fixture.invocationService().currentProviderCapabilities(AiFeature.ASSISTANT_CHAT)).thenReturn(
@@ -1085,7 +1085,7 @@ class AiChatMemoryServiceTest {
         String summaryText = mention ? "Bob_team" : "xBob client";
         Instant now = Instant.parse("2026-08-12T00:00:00Z");
         MemoryFixture fixture = memoryFixture(1_024, Clock.fixed(now, ZoneOffset.UTC));
-        AiChatQueuedTurn turn = new AiChatQueuedTurn(3, 12, 5, 7, 102, 2, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null));
+        AiChatQueuedTurn turn = new AiChatQueuedTurn(3, 12, 5, 7, 102, 2, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null, 1, 1L));
         AiChatMessage early = message(101, 1, "user", "Prior discussion " + "history ".repeat(4_000));
         AiChatMessage initiating = message(102, 2, "user", "Continue");
         when(fixture.invocationService().currentProviderCapabilities(AiFeature.ASSISTANT_CHAT)).thenReturn(

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.AiAgentPrivacyObjectMapper">
+  <insert id="insertPending">
+    INSERT INTO ai_agent_privacy_object (workspace_id, operation_key, object_key, deletion_queue_id, disposition)
+    VALUES (#{workspaceId}, #{operationKey}, #{objectKey}, #{queueId}, 'pending')
+    ON DUPLICATE KEY UPDATE deletion_queue_id = VALUES(deletion_queue_id), disposition = 'pending',
+      retained_attachment_id = NULL, completed_at = NULL
+  </insert>
+  <insert id="insertRetained">
+    INSERT INTO ai_agent_privacy_object (workspace_id, operation_key, object_key, disposition, retained_attachment_id, completed_at)
+    VALUES (#{workspaceId}, #{operationKey}, #{objectKey}, 'retained', #{attachmentId}, CURRENT_TIMESTAMP(6))
+    ON DUPLICATE KEY UPDATE deletion_queue_id = NULL, disposition = 'retained',
+      retained_attachment_id = VALUES(retained_attachment_id), completed_at = VALUES(completed_at)
+  </insert>
+  <update id="acknowledgeDeleted">
+    UPDATE ai_agent_privacy_object SET disposition = 'deleted', completed_at = CURRENT_TIMESTAMP(6)
+    WHERE workspace_id = #{workspaceId} AND deletion_queue_id = #{queueId} AND object_key = #{objectKey}
+      AND disposition = 'pending'
+  </update>
+</mapper>

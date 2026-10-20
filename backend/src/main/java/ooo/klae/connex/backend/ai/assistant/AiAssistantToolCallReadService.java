@@ -83,6 +83,7 @@ public class AiAssistantToolCallReadService {
     private static final Set<String> CREATED_RECORD_KINDS = Set.of("activity", "task", "note", "person", "company", "deal", "report");
     private final AiAssistantToolCatalog toolCatalog;
     private final AiAssistantWriteToolRegistry writeToolRegistry;
+    private final AiChatPrivacyGuard privacyGuard;
     private final AiChatMapper chatMapper;
     private final WorkspaceService workspaceService;
     private final PersonMapper personMapper;
@@ -180,12 +181,12 @@ public class AiAssistantToolCallReadService {
         Instant now = clock.instant();
         List<AiChatToolCall> rows = new ArrayList<>(chatMapper.listToolCallsBySession(
                 viewer.workspaceId(), session.getId(), pendingOnly, MAX_TOOL_CALLS,
-                pendingOnly ? AiAssistantProposalExpiry.pendingCreatedAfter(now) : null));
+                pendingOnly ? AiAssistantProposalExpiry.pendingCreatedAfter(now) : null, privacyGuard.currentGeneration(viewer.workspaceId())));
         if (!pendingOnly && rows.size() == MAX_TOOL_CALLS) {
             AiChatToolCall boundary = rows.getLast();
             rows.addAll(chatMapper.listUndecidedToolCallsAfterHistory(
                     viewer.workspaceId(), session.getId(), boundary.getMessageId(), boundary.getId(),
-                    MAX_TOOL_CALLS).reversed());
+                    MAX_TOOL_CALLS, privacyGuard.currentGeneration(viewer.workspaceId())).reversed());
         }
         List<StoredToolCall> stored = rows.stream()
                 .map(this::readStored)
@@ -210,7 +211,7 @@ public class AiAssistantToolCallReadService {
             int toolCallId,
             boolean mutationsAvailable) {
         AiChatToolCall toolCall = chatMapper.getToolCallBySession(
-                viewer.workspaceId(), session.getId(), toolCallId);
+                viewer.workspaceId(), session.getId(), toolCallId, privacyGuard.currentGeneration(viewer.workspaceId()));
         StoredToolCall stored = toolCall == null ? null : readStored(toolCall);
         if (stored == null) {
             throw inaccessible();
@@ -588,7 +589,7 @@ public class AiAssistantToolCallReadService {
         }
         Map<Integer, Integer> messages = new LinkedHashMap<>();
         for (AiChatMessage message : chatMapper.listAssistantMessagesBySessionAndTurnIds(
-                workspaceId, sessionId, turnIds, MAX_TOOL_CALLS)) {
+                workspaceId, sessionId, turnIds, MAX_TOOL_CALLS, privacyGuard.currentGeneration(workspaceId))) {
             Integer turnId = assistantTurnId(message.getStructuredJson());
             if (turnId != null) {
                 messages.putIfAbsent(turnId, message.getId());
@@ -1192,10 +1193,12 @@ public class AiAssistantToolCallReadService {
         workspaceService.requirePermission(
                 viewer.workspaceId(), viewer.userId(), Permission.AI_USE);
         AiChatSession session = chatMapper.getAccessibleSessionById(
-                viewer.workspaceId(), viewer.userId(), sessionId);
+                viewer.workspaceId(), viewer.userId(), sessionId, privacyGuard.currentGeneration(viewer.workspaceId()));
         if (session == null) {
             throw inaccessible();
         }
+        sessionReadAudit.retainTranscriptAuditParents(viewer.workspaceId(), viewer.userId());
+        privacyGuard.retain(chatMapper, privacyGuard.capture(chatMapper, session));
         sessionReadAudit.recordAccessible(
                 viewer.workspaceId(), viewer.userId(), session);
         return session;
@@ -1206,7 +1209,7 @@ public class AiAssistantToolCallReadService {
                 viewer.workspaceId(), viewer.userId(), Permission.AI_SESSION_ADMIN);
         List<Integer> activeMemberIds = activeMemberIds(viewer);
         AiChatSession session = chatMapper.getRetainedSessionById(
-                viewer.workspaceId(), viewer.userId(), sessionId, activeMemberIds);
+                viewer.workspaceId(), viewer.userId(), sessionId, activeMemberIds, privacyGuard.currentGeneration(viewer.workspaceId()));
         if (session == null) {
             throw inaccessible();
         }
@@ -1215,6 +1218,8 @@ public class AiAssistantToolCallReadService {
                 && revalidatedMemberIds.contains(session.getCreatedByUserId())) {
             throw inaccessible();
         }
+        sessionReadAudit.retainTranscriptAuditParents(viewer.workspaceId(), viewer.userId());
+        privacyGuard.retain(chatMapper, privacyGuard.capture(chatMapper, session));
         return session;
     }
 

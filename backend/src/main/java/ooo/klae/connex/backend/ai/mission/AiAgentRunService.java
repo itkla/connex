@@ -11,11 +11,17 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Supplier;
 
 import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantSessionReadAudit;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolExecutor;
 import ooo.klae.connex.backend.ai.assistant.AiChatCitationProjector;
@@ -44,6 +50,9 @@ import tools.jackson.databind.ObjectMapper;
 @RequiredArgsConstructor
 public class AiAgentRunService {
     private static final Set<String> STATES = Set.of("queued", "running", "waiting_approval", "paused", "done", "failed", "cancelled");
+    private final AiChatPrivacyGuard privacyGuard;
+    private final AiAssistantSessionReadAudit readAudit;
+    private final PlatformTransactionManager transactionManager;
     private final AiAgentRunMapper runs;
     private final AiChatMapper chat;
     private final AiAgentRunPersistenceService persistence;
@@ -94,12 +103,16 @@ public class AiAgentRunService {
     /** Returns only metadata when privacy has permanently or temporarily withheld the content. */
     @RequirePermission(Permission.AI_USE)
     public AiAgentRunDto get(int id) {
-        return project(owned(id));
+        return readProjection(() -> project(owned(id)));
     }
 
     /** Lists independently of transcript/tool limits with an owner/filter-bound keyset cursor. */
     @RequirePermission(Permission.AI_USE)
     public AiAgentRunPage list(int limit, Integer sessionId, String state, String cursor) {
+        return readProjection(() -> listCurrent(limit, sessionId, state, cursor));
+    }
+
+    private AiAgentRunPage listCurrent(int limit, Integer sessionId, String state, String cursor) {
         if (limit < 1 || limit > 50 || (sessionId != null && sessionId <= 0)
                 || (state != null && !STATES.contains(state))) {
             throw new BadRequestException("Invalid mission page");
@@ -124,7 +137,7 @@ public class AiAgentRunService {
                 throw new BadRequestException("Invalid mission cursor");
             }
         }
-        List<AiAgentRun> found = runs.listRuns(workspaceId, owner, sessionId, state, before, limit + 1);
+        List<AiAgentRun> found = runs.listRuns(workspaceId, owner, sessionId, state, before, limit + 1, privacyGuard.currentGeneration(workspaceId));
         boolean more = found.size() > limit;
         List<AiAgentRun> page = more ? found.subList(0, limit) : found;
         List<AiAgentRunDto> items = new ArrayList<>();
@@ -141,6 +154,10 @@ public class AiAgentRunService {
     /** Reads the canonical authorized report; a stopped or missing generation cannot disclose it. */
     @RequirePermission(Permission.AI_USE)
     public AiAgentOutputDto output(int id) {
+        return readProjection(() -> outputCurrent(id));
+    }
+
+    private AiAgentOutputDto outputCurrent(int id) {
         AiAgentRun run = owned(id);
         if (withheld(run)) {
             throw new AiAgentGoneException("mission_output_withheld");
@@ -203,6 +220,22 @@ public class AiAgentRunService {
         }
     }
 
+    private <T> T readProjection(Supplier<T> projection) {
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+        return transaction.execute(status -> {
+            int workspaceId = workspaces.getCurrentWorkspaceId();
+            int userId = workspaces.getCurrentUserId();
+            requireMembership(workspaceId, userId);
+            readAudit.retainTranscriptAuditParents(workspaceId, userId);
+            privacyGuard.retainCurrentOrganization(workspaceId);
+            if (chat.lockPrivacyBarrierForShare(workspaceId) == null) {
+                throw new AiAgentUnavailableException();
+            }
+            return projection.get();
+        });
+    }
+
     private AiAgentRun owned(int id) {
         int workspaceId = workspaces.getCurrentWorkspaceId();
         requireMembership(workspaceId, workspaces.getCurrentUserId());
@@ -223,7 +256,7 @@ public class AiAgentRunService {
         if (run.getSessionId() == null) {
             return true;
         }
-        var session = chat.getAccessibleSessionById(run.getWorkspaceId(), owner, run.getSessionId());
+        var session = chat.getAccessibleSessionById(run.getWorkspaceId(), owner, run.getSessionId(), privacyGuard.currentGeneration(run.getWorkspaceId()));
         return session != null && session.getCreatedByUserId() != null
                 && workspaces.isMember(run.getWorkspaceId(), session.getCreatedByUserId());
     }
@@ -236,7 +269,8 @@ public class AiAgentRunService {
 
     private boolean withheld(AiAgentRun run) {
         var barrier = chat.getPrivacyBarrier(run.getWorkspaceId());
-        return !supportedContent(run)
+        return run.getOrganizationPrivacyGeneration() != privacyGuard.currentGeneration(run.getWorkspaceId())
+                || !supportedContent(run)
                 || run.getWithheldAt() != null || run.getPurgedAt() != null || barrier == null
                 || barrier.isBlocked() || barrier.getGeneration() != run.getPrivacyGeneration();
     }

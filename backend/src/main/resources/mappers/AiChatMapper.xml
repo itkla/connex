@@ -3,8 +3,10 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="ooo.klae.connex.backend.mappers.AiChatMapper">
 
+
   <resultMap id="sessionResult" type="AiChatSession">
     <id property="id" column="id"/>
+    <result property="organizationPrivacyGeneration" column="organization_privacy_generation"/>
     <result property="messageSeqHighWater" column="message_seq_high_water"/>
     <result property="missionTaintGeneration" column="mission_taint_generation"/>
     <result property="missionTaintSeq" column="mission_taint_seq"/>
@@ -37,6 +39,7 @@
 
   <resultMap id="messageResult" type="AiChatMessage">
     <id property="id" column="id"/>
+    <result property="organizationPrivacyGeneration" column="organization_privacy_generation"/>
     <result property="missionRunId" column="mission_run_id"/>
     <result property="missionMessageKind" column="mission_message_kind"/>
     <result property="privacyGeneration" column="privacy_generation"/>
@@ -54,6 +57,7 @@
 
   <resultMap id="turnResult" type="AiChatTurn">
     <id property="id" column="id"/>
+    <result property="organizationPrivacyGeneration" column="organization_privacy_generation"/>
     <result property="missionRunId" column="mission_run_id"/>
     <result property="missionSegmentId" column="mission_segment_id"/>
     <result property="privacyGeneration" column="privacy_generation"/>
@@ -77,6 +81,7 @@
 
   <resultMap id="toolCallResult" type="AiChatToolCall">
     <id property="id" column="id"/>
+    <result property="organizationPrivacyGeneration" column="organization_privacy_generation"/>
     <result property="missionRunId" column="mission_run_id"/>
     <result property="artifactOrigin" column="artifact_origin"/>
     <result property="privacyGeneration" column="privacy_generation"/>
@@ -104,6 +109,8 @@
         ON privacy_barrier.workspace_id = privacy_session.workspace_id
       WHERE privacy_session.workspace_id = ai_chat_message.workspace_id
         AND privacy_session.id = ai_chat_message.session_id
+        AND privacy_session.organization_privacy_generation = #{organizationPrivacyGeneration}
+        AND ai_chat_message.organization_privacy_generation = privacy_session.organization_privacy_generation
         AND (privacy_session.mission_taint_seq IS NULL
           OR (ai_chat_message.author_kind = 'user' AND ai_chat_message.seq &lt; privacy_session.mission_taint_seq)
           OR (privacy_barrier.blocked = FALSE
@@ -118,13 +125,15 @@
       LEFT JOIN ai_agent_privacy_barrier privacy_barrier
         ON privacy_barrier.workspace_id = privacy_session.workspace_id
       WHERE privacy_session.workspace_id = tc.workspace_id AND privacy_session.id = m.session_id
+        AND privacy_session.organization_privacy_generation = #{organizationPrivacyGeneration}
+        AND tc.organization_privacy_generation = privacy_session.organization_privacy_generation
         AND (privacy_session.mission_taint_seq IS NULL OR (privacy_barrier.blocked = FALSE
           AND COALESCE(tc.privacy_generation, privacy_session.mission_taint_generation) = privacy_barrier.generation))
     )
   </sql>
 
   <sql id="sessionColumns">
-    s.id, s.workspace_id, s.message_seq_high_water, s.mission_taint_generation,
+    s.id, s.workspace_id, s.organization_privacy_generation, s.message_seq_high_water, s.mission_taint_generation,
     s.mission_taint_seq, s.title_privacy_generation, s.created_by_user_id,
     CASE WHEN s.title_user_set = TRUE OR s.mission_taint_seq IS NULL OR EXISTS (
       SELECT 1 FROM ai_agent_privacy_barrier title_barrier
@@ -167,7 +176,7 @@
   </sql>
 
   <sql id="lockedSessionColumns">
-    s.id, s.workspace_id, s.message_seq_high_water, s.mission_taint_generation,
+    s.id, s.workspace_id, s.organization_privacy_generation, s.message_seq_high_water, s.mission_taint_generation,
     s.mission_taint_seq, s.title_privacy_generation, s.created_by_user_id,
     CASE WHEN s.title_user_set = TRUE OR s.mission_taint_seq IS NULL OR EXISTS (
       SELECT 1 FROM ai_agent_privacy_barrier title_barrier
@@ -197,6 +206,7 @@
     SELECT <include refid="sessionColumns"/>
     FROM ai_chat_session s
     WHERE s.workspace_id = #{workspaceId}
+      AND s.organization_privacy_generation = #{organizationPrivacyGeneration}
       AND <include refid="accessibleSession"/>
     ORDER BY s.last_message_at DESC, s.id DESC
     LIMIT #{limit} OFFSET #{offset}
@@ -206,6 +216,7 @@
     SELECT COUNT(*)
     FROM ai_chat_session s
     WHERE s.workspace_id = #{workspaceId}
+      AND s.organization_privacy_generation = #{organizationPrivacyGeneration}
       AND <include refid="accessibleSession"/>
   </select>
 
@@ -218,6 +229,7 @@
      AND invited.user_id = #{userId}
      AND invited.status = 'invited'
     WHERE s.workspace_id = #{workspaceId}
+      AND s.organization_privacy_generation = #{organizationPrivacyGeneration}
       AND s.visibility = 'shared'
       AND s.status = 'active'
     ORDER BY invited.invited_at DESC, s.id DESC
@@ -233,6 +245,7 @@
      AND invited.user_id = #{userId}
      AND invited.status = 'invited'
     WHERE s.workspace_id = #{workspaceId}
+      AND s.organization_privacy_generation = #{organizationPrivacyGeneration}
       AND s.visibility = 'shared'
       AND s.status = 'active'
   </select>
@@ -241,6 +254,7 @@
     SELECT <include refid="sessionColumns"/>
     FROM ai_chat_session s
     WHERE s.workspace_id = #{workspaceId}
+      AND s.organization_privacy_generation = #{organizationPrivacyGeneration}
       AND <include refid="retainedSession"/>
     ORDER BY s.last_message_at DESC, s.id DESC
     LIMIT #{limit} OFFSET #{offset}
@@ -250,6 +264,7 @@
     SELECT COUNT(*)
     FROM ai_chat_session s
     WHERE s.workspace_id = #{workspaceId}
+      AND s.organization_privacy_generation = #{organizationPrivacyGeneration}
       AND <include refid="retainedSession"/>
   </select>
 
@@ -257,6 +272,7 @@
     SELECT <include refid="sessionColumns"/>
     FROM ai_chat_session s
     WHERE s.workspace_id = #{workspaceId}
+      AND s.organization_privacy_generation = #{organizationPrivacyGeneration}
       AND s.id = #{id}
       AND <include refid="accessibleSession"/>
   </select>
@@ -265,6 +281,7 @@
     SELECT <include refid="sessionColumns"/>
     FROM ai_chat_session s
     WHERE s.workspace_id = #{workspaceId}
+      AND s.organization_privacy_generation = #{organizationPrivacyGeneration}
       AND s.id = #{id}
       AND <include refid="retainedSession"/>
   </select>
@@ -273,6 +290,7 @@
     SELECT <include refid="sessionColumns"/>
     FROM ai_chat_session s
     WHERE s.workspace_id = #{workspaceId}
+      AND s.organization_privacy_generation = #{organizationPrivacyGeneration}
       AND s.id = #{id}
   </select>
 
@@ -290,7 +308,7 @@
     session, and a maintenance pass has no member.
   -->
   <select id="getSessionByIdForMaintenanceUpdate" resultMap="sessionResult" flushCache="true" useCache="false">
-    SELECT s.id, s.workspace_id, s.message_seq_high_water, s.mission_taint_generation,
+    SELECT s.id, s.workspace_id, s.organization_privacy_generation, s.message_seq_high_water, s.mission_taint_generation,
     s.mission_taint_seq, s.title_privacy_generation, s.created_by_user_id,
     CASE WHEN s.title_user_set = TRUE OR s.mission_taint_seq IS NULL OR EXISTS (
       SELECT 1 FROM ai_agent_privacy_barrier title_barrier
@@ -313,15 +331,16 @@
       SELECT 1
       FROM ai_chat_session
       WHERE workspace_id = #{workspaceId}
+        AND organization_privacy_generation = #{organizationPrivacyGeneration}
         AND id = #{id}
     )
   </select>
 
   <insert id="insertSession" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO ai_chat_session
-      (workspace_id, created_by_user_id, title, title_user_set, visibility, status)
+      (workspace_id, organization_privacy_generation, created_by_user_id, title, title_user_set, visibility, status)
     VALUES
-      (#{workspaceId}, #{createdByUserId}, #{title}, #{titleUserSet}, #{visibility}, #{status})
+      (#{workspaceId}, #{organizationPrivacyGeneration}, #{createdByUserId}, #{title}, #{titleUserSet}, #{visibility}, #{status})
   </insert>
 
   <update id="updateSession">
@@ -596,17 +615,17 @@
   <insert id="insertMessage" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO ai_chat_message
       (workspace_id, session_id, seq, author_kind, author_user_id, content,
-       structured_json, input_tokens, output_tokens, mission_run_id, mission_message_kind, privacy_generation)
+       structured_json, input_tokens, output_tokens, mission_run_id, mission_message_kind, privacy_generation, organization_privacy_generation)
     VALUES
       (#{workspaceId}, #{sessionId}, #{seq}, #{authorKind}, #{authorUserId}, #{content},
        #{structuredJson,jdbcType=VARCHAR}, #{inputTokens,jdbcType=INTEGER},
        #{outputTokens,jdbcType=INTEGER}, #{missionRunId,jdbcType=INTEGER},
-       #{missionMessageKind,jdbcType=VARCHAR}, #{privacyGeneration,jdbcType=BIGINT})
+       #{missionMessageKind,jdbcType=VARCHAR}, #{privacyGeneration,jdbcType=BIGINT}, #{organizationPrivacyGeneration})
   </insert>
 
   <select id="getMessageById" resultMap="messageResult">
     SELECT id, workspace_id, session_id, seq, author_kind, author_user_id, content,
-           structured_json, input_tokens, output_tokens, mission_run_id, mission_message_kind, privacy_generation, created_at
+           structured_json, input_tokens, output_tokens, mission_run_id, mission_message_kind, privacy_generation, organization_privacy_generation, created_at
     FROM ai_chat_message
     WHERE workspace_id = #{workspaceId}
       AND session_id = #{sessionId}
@@ -616,7 +635,7 @@
 
   <select id="listMessages" resultMap="messageResult">
     SELECT id, workspace_id, session_id, seq, author_kind, author_user_id, content,
-           structured_json, input_tokens, output_tokens, mission_run_id, mission_message_kind, privacy_generation, created_at
+           structured_json, input_tokens, output_tokens, mission_run_id, mission_message_kind, privacy_generation, organization_privacy_generation, created_at
     FROM ai_chat_message
     WHERE workspace_id = #{workspaceId}
       AND <include refid="eligibleReactiveMessage"/>
@@ -649,7 +668,7 @@
            recent.created_at
     FROM (
       SELECT id, workspace_id, session_id, seq, author_kind, author_user_id, content,
-             structured_json, input_tokens, output_tokens, mission_run_id, mission_message_kind, privacy_generation, created_at
+             structured_json, input_tokens, output_tokens, mission_run_id, mission_message_kind, privacy_generation, organization_privacy_generation, created_at
       FROM ai_chat_message
       WHERE workspace_id = #{workspaceId}
       AND <include refid="eligibleReactiveMessage"/>
@@ -664,7 +683,7 @@
 
   <select id="getLatestAnswer" resultMap="messageResult">
     SELECT id, workspace_id, session_id, seq, author_kind, author_user_id, content,
-           structured_json, input_tokens, output_tokens, mission_run_id, mission_message_kind, privacy_generation, created_at
+           structured_json, input_tokens, output_tokens, mission_run_id, mission_message_kind, privacy_generation, organization_privacy_generation, created_at
     FROM ai_chat_message
     WHERE workspace_id = #{workspaceId}
       AND <include refid="eligibleReactiveMessage"/>
@@ -676,7 +695,7 @@
 
   <select id="getHistorySummary" resultMap="messageResult">
     SELECT id, workspace_id, session_id, seq, author_kind, author_user_id, content,
-           structured_json, input_tokens, output_tokens, mission_run_id, mission_message_kind, privacy_generation, created_at
+           structured_json, input_tokens, output_tokens, mission_run_id, mission_message_kind, privacy_generation, organization_privacy_generation, created_at
     FROM ai_chat_message
     WHERE workspace_id = #{workspaceId}
       AND <include refid="eligibleReactiveMessage"/>
@@ -688,7 +707,7 @@
 
   <select id="listMessagesForCompaction" resultMap="messageResult">
     SELECT id, workspace_id, session_id, seq, author_kind, author_user_id, content,
-           structured_json, input_tokens, output_tokens, mission_run_id, mission_message_kind, privacy_generation, created_at
+           structured_json, input_tokens, output_tokens, mission_run_id, mission_message_kind, privacy_generation, organization_privacy_generation, created_at
     FROM ai_chat_message
     WHERE workspace_id = #{workspaceId}
       AND <include refid="eligibleReactiveMessage"/>
@@ -738,11 +757,11 @@
   <insert id="insertTurn" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO ai_chat_turn
       (workspace_id, session_id, requested_by_user_id, status, scope_json,
-       privacy_mode, streamed, privacy_generation, privacy_taint_seq)
+       privacy_mode, streamed, privacy_generation, privacy_taint_seq, organization_privacy_generation)
     VALUES
       (#{workspaceId}, #{sessionId}, #{requestedByUserId}, #{status},
        #{scopeJson,jdbcType=VARCHAR}, #{privacyMode}, #{streamed},
-       #{privacyGeneration,jdbcType=BIGINT}, #{privacyTaintSeq,jdbcType=INTEGER})
+       #{privacyGeneration,jdbcType=BIGINT}, #{privacyTaintSeq,jdbcType=INTEGER}, #{organizationPrivacyGeneration})
   </insert>
 
   <update id="applyTurnSkill">
@@ -839,11 +858,16 @@
   <select id="getTurnById" resultMap="turnResult">
     SELECT id, workspace_id, session_id, requested_by_user_id, status,
            terminal_reason, skill_key, skill_version, scope_json,
-           mission_run_id, mission_segment_id, privacy_generation, privacy_taint_seq,
+           mission_run_id, mission_segment_id, privacy_generation, organization_privacy_generation, privacy_taint_seq,
            privacy_mode, streamed, partial_content,
            partial_content_utf16_offset, cancel_requested_at, created_at, updated_at
     FROM ai_chat_turn
     WHERE workspace_id = #{workspaceId}
+      AND organization_privacy_generation = #{organizationPrivacyGeneration}
+      AND EXISTS (SELECT 1 FROM ai_chat_session privacy_session
+        WHERE privacy_session.workspace_id = ai_chat_turn.workspace_id
+          AND privacy_session.id = ai_chat_turn.session_id
+          AND privacy_session.organization_privacy_generation = #{organizationPrivacyGeneration})
       AND session_id = #{sessionId}
       AND id = #{id}
   </select>
@@ -851,7 +875,7 @@
   <select id="getTurnByIdForUpdate" resultMap="turnResult" flushCache="true" useCache="false">
     SELECT id, workspace_id, session_id, requested_by_user_id, status,
            terminal_reason, skill_key, skill_version, scope_json,
-           mission_run_id, mission_segment_id, privacy_generation, privacy_taint_seq,
+           mission_run_id, mission_segment_id, privacy_generation, organization_privacy_generation, privacy_taint_seq,
            privacy_mode, streamed, partial_content,
            partial_content_utf16_offset, cancel_requested_at, created_at, updated_at
     FROM ai_chat_turn
@@ -874,11 +898,16 @@
   <select id="listTurnsByIds" resultMap="turnResult">
     SELECT id, workspace_id, session_id, requested_by_user_id, status,
            terminal_reason, skill_key, skill_version, scope_json,
-           mission_run_id, mission_segment_id, privacy_generation, privacy_taint_seq,
+           mission_run_id, mission_segment_id, privacy_generation, organization_privacy_generation, privacy_taint_seq,
            privacy_mode, streamed, partial_content,
            partial_content_utf16_offset, cancel_requested_at, created_at, updated_at
     FROM ai_chat_turn
     WHERE workspace_id = #{workspaceId}
+      AND organization_privacy_generation = #{organizationPrivacyGeneration}
+      AND EXISTS (SELECT 1 FROM ai_chat_session privacy_session
+        WHERE privacy_session.workspace_id = ai_chat_turn.workspace_id
+          AND privacy_session.id = ai_chat_turn.session_id
+          AND privacy_session.organization_privacy_generation = #{organizationPrivacyGeneration})
       AND session_id = #{sessionId}
       AND id IN
       <foreach collection="ids" item="id" open="(" separator="," close=")">
@@ -889,11 +918,16 @@
   <select id="getLatestActiveTurnBySession" resultMap="turnResult">
     SELECT id, workspace_id, session_id, requested_by_user_id, status,
            terminal_reason, skill_key, skill_version, scope_json,
-           mission_run_id, mission_segment_id, privacy_generation, privacy_taint_seq,
+           mission_run_id, mission_segment_id, privacy_generation, organization_privacy_generation, privacy_taint_seq,
            privacy_mode, streamed, partial_content,
            partial_content_utf16_offset, cancel_requested_at, created_at, updated_at
     FROM ai_chat_turn
     WHERE workspace_id = #{workspaceId}
+      AND organization_privacy_generation = #{organizationPrivacyGeneration}
+      AND EXISTS (SELECT 1 FROM ai_chat_session privacy_session
+        WHERE privacy_session.workspace_id = ai_chat_turn.workspace_id
+          AND privacy_session.id = ai_chat_turn.session_id
+          AND privacy_session.organization_privacy_generation = #{organizationPrivacyGeneration})
       AND session_id = #{sessionId}
       AND status IN ('queued', 'running')
     ORDER BY id DESC
@@ -997,12 +1031,12 @@
   <insert id="insertToolCall" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO ai_chat_tool_call
       (workspace_id, message_id, tool_name, status, arguments_json,
-       thought_signature, idempotency_key, server_proposal, mission_run_id, artifact_origin, privacy_generation)
+       thought_signature, idempotency_key, server_proposal, mission_run_id, artifact_origin, privacy_generation, organization_privacy_generation)
     VALUES
       (#{workspaceId}, #{messageId}, #{toolName}, #{status},
        #{argumentsJson,jdbcType=VARCHAR}, #{thoughtSignature,jdbcType=LONGVARCHAR},
        #{idempotencyKey,jdbcType=VARCHAR}, #{serverProposal}, #{missionRunId,jdbcType=INTEGER},
-       #{artifactOrigin}, #{privacyGeneration,jdbcType=BIGINT})
+       #{artifactOrigin}, #{privacyGeneration,jdbcType=BIGINT}, #{organizationPrivacyGeneration})
   </insert>
 
   <select id="getToolCallById" resultMap="toolCallResult">
@@ -1019,7 +1053,7 @@
            CAST(tc.arguments_json AS BINARY) AS arguments_json, tc.thought_signature, CAST(tc.result_json AS BINARY) AS result_json,
            tc.executed_by_user_id, tc.executed_at,
            tc.idempotency_key, tc.server_proposal, tc.mission_run_id, tc.artifact_origin,
-           tc.privacy_generation, tc.created_at, tc.updated_at
+           tc.privacy_generation, tc.organization_privacy_generation, tc.created_at, tc.updated_at
     FROM ai_chat_tool_call tc
     JOIN ai_chat_message m
       ON m.workspace_id = tc.workspace_id AND m.id = tc.message_id
@@ -1034,7 +1068,7 @@
            CAST(tc.arguments_json AS BINARY) AS arguments_json, tc.thought_signature, CAST(tc.result_json AS BINARY) AS result_json,
            tc.executed_by_user_id, tc.executed_at,
            tc.idempotency_key, tc.server_proposal, tc.mission_run_id, tc.artifact_origin,
-           tc.privacy_generation, tc.created_at, tc.updated_at
+           tc.privacy_generation, tc.organization_privacy_generation, tc.created_at, tc.updated_at
     FROM ai_chat_tool_call tc
     JOIN ai_chat_message m
       ON m.workspace_id = tc.workspace_id AND m.id = tc.message_id
@@ -1057,7 +1091,7 @@
            CAST(tc.arguments_json AS BINARY) AS arguments_json, tc.thought_signature, CAST(tc.result_json AS BINARY) AS result_json,
            tc.executed_by_user_id, tc.executed_at,
            tc.idempotency_key, tc.server_proposal, tc.mission_run_id, tc.artifact_origin,
-           tc.privacy_generation, tc.created_at, tc.updated_at
+           tc.privacy_generation, tc.organization_privacy_generation, tc.created_at, tc.updated_at
     FROM ai_chat_tool_call tc
     JOIN ai_chat_message m
       ON m.workspace_id = tc.workspace_id AND m.id = tc.message_id
@@ -1086,6 +1120,7 @@
       ON boundary.workspace_id = m.workspace_id AND boundary.session_id = m.session_id
       AND boundary.id = #{afterMessageId}
     WHERE tc.workspace_id = #{workspaceId}
+      AND <include refid="eligibleReactiveTool"/>
       AND m.session_id = #{sessionId}
       AND tc.status = 'proposed'
       AND tc.server_proposal = TRUE
@@ -1100,7 +1135,7 @@
            CAST(tc.arguments_json AS BINARY) AS arguments_json, tc.thought_signature, CAST(tc.result_json AS BINARY) AS result_json,
            tc.executed_by_user_id, tc.executed_at,
            tc.idempotency_key, tc.server_proposal, tc.mission_run_id, tc.artifact_origin,
-           tc.privacy_generation, tc.created_at, tc.updated_at
+           tc.privacy_generation, tc.organization_privacy_generation, tc.created_at, tc.updated_at
     FROM ai_chat_tool_call tc
     JOIN ai_chat_message m
       ON m.workspace_id = tc.workspace_id AND m.id = tc.message_id
@@ -1118,7 +1153,7 @@
            CAST(tc.arguments_json AS BINARY) AS arguments_json, tc.thought_signature, CAST(tc.result_json AS BINARY) AS result_json,
            tc.executed_by_user_id, tc.executed_at,
            tc.idempotency_key, tc.server_proposal, tc.mission_run_id, tc.artifact_origin,
-           tc.privacy_generation, tc.created_at, tc.updated_at
+           tc.privacy_generation, tc.organization_privacy_generation, tc.created_at, tc.updated_at
     FROM ai_chat_tool_call tc
     JOIN ai_chat_message m
       ON m.workspace_id = tc.workspace_id AND m.id = tc.message_id

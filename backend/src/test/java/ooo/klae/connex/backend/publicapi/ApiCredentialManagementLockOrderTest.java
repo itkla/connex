@@ -78,6 +78,7 @@ class ApiCredentialManagementLockOrderTest {
             workspaceMapper,
             userMapper,
             organizationMapper,
+            mock(ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService.class),
             mock(OrgMemberService.class),
             mock(OrgAllowedDomainService.class),
             roleMapper,

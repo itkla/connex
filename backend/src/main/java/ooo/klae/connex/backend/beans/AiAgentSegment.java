@@ -11,6 +11,7 @@ import lombok.NoArgsConstructor;
 public class AiAgentSegment {
     private int id;
     private int workspaceId;
+    private long organizationPrivacyGeneration;
     private int runId;
     private int segmentNo;
     private int attemptNo;

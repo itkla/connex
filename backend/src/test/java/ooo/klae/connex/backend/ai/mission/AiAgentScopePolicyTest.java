@@ -139,6 +139,6 @@ class AiAgentScopePolicyTest {
 
     private static AiChatQueuedTurn turn(int turnId) {
         return new AiChatQueuedTurn(7, 11, 13, turnId, 19, 3, 23, false, List.of(), List.of(),
-                AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(7, 13, 4, 3));
+                AiPrivacyMode.MASKED, false, AiChatQueryScope.none(), new AiChatPrivacyToken(7, 13, 4, 3, 1, 1L));
     }
 }

@@ -50,7 +50,18 @@ class AiProposalSetStorageArchTest {
         String sql = mapper.getDocumentElement().getTextContent().toLowerCase();
         assertFalse(sql.contains("on duplicate key"));
         assertFalse(sql.contains("replace into"));
-        assertFalse(sql.contains("for update"));
+        var selects = mapper.getElementsByTagName("select");
+        int lockingReads = 0;
+        for (int index = 0; index < selects.getLength(); index++) {
+            var select = (org.w3c.dom.Element) selects.item(index);
+            if (select.getTextContent().toLowerCase(java.util.Locale.ROOT).contains("for update")) {
+                assertEquals("lockByKey", select.getAttribute("id"));
+                assertEquals("true", select.getAttribute("flushCache"));
+                assertEquals("false", select.getAttribute("useCache"));
+                lockingReads++;
+            }
+        }
+        assertEquals(1, lockingReads);
         assertFalse(sql.contains(" limit "));
         Document chat = mapper("AiChatMapper");
         var inserts = chat.getElementsByTagName("insert");

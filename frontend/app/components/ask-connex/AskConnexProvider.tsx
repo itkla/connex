@@ -299,6 +299,14 @@ function isActiveTurnStatus(status: string): boolean {
     return status === 'accepted' || status === 'queued' || status === 'running';
 }
 
+/** Unknown provenance is withheld once a committed workspace cutoff has been observed. */
+function isInvalidatedAiChatSession(session: AiChatSession, cutoff: bigint | undefined): boolean {
+    if (cutoff === undefined) return false;
+    const generation = session.organizationPrivacyGeneration;
+    return typeof generation !== 'string' || generation.length > 19 || !/^[1-9][0-9]*$/.test(generation)
+        || BigInt(generation) > BigInt('9223372036854775807') || BigInt(generation) <= cutoff;
+}
+
 function routeSessionId(value: string | string[] | undefined): number | null {
     const candidate = Array.isArray(value) ? value[0] : value;
     if (candidate === undefined || !/^[1-9]\d*$/.test(candidate)) return null;
@@ -534,6 +542,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const [freshMessageIds, setFreshMessageIds] = useState<ReadonlySet<number>>(new Set());
     const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error' | 'forbidden'>('loading');
     const [loadError, setLoadError] = useState<Error | null>(null);
+    const [privacyUnavailable, setPrivacyUnavailable] = useState(false);
+    const [privacyInitializing, setPrivacyInitializing] = useState(false);
     const [composer, setComposer] = useState('');
     const [fileAttachments, setFileAttachments] = useState<AskConnexFileAttachment[]>([]);
     const [featureUnavailable, setFeatureUnavailable] = useState(false);
@@ -578,10 +588,16 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const identityControllerRef = useRef<AbortController | null>(null);
     const sessionControllerRef = useRef<AbortController | null>(null);
     const sessionContentControllerRef = useRef(new AbortController());
+    /** A v1 withdrawal stays hidden until the member explicitly reloads or selects the session. */
+    const withdrawnSessionsRef = useRef(new Set<string>());
+    const retiredSessionsRef = useRef(new Set<string>());
     const tempMessageIdRef = useRef(-1);
     const sessionCreationRef = useRef<Promise<AiChatSession> | null>(null);
     const sessionEpochRef = useRef(0);
     const activeSessionRef = useRef<AiChatSession | null>(null);
+    const knownSessionsRef = useRef<AiChatSession[]>([]);
+    const workspacePrivacyCutoffsRef = useRef(new Map<number, bigint>());
+    const scopePrivacyEpochRef = useRef(0);
     const typingRef = useRef(false);
     const sessionsRefreshVersionRef = useRef(0);
     const transcriptRefreshVersionRef = useRef(0);
@@ -744,6 +760,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         activeSessionRef.current = activeSession;
     }, [activeSession]);
 
+    useLayoutEffect(() => {
+        knownSessionsRef.current = [...sessions, ...invitations];
+    }, [invitations, sessions]);
+
     useEffect(() => {
         typingRef.current = composer.trim().length > 0;
         composerRef.current = askConnexMessageContent(composer);
@@ -790,6 +810,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         if (scopePreviewKey === null) return;
         if (permission !== 'granted' || activeWorkspaceId === null || switching) return;
         const controller = new AbortController();
+        const privacyEpoch = scopePrivacyEpochRef.current;
         const timer = window.setTimeout(() => {
             const declared = scopeRequestRef.current;
             if (declared === null) return;
@@ -801,7 +822,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 },
                 { signal: controller.signal },
             ).then((preview) => {
-                if (controller.signal.aborted) return;
+                if (controller.signal.aborted || scopePrivacyEpochRef.current !== privacyEpoch) return;
                 setScopeInterpretation({
                     key: scopePreviewKey,
                     state: {
@@ -812,7 +833,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                     },
                 });
             }).catch((error: unknown) => {
-                if (controller.signal.aborted) return;
+                if (controller.signal.aborted || scopePrivacyEpochRef.current !== privacyEpoch) return;
                 const status = error instanceof ApiError ? error.status : null;
                 const state: AskConnexScopePreviewState = status === 400
                     ? { status: 'refused', reason: scopeRefusalReason(error) }
@@ -828,7 +849,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             window.clearTimeout(timer);
             controller.abort();
         };
-    }, [activeWorkspaceId, permission, scopePreviewKey, scopeRoutingContent, switching]);
+    }, [activeWorkspaceId, missionContentVersion, permission, scopePreviewKey, scopeRoutingContent, switching]);
 
     useEffect(() => {
         workspaceSessionIdRef.current = workspaceSessionId;
@@ -889,9 +910,17 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         streamStore.publish(null);
     }, [streamStore]);
 
-    /** Withdraws every local content projection before reloading a privacy-invalidated session. */
-    const invalidateSessionContent = useCallback((sessionId: number) => {
+    /** Withdraws local content; only organization-generation invalidation retires the session. */
+    const invalidateSessionContent = useCallback((sessionId: number, retire = false) => {
+        withdrawnSessionsRef.current.add(`${activeWorkspaceId}:${sessionId}`);
+        if (retire) retiredSessionsRef.current.add(`${activeWorkspaceId}:${sessionId}`);
+        sessionsRefreshVersionRef.current += 1;
+        setSessions((current) => current.filter((session) => session.id !== sessionId));
+        setInvitations((current) => current.filter((session) => session.id !== sessionId));
         if (activeSessionRef.current?.id !== sessionId) return;
+        scopePrivacyEpochRef.current += 1;
+        sessionEpochRef.current += 1;
+        sessionControllerRef.current?.abort();
         sessionContentControllerRef.current.abort();
         sessionContentControllerRef.current = new AbortController();
         transcriptRefreshVersionRef.current += 1;
@@ -909,11 +938,21 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         setNarration(null);
         setTodos(null);
         setComposer('');
+        setFileAttachments([]);
+        setScopeDraft(EMPTY_ASK_CONNEX_SCOPE_DRAFT);
+        setScopeInterpretation(null);
+        setScopeRoutingContent('');
+        setScopeEditorOpen(false);
+        setParticipants([]);
+        setPresence(null);
+        setTurnRecovery(null);
+        setPrivacyUnavailable(true);
         dispatchTurn({ type: 'reset' });
         dispatchToolCalls({ type: 'reset' });
         setMissionContentVersion((version) => version + 1);
-        setReloadVersion((version) => version + 1);
-    }, [resetStream, turnKey]);
+        setLoadState('ready');
+        setLoadError(null);
+    }, [activeWorkspaceId, resetStream, turnKey]);
 
     /** A removed followed turn withdraws its buffered content even when cleanup frames were missed. */
     const loadFollowedTurn = useCallback(async (
@@ -1291,9 +1330,12 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             getAiChatInvitations({ page: 1, size: 25 }, { signal }),
         ]);
         if (signal.aborted || refreshVersion !== sessionsRefreshVersionRef.current) return [];
-        setSessions(page.items.filter((session) => !session.archived));
-        setInvitations(invitationPage.items.filter((session) => !session.archived));
-        return page.items;
+        const eligible = (session: AiChatSession) => !retiredSessionsRef.current.has(`${session.workspaceId}:${session.id}`)
+            && !isInvalidatedAiChatSession(session, workspacePrivacyCutoffsRef.current.get(session.workspaceId));
+        const current = page.items.filter(eligible);
+        setSessions(current.filter((session) => !session.archived));
+        setInvitations(invitationPage.items.filter((session) => eligible(session) && !session.archived));
+        return current;
     }, []);
 
     const refreshCollaboration = useCallback(async (
@@ -1321,6 +1363,11 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         toolCalls: AiAssistantToolCall[];
         refreshVersion: number;
     } | null> => {
+        const sessionIdentity = `${activeWorkspaceId}:${sessionId}`;
+        if (retiredSessionsRef.current.has(sessionIdentity)) {
+            setLoadState('ready');
+            return null;
+        }
         const refreshVersion = ++transcriptRefreshVersionRef.current;
         const recovery = recoveryTurnRef.current;
         const terminalTurnId = settledTurnId ?? (
@@ -1341,7 +1388,15 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             getAiAssistantToolCalls(sessionId, {}, { signal }),
             getAiAssistantToolCalls(sessionId, { pendingOnly: true }, { signal }),
         ]);
-        if (signal.aborted || refreshVersion !== transcriptRefreshVersionRef.current) return null;
+        if (signal.aborted || refreshVersion !== transcriptRefreshVersionRef.current
+                || retiredSessionsRef.current.has(sessionIdentity)) return null;
+        if (isInvalidatedAiChatSession(firstDetail.session,
+                workspacePrivacyCutoffsRef.current.get(firstDetail.session.workspaceId))) {
+            invalidateSessionContent(sessionId, true);
+            setPrivacyUnavailable(true);
+            setLoadState('ready');
+            return null;
+        }
         const nextMessages = await loadAskConnexLatestMessages(
             firstDetail.messages,
             ASK_CONNEX_MESSAGE_PAGE_SIZE,
@@ -1354,7 +1409,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 return detail.messages;
             },
         );
-        if (signal.aborted || refreshVersion !== transcriptRefreshVersionRef.current) return null;
+        if (signal.aborted || refreshVersion !== transcriptRefreshVersionRef.current
+                || retiredSessionsRef.current.has(sessionIdentity)) return null;
         const nextToolCalls = mergeAskConnexToolCalls(historicalToolCalls, pendingToolCalls);
         dispatchTurn({ type: 'toolsObserved', sessionId, toolCalls: nextToolCalls });
         let terminalEvidence: AiChatTurn | null = null;
@@ -1362,11 +1418,13 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             try {
                 terminalEvidence = await loadFollowedTurn(sessionId, terminalTurnId, signal);
             } catch (error) {
-                if (signal.aborted || refreshVersion !== transcriptRefreshVersionRef.current) return null;
+                if (signal.aborted || refreshVersion !== transcriptRefreshVersionRef.current
+                || retiredSessionsRef.current.has(sessionIdentity)) return null;
                 throw error;
             }
         }
-        if (signal.aborted || refreshVersion !== transcriptRefreshVersionRef.current) return null;
+        if (signal.aborted || refreshVersion !== transcriptRefreshVersionRef.current
+                || retiredSessionsRef.current.has(sessionIdentity)) return null;
         if (terminalEvidence !== null) dispatchTurn({ type: 'reconciled', turn: terminalEvidence });
         const reconciled = reconcileAskConnexDurableMessages(messagesRef.current, nextMessages, animateNew);
         messagesRef.current = reconciled.messages;
@@ -1393,13 +1451,15 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         ));
         setActiveSession(firstDetail.session);
         activeSessionRef.current = firstDetail.session;
+        setPrivacyUnavailable(false);
         if (firstDetail.session.visibility === 'shared') {
             await refreshCollaboration(sessionId, signal);
         } else {
             setParticipants([]);
             setPresence(null);
         }
-        if (signal.aborted || refreshVersion !== transcriptRefreshVersionRef.current) return null;
+        if (signal.aborted || refreshVersion !== transcriptRefreshVersionRef.current
+                || retiredSessionsRef.current.has(sessionIdentity)) return null;
         setLoadState('ready');
         setLoadError(null);
         return {
@@ -1409,9 +1469,11 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             toolCalls: nextToolCalls,
             refreshVersion,
         };
-    }, [loadFollowedTurn, refreshCollaboration]);
+    }, [activeWorkspaceId, invalidateSessionContent, loadFollowedTurn, refreshCollaboration]);
 
     const clearActiveSession = useCallback(() => {
+        setPrivacyUnavailable(false);
+        setPrivacyInitializing(false);
         sessionEpochRef.current++;
         sessionControllerRef.current?.abort();
         transcriptRefreshVersionRef.current += 1;
@@ -1681,8 +1743,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                     return;
                 }
                 selectionLoadStarted = true;
+                withdrawnSessionsRef.current.delete(`${activeWorkspaceId}:${selectedSessionId}`);
                 const detail = await refreshTranscript(selectedSessionId, controller.signal, false);
                 if (controller.signal.aborted) return;
+                if (detail === null) return;
                 if (storedTurn?.sessionId === selectedSessionId) {
                     dispatchTurn({
                         type: 'accepted',
@@ -1701,6 +1765,14 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 if (selectionLoadStarted && error instanceof ApiError
                         && (error.status === 403 || error.status === 404)) {
                     clearActiveSession();
+                    setPrivacyUnavailable(true);
+                    return;
+                }
+                if (error instanceof ApiError && error.status === 503
+                        && (error.message === 'assistant_privacy_initializing'
+                            || error.message === 'ai_privacy_initialization_pending')) {
+                    setPrivacyInitializing(true);
+                    setLoadState('ready');
                     return;
                 }
                 if (error instanceof ApiError && error.status === 403) {
@@ -1750,6 +1822,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         dispatchToolCalls({ type: 'reset' });
         setLoadState('loading');
         try {
+            withdrawnSessionsRef.current.delete(`${activeWorkspaceId}:${session.id}`);
             const detail = await refreshTranscript(session.id, signal, false);
             if (workspaceMode) router.replace(`/ask-connex/${session.id}`);
             if (detail?.activeTurn) void followDurableTurn(detail.activeTurn, signal);
@@ -1763,7 +1836,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 deferApiError(error, 'toast.requestFailed');
             }
         }
-    }, [canPersist, clearActiveSession, deferApiError, followDurableTurn, refreshTranscript, resetStream, router, sessionKey, t, turnKey, working, workspaceMode]);
+    }, [activeWorkspaceId, canPersist, clearActiveSession, deferApiError, followDurableTurn, refreshTranscript, resetStream, router, sessionKey, t, turnKey, working, workspaceMode]);
 
     const newChat = useCallback(() => {
         if (working) return;
@@ -1781,7 +1854,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             return;
         }
         if (workspaceSessionId === null
-                || activeSessionRef.current?.id === workspaceSessionId) return;
+                || activeSessionRef.current?.id === workspaceSessionId
+                || withdrawnSessionsRef.current.has(`${activeWorkspaceId}:${workspaceSessionId}`)) return;
         sessionEpochRef.current++;
         sessionControllerRef.current?.abort();
         const controller = new AbortController();
@@ -1809,7 +1883,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 if (signal.aborted) return;
                 if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
                     clearActiveSession();
-                    router.replace('/ask-connex');
+                    setPrivacyUnavailable(true);
                     return;
                 }
                 setLoadError(error instanceof ApiError ? error : new Error(t('toast.requestFailed')));
@@ -1819,7 +1893,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         };
         void load();
         return () => controller.abort();
-    }, [canPersist, activeTurn, clearActiveSession, deferApiError, followDurableTurn, identity, refreshTranscript, resetStream, router, sessionKey, stateIdentity, switching, t, turnKey, workspaceMode, workspaceSessionId]);
+    }, [canPersist, activeTurn, activeWorkspaceId, clearActiveSession, deferApiError, followDurableTurn, identity, refreshTranscript, resetStream, router, sessionKey, stateIdentity, switching, t, turnKey, workspaceMode, workspaceSessionId]);
 
     const runRealtimeRefresh = useCallback(async (sessionIds: ReadonlySet<number>, signal: AbortSignal) => {
         if (signal.aborted) return;
@@ -1870,8 +1944,22 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
 
     useEffect(() => {
         if (userId === null || activeWorkspaceId === null || switching) return;
-        let connectedBefore = false;
         const socket = createAiChatSocket({
+            onPrivacyFrame: (frame) => {
+                if (frame.workspaceId !== activeWorkspaceId) return;
+                const cutoff = BigInt(frame.cutoffGeneration);
+                const previous = workspacePrivacyCutoffsRef.current.get(frame.workspaceId);
+                if (previous !== undefined && previous >= cutoff) return;
+                workspacePrivacyCutoffsRef.current.set(frame.workspaceId, cutoff);
+                sessionsRefreshVersionRef.current += 1;
+                const active = activeSessionRef.current;
+                const known = active === null ? knownSessionsRef.current : [...knownSessionsRef.current, active];
+                for (const session of known) {
+                    if (isInvalidatedAiChatSession(session, cutoff)) {
+                        invalidateSessionContent(session.id, true);
+                    }
+                }
+            },
             onFrame: (frame) => {
                 if (frame.workspaceId !== activeWorkspaceId) return;
                 if (frame.kind === 'thinking') {
@@ -1917,10 +2005,6 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             onDelta: handleStreamDelta,
             onStatusChange: (status) => {
                 if (status !== 'connected') return;
-                if (!connectedBefore) {
-                    connectedBefore = true;
-                    return;
-                }
                 const signal = identityControllerRef.current?.signal;
                 if (!signal || signal.aborted) return;
                 const sessionId = activeSessionRef.current?.id;
@@ -2091,6 +2175,12 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             origin,
         ).then((createdSession) => {
             if (signal.aborted) throw signal.reason;
+            if (isInvalidatedAiChatSession(createdSession,
+                    workspacePrivacyCutoffsRef.current.get(createdSession.workspaceId))) {
+                invalidateSessionContent(createdSession.id, true);
+                setPrivacyUnavailable(true);
+                throw new ApiError('assistant_privacy_unavailable', 409);
+            }
             setActiveSession(createdSession);
             activeSessionRef.current = createdSession;
             setSessions((current) => [
@@ -2106,7 +2196,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         });
         sessionCreationRef.current = creation;
         return creation;
-    }, [canPersist, activeSession, router, sessionKey, t, workspaceMode]);
+    }, [canPersist, activeSession, invalidateSessionContent, router, sessionKey, t, workspaceMode]);
 
     const uploadErrorMessage = useCallback((error: unknown): string => {
         const workspaceMessage = workspaceUnavailableDescription(error, tRoot);
@@ -2435,6 +2525,12 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                         workspacePinnedRequest(originWorkspaceId, { signal: activeSignal }),
                     );
                     if (activeSignal.aborted) return;
+                    if (isInvalidatedAiChatSession(createdSession,
+                            workspacePrivacyCutoffsRef.current.get(createdSession.workspaceId))) {
+                        invalidateSessionContent(createdSession.id, true);
+                        setPrivacyUnavailable(true);
+                        return;
+                    }
                     session = createdSession;
                     setActiveSession(createdSession);
                     activeSessionRef.current = createdSession;
@@ -2540,7 +2636,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             submittingRef.current = false;
             setSubmitting(false);
         }
-    }, [canPersist, activeSession, activeWorkspaceId, composer, corrections, featureUnavailable, fileContextCount, fileOperationPending, followTurn, permission, refreshTranscript, resetStream, router, scopeBlocked, scopePreviewKey, scopeRequest, sessionKey, showApiError, sourceRecord, sourceSelection, submissionBlocked, t, turn.phase, turnKey, userDisplayName, userId, workspaceMode]);
+    }, [canPersist, activeSession, activeWorkspaceId, composer, corrections, featureUnavailable, invalidateSessionContent, fileContextCount, fileOperationPending, followTurn, permission, refreshTranscript, resetStream, router, scopeBlocked, scopePreviewKey, scopeRequest, sessionKey, showApiError, sourceRecord, sourceSelection, submissionBlocked, t, turn.phase, turnKey, userDisplayName, userId, workspaceMode]);
 
     const retryPrompt = askConnexBoundRetryPrompt(turnRecovery?.target ?? null, turn, messages, toolCalls);
     const turnWriteState = askConnexTurnWriteState(turn, toolCalls,
@@ -2653,6 +2749,12 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     }, []);
 
     const unavailable = useMemo(() => {
+        if (privacyInitializing) {
+            return { title: t('unavailable.lookupTitle'), body: t('privacyInitializing') };
+        }
+        if (privacyUnavailable) {
+            return { title: t('unavailable.lookupTitle'), body: t('privacyUnavailable') };
+        }
         if (permission === 'denied') {
             return { title: t('unavailable.permissionTitle'), body: t('unavailable.permissionBody') };
         }
@@ -2669,7 +2771,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             return { title: t('unavailable.uncertainTitle'), body: t('unavailable.uncertainBody') };
         }
         return null;
-    }, [permission, submissionBlocked, t, featureUnavailable]);
+    }, [permission, privacyInitializing, privacyUnavailable, submissionBlocked, t, featureUnavailable]);
 
     const canRetryTurn = retryPrompt !== null
         && unavailable === null
@@ -3250,6 +3352,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 {children}
             </AskConnexMountContext.Provider>
             <AskConnexDrawer
+                key={`${activeWorkspaceId}:${missionContentVersion}`}
                 open={open}
                 instantOpen={instantOpen}
                 isMobile={isMobile}

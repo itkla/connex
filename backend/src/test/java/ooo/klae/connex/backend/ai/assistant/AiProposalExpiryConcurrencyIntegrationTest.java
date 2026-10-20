@@ -73,6 +73,20 @@ class AiProposalExpiryConcurrencyIntegrationTest extends AbstractAiProposalExpir
     }
 
     @Test
+    void organizationAuthorityWaitCrossingDeadlineRefusesWithoutGenerationChange() throws Exception {
+        Proposal proposal = proposal("update_record_fields", "company", Map.of("industry", "Late industry"));
+        Long generation = jdbc.queryForObject(
+                "SELECT generation FROM ai_assistant_privacy_fence WHERE organization_id=?",
+                Long.class, organization.getId());
+        assertRefusalAfterWait(proposal, new LockRow("ai_assistant_privacy_fence",
+                "SELECT generation FROM ai_assistant_privacy_fence WHERE organization_id=? FOR UPDATE",
+                List.of(organization.getId())), false);
+        assertEquals(generation, jdbc.queryForObject(
+                "SELECT generation FROM ai_assistant_privacy_fence WHERE organization_id=?",
+                Long.class, organization.getId()));
+    }
+
+    @Test
     void contentionMatrixCoversEveryExecutableToolAndDeclaredTargetBranch() {
         Set<String> actual = toolsAndKinds().map(arguments -> {
             Object[] values = arguments.get();
@@ -211,7 +225,7 @@ class AiProposalExpiryConcurrencyIntegrationTest extends AbstractAiProposalExpir
         assertEquals(other.getId(), jdbc.queryForObject(
                 "SELECT owner_id FROM person WHERE workspace_id = ? AND id = ?",
                 Integer.class, workspace.getId(), person.getId()));
-        assertEquals("executed", chats.getToolCallBySession(workspace.getId(), proposal.sessionId(), proposal.id()).getStatus());
+        assertEquals("executed", chats.getToolCallBySession(workspace.getId(), proposal.sessionId(), proposal.id(), 1L).getStatus());
     }
 
     @ParameterizedTest
@@ -235,7 +249,7 @@ class AiProposalExpiryConcurrencyIntegrationTest extends AbstractAiProposalExpir
         assertPending(proposal);
         now.set(originalNow);
         execute(proposal);
-        assertEquals("executed", chats.getToolCallBySession(workspace.getId(), proposal.sessionId(), proposal.id()).getStatus());
+        assertEquals("executed", chats.getToolCallBySession(workspace.getId(), proposal.sessionId(), proposal.id(), 1L).getStatus());
     }
 
     private void assertRefusalAfterWait(Proposal proposal, LockRow row, boolean discard) throws Exception {
@@ -326,7 +340,7 @@ class AiProposalExpiryConcurrencyIntegrationTest extends AbstractAiProposalExpir
             assertEquals(before, domainSnapshot());
         } else {
             execute(proposal);
-            assertEquals("executed", chats.getToolCallBySession(workspace.getId(), proposal.sessionId(), proposal.id()).getStatus());
+            assertEquals("executed", chats.getToolCallBySession(workspace.getId(), proposal.sessionId(), proposal.id(), 1L).getStatus());
             if (changesDomain) {
                 assertNotEquals(before, domainSnapshot(), "The before-deadline control must perform the intended action");
             } else {

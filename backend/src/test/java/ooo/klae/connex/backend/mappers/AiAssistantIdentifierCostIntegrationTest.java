@@ -37,6 +37,7 @@ import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantIdentifierResolver;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantSessionReadAudit;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolExecutor;
+import ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard;
 import ooo.klae.connex.backend.ai.assistant.AiChatTurnPersistenceService;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseService;
 import ooo.klae.connex.backend.ai.masking.MaskingEngine;
@@ -60,6 +61,7 @@ class AiAssistantIdentifierCostIntegrationTest extends AbstractMapperTest {
     @Autowired private PlatformTransactionManager transactionManager;
     @Autowired private SqlSessionFactory sessions;
     @Autowired private AiChatMapper chatMapper;
+    @Autowired private AiChatPrivacyGuard privacyGuard;
     @Autowired private AttachmentMapper attachments;
     @Autowired private WorkspaceService workspaceService;
     @Autowired private OrganizationWorkspaceScopeControlAccess scope;
@@ -80,7 +82,7 @@ class AiAssistantIdentifierCostIntegrationTest extends AbstractMapperTest {
         user = newUser();
         jdbc.update("UPDATE workspace_member SET role = 'owner' WHERE workspace_id = ? AND user_id = ?",
                 workspace.getId(), user.getId());
-        jdbc.update("INSERT INTO ai_chat_session (workspace_id, created_by_user_id, title) VALUES (?, ?, 'Cost fixture')",
+        jdbc.update("INSERT INTO ai_chat_session (workspace_id, created_by_user_id, title, organization_privacy_generation) VALUES (?, ?, 'Cost fixture', 1)",
                 workspace.getId(), user.getId());
         sessionId = jdbc.queryForObject("SELECT id FROM ai_chat_session WHERE workspace_id = ?", Integer.class, workspace.getId());
     }
@@ -155,7 +157,7 @@ class AiAssistantIdentifierCostIntegrationTest extends AbstractMapperTest {
         var timedChat = mock(AiChatMapper.class, delegatesTo(chatMapper));
         var governance = mock(AiWorkspaceGovernanceService.class);
         when(governance.isEnabled(workspace.getId())).thenReturn(true);
-        var queue = new AiChatTurnPersistenceService(timedChat, attachments, currentWorkspace,
+        var queue = new AiChatTurnPersistenceService(privacyGuard, timedChat, attachments, currentWorkspace,
                 new AiRestrictionEpoch(), governance, timedResolver, mock(AiAssistantToolExecutor.class),
                 mock(AiAssistantSessionReadAudit.class), Clock.systemUTC(), mock(AiChatRealtimeDispatcher.class),
                 JsonMapper.builder().build(), mock(AiRunLeaseService.class), ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());

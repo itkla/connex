@@ -118,3 +118,16 @@ exception for synthetic disabled proofs is confined to disabled mode and documen
 internal read path for denied bytes; it never returns that stream to a controller. Legacy migration
 requires a CLEAN proof before its deterministic write. Lifecycle states, administrative operations,
 and rollback restrictions are specified in `docs/MALWARE_SCANNING.md`.
+
+## Assistant erasure obligations (V237)
+
+Before removing an affected chat reference, ordered cleanup locks all same-workspace URL references
+and the exact attachment. A valid independently retained CRM reference records a retained
+disposition with its exact id. Otherwise deletion enqueue and an operation-bound pending obligation
+commit together. The exact queue executor records deleted only with final successful deletion,
+quota settlement and queue removal. Provider failure, rollback, canceled/missing queue rows and
+ambiguous completion remain pending. A crash after provider deletion retries safely.
+
+Quarantine administration defers chat-owned deletion to privacy cleanup so it cannot discard the
+association before discovery. Actual chat-byte delivery checks original organization authority at
+each output write. Export filters row/object candidates and independently guards live output.

@@ -125,6 +125,9 @@ public class SeederBatchWriter {
         organizationMapper.insert(organization);
         flush();
         requireGeneratedId("organization", organization.getId());
+        var privacyMapper = batchSession.getMapper(ooo.klae.connex.backend.mappers.AiAssistantPrivacyControlMapper.class);
+        ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService.provisionControl(privacyMapper, organization.getId());
+        flush();
 
         Workspace workspace = generator.workspace(workspaceSeed, workspaceIndex, organization.getId());
         workspaceMapper.insert(workspace);

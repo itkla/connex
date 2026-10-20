@@ -363,9 +363,9 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
                 assertTrue(revoked.await(10, TimeUnit.SECONDS));
             }
             return realChatMapper.getAccessibleSessionById(
-                    workspace.getId(), firstActor.getId(), proposal.sessionId());
+                    workspace.getId(), firstActor.getId(), proposal.sessionId(), 1L);
         }).when(chatMapperSpy).getAccessibleSessionById(
-                workspace.getId(), firstActor.getId(), proposal.sessionId());
+                workspace.getId(), firstActor.getId(), proposal.sessionId(), 1L);
         ExecutorService executor = Executors.newSingleThreadExecutor();
 
         try {
@@ -691,6 +691,7 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
         AiChatMessage message = message(session, actor);
         AiChatTurn turn = new AiChatTurn();
         turn.setWorkspaceId(workspace.getId());
+        turn.setOrganizationPrivacyGeneration(1L);
         turn.setSessionId(session.getId());
         turn.setRequestedByUserId(actor.getId());
         turn.setStatus("running");
@@ -701,7 +702,7 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
                 workspace.getId(), actor.getId(), session.getId(), turn.getId(),
                 message.getId(), message.getSeq(), expectedEpoch, true, List.of(), List.of(),
                 AiPrivacyMode.MASKED, false, AiChatQueryScope.none(),
-                new AiChatPrivacyToken(workspace.getId(), session.getId(), 1, null));
+                new AiChatPrivacyToken(workspace.getId(), session.getId(), 1, null, organization.getId(), 1L));
         return new ToolFixture(session.getId(), toolCall.getId(), queued);
     }
 
@@ -853,6 +854,7 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
     private AiChatSession session(User actor) {
         AiChatSession session = new AiChatSession();
         session.setWorkspaceId(workspace.getId());
+        session.setOrganizationPrivacyGeneration(1L);
         session.setCreatedByUserId(actor.getId());
         session.setTitle("Assistant proposal");
         session.setVisibility("private");
@@ -864,6 +866,7 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
     private AiChatMessage message(AiChatSession session, User actor) {
         AiChatMessage message = new AiChatMessage();
         message.setWorkspaceId(workspace.getId());
+        message.setOrganizationPrivacyGeneration(1L);
         message.setSessionId(session.getId());
         message.setSeq(1);
         message.setAuthorKind("user");
@@ -878,6 +881,7 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
         AiChatToolCall toolCall = new AiChatToolCall();
         toolCall.setServerProposal(true);
         toolCall.setWorkspaceId(workspace.getId());
+        toolCall.setOrganizationPrivacyGeneration(1L);
         toolCall.setMessageId(message.getId());
         toolCall.setToolName(write.toolName());
         toolCall.setStatus("proposed");
@@ -1195,7 +1199,7 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
                 edit.get(20, TimeUnit.SECONDS);
                 assertEquals("Assistant proposal target changed", approval.get(20, TimeUnit.SECONDS).getMessage());
                 assertEquals(memberTitle, jdbcTemplate.queryForObject("SELECT title FROM person WHERE id = ?", String.class, person.getId()));
-                assertEquals("proposed", chatMapper.getToolCallBySession(workspace.getId(), fixture.sessionId(), fixture.toolCallId()).getStatus());
+                assertEquals("proposed", chatMapper.getToolCallBySession(workspace.getId(), fixture.sessionId(), fixture.toolCallId(), 1L).getStatus());
             } catch (Exception | Error failure) {
                 primaryFailure = failure;
                 throw failure;
@@ -1283,7 +1287,7 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
             assertEquals(secondActor.getId(), companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), target.getId()).getOwnerId());
             authenticate(firstActor);
             AiChatToolCall stored = chatMapper.getToolCallById(workspace.getId(), jdbcTemplate.queryForObject(
-                    "SELECT message_id FROM ai_chat_tool_call WHERE id = ?", Integer.class, fixture.toolCallId()), fixture.toolCallId());
+                    "SELECT message_id FROM ai_chat_tool_call WHERE id = ?", Integer.class, fixture.toolCallId()), fixture.toolCallId(), 1L);
             assertEquals(originalLabel, objectMapper.readTree(stored.getResultJson()).path("outcome").path("owner").asString());
             AiAssistantToolResult result = writeToolService.proposalResult(prepared, new AiAssistantToolProposal(
                     fixture.toolCallId(), "executed", stored.getResultJson(), true));

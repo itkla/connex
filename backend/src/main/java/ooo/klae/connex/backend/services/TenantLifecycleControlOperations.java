@@ -40,6 +40,7 @@ public class TenantLifecycleControlOperations {
     private final UserMapper userMapper;
     private final OwnershipOfferWriter ownershipOfferWriter;
     private final org.springframework.context.ApplicationEventPublisher events;
+    private final ooo.klae.connex.backend.mappers.AiAssistantPrivacyControlMapper assistantPrivacy;
 
     /** Atomically validates an active workspace and acquires an export lease. */
     @Transactional(
@@ -354,6 +355,14 @@ public class TenantLifecycleControlOperations {
                 || mapper.countOperationLeasesInOrg(orgId) != 0) {
             throw new IllegalStateException("Organization still has workspace roots");
         }
+        ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyPublicationGuard.retainInvalidation(orgId);
+        if (assistantPrivacy.lockFence(orgId) == null
+                || assistantPrivacy.countIncompleteOperations(orgId) != 0) {
+            throw new ConflictException("assistant_privacy_initializing");
+        }
+        assistantPrivacy.deleteWorkspaceIntents(orgId);
+        assistantPrivacy.deleteOperations(orgId);
+        assistantPrivacy.deleteFence(orgId);
         ownershipOfferWriter.invalidateScopeBeforeRootDeletionLocked(orgId, null);
         if (mapper.deleteOrganization(orgId) != 1) {
             throw new IllegalStateException("Organization lifecycle root was not deleted");

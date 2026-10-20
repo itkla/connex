@@ -96,6 +96,8 @@ public class AiBriefRunService {
     private final ObjectMapper objectMapper;
     private final PlatformTransactionManager transactionManager;
     private final Clock clock;
+    private final ooo.klae.connex.backend.mappers.AiChatMapper chatMapper;
+    private final AiChatPrivacyGuard privacyGuard;
 
     /** The outcome of one scheduled brief pass, recorded for observability. */
     public enum Outcome { STARTED, DELIVERED, SKIPPED, FAILED }
@@ -187,7 +189,7 @@ public class AiBriefRunService {
         try {
             owner = userService.getActiveWorkspaceUser(
                     schedule.getWorkspaceId(), schedule.getUserId());
-        } catch (ResourceNotFoundException | ForbiddenException exception) {
+        } catch (ResourceNotFoundException | ForbiddenException | AiAssistantLoopException exception) {
             release(schedule, false, REASON_ACCESS_LOST);
             return Outcome.SKIPPED;
         }
@@ -217,13 +219,13 @@ public class AiBriefRunService {
         try {
             turn = persistenceService.readTurn(
                     schedule.getPendingSessionId(), schedule.getPendingTurnId());
-        } catch (ResourceNotFoundException | ForbiddenException exception) {
+        } catch (ResourceNotFoundException | ForbiddenException | AiAssistantLoopException exception) {
             release(schedule, false, REASON_ACCESS_LOST);
             return Outcome.SKIPPED;
         }
         String status = turn == null ? null : turn.getStatus();
         if ("resolved".equals(status)) {
-            return releaseAndNotify(schedule, owner);
+            return releaseAndNotify(schedule, owner, turn);
         }
         if ("failed".equals(status) || "timed_out".equals(status)) {
             release(schedule, false, REASON_GENERATION_FAILED);
@@ -275,12 +277,20 @@ public class AiBriefRunService {
      * @return {@link Outcome#DELIVERED} when this pass released and announced the brief,
      *     {@link Outcome#SKIPPED} when another pass had already released it
      */
-    private Outcome releaseAndNotify(AiBriefSchedule schedule, User owner) {
+    private Outcome releaseAndNotify(AiBriefSchedule schedule, User owner, AiChatTurn origin) {
         TransactionTemplate transaction = new TransactionTemplate(transactionManager);
         Boolean delivered = transaction.execute(status -> {
+            var session = chatMapper.getSessionByIdForMaintenanceUpdate(
+                    schedule.getWorkspaceId(), schedule.getPendingSessionId());
+            if (session == null || origin.getOrganizationPrivacyGeneration() <= 0
+                    || origin.getOrganizationPrivacyGeneration() != session.getOrganizationPrivacyGeneration()) {
+                return false;
+            }
+            var token = privacyGuard.capture(chatMapper, session);
             if (!release(schedule, true, null)) {
                 return false;
             }
+            privacyGuard.retain(chatMapper, token);
             notify(schedule, owner);
             return true;
         });

@@ -350,6 +350,7 @@ class WebSocketSessionSecurityIntegrationTest {
                 role.getId(), workspace.getId(), user.getId());
         AiChatSession chat = new AiChatSession();
         chat.setWorkspaceId(workspace.getId());
+        chat.setOrganizationPrivacyGeneration(1L);
         chat.setCreatedByUserId(user.getId());
         chat.setTitle("WebSocket fixture");
         chat.setVisibility("private");
@@ -361,6 +362,7 @@ class WebSocketSessionSecurityIntegrationTest {
         turn.setRequestedByUserId(user.getId());
         turn.setStatus("running");
         turn.setPrivacyGeneration(1L);
+        turn.setOrganizationPrivacyGeneration(1L);
         chats.insertTurn(turn);
         return new Account(user, workspace, chat.getId(), turn.getId());
     }

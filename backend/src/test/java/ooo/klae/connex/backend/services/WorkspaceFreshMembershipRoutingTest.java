@@ -32,6 +32,7 @@ import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.MemberDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
@@ -67,7 +68,8 @@ class WorkspaceFreshMembershipRoutingTest {
     private final TenantWorkScope scope = new TenantWorkScope(context, catalogs, workspaces, lifecycle, preparation);
     private final FreshMembershipTransaction membership = new FreshMembershipTransaction(scope, new TransactionTemplate(transactions));
     private final WorkspaceService service = new WorkspaceService(
-        workspaces, mock(UserMapper.class), mock(OrganizationMapper.class), mock(OrgMemberService.class),
+        workspaces, mock(UserMapper.class), mock(OrganizationMapper.class), mock(AiAssistantPrivacyService.class),
+        mock(OrgMemberService.class),
         mock(OrgAllowedDomainService.class), mock(RoleMapper.class), mock(NotificationMapper.class),
         offboarding, mock(WorkspaceMembershipRemovalTransaction.class), membership, scope,
         mock(NotificationDelivery.class), versions, context, audit, mock(SystemActor.class),

@@ -69,6 +69,7 @@ public class AiChatTurnPersistenceService {
     private static final String PROPOSED = "proposed";
     private static final String INACCESSIBLE = "AI assistant session is not accessible";
 
+    private final AiChatPrivacyGuard privacyGuard;
     private final AiChatMapper chatMapper;
     private final AttachmentMapper attachmentMapper;
     private final WorkspaceService workspaceService;
@@ -156,9 +157,9 @@ public class AiChatTurnPersistenceService {
         if (chatMapper.countActiveTurns(workspaceId, sessionId) != 0) {
             throw new ConflictException("Assistant session already has an active turn");
         }
-        AiChatPrivacyToken privacyToken = AiChatPrivacyGuard.capture(chatMapper, session);
+        AiChatPrivacyToken privacyToken = privacyGuard.capture(chatMapper, session);
         List<Integer> attachmentIds = attachmentMapper.getAssistantSessionAttachments(
-                workspaceId, sessionId).stream()
+                workspaceId, sessionId, privacyGuard.currentGeneration(workspaceId)).stream()
                 .map(Attachment::getId)
                 .toList();
         if (request.pageContext().size() + attachmentIds.size()
@@ -172,6 +173,7 @@ public class AiChatTurnPersistenceService {
         message.setSessionId(sessionId);
         message.setSeq(chatMapper.nextMessageSequence(workspaceId, sessionId));
         message.setPrivacyGeneration(privacyToken.privacyGeneration());
+        message.setOrganizationPrivacyGeneration(privacyToken.organizationPrivacyGeneration());
         message.setAuthorKind(USER);
         message.setAuthorUserId(userId);
         message.setContent(request.content());
@@ -185,7 +187,7 @@ public class AiChatTurnPersistenceService {
                 messageResources.register(resource.kind(), resource.id()));
         var identifiers = new ArrayList<>(identifierResolution.identifiers());
         var exactSuggestionMembers = new java.util.LinkedHashSet<String>();
-        AiChatMessage latestAnswer = chatMapper.getLatestAnswer(workspaceId, sessionId);
+        AiChatMessage latestAnswer = chatMapper.getLatestAnswer(workspaceId, sessionId, privacyGuard.currentGeneration(workspaceId));
         if (latestAnswer != null && latestAnswer.getStructuredJson() != null) {
             try {
                 AiAssistantMemberIdentifiers.suggestionIdentifiers(
@@ -218,6 +220,7 @@ public class AiChatTurnPersistenceService {
         turn.setPrivacyMode(privacyMode.name().toLowerCase(java.util.Locale.ROOT));
         turn.setStreamed(streamed);
         turn.setPrivacyGeneration(privacyToken.privacyGeneration());
+        turn.setOrganizationPrivacyGeneration(privacyToken.organizationPrivacyGeneration());
         turn.setPrivacyTaintSeq(privacyToken.taintSeqAtAdmission());
         chatMapper.insertTurn(turn);
         chatMapper.updateLastMessageAt(workspaceId, sessionId);
@@ -230,7 +233,7 @@ public class AiChatTurnPersistenceService {
         if (!this.restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(workspaceId, restrictionEpoch)) {
             throw new AiAssistantLoopException("restrictions_changed", "restrictions_changed");
         }
-        AiChatPrivacyGuard.retain(chatMapper, privacyToken);
+        privacyGuard.retain(chatMapper, privacyToken);
         sessionReadAudit.recordAccessible(workspaceId, userId, session);
         expiredTurnIds.forEach(expiredId -> releaseRunLease(workspaceId, expiredId));
         return new AiChatQueuedTurn(
@@ -292,7 +295,7 @@ public class AiChatTurnPersistenceService {
         workspaceService.lockAndRequireMember(workspaceId, userId);
         workspaceService.requirePermission(workspaceId, userId, Permission.AI_USE);
         List<Integer> activeMemberIds = activeMemberIds(workspaceId, userId);
-        AiChatSession session = requireAccessibleLocked(workspaceId, userId, sessionId);
+        AiChatSession session = requireVisibleLocked(workspaceId, userId, sessionId);
         requireActiveAuthor(session, activeMemberIds);
         AiChatTurn turn = chatMapper.getTurnByIdForUpdate(workspaceId, sessionId, turnId);
         if (turn == null) {
@@ -304,6 +307,7 @@ public class AiChatTurnPersistenceService {
         if (expired) {
             retainTerminalPrivacy(result);
         }
+        privacyGuard.retainOrganization(workspaceId, session.getOrganizationPrivacyGeneration());
         chatMapper.lockPrivacyBarrierForShare(workspaceId);
         if (!turnTokenCurrent(result)) {
             result.setPartialContent(null);
@@ -356,27 +360,27 @@ public class AiChatTurnPersistenceService {
     @Transactional(readOnly = true, propagation = Propagation.REQUIRES_NEW)
     public List<AiChatMessage> loadHistory(AiChatQueuedTurn turn, int limit) {
         requireCurrentActorRead(turn);
-        AiChatPrivacyGuard.requireCurrent(chatMapper, turn.privacyToken());
+        privacyGuard.requireCurrent(chatMapper, turn.privacyToken());
         AiChatSession session = chatMapper.getAccessibleSessionById(
-                turn.workspaceId(), turn.userId(), turn.sessionId());
+                turn.workspaceId(), turn.userId(), turn.sessionId(), privacyGuard.currentGeneration(turn.workspaceId()));
         if (session == null) {
             throw inaccessible();
         }
         return chatMapper.listRecentMessages(
-                turn.workspaceId(), turn.sessionId(), turn.userMessageSeq(), limit);
+                turn.workspaceId(), turn.sessionId(), turn.userMessageSeq(), limit, privacyGuard.currentGeneration(turn.workspaceId()));
     }
 
     /** Loads the single durable session summary after current access revalidation. */
     @Transactional(readOnly = true, propagation = Propagation.REQUIRES_NEW)
     public AiChatMessage loadHistorySummary(AiChatQueuedTurn turn) {
         requireCurrentActorRead(turn);
-        AiChatPrivacyGuard.requireCurrent(chatMapper, turn.privacyToken());
+        privacyGuard.requireCurrent(chatMapper, turn.privacyToken());
         AiChatSession session = chatMapper.getAccessibleSessionById(
-                turn.workspaceId(), turn.userId(), turn.sessionId());
+                turn.workspaceId(), turn.userId(), turn.sessionId(), privacyGuard.currentGeneration(turn.workspaceId()));
         if (session == null) {
             throw inaccessible();
         }
-        return chatMapper.getHistorySummary(turn.workspaceId(), turn.sessionId());
+        return chatMapper.getHistorySummary(turn.workspaceId(), turn.sessionId(), privacyGuard.currentGeneration(turn.workspaceId()));
     }
 
     /** Loads whole chronological transcript messages eligible for the next compaction step. */
@@ -387,14 +391,14 @@ public class AiChatTurnPersistenceService {
             int beforeSeq,
             int limit) {
         requireCurrentActorRead(turn);
-        AiChatPrivacyGuard.requireCurrent(chatMapper, turn.privacyToken());
+        privacyGuard.requireCurrent(chatMapper, turn.privacyToken());
         AiChatSession session = chatMapper.getAccessibleSessionById(
-                turn.workspaceId(), turn.userId(), turn.sessionId());
+                turn.workspaceId(), turn.userId(), turn.sessionId(), privacyGuard.currentGeneration(turn.workspaceId()));
         if (session == null) {
             throw inaccessible();
         }
         return chatMapper.listMessagesForCompaction(
-                turn.workspaceId(), turn.sessionId(), afterSeq, beforeSeq, limit);
+                turn.workspaceId(), turn.sessionId(), afterSeq, beforeSeq, limit, privacyGuard.currentGeneration(turn.workspaceId()));
     }
 
     /** Inserts or incrementally updates the durable demasked session summary. */
@@ -419,7 +423,7 @@ public class AiChatTurnPersistenceService {
                     "restrictions_changed", "restrictions_changed");
         }
         AiChatMessage currentSummary = chatMapper.getHistorySummary(
-                turn.workspaceId(), turn.sessionId());
+                turn.workspaceId(), turn.sessionId(), privacyGuard.currentGeneration(turn.workspaceId()));
         if (existingSummaryId == null) {
             if (expectedThroughSeq != 0 || currentSummary != null) {
                 throw new ConflictException("Assistant history summary changed during compaction");
@@ -437,6 +441,7 @@ public class AiChatTurnPersistenceService {
             summary.setSeq(chatMapper.nextMessageSequence(
                     turn.workspaceId(), turn.sessionId()));
             summary.setPrivacyGeneration(turn.privacyToken().privacyGeneration());
+            summary.setOrganizationPrivacyGeneration(turn.privacyToken().organizationPrivacyGeneration());
             summary.setAuthorKind(SYSTEM);
             summary.setAuthorUserId(null);
             summary.setContent(content);
@@ -451,7 +456,7 @@ public class AiChatTurnPersistenceService {
                             "message", null, "created", null));
         } else {
             AiChatMessage existing = chatMapper.getMessageById(
-                    turn.workspaceId(), turn.sessionId(), existingSummaryId);
+                    turn.workspaceId(), turn.sessionId(), existingSummaryId, privacyGuard.currentGeneration(turn.workspaceId()));
             if (existing == null || !SYSTEM.equals(existing.getAuthorKind())) {
                 throw new IllegalStateException("Assistant history summary is unavailable");
             }
@@ -463,7 +468,7 @@ public class AiChatTurnPersistenceService {
             messageId = existingSummaryId;
         }
         AiChatMessage stored = chatMapper.getMessageById(
-                turn.workspaceId(), turn.sessionId(), messageId);
+                turn.workspaceId(), turn.sessionId(), messageId, privacyGuard.currentGeneration(turn.workspaceId()));
         if (stored == null) {
             throw new IllegalStateException("Assistant history summary is unavailable");
         }
@@ -495,9 +500,9 @@ public class AiChatTurnPersistenceService {
     @Transactional(readOnly = true, propagation = Propagation.REQUIRES_NEW)
     public List<Attachment> loadAttachments(AiChatQueuedTurn turn) {
         requireCurrentActorRead(turn);
-        AiChatPrivacyGuard.requireCurrent(chatMapper, turn.privacyToken());
+        privacyGuard.requireCurrent(chatMapper, turn.privacyToken());
         AiChatSession session = chatMapper.getAccessibleSessionById(
-                turn.workspaceId(), turn.userId(), turn.sessionId());
+                turn.workspaceId(), turn.userId(), turn.sessionId(), privacyGuard.currentGeneration(turn.workspaceId()));
         if (session == null) {
             throw inaccessible();
         }
@@ -505,7 +510,7 @@ public class AiChatTurnPersistenceService {
             return List.of();
         }
         List<Attachment> attachments = attachmentMapper.getAssistantSessionAttachmentsByIds(
-                turn.workspaceId(), turn.sessionId(), turn.attachmentIds());
+                turn.workspaceId(), turn.sessionId(), turn.attachmentIds(), privacyGuard.currentGeneration(turn.workspaceId()));
         if (attachments.size() != turn.attachmentIds().size()) {
             throw inaccessible();
         }
@@ -560,6 +565,7 @@ public class AiChatTurnPersistenceService {
         AiChatToolCall toolCall = new AiChatToolCall();
         toolCall.setWorkspaceId(turn.workspaceId());
         toolCall.setPrivacyGeneration(turn.privacyToken().privacyGeneration());
+        toolCall.setOrganizationPrivacyGeneration(turn.privacyToken().organizationPrivacyGeneration());
         toolCall.setMessageId(turn.userMessageId());
         toolCall.setToolName(toolName);
         toolCall.setStatus(PROPOSED);
@@ -589,15 +595,15 @@ public class AiChatTurnPersistenceService {
     @Transactional(readOnly = true, propagation = Propagation.REQUIRES_NEW)
     public Optional<String> storedWriteArguments(AiChatQueuedTurn turn, int stepNumber) {
         requireCurrentActorRead(turn);
-        AiChatPrivacyGuard.requireCurrent(chatMapper, turn.privacyToken());
+        privacyGuard.retain(chatMapper, turn.privacyToken());
         AiChatSession session = chatMapper.getAccessibleSessionById(
-                turn.workspaceId(), turn.userId(), turn.sessionId());
+                turn.workspaceId(), turn.userId(), turn.sessionId(), privacyGuard.currentGeneration(turn.workspaceId()));
         if (session == null) {
             throw inaccessible();
         }
         return Optional.ofNullable(chatMapper.getToolCallByIdempotencyKey(
                         turn.workspaceId(),
-                        turnStepKey(turn.turnId(), stepNumber, AiAssistantToolCallRef.SOLE_CALL)))
+                        turnStepKey(turn.turnId(), stepNumber, AiAssistantToolCallRef.SOLE_CALL), privacyGuard.currentGeneration(turn.workspaceId())))
                 .map(AiChatToolCall::getArgumentsJson);
     }
 
@@ -622,7 +628,7 @@ public class AiChatTurnPersistenceService {
         String idempotencyKey = turnStepKey(
                 turn.turnId(), stepNumber, AiAssistantToolCallRef.SOLE_CALL);
         AiChatToolCall existing = chatMapper.getToolCallByIdempotencyKey(
-                turn.workspaceId(), idempotencyKey);
+                turn.workspaceId(), idempotencyKey, privacyGuard.currentGeneration(turn.workspaceId()));
         if (existing != null) {
             if (existing.getSessionId() != turn.sessionId()
                     || !Objects.equals(existing.getRequestedByUserId(), turn.userId())
@@ -630,12 +636,14 @@ public class AiChatTurnPersistenceService {
                     || !sameJson(write.argumentsJson(), existing.getArgumentsJson())) {
                 throw new ConflictException("Assistant tool idempotency key was reused");
             }
+            retainPrivacyFence(turn);
             return new AiAssistantToolProposal(
                     existing.getId(), existing.getStatus(), existing.getResultJson(), false);
         }
         AiChatToolCall toolCall = new AiChatToolCall();
         toolCall.setWorkspaceId(turn.workspaceId());
         toolCall.setPrivacyGeneration(turn.privacyToken().privacyGeneration());
+        toolCall.setOrganizationPrivacyGeneration(turn.privacyToken().organizationPrivacyGeneration());
         toolCall.setMessageId(turn.userMessageId());
         toolCall.setToolName(write.toolName());
         toolCall.setStatus(PROPOSED);
@@ -862,7 +870,7 @@ public class AiChatTurnPersistenceService {
         if (!RUNNING.equals(stored.getStatus())) {
             return false;
         }
-        AiChatPrivacyGuard.requireCurrent(chatMapper, turn.privacyToken());
+        privacyGuard.requireCurrent(chatMapper, turn.privacyToken());
         boolean updated = chatMapper.updateToolCall(
                 turn.workspaceId(), turn.userMessageId(), toolCallId, "failed",
                 resultJson, turn.userId()) == 1;
@@ -908,6 +916,7 @@ public class AiChatTurnPersistenceService {
         message.setSessionId(turn.sessionId());
         message.setSeq(chatMapper.nextMessageSequence(turn.workspaceId(), turn.sessionId()));
         message.setPrivacyGeneration(turn.privacyToken().privacyGeneration());
+        message.setOrganizationPrivacyGeneration(turn.privacyToken().organizationPrivacyGeneration());
         message.setAuthorKind(ASSISTANT);
         message.setAuthorUserId(null);
         message.setContent(content);
@@ -947,8 +956,8 @@ public class AiChatTurnPersistenceService {
                 turn.workspaceId(), turn.restrictionEpoch())) {
             return false;
         }
-        AiChatPrivacyGuard.requireCurrent(chatMapper, turn.privacyToken());
-        AiChatTurn source = chatMapper.getTurnById(turn.workspaceId(), turn.sessionId(), turn.turnId());
+        privacyGuard.requireCurrent(chatMapper, turn.privacyToken());
+        AiChatTurn source = chatMapper.getTurnById(turn.workspaceId(), turn.sessionId(), turn.turnId(), privacyGuard.currentGeneration(turn.workspaceId()));
         if (source == null || !RESOLVED.equals(source.getStatus()) || source.getMissionRunId() != null) {
             return false;
         }
@@ -1121,34 +1130,34 @@ public class AiChatTurnPersistenceService {
             return;
         }
         requireCurrentActorRead(turn);
-        AiChatPrivacyGuard.requireCurrent(chatMapper, turn.privacyToken());
-        AiChatTurn stored = chatMapper.getTurnById(turn.workspaceId(), turn.sessionId(), turn.turnId());
+        privacyGuard.requireCurrent(chatMapper, turn.privacyToken());
+        AiChatTurn stored = chatMapper.getTurnById(turn.workspaceId(), turn.sessionId(), turn.turnId(), privacyGuard.currentGeneration(turn.workspaceId()));
         if (stored == null || stored.getMissionRunId() != null || !RUNNING.equals(stored.getStatus())) {
             throw new ConflictException("Assistant turn is no longer active");
         }
     }
 
     public void requirePrivacyCurrent(AiChatQueuedTurn turn) {
-        AiChatPrivacyGuard.requireCurrent(chatMapper, turn.privacyToken());
+        privacyGuard.requireCurrent(chatMapper, turn.privacyToken());
     }
 
     /** Installs the original provenance for every invocation in a derived execution. */
     public <T> T withPrivacyToken(AiChatQueuedTurn turn, java.util.function.Supplier<T> action) {
-        return AiChatPrivacyGuard.execute(chatMapper, turn.privacyToken(), action);
+        return privacyGuard.execute(chatMapper, turn.privacyToken(), action);
     }
 
     private void retainPrivacyFence(AiChatQueuedTurn turn) {
         retainRestrictionFence(turn);
-        AiChatPrivacyGuard.retain(chatMapper, turn.privacyToken());
+        privacyGuard.retain(chatMapper, turn.privacyToken());
     }
 
     private boolean turnTokenCurrent(AiChatTurn turn) {
-        if (turn.getPrivacyGeneration() == null) {
+        if (turn.getPrivacyGeneration() == null || turn.getOrganizationPrivacyGeneration() <= 0) {
             return false;
         }
         try {
-            AiChatPrivacyGuard.requireCurrent(chatMapper, new AiChatPrivacyToken(turn.getWorkspaceId(),
-                    turn.getSessionId(), turn.getPrivacyGeneration(), turn.getPrivacyTaintSeq()));
+            privacyGuard.requireCurrent(chatMapper, new AiChatPrivacyToken(turn.getWorkspaceId(),
+                    turn.getSessionId(), turn.getPrivacyGeneration(), turn.getPrivacyTaintSeq(), privacyGuard.organizationId(turn.getWorkspaceId()), turn.getOrganizationPrivacyGeneration()));
             return true;
         } catch (AiAssistantLoopException exception) {
             return false;
@@ -1163,7 +1172,7 @@ public class AiChatTurnPersistenceService {
     }
 
     private void retainTerminalPrivacy(AiChatTurn turn) {
-        if (turn.getPrivacyGeneration() == null) {
+        if (turn.getPrivacyGeneration() == null || turn.getOrganizationPrivacyGeneration() <= 0) {
             clearTerminalContent(turn);
             return;
         }
@@ -1173,18 +1182,18 @@ public class AiChatTurnPersistenceService {
             return;
         }
         try {
-            AiChatPrivacyGuard.retain(chatMapper, new AiChatPrivacyToken(turn.getWorkspaceId(),
-                    turn.getSessionId(), turn.getPrivacyGeneration(), turn.getPrivacyTaintSeq()));
+            privacyGuard.retain(chatMapper, new AiChatPrivacyToken(turn.getWorkspaceId(),
+                    turn.getSessionId(), turn.getPrivacyGeneration(), turn.getPrivacyTaintSeq(), privacyGuard.organizationId(turn.getWorkspaceId()), turn.getOrganizationPrivacyGeneration()));
         } catch (AiAssistantLoopException exception) {
             clearTerminalContent(turn);
         }
     }
 
     private void refuseDiscoveredMission(int workspaceId, int userId, int sessionId, int turnId) {
-        if (chatMapper.getAccessibleSessionById(workspaceId, userId, sessionId) == null) {
+        if (chatMapper.getAccessibleSessionById(workspaceId, userId, sessionId, privacyGuard.currentGeneration(workspaceId)) == null) {
             return;
         }
-        AiChatTurn discovered = chatMapper.getTurnById(workspaceId, sessionId, turnId);
+        AiChatTurn discovered = chatMapper.getTurnById(workspaceId, sessionId, turnId, privacyGuard.currentGeneration(workspaceId));
         if (discovered != null) {
             refuseMissionTurn(discovered);
         }
@@ -1262,7 +1271,7 @@ public class AiChatTurnPersistenceService {
             throw new ConflictException("Assistant turn is no longer active");
         }
         refuseMissionTurn(stored);
-        AiChatPrivacyGuard.requireCurrent(chatMapper, turn.privacyToken());
+        privacyGuard.requireCurrent(chatMapper, turn.privacyToken());
         return stored;
     }
 
@@ -1298,6 +1307,12 @@ public class AiChatTurnPersistenceService {
     }
 
     private AiChatSession requireAccessibleLocked(int workspaceId, int userId, int sessionId) {
+        AiChatSession session = requireVisibleLocked(workspaceId, userId, sessionId);
+        privacyGuard.capture(chatMapper, session);
+        return session;
+    }
+
+    private AiChatSession requireVisibleLocked(int workspaceId, int userId, int sessionId) {
         AiChatSession session = chatMapper.getSessionByIdForUpdate(workspaceId, userId, sessionId);
         if (session == null) {
             throw inaccessible();

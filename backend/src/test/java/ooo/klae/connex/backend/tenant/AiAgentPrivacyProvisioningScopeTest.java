@@ -76,7 +76,7 @@ class AiAgentPrivacyProvisioningScopeTest {
         var privacy = mock(AiAgentPrivacyService.class);
         var recovery = mock(AiAgentStartupRecoveryService.class);
         var recorder = mock(JobRunRecorder.class);
-        var initializer = new AiAgentPrivacyInitializer(workspaces, scope, privacy, recovery, recorder,
+        var initializer = new AiAgentPrivacyInitializer(workspaces, scope, privacy, recovery, mock(ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService.class), recorder,
                 transactions, new AutomationExecutor(context, new AutomationScope(), scope), system,
                 new org.springframework.beans.factory.support.StaticListableBeanFactory()
                     .getBeanProvider(org.springframework.core.task.TaskExecutor.class));

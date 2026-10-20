@@ -12,6 +12,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class AiAssistantProposalSet {
     private int workspaceId;
+    private long organizationPrivacyGeneration;
     private String proposalKey;
     private int sessionId;
     private int originTurnId;

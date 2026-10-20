@@ -49,16 +49,16 @@ class AiAgentPrivacyIntegrationTest extends AbstractAiAgentPrivacyIntegrationTes
         assertEquals(3, counter(session.getId()));
         String first = invalidate();
         finish(first);
-        assertEquals(List.of(1), chatMapper.listMessages(workspace.getId(), session.getId(), 100, 0)
+        assertEquals(List.of(1), chatMapper.listMessages(workspace.getId(), session.getId(), 100, 0, 1L)
                 .stream().map(AiChatMessage::getSeq).toList());
-        assertEquals("Earlier input", chatMapper.listMessages(workspace.getId(), session.getId(), 100, 0).getFirst().getContent());
+        assertEquals("Earlier input", chatMapper.listMessages(workspace.getId(), session.getId(), 100, 0, 1L).getFirst().getContent());
         assertEquals(3, chatMapper.getPrivacySession(workspace.getId(), session.getId()).getMissionTaintSeq());
         assertEquals(3, counter(session.getId()));
         assertFalse(privacyMapper.getBarrier(workspace.getId()).isBlocked());
         privacyService.initialize(workspace.getId());
         assertEquals(3, counter(session.getId()));
         completedTurn(session.getId(), "Later input", "Later answer");
-        List<AiChatMessage> after = chatMapper.listMessages(workspace.getId(), session.getId(), 100, 0);
+        List<AiChatMessage> after = chatMapper.listMessages(workspace.getId(), session.getId(), 100, 0, 1L);
         assertEquals(List.of(1, 4, 5), after.stream().map(AiChatMessage::getSeq).toList());
         long currentGeneration = privacyMapper.getBarrier(workspace.getId()).getGeneration();
         assertEquals(currentGeneration, after.get(1).getPrivacyGeneration());
@@ -86,7 +86,7 @@ class AiAgentPrivacyIntegrationTest extends AbstractAiAgentPrivacyIntegrationTes
         jdbc.update("UPDATE ai_agent_privacy_work SET phase='sessions',current_session_id=?,session_phase='messages',last_message_id=0 WHERE workspace_id=? AND operation_key=?",
                 session.getId(), workspace.getId(), second);
         finish(second);
-        List<AiChatMessage> remaining = chatMapper.listMessages(workspace.getId(), session.getId(), 100, 0);
+        List<AiChatMessage> remaining = chatMapper.listMessages(workspace.getId(), session.getId(), 100, 0, 1L);
         assertEquals(1, remaining.size());
         assertEquals("Earlier input", remaining.getFirst().getContent());
         assertEquals(1, remaining.getFirst().getSeq());
@@ -100,7 +100,7 @@ class AiAgentPrivacyIntegrationTest extends AbstractAiAgentPrivacyIntegrationTes
         assertEquals(6, counter(session.getId()));
         String third = invalidate();
         finish(third);
-        assertEquals(List.of(1), chatMapper.listMessages(workspace.getId(), session.getId(), 100, 0)
+        assertEquals(List.of(1), chatMapper.listMessages(workspace.getId(), session.getId(), 100, 0, 1L)
                 .stream().map(AiChatMessage::getSeq).toList());
         assertEquals(6, counter(session.getId()));
         assertEquals(3, chatMapper.getPrivacySession(workspace.getId(), session.getId()).getMissionTaintSeq());
@@ -146,11 +146,11 @@ class AiAgentPrivacyIntegrationTest extends AbstractAiAgentPrivacyIntegrationTes
 
         finish(invalidate());
 
-        assertEquals(List.of("Preserve this exact input"), chatMapper.listMessages(workspace.getId(), session.getId(), 100, 0)
+        assertEquals(List.of("Preserve this exact input"), chatMapper.listMessages(workspace.getId(), session.getId(), 100, 0, 1L)
                 .stream().map(AiChatMessage::getContent).toList());
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM ai_chat_tool_call WHERE workspace_id=? AND id IN (?,?)",
                 Integer.class, workspace.getId(), earlierTool, laterTool));
-        assertNull(chatMapper.getHistorySummary(workspace.getId(), session.getId()));
+        assertNull(chatMapper.getHistorySummary(workspace.getId(), session.getId(), 1L));
         assertEquals(0, privacyMapper.residualCount(workspace.getId(), 1));
         AiChatQueuedTurn fresh = runningTurn(session.getId(), "Fresh post-purge input");
         int freshTool = turns.proposeTool(fresh, 1, 0, "get_record", "{\"id\":3}");
@@ -158,9 +158,9 @@ class AiAgentPrivacyIntegrationTest extends AbstractAiAgentPrivacyIntegrationTes
         turns.resolve(fresh, "Fresh answer", "{}", 1, 1);
         assertEquals(7, fresh.userMessageSeq());
         finish(invalidate());
-        assertEquals(List.of(1), chatMapper.listMessages(workspace.getId(), session.getId(), 100, 0)
+        assertEquals(List.of(1), chatMapper.listMessages(workspace.getId(), session.getId(), 100, 0, 1L)
                 .stream().map(AiChatMessage::getSeq).toList());
-        assertEquals("Preserve this exact input", chatMapper.listMessages(workspace.getId(), session.getId(), 100, 0).getFirst().getContent());
+        assertEquals("Preserve this exact input", chatMapper.listMessages(workspace.getId(), session.getId(), 100, 0, 1L).getFirst().getContent());
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM ai_chat_tool_call WHERE workspace_id=?",
                 Integer.class, workspace.getId()));
         assertEquals(0, privacyMapper.residualCount(workspace.getId(), 2));
@@ -191,6 +191,7 @@ class AiAgentPrivacyIntegrationTest extends AbstractAiAgentPrivacyIntegrationTes
     private AiChatSession session() {
         AiChatSession session = new AiChatSession();
         session.setWorkspaceId(workspace.getId());
+        session.setOrganizationPrivacyGeneration(1);
         session.setCreatedByUserId(currentUser.getId());
         session.setTitle("Mission privacy fixture");
         session.setVisibility("private");

@@ -45,6 +45,7 @@ public class AiAgentDsrPurgeService {
     private final AiAgentDsrControlMapper controlMapper;
     private final AiAgentPrivacyMapper privacyMapper;
     private final AiAgentPrivacyService privacyService;
+    private final ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService assistantPrivacyService;
     private final TenantLifecycleControlMapper lifecycleMapper;
     private final TenantWorkScope tenantWorkScope;
     private final TenantContext tenantContext;
@@ -73,11 +74,20 @@ public class AiAgentDsrPurgeService {
         return projection(accepted);
     }
 
-    /** Recovers accepted authority without consulting mutable request subject linkage or actor membership. */
+    /**
+     * Recovers accepted authority without consulting mutable subject linkage or actor membership.
+     * An exhausted keyset wraps once within the same invocation so changed receipts behind the
+     * cursor are retried without an empty scheduled pass; at most twenty receipts are processed.
+     */
     @Scheduled(fixedDelayString = "${connex.ai.mission-dsr-recovery-delay:10s}", initialDelay = 15000)
     public void recoverAccepted() {
+        int afterId = recoveryCursor.get();
         List<AuditLog> receipts = tenantWorkScope.unroutedRead(
-                () -> controlMapper.pendingAcceptances(recoveryCursor.get(), 20));
+                () -> controlMapper.pendingAcceptances(afterId, 20));
+        if (receipts.isEmpty() && afterId != 0) {
+            recoveryCursor.set(0);
+            receipts = tenantWorkScope.unroutedRead(() -> controlMapper.pendingAcceptances(0, 20));
+        }
         if (receipts.isEmpty()) {
             recoveryCursor.set(0);
             return;
@@ -106,6 +116,34 @@ public class AiAgentDsrPurgeService {
         if (completed != null) {
             return;
         }
+        if (accepted.schemaVersion() == 2) {
+            var operation = tenantWorkScope.unroutedRead(
+                    () -> assistantPrivacyService.findOperation(accepted.orgId(), accepted.operationId()));
+            if (operation == null || !accepted.cutoffGeneration().equals(operation.getCutoffGeneration())
+                    || !accepted.invalidatedGeneration().equals(operation.getInvalidatedGeneration())
+                    || !Long.valueOf(accepted.requestId()).equals(operation.getDsrRequestId())
+                    || !Integer.valueOf(accepted.auditId()).equals(operation.getControlAcceptanceAuditId())) {
+                throw new ConflictException("dsr_lifecycle_evidence_required");
+            }
+            for (int workspaceId : acceptedWorkspaceIds(accepted)) {
+                if (deletedWorkspaceVerifiedAt(accepted, workspaceId) != null) {
+                    continue;
+                }
+                tenantWorkScope.inLifecycleWorkspace(workspaceId, () -> inAcceptedScope(accepted, workspaceId, () -> {
+                    TransactionTemplate tenant = new TransactionTemplate(transactionManager);
+                    tenant.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+                    tenant.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+                    tenant.executeWithoutResult(status -> {
+                        var workspace = lifecycleMapper.lockWorkspaceForShare(workspaceId);
+                        if (workspace == null || workspace.orgId() != accepted.orgId()) {
+                            throw new ConflictException("dsr_lifecycle_evidence_required");
+                        }
+                        privacyService.enrollOperation(workspaceId, operation);
+                    });
+                    return null;
+                }));
+            }
+        } else {
         tenantWorkScope.inWorkspace(accepted.workspaceIds().getFirst(), () -> inAcceptedScope(
                 accepted, accepted.workspaceIds().getFirst(), () -> {
             TransactionTemplate tenant = new TransactionTemplate(transactionManager);
@@ -126,6 +164,7 @@ public class AiAgentDsrPurgeService {
             });
             return null;
         }));
+        }
         AiAgentHoldingsPurgeDto current = projection(accepted);
         if (current.completedWorkspaceCount() == current.workspaceCount()) {
             tenantWorkScope.unrouted(() -> {
@@ -140,7 +179,17 @@ public class AiAgentDsrPurgeService {
         boolean missing = false;
         boolean retrying = false;
         String finishedAt = null;
-        for (int workspaceId : accepted.workspaceIds()) {
+        List<Integer> workspaceIds = acceptedWorkspaceIds(accepted);
+        for (int workspaceId : workspaceIds) {
+            java.time.LocalDateTime receipt = deletedWorkspaceVerifiedAt(accepted, workspaceId);
+            if (receipt != null) {
+                complete++;
+                String completedAt = receipt.toInstant(java.time.ZoneOffset.UTC).toString();
+                if (finishedAt == null || completedAt.compareTo(finishedAt) > 0) {
+                    finishedAt = completedAt;
+                }
+                continue;
+            }
             AiAgentPrivacyWork work = tenantWorkScope.inLifecycleWorkspaceRead(workspaceId,
                     () -> readAcceptedWork(accepted, workspaceId));
             if (work == null) {
@@ -158,12 +207,27 @@ public class AiAgentDsrPurgeService {
         }
         AuditLog completion = tenantWorkScope.unroutedRead(() -> controlMapper.findCompletion(
                 accepted.orgId(), accepted.requestId(), accepted.operationId()));
-        boolean completed = complete == accepted.workspaceIds().size() && completion != null;
+        boolean completed = complete == workspaceIds.size() && completion != null;
         String state = completed ? "complete" : missing ? "invalidation_pending" : retrying ? "retrying" : "purging";
-        return new AiAgentHoldingsPurgeDto(1, accepted.operationId(), Long.toString(accepted.requestId()),
-                AiAgentPurgeAcceptance.SCOPE, AiAgentPurgeAcceptance.CUTOFF_POLICY, accepted.acceptedAt(), state,
-                accepted.workspaceIds().size(), complete, completed ? finishedAt : null,
+        return new AiAgentHoldingsPurgeDto(accepted.schemaVersion(), accepted.operationId(), Long.toString(accepted.requestId()),
+                accepted.scope(), accepted.cutoffPolicy(), accepted.acceptedAt(), state,
+                workspaceIds.size(), complete, completed ? finishedAt : null,
                 retrying ? "cleanup_retry" : null);
+    }
+
+    private List<Integer> acceptedWorkspaceIds(AiAgentPurgeAcceptance accepted) {
+        if (accepted.schemaVersion() == 1) {
+            return accepted.workspaceIds();
+        }
+        return java.util.stream.Stream.concat(accepted.workspaceIds().stream(),
+                tenantWorkScope.unroutedRead(() -> assistantPrivacyService.operationWorkspaceIds(
+                    accepted.orgId(), accepted.operationId())).stream())
+                .distinct().sorted().toList();
+    }
+
+    private java.time.LocalDateTime deletedWorkspaceVerifiedAt(AiAgentPurgeAcceptance accepted, int workspaceId) {
+        return accepted.schemaVersion() == 2 ? tenantWorkScope.unroutedRead(
+                () -> assistantPrivacyService.deletedWorkspaceVerifiedAt(accepted.orgId(), accepted.operationId(), workspaceId)) : null;
     }
 
     /** Installs only frozen accepted workspace authority and restores the caller after every tenant phase. */
@@ -183,7 +247,11 @@ public class AiAgentDsrPurgeService {
             read.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
             read.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
             read.setReadOnly(true);
-            return read.execute(status -> privacyMapper.getWork(workspaceId, accepted.operationId()));
+            AiAgentPrivacyWork work = read.execute(status -> privacyMapper.getWork(workspaceId, accepted.operationId()));
+            if (work != null && !accepted.scope().equals(work.getContentScope())) {
+                throw new ConflictException("dsr_scope_conflict");
+            }
+            return work;
         } finally {
             tenantContext.restore(previous);
         }
