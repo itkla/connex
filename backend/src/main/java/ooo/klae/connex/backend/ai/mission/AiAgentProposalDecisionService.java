@@ -19,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantLoopException;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantProposalExpiredException;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteToolService;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteToolService.LockedDecisionContext;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteToolService.PreliminaryPrincipals;
@@ -77,6 +78,9 @@ public class AiAgentProposalDecisionService {
                 publishInvalidation(id);
             } catch (ForbiddenException | ResourceNotFoundException | AiAgentGoneException exception) {
                 stopped = "access_lost";
+                results.add(new AiAgentProposalDecisionResponse.Item(selected.actionSlot(), "refused", stopped));
+            } catch (AiAssistantProposalExpiredException exception) {
+                stopped = "mission_review_expired";
                 results.add(new AiAgentProposalDecisionResponse.Item(selected.actionSlot(), "refused", stopped));
             } catch (ConflictException | AiAssistantLoopException exception) {
                 stopped = "proposal_conflict";
@@ -270,12 +274,15 @@ public class AiAgentProposalDecisionService {
     }
 
     private static String canonicalOutcome(String status, String reviewState) {
+        if ("proposed".equals(status)) {
+            return "refused";
+        }
         return switch (reviewState) {
             case "applied" -> "executed";
             case "discarded" -> "rejected";
-            case "withdrawn", "expired" -> "withdrawn";
+            case "withdrawn" -> "withdrawn";
             case "undone" -> "undone";
-            default -> "proposed".equals(status) ? "refused" : "indeterminate";
+            default -> "indeterminate";
         };
     }
 }

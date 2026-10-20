@@ -109,8 +109,13 @@ class AiAgentProposalHttpIntegrationTest extends AbstractAiAgentProposalIntegrat
     void proposalDecisionsRequireAuthenticationCsrfAndPinnedWorkspace() throws Exception {
         var fixture = frozen("assign_owner");
         var body = json.writeValueAsString(request(fixture, "approve", fixture.selected().getFirst()));
-        try (HttpClient anonymous = HttpClient.newHttpClient()) {
+        try (HttpClient anonymous = HttpClient.newBuilder()
+                .cookieHandler(new CookieManager(null, CookiePolicy.ACCEPT_ALL)).build()) {
+            var bootstrap = anonymous.send(HttpRequest.newBuilder(uri("/api/auth/csrf")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            CsrfBootstrapDto csrf = json.readValue(body(bootstrap, 200).toString(), CsrfBootstrapDto.class);
             var response = anonymous.send(HttpRequest.newBuilder(uri(path(fixture))).header("Content-Type", "application/json")
+                    .header(csrf.headerName(), csrf.token())
                     .POST(HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString());
             assertEquals(401, response.statusCode(), response.body());
         }
@@ -290,7 +295,7 @@ class AiAgentProposalHttpIntegrationTest extends AbstractAiAgentProposalIntegrat
         assertEquals(404, send(browser, "GET", base + "/proposals/" + fixture.selected().getFirst().getActionSlot(), null, workspace.getId()).statusCode());
         JsonNode metadata = body(send(browser, "GET", base, null, workspace.getId()), 200);
         assertTrue(metadata.path("contentWithheld").asBoolean());
-        assertTrue(metadata.path("proposalCounts").isNull());
+        assertFalse(metadata.has("proposalCounts"));
         authenticateAs(currentUser, workspace.getId());
         assertPending(fixture);
         assertNull(jdbc.queryForObject("SELECT owner_id FROM person WHERE workspace_id=? AND id=?", Integer.class, workspace.getId(), person.getId()));
@@ -360,8 +365,8 @@ class AiAgentProposalHttpIntegrationTest extends AbstractAiAgentProposalIntegrat
     @Test
     void expiredReviewDisarmsOutputAndMyWorkWithoutSweeper() throws Exception {
         var fixture = frozen("assign_owner");
-        Browser browser = login(currentUser);
         clock.set(runs.getRun(workspace.getId(), fixture.runId()).getReviewExpiresAt().toInstant(ZoneOffset.UTC));
+        Browser browser = login(currentUser);
         JsonNode output = body(send(browser, "GET", "/api/ai/assistant/missions/" + fixture.runId() + "/output", null, workspace.getId()), 200);
         assertEquals("expired", output.path("proposalSet").path("items").get(0).path("card").path("reviewState").asString());
         assertEquals(0, output.path("proposalSet").path("derivedCounts").path("pending").asInt());

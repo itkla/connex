@@ -128,7 +128,7 @@ class AiAgentProposalTenantRoutingIntegrationTest extends AbstractAiAgentProposa
         assertEquals("Foreign colliding report", json.readTree(foreignOutput).path("report").path("markdown").asString());
         assertFalse(foreignOutput.contains(primary.getName()));
         http.perform(post("/api/ai/assistant/missions/" + original.runId() + "/proposal-decisions")
-                .session(session).with(SecurityMockMvcRequestPostProcessors.csrf())
+                .session(session).with(SecurityMockMvcRequestPostProcessors.csrf().asHeader())
                 .header("X-Workspace-Id", foreignWorkspace.getId()).contentType(MediaType.APPLICATION_JSON)
                 .content(decisionBody))
                 .andExpect(status().isOk());

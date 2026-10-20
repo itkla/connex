@@ -24,6 +24,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantProposalExpiredException;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteToolService;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteToolService.PreliminaryPrincipals;
 import ooo.klae.connex.backend.beans.AiAgentAction;
@@ -113,6 +114,30 @@ class AiAgentProposalDecisionServiceTest {
         assertEquals(List.of("executed", "refused", "not_processed"),
                 result.items().stream().map(item -> item.outcome()).toList());
         assertEquals("infrastructure_failure", result.stopReason());
+    }
+
+    @Test
+    void expiryAtMutationAdmissionRefusesTheItemWithoutCanonicalReconciliation() {
+        when(transaction.decideOne(anyInt(), anyString(), any(), any()))
+                .thenReturn("executed").thenThrow(new AiAssistantProposalExpiredException());
+        var result = service.decide(31, request(first, second, item("discard")));
+        assertFalse(result.complete());
+        assertEquals("mission_review_expired", result.stopReason());
+        assertEquals(List.of("executed", "refused", "not_processed"),
+                result.items().stream().map(item -> item.outcome()).toList());
+        assertEquals("mission_review_expired", result.items().get(1).code());
+        verify(reads, never()).item(anyInt(), anyString());
+    }
+
+    @Test
+    void infrastructureReconciliationDoesNotTurnAnExpiredPendingItemIntoWithdrawal() {
+        when(transaction.decideOne(anyInt(), anyString(), any(), any()))
+                .thenThrow(new IllegalStateException("commit acknowledgment lost"));
+        when(reads.item(31, first.actionSlot())).thenReturn(projected(first, "proposed", "expired"));
+        var result = service.decide(31, request(first, second));
+        assertEquals("infrastructure_failure", result.stopReason());
+        assertEquals(List.of("refused", "not_processed"),
+                result.items().stream().map(item -> item.outcome()).toList());
     }
 
     @Test

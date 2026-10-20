@@ -66,18 +66,32 @@ for (const locale of ['en', 'ja'] as const) {
             const workspaceId = await activeWorkspaceId(api);
             const csrf = await csrfBootstrap(api);
             const headers = { 'X-Workspace-Id': String(workspaceId), [csrf.headerName]: csrf.token };
-            const contactId = positiveId(await seeder(api, workspaceId, csrf).post('/api/persons', {
-                name: 'Marlowe Quillfeather', title: 'Operations Lead', email: `mission.${unique}@example.com`,
+            const seed = seeder(api, workspaceId, csrf);
+            const pipelineId = positiveId(await seed.post('/api/pipelines', { name: 'Mission pipeline' }));
+            const initialStageId = positiveId(await seed.post(`/api/pipelines/${pipelineId}/stages`, {
+                name: 'Qualifying', position: 0, success: false, failure: false,
+            }));
+            await seed.post(`/api/pipelines/${pipelineId}/stages`, {
+                name: 'Negotiation', position: 1, success: false, failure: false,
+            });
+            const dealName = 'Marlowe launch';
+            const duplicateReview = await seed.post('/api/duplicate-preflight/deals', { name: dealName });
+            if (typeof duplicateReview.reviewToken !== 'string') {
+                throw new Error('Deal duplicate preflight did not return a review token');
+            }
+            const dealId = positiveId(await seed.post('/api/deals', {
+                name: dealName, value: 5000, actualValue: 0, currency: 'USD',
+                pipeline: pipelineId, stage: initialStageId, duplicateReviewToken: duplicateReview.reviewToken,
             }));
             cleanup = await enrollPasskey(page, password);
-            await configureScriptedAiProvider(api, workspaceId, csrf, 'scripted-native');
+            await configureScriptedAiProvider(api, workspaceId, csrf, 'scripted-json');
             const session = await api.post('/api/ai/assistant/sessions', { headers, data: { title: 'Prepare record changes', autoTitle: false } });
             expect(session.status()).toBe(201);
             const sessionId = positiveId(await session.json());
             const created = await api.post(`/api/ai/assistant/sessions/${sessionId}/missions`, { headers, data: {
                 clientRequestKey: randomUUID(), missionType: 'record_preparation_v1',
                 goal: 'connex_script_browser_mission_proposals review this record and prepare changes',
-                scope: { kind: 'record', recordKind: 'person', recordId: contactId },
+                scope: { kind: 'record', recordKind: 'deal', recordId: dealId },
             } });
             expect(created.status()).toBe(202);
             const runId = positiveId(await created.json());
@@ -95,12 +109,12 @@ for (const locale of ['en', 'ja'] as const) {
                 headers: { [csrf.headerName]: csrf.token },
             });
             expect(selectedOrigin.status()).toBe(200);
-            const before: unknown = await (await api.get(`/api/persons/${contactId}`, { headers })).json();
-            expect(before).toMatchObject({ title: 'Operations Lead' });
+            const before: unknown = await (await api.get(`/api/deals/${dealId}`, { headers })).json();
+            expect(before).toMatchObject({ stage: initialStageId, ownerId: expect.any(Number) });
             const historical: AiAssistantToolCall[] = Array.from({ length: 101 }, (_, index) => ({
                 id: index + 1000, toolName: 'assign_owner', tier: 'confirm', status: 'rejected',
                 reviewState: 'discarded', reviewExpiresAt: null,
-                target: { kind: 'person', id: contactId, label: 'Marlowe Quillfeather' },
+                target: { kind: 'deal', id: dealId, label: dealName },
                 requestSummary: 'Assign owner', outcomeSummary: null, change: null, changes: [],
                 outcomeValues: [], createdRecord: null, messageId: null, turnId: index + 1000,
                 undoExpiresAt: null, undoAvailable: false, createdAt: '2026-08-01T10:00:00Z',
@@ -116,7 +130,7 @@ for (const locale of ['en', 'ja'] as const) {
             await page.locator(`a[href='/ask-connex/${sessionId}?mission=${runId}']`).first().click();
             const review = page.getByRole('dialog', { name: message(locale, 'common', 'AskConnex.missions.preparation.outputTitle') });
             await expect(review).toBeVisible();
-            await expect(review.getByText('Head of Partnerships', { exact: true })).toBeVisible();
+            await expect(review.getByText('Negotiation', { exact: true })).toBeVisible();
             await page.reload();
             await expect(review).toBeVisible();
             const decision = page.waitForResponse((response) => response.request().method() === 'POST'
@@ -128,23 +142,29 @@ for (const locale of ['en', 'ja'] as const) {
             expect(result).toMatchObject({ complete: false, items: expect.arrayContaining([
                 expect.objectContaining({ outcome: 'executed' }), expect.objectContaining({ outcome: 'refused' }),
             ]) });
+            const afterApply: unknown = await (await api.get(`/api/deals/${dealId}`, { headers })).json();
+            expect(afterApply).toMatchObject({ stage: initialStageId });
+            expect(afterApply).not.toHaveProperty('ownerId');
             const discard = review.getByRole('button', { name: message(locale, 'common', 'AskConnex.toolCards.actions.discardAria')
-                .replace('{target}', 'Marlowe Quillfeather') });
+                .replace('{target}', dealName) });
             await discard.last().click();
             await expect(review.getByText(message(locale, 'common', 'AskConnex.missions.review.complete'), { exact: true })).toBeVisible();
+            const afterDiscard: unknown = await (await api.get(`/api/deals/${dealId}`, { headers })).json();
+            expect(afterDiscard).toMatchObject({ stage: initialStageId });
+            expect(afterDiscard).not.toHaveProperty('ownerId');
             await page.keyboard.press('Escape');
             await expect(review).toHaveCount(0);
             await page.getByRole('button', { name: message(locale, 'workspace', 'WorkspaceSwitcher.switchAria') }).click();
             await page.getByRole('menuitem').filter({ hasText: destinationName }).click();
             await expect(page).toHaveURL(/\/dashboard$/);
-            await expect(page.getByText('Head of Partnerships', { exact: true })).toHaveCount(0);
+            await expect(page.getByText('Negotiation', { exact: true })).toHaveCount(0);
             const signedOut = await api.post('/api/auth/logout', { headers: { [csrf.headerName]: csrf.token } });
             expect(signedOut.ok()).toBe(true);
             await registerUser(api, { username: `e2e_mission_other_${unique}`,
                 email: `e2e_mission_other_${unique}@example.com`, password });
             await page.goto('/ask-connex');
             await expect(review).toHaveCount(0);
-            await expect(page.getByText('Head of Partnerships', { exact: true })).toHaveCount(0);
+            await expect(page.getByText('Negotiation', { exact: true })).toHaveCount(0);
             expect(errors).toEqual([]);
         } finally {
             if (cleanup) await cleanup();

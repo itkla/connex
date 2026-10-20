@@ -448,6 +448,8 @@ reload. Terminal retries return the actual executed, rejected, withdrawn or undo
 before checking waiting state/deadline. Business refusal leaves a pending item disarmed.
 Discard needs AI/session authority without domain-edit authority. Final approval admission
 checks the immutable deadline after domain-lock and privacy contention.
+Deadline refusal at final mutation admission leaves the canonical item pending and returns `refused` with
+`mission_review_expired`; effective expiry on a read is not a committed withdrawal.
 
 Cancellation, fatal settlement, departure and review expiry discover all pending proposals by
 root/action linkage, independently of checkpoint contents. They record canonical `failed` /
