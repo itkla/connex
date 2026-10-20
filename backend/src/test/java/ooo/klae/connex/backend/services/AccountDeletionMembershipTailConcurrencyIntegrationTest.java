@@ -75,6 +75,7 @@ class AccountDeletionMembershipTailConcurrencyIntegrationTest extends AbstractSe
     @Autowired private JdbcTemplate jdbc;
     private final List<Integer> accounts = new ArrayList<>();
     private final List<Integer> scopes = new ArrayList<>();
+    private final List<Integer> organizationIds = new ArrayList<>();
     private int orgId;
     private int workspaceId;
 
@@ -87,11 +88,7 @@ class AccountDeletionMembershipTailConcurrencyIntegrationTest extends AbstractSe
 
     @BeforeEach
     void isolatedRoots() {
-        Organization org = new Organization();
-        org.setName("Erasure tail " + unique());
-        org.setSlug("erasure-tail-" + unique());
-        organizations.insert(org);
-        orgId = org.getId();
+        orgId = newOrganization().getId();
         orgMembers.addMember(orgId, currentUser.getId(), "owner");
         workspace = newWorkspace();
         workspaceId = workspace.getId();
@@ -99,9 +96,22 @@ class AccountDeletionMembershipTailConcurrencyIntegrationTest extends AbstractSe
         authenticateAs(currentUser, workspaceId);
     }
 
+    private Organization newOrganization() {
+        Organization org = new Organization();
+        org.setName("Erasure tail " + unique());
+        org.setSlug("erasure-tail-" + unique());
+        organizations.insert(org);
+        organizationIds.add(org.getId());
+        return org;
+    }
+
     private Workspace newWorkspace() {
+        return newWorkspace(orgId);
+    }
+
+    private Workspace newWorkspace(int organizationId) {
         Workspace created = new Workspace();
-        created.setOrgId(orgId);
+        created.setOrgId(organizationId);
         created.setName("Erasure tail workspace");
         created.setSlug("erasure-tail-" + unique());
         roots.insert(created);
@@ -116,10 +126,11 @@ class AccountDeletionMembershipTailConcurrencyIntegrationTest extends AbstractSe
             jdbc.update("DELETE FROM person WHERE workspace_id = ?", id);
             jdbc.update("DELETE FROM workspace WHERE id = ?", id);
         }
-        jdbc.update("DELETE FROM organization WHERE id = ?", orgId);
+        organizationIds.forEach(id -> jdbc.update("DELETE FROM organization WHERE id = ?", id));
         accounts.forEach(id -> jdbc.update("DELETE FROM app_user WHERE id = ?", id));
         accounts.clear();
         scopes.clear();
+        organizationIds.clear();
     }
 
     @ParameterizedTest
@@ -149,7 +160,7 @@ class AccountDeletionMembershipTailConcurrencyIntegrationTest extends AbstractSe
         CountDownLatch atMembership = new CountDownLatch(1);
         AtomicLong writerConnection = new AtomicLong();
         AtomicLong deletionConnection = new AtomicLong();
-        AtomicInteger tailCalls = observeTail(deletionConnection);
+        AtomicInteger tailCalls = observeTail(erased, deletionConnection);
         WorkspaceMapper real = sql.getMapper(WorkspaceMapper.class);
         doAnswer(call -> {
             Integer locked = real.lockActiveMembership(workspaceId, erased.getId());
@@ -159,7 +170,7 @@ class AccountDeletionMembershipTailConcurrencyIntegrationTest extends AbstractSe
             return locked;
         }).when(roots).lockActiveMembership(workspaceId, erased.getId());
         doAnswer(call -> {
-            deletionConnection.set(connection());
+            assertEquals(deletionConnection.get(), connection());
             atMembership.countDown();
             return real.lockAccountMembershipForUpdate(workspaceId, erased.getId());
         }).when(roots).lockAccountMembershipForUpdate(workspaceId, erased.getId());
@@ -214,11 +225,16 @@ class AccountDeletionMembershipTailConcurrencyIntegrationTest extends AbstractSe
     @ValueSource(strings = {"pending", "suspended", "inactive-scope"})
     void erasureRetainsMembershipsOutsideActiveAuthorization(String state) throws Exception {
         User erased = newUser();
-        Workspace extra = newWorkspace();
+        int extraOrgId = "inactive-scope".equals(state) ? newOrganization().getId() : orgId;
+        Workspace extra = newWorkspace(extraOrgId);
+        List<Integer> erasedOrgIds = new ArrayList<>(List.of(orgId));
         roots.addMember(extra.getId(), erased.getId(), "member");
         if ("inactive-scope".equals(state)) {
+            orgMembers.addMember(extraOrgId, currentUser.getId(), "owner");
+            orgMembers.addMember(extraOrgId, erased.getId(), "admin");
+            erasedOrgIds.add(extraOrgId);
             jdbc.update("UPDATE workspace SET lifecycle_state = 'tearing_down' WHERE id = ?", extra.getId());
-            jdbc.update("UPDATE organization SET lifecycle_state = 'tearing_down' WHERE id = ?", orgId);
+            jdbc.update("UPDATE organization SET lifecycle_state = 'tearing_down' WHERE id = ?", extraOrgId);
         } else {
             jdbc.update("UPDATE workspace_member SET status = ? WHERE workspace_id = ? AND user_id = ?",
                 state, extra.getId(), erased.getId());
@@ -227,14 +243,14 @@ class AccountDeletionMembershipTailConcurrencyIntegrationTest extends AbstractSe
         assertEquals(1, users.reserveAccountDeletion(erased.getId(), RESERVATION));
         CountDownLatch atMembership = new CountDownLatch(1);
         AtomicLong deletionConnection = new AtomicLong();
-        AtomicInteger tailCalls = observeTail(deletionConnection);
+        AtomicInteger tailCalls = observeTail(erased, deletionConnection);
         WorkspaceMapper real = sql.getMapper(WorkspaceMapper.class);
         doAnswer(call -> {
-            deletionConnection.set(connection());
+            assertEquals(deletionConnection.get(), connection());
             atMembership.countDown();
             return real.lockAccountMembershipForUpdate(extra.getId(), erased.getId());
         }).when(roots).lockAccountMembershipForUpdate(extra.getId(), erased.getId());
-        assertCascadeRetains(erased, List.of(workspaceId, extra.getId()), List.of(orgId));
+        assertCascadeRetains(erased, List.of(workspaceId, extra.getId()), erasedOrgIds);
         try (var worker = Executors.newSingleThreadExecutor()) {
             Future<?>[] deleter = new Future<?>[1];
             new TransactionTemplate(transactions).executeWithoutResult(status -> {
@@ -250,7 +266,10 @@ class AccountDeletionMembershipTailConcurrencyIntegrationTest extends AbstractSe
             completed(deleter[0]);
         }
         assertErased(erased);
-        assertChain(audits());
+        List<AuditLog> committed = audits();
+        assertEquals(List.of("user.delete"), committed.stream().map(AuditLog::getAction).toList());
+        assertTrue(committed.stream().allMatch(entry -> Objects.equals(orgId, entry.getIntegrityOrgId())));
+        assertChain(committed);
     }
 
     /** The foreign-key parent wait must precede discovery of an inserted, uncommitted membership. */
@@ -338,11 +357,16 @@ class AccountDeletionMembershipTailConcurrencyIntegrationTest extends AbstractSe
         assertChain(audits());
     }
 
-    private AtomicInteger observeTail(AtomicLong deletionConnection) {
+    private AtomicInteger observeTail(User erased, AtomicLong deletionConnection) {
         AtomicInteger calls = new AtomicInteger();
+        UserMapper realUsers = sql.getMapper(UserMapper.class);
         OrganizationMapper realOrganizations = sql.getMapper(OrganizationMapper.class);
         ApiCredentialMapper realCredentials = sql.getMapper(ApiCredentialMapper.class);
         AuditIntegrityMapper realHeads = sql.getMapper(AuditIntegrityMapper.class);
+        doAnswer(call -> {
+            deletionConnection.compareAndSet(0, connection());
+            return realUsers.lockById(erased.getId());
+        }).when(users).lockById(erased.getId());
         doAnswer(call -> {
             if (connection() == deletionConnection.get()) calls.incrementAndGet();
             return realOrganizations.lockById(call.getArgument(0));
@@ -385,6 +409,7 @@ class AccountDeletionMembershipTailConcurrencyIntegrationTest extends AbstractSe
     private void deleteAs(User erased) {
         authenticateAs(erased, workspaceId);
         try {
+            assertEquals(orgId, tenantContext.getOrgId());
             deletion.delete(erased.getId(), RESERVATION);
         } finally {
             clearAuthentication();
