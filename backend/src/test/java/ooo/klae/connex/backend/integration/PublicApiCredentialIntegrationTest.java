@@ -609,7 +609,7 @@ class PublicApiCredentialIntegrationTest {
             workspace, issueBody("After reservation", "crm.read"));
 
         assertEquals(403, response.statusCode(), response.body());
-        assertEquals("Requires API_CREDENTIAL_MANAGE permission in this workspace",
+        assertEquals("Requires the API_CREDENTIAL_MANAGE permission in this workspace",
             objectMapper.readTree(response.body()).path("message").asString());
         assertEquals(credentialsBefore, credentialRows(workspace));
         assertEquals(scopesBefore, credentialScopeRows(workspace));
@@ -659,7 +659,7 @@ class PublicApiCredentialIntegrationTest {
             "/api/api-credentials/" + target.id(), session, workspace, null);
 
         assertEquals(403, response.statusCode(), response.body());
-        assertEquals("Requires API_CREDENTIAL_MANAGE permission in this workspace",
+        assertEquals("Requires the API_CREDENTIAL_MANAGE permission in this workspace",
             objectMapper.readTree(response.body()).path("message").asString());
         assertEquals(credentialsBefore, credentialRows(workspace));
         assertEquals(scopesBefore, credentialScopeRows(workspace));
@@ -681,10 +681,15 @@ class PublicApiCredentialIntegrationTest {
         assertEquals(0, jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM api_credential_scope WHERE credential_id IN (?, ?)",
             Integer.class, owned.id(), revoked.id()));
-        assertEquals(1, jdbcTemplate.queryForObject(
-            "SELECT COUNT(*) FROM audit_log"
+        List<Long> erasedCredentialIds = jdbcTemplate.queryForList(
+            "SELECT changes FROM audit_log"
                 + " WHERE action = 'api_credential.account_erased' AND workspace_id = ?",
-            Integer.class, workspace.getId()));
+            String.class, workspace.getId()).stream()
+            .map(changes -> objectMapper.readTree(changes).path("credentialId").longValue())
+            .toList();
+        assertEquals(2, erasedCredentialIds.size());
+        assertTrue(erasedCredentialIds.contains(owned.id()));
+        assertTrue(erasedCredentialIds.contains(revoked.id()));
     }
 
     @Test
