@@ -25,6 +25,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.JdbcTransactionManager;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
 import org.springframework.transaction.annotation.Propagation;
@@ -50,7 +51,9 @@ class RequestTransactionCommitListenerContextTest {
 
     @BeforeEach
     void bindRequest() {
-        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(new MockHttpServletRequest()));
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        new RequestTransactionCommitListener().preHandle(request, new MockHttpServletResponse(), new Object());
     }
 
     @AfterEach
@@ -113,6 +116,26 @@ class RequestTransactionCommitListenerContextTest {
         });
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"single-database", "catalog-per-placement"})
+    void earlierAndReadOnlyCommitsDoNotMarkTheHandlerWindow(String mode) {
+        configured(mode).run(context -> {
+            assertThat(context).hasNotFailed();
+            MockHttpServletRequest request = new MockHttpServletRequest();
+            RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+            TransactionProbe probe = context.getBean(TransactionProbe.class);
+
+            probe.commit();
+            assertFalse(RequestTransactionCommitListener.committedDuringRequest());
+            context.getBean(RequestTransactionCommitListener.class)
+                .preHandle(request, new MockHttpServletResponse(), new Object());
+            probe.readOnly();
+            assertFalse(RequestTransactionCommitListener.committedDuringRequest());
+            probe.commit();
+            assertTrue(RequestTransactionCommitListener.committedDuringRequest());
+        });
+    }
+
     private ApplicationContextRunner configured(String mode) {
         String url = Objects.requireNonNull(System.getenv("CONNEX_DB_URL"), "CONNEX_DB_URL");
         return contextRunner.withPropertyValues(
@@ -167,6 +190,11 @@ class RequestTransactionCommitListenerContextTest {
         public void rollback() {
             commit();
             throw new IllegalStateException("rollback");
+        }
+
+        @Transactional(readOnly = true)
+        public void readOnly() {
+            inner.participating();
         }
 
         @Transactional

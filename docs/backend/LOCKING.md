@@ -28,12 +28,15 @@ Read the relevant section before adding/changing `FOR UPDATE`, transaction isola
 
 Interactive and public API requests return HTTP 409 for Spring pessimistic lock failures and exact
 MySQL deadlock (1213), lock-wait timeout (1205), and NOWAIT (3572/HY000) failures, including causes
-and `TransactionSystemException` application exceptions, only when no Spring-managed transaction has
-committed during the current request on its thread. A `TransactionExecutionListener` registered by
-Boot on the JDBC transaction manager (also with a tenant-routed datasource) records successful
-physical commits in request attributes; nested savepoint releases and participating transactions
-do not mark a commit. `REQUIRES_NEW` and independent audit commits conservatively mark the request,
-even if the outer transaction later rolls back. A request already marked committed keeps the existing
+and `TransactionSystemException` application exceptions, only when no non-read-only Spring transaction
+has committed during handler execution on the request thread. The final MVC interceptor arms the
+window after authentication, MFA and tenant resolution; pre-handler bookkeeping commits do not
+count. Read-only commits are ignored. Credential successful-use recording runs after the filter
+chain returns, outside the handler's error-response decision. A `TransactionExecutionListener`
+registered by Boot on the JDBC transaction manager (also with a tenant-routed datasource) records successful writable physical
+commits in request attributes; nested savepoint releases and participating transactions do not mark
+a commit. Handler-phase bookkeeping, `REQUIRES_NEW` and independent audit commits conservatively mark
+the request, even if the outer transaction later rolls back. A marked request keeps the existing
 HTTP 500 path. Autocommit statements and work on other threads are not tracked; without a bound
 request the marker is a no-op. Responses use a generic conflict message without SQL or lock details;
 callers may retry with a fresh request and transaction within this tracking bound. There are no

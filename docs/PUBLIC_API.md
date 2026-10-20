@@ -198,11 +198,12 @@ Invalid credentials, privileged accounts that require passkey enrollment and, un
 attestation enforcement, privileged accounts whose passkeys still await approval receive `401`;
 authenticated credentials without the required scope, including credentials whose entire stored
 scope set is no longer live under current RBAC, receive `403`.
-Lock contention receives `409` with `conflict` only when no Spring-managed transaction has committed
-in the current request, so the caller can retry because no tracked transaction committed. Earlier
-commits retain `500` with `internal_error`. Tracking covers the request thread's Spring transactions,
-including independent audit commits; autocommit statements and work on other threads are outside
-this bound. See [the locking contract](backend/LOCKING.md#global-principles).
+Lock contention receives `409` with `conflict` only when no writable Spring transaction has committed
+during handler execution, so the caller can retry because no tracked transaction committed. Handler
+commits retain `500` with `internal_error`. Tracking starts after the pre-handler authentication and
+tenant bookkeeping and ignores read-only transactions. It covers the request thread's handler-phase
+Spring transactions, including independent audit commits; autocommit statements and work on other
+threads are outside this bound. See [the locking contract](backend/LOCKING.md#global-principles).
 Replacing a partial, uncommitted response with an error envelope preserves the correlation id,
 allowed CORS and `Vary` metadata, rate-limit and `Retry-After` headers, and HSTS while discarding
 stale representation headers and bytes.

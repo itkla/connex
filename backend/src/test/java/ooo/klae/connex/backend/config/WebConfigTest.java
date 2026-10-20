@@ -13,7 +13,8 @@ import ooo.klae.connex.backend.tenant.TenantResolutionInterceptor;
 
 class WebConfigTest {
 
-    private final LocaleResolver localeResolver = new WebConfig(mock(TenantResolutionInterceptor.class))
+    private final LocaleResolver localeResolver = new WebConfig(mock(TenantResolutionInterceptor.class),
+            new RequestTransactionCommitListener())
             .localeResolver();
 
     @Test

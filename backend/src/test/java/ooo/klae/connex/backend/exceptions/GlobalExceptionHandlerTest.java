@@ -36,6 +36,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.validation.BindException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
@@ -78,7 +79,9 @@ class GlobalExceptionHandlerTest {
         errorReporter = mock(ErrorReporter.class);
         tenantContext = new TenantContext();
         handler = new GlobalExceptionHandler(errorReporter, tenantContext);
-        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(new MockHttpServletRequest()));
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        new RequestTransactionCommitListener().preHandle(request, new MockHttpServletResponse(), new Object());
     }
 
     @AfterEach
@@ -580,6 +583,7 @@ class GlobalExceptionHandlerTest {
         MDC.put(CorrelationIds.MDC_KEY, "earlier-commit-123");
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/fail");
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        new RequestTransactionCommitListener().preHandle(request, new MockHttpServletResponse(), new Object());
         TransactionExecution committed = mock(TransactionExecution.class);
         when(committed.isNewTransaction()).thenReturn(true);
         new RequestTransactionCommitListener().afterCommit(committed, null);

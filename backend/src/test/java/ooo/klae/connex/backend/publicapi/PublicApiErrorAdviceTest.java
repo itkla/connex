@@ -18,6 +18,7 @@ import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.web.method.annotation.ExceptionHandlerMethodResolver;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.transaction.TransactionExecution;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
@@ -37,7 +38,9 @@ class PublicApiErrorAdviceTest {
     @BeforeEach
     void bindRequestCorrelationId() {
         MDC.put(CorrelationIds.MDC_KEY, "locked-mfa-request-123");
-        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(new MockHttpServletRequest()));
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        new RequestTransactionCommitListener().preHandle(request, new MockHttpServletResponse(), new Object());
     }
 
     @AfterEach
@@ -117,6 +120,9 @@ class PublicApiErrorAdviceTest {
     @ParameterizedTest
     @MethodSource("ooo.klae.connex.backend.support.LockContentionTestCases#retryable")
     void contentionAfterAnEarlierCommitKeepsTheExact500EnvelopeAndLogging(Exception failure) {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        new RequestTransactionCommitListener().preHandle(request, new MockHttpServletResponse(), new Object());
         TransactionExecution committed = mock(TransactionExecution.class);
         when(committed.isNewTransaction()).thenReturn(true);
         new RequestTransactionCommitListener().afterCommit(committed, null);
