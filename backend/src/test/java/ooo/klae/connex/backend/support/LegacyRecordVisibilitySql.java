@@ -630,10 +630,11 @@ public final class LegacyRecordVisibilitySql {
           </select>
         </mapper>
         """;
-    /** Frozen Report SQL from b004c467b, before the L3 ceiling rewrite. */
+    /** Frozen Report SQL from origin/main at 37497574b, including #2161's unit grouping fix. */
     private static final String REPORT = """
         <?xml version="1.0" encoding="UTF-8" ?>
-        <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+        <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+                "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
         <mapper namespace="ooo.klae.connex.backend.mappers.ReportMapper">
           <sql id="dealFilters">
             <if test="query.pipelineIds != null and !query.pipelineIds.isEmpty()">
@@ -662,6 +663,13 @@ public final class LegacyRecordVisibilitySql {
             </if>
           </sql>
 
+          <sql id="coverageGapUnit">
+            <choose>
+              <when test="query.measure == 'coverage_gap_open_pipeline_value'">COALESCE(open_deal.currency, '')</when>
+              <otherwise>'count'</otherwise>
+            </choose>
+          </sql>
+
           <select id="aggregateCoverageGaps" resultType="ooo.klae.connex.backend.dto.ReportAggregateRow">
             SELECT
               <choose>
@@ -686,10 +694,7 @@ public final class LegacyRecordVisibilitySql {
                 <when test="query.groupBy == 'company'">gap_company.name</when>
                 <otherwise>'Total'</otherwise>
               </choose> AS group_label,
-              <choose>
-                <when test="query.measure == 'coverage_gap_open_pipeline_value'">COALESCE(open_deal.currency, '')</when>
-                <otherwise>'count'</otherwise>
-              </choose> AS unit,
+              <include refid="coverageGapUnit"/> AS unit,
               <choose>
                 <when test="query.measure == 'coverage_gap_open_pipeline_value'">COALESCE(SUM(open_deal.value), 0)</when>
                 <otherwise>COUNT(DISTINCT gap_company.id)</otherwise>
@@ -815,9 +820,16 @@ public final class LegacyRecordVisibilitySql {
                 or query.statuses != null and !query.statuses.isEmpty()">
               WHERE open_deal.id IS NOT NULL
             </if>
-            GROUP BY group_key, group_label, unit
+            GROUP BY group_key, group_label, <include refid="coverageGapUnit"/>
             ORDER BY value DESC, group_label, group_key
           </select>
+
+          <sql id="singleThreadedDealUnit">
+            <choose>
+              <when test="query.measure == 'single_threaded_deal_value'">single_deal.currency</when>
+              <otherwise>'count'</otherwise>
+            </choose>
+          </sql>
 
           <select id="aggregateSingleThreadedDeals" resultType="ooo.klae.connex.backend.dto.ReportAggregateRow">
             SELECT
@@ -847,10 +859,7 @@ public final class LegacyRecordVisibilitySql {
                 <when test="query.groupBy == 'company'">COALESCE(single_company.name, 'Unassigned')</when>
                 <otherwise>'Total'</otherwise>
               </choose> AS group_label,
-              <choose>
-                <when test="query.measure == 'single_threaded_deal_value'">single_deal.currency</when>
-                <otherwise>'count'</otherwise>
-              </choose> AS unit,
+              <include refid="singleThreadedDealUnit"/> AS unit,
               <choose>
                 <when test="query.measure == 'single_threaded_deal_value'">SUM(single_deal.value)</when>
                 <otherwise>COUNT(*)</otherwise>
@@ -886,7 +895,7 @@ public final class LegacyRecordVisibilitySql {
                 )
               )
               AND single_company.archived_at IS NULL
-            GROUP BY group_key, group_label, unit
+            GROUP BY group_key, group_label, <include refid="singleThreadedDealUnit"/>
             ORDER BY value DESC, group_label, group_key
           </select>
 

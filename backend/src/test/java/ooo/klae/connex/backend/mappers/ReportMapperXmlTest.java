@@ -682,6 +682,7 @@ class ReportMapperXmlTest {
         String sql = configuration.getMappedStatement(ReportMapper.class.getName() + "." + statement)
                 .getBoundSql(Map.of(
                         "query", query(measure, group, bucket, null, null, null, null),
+                        "orgWorkspaceIdsJson", "[7]",
                         "warmthReference", LocalDateTime.of(2026, 2, 1, 0, 0),
                         "model", RelationshipWarmthModel.current().sqlParameters()))
                 .getSql();
