@@ -45,7 +45,7 @@ class AiAgentPrivacyInitializationIntegrationTest extends AbstractAiAgentPrivacy
     void missingBarrierWithMissionEvidenceIsNotReinitialized() {
         jdbc.update("INSERT INTO ai_chat_session (workspace_id,created_by_user_id,title,message_seq_high_water,mission_taint_generation,mission_taint_seq) VALUES (?,?,?,1,1,1)",
                 workspace.getId(), currentUser.getId(), "Tainted fixture");
-        jdbc.update("DELETE FROM ai_agent_privacy_barrier WHERE workspace_id=?", workspace.getId());
+        ooo.klae.connex.backend.support.TestEntityFixtures.deleteChatPrivacy(jdbc, workspace.getId());
         assertThrows(ServiceUnavailableException.class, () -> privacyService.initialize(workspace.getId()));
         assertNull(privacyMapper.getBarrier(workspace.getId()));
     }
@@ -54,6 +54,7 @@ class AiAgentPrivacyInitializationIntegrationTest extends AbstractAiAgentPrivacy
     void newWorkspaceBarrierInitializationRecoversControlCommitCrash() {
         AiChatSession session = new AiChatSession();
         session.setWorkspaceId(workspace.getId());
+        session.setOrganizationPrivacyGeneration(1L);
         session.setCreatedByUserId(currentUser.getId());
         session.setTitle("Barrier admission fixture");
         session.setVisibility("private");
@@ -62,7 +63,7 @@ class AiAgentPrivacyInitializationIntegrationTest extends AbstractAiAgentPrivacy
         var request = new AiAgentRunCreateRequest(UUID.randomUUID().toString(), "record_review_v1", "Review",
                 new AiAgentRunCreateRequest.Scope("record", "company", 1), null);
         doReturn(AiAgentCapabilityGate.hash("configured provider fixture")).when(capability).requireReady();
-        jdbc.update("DELETE FROM ai_agent_privacy_barrier WHERE workspace_id=?", workspace.getId());
+        ooo.klae.connex.backend.support.TestEntityFixtures.deleteChatPrivacy(jdbc, workspace.getId());
         assertNull(privacyMapper.getBarrier(workspace.getId()));
         assertThrows(AiAgentUnavailableException.class, () -> missions.create(session.getId(), request));
         assertEquals(0, chatMapper.getPrivacySession(workspace.getId(), session.getId()).getMessageSeqHighWater());

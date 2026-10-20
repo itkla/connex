@@ -182,7 +182,16 @@ class AiAgentContinuationV235MigrationIntegrationTest {
 
     @Test
     void canonicalJsonRoundTripsThroughNonUtf8Connection() throws Exception {
-        String cp1252 = url.replaceAll("(?i)(characterEncoding|connectionCollation)=[^&]*&?", "");
+        try (var transport = MySqlScratchCatalog.create(url, username, password,
+                "connex_cont_transport_it_", "utf8mb4", "utf8mb4_unicode_ci")) {
+            Flyway.configure().dataSource(transport.url(), username, password).locations("classpath:db/migration")
+                    .callbacks(new AuditLogV126MigrationCallback()).load().migrate();
+            assertCanonicalTransport(transport.url());
+        }
+    }
+
+    private void assertCanonicalTransport(String transportUrl) throws Exception {
+        String cp1252 = transportUrl.replaceAll("(?i)(characterEncoding|connectionCollation)=[^&]*&?", "");
         cp1252 += (cp1252.contains("?") ? "&" : "?") + "characterEncoding=Cp1252&connectionCollation=latin1_bin";
         try (Connection connection = DriverManager.getConnection(cp1252, username, password);
                 SqlSession session = mapperFactory(cp1252).openSession(connection)) {

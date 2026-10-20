@@ -161,6 +161,9 @@ public final class ArchiveVisibilityRegistry {
 
     private static Map<String, ArchiveDisposition> buildDispositions() {
         Map<String, ArchiveDisposition> entries = new LinkedHashMap<>();
+        declare(entries, "AiAgentPrivacyMapper", ArchiveStrategy.NO_RECORD_PROJECTION,
+            "Erasure resolves independent CRM attachment ownership by numeric keys only, including "
+                + "archived records that still retain their files; no identifying record columns are projected.");
         declare(entries, "PersonMapper", ArchiveStrategy.ARCHIVE_TOGGLE,
             "The shared `visible` fragment excludes archived contacts from every ordinary read and "
                 + "`companyJoin` drops an archived employer from the contact's company projection; "

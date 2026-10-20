@@ -1346,7 +1346,9 @@
         "forbidden": "You don’t have permission to view or control this review.",
         "failed": "Couldn't load the review"
       }
-    }
+    },
+    "privacyUnavailable": "This chat is no longer available following a privacy request. Start a new chat to continue.",
+    "privacyInitializing": "Chat is temporarily unavailable while we prepare a privacy update. Try again shortly."
   },
   "SearchLayout": {
     "title": "Search",

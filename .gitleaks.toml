@@ -22,6 +22,8 @@ regexes = [
   '''TOKEN="(0123456789abcdef){4}"''',
   '''VALID_TOKEN = "(0123456789abcdef){2}"''',
   '''IDEMPOTENCY_KEY = "[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}"''',
+  '''AND p\.proposal_key = t0?\.proposal_key$''',
+  '''idempotencyKey: '[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}', operationId: accepted\.operationId,''',
   '''static final String KEY = "[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}";''',
   '''\{"clientRequestKey":"[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}","missionType":"record_review_v1",''',
   '''\{ clientRequestKey: '[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}', missionType: 'record_review_v1',''',

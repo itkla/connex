@@ -414,6 +414,29 @@
             },
             "stale": "This data-subject request changed. Close this dialog and review the updated request before trying again.",
             "failed": "Couldn't retrieve the erasure status"
+        },
+        "assistantPurge": {
+            "action": "Erase Ask Connex chats and files",
+            "title": "Erase Ask Connex chats and files?",
+            "description": "Erase existing Ask Connex chats across this organization.",
+            "scope": "This erases existing Ask Connex chats, reviews, and chat files across this organization. Saved CRM records remain. Files saved separately on records remain.",
+            "cutoff": "Chats become unavailable when this request is accepted. New chats started afterward are kept. Erasure continues until every affected workspace and file has been checked.",
+            "irreversible": "This can’t be undone.",
+            "confirm": "Erase data",
+            "starting": "Starting…",
+            "close": "Close",
+            "retry": "Refresh status",
+            "accepted": "The erasure request has been accepted. It continues if you close this dialog.",
+            "progress": "{completed} of {total} workspaces completed.",
+            "workflowUnchanged": "Update the data-subject request status separately after reviewing the result.",
+            "states": {
+                "invalidation_pending": "Preparing the erasure.",
+                "purging": "Erasing Ask Connex chats and files.",
+                "retrying": "Erasure will retry. Affected content remains unavailable.",
+                "complete": "Erasure completed and verified."
+            },
+            "stale": "This data-subject request changed. Close this dialog and review the updated request before trying again.",
+            "failed": "Couldn't retrieve the erasure status"
         }
     }
 }

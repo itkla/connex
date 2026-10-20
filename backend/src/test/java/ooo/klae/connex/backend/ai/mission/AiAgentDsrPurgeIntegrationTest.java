@@ -42,6 +42,7 @@ import tools.jackson.databind.ObjectMapper;
 /** Real control and tenant transactions retain accepted authority across erasure failures. */
 class AiAgentDsrPurgeIntegrationTest extends AbstractAiAgentPrivacyIntegrationTest {
     @Autowired private AiAgentDsrPurgeService purgeService;
+    @Autowired private ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService organizationPrivacy;
     @Autowired private DataSubjectRequestService requestService;
     @Autowired private DataSubjectRequestMapper requestMapper;
     @Autowired private AiAgentDsrControlMapper receipts;
@@ -304,6 +305,105 @@ class AiAgentDsrPurgeIntegrationTest extends AbstractAiAgentPrivacyIntegrationTe
         assertEquals(accepted, durable);
     }
 
+    @Test
+    void v2AcceptanceAdvancesOrganizationOnce() {
+        AiAgentHoldingsPurgeRequest command = assistantCommand();
+        var accepted = requestService.acceptMissionPurge(workspace.getOrgId(), requestId, currentUser.getId(), command);
+        assertEquals(2, accepted.schemaVersion());
+        assertEquals(Long.valueOf(1), accepted.cutoffGeneration());
+        assertEquals(Long.valueOf(2), accepted.invalidatedGeneration());
+        assertEquals(2, organizationPrivacy.current(workspace.getOrgId()));
+        assertEquals(accepted, requestService.acceptMissionPurge(workspace.getOrgId(), requestId, currentUser.getId(), command));
+        assertEquals(2, organizationPrivacy.current(workspace.getOrgId()));
+        assertEquals(1, privacyMapper.getBarrier(workspace.getId()).getGeneration());
+        assertFalse(privacyMapper.getBarrier(workspace.getId()).isBlocked());
+        var operation = organizationPrivacy.findOperation(workspace.getOrgId(), accepted.operationId());
+        assertEquals(accepted.auditId(), operation.getControlAcceptanceAuditId());
+        assertEquals(1, acceptedCount());
+    }
+
+    @Test
+    void v1ReplayCannotBecomeV2() {
+        AiAgentHoldingsPurgeRequest original = command();
+        var accepted = requestService.acceptMissionPurge(workspace.getOrgId(), requestId, currentUser.getId(), original);
+        var changed = new AiAgentHoldingsPurgeRequest(original.idempotencyKey(), original.snapshotToken(),
+                AiAgentPurgeAcceptance.ASSISTANT_SCOPE, AiAgentPurgeAcceptance.ASSISTANT_CUTOFF_POLICY);
+        assertThrows(ConflictException.class, () -> requestService.acceptMissionPurge(
+                workspace.getOrgId(), requestId, currentUser.getId(), changed));
+        assertEquals(accepted, AiAgentPurgeAcceptance.from(receipts.findAcceptance(
+                workspace.getOrgId(), requestId, accepted.operationId()), json));
+        assertEquals(1, organizationPrivacy.current(workspace.getOrgId()));
+    }
+
+    @Test
+    void v2RecoveryUsesAcceptedCutoff() {
+        int old = newTaintedSession("Accepted old content");
+        var command = assistantCommand();
+        var accepted = requestService.acceptMissionPurge(workspace.getOrgId(), requestId, currentUser.getId(), command);
+        int current = newTaintedSession("Current content after acceptance");
+        jdbc.update("UPDATE data_subject_request SET subject_person_id=NULL, subject_workspace_id=NULL, identity_verified_at=NULL WHERE id=?", requestId);
+        jdbc.update("DELETE FROM org_member WHERE org_id=? AND user_id=?", workspace.getOrgId(), currentUser.getId());
+        purgeService.recoverAccepted();
+        var installed = privacyMapper.getWork(workspace.getId(), accepted.operationId());
+        assertNotNull(installed);
+        assertEquals(1, installed.getCutoffGeneration());
+        assertEquals(AiAgentPurgeAcceptance.ASSISTANT_SCOPE, installed.getContentScope());
+        byte[] fingerprint = installed.getOperationFingerprint();
+        privacyService.initialize(workspace.getId());
+        purgeService.recoverAccepted();
+        org.junit.jupiter.api.Assertions.assertArrayEquals(fingerprint,
+                privacyMapper.getWork(workspace.getId(), accepted.operationId()).getOperationFingerprint());
+        finish(accepted.operationId());
+        purgeService.recoverAccepted();
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM ai_chat_session WHERE workspace_id=? AND id=?", Integer.class, workspace.getId(), old));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM ai_chat_session WHERE workspace_id=? AND id=?", Integer.class, workspace.getId(), current));
+        assertNotNull(receipts.findCompletion(workspace.getOrgId(), requestId, accepted.operationId()));
+    }
+
+    @Test
+    void missingWorkspaceStillRequiresLifecycleEvidence() {
+        acceptedWorkspace = additionalWorkspace("Accepted workspace later missing");
+        var accepted = purgeService.initiate(workspace.getOrgId(), requestId, currentUser.getId(), assistantCommand());
+        finish(accepted.operationId());
+        removeAdditionalWorkspace(acceptedWorkspace.getId());
+        purgeService.recoverAccepted();
+        assertNull(receipts.findCompletion(workspace.getOrgId(), requestId, accepted.operationId()));
+        assertThrows(RuntimeException.class, () -> purgeService.get(
+                workspace.getOrgId(), requestId, currentUser.getId(), accepted.operationId()));
+    }
+
+    @Test
+    void verifiedDeletedWorkspaceCanFinishRecoveryAndC2FromItsDurableReceipt() {
+        acceptedWorkspace = additionalWorkspace("Verified workspace later deleted");
+        var accepted = purgeService.initiate(workspace.getOrgId(), requestId, currentUser.getId(), assistantCommand());
+        finish(accepted.operationId());
+        finishWorkspace(acceptedWorkspace.getId(), accepted.operationId());
+        assertNull(receipts.findCompletion(workspace.getOrgId(), requestId, accepted.operationId()));
+        jdbc.update("UPDATE workspace SET lifecycle_state='tearing_down' WHERE id=?", acceptedWorkspace.getId());
+        jdbc.update("DELETE FROM ai_agent_privacy_object WHERE workspace_id=?", acceptedWorkspace.getId());
+        jdbc.update("DELETE FROM ai_agent_privacy_work WHERE workspace_id=?", acceptedWorkspace.getId());
+        purgeService.recoverAccepted();
+        workScope.inLifecycleWorkspace(acceptedWorkspace.getId(), () -> privacyService.initialize(acceptedWorkspace.getId()));
+        assertNull(receipts.findCompletion(workspace.getOrgId(), requestId, accepted.operationId()));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM ai_assistant_privacy_operation_workspace"
+                + " WHERE organization_id=? AND operation_key=? AND workspace_id=? AND state='verified'", Integer.class,
+                workspace.getOrgId(), accepted.operationId(), acceptedWorkspace.getId()));
+        removeAdditionalWorkspace(acceptedWorkspace.getId());
+
+        purgeService.recoverAccepted();
+
+        assertNotNull(receipts.findCompletion(workspace.getOrgId(), requestId, accepted.operationId()));
+        var current = purgeService.get(workspace.getOrgId(), requestId, currentUser.getId(), accepted.operationId());
+        assertEquals("complete", current.state());
+        assertEquals(2, current.completedWorkspaceCount());
+    }
+
+    private AiAgentHoldingsPurgeRequest assistantCommand() {
+        return new AiAgentHoldingsPurgeRequest(UUID.randomUUID().toString(),
+                DataSubjectRequestSnapshot.token(requestMapper.findById(workspace.getOrgId(), requestId)),
+                AiAgentPurgeAcceptance.ASSISTANT_SCOPE, AiAgentPurgeAcceptance.ASSISTANT_CUTOFF_POLICY);
+    }
+
     private AiAgentHoldingsPurgeRequest command() {
         return new AiAgentHoldingsPurgeRequest(UUID.randomUUID().toString(),
                 DataSubjectRequestSnapshot.token(requestMapper.findById(workspace.getOrgId(), requestId)),
@@ -329,12 +429,12 @@ class AiAgentDsrPurgeIntegrationTest extends AbstractAiAgentPrivacyIntegrationTe
 
     private int newTaintedSession(int workspaceId, String content) {
         jdbc.update("INSERT INTO ai_chat_session (workspace_id, created_by_user_id, title, mission_taint_generation,"
-                + " mission_taint_seq, message_seq_high_water, title_privacy_generation) VALUES (?, ?, 'Ask Connex', 1, 1, 1, 1)",
-                workspaceId, currentUser.getId());
+                + " mission_taint_seq, message_seq_high_water, title_privacy_generation, organization_privacy_generation) VALUES (?, ?, 'Ask Connex', 1, 1, 1, 1, ?)",
+                workspaceId, currentUser.getId(), organizationPrivacy.current(workspace.getOrgId()));
         int session = java.util.Objects.requireNonNull(jdbc.queryForObject(
                 "SELECT MAX(id) FROM ai_chat_session WHERE workspace_id=?", Integer.class, workspaceId));
-        jdbc.update("INSERT INTO ai_chat_message (workspace_id, session_id, seq, content, author_kind, privacy_generation)"
-                + " VALUES (?, ?, 1, ?, 'user', 1)", workspaceId, session, content);
+        jdbc.update("INSERT INTO ai_chat_message (workspace_id, session_id, seq, content, author_kind, privacy_generation, organization_privacy_generation)"
+                + " VALUES (?, ?, 1, ?, 'user', 1, ?)", workspaceId, session, content, organizationPrivacy.current(workspace.getOrgId()));
         return session;
     }
 
@@ -365,6 +465,7 @@ class AiAgentDsrPurgeIntegrationTest extends AbstractAiAgentPrivacyIntegrationTe
         jdbc.update("DELETE FROM ai_chat_message WHERE workspace_id=?", workspaceId);
         jdbc.update("DELETE FROM ai_chat_session WHERE workspace_id=?", workspaceId);
         jdbc.update("UPDATE ai_agent_privacy_barrier SET latest_operation_key=NULL WHERE workspace_id=?", workspaceId);
+        jdbc.update("DELETE FROM ai_agent_privacy_object WHERE workspace_id=?", workspaceId);
         jdbc.update("DELETE FROM ai_agent_privacy_work WHERE workspace_id=?", workspaceId);
         jdbc.update("DELETE FROM ai_agent_privacy_barrier WHERE workspace_id=?", workspaceId);
         jdbc.update("DELETE FROM workspace WHERE id=?", workspaceId);

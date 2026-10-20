@@ -160,10 +160,9 @@ public interface AiAgentPrivacyMapper {
     int countIncompleteWork(
             @Param("workspaceId") int workspaceId);
 
-    /** Executes the tenant-scoped deleteMissionTurns privacy operation. */
-    int deleteMissionTurns(
-            @Param("workspaceId") int workspaceId,
-            @Param("runId") int runId);
+    /** Breaks restrictive segment references on locked terminal turns without deleting proposal ancestry. */
+    int detachMissionTurns(@Param("workspaceId") int workspaceId, @Param("runId") int runId,
+            @Param("ids") List<Integer> ids);
 
     /** Executes the tenant-scoped settleAffectedTurn privacy operation. */
     int settleAffectedTurn(
@@ -193,4 +192,34 @@ public interface AiAgentPrivacyMapper {
     /** Refuses content continuation for a pre-contract ordinary execution during startup. */
     int settleLegacyTurn(@Param("workspaceId") int workspaceId,
             @Param("sessionId") int sessionId, @Param("turnId") int turnId);
+
+    /** Discovers v2 roots without cursor restrictions for residual repair. */
+    List<Integer> allChatRunIds(@Param("workspaceId") int workspaceId, @Param("cutoffGeneration") long cutoffGeneration, @Param("limit") int limit);
+    List<Integer> allChatSessionIds(@Param("workspaceId") int workspaceId, @Param("cutoffGeneration") long cutoffGeneration, @Param("limit") int limit);
+    List<Integer> allChatTurnIds(@Param("workspaceId") int workspaceId, @Param("sessionId") int sessionId, @Param("activeOnly") boolean activeOnly, @Param("limit") int limit);
+    List<Integer> allChatToolIds(@Param("workspaceId") int workspaceId, @Param("sessionId") int sessionId, @Param("limit") int limit);
+    List<Integer> allChatMessageIds(@Param("workspaceId") int workspaceId, @Param("sessionId") int sessionId, @Param("limit") int limit);
+    List<String> proposalParentKeys(@Param("workspaceId") int workspaceId, @Param("sessionId") int sessionId, @Param("cutoffGeneration") long cutoffGeneration, @Param("allChat") boolean allChat, @Param("limit") int limit);
+    List<String> toolParentKeys(@Param("workspaceId") int workspaceId, @Param("ids") List<Integer> ids);
+    String lockProposalParent(@Param("workspaceId") int workspaceId, @Param("sessionId") int sessionId, @Param("proposalKey") String proposalKey);
+    int deleteProposalParent(@Param("workspaceId") int workspaceId, @Param("sessionId") int sessionId, @Param("proposalKey") String proposalKey);
+    List<ooo.klae.connex.backend.beans.Attachment> chatAttachments(@Param("workspaceId") int workspaceId, @Param("sessionId") int sessionId, @Param("limit") int limit);
+    Integer retainedCrmReference(@Param("workspaceId") int workspaceId, @Param("url") String url);
+    int settleAllChatTurn(@Param("workspaceId") int workspaceId, @Param("sessionId") int sessionId, @Param("turnId") int turnId);
+    int deleteAllChatTools(@Param("workspaceId") int workspaceId, @Param("sessionId") int sessionId, @Param("ids") List<Integer> ids);
+    int deleteAllChatMessages(@Param("workspaceId") int workspaceId, @Param("sessionId") int sessionId, @Param("ids") List<Integer> ids);
+    int deleteAllChatTurns(@Param("workspaceId") int workspaceId, @Param("sessionId") int sessionId, @Param("ids") List<Integer> ids);
+    int deleteAllChatParticipants(@Param("workspaceId") int workspaceId, @Param("sessionId") int sessionId, @Param("limit") int limit);
+    int deleteAllChatSession(@Param("workspaceId") int workspaceId, @Param("sessionId") int sessionId);
+    long allChatResidualCount(@Param("workspaceId") int workspaceId, @Param("cutoffGeneration") long cutoffGeneration, @Param("operationKey") String operationKey);
+    long allChatSessionResidualCount(@Param("workspaceId") int workspaceId, @Param("sessionId") int sessionId);
+
+    /** Discovers all retained run payloads after lifecycle admission has closed. */
+    List<Integer> workspaceTeardownRunIds(@Param("workspaceId") int workspaceId, @Param("limit") int limit);
+
+    /** Discovers every local session without interpreting the v1 cutoff as organization authority. */
+    List<Integer> workspaceTeardownSessionIds(@Param("workspaceId") int workspaceId, @Param("limit") int limit);
+
+    /** Requires all local chat holdings, owned leases, and object obligations to be settled. */
+    long workspaceTeardownResidualCount(@Param("workspaceId") int workspaceId);
 }

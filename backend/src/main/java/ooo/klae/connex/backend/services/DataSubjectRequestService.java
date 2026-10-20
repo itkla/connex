@@ -233,14 +233,15 @@ public class DataSubjectRequestService {
     public ooo.klae.connex.backend.ai.mission.AiAgentPurgeAcceptance acceptMissionPurge(
             int orgId, long requestId, int actorId,
             ooo.klae.connex.backend.dto.AiAgentHoldingsPurgeRequest request) {
-        if (!ooo.klae.connex.backend.ai.mission.AiAgentPurgeAcceptance.SCOPE.equals(request.scopeAcknowledgement())
-                || !ooo.klae.connex.backend.ai.mission.AiAgentPurgeAcceptance.CUTOFF_POLICY.equals(request.cutoffPolicyAcknowledgement())) {
-            throw new BadRequestException("Mission holdings purge scope must be acknowledged");
-        }
         var replay = tenantWorkScope.unroutedRead(
                 () -> controlOperations.missionPurgeByKey(orgId, requestId, actorId, request.idempotencyKey()));
         if (replay != null) {
+            replay.requireAcknowledgments(request.scopeAcknowledgement(), request.cutoffPolicyAcknowledgement());
             return replay;
+        }
+        if (!ooo.klae.connex.backend.ai.mission.AiAgentPurgeAcceptance.acknowledges(
+                request.scopeAcknowledgement(), request.cutoffPolicyAcknowledgement())) {
+            throw new BadRequestException("Mission holdings purge scope must be acknowledged");
         }
         DataSubjectRequest subject = tenantWorkScope.unrouted(
                 () -> controlOperations.loadForMutation(orgId, requestId, actorId));

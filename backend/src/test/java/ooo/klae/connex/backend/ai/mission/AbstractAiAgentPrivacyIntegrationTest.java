@@ -47,6 +47,7 @@ abstract class AbstractAiAgentPrivacyIntegrationTest extends AbstractServiceTest
         currentUser = newUser();
         workspaceMapper.updateMemberRole(workspace.getId(), currentUser.getId(), "owner");
         authenticateAs(currentUser, workspace.getId());
+        ooo.klae.connex.backend.support.TestEntityFixtures.seedExistingWorkspacePrivacy(jdbc, workspace.getId());
         privacyService.initialize(workspace.getId());
     }
 
@@ -88,6 +89,7 @@ abstract class AbstractAiAgentPrivacyIntegrationTest extends AbstractServiceTest
         jdbc.update("DELETE FROM ai_chat_session WHERE workspace_id=?", id);
         jdbc.update("DELETE FROM ai_run_lease WHERE workspace_id=?", id);
         jdbc.update("UPDATE ai_agent_privacy_barrier SET latest_operation_key=NULL WHERE workspace_id=?", id);
+        jdbc.update("DELETE FROM ai_agent_privacy_object WHERE workspace_id=?", id);
         jdbc.update("DELETE FROM ai_agent_privacy_work WHERE workspace_id=?", id);
         jdbc.update("DELETE FROM ai_agent_privacy_barrier WHERE workspace_id=?", id);
         jdbc.update("DELETE FROM workspace_member WHERE workspace_id=?", id);
@@ -96,6 +98,9 @@ abstract class AbstractAiAgentPrivacyIntegrationTest extends AbstractServiceTest
             jdbc.update("DELETE FROM app_user WHERE id=?", currentUser.getId());
         }
         if (organization != null) {
+            jdbc.update("DELETE FROM ai_assistant_privacy_operation_workspace WHERE organization_id=?", organization.getId());
+            jdbc.update("DELETE FROM ai_assistant_privacy_operation WHERE organization_id=?", organization.getId());
+            jdbc.update("DELETE FROM ai_assistant_privacy_fence WHERE organization_id=?", organization.getId());
             jdbc.update("DELETE FROM organization WHERE id=?", organization.getId());
         }
     }

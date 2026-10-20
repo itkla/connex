@@ -161,6 +161,7 @@ class AiAgentRunIntegrationTest extends AbstractAiAgentPrivacyIntegrationTest {
     protected int session() {
         AiChatSession session = new AiChatSession();
         session.setWorkspaceId(workspace.getId());
+        session.setOrganizationPrivacyGeneration(1L);
         session.setCreatedByUserId(currentUser.getId());
         session.setTitle("Mission fixture");
         session.setVisibility("private");

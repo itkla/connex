@@ -13,6 +13,7 @@ public class AiChatSession {
     private Integer missionTaintSeq;
     private Long titlePrivacyGeneration;
     private int workspaceId;
+    private long organizationPrivacyGeneration;
     private Integer createdByUserId;
     private String title;
     private boolean titleUserSet = true;

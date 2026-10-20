@@ -31,7 +31,15 @@ public interface AiAssistantProposalSetMapper {
     AiAssistantProposalSet findByKey(
             @Param("workspaceId") int workspaceId,
             @Param("sessionId") int sessionId,
-            @Param("proposalKey") String proposalKey);
+            @Param("proposalKey") String proposalKey,
+            @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
+
+    /** Locks the exact parent before any proposal child or originating turn is acquired. */
+    AiAssistantProposalSet lockByKey(
+            @Param("workspaceId") int workspaceId,
+            @Param("sessionId") int sessionId,
+            @Param("proposalKey") String proposalKey,
+            @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     /** Returns the original invocation, including staged or failed calls, or null when absent. */
     AiAssistantProposalSet findByCallIdentity(
@@ -39,13 +47,15 @@ public interface AiAssistantProposalSetMapper {
             @Param("sessionId") int sessionId,
             @Param("originTurnId") int originTurnId,
             @Param("stepNumber") int stepNumber,
-            @Param("callOrdinal") int callOrdinal);
+            @Param("callOrdinal") int callOrdinal,
+            @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     /** Reads all members in original display order without applying a transcript projection cap. */
     List<AiChatToolCall> listMembers(
             @Param("workspaceId") int workspaceId,
             @Param("sessionId") int sessionId,
-            @Param("proposalKey") String proposalKey);
+            @Param("proposalKey") String proposalKey,
+            @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     /**
      * Tests exact count, contiguous ordinals, trust, tool, shared creation time and chat ownership.
@@ -54,5 +64,6 @@ public interface AiAssistantProposalSetMapper {
     boolean hasCompleteMembership(
             @Param("workspaceId") int workspaceId,
             @Param("sessionId") int sessionId,
-            @Param("proposalKey") String proposalKey);
+            @Param("proposalKey") String proposalKey,
+            @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 }

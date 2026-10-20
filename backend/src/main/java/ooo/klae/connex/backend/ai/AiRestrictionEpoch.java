@@ -201,8 +201,7 @@ public class AiRestrictionEpoch {
         Objects.requireNonNull(invocation, "invocation");
         RestrictionExpectation expected = expectedEgressEpoch.get();
         if (expected == null) {
-            ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard.requireEgressCurrent();
-            return invocation.get();
+            return ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard.invokeAtEgress(invocation);
         }
         if (expected.workspaceId() != workspaceId) {
             throw new IllegalStateException("AI egress workspace does not match its restriction context");
@@ -210,8 +209,7 @@ public class AiRestrictionEpoch {
         AtomicReference<T> result = new AtomicReference<>();
         boolean invoked = runIfCurrent(
                 workspaceId, expected.epoch(), () -> {
-                    ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard.requireEgressCurrent();
-                    result.set(invocation.get());
+                    result.set(ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard.invokeAtEgress(invocation));
                 });
         if (!invoked) {
             throw new EgressRejectedException("AI restrictions changed before provider egress");

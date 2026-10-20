@@ -47,6 +47,7 @@ import ooo.klae.connex.backend.support.MySqlLockWaitProbe;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 class AiAgentPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivacyIntegrationTest {
+    @Autowired private ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard privacyGuard;
     @Autowired private TenantWorkScope tenantWorkScope;
     @Autowired private org.mybatis.spring.SqlSessionTemplate sqlSessions;
     @MockitoSpyBean private AiAgentPrivacyMapper workMapper;
@@ -55,6 +56,7 @@ class AiAgentPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivacyInt
     @Autowired private AiAssistantTurnService turns;
     @MockitoSpyBean private AiChatProgressService progress;
     @MockitoSpyBean private AiRestrictionEpoch epochs;
+    @MockitoSpyBean private ooo.klae.connex.backend.mappers.AiAssistantPrivacyControlMapper organizationPrivacy;
     @Autowired private AiChatTurnPersistenceService persistence;
     @Autowired private PersonService persons;
     @Autowired private AiAgentRunPersistenceService missions;
@@ -68,6 +70,7 @@ class AiAgentPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivacyInt
     void completedPurgeRejectsDelayedPlanAndCheckpointWriters() throws Exception {
         AiChatSession session = new AiChatSession();
         session.setWorkspaceId(workspace.getId());
+        session.setOrganizationPrivacyGeneration(1);
         session.setCreatedByUserId(currentUser.getId());
         session.setTitle("Delayed continuation fixture");
         session.setVisibility("private");
@@ -151,9 +154,9 @@ class AiAgentPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivacyInt
         org.mockito.stubbing.Answer<AiChatSession> snapshot = invocation -> {
             AiChatSession found = retained
                     ? real.getRetainedSessionById(invocation.getArgument(0), invocation.getArgument(1),
-                            invocation.getArgument(2), invocation.getArgument(3))
+                            invocation.getArgument(2), invocation.getArgument(3), 1L)
                     : real.getAccessibleSessionById(invocation.getArgument(0), invocation.getArgument(1),
-                            invocation.getArgument(2));
+                            invocation.getArgument(2), 1L);
             if (Thread.currentThread().getName().equals("mission-transcript-reader")
                     && firstRead.compareAndSet(true, false)) {
                 assertNotNull(found);
@@ -165,10 +168,10 @@ class AiAgentPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivacyInt
         };
         if (retained) {
             doAnswer(snapshot).when(chat).getRetainedSessionById(
-                    eq(workspace.getId()), eq(currentUser.getId()), eq(session.getId()), anyList());
+                    eq(workspace.getId()), eq(currentUser.getId()), eq(session.getId()), anyList(), org.mockito.ArgumentMatchers.eq(1L));
         } else {
             doAnswer(snapshot).when(chat).getAccessibleSessionById(
-                    workspace.getId(), currentUser.getId(), session.getId());
+                    workspace.getId(), currentUser.getId(), session.getId(), 1L);
         }
         try (var workers = Executors.newSingleThreadExecutor()) {
             var reader = workers.submit(() -> {
@@ -215,13 +218,13 @@ class AiAgentPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivacyInt
         AtomicLong waitingConnection = new AtomicLong();
         doAnswer(invocation -> {
             var messages = realChat.listMessages(invocation.getArgument(0), invocation.getArgument(1),
-                    invocation.getArgument(2), invocation.getArgument(3));
+                    invocation.getArgument(2), invocation.getArgument(3), 1L);
             if (Thread.currentThread().getName().equals("mission-projecting-reader")) {
                 projecting.countDown();
                 await(releaseProjection);
             }
             return messages;
-        }).when(chat).listMessages(workspace.getId(), session.getId(), 50, 0);
+        }).when(chat).listMessages(workspace.getId(), session.getId(), 50, 0, 1L);
         doAnswer(invocation -> {
             waitingConnection.set(connectionId());
             invalidating.countDown();
@@ -255,11 +258,7 @@ class AiAgentPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivacyInt
         assertTrue(assistant.get(session.getId(), 1, 50).messages().items().isEmpty());
     }
 
-    /**
-     * Restriction waits for barrier X while retaining its write fence; admission pauses before
-     * requesting the conflicting read fence. Restriction must commit before admission can recheck its epoch,
-     * proving admission has not retained the downstream audit head at that checkpoint.
-     */
+    /** Restriction queues organization X before admission can acquire its conflicting local read fence. */
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void admissionAndRestrictionCannotInvertFenceAndAuditHead(boolean admissionFirst) throws Exception {
@@ -268,6 +267,7 @@ class AiAgentPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivacyInt
         var person = newPerson(null);
         AiChatSession session = new AiChatSession();
         session.setWorkspaceId(workspace.getId());
+        session.setOrganizationPrivacyGeneration(1);
         session.setCreatedByUserId(author.getId());
         session.setTitle("Shared ordinary session");
         session.setVisibility("shared");
@@ -277,9 +277,9 @@ class AiAgentPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivacyInt
         long epoch = epochs.current(workspace.getId());
         CountDownLatch admissionBeforeFence = new CountDownLatch(1);
         CountDownLatch releaseAdmission = new CountDownLatch(1);
-        CountDownLatch restrictionAtBarrier = new CountDownLatch(1);
+        CountDownLatch restrictionAtAuthority = new CountDownLatch(1);
         AtomicLong restrictionConnection = new AtomicLong();
-        AiAgentPrivacyMapper realPrivacy = sqlSessions.getMapper(AiAgentPrivacyMapper.class);
+        var realControl = sqlSessions.getMapper(ooo.klae.connex.backend.mappers.AiAssistantPrivacyControlMapper.class);
         doAnswer(invocation -> {
             admissionBeforeFence.countDown();
             await(releaseAdmission);
@@ -287,9 +287,9 @@ class AiAgentPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivacyInt
         }).when(epochs).retainReadFenceUntilTransactionCompletionIfCurrent(workspace.getId(), epoch);
         doAnswer(invocation -> {
             restrictionConnection.set(connectionId());
-            restrictionAtBarrier.countDown();
-            return realPrivacy.lockBarrier(invocation.getArgument(0));
-        }).when(workMapper).lockBarrier(workspace.getId());
+            restrictionAtAuthority.countDown();
+            return realControl.lockFence(invocation.getArgument(0));
+        }).when(organizationPrivacy).lockFence(workspace.getOrgId());
         try (var workers = Executors.newFixedThreadPool(2)) {
             java.util.concurrent.Callable<AiAssistantLoopException> admission = () -> {
                 authenticateAs(currentUser, workspace.getId());
@@ -313,15 +313,15 @@ class AiAgentPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivacyInt
             var restricted = new java.util.concurrent.atomic.AtomicReference<java.util.concurrent.Future<Boolean>>();
             try {
                 transaction().executeWithoutResult(status -> {
-                    privacyMapper.lockBarrierForShare(workspace.getId());
+                    realControl.lockFenceForShare(workspace.getOrgId());
                     if (admissionFirst) {
                         admitted.set(workers.submit(admission));
                         await(admissionBeforeFence);
                     }
                     restricted.set(workers.submit(restriction));
-                    await(restrictionAtBarrier);
+                    await(restrictionAtAuthority);
                     MySqlLockWaitProbe.awaitExclusiveRecordLock(jdbc, restrictionConnection.get(),
-                            "ai_agent_privacy_barrier", Integer.toString(workspace.getId()));
+                            "ai_assistant_privacy_fence", Integer.toString(workspace.getOrgId()));
                     if (!admissionFirst) {
                         admitted.set(workers.submit(admission));
                         await(admissionBeforeFence);
@@ -453,6 +453,7 @@ class AiAgentPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivacyInt
 
     private AiChatTurn ordinaryPartial(AiChatSession session) {
         AiChatTurn turn = new AiChatTurn();
+        turn.setOrganizationPrivacyGeneration(1L);
         turn.setWorkspaceId(workspace.getId());
         turn.setSessionId(session.getId());
         turn.setRequestedByUserId(currentUser.getId());
@@ -548,7 +549,7 @@ class AiAgentPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivacyInt
     @ValueSource(booleans = {true, false})
     void purgeCompletionWaitsForEarlierWriterCommitOrRollback(boolean commit) throws Exception {
         AiChatSession session = taintedSession();
-        AiChatPrivacyToken token = AiChatPrivacyGuard.capture(chatMapper,
+        AiChatPrivacyToken token = privacyGuard.capture(chatMapper,
                 chatMapper.getPrivacySession(workspace.getId(), session.getId()));
         CountDownLatch retained = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
@@ -559,7 +560,7 @@ class AiAgentPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivacyInt
             var writer = workers.submit(() -> tenantWorkScope.inWorkspace(workspace.getId(), () -> {
                 transaction().executeWithoutResult(status -> {
                     chatMapper.getSessionByIdForMaintenanceUpdate(workspace.getId(), session.getId());
-                    AiChatPrivacyGuard.retain(chatMapper, token);
+                    privacyGuard.retain(chatMapper, token);
                     insertMessage(session.getId(), token.privacyGeneration());
                     retained.countDown();
                     await(release);
@@ -597,7 +598,7 @@ class AiAgentPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivacyInt
     @Test
     void invalidationBeforeWriterForcesRollbackAfterObservedBarrierWait() throws Exception {
         AiChatSession session = taintedSession();
-        AiChatPrivacyToken token = AiChatPrivacyGuard.capture(chatMapper,
+        AiChatPrivacyToken token = privacyGuard.capture(chatMapper,
                 chatMapper.getPrivacySession(workspace.getId(), session.getId()));
         CountDownLatch invalidated = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
@@ -621,7 +622,7 @@ class AiAgentPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivacyInt
                             insertMessage(session.getId(), token.privacyGeneration());
                             writerConnection.set(connectionId());
                             writing.countDown();
-                            AiChatPrivacyGuard.retain(chatMapper, token);
+                            privacyGuard.retain(chatMapper, token);
                         }));
                 return true;
             }));
@@ -740,6 +741,7 @@ class AiAgentPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivacyInt
     private AiChatSession taintedSession() {
         AiChatSession session = new AiChatSession();
         session.setWorkspaceId(workspace.getId());
+        session.setOrganizationPrivacyGeneration(1);
         session.setCreatedByUserId(currentUser.getId());
         session.setTitle("Private cleanup fixture");
         session.setTitleUserSet(false);
@@ -753,6 +755,7 @@ class AiAgentPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivacyInt
 
     private void insertMessage(int sessionId, long generation) {
         AiChatMessage message = new AiChatMessage();
+        message.setOrganizationPrivacyGeneration(1L);
         message.setWorkspaceId(workspace.getId());
         message.setSessionId(sessionId);
         message.setSeq(chatMapper.nextMessageSequence(workspace.getId(), sessionId));

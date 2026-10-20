@@ -929,3 +929,13 @@ transport decision (§8.4) to surface early on a small surface.
 ## Ownership consent (#1534 slice 4o)
 
 Existing-scope owner promotions create offers; acceptance grants ownership. The HTTP, MFA, locking, control-plane, notice and cleanup contracts are in [Ownership offers](backend/OWNERSHIP_OFFERS.md). Founding, admin changes and last-owner checks retain their existing behavior. The self-offer card is authoritative on every catalog layout; ordinary inbox delivery retains the existing cross-catalog limitation.
+
+## Assistant privacy coordination ownership (V236/V237)
+
+The control fence, operation and operation-workspace tables contain organization coordination
+metadata only. The workspace ledger retains placement evidence without a workspace FK; ordinary
+workspace deletion must not silently remove pending accepted-operation evidence. Explicit
+organization cleanup owns these tables. Missing workspace evidence still refuses DSR completion.
+The tenant object-obligation table participates in lifecycle/export/residual registries and is
+deleted before its privacy-work parent. No tenant query joins control privacy tables; services pass
+server-resolved organization generations between separately routed statements.

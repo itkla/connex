@@ -283,8 +283,9 @@ class TenantScopeArchTest {
 
             Map<String, Element> fragments = sqlFragments(doc);
             List<Element> selects = elementsByTag(doc, "select");
-            assertFalse(selects.isEmpty(),
-                "No <select> statements parsed from " + resource + " — the XML scan is misconfigured.");
+            assertTrue(!selects.isEmpty() || List.of("insert", "update", "delete").stream()
+                    .anyMatch(tag -> !elementsByTag(doc, tag).isEmpty()),
+                "No SQL statements parsed from " + resource + " — the XML scan is misconfigured.");
 
             for (Element select : selects) {
                 scanned++;

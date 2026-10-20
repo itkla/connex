@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard;
 import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Person;
@@ -39,6 +40,7 @@ public class AttachmentWriteOperations {
         Set.of("fileName", "entityType", "entityId", "url", "contentType", "size");
 
     private final AttachmentMapper attachmentMapper;
+    private final AiChatPrivacyGuard privacyGuard;
     private final AiChatMapper aiChatMapper;
     private final CompanyMapper companyMapper;
     private final PersonMapper personMapper;
@@ -85,11 +87,12 @@ public class AttachmentWriteOperations {
     /** Stores a managed assistant attachment after the caller has locked and authorized its session. */
     @Transactional
     public Attachment uploadAssistantSession(
-            int workspaceId, int sessionId, ScannedUpload scanned, User uploader) {
-        if (!aiChatMapper.sessionExists(workspaceId, sessionId)) {
+            int workspaceId, int sessionId, ScannedUpload scanned, User uploader, Runnable privacyAdmission) {
+        if (!aiChatMapper.sessionExists(workspaceId, sessionId, privacyGuard.currentGeneration(workspaceId))) {
             throw new ResourceNotFoundException("Attachment target was not found");
         }
         StoredBinary stored = managedObjectService.storeInspectedAttachment(workspaceId, scanned);
+        privacyAdmission.run();
         return persistStored(
             workspaceId, "ai_chat_session", sessionId, uploader, stored, scanned);
     }

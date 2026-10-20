@@ -128,9 +128,9 @@ class TenantExportSnapshotTransactionTest {
         ClientErrorService clientErrorService = mock(ClientErrorService.class);
         AtomicInteger tableCloses = new AtomicInteger();
         AtomicInteger objectCloses = new AtomicInteger();
-        when(mapper.streamRows(anyInt(), any())).thenAnswer(invocation ->
+        when(mapper.streamRows(anyInt(), any(), org.mockito.ArgumentMatchers.anyLong())).thenAnswer(invocation ->
             new EmptyCursor<Map<String, Object>>(tableCloses));
-        when(mapper.streamActiveObjectReferences(anyInt())).thenAnswer(invocation ->
+        when(mapper.streamActiveObjectReferences(anyInt(), org.mockito.ArgumentMatchers.anyLong())).thenAnswer(invocation ->
             new EmptyCursor<ActiveObjectReference>(objectCloses));
         TenantExportSnapshotTransaction transaction =
             new TenantExportSnapshotTransaction(
@@ -153,6 +153,7 @@ class TenantExportSnapshotTransactionTest {
             Duration.ofSeconds(5),
             cancellationExecutor,
             failure -> failure);
+        execution.bindOrganizationGeneration(1L);
         execution.armDeadline(deadlineExecutor);
         execution.begin();
 
@@ -175,9 +176,9 @@ class TenantExportSnapshotTransactionTest {
     @Test
     void captureExportsTheSafeRegisteredClientErrorProjection() throws Exception {
         TenantLifecycleMapper mapper = mock(TenantLifecycleMapper.class);
-        when(mapper.streamRows(anyInt(), any())).thenAnswer(invocation ->
+        when(mapper.streamRows(anyInt(), any(), org.mockito.ArgumentMatchers.anyLong())).thenAnswer(invocation ->
             new EmptyCursor<Map<String, Object>>(new AtomicInteger()));
-        when(mapper.streamActiveObjectReferences(anyInt())).thenAnswer(invocation ->
+        when(mapper.streamActiveObjectReferences(anyInt(), org.mockito.ArgumentMatchers.anyLong())).thenAnswer(invocation ->
             new EmptyCursor<ActiveObjectReference>(new AtomicInteger()));
         ClientErrorService clientErrorService = mock(ClientErrorService.class);
         when(clientErrorService.workspaceExportPage(7, 0, 500)).thenReturn(List.of(
@@ -198,6 +199,7 @@ class TenantExportSnapshotTransactionTest {
             1, 1, 0, TimeUnit.NANOSECONDS, new ArrayBlockingQueue<>(1));
         TenantExportExecution execution = new TenantExportExecution(
             Duration.ofSeconds(5), cancellationExecutor, failure -> failure);
+        execution.bindOrganizationGeneration(1L);
         execution.armDeadline(deadlineExecutor);
         execution.begin();
         ByteArrayOutputStream output = new ByteArrayOutputStream();

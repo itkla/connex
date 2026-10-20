@@ -242,6 +242,21 @@ public class AiChatAgentLoopService {
         return persistenceService.withPrivacyToken(turn, () -> runWithPrivacyToken(turn));
     }
 
+    /**
+     * Executes under the original privacy token, including preparation and repair attempts.
+     *
+     * <p>Every declared scope supplies a directive even without skill routing, so generic model
+     * reads stay within that declaration. Consumed plan steps retain their durable idempotency keys;
+     * the model resumes after them even when the plan produced no usable evidence. Skill attribution
+     * and its smaller synthesis budget apply only after the plan actually supplies evidence.
+     *
+     * <p>Narration is requester-only because it may name records from that member's tool results
+     * that a shared viewer's narrower access would withhold in the settled transcript.
+     *
+     * <p>A repair produced no model decision and consumes no step budget. Consecutive malformed
+     * steps and the step-number backstop bound retries. A closing attempt stays closing across
+     * repair so no retry can execute a tool beyond the closing boundary.
+     */
     private AiGenerationTaskResult<AiChatTurnGenerationResult> runWithPrivacyToken(AiChatQueuedTurn turn) {
         AiAgentExecutionPolicy mission = AiAgentExecutionPolicy.forTurn(turn);
         AiRunLeaseGuard ownership = mission == null ? new AiRunLeaseGuard(aiProperties.getRunLeaseTtl()) : mission.ownership();
@@ -313,9 +328,6 @@ public class AiChatAgentLoopService {
                     initiatingMessage.getContent(),
                     promptContext,
                     turn.scope());
-            // Carried on every turn that declares a scope, routed or not: the generic loop is
-            // exactly where a model would otherwise reach for a read the declaration cannot be
-            // applied to and have the turn refused for it.
             String scopeDirective = AiChatScopedToolPolicy.directive(turn.scope());
             AiAssistantPromptAssembler.SkillContext skillContext =
                     AiAssistantPromptAssembler.SkillContext.NONE
@@ -342,15 +354,10 @@ public class AiChatAgentLoopService {
                             requireOwnership(ownership);
                             requireCurrentToolExecution(turn);
                         });
-                // Every step the plan consumed already owns a durable idempotency key, so the
-                // model loop resumes after them even when the plan produced nothing usable.
                 stepOffset = execution.lastStepNumber();
                 maxSteps = Math.min(maxSteps, HARD_MAX_STEPS - stepOffset);
                 if (execution.executed()) {
                     Set<Toolset> seeded = seededToolsets(routing.skill());
-                    // Attribution is written only once the plan actually produced the evidence the
-                    // answer is built from, so the durable turn row and the answer's own skill
-                    // metadata can never name a declaration the turn did not really run under.
                     persistenceService.applySkill(
                             turn, routing.skill().key(), routing.skill().version());
                     state.loadedToolsets.addAll(seeded);
@@ -358,8 +365,6 @@ public class AiChatAgentLoopService {
                             routing.skill().key(), routing.skill().version());
                     skillContext = new AiAssistantPromptAssembler.SkillContext(
                             routing.skill().directive(), execution.evidence(), scopeDirective);
-                    // The server-owned plan already retrieved the evidence, so the model gets the
-                    // skill's small synthesis budget instead of the improvisation budget.
                     maxSteps = Math.min(maxSteps, routing.skill().budgets().maxModelSteps());
                 }
             }
@@ -569,10 +574,6 @@ public class AiChatAgentLoopService {
                             .ifPresent(text -> {
                                 narrationBytes.addAndGet(text.length());
                                 narration.add(new AiChatNarration(stepNumber, text));
-                                // Requester-only, exactly like thinking: narration names records
-                                // this member's own tool results reached, and a shared viewer whose
-                                // access is narrower must not learn a label live that the settled
-                                // transcript would withhold from them.
                                 publish(turn.userId(), new AiChatStepFrameDto(
                                         turn.workspaceId(), turn.sessionId(), turn.turnId(),
                                         stepNumber, "narration", null, null, null, null, text));
@@ -622,12 +623,6 @@ public class AiChatAgentLoopService {
                         closingReason = "schema_repair_failed";
                         continue steps;
                     }
-                    // A repair iteration produced no model decision, so it is not charged to the
-                    // step budget. It is still bounded: a second consecutive malformed step ends
-                    // the turn above, and the backstop bounds the step numbers regardless. A
-                    // closing step stays closing across its repair — otherwise the retry would
-                    // run with the ordinary schema and a tool it returned would execute past the
-                    // closing boundary.
                     repair = attempt.repair().orElseThrow();
                     closingPending = closing;
                     continue;
@@ -1097,6 +1092,10 @@ public class AiChatAgentLoopService {
      * return their outcome directly instead of throwing, so neither writes a durable row for a turn
      * the loop no longer owns.
      *
+     * <p>Plan frames, like narration, are requester-only because model prose can name records a
+     * shared viewer cannot read. Publishing a plan supplies no new evidence and must not reset
+     * the no-progress guard, even when the model changes the plan's wording.
+     *
      * @param context the per-turn surfaces every tool call of the turn executes against
      * @param stepNumber the durable number of the model step this call belongs to
      * @param closingAttempted whether the turn already spent its closing step
@@ -1389,10 +1388,6 @@ public class AiChatAgentLoopService {
                 state.todos.addAll(AiChatTodo.from(
                         call.tool().args().get("items"),
                         call.tool().args().get("statuses")));
-                // Requester-only, like narration: a plan step is model prose that can name a
-                // record this member's own tool results reached, and a viewer whose access is
-                // narrower must not learn it live from a frame the settled transcript would
-                // withhold.
                 publish(turn.userId(), new AiChatStepFrameDto(
                         turn.workspaceId(), turn.sessionId(), turn.turnId(),
                         stepNumber, "todos", null, null, null, null,
@@ -1402,9 +1397,6 @@ public class AiChatAgentLoopService {
                 state.toolResultCache.put(toolCallKey, toolResult);
             }
             boolean freshResult = state.seenToolResults.add(progressResultJson);
-            // Publishing a plan is bookkeeping, not evidence. Letting it reset the no-progress
-            // guard would let a model keep a turn alive on cosmetically different plans alone, so
-            // a plan leaves the guard exactly as it found it.
             boolean stalled;
             if (publishedPlan) {
                 stalled = progress.plan(state);

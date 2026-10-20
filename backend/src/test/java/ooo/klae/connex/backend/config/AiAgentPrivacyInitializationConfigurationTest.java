@@ -65,6 +65,8 @@ class AiAgentPrivacyInitializationConfigurationTest {
         .withBean(WorkspaceMapper.class, () -> workspaces)
         .withBean(TenantWorkScope.class, () -> scope)
         .withBean(AiAgentPrivacyService.class, () -> privacy)
+        .withBean(ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService.class,
+            () -> mock(ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService.class))
         .withBean(AiAgentStartupRecoveryService.class, () -> recovery)
         .withBean(JobRunRecorder.class, () -> mock(JobRunRecorder.class))
         .withBean(TestTransactionManager.class, TestTransactionManager::new)

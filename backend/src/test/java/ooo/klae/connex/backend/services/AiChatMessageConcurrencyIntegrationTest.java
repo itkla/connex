@@ -91,6 +91,7 @@ class AiChatMessageConcurrencyIntegrationTest {
 
         session = new AiChatSession();
         session.setWorkspaceId(workspace.getId());
+        session.setOrganizationPrivacyGeneration(1L);
         session.setCreatedByUserId(actors.getFirst().getId());
         session.setTitle("Concurrent appends");
         session.setVisibility("shared");
@@ -121,6 +122,7 @@ class AiChatMessageConcurrencyIntegrationTest {
             }
         }
         if (organization != null) {
+            TestEntityFixtures.deleteOrganizationPrivacy(jdbcTemplate, organization.getId());
             jdbcTemplate.update("DELETE FROM organization WHERE id = ?", organization.getId());
         }
     }
@@ -185,7 +187,7 @@ class AiChatMessageConcurrencyIntegrationTest {
         }
 
         List<AiChatMessage> messages = chatMapper.listMessages(
-            workspace.getId(), session.getId(), 100, 0);
+            workspace.getId(), session.getId(), 100, 0, 1L);
         assertEquals(APPEND_COUNT, messages.size());
         assertEquals(
             IntStream.rangeClosed(1, APPEND_COUNT).boxed().toList(),

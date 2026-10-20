@@ -78,7 +78,7 @@ class AiAssistantServiceTest extends AbstractServiceTest {
     void createDefaultsToPrivateActiveAndOwnerCanRead() {
         AiChatSessionDto created = service.create(createRequest("  Planning room  "));
         AiChatSession persisted = chatMapper.getSessionById(
-            workspace.getId(), currentUser.getId(), created.getId());
+            workspace.getId(), currentUser.getId(), created.getId(), 1L);
         AiChatSessionDetailDto detail = service.get(created.getId(), 1, 50);
 
         assertNotEquals(0, created.getId());
@@ -99,6 +99,7 @@ class AiAssistantServiceTest extends AbstractServiceTest {
         AiChatSession session = privateSession(currentUser, "Compacted history");
         AiChatMessage summary = new AiChatMessage();
         summary.setWorkspaceId(workspace.getId());
+        summary.setOrganizationPrivacyGeneration(1L);
         summary.setSessionId(session.getId());
         summary.setSeq(1);
         summary.setAuthorKind("system");
@@ -116,11 +117,11 @@ class AiAssistantServiceTest extends AbstractServiceTest {
         assertEquals("", detail.messages().items().getFirst().getContent());
         assertEquals(
                 "Server-only early relationship facts",
-                chatMapper.getHistorySummary(workspace.getId(), session.getId()).getContent());
+                chatMapper.getHistorySummary(workspace.getId(), session.getId(), 1L).getContent());
         assertEquals(
                 List.of(2),
                 chatMapper.listMessagesForCompaction(
-                        workspace.getId(), session.getId(), 0, 3, 10).stream()
+                        workspace.getId(), session.getId(), 0, 3, 10, 1L).stream()
                         .map(AiChatMessage::getSeq)
                         .toList());
     }
@@ -134,9 +135,9 @@ class AiAssistantServiceTest extends AbstractServiceTest {
         AiChatSessionDto manual = service.create(createRequest("Planning room"));
 
         AiChatSession automaticStored = chatMapper.getSessionById(
-                workspace.getId(), currentUser.getId(), automatic.getId());
+                workspace.getId(), currentUser.getId(), automatic.getId(), 1L);
         AiChatSession manualStored = chatMapper.getSessionById(
-                workspace.getId(), currentUser.getId(), manual.getId());
+                workspace.getId(), currentUser.getId(), manual.getId(), 1L);
         assertNotNull(automaticStored);
         assertNotNull(manualStored);
         assertFalse(automaticStored.isTitleUserSet());
@@ -338,6 +339,7 @@ class AiAssistantServiceTest extends AbstractServiceTest {
         Person target = newPerson(newCompany());
         AiChatMessage request = new AiChatMessage();
         request.setWorkspaceId(workspace.getId());
+        request.setOrganizationPrivacyGeneration(1L);
         request.setSessionId(retained.getId());
         request.setSeq(1);
         request.setAuthorKind("user");
@@ -346,6 +348,7 @@ class AiAssistantServiceTest extends AbstractServiceTest {
         chatMapper.insertMessage(request);
         AiChatToolCall toolCall = new AiChatToolCall();
         toolCall.setWorkspaceId(workspace.getId());
+        toolCall.setOrganizationPrivacyGeneration(1L);
         toolCall.setMessageId(request.getId());
         toolCall.setToolName("create_note");
         toolCall.setStatus("executed");
@@ -465,11 +468,11 @@ class AiAssistantServiceTest extends AbstractServiceTest {
         assertThrows(ForbiddenException.class, () -> service.archive(session.getId()));
 
         AiChatSession unchanged = chatMapper.getSessionById(
-            workspace.getId(), currentUser.getId(), session.getId());
+            workspace.getId(), currentUser.getId(), session.getId(), 1L);
         assertNotNull(unchanged);
         assertEquals("Immutable evidence", unchanged.getTitle());
         assertEquals("active", unchanged.getStatus());
-        assertEquals(0, chatMapper.countMessages(workspace.getId(), session.getId()));
+        assertEquals(0, chatMapper.countMessages(workspace.getId(), session.getId(), 1L));
     }
 
     @Test
@@ -538,7 +541,7 @@ class AiAssistantServiceTest extends AbstractServiceTest {
                 () -> service.setShared(created.getId(), true));
 
         AiChatSession unchanged = chatMapper.getSessionById(
-                workspace.getId(), currentUser.getId(), created.getId());
+                workspace.getId(), currentUser.getId(), created.getId(), 1L);
         assertEquals("Requires the AI_SESSION_SHARE permission in this workspace",
                 forbidden.getMessage());
         assertNotNull(unchanged);
@@ -565,7 +568,7 @@ class AiAssistantServiceTest extends AbstractServiceTest {
                 () -> service.setShared(created.getId(), true));
 
         AiChatSession unchanged = chatMapper.getSessionById(
-                workspace.getId(), currentUser.getId(), created.getId());
+                workspace.getId(), currentUser.getId(), created.getId(), 1L);
         assertEquals("Sessions with existing assistant answers cannot be shared",
                 conflict.getMessage());
         assertNotNull(unchanged);
@@ -585,7 +588,7 @@ class AiAssistantServiceTest extends AbstractServiceTest {
         assertThrows(
                 ForbiddenException.class,
                 () -> service.invite(created.getId(), member.getId()));
-        assertEquals(0, chatMapper.countInvitedSessions(workspace.getId(), member.getId()));
+        assertEquals(0, chatMapper.countInvitedSessions(workspace.getId(), member.getId(), 1L));
 
         chatMapper.insertInvitation(
                 workspace.getId(), created.getId(), member.getId(), currentUser.getId());
@@ -593,7 +596,7 @@ class AiAssistantServiceTest extends AbstractServiceTest {
 
         assertThrows(ForbiddenException.class, () -> service.join(created.getId()));
         assertEquals(0, chatMapper.countAccessibleSessions(
-                workspace.getId(), member.getId()));
+                workspace.getId(), member.getId(), 1L));
     }
 
     @Test
@@ -778,7 +781,7 @@ class AiAssistantServiceTest extends AbstractServiceTest {
 
         assertEquals(INACCESSIBLE, update.getMessage());
         assertEquals(INACCESSIBLE, append.getMessage());
-        assertEquals(0, chatMapper.countMessages(workspace.getId(), created.getId()));
+        assertEquals(0, chatMapper.countMessages(workspace.getId(), created.getId(), 1L));
     }
 
     @Test
@@ -790,7 +793,7 @@ class AiAssistantServiceTest extends AbstractServiceTest {
         service.archive(created.getId());
         service.archive(created.getId());
         AiChatSession archived = chatMapper.getSessionById(
-            workspace.getId(), currentUser.getId(), created.getId());
+            workspace.getId(), currentUser.getId(), created.getId(), 1L);
         ConflictException conflict = assertThrows(
             ConflictException.class,
             () -> service.appendMessage(created.getId(), messageRequest("Too late")));
@@ -887,7 +890,7 @@ class AiAssistantServiceTest extends AbstractServiceTest {
         assertEquals(List.of(), answer.getSuggestions());
         assertEquals(
                 persistedContent,
-                chatMapper.listMessages(workspace.getId(), created.getId(), 50, 0)
+                chatMapper.listMessages(workspace.getId(), created.getId(), 50, 0, 1L)
                         .getFirst().getContent());
     }
 
@@ -1021,9 +1024,9 @@ class AiAssistantServiceTest extends AbstractServiceTest {
         authenticateAs(caller, workspace.getId());
         AiChatSession session = sharedSession(caller, "Permission race");
         AiChatSession before = chatMapper.getSessionById(
-            workspace.getId(), caller.getId(), session.getId());
+            workspace.getId(), caller.getId(), session.getId(), 1L);
         long sessionCount = chatMapper.countAccessibleSessions(
-            workspace.getId(), caller.getId());
+            workspace.getId(), caller.getId(), 1L);
 
         doAnswer(invocation -> {
             workspaceMapper.setMemberCustomRole(
@@ -1044,11 +1047,11 @@ class AiAssistantServiceTest extends AbstractServiceTest {
         authorizationOrder.verify(workspaceService).requirePermission(
             workspace.getId(), caller.getId(), Permission.AI_USE);
         AiChatSession after = chatMapper.getSessionById(
-            workspace.getId(), caller.getId(), session.getId());
+            workspace.getId(), caller.getId(), session.getId(), 1L);
         assertEquals("Requires the AI_USE permission in this workspace", forbidden.getMessage());
         assertEquals(sessionCount, chatMapper.countAccessibleSessions(
-            workspace.getId(), caller.getId()));
-        assertEquals(0, chatMapper.countMessages(workspace.getId(), session.getId()));
+            workspace.getId(), caller.getId(), 1L));
+        assertEquals(0, chatMapper.countMessages(workspace.getId(), session.getId(), 1L));
         assertNotNull(before);
         assertNotNull(after);
         assertEquals(before.getLastMessageAt(), after.getLastMessageAt());
@@ -1067,6 +1070,7 @@ class AiAssistantServiceTest extends AbstractServiceTest {
         Person target = newPerson(newCompany());
         AiChatMessage request = new AiChatMessage();
         request.setWorkspaceId(workspace.getId());
+        request.setOrganizationPrivacyGeneration(1L);
         request.setSessionId(session.getId());
         request.setSeq(1);
         request.setAuthorKind("user");
@@ -1075,6 +1079,7 @@ class AiAssistantServiceTest extends AbstractServiceTest {
         chatMapper.insertMessage(request);
         AiChatToolCall toolCall = new AiChatToolCall();
         toolCall.setWorkspaceId(workspace.getId());
+        toolCall.setOrganizationPrivacyGeneration(1L);
         toolCall.setMessageId(request.getId());
         toolCall.setToolName("create_note");
         toolCall.setStatus("executed");
@@ -1110,6 +1115,7 @@ class AiAssistantServiceTest extends AbstractServiceTest {
     private AiChatSession session(User owner, String title, String visibility) {
         AiChatSession session = new AiChatSession();
         session.setWorkspaceId(workspace.getId());
+        session.setOrganizationPrivacyGeneration(1L);
         session.setCreatedByUserId(owner.getId());
         session.setTitle(title);
         session.setVisibility(visibility);
@@ -1166,6 +1172,7 @@ class AiAssistantServiceTest extends AbstractServiceTest {
     private void assistantMessage(int sessionId, int sequence, String content, String metadata) {
         AiChatMessage message = new AiChatMessage();
         message.setWorkspaceId(workspace.getId());
+        message.setOrganizationPrivacyGeneration(1L);
         message.setSessionId(sessionId);
         message.setSeq(sequence);
         message.setAuthorKind("assistant");
@@ -1177,6 +1184,7 @@ class AiAssistantServiceTest extends AbstractServiceTest {
     private int turn(int sessionId, User requester) {
         AiChatTurn turn = new AiChatTurn();
         turn.setWorkspaceId(workspace.getId());
+        turn.setOrganizationPrivacyGeneration(1L);
         turn.setSessionId(sessionId);
         turn.setRequestedByUserId(requester.getId());
         turn.setStatus("resolved");

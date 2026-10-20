@@ -76,6 +76,10 @@ class AiAgentRunPersistenceServiceTest {
 
     private final AiAgentRunMapper runs = mock(AiAgentRunMapper.class);
     private final AiChatMapper chat = mock(AiChatMapper.class);
+    private final ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService organizationAuthority =
+            mock(ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService.class);
+    private final ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard privacyGuard =
+            new ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard(organizationAuthority);
     private final WorkspaceService workspaces = mock(WorkspaceService.class);
     private final AiRestrictionEpoch restriction = mock(AiRestrictionEpoch.class);
     private final AiRunLeaseService leases = mock(AiRunLeaseService.class);
@@ -93,15 +97,19 @@ class AiAgentRunPersistenceServiceTest {
 
     @BeforeEach
     void setUp() {
+        when(organizationAuthority.organizationId(org.mockito.ArgumentMatchers.anyInt())).thenReturn(1);
+        when(organizationAuthority.current(1)).thenReturn(1L);
+        when(organizationAuthority.freshCurrent(1)).thenReturn(1L);
         StaticListableBeanFactory factory = new StaticListableBeanFactory();
         factory.addBean("missionPersistence", proxy);
-        service = new AiAgentRunPersistenceService(runs, chat, workspaces, restriction, leases,
+        service = new AiAgentRunPersistenceService(runs, privacyGuard, chat, workspaces, restriction, leases,
                 JsonMapper.builder().build(), Clock.fixed(NOW, ZoneOffset.UTC),
                 factory.getBeanProvider(AiAgentRunPersistenceService.class));
         when(workspaces.getCurrentWorkspaceId()).thenReturn(WORKSPACE);
         when(workspaces.getCurrentUserId()).thenReturn(OWNER);
         when(workspaces.isMember(WORKSPACE, OWNER)).thenReturn(true);
         session.setWorkspaceId(WORKSPACE);
+        session.setOrganizationPrivacyGeneration(1L);
         session.setId(SESSION);
         session.setStatus("active");
         session.setCreatedByUserId(OWNER);
@@ -113,12 +121,13 @@ class AiAgentRunPersistenceServiceTest {
         when(chat.getSessionByIdForUpdate(WORKSPACE, OWNER, SESSION)).thenReturn(session);
         when(chat.getSessionByIdForMaintenanceUpdate(WORKSPACE, SESSION)).thenReturn(session);
         when(chat.getPrivacySession(WORKSPACE, SESSION)).thenReturn(session);
-        when(chat.getAccessibleSessionById(WORKSPACE, OWNER, SESSION)).thenReturn(session);
+        when(chat.getAccessibleSessionById(WORKSPACE, OWNER, SESSION, 1L)).thenReturn(session);
         when(chat.getPrivacyBarrier(WORKSPACE)).thenReturn(barrier);
         when(chat.lockPrivacyBarrierForShare(WORKSPACE)).thenReturn(barrier);
         when(restriction.current(WORKSPACE)).thenReturn(EPOCH);
         when(restriction.retainReadFenceUntilTransactionCompletionIfCurrent(WORKSPACE, EPOCH)).thenReturn(true);
         run.setWorkspaceId(WORKSPACE);
+        run.setOrganizationPrivacyGeneration(1L);
         run.setId(RUN);
         run.setSessionId(SESSION);
         run.setOwnerUserId(OWNER);
@@ -140,6 +149,7 @@ class AiAgentRunPersistenceServiceTest {
         run.setHardDeadlineAt(run.getExecutionDeadlineAt());
         segment.setId(SEGMENT);
         segment.setWorkspaceId(WORKSPACE);
+        segment.setOrganizationPrivacyGeneration(1L);
         segment.setRunId(RUN);
         segment.setSegmentNo(1);
         segment.setAttemptNo(1);
@@ -150,6 +160,7 @@ class AiAgentRunPersistenceServiceTest {
         segment.setReservedTokens(131072);
         turn.setId(TURN);
         turn.setWorkspaceId(WORKSPACE);
+        turn.setOrganizationPrivacyGeneration(1L);
         turn.setSessionId(SESSION);
         turn.setMissionRunId(RUN);
         turn.setMissionSegmentId(SEGMENT);
@@ -158,6 +169,7 @@ class AiAgentRunPersistenceServiceTest {
         goal.setSeq(3);
         goal.setSessionId(SESSION);
         goal.setWorkspaceId(WORKSPACE);
+        goal.setOrganizationPrivacyGeneration(1L);
         when(runs.getRun(WORKSPACE, RUN)).thenReturn(run);
         when(runs.lockRun(WORKSPACE, RUN)).thenReturn(run);
         when(runs.getSegment(WORKSPACE, SEGMENT)).thenReturn(segment);
@@ -199,12 +211,14 @@ class AiAgentRunPersistenceServiceTest {
     void purgedCreateKeyCannotCreateAgainAfterRequestHashErasure() {
         run.setPurgedAt(now());
         run.setRequestHash(null);
+        barrier.setGeneration(GENERATION + 1);
         when(runs.findByRequestKey(WORKSPACE, OWNER, REQUEST_KEY)).thenReturn(run);
 
         assertThrows(AiAgentGoneException.class, () -> service.create(SESSION, request(), "en",
                 AiAgentCapabilityGate.hash("request"), SCOPE, EPOCH));
         verify(chat, never()).nextMessageSequence(anyInt(), anyInt());
         verify(runs, never()).insertRun(any());
+        verify(chat, never()).lockPrivacyBarrierForShare(WORKSPACE);
     }
 
     @Test
@@ -457,7 +471,7 @@ class AiAgentRunPersistenceServiceTest {
 
         assertThrows(ResourceNotFoundException.class, () -> service.requireRunning(policy()));
 
-        verify(chat).getAccessibleSessionById(WORKSPACE, OWNER, SESSION);
+        verify(chat).getAccessibleSessionById(WORKSPACE, OWNER, SESSION, 1L);
         verify(chat, never()).getSessionByIdForUpdate(anyInt(), anyInt(), anyInt());
         verify(runs, never()).lockRun(anyInt(), anyInt());
         verifyNoInteractions(leases);
@@ -559,7 +573,7 @@ class AiAgentRunPersistenceServiceTest {
     private AiAgentExecutionPolicy policy() {
         AiChatQueuedTurn queued = new AiChatQueuedTurn(WORKSPACE, OWNER, SESSION, TURN, GOAL, 3,
                 EPOCH, false, List.of(), List.of(), AiPrivacyMode.MASKED, false,
-                AiChatQueryScope.none(), new AiChatPrivacyToken(WORKSPACE, SESSION, GENERATION, 3));
+                AiChatQueryScope.none(), new AiChatPrivacyToken(WORKSPACE, SESSION, GENERATION, 3, 1, 1L));
         return new AiAgentExecutionPolicy(RUN, SEGMENT, 1, queued, goal, new AiAgentScopePolicy("person", 41),
                 8, NOW.plusSeconds(180), lease, guard, proxy, gate);
     }
