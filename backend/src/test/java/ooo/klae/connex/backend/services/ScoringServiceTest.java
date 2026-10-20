@@ -850,7 +850,7 @@ class ScoringServiceTest {
             temperature(13, "cold", "steady", null)
         );
         doReturn(contacts).when(service).scoreContacts(WS);
-        doReturn(companies).when(service).scoreCompanies(WS);
+        doReturn(companies).when(service).scoreCompanies(WS, "[1]");
 
         WarmthSummaryDto summary = service.summarize(WS);
 
@@ -859,7 +859,7 @@ class ScoringServiceTest {
         assertEquals(new TrendCounts(3, 4, 2), summary.contactTrends());
         assertEquals(new DecayCounts(2, 2, 2), summary.contactDecay());
         verify(service, times(1)).scoreContacts(WS);
-        verify(service, times(1)).scoreCompanies(WS);
+        verify(service, times(1)).scoreCompanies(WS, "[1]");
     }
 
     @ParameterizedTest
@@ -878,8 +878,8 @@ class ScoringServiceTest {
             when(companies.getByIds(WS, "[1]", List.of(10))).thenReturn(List.of(company));
             service.companyEvidence(WS, 10, 42);
             var order = inOrder(companies, scopes, notes);
-            order.verify(scopes).withWorkspaceScopeRead(eq(WS), any());
             order.verify(scopes).getForWorkspace(WS);
+            order.verify(scopes).withWorkspaceScopeRead(eq(WS), org.mockito.ArgumentMatchers.any(RecordVisibilityScopeControlAccess.RecordVisibilityScope.class), any());
             order.verify(companies).getByIds(WS, "[1]", List.of(10));
             order.verify(companies).getRelationshipEvidenceTotals(
                 WS, "[1]", 10, reference, RelationshipWarmthModel.current().sqlParameters(), 100_001);
@@ -916,7 +916,7 @@ class ScoringServiceTest {
         });
 
         if (companyEvidence) {
-            verify(scopes).withWorkspaceScopeRead(eq(WS), any());
+            verify(scopes).withWorkspaceScopeRead(eq(WS), org.mockito.ArgumentMatchers.any(RecordVisibilityScopeControlAccess.RecordVisibilityScope.class), any());
             verify(scopes).getForWorkspace(WS);
             verifyNoMoreInteractions(scopes);
         } else {

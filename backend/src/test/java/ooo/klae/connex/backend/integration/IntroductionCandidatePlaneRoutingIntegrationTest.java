@@ -88,9 +88,8 @@ class IntroductionCandidatePlaneRoutingIntegrationTest {
 
     @Test
     void unresolvedBackgroundScopeReadsControlAndRestoresRouting() throws Exception {
-        WorkspaceMapper workspaceMapper = mock(WorkspaceMapper.class);
+        WorkspaceMapper workspaceMapper = fixture.workspaceMapper;
         TenantCatalogResolver resolver = mock(TenantCatalogResolver.class);
-        when(workspaceMapper.getOrgId(fixture.workspaceId)).thenReturn(fixture.orgId);
         when(resolver.resolveCatalog(fixture.orgId)).thenReturn(fixture.tenantCatalog);
         TenantWorkScope workScope = new TenantWorkScope(fixture.tenantContext, resolver, workspaceMapper);
         workScope.inWorkspace(fixture.workspaceId, () -> {

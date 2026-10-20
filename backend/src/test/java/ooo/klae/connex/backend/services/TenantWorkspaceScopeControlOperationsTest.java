@@ -12,6 +12,9 @@ import static org.mockito.Mockito.when;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper;
@@ -27,13 +30,15 @@ class TenantWorkspaceScopeControlOperationsTest {
     private final TenantWorkspaceScopeControlOperations operations =
         new TenantWorkspaceScopeControlOperations(workspaces, lifecycle, catalogs);
 
-    @Test
-    void oneReadPerKindPreservesUnfilteredNameOrderingAndActiveOnlyIds() {
+    @ParameterizedTest
+    @NullSource
+    @ValueSource(strings = "cnx_tenant")
+    void oneReadPerKindPreservesUnfilteredNameOrderingAndActiveOnlyIds(String catalog) {
         when(workspaces.findOrganizationWorkspacesForShare(7)).thenReturn(List.of(
             workspace(11, 900, "Alpha"), workspace(7, 900, "Zulu"), workspace(13, 900, "廃止")));
         when(workspaces.findByOrgId(900)).thenReturn(List.of(workspace(11, 900, "Alpha"), workspace(7, 900, "Zulu")));
 
-        var prepared = operations.load(7, 900, "cnx_tenant", null);
+        var prepared = operations.load(7, 900, catalog, null);
 
         assertEquals("[11,7,13]", prepared.requireSharing().workspaceIdsJson());
         assertEquals(List.of(7, 11, 13), prepared.requireSharing().recordVisibilityScope().workspaceIds());
@@ -42,6 +47,8 @@ class TenantWorkspaceScopeControlOperationsTest {
         verify(workspaces).findOrganizationWorkspacesForShare(7);
         verify(workspaces).findByOrgId(900);
         verify(workspaces, never()).getOrgId(7);
+        org.mockito.Mockito.verifyNoMoreInteractions(workspaces);
+        org.mockito.Mockito.verifyNoInteractions(catalogs, lifecycle);
     }
 
     @Test

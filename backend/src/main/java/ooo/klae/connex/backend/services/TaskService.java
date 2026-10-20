@@ -183,7 +183,7 @@ public class TaskService {
     }
 
     private Task createWithinVisibilityScope(Task task) {
-        return create(task, MutationAdmission.UNRESTRICTED);
+        return createWithinVisibilityScope(task, MutationAdmission.UNRESTRICTED);
     }
 
     /** Performs the canonical action after its final under-lock mutation admission. */
@@ -328,7 +328,7 @@ public class TaskService {
     }
 
     private Task completeWithinVisibilityScope(int id) {
-        return complete(id, MutationAdmission.UNRESTRICTED);
+        return completeWithinVisibilityScope(id, MutationAdmission.UNRESTRICTED);
     }
 
     /** Performs the canonical action after its final under-lock mutation admission. */
@@ -617,7 +617,7 @@ public class TaskService {
     }
 
     private Task rescheduleWithinVisibilityScope(int id, String dueDate) {
-        return reschedule(id, dueDate, MutationAdmission.UNRESTRICTED);
+        return rescheduleWithinVisibilityScope(id, dueDate, MutationAdmission.UNRESTRICTED);
     }
 
     /** Performs the canonical action after its final under-lock mutation admission. */

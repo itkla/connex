@@ -765,13 +765,14 @@ public class DealService {
     }
 
     public DealTopDto getTopDeals(String currency, MemberScope memberScope) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceService.getCurrentWorkspaceId(), () -> getTopDealsWithinVisibilityScope(currency, memberScope));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> getTopDealsWithinVisibilityScope(currency, memberScope, resolvedVisibilityScope));
     }
 
-    private DealTopDto getTopDealsWithinVisibilityScope(String currency, MemberScope memberScope) {
+    private DealTopDto getTopDealsWithinVisibilityScope(String currency, MemberScope memberScope, RecordVisibilityScope operationVisibilityScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        String orgWorkspaceIdsJson = operationVisibilityScope.workspaceIdsJson();
         List<DealSummaryDto> topOpen = dealMapper.topOpenDeals(workspaceId, currency, memberScope).stream()
             .map(deal -> toDealSummary(workspaceId, orgWorkspaceIdsJson, deal))
             .toList();
@@ -990,16 +991,17 @@ public class DealService {
      * @return the workspace-scoped {@link DealSummaryDto}
      */
     public DealSummaryDto getDealSummary(int id) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceService.getCurrentWorkspaceId(), () -> getDealSummaryWithinVisibilityScope(id));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> getDealSummaryWithinVisibilityScope(id, resolvedVisibilityScope));
     }
 
-    private DealSummaryDto getDealSummaryWithinVisibilityScope(int id) {
+    private DealSummaryDto getDealSummaryWithinVisibilityScope(int id, RecordVisibilityScope operationVisibilityScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, id);
         if (deal == null) throw new ResourceNotFoundException("Deal not found");
 
-        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        String orgWorkspaceIdsJson = operationVisibilityScope.workspaceIdsJson();
         return toDealSummary(workspaceId, orgWorkspaceIdsJson, deal);
     }
 
@@ -1038,12 +1040,13 @@ public class DealService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DEAL_CREATE)
     public Deal create(Deal deal) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceService.getCurrentWorkspaceId(), () -> createWithinVisibilityScope(deal));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> createWithinVisibilityScope(deal, resolvedVisibilityScope));
     }
 
-    private Deal createWithinVisibilityScope(Deal deal) {
-        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
+    private Deal createWithinVisibilityScope(Deal deal, RecordVisibilityScope operationVisibilityScope) {
+        RecordVisibilityScope scope = operationVisibilityScope;
         lockCreatePermission();
         duplicateDecisionLockService.lockCurrentOrganization();
         return createAfterDuplicateDecisionLock(deal, null, MutationAdmission.UNRESTRICTED, scope);
@@ -1059,12 +1062,13 @@ public class DealService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DEAL_CREATE)
     public Deal createReviewed(Deal deal, String duplicateReviewToken) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceService.getCurrentWorkspaceId(), () -> createReviewedWithinVisibilityScope(deal, duplicateReviewToken));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> createReviewedWithinVisibilityScope(deal, duplicateReviewToken, resolvedVisibilityScope));
     }
 
-    private Deal createReviewedWithinVisibilityScope(Deal deal, String duplicateReviewToken) {
-        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
+    private Deal createReviewedWithinVisibilityScope(Deal deal, String duplicateReviewToken, RecordVisibilityScope operationVisibilityScope) {
+        RecordVisibilityScope scope = operationVisibilityScope;
         lockCreatePermission();
         duplicatePreflightService.requireReviewedDealCreation(
             new DealDuplicatePreflightRequest(
@@ -1169,13 +1173,14 @@ public class DealService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DEAL_UPDATE)
     public Deal update(int id, Deal deal) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceService.getCurrentWorkspaceId(), () -> updateWithinVisibilityScope(id, deal));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> updateWithinVisibilityScope(id, deal, resolvedVisibilityScope));
     }
 
-    private Deal updateWithinVisibilityScope(int id, Deal deal) {
+    private Deal updateWithinVisibilityScope(int id, Deal deal, RecordVisibilityScope operationVisibilityScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        RecordVisibilityScope scope = operationVisibilityScope;
         String orgWorkspaceIdsJson = scope.workspaceIdsJson();
         duplicateDecisionLockService.lockCurrentOrganization();
         Deal before = requireDealForUpdate(workspaceId, id);
@@ -1269,7 +1274,7 @@ public class DealService {
     }
 
     private Deal updateValueWithinVisibilityScope(int id, BigDecimal value) {
-        return updateValue(id, value, MutationAdmission.UNRESTRICTED);
+        return updateValueWithinVisibilityScope(id, value, MutationAdmission.UNRESTRICTED);
     }
 
     /** Performs the canonical action after its final under-lock mutation admission. */
@@ -1339,7 +1344,7 @@ public class DealService {
     }
 
     private Deal rescheduleWithinVisibilityScope(int id, String expectedCloseDate) {
-        return reschedule(id, expectedCloseDate, MutationAdmission.UNRESTRICTED);
+        return rescheduleWithinVisibilityScope(id, expectedCloseDate, MutationAdmission.UNRESTRICTED);
     }
 
     /** Performs the canonical action after its final under-lock mutation admission. */
@@ -1412,13 +1417,14 @@ public class DealService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DEAL_UPDATE)
     public Deal reopen(int id) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceService.getCurrentWorkspaceId(), () -> reopenWithinVisibilityScope(id));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> reopenWithinVisibilityScope(id, resolvedVisibilityScope));
     }
 
-    private Deal reopenWithinVisibilityScope(int id) {
+    private Deal reopenWithinVisibilityScope(int id, RecordVisibilityScope operationVisibilityScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        RecordVisibilityScope scope = operationVisibilityScope;
         int actorId = workspaceService.getCurrentUserId();
         WorkspaceService.LockedPermissionSnapshot permissions =
             workspaceService.lockAndRequirePermissionsSnapshot(
@@ -2036,7 +2042,7 @@ public class DealService {
     }
 
     private Deal updateOwnerWithinVisibilityScope(int dealId, Integer ownerId) {
-        return updateOwner(dealId, ownerId, MutationAdmission.UNRESTRICTED);
+        return updateOwnerWithinVisibilityScope(dealId, ownerId, MutationAdmission.UNRESTRICTED);
     }
 
     /** Performs the canonical action after its final under-lock mutation admission. */

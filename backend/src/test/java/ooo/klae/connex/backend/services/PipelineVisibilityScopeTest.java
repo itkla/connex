@@ -51,8 +51,8 @@ class PipelineVisibilityScopeTest {
         when(pipelines.getStagesByPipelineId(7, "[7,8,9]", 12)).thenReturn(List.of(stage("First", false)));
         assertEquals(1, service.getStagesByPipelineId(12).size());
         var order = inOrder(scopes, pipelines);
-        order.verify(scopes).withWorkspaceScopeRead(eq(7), any());
         order.verify(scopes).getForWorkspace(7);
+        order.verify(scopes).withWorkspaceScopeRead(eq(7), org.mockito.ArgumentMatchers.any(RecordVisibilityScopeControlAccess.RecordVisibilityScope.class), any());
         order.verify(pipelines).getPipelineById(7, "[7,8,9]", 12);
         order.verify(pipelines).getStagesByPipelineId(7, "[7,8,9]", 12);
         verifyNoMoreInteractions(scopes);

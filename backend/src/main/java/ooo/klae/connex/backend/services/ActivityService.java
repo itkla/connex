@@ -208,7 +208,7 @@ public class ActivityService {
     }
 
     private Activity createWithinVisibilityScope(Activity activity) {
-        return create(activity, MutationAdmission.UNRESTRICTED);
+        return createWithinVisibilityScope(activity, MutationAdmission.UNRESTRICTED);
     }
 
     /** Performs the canonical action after its final under-lock mutation admission. */

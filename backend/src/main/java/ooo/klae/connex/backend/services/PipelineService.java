@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
+
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -52,13 +54,14 @@ public class PipelineService {
     }
 
     public Pipeline getPipelineById(int id) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceService.getCurrentWorkspaceId(), () -> getPipelineByIdWithinVisibilityScope(id));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> getPipelineByIdWithinVisibilityScope(id, resolvedVisibilityScope));
     }
 
-    private Pipeline getPipelineByIdWithinVisibilityScope(int id) {
+    private Pipeline getPipelineByIdWithinVisibilityScope(int id, RecordVisibilityScope operationVisibilityScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        String orgWorkspaceIdsJson = operationVisibilityScope.workspaceIdsJson();
         Pipeline pipeline = pipelineMapper.getPipelineById(workspaceId, orgWorkspaceIdsJson, id);
         if (pipeline == null) throw new ResourceNotFoundException("Pipeline not found with id: " + id);
         hydrateStageDeals(pipeline.getStages());
@@ -103,13 +106,14 @@ public class PipelineService {
     // Stage operations (will likely move to separate StageService in the future)
 
     public List<Stage> getStagesByPipelineId(int pipelineId) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceService.getCurrentWorkspaceId(), () -> getStagesByPipelineIdWithinVisibilityScope(pipelineId));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> getStagesByPipelineIdWithinVisibilityScope(pipelineId, resolvedVisibilityScope));
     }
 
-    private List<Stage> getStagesByPipelineIdWithinVisibilityScope(int pipelineId) {
+    private List<Stage> getStagesByPipelineIdWithinVisibilityScope(int pipelineId, RecordVisibilityScope operationVisibilityScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        String orgWorkspaceIdsJson = operationVisibilityScope.workspaceIdsJson();
         requirePipeline(workspaceId, orgWorkspaceIdsJson, pipelineId);
         List<Stage> stages = pipelineMapper.getStagesByPipelineId(workspaceId, orgWorkspaceIdsJson, pipelineId);
         hydrateStageDeals(stages.toArray(Stage[]::new));
@@ -123,13 +127,14 @@ public class PipelineService {
     }
 
     public Stage getStageById(int id) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceService.getCurrentWorkspaceId(), () -> getStageByIdWithinVisibilityScope(id));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> getStageByIdWithinVisibilityScope(id, resolvedVisibilityScope));
     }
 
-    private Stage getStageByIdWithinVisibilityScope(int id) {
+    private Stage getStageByIdWithinVisibilityScope(int id, RecordVisibilityScope operationVisibilityScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        String orgWorkspaceIdsJson = operationVisibilityScope.workspaceIdsJson();
         Stage stage = pipelineMapper.getVisibleStageById(workspaceId, orgWorkspaceIdsJson, id);
         if (stage == null) throw new ResourceNotFoundException("Stage not found with id: " + id);
         stage.setDeals(referenceService.hydrateDeals(
@@ -360,13 +365,14 @@ public class PipelineService {
      * Retrieves the deals associated with a pipeline in the active workspace.
      */
     public List<Deal> getDealsByPipelineId(int pipelineId) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceService.getCurrentWorkspaceId(), () -> getDealsByPipelineIdWithinVisibilityScope(pipelineId));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> getDealsByPipelineIdWithinVisibilityScope(pipelineId, resolvedVisibilityScope));
     }
 
-    private List<Deal> getDealsByPipelineIdWithinVisibilityScope(int pipelineId) {
+    private List<Deal> getDealsByPipelineIdWithinVisibilityScope(int pipelineId, RecordVisibilityScope operationVisibilityScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        String orgWorkspaceIdsJson = operationVisibilityScope.workspaceIdsJson();
         requirePipeline(workspaceId, orgWorkspaceIdsJson, pipelineId);
         return referenceService.hydrateDeals(
             workspaceId, dealMapper.getDealsByPipelineId(workspaceId, pipelineId));
@@ -376,13 +382,14 @@ public class PipelineService {
      * Retrieves the deals associated with a stage in the active workspace.
      */
     public List<Deal> getDealsByStageId(int stageId) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceService.getCurrentWorkspaceId(), () -> getDealsByStageIdWithinVisibilityScope(stageId));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> getDealsByStageIdWithinVisibilityScope(stageId, resolvedVisibilityScope));
     }
 
-    private List<Deal> getDealsByStageIdWithinVisibilityScope(int stageId) {
+    private List<Deal> getDealsByStageIdWithinVisibilityScope(int stageId, RecordVisibilityScope operationVisibilityScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        String orgWorkspaceIdsJson = operationVisibilityScope.workspaceIdsJson();
         if (pipelineMapper.getVisibleStageById(workspaceId, orgWorkspaceIdsJson, stageId) == null)
             throw new ResourceNotFoundException("Stage not found with id: " + stageId);
         return referenceService.hydrateDeals(

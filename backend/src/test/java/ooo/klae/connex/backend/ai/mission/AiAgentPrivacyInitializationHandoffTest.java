@@ -3,10 +3,12 @@ package ooo.klae.connex.backend.ai.mission;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -28,6 +30,7 @@ import org.springframework.core.task.TaskExecutor;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -134,22 +137,61 @@ class AiAgentPrivacyInitializationHandoffTest {
     }
 
     @Test
-    void singleDatabaseProvisioningStaysSynchronousAndDoesNotPrepareScopes() {
-        when(workspaces.getOrgId(7)).thenReturn(900);
+    void singleDatabaseProvisioningPreparesAfterCommitAndInitializesSynchronously() throws Exception {
+        DataSource dataSource = mock(DataSource.class);
+        Connection connection = mock(Connection.class);
+        when(dataSource.getConnection()).thenReturn(connection);
+        when(connection.getAutoCommit()).thenReturn(true);
+        var transactions = new DataSourceTransactionManager(dataSource);
+        var prepared = new TenantWorkspaceScopeSnapshot(7, 900, null, Optional.empty(),
+            new WorkspaceScope(900, List.of(7), "[7]"));
+        when(workspaces.getOrgId(7)).thenAnswer(call -> {
+            assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
+            assertFalse(TransactionSynchronizationManager.hasResource(dataSource));
+            return 900;
+        });
+        when(operations.load(7, 900, null, null)).thenAnswer(call -> {
+            verify(connection).commit();
+            assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
+            assertFalse(TransactionSynchronizationManager.hasResource(dataSource));
+            return prepared;
+        });
         User actor = new User();
         actor.setId(1);
         when(system.user()).thenReturn(actor);
         doAnswer(call -> {
             assertEquals(7, context.getWorkspaceId());
-            assertNull(context.getWorkspaceScopes());
+            assertSame(prepared, context.getWorkspaceScopes());
             return null;
         }).when(privacy).initialize(7);
 
-        initializer().provisioned(new AiAgentPrivacyInitializer.WorkspaceProvisioned(7));
+        var initializer = initializer(transactions);
+        new TransactionTemplate(transactions).executeWithoutResult(status -> {
+            verifyNoInteractions(operations, privacy);
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    Object retained = TransactionSynchronizationManager.getResource(dataSource);
+                    assertTrue(retained != null);
+                    initializer.provisioned(new AiAgentPrivacyInitializer.WorkspaceProvisioned(7));
+                    assertSame(retained, TransactionSynchronizationManager.getResource(dataSource));
+                    verify(recovery).reconcile(7);
+                    assertTrue(pending.isEmpty());
+                }
+            });
+        });
 
         verify(privacy).initialize(7);
         verify(recovery).reconcile(7);
-        verifyNoInteractions(operations);
+        verify(operations, times(1)).load(7, 900, null, null);
+        verify(workspaces, times(1)).getOrgId(7);
+        var order = inOrder(connection, operations, privacy, recovery);
+        order.verify(connection).commit();
+        order.verify(operations).load(7, 900, null, null);
+        order.verify(privacy).initialize(7);
+        order.verify(privacy).reconcileLegacyTurns(7);
+        order.verify(recovery).reconcile(7);
+        assertFalse(TransactionSynchronizationManager.hasResource(dataSource));
         assertTrue(pending.isEmpty());
         assertFalse(context.isResolved());
     }
@@ -205,10 +247,14 @@ class AiAgentPrivacyInitializationHandoffTest {
     }
 
     private AiAgentPrivacyInitializer initializer() {
+        return initializer(new TestTransactionManager());
+    }
+
+    private AiAgentPrivacyInitializer initializer(PlatformTransactionManager transactions) {
         var beans = new StaticListableBeanFactory();
         beans.addBean("aiAgentPrivacyInitializationExecutor", (TaskExecutor) pending::add);
         return new AiAgentPrivacyInitializer(workspaces, scope, privacy, recovery, assistantPrivacy,
-            mock(JobRunRecorder.class), new TestTransactionManager(),
+            mock(JobRunRecorder.class), transactions,
             new AutomationExecutor(context, new AutomationScope(), scope), system,
             beans.getBeanProvider(TaskExecutor.class));
     }

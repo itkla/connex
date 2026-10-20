@@ -11,7 +11,7 @@ import java.sql.Connection;
 import javax.sql.DataSource;
 
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.datasource.DataSourceUtils;
@@ -27,6 +27,7 @@ import ooo.klae.connex.backend.mappers.AiOutputCacheMapper;
 import ooo.klae.connex.backend.support.AiOutputCachePlaneFixture;
 import ooo.klae.connex.backend.support.TestEntityFixtures;
 import ooo.klae.connex.backend.tenant.TenantContext;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /** Exercises the real restriction service after independently committed workspace/cache creation. */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
@@ -35,13 +36,16 @@ class AiOutputCacheRestrictionScopeIntegrationTest {
     @Autowired private RecordVisibilityScopeControlAccess scopes;
     @Autowired private AiOutputCacheMapper cache;
     @Autowired private TenantContext tenantContext;
+    @Autowired private TenantWorkScope workScope;
+    @Autowired private ooo.klae.connex.backend.ai.AiRestrictionEpoch restrictionEpoch;
     @Autowired private PlatformTransactionManager transactionManager;
     @Autowired private DataSource dataSource;
     @MockitoBean private AuditService auditService;
 
     @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    void restrictionPurgesWorkspaceAndCacheCommittedAfterAMemoizedReadInTheSameTransaction(boolean provisionCeased)
+    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void restrictionPurgesWorkspacesCommittedAfterPreparedOrMemoizedVisibilityReads(
+            boolean provisionCeased, boolean preparedEntry)
             throws Exception {
         try (var fixture = new AiOutputCachePlaneFixture(false, 2)) {
             for (int workspace : fixture.workspaceIds) {
@@ -55,12 +59,22 @@ class AiOutputCacheRestrictionScopeIntegrationTest {
             SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(actor, null, actor.getAuthorities()));
             tenantContext.set(fixture.workspaceId, fixture.orgId, fixture.userId, "owner", null);
+            int deletedWorkspace = preparedEntry ? fixture.addWorkspace(fixture.orgId) : 0;
+            var prepared = preparedEntry
+                ? workScope.prepareWorkspaceScopes(fixture.workspaceId, fixture.orgId, null) : null;
+            if (preparedEntry) {
+                assertTrue(prepared.requireSharing().recordVisibilityScope().workspaceIds().contains(deletedWorkspace));
+                tenantContext.setWithWorkspaceScopes(fixture.workspaceId, fixture.orgId, fixture.userId,
+                    "owner", null, prepared);
+                fixture.control.update("DELETE FROM workspace_member WHERE workspace_id = ?", deletedWorkspace);
+                fixture.control.update("DELETE FROM workspace WHERE id = ?", deletedWorkspace);
+            }
             try {
                 var transaction = new TransactionTemplate(transactionManager);
                 transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
                 transaction.executeWithoutResult(status -> {
                     Connection original = DataSourceUtils.getConnection(dataSource);
-                    var memo = scopes.getForWorkspace(fixture.workspaceId);
+                    var earlierScope = scopes.getForWorkspace(fixture.workspaceId);
                     int sibling;
                     try {
                         sibling = fixture.addWorkspace(fixture.orgId);
@@ -69,14 +83,26 @@ class AiOutputCacheRestrictionScopeIntegrationTest {
                     } catch (java.sql.SQLException exception) {
                         throw new IllegalStateException(exception);
                     }
-                    assertFalse(memo.workspaceIds().contains(sibling));
-                    assertSame(memo, scopes.getForWorkspace(fixture.workspaceId));
+                    assertFalse(earlierScope.workspaceIds().contains(sibling));
+                    assertSame(earlierScope, scopes.getForWorkspace(fixture.workspaceId));
 
+                    long siblingEpoch = restrictionEpoch.current(sibling);
+                    if (preparedEntry) {
+                        assertFalse(scopes.getFreshForWorkspace(fixture.workspaceId).workspaceIds().contains(deletedWorkspace));
+                    }
                     var result = persons.updateProcessingRestrictions(fixture.personId, !provisionCeased, provisionCeased);
 
                     assertTrue(result.getSuspendedAt() != null || result.getProvisionCeasedAt() != null);
                     assertNull(cache.getBySubject(sibling, "intro.rationale:en", fixture.personId, 0));
-                    assertSame(memo, scopes.getForWorkspace(fixture.workspaceId));
+                    assertSame(earlierScope, scopes.getForWorkspace(fixture.workspaceId));
+                    assertSame(prepared, tenantContext.getWorkspaceScopes());
+                    assertTrue(restrictionEpoch.current(sibling) > siblingEpoch);
+                    assertEquals(1, new org.springframework.jdbc.core.JdbcTemplate(dataSource).queryForObject(
+                        "SELECT COUNT(*) FROM ai_assistant_privacy_operation_workspace w "
+                            + "JOIN ai_assistant_privacy_operation o ON o.organization_id = w.organization_id "
+                            + "AND o.operation_key = w.operation_key "
+                            + "WHERE w.organization_id = ? AND w.workspace_id = ? AND o.reason = 'restriction'",
+                        Integer.class, fixture.orgId, sibling));
                     assertSame(original, DataSourceUtils.getConnection(dataSource));
                     assertEquals(fixture.defaultCatalog, catalog(original));
                     assertEquals(fixture.cacheCases.stream().filter(row -> !row.deleted()).map(row -> row.id()).sorted().toList(),

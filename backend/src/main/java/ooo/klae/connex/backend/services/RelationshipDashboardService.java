@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
+
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -48,11 +50,12 @@ public class RelationshipDashboardService {
     /** Computes and hydrates the bounded dashboard relationship snapshot. */
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public RelationshipDashboardDto getDashboard(int workspaceId) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceId, () -> getDashboardWithinVisibilityScope(workspaceId));
+            workspaceId, resolvedVisibilityScope, () -> getDashboardWithinVisibilityScope(workspaceId, resolvedVisibilityScope));
     }
 
-    private RelationshipDashboardDto getDashboardWithinVisibilityScope(int workspaceId) {
+    private RelationshipDashboardDto getDashboardWithinVisibilityScope(int workspaceId, RecordVisibilityScope operationVisibilityScope) {
         ScoringService.WorkspaceScores scores = scoringService.scoreWorkspace(workspaceId);
         List<RelationshipTemperatureDto> contactScores = scores.contacts();
         List<RelationshipTemperatureDto> companyScores = scores.companies();
@@ -71,7 +74,7 @@ public class RelationshipDashboardService {
         for (Deal deal : deals.values()) {
             if (deal.getCompanyId() != null) companyIds.add(deal.getCompanyId());
         }
-        Map<Integer, Company> companies = companiesById(workspaceId, companyIds);
+        Map<Integer, Company> companies = companiesById(workspaceId, companyIds, operationVisibilityScope);
 
         List<DashboardContactTemperatureDto> contactItems = coolingContacts.stream()
             .filter(score -> people.containsKey(score.getId()))
@@ -137,10 +140,10 @@ public class RelationshipDashboardService {
         return result;
     }
 
-    private Map<Integer, Company> companiesById(int workspaceId, Set<Integer> ids) {
+    private Map<Integer, Company> companiesById(int workspaceId, Set<Integer> ids, RecordVisibilityScope operationVisibilityScope) {
         if (ids.isEmpty()) return Map.of();
         Map<Integer, Company> result = new HashMap<>();
-        for (Company company : companyMapper.getByIds(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), List.copyOf(ids))) {
+        for (Company company : companyMapper.getByIds(workspaceId, operationVisibilityScope.workspaceIdsJson(), List.copyOf(ids))) {
             result.put(company.getId(), company);
         }
         return result;

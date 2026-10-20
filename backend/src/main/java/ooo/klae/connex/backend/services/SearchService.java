@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
+
 import ooo.klae.connex.backend.mappers.CampaignMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealDocumentMapper;
@@ -151,13 +153,14 @@ public class SearchService {
             throw new BadRequestException("Search query is too long (max " + MAX_QUERY_LENGTH + " characters)");
         }
         if (types.stream().noneMatch(Set.of("companies", "pipelines", "deals", "notes", "tasks", "activities")::contains)) {
-            return searchWithinVisibilityScope(query, types);
+            return searchWithinVisibilityScope(query, types, null);
         }
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceService.getCurrentWorkspaceId(), () -> searchWithinVisibilityScope(query, types));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> searchWithinVisibilityScope(query, types, resolvedVisibilityScope));
     }
 
-    private SearchResultsDto searchWithinVisibilityScope(String query, Set<String> types) {
+    private SearchResultsDto searchWithinVisibilityScope(String query, Set<String> types, RecordVisibilityScope operationVisibilityScope) {
         String trimmed = query.trim();
         String pattern = LikePattern.containing(trimmed);
         String needle = foldSearchText(trimmed);
@@ -165,7 +168,7 @@ public class SearchService {
         int userId = workspaceService.getCurrentUserId();
         Set<Permission> permissions = workspaceService.permissionsFor(workspaceId, userId);
         String orgWorkspaceIdsJson = types.contains("companies") || types.contains("pipelines") || types.contains("notes")
-            ? recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson() : null;
+            ? operationVisibilityScope.workspaceIdsJson() : null;
         return new SearchResultsDto(
             selected(types, "companies", () -> companyMapper.search(workspaceId, orgWorkspaceIdsJson, pattern)
                 .stream().map(CompanyDto::from).toList()),

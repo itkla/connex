@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
+
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -129,18 +131,19 @@ public class ScoringService {
 
     /** Scores all contacts and companies from compact aggregates computed by the database. */
     public WorkspaceScores scoreWorkspace(int workspaceId) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceId, () -> scoreWorkspaceWithinVisibilityScope(workspaceId));
+            workspaceId, resolvedVisibilityScope, () -> scoreWorkspaceWithinVisibilityScope(workspaceId, resolvedVisibilityScope));
     }
 
-    private WorkspaceScores scoreWorkspaceWithinVisibilityScope(int workspaceId) {
+    private WorkspaceScores scoreWorkspaceWithinVisibilityScope(int workspaceId, RecordVisibilityScope operationVisibilityScope) {
         Instant now = scoringInstant(Instant.now(clock));
         LocalDateTime reference = LocalDateTime.ofInstant(now, ZoneOffset.UTC);
         return new WorkspaceScores(
             temperatures(personMapper.getRelationshipScoreAggregates(
                 workspaceId, reference, WARMTH_MODEL.sqlParameters()), now),
             temperatures(companyMapper.getRelationshipScoreAggregates(
-                workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), reference, WARMTH_MODEL.sqlParameters()), now)
+                workspaceId, operationVisibilityScope.workspaceIdsJson(), reference, WARMTH_MODEL.sqlParameters()), now)
         );
     }
 
@@ -448,13 +451,13 @@ public class ScoringService {
      * links target the same company, the touch is counted once.
      */
     public List<RelationshipTemperatureDto> scoreCompanies(int workspaceId) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceId, () -> scoreCompaniesWithinVisibilityScope(workspaceId));
+            workspaceId, resolvedVisibilityScope, () -> scoreCompaniesWithinVisibilityScope(workspaceId, resolvedVisibilityScope));
     }
 
-    private List<RelationshipTemperatureDto> scoreCompaniesWithinVisibilityScope(int workspaceId) {
-        return scoreCompanies(workspaceId,
-            recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson());
+    private List<RelationshipTemperatureDto> scoreCompaniesWithinVisibilityScope(int workspaceId, RecordVisibilityScope operationVisibilityScope) {
+        return scoreCompanies(workspaceId, operationVisibilityScope.workspaceIdsJson());
     }
 
     List<RelationshipTemperatureDto> scoreCompanies(int workspaceId, String orgWorkspaceIdsJson) {
@@ -468,12 +471,13 @@ public class ScoringService {
      * {@link AttributionRule#PRESENT_DAY_PERSON_COMPANY_OR_DEAL_COMPANY}.
      */
     public List<RelationshipTemperatureDto> coolingCompanies(int workspaceId, int limit) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceId, () -> coolingCompaniesWithinVisibilityScope(workspaceId, limit));
+            workspaceId, resolvedVisibilityScope, () -> coolingCompaniesWithinVisibilityScope(workspaceId, limit, resolvedVisibilityScope));
     }
 
-    private List<RelationshipTemperatureDto> coolingCompaniesWithinVisibilityScope(int workspaceId, int limit) {
-        return scoreCompanies(workspaceId).stream()
+    private List<RelationshipTemperatureDto> coolingCompaniesWithinVisibilityScope(int workspaceId, int limit, RecordVisibilityScope operationVisibilityScope) {
+        return scoreCompaniesWithinVisibilityScope(workspaceId, operationVisibilityScope).stream()
             .filter(temperature -> "cooling".equals(temperature.getTrend()))
             .sorted((left, right) -> Integer.compare(
                 right.getDaysSinceTouch() == null ? 0 : right.getDaysSinceTouch(),
@@ -490,9 +494,10 @@ public class ScoringService {
     public List<RelationshipTemperatureDto> scoreCompanies(int workspaceId, Set<Integer> companyIds) {
         List<Integer> requested = requestedCompanyIds(companyIds);
         if (requested.isEmpty()) return List.of();
-        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(workspaceId,
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(workspaceId, resolvedVisibilityScope,
             () -> scoreCompanyIds(workspaceId, requested,
-                recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson()));
+                resolvedVisibilityScope.workspaceIdsJson()));
     }
 
     List<RelationshipTemperatureDto> scoreCompanies(int workspaceId, Set<Integer> companyIds, String orgWorkspaceIdsJson) {
@@ -530,13 +535,14 @@ public class ScoringService {
      * workspace cap.
      */
     public List<RelationshipTemperatureDto> scoreCompaniesForMap(int workspaceId) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceId, () -> scoreCompaniesForMapWithinVisibilityScope(workspaceId));
+            workspaceId, resolvedVisibilityScope, () -> scoreCompaniesForMapWithinVisibilityScope(workspaceId, resolvedVisibilityScope));
     }
 
-    private List<RelationshipTemperatureDto> scoreCompaniesForMapWithinVisibilityScope(int workspaceId) {
+    private List<RelationshipTemperatureDto> scoreCompaniesForMapWithinVisibilityScope(int workspaceId, RecordVisibilityScope operationVisibilityScope) {
         long companyCount = companyMapper.countCompanies(
-            workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), null, null, false, null, MemberScope.allTeam(), false, null);
+            workspaceId, operationVisibilityScope.workspaceIdsJson(), null, null, false, null, MemberScope.allTeam(), false, null);
         if (companyCount > MAX_BATCH_COMPANIES) {
             throw new BadRequestException(
                 "Relationship map supports at most " + MAX_BATCH_COMPANIES + " companies");
@@ -545,7 +551,7 @@ public class ScoringService {
         LocalDateTime reference = LocalDateTime.ofInstant(now, ZoneOffset.UTC);
         return temperatures(
             companyMapper.getRelationshipScoreAggregates(
-                workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), reference, WARMTH_MODEL.sqlParameters()), now);
+                workspaceId, operationVisibilityScope.workspaceIdsJson(), reference, WARMTH_MODEL.sqlParameters()), now);
     }
 
     /**
@@ -555,13 +561,14 @@ public class ScoringService {
      * as-of-{@code asOf} employment when it assembles frames.
      */
     public List<RelationshipTemperatureDto> scoreCompanies(int workspaceId, Instant asOf) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceId, () -> scoreCompaniesWithinVisibilityScope(workspaceId, asOf));
+            workspaceId, resolvedVisibilityScope, () -> scoreCompaniesWithinVisibilityScope(workspaceId, asOf, resolvedVisibilityScope));
     }
 
-    private List<RelationshipTemperatureDto> scoreCompaniesWithinVisibilityScope(int workspaceId, Instant asOf) {
+    private List<RelationshipTemperatureDto> scoreCompaniesWithinVisibilityScope(int workspaceId, Instant asOf, RecordVisibilityScope operationVisibilityScope) {
         return scoreCompanies(workspaceId, asOf,
-            recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson());
+            operationVisibilityScope.workspaceIdsJson());
     }
 
     List<RelationshipTemperatureDto> scoreCompanies(int workspaceId, Instant asOf, String orgWorkspaceIdsJson) {
@@ -582,12 +589,13 @@ public class ScoringService {
      */
     @Transactional(readOnly = true)
     public RelationshipEvidenceDto companyEvidence(int workspaceId, int companyId, int currentUserId) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceId, () -> companyEvidenceWithinVisibilityScope(workspaceId, companyId, currentUserId));
+            workspaceId, resolvedVisibilityScope, () -> companyEvidenceWithinVisibilityScope(workspaceId, companyId, currentUserId, resolvedVisibilityScope));
     }
 
-    private RelationshipEvidenceDto companyEvidenceWithinVisibilityScope(int workspaceId, int companyId, int currentUserId) {
-        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+    private RelationshipEvidenceDto companyEvidenceWithinVisibilityScope(int workspaceId, int companyId, int currentUserId, RecordVisibilityScope operationVisibilityScope) {
+        String orgWorkspaceIdsJson = operationVisibilityScope.workspaceIdsJson();
         if (companyMapper.getByIds(workspaceId, orgWorkspaceIdsJson, List.of(companyId)).stream()
                 .noneMatch(company -> company.getId() == companyId)) {
             throw new ResourceNotFoundException("Company not found");
@@ -625,13 +633,14 @@ public class ScoringService {
     }
 
     public WarmthSummaryDto summarize(int workspaceId) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceId, () -> summarizeWithinVisibilityScope(workspaceId));
+            workspaceId, resolvedVisibilityScope, () -> summarizeWithinVisibilityScope(workspaceId, resolvedVisibilityScope));
     }
 
-    private WarmthSummaryDto summarizeWithinVisibilityScope(int workspaceId) {
+    private WarmthSummaryDto summarizeWithinVisibilityScope(int workspaceId, RecordVisibilityScope operationVisibilityScope) {
         List<RelationshipTemperatureDto> contacts = scoreContacts(workspaceId);
-        List<RelationshipTemperatureDto> companies = scoreCompanies(workspaceId);
+        List<RelationshipTemperatureDto> companies = scoreCompaniesWithinVisibilityScope(workspaceId, operationVisibilityScope);
         return summarizeScores(contacts, companies);
     }
 

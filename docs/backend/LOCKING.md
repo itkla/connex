@@ -23,8 +23,32 @@ Read the relevant section before adding/changing `FOR UPDATE`, transaction isola
     - cursor iteration in `TenantExportSnapshotTransaction`;
     - a failure swallowed inside another synchronization's `beforeCommit` or `beforeCompletion`, which registers too late for the commit it occurs in.
   - A lock failure that also crossed a participating `@Transactional` proxy has already marked the transaction rollback-only. Its commit therefore rolls back before any callback runs and fails with a cause-less `UnexpectedRollbackException`. Nothing is lost, but both engines classify that as permanent.
-- Read control-plane data needed only for a response after the tenant write commits. Organization workspace scope reads are different: in `catalog-per-placement`, `TenantResolutionInterceptor`, public API authentication, and workspace job scopes prepare their immutable scopes before the first tenant transaction (#2159). `ShareWorkspaceControlAccess`, `RecordVisibilityScopeControlAccess` and `OrganizationWorkspaceScopeControlAccess` serve that exact workspace/organization/catalog payload without suspending the transaction or borrowing another connection. Without a matching prepared payload, an active-transaction lookup throws `TenantScopeSnapshotMissingException` before any query or checkout, including for shared placements with a null catalog. Never hold a tenant connection while waiting for one of these control scope reads. Existing `single-database` lazy branches remain unchanged; the active-only boundary still uses its independent control transaction there. Other control operations, including quiet-hours evaluation and the bounded disclosure audit, retain their separately documented connection budgets. Control-plane **locks** needed through commit stay on the tenant transaction's own connection through `ControlCatalogRoutingInterceptor`; snapshots never replace authorization locks.
-- Company visibility and relationship validation resolve the unfiltered `RecordVisibilityScopeControlAccess` ceiling before the first authorization lock, duplicate-decision mutex or `FOR UPDATE`. This includes reference-hydrating Note/Task/Activity/Introduction writes, record creation and attachment target locks, transcript/turn preparation and document lifecycle activity callbacks. `CompanyMapper.getVisibleCompanyByIdForUpdate` and share-grant locks still run on the original tenant transaction connection; an invisible Company yields no row and cannot become an accepted relationship target. Compound reads and loops of independently committed mutations bind `withWorkspaceScope` at their operation root, restore it on exit and retain every existing transaction boundary. Destructive cache purges retain the separately documented `getFreshForWorkspace` exception.
+- Read control-plane data needed only for a response after the tenant write commits. Workspace
+  entries prepare immutable record-visibility and active-only organization scopes before tenant
+  transactions in both modes (#2165/#2176). Matching prepared reads borrow no connection. Routed
+  lookups without a matching payload throw `TenantScopeSnapshotMissingException` before any query
+  or connection checkout inside transactions, including shared placements with a null catalog.
+  Single-database entries inside an actual transaction skip preparation and retain lazy boundary
+  fallbacks. Ordinary sharing remains lazy in single-database mode. Control-plane **locks** needed
+  through commit stay on the tenant transaction's own connection through `ControlCatalogRoutingInterceptor`;
+  prepared scopes never replace authorization locks. Other control operations retain their documented
+  connection budgets.
+- **Scope reads and REPEATABLE READ read views (#2176).** A plain SELECT on an InnoDB transaction's
+  connection establishes its consistent-read view if none exists. A locking read uses current state
+  but does not refresh that view. Consequently a lazy organization-workspace scope read before a
+  contended record lock can make later plain share/reference reads see a grant revoked while waiting.
+  Prepare the scope before opening the transaction; when preparation is unavailable, resolve it
+  outside the transaction or after its first required locking read. Do not move locks off their
+  transaction connection or change lock order to satisfy scope preparation. Actual-transaction
+  single-database entry intentionally retains the lazy fallback and its pre-lock snapshot behavior;
+  `RecordVisibilityScopeReadViewIntegrationTest` characterizes it alongside prepared entry. Other
+  pre-lock consistent reads, including deal-board discovery, still establish a view independently
+  and are not repaired by scope preparation. The active-only boundary's lazy fallback already uses
+  an independent control transaction and does not establish the caller's view. Destructive freshness
+  is separate: restriction cache erasure retains its same-connection READ COMMITTED fresh scope read.
+  A deferred record-visibility operation's first use checks the prepared payload before its
+  transaction memo or lazy lookup; empty and skipped operations retain their no-read behavior.
+- Company visibility and relationship validation resolve the unfiltered `RecordVisibilityScopeControlAccess` ceiling before the first authorization lock, duplicate-decision mutex or `FOR UPDATE`. This includes reference-hydrating Note/Task/Activity/Introduction writes, record creation and attachment target locks, transcript/turn preparation and document lifecycle activity callbacks. `CompanyMapper.getVisibleCompanyByIdForUpdate` and share-grant locks still run on the original tenant transaction connection; an invisible Company yields no row and cannot become an accepted relationship target. Compound reads bind `withWorkspaceScopeRead`, and loops of independently committed mutations bind `withWorkspaceScope`, with one captured snapshot at their operation root, restore it on exit and retain every existing transaction boundary. Destructive cache purges retain the separately documented `getFreshForWorkspace` exception.
 - Changes to lock order or transaction isolation are Tier 3/high-risk and receive focused concurrency/correctness review.
 
 Interactive and public API requests return HTTP 409 for Spring pessimistic lock failures and exact
@@ -1758,7 +1782,7 @@ after obtaining it, the service rechecks the evidence fingerprint and current vi
 writing. This places the decision row after the organization mutex without introducing an ordering
 edge against record targets or identity groups.
 
-Routed record-visibility and active-org scopes are prepared with the workspace route, before any
+Record-visibility and active-org scopes in both modes are prepared with the workspace route, before any
 tenant transaction or authorization, organization mutex, provider connection, or record lock.
 Preparation uses a short read-only control transaction: one unfiltered sharing statement also backs
 the separately typed record-visibility scope, and one active-only statement backs read ceilings.
@@ -1769,9 +1793,13 @@ read the prepared payload inside their existing transactions without borrowing.
 
 Same-workspace `runAs` nesting reuses preparation; identity-only switches never load it. A switch to
 another identity retains usable data only when the prepared workspace, organization and catalog all
-match. Otherwise a later transactional scope lookup fails fast. Missing snapshot invariant failures
+match. Otherwise a later transactional scope lookup fails fast in routed mode; single-database mode
+retains its lazy fallback. Missing snapshot invariant failures
 escape notification preload degradation; ordinary preload failures retain existing pass isolation.
 
+In single-database mode, explicit operation scopes take precedence over matching prepared data,
+then the transaction memo and finally the lazy lookup. Explicit supplied scopes remain authoritative
+for batch mapper arguments and nested reads; routed supplied scopes must equal the prepared payload.
 The lazy `RecordVisibilityScopeControlAccess` path memoizes one successful snapshot per workspace
 within an actual synchronized transaction in `single-database` mode only. A durable outbox delivery
 page is one `REQUIRES_NEW`, `READ_COMMITTED` transaction, so its per-record segment checks and repeated
@@ -1813,8 +1841,8 @@ installing an automation identity later reuses that scope only for the same work
 and catalog. An identity resolved at operation entry must remain resolved. Transaction propagation,
 per-record commits and authorization locks remain unchanged. This is explicit operation reuse,
 separate from the default transaction memo: ordinary `REQUIRES_NEW`, completion callbacks and
-nontransactional reads outside that boundary
-retain their fresh-read contract. In routed mode every boundary read still validates the prepared
+nontransactional reads outside that boundary use matching prepared data when present and otherwise
+retain the existing lazy-read contract. In routed mode every boundary read still validates the prepared
 context payload before considering any memo, so a missing or stale payload still fails inside an
 open transaction without a control query. Assistant parallel tool batches reject writes; one
 auto/approved write is one transaction, and its nested Pipeline reads share the existing memo.
@@ -1825,8 +1853,8 @@ ordinary domain/identity work. `invalidateAssistantOrganization` retains the res
 before advancing organization privacy authority; the fresh scope lookup and cache DELETE follow,
 with those fences held through transaction completion. In `single-database`, this is an explicit
 exception to scope-before-locks: the unfiltered lookup runs on the same default-catalog transaction
-connection, without suspension or another checkout, and neither reads nor replaces the transaction
-memo (#2162). Its dedicated
+connection, without suspension or another checkout, and neither reads nor replaces the prepared
+payload, explicit operation scope or transaction memo (#2162). Its dedicated
 control statement also flushes MyBatis's local cache, without changing ordinary sharing reads. At
 `READ_COMMITTED` it sees workspace creation committed since an earlier memoized read. The only
 remaining discovery gap is between this adjacent control SELECT and tenant DELETE; it is not an
@@ -1891,8 +1919,9 @@ and stay on their existing transaction connection; no transaction boundary is sp
 Before authorization or duplicate-decision locks, dismissal and reopen obtain one unfiltered
 `RecordVisibilityScopeControlAccess` view for their visibility projections. In routed mode this is a
 memory-only read of the context-installed sharing snapshot, as are history-import and provider-page
-lookups. No scope read suspends their tenant transaction. Single-database sharing and record
-visibility keep their existing default-catalog transaction snapshot. Authorization locks and
+lookups. Record-visibility scopes in both modes use matching prepared data without suspending the
+tenant transaction. Ordinary single-database sharing and unprepared record-visibility fallbacks
+keep their existing default-catalog transaction snapshot. Authorization locks and
 `lockCurrentPair` remain on the tenant transaction's own connection until commit. Count/page retain
 one repeatable-read transaction; summary counts need no control snapshot.
 

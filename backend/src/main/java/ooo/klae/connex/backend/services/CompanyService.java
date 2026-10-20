@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
+
 import ooo.klae.connex.backend.dto.CompanyFacets;
 
 import org.springframework.stereotype.Service;
@@ -115,29 +117,32 @@ public class CompanyService {
             boolean noIndustry, List<Integer> ids, MemberScope memberScope, boolean archived,
             WarmthFilter warmth, int limit, int offset) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(workspaceId, () -> new PageResponse<>(
-            getCompaniesPage(query, sort, dir, industry, noIndustry, ids, memberScope, archived, warmth, limit, offset),
-            countCompanies(query, industry, noIndustry, ids, memberScope, archived, warmth)));
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(workspaceId, resolvedVisibilityScope, () -> new PageResponse<>(
+            getCompaniesPageWithinVisibilityScope(query, sort, dir, industry, noIndustry, ids, memberScope, archived, warmth, limit, offset, resolvedVisibilityScope),
+            countCompaniesWithinVisibilityScope(query, industry, noIndustry, ids, memberScope, archived, warmth, resolvedVisibilityScope)));
     }
 
     /** Keeps all visibility-dependent facet reads on the browser operation's scope. */
     public CompanyFacets getCompanyFacets(WarmthFilter warmth) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(workspaceId, () -> new CompanyFacets(
-            distinctIndustries(), hasCompanyWithoutIndustry(), countsByOwner(), countArchivedCompanies(),
-            warmth == null ? null : countsByWarmthBand(warmth)));
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(workspaceId, resolvedVisibilityScope, () -> new CompanyFacets(
+            distinctIndustriesWithinVisibilityScope(resolvedVisibilityScope), hasCompanyWithoutIndustryWithinVisibilityScope(resolvedVisibilityScope), countsByOwner(), countArchivedCompanies(),
+            warmth == null ? null : countsByWarmthBandWithinVisibilityScope(warmth, resolvedVisibilityScope)));
     }
 
     /**
      * Retrieves all {@code Company} records in the active workspace.
      */
     public List<Company> getAllCompanies() {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceService.getCurrentWorkspaceId(), () -> getAllCompaniesWithinVisibilityScope());
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> getAllCompaniesWithinVisibilityScope(resolvedVisibilityScope));
     }
 
-    private List<Company> getAllCompaniesWithinVisibilityScope() {
-        return companyMapper.getAllCompanies(workspaceService.getCurrentWorkspaceId(), recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId()).workspaceIdsJson());
+    private List<Company> getAllCompaniesWithinVisibilityScope(RecordVisibilityScope operationVisibilityScope) {
+        return companyMapper.getAllCompanies(workspaceService.getCurrentWorkspaceId(), operationVisibilityScope.workspaceIdsJson());
     }
 
     /**
@@ -150,16 +155,17 @@ public class CompanyService {
         if (key.isBlank()) {
             return new NormalizedCompanyMatches(List.of(), false);
         }
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceService.getCurrentWorkspaceId(), () -> findVisibleByNormalizedNameWithinVisibilityScope(key));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> findVisibleByNormalizedNameWithinVisibilityScope(key, resolvedVisibilityScope));
     }
 
-    private NormalizedCompanyMatches findVisibleByNormalizedNameWithinVisibilityScope(String key) {
+    private NormalizedCompanyMatches findVisibleByNormalizedNameWithinVisibilityScope(String key, RecordVisibilityScope operationVisibilityScope) {
         String pattern = java.util.Arrays.stream(key.split(" "))
                 .map(LikePattern::escape)
                 .collect(Collectors.joining("%", "", "%"));
         List<Company> candidates = companyMapper.findVisibleNameCandidates(
-                workspaceService.getCurrentWorkspaceId(), recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId()).workspaceIdsJson(), pattern, key,
+                workspaceService.getCurrentWorkspaceId(), operationVisibilityScope.workspaceIdsJson(), pattern, key,
                 COMPANY_NAME_CANDIDATE_LIMIT + 1);
         boolean truncated = candidates.size() > COMPANY_NAME_CANDIDATE_LIMIT;
         List<Company> matches = candidates.stream()
@@ -183,13 +189,14 @@ public class CompanyService {
     }
 
     public CompanyEngagementDto getCompanyEngagement(int companyId) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceService.getCurrentWorkspaceId(), () -> getCompanyEngagementWithinVisibilityScope(companyId));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> getCompanyEngagementWithinVisibilityScope(companyId, resolvedVisibilityScope));
     }
 
-    private CompanyEngagementDto getCompanyEngagementWithinVisibilityScope(int companyId) {
+    private CompanyEngagementDto getCompanyEngagementWithinVisibilityScope(int companyId, RecordVisibilityScope operationVisibilityScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        if (!companyMapper.exists(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), companyId)) {
+        if (!companyMapper.exists(workspaceId, operationVisibilityScope.workspaceIdsJson(), companyId)) {
             throw new ResourceNotFoundException("Company not found");
         }
         CompanyEngagementCountsDto counts = companyMapper.getCompanyEngagementCounts(workspaceId, companyId);
@@ -242,13 +249,14 @@ public class CompanyService {
 
     /** Bounded recent records for the company detail timeline. */
     public CompanyTimelineData getCompanyTimeline(int companyId, int limit) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceService.getCurrentWorkspaceId(), () -> getCompanyTimelineWithinVisibilityScope(companyId, limit));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> getCompanyTimelineWithinVisibilityScope(companyId, limit, resolvedVisibilityScope));
     }
 
-    private CompanyTimelineData getCompanyTimelineWithinVisibilityScope(int companyId, int limit) {
+    private CompanyTimelineData getCompanyTimelineWithinVisibilityScope(int companyId, int limit, RecordVisibilityScope operationVisibilityScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        if (!companyMapper.exists(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), companyId)) {
+        if (!companyMapper.exists(workspaceId, operationVisibilityScope.workspaceIdsJson(), companyId)) {
             throw new ResourceNotFoundException("Company not found");
         }
         int currentUserId = workspaceService.getCurrentUserId();
@@ -277,26 +285,28 @@ public class CompanyService {
     public List<Company> getCompaniesPage(String query, String sort, String dir, List<String> industry,
             boolean noIndustry, List<Integer> ids, MemberScope memberScope, boolean archived,
             WarmthFilter warmth, int limit, int offset) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceService.getCurrentWorkspaceId(), () -> getCompaniesPageWithinVisibilityScope(query, sort, dir, industry, noIndustry, ids, memberScope, archived, warmth, limit, offset));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> getCompaniesPageWithinVisibilityScope(query, sort, dir, industry, noIndustry, ids, memberScope, archived, warmth, limit, offset, resolvedVisibilityScope));
     }
 
     private List<Company> getCompaniesPageWithinVisibilityScope(String query, String sort, String dir, List<String> industry,
             boolean noIndustry, List<Integer> ids, MemberScope memberScope, boolean archived,
-            WarmthFilter warmth, int limit, int offset) {
-        return companyMapper.getCompaniesPage(workspaceService.getCurrentWorkspaceId(), recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId()).workspaceIdsJson(), query, sort, dir,
+            WarmthFilter warmth, int limit, int offset, RecordVisibilityScope operationVisibilityScope) {
+        return companyMapper.getCompaniesPage(workspaceService.getCurrentWorkspaceId(), operationVisibilityScope.workspaceIdsJson(), query, sort, dir,
             industry, noIndustry, ids, memberScope, archived, warmth, limit, offset);
     }
 
     public long countCompanies(String query, List<String> industry, boolean noIndustry, List<Integer> ids,
             MemberScope memberScope, boolean archived, WarmthFilter warmth) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceService.getCurrentWorkspaceId(), () -> countCompaniesWithinVisibilityScope(query, industry, noIndustry, ids, memberScope, archived, warmth));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> countCompaniesWithinVisibilityScope(query, industry, noIndustry, ids, memberScope, archived, warmth, resolvedVisibilityScope));
     }
 
     private long countCompaniesWithinVisibilityScope(String query, List<String> industry, boolean noIndustry, List<Integer> ids,
-            MemberScope memberScope, boolean archived, WarmthFilter warmth) {
-        return companyMapper.countCompanies(workspaceService.getCurrentWorkspaceId(), recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId()).workspaceIdsJson(),
+            MemberScope memberScope, boolean archived, WarmthFilter warmth, RecordVisibilityScope operationVisibilityScope) {
+        return companyMapper.countCompanies(workspaceService.getCurrentWorkspaceId(), operationVisibilityScope.workspaceIdsJson(),
             query, industry, noIndustry, ids, memberScope, archived, warmth);
     }
 
@@ -309,12 +319,13 @@ public class CompanyService {
      */
     public List<FacetCount> countsByWarmthBand(WarmthFilter warmth) {
         Objects.requireNonNull(warmth, "warmth is required to compute warmth band facets");
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceService.getCurrentWorkspaceId(), () -> countsByWarmthBandWithinVisibilityScope(warmth));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> countsByWarmthBandWithinVisibilityScope(warmth, resolvedVisibilityScope));
     }
 
-    private List<FacetCount> countsByWarmthBandWithinVisibilityScope(WarmthFilter warmth) {
-        return companyMapper.countsByWarmthBand(workspaceService.getCurrentWorkspaceId(), recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId()).workspaceIdsJson(), warmth);
+    private List<FacetCount> countsByWarmthBandWithinVisibilityScope(WarmthFilter warmth, RecordVisibilityScope operationVisibilityScope) {
+        return companyMapper.countsByWarmthBand(workspaceService.getCurrentWorkspaceId(), operationVisibilityScope.workspaceIdsJson(), warmth);
     }
 
     /** How many companies the active workspace currently holds archived. */
@@ -432,21 +443,23 @@ public class CompanyService {
     }
 
     public List<String> distinctIndustries() {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceService.getCurrentWorkspaceId(), () -> distinctIndustriesWithinVisibilityScope());
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> distinctIndustriesWithinVisibilityScope(resolvedVisibilityScope));
     }
 
-    private List<String> distinctIndustriesWithinVisibilityScope() {
-        return companyMapper.distinctIndustries(workspaceService.getCurrentWorkspaceId(), recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId()).workspaceIdsJson());
+    private List<String> distinctIndustriesWithinVisibilityScope(RecordVisibilityScope operationVisibilityScope) {
+        return companyMapper.distinctIndustries(workspaceService.getCurrentWorkspaceId(), operationVisibilityScope.workspaceIdsJson());
     }
 
     public boolean hasCompanyWithoutIndustry() {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceService.getCurrentWorkspaceId(), () -> hasCompanyWithoutIndustryWithinVisibilityScope());
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> hasCompanyWithoutIndustryWithinVisibilityScope(resolvedVisibilityScope));
     }
 
-    private boolean hasCompanyWithoutIndustryWithinVisibilityScope() {
-        return companyMapper.hasCompanyWithoutIndustry(workspaceService.getCurrentWorkspaceId(), recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId()).workspaceIdsJson());
+    private boolean hasCompanyWithoutIndustryWithinVisibilityScope(RecordVisibilityScope operationVisibilityScope) {
+        return companyMapper.hasCompanyWithoutIndustry(workspaceService.getCurrentWorkspaceId(), operationVisibilityScope.workspaceIdsJson());
     }
 
     public List<FacetCount> countsByOwner() {
@@ -454,12 +467,13 @@ public class CompanyService {
     }
 
     public List<Company> getCompaniesByTagId(int tagId) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceService.getCurrentWorkspaceId(), () -> getCompaniesByTagIdWithinVisibilityScope(tagId));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> getCompaniesByTagIdWithinVisibilityScope(tagId, resolvedVisibilityScope));
     }
 
-    private List<Company> getCompaniesByTagIdWithinVisibilityScope(int tagId) {
-        return companyMapper.getCompaniesByTagId(workspaceService.getCurrentWorkspaceId(), recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId()).workspaceIdsJson(), tagId);
+    private List<Company> getCompaniesByTagIdWithinVisibilityScope(int tagId, RecordVisibilityScope operationVisibilityScope) {
+        return companyMapper.getCompaniesByTagId(workspaceService.getCurrentWorkspaceId(), operationVisibilityScope.workspaceIdsJson(), tagId);
     }
 
     /**
@@ -467,13 +481,14 @@ public class CompanyService {
      * {@code ResourceNotFoundException} if absent in the active workspace.
      */
     public Company getCompanyById(int id) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceService.getCurrentWorkspaceId(), () -> getCompanyByIdWithinVisibilityScope(id));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> getCompanyByIdWithinVisibilityScope(id, resolvedVisibilityScope));
     }
 
-    private Company getCompanyByIdWithinVisibilityScope(int id) {
+    private Company getCompanyByIdWithinVisibilityScope(int id, RecordVisibilityScope operationVisibilityScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Company company = companyMapper.getCompanyById(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), id);
+        Company company = companyMapper.getCompanyById(workspaceId, operationVisibilityScope.workspaceIdsJson(), id);
         if (company == null) throw new ResourceNotFoundException("Company not found");
         return company;
     }
@@ -584,7 +599,7 @@ public class CompanyService {
             Company company,
             String duplicateReviewToken,
             RecordCreationAugmentation augmentation) {
-        return createCompanyReviewed(company, duplicateReviewToken, augmentation, MutationAdmission.UNRESTRICTED);
+        return createCompanyReviewedWithinVisibilityScope(company, duplicateReviewToken, augmentation, MutationAdmission.UNRESTRICTED);
     }
 
     /** Performs the canonical action after its final under-lock mutation admission. */
@@ -668,26 +683,28 @@ public class CompanyService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.COMPANY_UPDATE)
     public Company updateCompany(int id, Company company) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceService.getCurrentWorkspaceId(), () -> updateCompanyWithinVisibilityScope(id, company));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> updateCompanyWithinVisibilityScope(id, company, resolvedVisibilityScope));
     }
 
-    private Company updateCompanyWithinVisibilityScope(int id, Company company) {
-        return updateCompany(id, company, MutationAdmission.UNRESTRICTED);
+    private Company updateCompanyWithinVisibilityScope(int id, Company company, RecordVisibilityScope operationVisibilityScope) {
+        return updateCompanyWithinVisibilityScope(id, company, MutationAdmission.UNRESTRICTED, operationVisibilityScope);
     }
 
     /** Performs the canonical action after its final under-lock mutation admission. */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.COMPANY_UPDATE)
     public Company updateCompany(int id, Company company, MutationAdmission admission) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceService.getCurrentWorkspaceId(), () -> updateCompanyWithinVisibilityScope(id, company, admission));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> updateCompanyWithinVisibilityScope(id, company, admission, resolvedVisibilityScope));
     }
 
-    private Company updateCompanyWithinVisibilityScope(int id, Company company, MutationAdmission admission) {
+    private Company updateCompanyWithinVisibilityScope(int id, Company company, MutationAdmission admission, RecordVisibilityScope operationVisibilityScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         duplicateDecisionLockService.lockCurrentOrganization();
-        Company before = requireOwnedCompany(workspaceId, id);
+        Company before = requireOwnedCompany(workspaceId, id, operationVisibilityScope);
         company.setId(id);
         company.setWorkspaceId(workspaceId);
         company.setOwnerId(before.getOwnerId());
@@ -695,7 +712,7 @@ public class CompanyService {
         assertUniqueWebsite(company);
         admission.beforeMutation();
         int updated = companyMapper.update(company);
-        Company after = requireOwnedCompany(workspaceId, id);
+        Company after = requireOwnedCompany(workspaceId, id, operationVisibilityScope);
         identityIntakeService.recordCompany(
             workspaceId, id, after.getWebsite(), after.getPhone(),
             IdentityAcquisitionSource.INTERACTIVE_UPDATE, null);
@@ -725,25 +742,27 @@ public class CompanyService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.COMPANY_UPDATE)
     public Company updateOwner(int companyId, Integer ownerId) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceService.getCurrentWorkspaceId(), () -> updateOwnerWithinVisibilityScope(companyId, ownerId));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> updateOwnerWithinVisibilityScope(companyId, ownerId, resolvedVisibilityScope));
     }
 
-    private Company updateOwnerWithinVisibilityScope(int companyId, Integer ownerId) {
-        return updateOwner(companyId, ownerId, MutationAdmission.UNRESTRICTED);
+    private Company updateOwnerWithinVisibilityScope(int companyId, Integer ownerId, RecordVisibilityScope operationVisibilityScope) {
+        return updateOwnerWithinVisibilityScope(companyId, ownerId, MutationAdmission.UNRESTRICTED, operationVisibilityScope);
     }
 
     /** Performs the canonical action after its final under-lock mutation admission. */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.COMPANY_UPDATE)
     public Company updateOwner(int companyId, Integer ownerId, MutationAdmission admission) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceService.getCurrentWorkspaceId(), () -> updateOwnerWithinVisibilityScope(companyId, ownerId, admission));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> updateOwnerWithinVisibilityScope(companyId, ownerId, admission, resolvedVisibilityScope));
     }
 
-    private Company updateOwnerWithinVisibilityScope(int companyId, Integer ownerId, MutationAdmission admission) {
+    private Company updateOwnerWithinVisibilityScope(int companyId, Integer ownerId, MutationAdmission admission, RecordVisibilityScope operationVisibilityScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        requireOwnedCompany(workspaceId, companyId);
+        requireOwnedCompany(workspaceId, companyId, operationVisibilityScope);
         if (ownerId != null) workspaceService.lockAndRequireMember(workspaceId, ownerId);
         Company before = companyMapper.getOwnedCompanyByIdForUpdate(workspaceId, companyId);
         if (before == null || before.getArchivedAt() != null) {
@@ -758,19 +777,20 @@ public class CompanyService {
         if (!Objects.equals(before.getOwnerId(), ownerId)) {
             ruleTriggers.publish(workspaceId, "company", companyId, "company.owner_changed");
         }
-        return requireOwnedCompany(workspaceId, companyId);
+        return requireOwnedCompany(workspaceId, companyId, operationVisibilityScope);
     }
 
     @Transactional
     @RequirePermission(Permission.COMPANY_UPDATE)
     public Company updateLogo(int id, UploadSource source) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceService.getCurrentWorkspaceId(), () -> updateLogoWithinVisibilityScope(id, source));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> updateLogoWithinVisibilityScope(id, source, resolvedVisibilityScope));
     }
 
-    private Company updateLogoWithinVisibilityScope(int id, UploadSource source) {
+    private Company updateLogoWithinVisibilityScope(int id, UploadSource source, RecordVisibilityScope operationVisibilityScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Company before = requireOwnedCompany(workspaceId, id);
+        Company before = requireOwnedCompany(workspaceId, id, operationVisibilityScope);
         StoredImage stored = managedObjectService.storeCompanyImage(workspaceId, id, source);
         int updated = companyMapper.updateLogoUrlIfCurrent(
             workspaceId, id, before.getLogoUrl(), stored.url());
@@ -779,7 +799,7 @@ public class CompanyService {
         }
         managedObjectService.deleteCompanyImageAfterCommit(
             before.getWorkspaceId(), id, before.getLogoUrl());
-        Company after = requireOwnedCompany(workspaceId, id);
+        Company after = requireOwnedCompany(workspaceId, id, operationVisibilityScope);
         auditService.record("company.updateLogo", "company", id, before.getName(),
             "Updated logo for " + before.getName(),
             auditService.singleChange("logoUrl", before.getLogoUrl(), after.getLogoUrl()));
@@ -788,8 +808,9 @@ public class CompanyService {
     }
 
     public ManagedContent getLogoContent(int id, String token) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         Company company = recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceService.getCurrentWorkspaceId(), () -> requireCompany(id));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> requireCompany(id, resolvedVisibilityScope));
         return managedObjectService.openCompanyImage(
             company.getWorkspaceId(), id, company.getLogoUrl(), token);
     }
@@ -806,17 +827,18 @@ public class CompanyService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.COMPANY_DELETE)
     public Company archiveCompany(int id) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceService.getCurrentWorkspaceId(), () -> archiveCompanyWithinVisibilityScope(id));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> archiveCompanyWithinVisibilityScope(id, resolvedVisibilityScope));
     }
 
-    private Company archiveCompanyWithinVisibilityScope(int id) {
+    private Company archiveCompanyWithinVisibilityScope(int id, RecordVisibilityScope operationVisibilityScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         duplicateDecisionLockService.lockCurrentOrganization();
         if (companyMapper.lockById(workspaceId, id) == null) {
             throw new ResourceNotFoundException("Company not found");
         }
-        Company before = requireOwnedCompany(workspaceId, id);
+        Company before = requireOwnedCompany(workspaceId, id, operationVisibilityScope);
         if (companyMapper.archive(workspaceId, id) != 1) {
             throw new ResourceNotFoundException("Company not found");
         }
@@ -840,11 +862,12 @@ public class CompanyService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.COMPANY_DELETE)
     public Company restoreCompany(int id) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceService.getCurrentWorkspaceId(), () -> restoreCompanyWithinVisibilityScope(id));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> restoreCompanyWithinVisibilityScope(id, resolvedVisibilityScope));
     }
 
-    private Company restoreCompanyWithinVisibilityScope(int id) {
+    private Company restoreCompanyWithinVisibilityScope(int id, RecordVisibilityScope operationVisibilityScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         duplicateDecisionLockService.lockCurrentOrganization();
         if (companyMapper.lockById(workspaceId, id) == null) {
@@ -854,7 +877,7 @@ public class CompanyService {
         if (companyMapper.restore(workspaceId, id) != 1) {
             throw new ResourceNotFoundException("Company not found");
         }
-        Company after = requireOwnedCompany(workspaceId, id);
+        Company after = requireOwnedCompany(workspaceId, id, operationVisibilityScope);
         identityIntakeService.recordCompany(
             workspaceId, id, after.getWebsite(), after.getPhone(),
             IdentityAcquisitionSource.BACKFILL, null);
@@ -879,12 +902,13 @@ public class CompanyService {
      * Retrieves the tags associated with a company in the active workspace.
      */
     public List<Tag> getTagsByCompanyId(int companyId) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceService.getCurrentWorkspaceId(), () -> getTagsByCompanyIdWithinVisibilityScope(companyId));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> getTagsByCompanyIdWithinVisibilityScope(companyId, resolvedVisibilityScope));
     }
 
-    private List<Tag> getTagsByCompanyIdWithinVisibilityScope(int companyId) {
-        requireCompany(companyId);
+    private List<Tag> getTagsByCompanyIdWithinVisibilityScope(int companyId, RecordVisibilityScope operationVisibilityScope) {
+        requireCompany(companyId, operationVisibilityScope);
         return tagMapper.getTagsByCompanyId(workspaceService.getCurrentWorkspaceId(), companyId);
     }
 
@@ -894,24 +918,26 @@ public class CompanyService {
      */
     @RequirePermission(Permission.COMPANY_UPDATE)
     public boolean addTag(int companyId, int tagId) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceService.getCurrentWorkspaceId(), () -> addTagWithinVisibilityScope(companyId, tagId));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> addTagWithinVisibilityScope(companyId, tagId, resolvedVisibilityScope));
     }
 
-    private boolean addTagWithinVisibilityScope(int companyId, int tagId) {
-        return addTag(companyId, tagId, MutationAdmission.UNRESTRICTED);
+    private boolean addTagWithinVisibilityScope(int companyId, int tagId, RecordVisibilityScope operationVisibilityScope) {
+        return addTagWithinVisibilityScope(companyId, tagId, MutationAdmission.UNRESTRICTED, operationVisibilityScope);
     }
 
     /** Performs the canonical action after its final under-lock mutation admission. */
     @RequirePermission(Permission.COMPANY_UPDATE)
     public boolean addTag(int companyId, int tagId, MutationAdmission admission) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceService.getCurrentWorkspaceId(), () -> addTagWithinVisibilityScope(companyId, tagId, admission));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> addTagWithinVisibilityScope(companyId, tagId, admission, resolvedVisibilityScope));
     }
 
-    private boolean addTagWithinVisibilityScope(int companyId, int tagId, MutationAdmission admission) {
+    private boolean addTagWithinVisibilityScope(int companyId, int tagId, MutationAdmission admission, RecordVisibilityScope operationVisibilityScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Company company = requireOwnedCompany(workspaceId, companyId);
+        Company company = requireOwnedCompany(workspaceId, companyId, operationVisibilityScope);
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
         if (tag == null) throw new ResourceNotFoundException("Tag not found");
         admission.beforeMutation();
@@ -932,24 +958,26 @@ public class CompanyService {
      */
     @RequirePermission(Permission.COMPANY_UPDATE)
     public boolean removeTag(int companyId, int tagId) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceService.getCurrentWorkspaceId(), () -> removeTagWithinVisibilityScope(companyId, tagId));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> removeTagWithinVisibilityScope(companyId, tagId, resolvedVisibilityScope));
     }
 
-    private boolean removeTagWithinVisibilityScope(int companyId, int tagId) {
-        return removeTag(companyId, tagId, MutationAdmission.UNRESTRICTED);
+    private boolean removeTagWithinVisibilityScope(int companyId, int tagId, RecordVisibilityScope operationVisibilityScope) {
+        return removeTagWithinVisibilityScope(companyId, tagId, MutationAdmission.UNRESTRICTED, operationVisibilityScope);
     }
 
     /** Performs the canonical action after its final under-lock mutation admission. */
     @RequirePermission(Permission.COMPANY_UPDATE)
     public boolean removeTag(int companyId, int tagId, MutationAdmission admission) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceService.getCurrentWorkspaceId(), () -> removeTagWithinVisibilityScope(companyId, tagId, admission));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> removeTagWithinVisibilityScope(companyId, tagId, admission, resolvedVisibilityScope));
     }
 
-    private boolean removeTagWithinVisibilityScope(int companyId, int tagId, MutationAdmission admission) {
+    private boolean removeTagWithinVisibilityScope(int companyId, int tagId, MutationAdmission admission, RecordVisibilityScope operationVisibilityScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Company company = requireOwnedCompany(workspaceId, companyId);
+        Company company = requireOwnedCompany(workspaceId, companyId, operationVisibilityScope);
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
         admission.beforeMutation();
         if (companyMapper.removeTag(workspaceId, companyId, tagId) != 1) {
@@ -966,13 +994,14 @@ public class CompanyService {
     @Transactional
     @RequirePermission(Permission.COMPANY_UPDATE)
     public void removeTagIfUnchanged(int companyId, int tagId) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceService.getCurrentWorkspaceId(), () -> { removeTagIfUnchangedWithinVisibilityScope(companyId, tagId); return null; });
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> { removeTagIfUnchangedWithinVisibilityScope(companyId, tagId, resolvedVisibilityScope); return null; });
     }
 
-    private void removeTagIfUnchangedWithinVisibilityScope(int companyId, int tagId) {
+    private void removeTagIfUnchangedWithinVisibilityScope(int companyId, int tagId, RecordVisibilityScope operationVisibilityScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Company company = requireOwnedCompany(workspaceId, companyId);
+        Company company = requireOwnedCompany(workspaceId, companyId, operationVisibilityScope);
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
         if (companyMapper.removeTag(workspaceId, companyId, tagId) != 1) {
             throw new ConflictException("Company tag association changed and cannot be removed");
@@ -1014,13 +1043,14 @@ public class CompanyService {
      * Retrieves the people associated with a company in the active workspace.
      */
     public List<Person> getPersonsByCompanyId(int companyId, int limit) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceService.getCurrentWorkspaceId(), () -> getPersonsByCompanyIdWithinVisibilityScope(companyId, limit));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> getPersonsByCompanyIdWithinVisibilityScope(companyId, limit, resolvedVisibilityScope));
     }
 
-    private List<Person> getPersonsByCompanyIdWithinVisibilityScope(int companyId, int limit) {
+    private List<Person> getPersonsByCompanyIdWithinVisibilityScope(int companyId, int limit, RecordVisibilityScope operationVisibilityScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        requireCompany(workspaceId, companyId);
+        requireCompany(workspaceId, companyId, operationVisibilityScope);
         return personMapper.getPersonsByCompanyId(workspaceId, companyId, limit);
     }
 
@@ -1028,13 +1058,14 @@ public class CompanyService {
      * Retrieves the deals associated with a company in the active workspace.
      */
     public List<Deal> getDealsByCompanyId(int companyId, int limit) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceService.getCurrentWorkspaceId(), () -> getDealsByCompanyIdWithinVisibilityScope(companyId, limit));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> getDealsByCompanyIdWithinVisibilityScope(companyId, limit, resolvedVisibilityScope));
     }
 
-    private List<Deal> getDealsByCompanyIdWithinVisibilityScope(int companyId, int limit) {
+    private List<Deal> getDealsByCompanyIdWithinVisibilityScope(int companyId, int limit, RecordVisibilityScope operationVisibilityScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        requireCompany(workspaceId, companyId);
+        requireCompany(workspaceId, companyId, operationVisibilityScope);
         return referenceService.hydrateDeals(
             workspaceId, dealMapper.getDealsByCompanyIdPage(workspaceId, companyId, limit));
     }
@@ -1044,13 +1075,14 @@ public class CompanyService {
      * record's value. Readable by any member who can see the company.
      */
     public List<CustomFieldEntryDto> getCustomFields(int companyId) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceService.getCurrentWorkspaceId(), () -> getCustomFieldsWithinVisibilityScope(companyId));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> getCustomFieldsWithinVisibilityScope(companyId, resolvedVisibilityScope));
     }
 
-    private List<CustomFieldEntryDto> getCustomFieldsWithinVisibilityScope(int companyId) {
+    private List<CustomFieldEntryDto> getCustomFieldsWithinVisibilityScope(int companyId, RecordVisibilityScope operationVisibilityScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        requireCompany(workspaceId, companyId);
+        requireCompany(workspaceId, companyId, operationVisibilityScope);
         return customFieldValueService.getForEntity("company", companyId);
     }
 
@@ -1060,13 +1092,14 @@ public class CompanyService {
     @Transactional
     @RequirePermission(Permission.COMPANY_UPDATE)
     public List<CustomFieldEntryDto> updateCustomFields(int companyId, Map<Integer, Object> values) {
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceService.getCurrentWorkspaceId(), () -> updateCustomFieldsWithinVisibilityScope(companyId, values));
+            workspaceService.getCurrentWorkspaceId(), scope, () -> updateCustomFieldsWithinVisibilityScope(companyId, values, scope));
     }
 
-    private List<CustomFieldEntryDto> updateCustomFieldsWithinVisibilityScope(int companyId, Map<Integer, Object> values) {
+    private List<CustomFieldEntryDto> updateCustomFieldsWithinVisibilityScope(int companyId, Map<Integer, Object> values, RecordVisibilityScope operationVisibilityScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        requireCompany(workspaceId, companyId);
+        requireCompany(workspaceId, companyId, operationVisibilityScope);
         return customFieldValueService.applyValues("company", companyId, values);
     }
 
@@ -1076,13 +1109,14 @@ public class CompanyService {
     @Transactional
     @RequirePermission(Permission.COMPANY_UPDATE)
     public List<CustomFieldEntryDto> updateCustomField(int companyId, int definitionId, Object value) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceService.getCurrentWorkspaceId(), () -> updateCustomFieldWithinVisibilityScope(companyId, definitionId, value));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> updateCustomFieldWithinVisibilityScope(companyId, definitionId, value, resolvedVisibilityScope));
     }
 
-    private List<CustomFieldEntryDto> updateCustomFieldWithinVisibilityScope(int companyId, int definitionId, Object value) {
+    private List<CustomFieldEntryDto> updateCustomFieldWithinVisibilityScope(int companyId, int definitionId, Object value, RecordVisibilityScope operationVisibilityScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        requireCompany(workspaceId, companyId);
+        requireCompany(workspaceId, companyId, operationVisibilityScope);
         return customFieldValueService.applyValue("company", companyId, definitionId, value);
     }
 
@@ -1096,20 +1130,20 @@ public class CompanyService {
     /**
      * Loads a company that must exist in the active workspace, else 404.
      */
-    private Company requireCompany(int companyId) {
-        return requireCompany(workspaceService.getCurrentWorkspaceId(), companyId);
+    private Company requireCompany(int companyId, RecordVisibilityScope operationVisibilityScope) {
+        return requireCompany(workspaceService.getCurrentWorkspaceId(), companyId, operationVisibilityScope);
     }
 
-    private Company requireCompany(int workspaceId, int companyId) {
-        Company company = companyMapper.getCompanyById(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), companyId);
+    private Company requireCompany(int workspaceId, int companyId, RecordVisibilityScope operationVisibilityScope) {
+        Company company = companyMapper.getCompanyById(workspaceId, operationVisibilityScope.workspaceIdsJson(), companyId);
         if (company == null) throw new ResourceNotFoundException("Company not found");
         return company;
     }
 
-    private Company requireOwnedCompany(int workspaceId, int companyId) {
+    private Company requireOwnedCompany(int workspaceId, int companyId, RecordVisibilityScope operationVisibilityScope) {
         if (!companyMapper.existsOwned(workspaceId, companyId)) {
             throw new ResourceNotFoundException("Company not found");
         }
-        return requireCompany(workspaceId, companyId);
+        return requireCompany(workspaceId, companyId, operationVisibilityScope);
     }
 }

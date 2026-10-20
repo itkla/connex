@@ -179,7 +179,7 @@ public class WorkspaceService {
         return orgId;
     }
 
-    /** Prepares immutable routed request scopes through the workspace-resolution collaborator. */
+    /** Prepares immutable request scopes in both modes through the workspace-resolution collaborator. */
     public TenantWorkspaceScopeSnapshot prepareWorkspaceScopes(int workspaceId, int orgId, String catalog) {
         return tenantWorkScope.prepareWorkspaceScopes(workspaceId, orgId, catalog);
     }

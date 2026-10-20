@@ -145,7 +145,14 @@ class OwnershipOfferControlReadTest {
             }
             verify(orgMemberService).requireOrgOwner(7, 1);
         }
-        verify(workspaceMapper).findByOrgId(7);
+        verify(workspaceMapper, times(2)).findByOrgId(7);
+        verify(workspaceMapper, times(2)).getOrgId(13);
+        verify(workspaceMapper, times(1)).findOrganizationWorkspacesForShare(13);
+        var order = inOrder(workspaceMapper);
+        order.verify(workspaceMapper).findByOrgId(7);
+        order.verify(workspaceMapper, times(2)).getOrgId(13);
+        order.verify(workspaceMapper).findOrganizationWorkspacesForShare(13);
+        order.verify(workspaceMapper).findByOrgId(7);
         assertOriginalSelection();
     }
 

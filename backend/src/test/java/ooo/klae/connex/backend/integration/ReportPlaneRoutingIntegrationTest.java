@@ -97,9 +97,8 @@ class ReportPlaneRoutingIntegrationTest {
     void backgroundWorkspaceScopeRestoresRouting() throws Exception {
         List<ReadCase> cases = cases();
         List<List<?>> expected = cases.stream().<List<?>>map(this::legacy).toList();
-        WorkspaceMapper workspaces = mock(WorkspaceMapper.class);
+        WorkspaceMapper workspaces = fixture.workspaceMapper;
         TenantCatalogResolver resolver = mock(TenantCatalogResolver.class);
-        when(workspaces.getOrgId(fixture.workspaceId)).thenReturn(fixture.orgId);
         when(resolver.resolveCatalog(fixture.orgId)).thenReturn(fixture.tenantCatalog);
         new TenantWorkScope(fixture.tenantContext, resolver, workspaces).inWorkspace(fixture.workspaceId, () -> {
             assertFalse(fixture.tenantContext.isResolved());

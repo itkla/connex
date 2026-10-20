@@ -72,6 +72,109 @@ class TenantWorkspaceScopeInstallationArchTest {
         entry("tenant.TenantWorkScope.WorkspaceRouteScope.close", "swapWorkspaceScopes"),
         entry("tenant.TenantWorkScope.withPreparedWorkspace", "swapWorkspaceScopes"));
 
+    private static final Map<String, String> PREPARATION_ENTRIES = Map.ofEntries(
+        Map.entry("tenant.TenantResolutionInterceptor.resolveRequest", "tenant.TenantResolutionInterceptor.resolveRequest"),
+        Map.entry("publicapi.ApiCredentialAuthenticationFilter.doFilterInternal", "publicapi.ApiCredentialAuthenticationFilter.doFilterInternal"),
+        Map.entry("services.AutomationExecutor.runWithPinnedPlacement", "services.AutomationExecutor.runAs"),
+        Map.entry("services.WorkspaceMembershipRemovalTransaction.withTenantContext", "services.WorkspaceMembershipRemovalTransaction.execute"),
+        Map.entry("services.UserOffboardingService.withTenantContext", "services.UserOffboardingService.prepareFreshMembership"),
+        Map.entry("services.TenantDiagnosticsTenantAccess.withTenantContext", "services.TenantDiagnosticsTenantAccess.inWorkspace"),
+        Map.entry("services.DataSubjectDisclosureAccess.withTenantContext", "services.DataSubjectDisclosureAccess.inSubjectWorkspace"),
+        Map.entry("services.TenantLifecycleAccess.withTenantContext", "services.TenantLifecycleAccess.withRoute"),
+        Map.entry("services.OwnershipOfferService.withIdentity", "services.OwnershipOfferService.routed"),
+        Map.entry("tenant.TenantWorkScope.WorkspaceRouteScope.<init>", "tenant.TenantWorkScope.routeFor"),
+        Map.entry("tenant.TenantWorkScope.withPreparedWorkspace", "tenant.TenantWorkScope.withPreparedWorkspace"));
+    private static final Map<String, String> EXCEPTIONS = Map.ofEntries(
+        Map.entry("tenant.TenantContext.setWithWorkspaceScopes", "Binds caller-prepared data; never performs reads"),
+        Map.entry("services.OwnershipOfferWriter.withNoticeScope", "Identity-only under existing locks; incompatible payload is discarded"),
+        Map.entry("seeder.SeederBatchWriter.write", "In-transaction roots are uncommitted; direct mapper writes need no scope"),
+        Map.entry("ai.mission.AiAgentDsrPurgeService.installAcceptedIdentity", "Identity-only accepted erasure authority; no visibility-scope reads"),
+        Map.entry("ai.mission.AiAgentDsrPurgeService.inAcceptedScope", "Restores complete enclosing state"),
+        Map.entry("ai.mission.AiAgentDsrPurgeService.readAcceptedWork", "Restores complete enclosing state"),
+        Map.entry("tenant.TenantWorkScope.WorkspaceRouteScope.close", "Restores the enclosing route payload"));
+    private static final Map<String, Set<String>> PREPARATION_CALLS = Map.ofEntries(
+        Map.entry("tenant.TenantResolutionInterceptor.resolveRequest", Set.of("prepareWorkspaceScopes")),
+        Map.entry("publicapi.ApiCredentialAuthenticationFilter.doFilterInternal", Set.of("prepareWorkspaceScopes")),
+        Map.entry("services.AutomationExecutor.runAs", Set.of("withWorkspacePlacement")),
+        Map.entry("services.AutomationExecutor.runAsObserver", Set.of("withWorkspacePlacement")),
+        Map.entry("services.WorkspaceMembershipRemovalTransaction.execute", Set.of("withWorkspacePlacement")),
+        Map.entry("services.UserOffboardingService.prepareFreshMembership", Set.of("withWorkspacePlacement")),
+        Map.entry("services.TenantDiagnosticsTenantAccess.inWorkspace", Set.of("withWorkspacePlacement")),
+        Map.entry("services.TenantDiagnosticsTenantAccess.inOrganization", Set.of("withWorkspacePlacement")),
+        Map.entry("services.DataSubjectDisclosureAccess.inSubjectWorkspace", Set.of("withWorkspacePlacement")),
+        Map.entry("services.DataSubjectDisclosureAccess.withLockedSubjectPerson", Set.of("withWorkspacePlacement")),
+        Map.entry("services.DataSubjectDisclosureAccess.withSnapshot", Set.of("withPreparedWorkspace")),
+        Map.entry("services.TenantLifecycleAccess.withRoute", Set.of("withPreparedWorkspace")),
+        Map.entry("services.TenantLifecycleAccess.capture", Set.of("prepareLifecycleWorkspace")),
+        Map.entry("services.OwnershipOfferService.routed", Set.of("withWorkspacePlacement", "withPreparedWorkspace")),
+        Map.entry("services.FreshMembershipTransaction.execute", Set.of("inWorkspace")),
+        Map.entry("services.FreshMembershipTransaction.executeWithPreparedScopes", Set.of("inWorkspace")),
+        Map.entry("tenant.TenantWorkScope.routeFor", Set.of("prepareWorkspaceScopes", "forWorkspace")),
+        Map.entry("tenant.TenantWorkScope.withPreparedWorkspace", Set.of("prepareWorkspaceScopes")),
+        Map.entry("tenant.TenantWorkScope.prepareWorkspaceScopes", Set.of("load", "isActualTransactionActive")),
+        Map.entry("tenant.TenantWorkScope.prepareLifecycleWorkspace", Set.of("forLifecycleWorkspace", "isActualTransactionActive")));
+
+    /** Pins reviewed call edges; mode and transaction ordering are exercised by the entry unit tests. */
+    @Test
+    void everyInstallerHasAPreparationEntryOrAnExplicitExceptionInBothModes() throws IOException {
+        Set<String> classified = new HashSet<>(PREPARATION_ENTRIES.keySet());
+        assertTrue(java.util.Collections.disjoint(classified, EXCEPTIONS.keySet()));
+        classified.addAll(EXCEPTIONS.keySet());
+        assertEquals(REVIEWED.keySet(), classified.stream().map(name -> ROOT + name).collect(Collectors.toSet()));
+        assertTrue(PREPARATION_CALLS.keySet().containsAll(PREPARATION_ENTRIES.values()));
+        var calls = preparationCalls();
+        for (var expected : PREPARATION_CALLS.entrySet()) {
+            assertTrue(calls.getOrDefault(expected.getKey(), Set.of()).containsAll(expected.getValue()),
+                () -> "Missing reviewed preparation path: " + expected);
+        }
+        for (String entry : List.of("services.FreshMembershipTransaction.executeWithPreparedScopes",
+                "services.TenantLifecycleAccess.capture", "tenant.TenantWorkScope.prepareWorkspaceScopes",
+                "tenant.TenantWorkScope.prepareLifecycleWorkspace")) {
+            assertFalse(calls.get(entry).contains("isCatalogPerPlacement"),
+                () -> "Preparation must not be gated on routed mode: " + entry);
+        }
+    }
+
+    private static Map<String, Set<String>> preparationCalls() throws IOException {
+        var compiler = Objects.requireNonNull(ToolProvider.getSystemJavaCompiler());
+        Set<Path> paths = PREPARATION_CALLS.keySet().stream().map(name -> name.substring(0, name.lastIndexOf('.')))
+            .map(name -> Path.of("src/main/java", ROOT.replace('.', '/') + name.replace('.', '/') + ".java"))
+            .collect(Collectors.toSet());
+        try (var manager = compiler.getStandardFileManager(null, null, StandardCharsets.UTF_8)) {
+            JavacTask parser = (JavacTask) compiler.getTask(null, manager, null, List.of("-proc:none"),
+                null, manager.getJavaFileObjectsFromPaths(paths));
+            Map<String, Set<String>> calls = new LinkedHashMap<>();
+            for (var unit : parser.parse()) {
+                new TreeScanner<Void, String>() {
+                    private String owner;
+
+                    @Override
+                    public Void visitClass(ClassTree tree, String ignored) {
+                        String previous = owner;
+                        owner = unit.getPackageName().toString().substring(ROOT.length()) + "." + tree.getSimpleName();
+                        super.visitClass(tree, ignored);
+                        owner = previous;
+                        return null;
+                    }
+
+                    @Override
+                    public Void visitMethod(MethodTree tree, String ignored) {
+                        return super.visitMethod(tree, owner + "." + tree.getName());
+                    }
+
+                    @Override
+                    public Void visitMethodInvocation(MethodInvocationTree tree, String method) {
+                        if (method != null) {
+                            calls.computeIfAbsent(method, key -> new HashSet<>()).add(methodName(tree));
+                        }
+                        return super.visitMethodInvocation(tree, method);
+                    }
+                }.scan(unit, null);
+            }
+            return calls;
+        }
+    }
+
     @Test
     void productionInstallersAndRestorersMatchTheReviewedList() throws IOException {
         var compiler = Objects.requireNonNull(ToolProvider.getSystemJavaCompiler());

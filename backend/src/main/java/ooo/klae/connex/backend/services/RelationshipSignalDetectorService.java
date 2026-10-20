@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
+
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -69,11 +71,12 @@ public class RelationshipSignalDetectorService {
     /** Detects cooling person and company relationships from the canonical warmth output. */
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public Detection detectDecay(int workspaceId, String generationToken) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceId, () -> detectDecayWithinVisibilityScope(workspaceId, generationToken));
+            workspaceId, resolvedVisibilityScope, () -> detectDecayWithinVisibilityScope(workspaceId, generationToken, resolvedVisibilityScope));
     }
 
-    private Detection detectDecayWithinVisibilityScope(int workspaceId, String generationToken) {
+    private Detection detectDecayWithinVisibilityScope(int workspaceId, String generationToken, RecordVisibilityScope operationVisibilityScope) {
         ScoringService.WorkspaceScores scores = scoringService.scoreWorkspace(workspaceId);
         Map<Integer, String> contactSourceStateHashes =
             scoringService.contactSourceStateHashes(
@@ -115,7 +118,7 @@ public class RelationshipSignalDetectorService {
             .map(candidate -> candidate.temperature().getId())
             .toList();
         if (!companyIds.isEmpty()) {
-            companyMapper.getByIds(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), companyIds)
+            companyMapper.getByIds(workspaceId, operationVisibilityScope.workspaceIdsJson(), companyIds)
                 .forEach(company -> companies.put(company.getId(), company));
         }
         List<RelationshipSignal> candidates = new ArrayList<>();

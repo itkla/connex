@@ -18,9 +18,9 @@ import ooo.klae.connex.backend.tenant.TenantContext;
 
 /**
  * Resolves the unfiltered organization workspace set preserving legacy {@code JOIN workspace}
- * record-visibility ceilings with exact parity (#485, program decision 1). Delegation to
- * {@link ShareWorkspaceControlAccess} retains its prepared routed snapshot, lazy single-database lookup,
- * and tenant-context checks without duplicating that boundary.
+ * record-visibility ceilings with exact parity (#485, program decision 1). Both modes consume
+ * context-prepared data without SQL; {@link ShareWorkspaceControlAccess} supplies the lazy fallback
+ * without changing ordinary single-database share-grant or listing freshness.
  *
  * <p>This deliberately differs from the active-only {@link OrganizationWorkspaceScopeControlAccess}
  * used by Identity, PersonEdge, and assistant ceilings. Any lifecycle tightening is a separate,
@@ -59,12 +59,17 @@ public class RecordVisibilityScopeControlAccess {
         return runWithinScope(workspaceId, null, operation);
     }
 
-    /** Reuses a caller's trusted snapshot across nested work and restores any enclosing operation. */
+    /**
+     * Reuses a caller's trusted snapshot across nested work and restores any enclosing operation.
+     * In single-database mode it takes precedence over prepared data, keeping nested reads aligned
+     * with the scope explicitly passed to batch statements. Routed scopes must equal the exact
+     * prepared payload and cannot substitute for a missing payload.
+     */
     public <T> T withWorkspaceScope(int workspaceId, RecordVisibilityScope scope, Supplier<T> operation) {
         Objects.requireNonNull(scope, "scope");
         requireScopeIdentity(workspaceId, scope);
         if (shareWorkspaceControlAccess.isCatalogPerPlacement()
-                && !scope.equals(loadScope(workspaceId))) {
+                && !scope.equals(getFreshForWorkspace(workspaceId))) {
             throw new TenantScopeSnapshotException("Operation scope does not match the prepared tenant context");
         }
         return runWithinScope(workspaceId, scope, operation);
@@ -114,6 +119,37 @@ public class RecordVisibilityScopeControlAccess {
     }
 
     /**
+     * Reuses a caller's trusted snapshot for a read without joining the mutation callback interface.
+     * Explicit single-database snapshots precede prepared data; routed snapshots must equal the
+     * exact prepared payload. The enclosing operation is restored even when the read fails.
+     *
+     * @param <T> the read's result type
+     * @param workspaceId workspace anchoring the organization
+     * @param scope the trusted snapshot already resolved by the caller
+     * @param read the read-only operation
+     * @return the read's result
+     */
+    public <T> T withWorkspaceScopeRead(int workspaceId, RecordVisibilityScope scope, RecordVisibilityRead<T> read) {
+        Objects.requireNonNull(scope, "scope");
+        requireScopeIdentity(workspaceId, scope);
+        if (shareWorkspaceControlAccess.isCatalogPerPlacement()
+                && !scope.equals(getFreshForWorkspace(workspaceId))) {
+            throw new TenantScopeSnapshotException("Operation scope does not match the prepared tenant context");
+        }
+        OperationScope previous = operationScope.get();
+        operationScope.set(new OperationScope(workspaceId, tenantContext.getCatalog(), tenantContext.isResolved(), tenantContext.getOrgId(), scope));
+        try {
+            return read.read();
+        } finally {
+            if (previous == null) {
+                operationScope.remove();
+            } else {
+                operationScope.set(previous);
+            }
+        }
+    }
+
+    /**
      * Shares a read-only operation's first needed snapshot and any ordinary lookup failure.
      * Empty and skipped operations perform no lookup, exactly as
      * {@link #withDeferredWorkspaceScope(int, Supplier)}. Routed reads still validate their prepared
@@ -143,13 +179,14 @@ public class RecordVisibilityScopeControlAccess {
 
     /**
      * Resolves one immutable, unfiltered record-visibility ceiling for an operation.
-     * Routed operations serve the immutable payload prepared before their first tenant transaction.
-     * A missing or mismatched payload inside a routed transaction fails before any control read.
-     * In single-database mode only, an actual transaction with synchronization reuses one scope per
-     * workspace. The memo is suspended with that transaction and discarded on commit or rollback;
-     * outside a transaction or explicit operation boundary, every call reads a fresh snapshot. Catalog-per-placement mode bypasses
-     * the memo entirely: every call reaches the boundary so the prepared snapshot supplied by
-     * #2165 is validated against the current workspace, organization, and catalog.
+     * Both modes serve a payload matching the current workspace, organization and effective catalog.
+     * Single-database precedence is explicit operation scope, prepared payload, transaction memo,
+     * then lazy lookup. A deferred operation's first needed scope follows the same precedence and
+     * retains ordinary lookup failures, while snapshot-invariant refusals always propagate.
+     * The transaction memo is suspended with its transaction and discarded on completion.
+     * A transaction-first single-database entry retains its lazy behavior; at REPEATABLE READ its
+     * first consistent scope read can establish a pre-lock read view (see {@code docs/backend/LOCKING.md}).
+     * Routed reads bypass both memos and refuse a missing payload inside a transaction before SQL.
      *
      * @param workspaceId workspace anchoring the organization
      * @return the organization's workspace IDs, including the anchor
@@ -157,11 +194,9 @@ public class RecordVisibilityScopeControlAccess {
      *     the resolved tenant context
      */
     public RecordVisibilityScope getForWorkspace(int workspaceId) {
-        if (shareWorkspaceControlAccess.isCatalogPerPlacement()) {
-            return loadScope(workspaceId);
-        }
+        boolean routed = shareWorkspaceControlAccess.isCatalogPerPlacement();
         OperationScope operation = operationScope.get();
-        if (operation != null && operation.workspaceId == workspaceId) {
+        if (!routed && operation != null && operation.workspaceId == workspaceId) {
             if (operation.resolved && !tenantContext.isResolved()
                     || !Objects.equals(operation.catalog, tenantContext.getCatalog())
                     || tenantContext.isResolved() && (tenantContext.getWorkspaceId().intValue() != workspaceId
@@ -176,7 +211,7 @@ public class RecordVisibilityScopeControlAccess {
                 throw operation.failure;
             }
             try {
-                RecordVisibilityScope scope = transactionScope(workspaceId);
+                RecordVisibilityScope scope = preparedOrTransactionScope(workspaceId);
                 requireScopeIdentity(workspaceId, scope);
                 operation.scope = scope;
                 return scope;
@@ -186,6 +221,19 @@ public class RecordVisibilityScopeControlAccess {
                 operation.failure = exception;
                 throw exception;
             }
+        }
+        if (routed) {
+            var prepared = tenantContext.getWorkspaceScopes();
+            return prepared != null && prepared.workspaceId() == workspaceId
+                ? prepared.requireSharing().recordVisibilityScope() : loadScope(workspaceId);
+        }
+        return preparedOrTransactionScope(workspaceId);
+    }
+
+    private RecordVisibilityScope preparedOrTransactionScope(int workspaceId) {
+        var prepared = tenantContext.getWorkspaceScopes();
+        if (prepared != null && prepared.workspaceId() == workspaceId) {
+            return prepared.requireSharing().recordVisibilityScope();
         }
         return transactionScope(workspaceId);
     }
@@ -212,7 +260,8 @@ public class RecordVisibilityScopeControlAccess {
 
     /**
      * Resolves the destructive cache-purge ceiling immediately before its tenant delete.
-     * In single-database mode this bypasses, and never replaces, the transaction memo. The
+     * In single-database mode this bypasses, and never replaces, the explicit operation scope,
+     * prepared payload and transaction memo. The
      * default-catalog caller retains its existing connection and locks: under READ_COMMITTED,
      * this read observes workspace creation committed since an earlier visibility lookup.
      * This is the cache purge's explicit exception to scope-before-locks ordering.

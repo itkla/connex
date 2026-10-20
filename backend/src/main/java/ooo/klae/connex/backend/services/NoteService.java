@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
+
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -77,8 +79,9 @@ public class NoteService {
             int limit,
             int offset,
             boolean workspaceOnly) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
-            workspaceService.getCurrentWorkspaceId(), () -> getNotesPageWithinVisibilityScope(query, sort, dir, limit, offset, workspaceOnly));
+            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> getNotesPageWithinVisibilityScope(query, sort, dir, limit, offset, workspaceOnly, resolvedVisibilityScope));
     }
 
     private PageResponse<Note> getNotesPageWithinVisibilityScope(
@@ -87,9 +90,9 @@ public class NoteService {
             String dir,
             int limit,
             int offset,
-            boolean workspaceOnly) {
+            boolean workspaceOnly, RecordVisibilityScope operationVisibilityScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId)
+        String orgWorkspaceIdsJson = operationVisibilityScope
             .workspaceIdsJson();
         List<Integer> authorIds = matchingAuthorIds(workspaceId, query);
         String sortKey = canonicalPageSort(sort);
@@ -156,7 +159,7 @@ public class NoteService {
     }
 
     private List<Note> getNotesReferencingWithinVisibilityScope(String refType, int refId) {
-        return getNotesReferencing(refType, refId, 25, 0);
+        return getNotesReferencingWithinVisibilityScope(refType, refId, 25, 0);
     }
 
     /** Returns bounded backlink previews after reader-specific reference redaction. */
@@ -190,7 +193,7 @@ public class NoteService {
     }
 
     private Note createWithinVisibilityScope(Note note) {
-        return create(note, MutationAdmission.UNRESTRICTED);
+        return createWithinVisibilityScope(note, MutationAdmission.UNRESTRICTED);
     }
 
     /** Performs the canonical action after its final under-lock mutation admission. */
