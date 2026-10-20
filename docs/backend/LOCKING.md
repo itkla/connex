@@ -26,6 +26,13 @@ Read the relevant section before adding/changing `FOR UPDATE`, transaction isola
 - Read control-plane data that a tenant write needs only for its response — deal-collaborator profile hydration, for example — after that write's transaction has completed. Suspending a routed tenant transaction to read the control catalog borrows a second pooled connection while the write still holds its row locks and the workspace audit-chain head, so under `catalog-per-placement` enough concurrent requests exhaust the pool and hold those locks for a whole connection timeout. Control-plane state a write must consult before it commits keeps the suspend-and-read shape, and those paths budget two pooled connections per concurrent request — except control-plane **locks** the write relies on until it commits, which must be taken on the transaction's own connection through the control-catalog scope (`ControlCatalogRoutingInterceptor`), never by suspending and reading, or the lock is released before the tenant write commits. Deal-collaborator replacement locks its members' rows that way. The suspend-and-read paths are: quiet-hours evaluation, and `ShareService.share()`, whose organization workspace snapshot is the ceiling the tenant grant statement enforces and so must be read before the grant. `ShareService.share()` takes that snapshot before it acquires any row lock, and `ShareService.listShares()` reads it after the tenant listing and skips it entirely when there is nothing to hydrate.
 - Changes to lock order or transaction isolation are Tier 3/high-risk and receive focused concurrency/correctness review.
 
+Interactive and public API requests return HTTP 409 for Spring pessimistic lock failures and exact
+MySQL deadlock (1213), lock-wait timeout (1205), and NOWAIT (3572/HY000) failures, including causes
+and `TransactionSystemException` application exceptions. Responses use a generic conflict message
+without SQL or lock details; callers may retry with a fresh request and transaction. There are no
+in-request retries. Unclassified transaction failures, including a cause-less
+`UnexpectedRollbackException`, retain their existing HTTP 500 response.
+
 ## Workflow lifecycle and account offboarding
 
 Workflow lifecycle writes and permanent account offboarding share a hierarchy:

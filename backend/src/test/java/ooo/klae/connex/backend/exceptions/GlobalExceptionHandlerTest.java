@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 import java.sql.SQLTimeoutException;
 import java.util.List;
@@ -20,6 +21,8 @@ import java.util.regex.Pattern;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -41,6 +44,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
+import org.springframework.web.method.annotation.ExceptionHandlerMethodResolver;
 
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -522,6 +526,45 @@ class GlobalExceptionHandlerTest {
                 "/api/fail"), captor.getValue());
         assertFalse(captor.getValue().detail().contains("secret"));
         assertFalse(captor.getValue().path().contains("token"));
+    }
+
+    @ParameterizedTest
+    @MethodSource("ooo.klae.connex.backend.support.LockContentionTestCases#retryable")
+    void lockContentionReturnsGeneric409WithoutReportingOrLoggingSql(Exception failure) {
+        var method = new ExceptionHandlerMethodResolver(GlobalExceptionHandler.class)
+            .resolveMethodByThrowable(failure);
+        assertNotNull(method);
+        assertEquals("unexpectedFailure", method.getName());
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/fail");
+
+        var response = handler.unexpectedFailure(failure, request);
+        List<ILoggingEvent> events = captureHandlerLogs(() -> handler.unexpectedFailure(failure, request));
+
+        assertEquals(HttpStatus.CONFLICT, response.getStatusCode());
+        assertEquals(Map.of("message", "The request conflicts with another operation; try again"),
+            response.getBody());
+        verifyNoInteractions(errorReporter);
+        assertEquals(1, events.size());
+        assertEquals(ch.qos.logback.classic.Level.WARN, events.getFirst().getLevel());
+        assertNull(events.getFirst().getThrowableProxy());
+        assertFalse(events.getFirst().getFormattedMessage().contains("private"));
+    }
+
+    @ParameterizedTest
+    @MethodSource("ooo.klae.connex.backend.support.LockContentionTestCases#unclassifiedTransactions")
+    void unclassifiedTransactionFailureKeepsTheExact500EnvelopeAndReporting(Exception failure) {
+        MDC.put(CorrelationIds.MDC_KEY, "transaction-error-123");
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/fail");
+
+        var response = handler.unexpectedFailure(failure, request);
+
+        assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, response.getStatusCode());
+        assertEquals(Map.of("message", "An unexpected error occurred",
+            "correlationId", "transaction-error-123"), response.getBody());
+        ArgumentCaptor<ReportedError> captor = ArgumentCaptor.forClass(ReportedError.class);
+        verify(errorReporter).report(captor.capture());
+        assertEquals(failure.getClass().getName(), captor.getValue().message());
+        assertFalse(captor.getValue().detail().contains("private"));
     }
 
     @Test

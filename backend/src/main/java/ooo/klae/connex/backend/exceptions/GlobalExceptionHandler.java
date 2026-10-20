@@ -438,7 +438,17 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Malformed request body");
     }
 
+    /** Maps exact lock contention to a retryable conflict, preserving all other internal errors. */
     @ExceptionHandler(Exception.class)
+    public ResponseEntity<Map<String, String>> unexpectedFailure(Exception ex, HttpServletRequest request) {
+        if (!DatabaseFailureClassifier.isLockContention(ex)) {
+            return internalError(ex, request);
+        }
+        log.warn("Request conflict: exception={} detail={}", ex.getClass().getName(), stackDetail(ex));
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+            .body(Map.of("message", "The request conflicts with another operation; try again"));
+    }
+
     public ResponseEntity<Map<String, String>> internalError(Exception ex, HttpServletRequest request) {
         String correlationId = CorrelationIds.current();
         String detail = stackDetail(ex);
