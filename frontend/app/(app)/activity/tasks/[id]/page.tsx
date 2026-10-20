@@ -39,7 +39,7 @@ const STATUS_TONE: Record<TaskStatus, string> = {
 
 function MetaRow({ label, children }: { label: string; children: React.ReactNode }) {
     return (
-        <div className="flex flex-col gap-1.5 px-6 py-4">
+        <div className="flex min-w-0 flex-col gap-1.5 px-6 py-4 sm:py-3">
             <dt className="text-sm text-muted-foreground">{label}</dt>
             <dd className="text-base text-foreground">{children}</dd>
         </div>
@@ -118,7 +118,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
                 </Rise>
 
                 <Rise delay={0.05}>
-                    <dl className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
+                    <dl className="grid grid-cols-1 divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card sm:grid-cols-2 sm:divide-y-0 sm:py-3 xl:grid-cols-3">
                         <MetaRow label={t("status")}>
                             <span
                                 className={cn(
@@ -147,7 +147,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
 
                         <MetaRow label={t("assignee")}>
                             {assignee ? (
-                                <span className="inline-flex items-center gap-2">
+                                <span className="inline-flex max-w-full items-center gap-2">
                                     <Avatar size="sm" className="ring-1 ring-border">
                                         {assignee.profilePictureUrl ? (
                                             <AvatarImage src={assignee.profilePictureUrl} alt="" />
@@ -156,7 +156,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
                                             <UserIcon className="size-3 text-muted-foreground" />
                                         </AvatarFallback>
                                     </Avatar>
-                                    <span>{assignee.displayName || assignee.username}</span>
+                                    <span className="truncate">{assignee.displayName || assignee.username}</span>
                                 </span>
                             ) : (
                                 <span className="text-muted-foreground">{t("unassigned")}</span>

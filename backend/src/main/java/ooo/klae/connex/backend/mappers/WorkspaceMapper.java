@@ -18,6 +18,14 @@ import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 public interface WorkspaceMapper {
     List<Workspace> getWorkspacesForUser(int userId);
     List<WorkspaceMembershipDto> getMembershipsForUser(int userId);
+    /** Discovers every membership scope without status or lifecycle filtering for final erasure. */
+    List<Integer> discoverAccountMembershipWorkspaceIds(@Param("userId") int userId);
+    /** Retains an exact erasure membership through the user index before its clustered row. */
+    WorkspaceMember lockAccountMembershipForUpdate(
+        @Param("workspaceId") int workspaceId, @Param("userId") int userId);
+    /** Preserves owner NOWAIT semantics with the same user-index-first erasure acquisition. */
+    WorkspaceMember lockAccountMembershipWithoutWaiting(
+        @Param("workspaceId") int workspaceId, @Param("userId") int userId);
     /** Returns the exact active membership through a current shared-locking read. */
     WorkspaceMembershipDto getMembershipForUserForShare(
         @Param("workspaceId") int workspaceId,

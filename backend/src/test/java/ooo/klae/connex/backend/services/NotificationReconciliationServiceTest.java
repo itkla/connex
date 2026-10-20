@@ -26,6 +26,9 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.SimpleTransactionStatus;
 
 import ooo.klae.connex.backend.beans.DealReminderCandidate;
 import ooo.klae.connex.backend.beans.HistoricalNotificationBaseline;
@@ -44,9 +47,11 @@ import ooo.klae.connex.backend.notifications.NotificationDispatcher;
 import ooo.klae.connex.backend.notifications.NotificationProperties;
 import ooo.klae.connex.backend.notifications.NotificationPushPublisher;
 import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 import tools.jackson.databind.ObjectMapper;
 
 class NotificationReconciliationServiceTest {
+    private static final RecordVisibilityScope RECORD_SCOPE = new RecordVisibilityScope(1, List.of(7));
 
     @Test
     void classifiesWarningCriticalAndInitialBackfillBoundaries() {
@@ -346,12 +351,18 @@ class NotificationReconciliationServiceTest {
         private final NotificationDispatcher dispatcher = Mockito.mock(NotificationDispatcher.class);
         private final ScoringService scoringService = Mockito.mock(ScoringService.class);
         private final IntroductionService introductionService = Mockito.mock(IntroductionService.class);
+        private final DuplicateDecisionLockService duplicateDecisionLockService = Mockito.mock(DuplicateDecisionLockService.class);
+        private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess =
+            Mockito.mock(RecordVisibilityScopeControlAccess.class);
+        private final PlatformTransactionManager transactionManager = Mockito.mock(PlatformTransactionManager.class);
         private final DealRiskService dealRiskService = noRiskService();
         private final NotificationProperties properties = new NotificationProperties();
         private final Clock clock = Clock.fixed(Instant.parse("2026-06-23T15:30:00Z"), ZoneOffset.UTC);
         private final NotificationDelivery notificationDelivery;
 
         private ReconciliationFixture(boolean mockedDelivery) {
+            when(recordVisibilityScopeControlAccess.getForWorkspace(7)).thenReturn(RECORD_SCOPE);
+            when(transactionManager.getTransaction(any())).thenAnswer(invocation -> new SimpleTransactionStatus());
             notificationDelivery = mockedDelivery
                 ? Mockito.mock(NotificationDelivery.class)
                 : wrap(dispatcher, notificationMapper, preferenceMapper);
@@ -372,7 +383,7 @@ class NotificationReconciliationServiceTest {
         private NotificationReconciliationService service(Clock evaluationClock) {
             return new NotificationReconciliationService(
                 notificationMapper,
-                Mockito.mock(DuplicateDecisionLockService.class),
+                duplicateDecisionLockService,
                 preferenceMapper,
                 notificationDelivery,
                 stateVersions(notificationMapper),
@@ -381,7 +392,9 @@ class NotificationReconciliationServiceTest {
                 introductionService,
                 dealRiskService,
                 evaluationClock,
-                new ObjectMapper());
+                new ObjectMapper(),
+                recordVisibilityScopeControlAccess,
+                transactionManager);
         }
     }
 
@@ -606,10 +619,19 @@ class NotificationReconciliationServiceTest {
         IntroductionService introductionService = fixture.introductionService;
 
         when(notificationMapper.findWorkspaceRecipientIds(7)).thenReturn(List.of(42));
-        when(introductionService.computeSuggestions(eq(7), anyInt(), any())).thenReturn(List.of(introSuggestion()));
+        when(introductionService.computeSuggestions(eq(7), anyInt(), any(), eq(RECORD_SCOPE))).thenReturn(List.of(introSuggestion()));
 
         NotificationReconciliationService service = fixture.service();
         service.reconcileWorkspace(7, true);
+
+        var order = Mockito.inOrder(fixture.recordVisibilityScopeControlAccess, fixture.transactionManager,
+            fixture.duplicateDecisionLockService, introductionService);
+        order.verify(fixture.recordVisibilityScopeControlAccess).getForWorkspace(7);
+        order.verify(fixture.transactionManager).getTransaction(org.mockito.ArgumentMatchers.argThat(
+            definition -> definition.getPropagationBehavior() == TransactionDefinition.PROPAGATION_REQUIRES_NEW));
+        order.verify(fixture.duplicateDecisionLockService).lockBackgroundOrganization(7);
+        order.verify(introductionService).computeSuggestions(eq(7), anyInt(), any(), eq(RECORD_SCOPE));
+        verify(fixture.recordVisibilityScopeControlAccess).getForWorkspace(7);
 
         ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
         verify(dispatcher).dispatch(captor.capture());
@@ -627,6 +649,25 @@ class NotificationReconciliationServiceTest {
     }
 
     @Test
+    void unavailablePrelockScopeLeavesIntroRemindersUnmanagedAndOtherPassesRunning() {
+        ReconciliationFixture fixture = ReconciliationFixture.withDispatcher();
+        Notification existing = reminderNotification(201,
+            NotificationReconciliationService.INTRO_OPPORTUNITY_TYPE, "relationship.intro_opportunity:3:8");
+        when(fixture.notificationMapper.findWorkspaceReminderNotifications(7)).thenReturn(List.of(existing));
+        when(fixture.recordVisibilityScopeControlAccess.getForWorkspace(7))
+            .thenThrow(new IllegalStateException("scope unavailable"));
+
+        fixture.service().reconcileWorkspace(7, true);
+
+        var order = Mockito.inOrder(fixture.recordVisibilityScopeControlAccess, fixture.duplicateDecisionLockService);
+        order.verify(fixture.recordVisibilityScopeControlAccess).getForWorkspace(7);
+        order.verify(fixture.duplicateDecisionLockService).lockBackgroundOrganization(7);
+        verify(fixture.notificationMapper).findTaskReminderCandidates(7);
+        Mockito.verifyNoInteractions(fixture.introductionService);
+        verify(fixture.notificationMapper, never()).resolveReminder(anyInt(), anyInt(), anyInt(), anyString());
+    }
+
+    @Test
     void reconciliationSkipsIntroOpportunitiesWhenDisabled() {
         ReconciliationFixture fixture = ReconciliationFixture.withDispatcher();
         NotificationDispatcher dispatcher = fixture.dispatcher;
@@ -638,6 +679,7 @@ class NotificationReconciliationServiceTest {
         NotificationReconciliationService service = fixture.service();
         service.reconcileWorkspace(7, true);
 
+        verify(introductionService, never()).computeSuggestions(anyInt(), anyInt(), any(), any());
         verify(introductionService, never()).computeSuggestions(anyInt(), anyInt(), any());
         verify(dispatcher, never()).dispatch(any());
     }
@@ -651,6 +693,7 @@ class NotificationReconciliationServiceTest {
         NotificationReconciliationService service = fixture.service();
         service.reconcileWorkspace(7, false);
 
+        verify(introductionService, never()).computeSuggestions(anyInt(), anyInt(), any(), any());
         verify(introductionService, never()).computeSuggestions(anyInt(), anyInt(), any());
         verify(dispatcher, never()).dispatch(any());
     }
@@ -669,6 +712,7 @@ class NotificationReconciliationServiceTest {
         service.reconcileWorkspace(7, false);
 
         verify(notificationMapper, never()).resolveReminder(anyInt(), anyInt(), anyInt(), any());
+        verify(introductionService, never()).computeSuggestions(anyInt(), anyInt(), any(), any());
         verify(introductionService, never()).computeSuggestions(anyInt(), anyInt(), any());
     }
 
@@ -704,6 +748,7 @@ class NotificationReconciliationServiceTest {
         ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
         verify(dispatcher).dispatch(captor.capture());
         assertEquals(NotificationReconciliationService.TASK_TYPE, captor.getValue().getType());
+        verify(introductionService, never()).computeSuggestions(anyInt(), anyInt(), any(), any());
         verify(introductionService, never()).computeSuggestions(anyInt(), anyInt(), any());
         verify(dealRiskService, never())
             .assessWorkspaceNotificationStates(anyInt(), any(), any());
@@ -859,7 +904,7 @@ class NotificationReconciliationServiceTest {
             .thenReturn(List.of());
         NotificationReconciliationService service = fixture.service();
         NotificationReconciliationService.HistoricalExpectationSnapshot snapshot =
-            service.historicalExpectationSnapshot(7, clock.instant());
+            service.historicalExpectationSnapshot(7, clock.instant(), RECORD_SCOPE);
         HistoricalNotificationBaseline baseline =
             baseline(NotificationReconciliationService.TASK_TYPE, "warning", "task.due:91");
         baseline.setSourceStateHash(
@@ -895,10 +940,10 @@ class NotificationReconciliationServiceTest {
         NotificationReconciliationService dueSoonService = fixture.service(dueSoon);
         NotificationReconciliationService overdueService = fixture.service(overdue);
         NotificationReconciliationService.HistoricalExpectation dueSoonExpectation =
-            dueSoonService.historicalExpectationSnapshot(7, dueSoon.instant())
+            dueSoonService.historicalExpectationSnapshot(7, dueSoon.instant(), RECORD_SCOPE)
                 .expectations().values().iterator().next();
         NotificationReconciliationService.HistoricalExpectation overdueExpectation =
-            overdueService.historicalExpectationSnapshot(7, overdue.instant())
+            overdueService.historicalExpectationSnapshot(7, overdue.instant(), RECORD_SCOPE)
                 .expectations().values().iterator().next();
         HistoricalNotificationBaseline baseline =
             baseline(NotificationReconciliationService.TASK_TYPE, "warning", "task.due:91");
@@ -949,11 +994,11 @@ class NotificationReconciliationServiceTest {
 
         NotificationReconciliationService.HistoricalExpectation before =
             fixture.service(beforeClosingSoon)
-                .historicalExpectationSnapshot(7, beforeClosingSoon.instant())
+                .historicalExpectationSnapshot(7, beforeClosingSoon.instant(), RECORD_SCOPE)
                 .expectations().values().iterator().next();
         NotificationReconciliationService.HistoricalExpectation after =
             fixture.service(closingSoon)
-                .historicalExpectationSnapshot(7, closingSoon.instant())
+                .historicalExpectationSnapshot(7, closingSoon.instant(), RECORD_SCOPE)
                 .expectations().values().iterator().next();
 
         assertEquals(before.sourceStateHash(), after.sourceStateHash());
@@ -1005,7 +1050,7 @@ class NotificationReconciliationServiceTest {
         NotificationReconciliationService service =
             fixture.service(clock);
         NotificationReconciliationService.HistoricalExpectation initial =
-            service.historicalExpectationSnapshot(7, clock.instant())
+            service.historicalExpectationSnapshot(7, clock.instant(), RECORD_SCOPE)
                 .expectations().values().iterator().next();
         HistoricalNotificationBaseline baseline = baseline(
             NotificationReconciliationService.DEAL_RISK_TYPE,
@@ -1229,7 +1274,7 @@ class NotificationReconciliationServiceTest {
 
         NotificationReconciliationService.HistoricalExpectationSnapshot snapshot =
             service.historicalExpectationSnapshot(
-                7, Instant.parse("2026-06-23T15:30:00Z"));
+                7, Instant.parse("2026-06-23T15:30:00Z"), RECORD_SCOPE);
         HistoricalNotificationBaseline baseline =
             baseline(NotificationReconciliationService.TASK_TYPE, "warning", "task.due:91");
         baseline.setSourceStateHash(

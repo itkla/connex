@@ -510,9 +510,9 @@
       state_version = notification_recipient_state.state_version + 1
   </insert>
 
-  <select id="lockRecipientMemberships" resultType="int">
+  <select id="lockRecipientMemberships" resultType="int" flushCache="true" useCache="false">
     SELECT workspace_id
-    FROM workspace_member
+    FROM workspace_member FORCE INDEX (idx_workspace_member_user)
     WHERE user_id = #{recipientId}
     ORDER BY workspace_id
     FOR UPDATE

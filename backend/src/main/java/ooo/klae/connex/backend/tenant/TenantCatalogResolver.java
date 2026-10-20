@@ -24,6 +24,11 @@ public class TenantCatalogResolver {
     private final PlacementRegistry placementRegistry;
     private final TenantRoutingProperties properties;
 
+    /** Whether this deployment can route a tenant catalog independently of control-only handling. */
+    public boolean isCatalogPerPlacement() {
+        return properties.isCatalogPerPlacement();
+    }
+
     /**
      * Resolves the catalog for a membership-validated organization.
      *

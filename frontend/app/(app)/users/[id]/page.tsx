@@ -87,7 +87,7 @@ export default async function UserPage({ params }: { params: { id: number } }) {
                     </div>
                 </Rise>
 
-                <div className="grid grid-cols-1 gap-8 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+                <div className="grid grid-cols-1 gap-8 xl:grid-cols-[minmax(16rem,20rem)_minmax(0,1fr)] xl:items-start">
                     <Rise delay={0.06}>
                         <aside>
                             <SectionHeader title={t("profile")} />

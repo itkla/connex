@@ -18,6 +18,7 @@ import ooo.klae.connex.backend.mappers.ProviderConnectionMapper;
 import ooo.klae.connex.backend.services.DuplicateDecisionLockService;
 import ooo.klae.connex.backend.services.MatchingService;
 import ooo.klae.connex.backend.services.ProviderCaptureHistoricalBaselineService;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
 import ooo.klae.connex.backend.services.WorkspaceService;
 
 class ProviderCaptureBodyAccessTest {
@@ -35,7 +36,8 @@ class ProviderCaptureBodyAccessTest {
                 new ObjectMapper(),
                 mock(DuplicateDecisionLockService.class),
                 mock(WorkspaceService.class),
-                mock(ProviderCaptureHistoricalBaselineService.class));
+                mock(ProviderCaptureHistoricalBaselineService.class),
+                mock(RecordVisibilityScopeControlAccess.class));
         ProviderCaptureItem privateItem = new ProviderCaptureItem(
             "event-1",
             "version-1",

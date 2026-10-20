@@ -1,7 +1,10 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
@@ -36,6 +39,47 @@ class UserDeletionAuditOrderTest {
 
     private static final String OWNER = "audit-order-owner";
 
+    @Test
+    void membershipCompletenessUsesUnfilteredCurrentLockingReadsOnUserIndexes() throws Exception {
+        for (var entry : java.util.Map.of(
+                "NotificationMapper", "lockRecipientMemberships",
+                "OrgMemberMapper", "lockAccountMembershipOrgIds").entrySet()) {
+            try (var input = getClass().getClassLoader().getResourceAsStream("mappers/" + entry.getKey() + ".xml")) {
+                assertNotNull(input);
+                String xml = new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+                int start = xml.indexOf("id=\"" + entry.getValue() + "\"");
+                assertTrue(start > 0);
+                String statement = xml.substring(start, xml.indexOf("</select>", start));
+                assertTrue(statement.contains("FOR UPDATE"));
+                assertTrue(statement.contains("FORCE INDEX"));
+                assertTrue(statement.contains("flushCache=\"true\""));
+                assertTrue(statement.contains("useCache=\"false\""));
+                assertFalse(statement.contains("status"));
+                assertFalse(statement.contains("lifecycle_state"));
+                assertFalse(statement.contains("JOIN"));
+            }
+        }
+    }
+
+    @Test
+    void exactMembershipPrelocksUseTheSameUserIndexBeforeTheirPrimaryRows() throws Exception {
+        try (var input = getClass().getClassLoader().getResourceAsStream("mappers/WorkspaceMapper.xml")) {
+            assertNotNull(input);
+            String xml = new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            for (String id : List.of("lockAccountMembershipForUpdate", "lockAccountMembershipWithoutWaiting")) {
+                int start = xml.indexOf("id=\"" + id + "\"");
+                assertTrue(start > 0);
+                String statement = xml.substring(start, xml.indexOf("</select>", start));
+                assertTrue(statement.contains("FORCE INDEX (idx_workspace_member_user)"));
+                assertTrue(statement.contains("WHERE user_id = #{userId} AND workspace_id = #{workspaceId}"));
+                assertTrue(statement.contains("FOR UPDATE"));
+                assertEquals(id.endsWith("WithoutWaiting"), statement.contains("NOWAIT"));
+                assertFalse(statement.contains("status ="));
+                assertFalse(statement.contains("lifecycle_state"));
+            }
+        }
+    }
+
     @AfterEach
     void clearTenantContext() {
         new TenantContext().clear();
@@ -58,6 +102,27 @@ class UserDeletionAuditOrderTest {
     }
 
     @Test
+    void finalErasureRejectsAnAmbientRepeatableReadBeforeMembershipScans() {
+        Fixture fixture = new Fixture();
+        var isolation = org.springframework.transaction.support.TransactionSynchronizationManager
+            .getCurrentTransactionIsolationLevel();
+        boolean active = org.springframework.transaction.support.TransactionSynchronizationManager
+            .isActualTransactionActive();
+        try {
+            org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(true);
+            org.springframework.transaction.support.TransactionSynchronizationManager.setCurrentTransactionIsolationLevel(
+                java.sql.Connection.TRANSACTION_REPEATABLE_READ);
+
+            assertThrows(IllegalStateException.class, () -> fixture.transaction.delete(9, OWNER));
+            verifyNoInteractions(fixture.workspaceService, fixture.orgMemberService,
+                fixture.lifecycleService, fixture.auditService);
+        } finally {
+            org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(active);
+            org.springframework.transaction.support.TransactionSynchronizationManager.setCurrentTransactionIsolationLevel(isolation);
+        }
+    }
+
+    @Test
     void erasureEmitsEveryAuditInSortedScopeOrderBeforeTheAccountDelete() {
         Fixture fixture = new Fixture();
         fixture.credentialAudits(
@@ -75,6 +140,30 @@ class UserDeletionAuditOrderTest {
         order.verify(fixture.auditService).recordScoped(
             eq("user.delete"), eq("user"), eq(9), eq(13), eq(6), any(), any(), any());
         order.verify(fixture.userMapper).delete(9);
+    }
+
+    @Test
+    void everyMembershipPrecedesOrganizationsCredentialsAndHeadsAndTheCascadeIsLast() {
+        Fixture fixture = new Fixture();
+        when(fixture.workspaceService.discoverOwnedWorkspaceIds(9)).thenReturn(List.of(7));
+        when(fixture.workspaceService.discoverAccountMembershipWorkspaceIds(9)).thenReturn(List.of(3, 7, 30));
+        when(fixture.orgMemberService.discoverAccountMembershipOrgIds(9)).thenReturn(List.of(2, 8));
+        fixture.credentialAudits(new RecordingCredentialAudit(5, 2, fixture.emitted));
+
+        fixture.transaction.delete(9, OWNER);
+
+        InOrder order = inOrder(fixture.userMapper, fixture.workspaceService, fixture.orgMemberService,
+            fixture.lifecycleService, fixture.auditService);
+        order.verify(fixture.workspaceService).discoverAccountMembershipWorkspaceIds(9);
+        order.verify(fixture.orgMemberService).discoverAccountMembershipOrgIds(9);
+        order.verify(fixture.workspaceService).lockAccountWorkspaceRoots(List.of(7), List.of(3, 5, 7, 30));
+        order.verify(fixture.workspaceService).assertAccountDeletionWorkspaceRecovery(9, List.of(7), List.of(3, 7, 30));
+        order.verify(fixture.orgMemberService).assertAccountDeletionOrganizationRecovery(9, List.of(2, 8), List.of(2, 8));
+        order.verify(fixture.lifecycleService).deleteForAccount(9, List.of(new ApiCredentialReferenceRoot(5, 2)));
+        order.verify(fixture.auditService).recordScoped(
+            eq("user.delete"), eq("user"), eq(9), eq(null), eq(null), any(), any(), any());
+        order.verify(fixture.userMapper).delete(9);
+        assertEquals(List.of("workspace:5", "system:0"), fixture.emitted);
     }
 
     @Test

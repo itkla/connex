@@ -191,13 +191,19 @@ chain. Firewall method rejections use `method_not_allowed`; other public firewal
 `bad_request` without exposing the rejection detail. Initial codes are `invalid_token`,
 `insufficient_scope`, `invalid_request`, `bad_request`,
 `invalid_cors_request`, `request_too_large`,
-`not_found`, `method_not_allowed`, `rate_limit_exceeded`,
+`not_found`, `method_not_allowed`, `conflict`, `rate_limit_exceeded`,
 `privileged_mfa_enrollment_required`, `privileged_mfa_attestation_required`, `public_api_unavailable`,
 and `internal_error`.
 Invalid credentials, privileged accounts that require passkey enrollment and, under the default
 attestation enforcement, privileged accounts whose passkeys still await approval receive `401`;
 authenticated credentials without the required scope, including credentials whose entire stored
 scope set is no longer live under current RBAC, receive `403`.
+Lock contention receives `409` with `conflict` only when no writable Spring transaction has committed
+during handler execution, so the caller can retry because no tracked transaction committed. Handler
+commits retain `500` with `internal_error`. Tracking starts after the pre-handler authentication and
+tenant bookkeeping and ignores read-only transactions. It covers the request thread's handler-phase
+Spring transactions, including independent audit commits and Spring MVC async workers; autocommit
+statements and application executors without bound request attributes are outside this bound. See [the locking contract](backend/LOCKING.md#global-principles).
 Replacing a partial, uncommitted response with an error envelope preserves the correlation id,
 allowed CORS and `Vary` metadata, rate-limit and `Retry-After` headers, and HSTS while discarding
 stale representation headers and bytes.

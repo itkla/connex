@@ -238,6 +238,24 @@
     FOR UPDATE NOWAIT
   </select>
 
+  <select id="discoverAccountMembershipWorkspaceIds" resultType="int" flushCache="true" useCache="false">
+    SELECT workspace_id FROM workspace_member WHERE user_id = #{userId}
+  </select>
+
+  <select id="lockAccountMembershipForUpdate" resultType="WorkspaceMember" flushCache="true" useCache="false">
+    SELECT workspace_id, user_id, role, role_id, status, created_at
+    FROM workspace_member FORCE INDEX (idx_workspace_member_user)
+    WHERE user_id = #{userId} AND workspace_id = #{workspaceId}
+    FOR UPDATE
+  </select>
+
+  <select id="lockAccountMembershipWithoutWaiting" resultType="WorkspaceMember" flushCache="true" useCache="false">
+    SELECT workspace_id, user_id, role, role_id, status, created_at
+    FROM workspace_member FORCE INDEX (idx_workspace_member_user)
+    WHERE user_id = #{userId} AND workspace_id = #{workspaceId}
+    FOR UPDATE NOWAIT
+  </select>
+
   <select id="workspaceIdsOwnedBy" resultType="int">
     SELECT workspace_id FROM workspace_member
     WHERE user_id = #{userId} AND role = 'owner' AND status = 'active'
@@ -325,8 +343,10 @@
        ceilings and for tenant diagnostics, and it admits only workspaces whose own and whose
        organization's lifecycle_state is 'active'. The two therefore return different sets for a
        winding-down organization, so the allowlist ShareMapper enforces can be wider than the one
-       IdentityMapper/PersonEdgeMapper/AiAssistantIdentifierMapper enforce. Neither statement may
-       be swapped for the other; see ShareWorkspaceControlAccess for the full argument. -->
+       IdentityMapper/PersonEdgeMapper/AiAssistantIdentifierMapper enforce.
+       RecordVisibilityScopeControlAccess also delegates to the unfiltered snapshot to preserve
+       legacy record-visibility ceilings (#485). Neither statement may be swapped for the other;
+       see ShareWorkspaceControlAccess for the full argument. -->
   <select id="findOrganizationWorkspacesForShare" resultType="Workspace">
     SELECT peer.id, peer.org_id, peer.name
     FROM workspace anchor
@@ -340,7 +360,8 @@
        purpose: a torn-down or winding-down workspace must stop contributing read visibility.
        DIVERGENCE, deliberate: `findOrganizationWorkspacesForShare` above applies no lifecycle
        filter, because the share joins it replaced applied none. The same bound parameter name
-       therefore carries a different set on the share path than on the read path. -->
+       therefore carries the unfiltered set on sharing and legacy record-visibility paths, and the
+       active-only set on Identity/PersonEdge/assistant paths. -->
   <select id="findByOrgId" resultType="Workspace">
     SELECT w.id, w.org_id, w.name, w.slug, w.timezone,
            w.identity_version AS identityVersion, w.created_at, w.updated_at
