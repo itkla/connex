@@ -1098,6 +1098,19 @@ See [UPGRADING.md](../UPGRADING.md) for the deployment implications.
 
 ## Failure behavior
 
+Processing restrictions purge persisted AI output caches in one tenant DELETE bounded by the
+unfiltered organization workspace set on each cache row's `workspace_id`. The purge retains
+person-keyed introduction rationales, stakeholder/connection deal-risk rationales, current structured
+person-to-deal brief links, and conservative deletion of every organization report narrative.
+Foreign-organization cache rows carrying the same subject IDs are preserved. Lifecycle state does
+not narrow this cache ceiling. Removed links and unlinked free text still lack reliable provenance.
+
+Single-database restrictions read a fresh ceiling on the existing transaction connection immediately
+before deletion, bypassing the record-visibility memo. Existing person-lock and epoch-fence ordering
+is unchanged; epoch guarantees remain JVM-local (#941). Routed restrictions use the prepared
+operation snapshot without another connection; destructive scope freshness remains a flag-enable
+prerequisite in #2172. See [LOCKING.md](LOCKING.md#duplicate-review-record-mutation-and-imports).
+
 Keep provider failure, rate limit, timeout, cancellation, blocked, and unavailable states distinct. Do not recover a lost response by issuing a second generation request when the established handle/polling protocol can continue the original operation.
 
 Deterministic warmth, risk, report figures, and other non-AI behavior remain available without AI.

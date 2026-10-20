@@ -1808,6 +1808,29 @@ context payload before considering any memo, so a missing or stale payload still
 open transaction without a control query. Assistant parallel tool batches reject writes; one
 auto/approved write is one transaction, and its nested Pipeline reads share the existing memo.
 
+Restriction-driven AI output-cache erasure uses `getFreshForWorkspace` immediately before its one
+set-based `AiOutputCacheMapper.deleteForPerson` call, after the existing authority/person locks and
+privacy invalidation. In `single-database`, this is an explicit exception to scope-before-locks:
+the unfiltered lookup runs on the same default-catalog transaction connection, without suspension
+or another checkout, and neither reads nor replaces the transaction memo (#2162). Its dedicated
+control statement also flushes MyBatis's local cache, without changing ordinary sharing reads. At
+`READ_COMMITTED` it sees workspace creation committed since an earlier memoized read. The only
+remaining discovery gap is between this adjacent control SELECT and tenant DELETE; it is not an
+atomic statement-level workspace snapshot. The active-only mission privacy/epoch discovery stays
+unchanged and is not the cache ceiling. Person-row-backed saves still lock contributors ascending
+before cache writes; restriction invalidation retains its local write fences before cache deletion
+through transaction completion. No authorization or person lock moves off the transaction connection.
+
+In routed mode the fresh method requires the exact #2165 prepared payload, even outside a
+transaction, and performs memory-only validation with no suspension or checkout. Workspace creation
+or deletion after preparation can make a destructive ceiling stale: a newly created workspace's
+cache can escape erasure, while a deleted workspace can remain in the set. A race-safe destructive
+scope contract is the routing flag-enable prerequisite **#2172**. This cache conversion does not
+implement that fence or enable catalog routing; operation-level freshness must not be claimed as
+complete erasure coverage until #2172 is resolved.
+
+`getFreshForWorkspace` also never consults the explicit `withWorkspaceScope` operation boundary, so a restriction purge reached inside a workflow or scheduler operation still reads the current organization workspace set rather than the operation's reused snapshot.
+
 The locked call chains are:
 
 - `NotificationReconciliationService.reconcileWorkspace`: preload the scope before opening its

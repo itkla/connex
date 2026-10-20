@@ -278,6 +278,24 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   another scope read. Report scope resolution precedes the restriction-epoch read and later snapshot
   persistence locks; transaction boundaries are unchanged and #2159 remains a flag-enable prerequisite.
 
+  `AiOutputCacheMapper.deleteForPerson` also binds the unfiltered set through `JSON_TABLE` on
+  `ai_output_cache.workspace_id`, with a separate anchor membership check. Its organization ceiling
+  encloses every feature branch, including organization-wide report narrative invalidation; checking
+  only the owned person cannot protect foreign cache rows carrying identical subject IDs. Its
+  crossing baseline entry is removed. In `single-database`, restriction processing obtains
+  `RecordVisibilityScopeControlAccess.getFreshForWorkspace` immediately before the one DELETE,
+  after existing locks and privacy invalidation. This same-connection `READ_COMMITTED` lookup bypasses
+  the #2162 transaction memo without replacing it. A dedicated control statement flushes MyBatis's
+  local cache without changing ordinary sharing reads, preserving current committed workspace membership
+  up to the gap between adjacent SELECT/DELETE statements. The active-only privacy workspace list
+  is unchanged and never substitutes for this ceiling. In routed mode the fresh method serves only
+  the exact #2165 prepared snapshot, with no lookup or suspension. Its destructive-operation
+  staleness remains the flag-enable prerequisite **#2172**, including newly created workspaces missed
+  by erasure and deleted workspaces still present in the prepared set. No fence is implemented here.
+  Full restriction-service split-catalog coverage additionally depends on converting PersonMapper's
+  remaining visibility/company joins; the isolated cache restriction/purge transaction has its own
+  minimal tenant-catalog coverage. Routing remains disabled.
+
 - **Context-installed workspace scopes (#2159 / #485 P5b).** Catalog-routed request resolution,
   public API authentication and every workspace job entry prepare immutable unfiltered and
   active-only organization snapshots before tenant transactions. Sharing and record visibility

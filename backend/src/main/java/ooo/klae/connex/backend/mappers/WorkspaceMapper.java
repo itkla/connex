@@ -114,6 +114,12 @@ public interface WorkspaceMapper {
     List<Workspace> findOrganizationWorkspacesForShare(@Param("workspaceId") int workspaceId);
 
     /**
+     * Loads the same unfiltered organization set for destructive cache erasure, flushing local
+     * MyBatis state so committed workspace creation cannot be hidden by an earlier sharing read.
+     */
+    List<Workspace> findOrganizationWorkspacesForCachePurge(@Param("workspaceId") int workspaceId);
+
+    /**
      * Loads every active workspace of an active organization, which is the scope the read-path
      * organization ceilings bind. It diverges from
      * {@link #findOrganizationWorkspacesForShare} by filtering on lifecycle state.
