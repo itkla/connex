@@ -1796,6 +1796,15 @@ detection completes before signal replacement acquires write locks. Reverse-intr
 are generated before manual or delivery snapshot persistence locks; the scheduled occurrence claim
 commits before generation. Neither read chain inherits those subsequent write locks.
 
+Report generation and KPI reads resolve one unfiltered record-visibility scope before collecting
+inputs. Full generation resolves before the restriction-epoch read's brief JVM lock, then reuses
+the scope across every widget, both periods, network accounts and reverse-introduction candidates.
+Cached, synchronous and asynchronous narratives consume the already-frozen figures. Manual and
+delivery snapshot persistence retain their existing definition/schedule locks after generation;
+the scheduled occurrence claim still commits first. No Report transaction boundary or lock
+connection changes for the mapper separation. Routed in-transaction snapshot installation and
+the fail-fast guard remain program-wide work in #2159 before flag enablement.
+
 Note page/count, global note search, and relationship-evidence reads resolve one unfiltered snapshot
 per operation. The page/count pair also reuses its author-ID snapshot; both note-search candidate
 streams share the scope across all batches. Evidence resolves only after the existing subject

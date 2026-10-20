@@ -246,8 +246,9 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   This preserves legacy `JOIN workspace` ceilings that had no lifecycle predicate; lifecycle
   tightening requires a separate explicit decision. It deliberately differs from the active-only
   `OrganizationWorkspaceScopeControlAccess` used by Identity, PersonEdge and assistant ceilings.
-  `IntroductionMapper`, `DuplicateReviewMapper`, `NoteMapper`, `SegmentMapper`, and `PipelineMapper` now bind this set through
-  `JSON_TABLE` and read tenant tables only; duplicate counts omit the optional employer-label joins.
+  `IntroductionMapper`, `DuplicateReviewMapper`, `NoteMapper`, `ReportMapper`, `SegmentMapper`, and
+  `PipelineMapper` now bind this set through `JSON_TABLE` and read tenant tables only; duplicate
+  counts omit the optional employer-label joins.
   Note pages and their counts reuse one scope and author-ID snapshot, and global note search reuses
   one scope across both bounded candidate streams. Private-note evidence resolves its scope after
   the existing subject-visibility refusal. Note assistant history retains its separate active-only
@@ -265,6 +266,12 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   workflow locks retain their transaction shape; #2159 (L-scope) owns the context-installed snapshot
   and fail-fast guard required before catalog routing can be enabled. The routing default
   stays `single-database`; other #485 crossings and the flag-enable gate remain open.
+  Report generation and KPI reads resolve one unfiltered scope for all widgets, current/prior
+  periods, network account values, and reverse-introduction candidates. Historical report populations
+  retain their record/share creation cutoffs inside tenant SQL and use current organization membership,
+  matching the removed workspace joins. Narrative generation consumes the frozen figures without
+  another scope read. Report scope resolution precedes the restriction-epoch read and later snapshot
+  persistence locks; transaction boundaries are unchanged and #2159 remains a flag-enable prerequisite.
 
 ### 0.6 Organization membership & org-level roles (#316)
 

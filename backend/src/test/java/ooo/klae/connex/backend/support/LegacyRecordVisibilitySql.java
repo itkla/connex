@@ -32,7 +32,7 @@ public final class LegacyRecordVisibilitySql {
             new Environment("pre-485-record-visibility", new JdbcTransactionFactory(), dataSource));
         configuration.setMapUnderscoreToCamelCase(true);
         configuration.getTypeAliasRegistry().registerAliases("ooo.klae.connex.backend.beans");
-        for (String xml : List.of(INTRODUCTION, DUPLICATE_REVIEW, NOTE, SEGMENT, PIPELINE)) {
+        for (String xml : List.of(INTRODUCTION, DUPLICATE_REVIEW, NOTE, REPORT, SEGMENT, PIPELINE)) {
             String resource = "pre-485-" + configuration.getMappedStatementNames().size();
             new XMLMapperBuilder(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)),
                 configuration, resource, configuration.getSqlFragments()).parse();
@@ -627,6 +627,370 @@ public final class LegacyRecordVisibilitySql {
               OR d.name LIKE #{query})
             ORDER BY n.created_at DESC, n.id DESC
             LIMIT #{limit} OFFSET #{offset}
+          </select>
+        </mapper>
+        """;
+    /** Frozen Report SQL from origin/main at 37497574b, including #2161's unit grouping fix. */
+    private static final String REPORT = """
+        <?xml version="1.0" encoding="UTF-8" ?>
+        <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+                "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+        <mapper namespace="ooo.klae.connex.backend.mappers.ReportMapper">
+          <sql id="dealFilters">
+            <if test="query.pipelineIds != null and !query.pipelineIds.isEmpty()">
+              AND d.pipeline_id IN
+              <foreach item="id" collection="query.pipelineIds" open="(" separator="," close=")">#{id}</foreach>
+            </if>
+            <if test="query.ownerIds != null and !query.ownerIds.isEmpty()">
+              AND d.owner_id IN
+              <foreach item="id" collection="query.ownerIds" open="(" separator="," close=")">#{id}</foreach>
+            </if>
+            <if test="query.statuses != null and !query.statuses.isEmpty()">
+              AND (CASE WHEN d.won = TRUE THEN 'won' WHEN d.won = FALSE THEN 'lost' ELSE 'open' END) IN
+              <foreach item="status" collection="query.statuses" open="(" separator="," close=")">#{status}</foreach>
+            </if>
+            <if test="query.tagIds != null and !query.tagIds.isEmpty()">
+              AND EXISTS (
+                SELECT 1 FROM deal_tag dt
+                JOIN tag filter_tag ON filter_tag.id = dt.tag_id AND filter_tag.workspace_id = #{query.workspaceId}
+                WHERE dt.deal_id = d.id AND dt.tag_id IN
+                <foreach item="id" collection="query.tagIds" open="(" separator="," close=")">#{id}</foreach>
+              )
+            </if>
+            <if test="query.riskIds != null and !query.riskIds.isEmpty()">
+              AND d.id IN
+              <foreach item="id" collection="query.riskIds" open="(" separator="," close=")">#{id}</foreach>
+            </if>
+          </sql>
+
+          <sql id="coverageGapUnit">
+            <choose>
+              <when test="query.measure == 'coverage_gap_open_pipeline_value'">COALESCE(open_deal.currency, '')</when>
+              <otherwise>'count'</otherwise>
+            </choose>
+          </sql>
+
+          <select id="aggregateCoverageGaps" resultType="ooo.klae.connex.backend.dto.ReportAggregateRow">
+            SELECT
+              <choose>
+                <when test="query.measure == 'coverage_gap_open_pipeline_value'">
+                  CONCAT(COALESCE(open_deal.currency, ''), ':',
+                    <choose>
+                      <when test="query.groupBy == 'company'">CAST(gap_company.id AS CHAR)</when>
+                      <otherwise>'total'</otherwise>
+                    </choose>)
+                </when>
+                <when test="query.groupBy == 'company'">CAST(gap_company.id AS CHAR)</when>
+                <otherwise>'total'</otherwise>
+              </choose> AS group_key,
+              <choose>
+                <when test="query.measure == 'coverage_gap_open_pipeline_value'">
+                  CONCAT(COALESCE(open_deal.currency, ''), ' · ',
+                    <choose>
+                      <when test="query.groupBy == 'company'">gap_company.name</when>
+                      <otherwise>'Total'</otherwise>
+                    </choose>)
+                </when>
+                <when test="query.groupBy == 'company'">gap_company.name</when>
+                <otherwise>'Total'</otherwise>
+              </choose> AS group_label,
+              <include refid="coverageGapUnit"/> AS unit,
+              <choose>
+                <when test="query.measure == 'coverage_gap_open_pipeline_value'">COALESCE(SUM(open_deal.value), 0)</when>
+                <otherwise>COUNT(DISTINCT gap_company.id)</otherwise>
+              </choose> AS value
+            FROM (
+              SELECT c.id, c.name
+              FROM company c
+              LEFT JOIN person gap_person ON gap_person.company_id = c.id
+                AND gap_person.created_at &lt; #{query.endUtc}
+                AND gap_person.suspended_at IS NULL
+                AND gap_person.archived_at IS NULL
+                AND (
+                  gap_person.workspace_id = #{query.workspaceId}
+                  OR EXISTS (
+                    SELECT 1
+                    FROM person_share gap_person_share
+                    JOIN workspace gap_person_viewer
+                      ON gap_person_viewer.id = gap_person_share.workspace_id
+                      AND gap_person_viewer.id = #{query.workspaceId}
+                    JOIN workspace gap_person_owner
+                      ON gap_person_owner.id = gap_person.workspace_id
+                      AND gap_person_owner.org_id = gap_person_viewer.org_id
+                    WHERE gap_person_share.person_id = gap_person.id
+                      AND gap_person_share.workspace_id = #{query.workspaceId}
+                      AND gap_person_share.created_at &lt; #{query.endUtc}
+                  )
+                )
+              LEFT JOIN (
+                SELECT warmth_touch.person_id,
+                       SUM(warmth_touch.weight
+                         * POW(#{model.decayBase}, -warmth_touch.age_days / #{model.halfLifeDays})) AS raw_weight
+                FROM (
+                  SELECT a.person_id,
+                         CASE LOWER(a.type)
+                           WHEN 'meeting' THEN #{model.meetingWeight}
+                           WHEN 'call' THEN #{model.callWeight}
+                           WHEN 'email' THEN #{model.emailWeight}
+                           ELSE #{model.otherActivityWeight}
+                         END AS weight,
+                         GREATEST(0.0,
+                           TIMESTAMPDIFF(MICROSECOND, a.timestamp, #{warmthReference})
+                             / #{model.microsecondsPerDay}) AS age_days
+                  FROM activity a
+                  WHERE a.workspace_id = #{query.workspaceId}
+                    AND a.person_id IS NOT NULL
+                    AND a.timestamp &lt; #{query.endUtc}
+                  UNION ALL
+                  SELECT n.person_id, #{model.noteWeight} AS weight,
+                         GREATEST(0.0,
+                           TIMESTAMPDIFF(MICROSECOND, n.created_at, #{warmthReference})
+                             / #{model.microsecondsPerDay}) AS age_days
+                  FROM note n
+                  WHERE n.workspace_id = #{query.workspaceId}
+                    AND n.visibility = 'workspace'
+                    AND n.person_id IS NOT NULL
+                    AND n.created_at &lt; #{query.endUtc}
+                  UNION ALL
+                  SELECT t.person_id, #{model.taskWeight} AS weight,
+                         GREATEST(0.0,
+                           TIMESTAMPDIFF(MICROSECOND, t.created_at, #{warmthReference})
+                             / #{model.microsecondsPerDay}) AS age_days
+                  FROM task t
+                  WHERE t.workspace_id = #{query.workspaceId}
+                    AND t.person_id IS NOT NULL
+                    AND t.created_at &lt; #{query.endUtc}
+                ) warmth_touch
+                GROUP BY warmth_touch.person_id
+              ) person_warmth ON person_warmth.person_id = gap_person.id
+              WHERE c.created_at &lt; #{query.endUtc}
+                AND (
+                  c.workspace_id = #{query.workspaceId}
+                  OR EXISTS (
+                    SELECT 1
+                    FROM company_share gap_company_share
+                    JOIN workspace gap_company_viewer
+                      ON gap_company_viewer.id = gap_company_share.workspace_id
+                      AND gap_company_viewer.id = #{query.workspaceId}
+                    JOIN workspace gap_company_owner
+                      ON gap_company_owner.id = c.workspace_id
+                      AND gap_company_owner.org_id = gap_company_viewer.org_id
+                    WHERE gap_company_share.company_id = c.id
+                      AND gap_company_share.workspace_id = #{query.workspaceId}
+                      AND gap_company_share.created_at &lt; #{query.endUtc}
+                  )
+                )
+                AND c.archived_at IS NULL
+              <if test="query.tagIds != null and !query.tagIds.isEmpty()">
+                AND EXISTS (
+                  SELECT 1
+                  FROM company_tag coverage_company_tag
+                  JOIN tag coverage_tag ON coverage_tag.id = coverage_company_tag.tag_id
+                    AND coverage_tag.workspace_id = #{query.workspaceId}
+                  WHERE coverage_company_tag.company_id = c.id
+                    AND coverage_company_tag.tag_id IN
+                    <foreach item="id" collection="query.tagIds" open="(" separator="," close=")">#{id}</foreach>
+                )
+              </if>
+              GROUP BY c.id, c.name
+              HAVING COUNT(DISTINCT CASE
+                WHEN COALESCE(person_warmth.raw_weight, 0.0) &gt;= #{model.warmMinimumRawWeight}
+                THEN gap_person.id
+                ELSE NULL
+              END) &lt;= 1
+            ) gap_company
+            LEFT JOIN deal open_deal ON open_deal.company_id = gap_company.id
+              AND open_deal.workspace_id = #{query.workspaceId}
+              AND open_deal.won IS NULL
+              <if test="query.pipelineIds != null and !query.pipelineIds.isEmpty()">
+                AND open_deal.pipeline_id IN
+                <foreach item="id" collection="query.pipelineIds" open="(" separator="," close=")">#{id}</foreach>
+              </if>
+              <if test="query.ownerIds != null and !query.ownerIds.isEmpty()">
+                AND open_deal.owner_id IN
+                <foreach item="id" collection="query.ownerIds" open="(" separator="," close=")">#{id}</foreach>
+              </if>
+              <if test="query.statuses != null and !query.statuses.isEmpty()">
+                AND 'open' IN
+                <foreach item="status" collection="query.statuses" open="(" separator="," close=")">#{status}</foreach>
+              </if>
+            <if test="query.measure == 'coverage_gap_open_pipeline_value'
+                or query.pipelineIds != null and !query.pipelineIds.isEmpty()
+                or query.ownerIds != null and !query.ownerIds.isEmpty()
+                or query.statuses != null and !query.statuses.isEmpty()">
+              WHERE open_deal.id IS NOT NULL
+            </if>
+            GROUP BY group_key, group_label, <include refid="coverageGapUnit"/>
+            ORDER BY value DESC, group_label, group_key
+          </select>
+
+          <sql id="singleThreadedDealUnit">
+            <choose>
+              <when test="query.measure == 'single_threaded_deal_value'">single_deal.currency</when>
+              <otherwise>'count'</otherwise>
+            </choose>
+          </sql>
+
+          <select id="aggregateSingleThreadedDeals" resultType="ooo.klae.connex.backend.dto.ReportAggregateRow">
+            SELECT
+              <choose>
+                <when test="query.measure == 'single_threaded_deal_value'">
+                  CONCAT(single_deal.currency, ':',
+                    <choose>
+                      <when test="query.groupBy == 'deal'">CAST(single_deal.id AS CHAR)</when>
+                      <when test="query.groupBy == 'company'">COALESCE(CAST(single_company.id AS CHAR), 'unassigned')</when>
+                      <otherwise>'total'</otherwise>
+                    </choose>)
+                </when>
+                <when test="query.groupBy == 'deal'">CAST(single_deal.id AS CHAR)</when>
+                <when test="query.groupBy == 'company'">COALESCE(CAST(single_company.id AS CHAR), 'unassigned')</when>
+                <otherwise>'total'</otherwise>
+              </choose> AS group_key,
+              <choose>
+                <when test="query.measure == 'single_threaded_deal_value'">
+                  CONCAT(single_deal.currency, ' · ',
+                    <choose>
+                      <when test="query.groupBy == 'deal'">single_deal.name</when>
+                      <when test="query.groupBy == 'company'">COALESCE(single_company.name, 'Unassigned')</when>
+                      <otherwise>'Total'</otherwise>
+                    </choose>)
+                </when>
+                <when test="query.groupBy == 'deal'">single_deal.name</when>
+                <when test="query.groupBy == 'company'">COALESCE(single_company.name, 'Unassigned')</when>
+                <otherwise>'Total'</otherwise>
+              </choose> AS group_label,
+              <include refid="singleThreadedDealUnit"/> AS unit,
+              <choose>
+                <when test="query.measure == 'single_threaded_deal_value'">SUM(single_deal.value)</when>
+                <otherwise>COUNT(*)</otherwise>
+              </choose> AS value
+            FROM (
+              SELECT d.id, d.name, d.value, d.currency, d.company_id
+              FROM deal d
+              JOIN deal_person single_link ON single_link.deal_id = d.id
+              JOIN person single_person ON single_person.id = single_link.person_id
+                AND single_person.suspended_at IS NULL
+                AND single_person.archived_at IS NULL
+              WHERE d.workspace_id = #{query.workspaceId}
+                AND d.won IS NULL
+                AND d.risk_excluded = FALSE
+              <include refid="dealFilters"/>
+              GROUP BY d.id, d.name, d.value, d.currency, d.company_id
+              HAVING COUNT(DISTINCT single_link.person_id) = 1
+            ) single_deal
+            LEFT JOIN company single_company ON single_company.id = single_deal.company_id
+              AND (
+                single_company.workspace_id = #{query.workspaceId}
+                OR EXISTS (
+                  SELECT 1
+                  FROM company_share single_company_share
+                  JOIN workspace single_company_viewer
+                    ON single_company_viewer.id = single_company_share.workspace_id
+                    AND single_company_viewer.id = #{query.workspaceId}
+                  JOIN workspace single_company_owner
+                    ON single_company_owner.id = single_company.workspace_id
+                    AND single_company_owner.org_id = single_company_viewer.org_id
+                  WHERE single_company_share.company_id = single_company.id
+                    AND single_company_share.workspace_id = #{query.workspaceId}
+                )
+              )
+              AND single_company.archived_at IS NULL
+            GROUP BY group_key, group_label, <include refid="singleThreadedDealUnit"/>
+            ORDER BY value DESC, group_label, group_key
+          </select>
+
+          <select id="getNetworkAccountValues"
+                  resultType="ooo.klae.connex.backend.dto.ReportNetworkAccountRow">
+            SELECT network_company.id AS company_id,
+                   network_company.name AS company_name,
+                   network_deal.currency AS currency,
+                   COALESCE(SUM(GREATEST(network_deal.value, 0)), 0) AS account_value
+            FROM deal network_deal
+            JOIN company network_company ON network_company.id = network_deal.company_id
+              AND (
+                network_company.workspace_id = #{query.workspaceId}
+                OR EXISTS (
+                  SELECT 1
+                  FROM company_share network_company_share
+                  JOIN workspace vws ON vws.id = network_company_share.workspace_id
+                    AND vws.id = #{query.workspaceId}
+                  JOIN workspace ows ON ows.id = network_company.workspace_id
+                    AND ows.org_id = vws.org_id
+                  WHERE network_company_share.company_id = network_company.id
+                    AND network_company_share.workspace_id = #{query.workspaceId}
+                )
+              )
+              AND network_company.archived_at IS NULL
+            WHERE network_deal.workspace_id = #{query.workspaceId}
+              AND network_deal.won IS NULL
+            <if test="query.pipelineIds != null and !query.pipelineIds.isEmpty()">
+              AND network_deal.pipeline_id IN
+              <foreach item="id" collection="query.pipelineIds" open="(" separator="," close=")">#{id}</foreach>
+            </if>
+            <if test="query.ownerIds != null and !query.ownerIds.isEmpty()">
+              AND network_deal.owner_id IN
+              <foreach item="id" collection="query.ownerIds" open="(" separator="," close=")">#{id}</foreach>
+            </if>
+            <if test="query.statuses != null and !query.statuses.isEmpty()">
+              AND 'open' IN
+              <foreach item="status" collection="query.statuses" open="(" separator="," close=")">#{status}</foreach>
+            </if>
+            <if test="query.tagIds != null and !query.tagIds.isEmpty()">
+              AND EXISTS (
+                SELECT 1
+                FROM company_tag network_company_tag
+                JOIN tag network_tag ON network_tag.id = network_company_tag.tag_id
+                  AND network_tag.workspace_id = #{query.workspaceId}
+                WHERE network_company_tag.company_id = network_company.id
+                  AND network_company_tag.tag_id IN
+                  <foreach item="id" collection="query.tagIds" open="(" separator="," close=")">#{id}</foreach>
+              )
+            </if>
+            GROUP BY network_company.id, network_company.name, network_deal.currency
+            ORDER BY network_deal.currency, network_company.name, network_company.id
+            LIMIT #{limit}
+          </select>
+
+          <select id="getVisiblePersonIdsAt" resultType="int">
+            SELECT p.id
+            FROM person p
+            WHERE p.created_at &lt;= #{asOf}
+              AND (
+                p.workspace_id = #{workspaceId}
+                OR EXISTS (
+                  SELECT 1
+                  FROM person_share ps
+                  JOIN workspace viewer_workspace ON viewer_workspace.id = ps.workspace_id
+                    AND viewer_workspace.id = #{workspaceId}
+                  JOIN workspace owner_workspace ON owner_workspace.id = p.workspace_id
+                    AND owner_workspace.org_id = viewer_workspace.org_id
+                  WHERE ps.person_id = p.id
+                    AND ps.workspace_id = #{workspaceId}
+                    AND ps.created_at &lt;= #{asOf}
+                )
+              )
+            ORDER BY p.id
+          </select>
+
+          <select id="getVisibleCompanyIdsAt" resultType="int">
+            SELECT c.id
+            FROM company c
+            WHERE c.created_at &lt;= #{asOf}
+              AND (
+                c.workspace_id = #{workspaceId}
+                OR EXISTS (
+                  SELECT 1
+                  FROM company_share cs
+                  JOIN workspace viewer_workspace ON viewer_workspace.id = cs.workspace_id
+                    AND viewer_workspace.id = #{workspaceId}
+                  JOIN workspace owner_workspace ON owner_workspace.id = c.workspace_id
+                    AND owner_workspace.org_id = viewer_workspace.org_id
+                  WHERE cs.company_id = c.id
+                    AND cs.workspace_id = #{workspaceId}
+                    AND cs.created_at &lt;= #{asOf}
+                )
+              )
+            ORDER BY c.id
           </select>
         </mapper>
         """;
