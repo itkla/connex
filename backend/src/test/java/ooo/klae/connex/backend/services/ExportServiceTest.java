@@ -16,6 +16,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -26,6 +27,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
@@ -54,12 +56,17 @@ class ExportServiceTest {
     @Mock private CompanyMapper companyMapper;
     @Mock private ProductMapper productMapper;
     @Mock private PipelineMapper pipelineMapper;
-    @Mock private RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess = unfiltered();
     @Mock private TagMapper tagMapper;
     @Mock private CustomFieldDefinitionMapper customFieldDefinitionMapper;
     @Mock private CustomFieldValueService customFieldValueService;
     @Mock private AuditService auditService;
     @InjectMocks private ExportService exportService;
+
+    @BeforeEach
+    void scopeCallbacks() {
+        ReflectionTestUtils.setField(exportService, "recordVisibilityScopeControlAccess", recordVisibilityScopeControlAccess);
+    }
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})

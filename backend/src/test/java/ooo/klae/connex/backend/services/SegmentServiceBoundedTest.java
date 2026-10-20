@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.argThat;
@@ -29,7 +30,7 @@ class SegmentServiceBoundedTest {
     @Test
     void evaluatesOnlyCeilingPlusOneSqlCandidates() {
         SegmentMapper segmentMapper = mock(SegmentMapper.class);
-        RecordVisibilityScopeControlAccess scopes = mock(RecordVisibilityScopeControlAccess.class);
+        RecordVisibilityScopeControlAccess scopes = unfiltered();
         when(scopes.getForWorkspace(7)).thenReturn(new RecordVisibilityScope(9, List.of(7, 8)));
         SegmentService service = new SegmentService(
             mock(WorkspaceService.class),
@@ -69,7 +70,7 @@ class SegmentServiceBoundedTest {
     @Test
     void warmIntroScopesPeopleAndEdgesToTheCandidatePage() {
         SegmentMapper segmentMapper = mock(SegmentMapper.class);
-        RecordVisibilityScopeControlAccess scopes = mock(RecordVisibilityScopeControlAccess.class);
+        RecordVisibilityScopeControlAccess scopes = unfiltered();
         when(scopes.getForWorkspace(7)).thenReturn(new RecordVisibilityScope(9, List.of(7, 8)));
         PersonMapper personMapper = mock(PersonMapper.class);
         PersonEdgeReadService edgeReader = mock(PersonEdgeReadService.class);
