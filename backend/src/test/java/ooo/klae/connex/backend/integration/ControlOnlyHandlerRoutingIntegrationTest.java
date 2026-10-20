@@ -343,7 +343,9 @@ class ControlOnlyHandlerRoutingIntegrationTest {
         http.perform(operation("switch").session(AuthenticatedSessions.stampedSession(user))
                 .with(authentication(new UsernamePasswordAuthenticationToken(user, null, List.of()))))
             .andExpect(status().isForbidden());
-        http.perform(authenticated(operation("switch")).with(csrf().asHeader().useInvalidToken()))
+        http.perform(operation("switch").session(AuthenticatedSessions.stampedSession(user))
+                .with(authentication(new UsernamePasswordAuthenticationToken(user, null, List.of())))
+                .with(csrf().asHeader().useInvalidToken()))
             .andExpect(status().isForbidden());
         users.bumpSessionEpoch(user.getId());
         http.perform(authenticated(get("/api/workspaces"))).andExpect(status().isUnauthorized());
