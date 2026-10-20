@@ -6,6 +6,7 @@ import java.time.ZoneId;
 import java.util.TimeZone;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.builder.SpringApplicationBuilder;
 
 class BackendApplicationTimeZoneTest {
 
@@ -24,6 +25,20 @@ class BackendApplicationTimeZoneTest {
                 assertEquals("UTC", TimeZone.getDefault().getID());
                 assertEquals(ZoneId.of("UTC"), ZoneId.systemDefault());
             }
+        } finally {
+            TimeZone.setDefault(original);
+        }
+    }
+
+    @Test
+    void warConfigurationPinsUtcBeforeConfiguringSpring() {
+        TimeZone original = TimeZone.getDefault();
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("Asia/Tokyo"));
+
+            new ServletInitializer().configure(new SpringApplicationBuilder());
+
+            assertEquals("UTC", TimeZone.getDefault().getID());
         } finally {
             TimeZone.setDefault(original);
         }

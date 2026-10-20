@@ -13,9 +13,11 @@ Smart-segment evaluation is the shared state-matching language used by automatio
 
 Evaluation returns workspace- and current-user-scoped record ids through `SegmentService`/`SegmentMapper`. Segments describe current state; automation adds a trigger/transition plus actions. Do not create a second condition language for workflows, campaigns, or adjacent features.
 
-Calendar dates for `within_days` use the active workspace's analytics zone when its context matches
-the evaluated workspace. Session-free evaluation reads the evaluated workspace's persisted timezone,
-falling back to UTC when absent. Definition validation does not resolve a zone or read the clock.
+Calendar dates for `within_days` are UTC by design until workspace-local relative dates land,
+matching the UTC timestamp columns they filter. One date is retained across candidate pages.
+Workspace-local relative dates, including the existing `CURDATE()` overdue comparison, need a
+separate change that converts both calendar boundaries and compared timestamps consistently.
+Definition validation does not resolve a zone or read the clock.
 
 ## Catalog is the vocabulary
 

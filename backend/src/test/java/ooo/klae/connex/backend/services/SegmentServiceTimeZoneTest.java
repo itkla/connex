@@ -1,13 +1,13 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -27,10 +27,9 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
-import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import ooo.klae.connex.backend.beans.User;
-import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.SegmentCondition;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.mappers.PersonMapper;
@@ -46,14 +45,11 @@ class SegmentServiceTimeZoneTest {
     private final WorkspaceService workspaceService = mock(WorkspaceService.class);
     private final AuthService authService = mock(AuthService.class);
     private final SegmentMapper segmentMapper = mock(SegmentMapper.class);
-    private final WorkspaceMapper workspaceMapper = mock(WorkspaceMapper.class);
     private final TenantContext tenantContext = new TenantContext();
-    private final TenantWorkScope scope = new TenantWorkScope(
-        tenantContext, mock(TenantCatalogResolver.class), workspaceMapper);
     private final SegmentService service = new SegmentService(
         workspaceService, authService, mock(ScoringService.class), mock(DealRiskService.class),
         segmentMapper, mock(PersonEdgeReadService.class), mock(PersonMapper.class), mock(TagMapper.class),
-        new SegmentCatalog(), workspaceMapper, tenantContext, scope);
+        new SegmentCatalog());
 
     @AfterEach
     void clearContext() {
@@ -63,27 +59,27 @@ class SegmentServiceTimeZoneTest {
     @ParameterizedTest
     @CsvSource({
         "2026-10-20T14:59:59Z, 2026-10-20, 2026-10-22",
-        "2026-10-20T15:00:01Z, 2026-10-21, 2026-10-23"
+        "2026-10-20T15:00:01Z, 2026-10-20, 2026-10-22",
+        "2026-10-21T00:00:01Z, 2026-10-21, 2026-10-23"
     })
-    void interactiveEvaluationUsesTheCurrentAnalyticsZone(String asOf, String from, String to) {
+    void interactiveBoundsUseUtcEvenForATokyoActor(String asOf, String from, String to) {
         tenantContext.set(7, 42, 17, "member", null);
         User actor = new User();
         actor.setId(17);
+        actor.setTimezone("Asia/Tokyo");
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(authService.getCurrentUser()).thenReturn(actor);
-        when(workspaceService.getCurrentAnalyticsTimezone()).thenReturn("Asia/Tokyo");
         when(segmentMapper.personIdsMatching(anyMap())).thenReturn(List.of(19));
 
         withClock(asOf, () -> assertEquals(List.of(19), service.evaluate("person", definition())));
 
         assertBounds(false, from, to);
-        verifyNoInteractions(workspaceMapper);
+        verify(workspaceService, never()).getCurrentAnalyticsTimezone();
     }
 
     @ParameterizedTest
     @EnumSource(BackgroundPath.class)
-    void sessionFreePathsUseTheirOwnWorkspaceWithoutAnActor(BackgroundPath path) {
-        when(workspaceMapper.getActiveById(7)).thenReturn(workspace("Asia/Tokyo"));
+    void sessionFreePathsUseUtcWithoutResolvingWorkspaceMetadata(BackgroundPath path) {
         if (path == BackgroundPath.CAMPAIGN) {
             when(segmentMapper.personIdsMatchingIncludingRestricted(anyMap())).thenReturn(List.of(19));
         } else {
@@ -107,63 +103,44 @@ class SegmentServiceTimeZoneTest {
             }
         });
 
-        assertBounds(path == BackgroundPath.CAMPAIGN, "2026-10-21", "2026-10-23");
+        assertBounds(path == BackgroundPath.CAMPAIGN, "2026-10-20", "2026-10-22");
         verifyNoInteractions(workspaceService, authService);
     }
 
     @Test
-    void missingPersistedTimezoneFallsBackToUtc() {
-        when(workspaceMapper.getActiveById(7)).thenReturn(workspace(null));
+    void routedOutboxTransactionNeedsNoControlCatalogReadOrTenantIdentity() {
+        TenantWorkScope scope = new TenantWorkScope(
+            tenantContext, mock(TenantCatalogResolver.class), mock(WorkspaceMapper.class));
         when(segmentMapper.personIdsMatching(anyMap())).thenReturn(List.of(19));
+        boolean previousTransaction = TransactionSynchronizationManager.isActualTransactionActive();
 
-        withClock("2026-10-20T15:00:01Z", () -> service.evaluate(7, 17, "person", definition()));
+        withClock("2026-10-20T15:00:01Z", () -> scope.withCatalog("cnx_tenant", () -> {
+            assertFalse(tenantContext.isResolved());
+            TransactionSynchronizationManager.setActualTransactionActive(true);
+            try {
+                assertEquals(List.of(19), service.evaluate(7, 17, "person", definition()));
+            } finally {
+                TransactionSynchronizationManager.setActualTransactionActive(previousTransaction);
+            }
+            return null;
+        }));
 
         assertBounds(false, "2026-10-20", "2026-10-22");
         verifyNoInteractions(workspaceService, authService);
     }
 
     @Test
-    void anotherCurrentWorkspaceCannotSupplyTheDateZone() {
-        tenantContext.set(9, 43, 18, "member", "cnx_other");
-        when(workspaceMapper.getActiveById(7)).thenAnswer(invocation -> {
-            assertNull(tenantContext.getCatalog());
-            return workspace("Asia/Tokyo");
-        });
-        when(segmentMapper.personIdsMatching(anyMap())).thenReturn(List.of(19));
-
-        withClock("2026-10-20T15:00:01Z", () -> service.evaluate(7, 17, "person", definition()));
-
-        assertBounds(false, "2026-10-21", "2026-10-23");
-        assertEquals("cnx_other", tenantContext.getCatalog());
-        verifyNoInteractions(workspaceService, authService);
-    }
-
-    @Test
-    void dateConditionsShareOneWorkspaceReadPerEvaluation() {
-        when(workspaceMapper.getActiveById(7)).thenReturn(workspace("Asia/Tokyo"));
-        when(segmentMapper.personIdsMatching(anyMap())).thenReturn(List.of(19));
-        SegmentDefinition definition = definition();
-        definition.setConditions(List.of(condition("created"), condition("updated")));
-
-        withClock("2026-10-20T15:00:01Z", () -> service.evaluate(7, 17, "person", definition));
-
-        verify(workspaceMapper).getActiveById(7);
-        verify(segmentMapper, times(2)).personIdsMatching(anyMap());
-    }
-
-    @Test
-    void boundedPagesKeepTheInitialCalendarDateAcrossMidnight() {
-        when(workspaceMapper.getActiveById(7)).thenReturn(workspace("Asia/Tokyo"));
+    void boundedPagesKeepTheInitialUtcDateAcrossMidnight() {
         when(segmentMapper.maximumEntityId(7, "person")).thenReturn(3);
         when(segmentMapper.entityIdsPage(7, "person", 0, 3, 2)).thenReturn(List.of(1, 2));
         when(segmentMapper.entityIdsPage(7, "person", 2, 3, 2)).thenReturn(List.of(3));
         when(segmentMapper.personIdsMatching(anyMap())).thenReturn(List.of(), List.of(3));
-        Clock beforeMidnight = Clock.fixed(Instant.parse("2026-10-20T14:59:59Z"), ZoneOffset.UTC);
-        Clock afterMidnight = Clock.fixed(Instant.parse("2026-10-20T15:00:01Z"), ZoneOffset.UTC);
+        Clock beforeMidnight = Clock.fixed(Instant.parse("2026-10-20T23:59:59Z"), ZoneOffset.UTC);
+        Clock afterMidnight = Clock.fixed(Instant.parse("2026-10-21T00:00:01Z"), ZoneOffset.UTC);
         AtomicInteger reads = new AtomicInteger();
 
         try (var clocks = mockStatic(Clock.class)) {
-            clocks.when(() -> Clock.system(org.mockito.ArgumentMatchers.any(ZoneId.class)))
+            clocks.when(() -> Clock.system(any(ZoneId.class)))
                 .thenAnswer(invocation -> (reads.getAndIncrement() == 0 ? beforeMidnight : afterMidnight)
                     .withZone(invocation.getArgument(0)));
             assertEquals(List.of(3), service.evaluate(7, 17, "person", definition(), 2));
@@ -175,23 +152,17 @@ class SegmentServiceTimeZoneTest {
             assertEquals("2026-10-20", page.get("dateFrom"));
             assertEquals("2026-10-22", page.get("dateTo"));
         }
-        verify(workspaceMapper).getActiveById(7);
-    }
-
-    @Test
-    void workspaceReadFailuresPropagate() {
-        DataAccessResourceFailureException failure = new DataAccessResourceFailureException("Unavailable");
-        when(workspaceMapper.getActiveById(7)).thenThrow(failure);
-
-        assertSame(failure, assertThrows(DataAccessResourceFailureException.class,
-            () -> service.evaluate(7, 17, "person", definition())));
+        assertEquals(1, reads.get());
     }
 
     @Test
     void definitionValidationDoesNotResolveWorkspaceDates() {
-        service.validate("person", definition());
+        try (var clocks = mockStatic(Clock.class)) {
+            service.validate("person", definition());
 
-        verifyNoInteractions(workspaceService, authService, workspaceMapper, segmentMapper);
+            clocks.verifyNoInteractions();
+        }
+        verifyNoInteractions(workspaceService, authService, segmentMapper);
     }
 
     private void assertBounds(boolean restricted, String from, String to) {
@@ -207,32 +178,21 @@ class SegmentServiceTimeZoneTest {
     }
 
     private static SegmentDefinition definition() {
-        SegmentDefinition definition = new SegmentDefinition();
-        definition.setMatch("all");
-        definition.setConditions(List.of(condition("created")));
-        return definition;
-    }
-
-    private static SegmentCondition condition(String field) {
         SegmentCondition condition = new SegmentCondition();
         condition.setType("field");
-        condition.setField(field);
+        condition.setField("created");
         condition.setOp("within_days");
         condition.setDays(2);
-        return condition;
-    }
-
-    private static Workspace workspace(String timezone) {
-        Workspace workspace = new Workspace();
-        workspace.setId(7);
-        workspace.setTimezone(timezone);
-        return workspace;
+        SegmentDefinition definition = new SegmentDefinition();
+        definition.setMatch("all");
+        definition.setConditions(List.of(condition));
+        return definition;
     }
 
     private static void withClock(String asOf, Runnable work) {
         Clock fixed = Clock.fixed(Instant.parse(asOf), ZoneOffset.UTC);
         try (var clocks = mockStatic(Clock.class)) {
-            clocks.when(() -> Clock.system(org.mockito.ArgumentMatchers.any(ZoneId.class)))
+            clocks.when(() -> Clock.system(any(ZoneId.class)))
                 .thenAnswer(invocation -> fixed.withZone(invocation.getArgument(0)));
             work.run();
         }

@@ -144,7 +144,7 @@ Architecture tests are enforcement, not obstacles. If a migration or mapper chan
 
 ## Code conventions
 
-- Every backend `LocalDateTime` is UTC. Never read the clock without an explicit zone or the injected UTC `Clock`.
+- Every backend `LocalDateTime` is UTC. Never read the clock without an explicit zone or the injected UTC `Clock`. Operators of non-UTC hosts must follow the [UTC cutover runbook](../docs/backend/UTC_CUTOVER.md).
 
 - Java null/type safety is explicit. Validate inputs, guard nullable values, and avoid unchecked casts or silent fallthrough.
 - Use Lombok consistently with neighboring code rather than hand-writing generated boilerplate.

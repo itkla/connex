@@ -132,6 +132,7 @@ def testPartitionFixturePatterns = [testPartitionFixtureRoot + '.class', testPar
 
 tasks.withType(Test).configureEach {
 	systemProperty 'user.timezone', 'UTC'
+	inputs.file('../docs/backend/UTC_CUTOVER.md')
 	exclude testPartitionFixturePatterns
 }
 

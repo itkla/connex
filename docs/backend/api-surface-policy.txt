@@ -1,6 +1,6 @@
 # Generated perimeter and authorization source SHA-256 ledger
 ../frontend/next.config.ts	e61fc77798d0202dbf4ed58555cfead278eec3fc9fb2ccb7c998a018fb8da343
-build.gradle	89b472471943ca7c721ae5046eb49b6b422f6b65c4a18601e1a83ed4873d0131
+build.gradle	6fa67bd6a66e20694d4c1ac268b83df16c618957c50b259900011aaaaf5eb8cc
 src/main/java/ooo/klae/connex/backend/ai/AiBudgetControlAccess.java	fcc5f6751f1678b33f54198095adff37b4126717ae7813093a31d067f3c6e1e7
 src/main/java/ooo/klae/connex/backend/ai/AiBudgetControlOperations.java	33f580c9fb3f51439d7359bf8d2f433f091ec91f72d35b79860f52347e1018f8
 src/main/java/ooo/klae/connex/backend/ai/AiFeatureGate.java	5e2602bee1b85d6f0a27b991ba3d323254f89b2d42ef21867551d7b88c57e6b9
@@ -611,7 +611,7 @@ src/main/java/ooo/klae/connex/backend/services/ScheduleService.java	aa72423cab1c
 src/main/java/ooo/klae/connex/backend/services/ScoringService.java	91b3f2a7f4b40b965fa89e30c2bd5eb8ec13088730f532084c2cb61fbbc328ad
 src/main/java/ooo/klae/connex/backend/services/SearchService.java	f7752d9bf414f894e849812c011ee54955b81fe51b8a7f2e9fa38108a5eb817c
 src/main/java/ooo/klae/connex/backend/services/SegmentCatalog.java	8ab11cfeab370615a8eab1b4d84e650e411623b7d88fdf02bd7c5225bd933d7e
-src/main/java/ooo/klae/connex/backend/services/SegmentService.java	89b1603f68814b2ec9471e33b0d035e06593000fbd9371b9d657f3d9f872ee85
+src/main/java/ooo/klae/connex/backend/services/SegmentService.java	8fb2e956c8e64593d38753788921a7c36702d7c9a09cb99c13ef819facdd8561
 src/main/java/ooo/klae/connex/backend/services/SequenceMergeFieldResolver.java	2d3a4fe2238e62af3637511b7737ac2316175fd597d26b6a5833cbc93182cc00
 src/main/java/ooo/klae/connex/backend/services/SequencePreviewService.java	9232fd41e0736ad0fa9948ad36b7e45e67760b13374c483d38ac68ce98c5a0d6
 src/main/java/ooo/klae/connex/backend/services/SequenceService.java	41361fcba2347a68a06095e5f456653eec72fb2485e096c1375a3ae7f9126fc1

@@ -1,7 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import java.time.LocalDate;
-import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -15,7 +15,6 @@ import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.beans.PersonEdge;
-import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.DealRiskDto;
 import ooo.klae.connex.backend.dto.RecordLabelDto;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
@@ -31,9 +30,6 @@ import ooo.klae.connex.backend.exceptions.WorkflowDefinitionValidationException;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.SegmentMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
-import ooo.klae.connex.backend.mappers.WorkspaceMapper;
-import ooo.klae.connex.backend.tenant.TenantContext;
-import ooo.klae.connex.backend.tenant.TenantWorkScope;
 import ooo.klae.connex.backend.util.LikePattern;
 
 /**
@@ -68,9 +64,6 @@ public class SegmentService {
     private final PersonMapper personMapper;
     private final TagMapper tagMapper;
     private final SegmentCatalog catalog;
-    private final WorkspaceMapper workspaceMapper;
-    private final TenantContext tenantContext;
-    private final TenantWorkScope tenantWorkScope;
 
     private static final int STRONG_EDGE = 2;
 
@@ -637,18 +630,10 @@ public class SegmentService {
         return new HashSet<>(runFieldQuery(ctx.recordType(), params));
     }
 
+    /** UTC by design until workspace-local relative dates land, matching the compared UTC timestamps. */
     private LocalDate today(EvalContext ctx) {
         if (ctx.today == null) {
-            String timezone;
-            if ((tenantContext.isResolved() || tenantContext.hasControlSelection())
-                    && Integer.valueOf(ctx.workspaceId()).equals(tenantContext.getWorkspaceId())) {
-                timezone = workspaceService.getCurrentAnalyticsTimezone();
-            } else {
-                Workspace workspace = tenantWorkScope.unroutedRead(
-                    () -> workspaceMapper.getActiveById(ctx.workspaceId()));
-                timezone = TimezoneSupport.validateIana(workspace == null ? null : workspace.getTimezone(), "UTC");
-            }
-            ctx.today = LocalDate.now(ZoneId.of(timezone));
+            ctx.today = LocalDate.now(ZoneOffset.UTC);
         }
         return ctx.today;
     }

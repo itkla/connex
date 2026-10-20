@@ -21,7 +21,7 @@ public class BackendApplication {
 	 * Aligns JVM defaults with UTC database sessions before Spring or libraries initialize date
 	 * handling, so offset-less backend timestamps never depend on the deployment host's zone.
 	 */
-	static void pinDefaultTimeZone() {
+	public static void pinDefaultTimeZone() {
 		TimeZone.setDefault(TimeZone.getTimeZone("UTC"));
 	}
 
