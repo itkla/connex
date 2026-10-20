@@ -71,10 +71,9 @@ public class NoteController {
     ) {
         PageBounds bounds = PageBounds.of(page, size);
         String query = q == null || q.isBlank() ? null : LikePattern.containing(q.trim());
-        List<NoteDto> items = noteService.getNotesPage(
-            query, sort, dir, bounds.size(), bounds.offset(), workspaceOnly)
-            .stream().map(NoteDto::from).toList();
-        return new PageResponse<>(items, noteService.countNotes(query, workspaceOnly));
+        PageResponse<Note> result = noteService.getNotesPage(
+            query, sort, dir, bounds.size(), bounds.offset(), workspaceOnly);
+        return new PageResponse<>(result.items().stream().map(NoteDto::from).toList(), result.total());
     }
 
     /**

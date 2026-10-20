@@ -13,6 +13,7 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.Clock;
@@ -1008,14 +1009,14 @@ class RecordListControllerTest {
 
         assertThrows(BadRequestException.class, () -> controller.getNotes(null, null, null, 1, 25));
 
-        verify(noteService, never()).getAllNotes();
+        verifyNoInteractions(noteService);
     }
 
     @Test
     void notesPageClampsSize() {
         NoteController controller = new NoteController(noteService);
-        when(noteService.getNotesPage(null, null, null, 100, 0, false)).thenReturn(List.of());
-        when(noteService.countNotes(null, false)).thenReturn(0L);
+        when(noteService.getNotesPage(null, null, null, 100, 0, false))
+            .thenReturn(new PageResponse<>(List.of(), 0));
 
         var response = controller.getNotesPage(0, 500, null, null, null, false);
 
@@ -1027,13 +1028,11 @@ class RecordListControllerTest {
     void notesPageEscapesQueryAndDelegatesSort() {
         NoteController controller = new NoteController(noteService);
         when(noteService.getNotesPage("%100\\%\\_%", "title", "asc", 25, 25, true))
-            .thenReturn(List.of());
-        when(noteService.countNotes("%100\\%\\_%", true)).thenReturn(0L);
+            .thenReturn(new PageResponse<>(List.of(), 0));
 
         controller.getNotesPage(2, 25, " 100%_ ", "title", "asc", true);
 
         verify(noteService).getNotesPage("%100\\%\\_%", "title", "asc", 25, 25, true);
-        verify(noteService).countNotes("%100\\%\\_%", true);
     }
 
     @Test
