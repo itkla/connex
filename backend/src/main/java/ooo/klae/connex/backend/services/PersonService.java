@@ -262,6 +262,11 @@ public class PersonService {
      * Retrieves a workspace-scoped {@code Person} by ID, throwing if absent.
      */
     public Person getPersonById(int id) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> getPersonByIdWithinVisibilityScope(id));
+    }
+
+    private Person getPersonByIdWithinVisibilityScope(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Person person = personMapper.getPersonById(workspaceId, id);
         if (person == null) throw new ResourceNotFoundException("Contact not found");
@@ -291,6 +296,11 @@ public class PersonService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_CREATE)
     public Person create(Person person) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> createWithinVisibilityScope(person));
+    }
+
+    private Person createWithinVisibilityScope(Person person) {
         lockCreatePermission();
         return createWithSource(
             person, IdentityAcquisitionSource.INTERACTIVE_CREATE, null, null);
@@ -306,6 +316,11 @@ public class PersonService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_CREATE)
     public Person createReviewed(Person person, String duplicateReviewToken) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> createReviewedWithinVisibilityScope(person, duplicateReviewToken));
+    }
+
+    private Person createReviewedWithinVisibilityScope(Person person, String duplicateReviewToken) {
         lockCreatePermission();
         duplicatePreflightService.requireReviewedPersonCreation(
             new PersonDuplicatePreflightRequest(
@@ -321,11 +336,27 @@ public class PersonService {
             Person person,
             String duplicateReviewToken,
             RecordCreationAugmentation augmentation) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> createReviewedWithinVisibilityScope(person, duplicateReviewToken, augmentation));
+    }
+
+    private Person createReviewedWithinVisibilityScope(
+            Person person,
+            String duplicateReviewToken,
+            RecordCreationAugmentation augmentation) {
         return createReviewed(person, duplicateReviewToken, augmentation, MutationAdmission.UNRESTRICTED);
     }
 
     /** Performs the canonical action after its final under-lock mutation admission. */
     Person createReviewed(
+            Person person,
+            String duplicateReviewToken,
+            RecordCreationAugmentation augmentation, MutationAdmission admission) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> createReviewedWithinVisibilityScope(person, duplicateReviewToken, augmentation, admission));
+    }
+
+    private Person createReviewedWithinVisibilityScope(
             Person person,
             String duplicateReviewToken,
             RecordCreationAugmentation augmentation, MutationAdmission admission) {
@@ -353,6 +384,14 @@ public class PersonService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_CREATE)
     public Person createFromBusinessCard(
+            Person person,
+            String sourceRowRef,
+            String duplicateReviewToken) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> createFromBusinessCardWithinVisibilityScope(person, sourceRowRef, duplicateReviewToken));
+    }
+
+    private Person createFromBusinessCardWithinVisibilityScope(
             Person person,
             String sourceRowRef,
             String duplicateReviewToken) {
@@ -433,6 +472,11 @@ public class PersonService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_CREATE)
     Person createFromBusinessCard(Person person, String sourceRowRef) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> createFromBusinessCardWithinVisibilityScope(person, sourceRowRef));
+    }
+
+    private Person createFromBusinessCardWithinVisibilityScope(Person person, String sourceRowRef) {
         return createWithSource(
             person, IdentityAcquisitionSource.BUSINESS_CARD, sourceRowRef, null);
     }
@@ -517,6 +561,11 @@ public class PersonService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_UPDATE)
     public Person update(int id, Person person) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> updateWithinVisibilityScope(id, person));
+    }
+
+    private Person updateWithinVisibilityScope(int id, Person person) {
         return update(id, person, MutationAdmission.UNRESTRICTED);
     }
 
@@ -524,6 +573,11 @@ public class PersonService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_UPDATE)
     public Person update(int id, Person person, MutationAdmission admission) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> updateWithinVisibilityScope(id, person, admission));
+    }
+
+    private Person updateWithinVisibilityScope(int id, Person person, MutationAdmission admission) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         var locked = duplicateDecisionLockService.lockCurrentOrganization(Permission.PERSON_UPDATE);
         Person before = personMapper.getOwnedPersonByIdForUpdate(workspaceId, id);
@@ -805,7 +859,7 @@ public class PersonService {
             int workspaceId, Integer currentCompanyId, Person person) {
         Integer requestedCompanyId = companyIdOf(person);
         if (requestedCompanyId == null && currentCompanyId != null
-                && !companyMapper.exists(workspaceId, currentCompanyId)) {
+                && !companyMapper.exists(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), currentCompanyId)) {
             Company retainedCompany = new Company();
             retainedCompany.setId(currentCompanyId);
             person.setCompany(retainedCompany);
@@ -814,7 +868,7 @@ public class PersonService {
         if (requestedCompanyId == null || Objects.equals(requestedCompanyId, currentCompanyId)) {
             return;
         }
-        if (!companyMapper.exists(workspaceId, requestedCompanyId)) {
+        if (!companyMapper.exists(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), requestedCompanyId)) {
             throw new BadRequestException("Company not found");
         }
     }

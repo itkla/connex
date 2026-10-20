@@ -172,14 +172,14 @@ class SegmentVisibilityScopeTest {
     @Test
     void eachPageStillCachesItsSignalsAcrossSiblingAndNestedConditions() {
         pages();
-        when(scoring.scoreCompanies(eq(7), anySet())).thenReturn(List.of());
+        when(scoring.scoreCompanies(eq(7), anySet(), eq("[7,8,9]"))).thenReturn(List.of());
         SegmentDefinition definition = definition("any", predicate("warmth_hot"), predicate("warmth_warm"));
         definition.setGroups(List.of(definition("any", predicate("warmth_cold"), predicate("cooling"))));
 
         assertEquals(List.of(), service.evaluate(7, 17, "company", definition, 2));
 
         for (int after : List.of(0, 2, 4)) {
-            verify(scoring).scoreCompanies(eq(7), eq(new HashSet<>(candidates(after))));
+            verify(scoring).scoreCompanies(eq(7), eq(new HashSet<>(candidates(after))), eq("[7,8,9]"));
         }
         verifyNoMoreInteractions(scoring);
         verify(scopes).getForWorkspace(7);

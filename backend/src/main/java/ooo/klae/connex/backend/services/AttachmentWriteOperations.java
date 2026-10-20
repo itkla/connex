@@ -50,9 +50,16 @@ public class AttachmentWriteOperations {
     private final WorkspaceMapper workspaceMapper;
     private final ShareMapper shareMapper;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     /** Persists an externally stored attachment after tenant target validation. */
     @Transactional
     public Attachment createExternal(int workspaceId, Attachment attachment) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceId, () -> createExternalWithinVisibilityScope(workspaceId, attachment));
+    }
+
+    private Attachment createExternalWithinVisibilityScope(int workspaceId, Attachment attachment) {
         requireTenantTarget(workspaceId, attachment.getEntityType(), attachment.getEntityId());
         return persist(workspaceId, attachment, false);
     }
@@ -60,6 +67,11 @@ public class AttachmentWriteOperations {
     /** Persists a trusted managed-object reference after tenant target validation. */
     @Transactional
     public Attachment createManaged(int workspaceId, Attachment attachment) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceId, () -> createManagedWithinVisibilityScope(workspaceId, attachment));
+    }
+
+    private Attachment createManagedWithinVisibilityScope(int workspaceId, Attachment attachment) {
         requireTenantTarget(workspaceId, attachment.getEntityType(), attachment.getEntityId());
         return persist(workspaceId, attachment, true);
     }
@@ -67,6 +79,12 @@ public class AttachmentWriteOperations {
     /** Stores and persists a managed attachment in one tenant transaction. */
     @Transactional
     public Attachment upload(
+            int workspaceId, String entityType, int entityId, ScannedUpload scanned, User uploader) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceId, () -> uploadWithinVisibilityScope(workspaceId, entityType, entityId, scanned, uploader));
+    }
+
+    private Attachment uploadWithinVisibilityScope(
             int workspaceId, String entityType, int entityId, ScannedUpload scanned, User uploader) {
         requireUploadTarget(workspaceId, entityType, entityId);
         return storeAndPersist(
@@ -76,6 +94,12 @@ public class AttachmentWriteOperations {
     /** Stores and persists a managed inline image in one tenant transaction. */
     @Transactional
     public Attachment uploadInlineImage(
+            int workspaceId, String entityType, int entityId, ScannedUpload scanned, User uploader) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceId, () -> uploadInlineImageWithinVisibilityScope(workspaceId, entityType, entityId, scanned, uploader));
+    }
+
+    private Attachment uploadInlineImageWithinVisibilityScope(
             int workspaceId, String entityType, int entityId, ScannedUpload scanned, User uploader) {
         requireUploadTarget(workspaceId, entityType, entityId);
         return storeAndPersist(
@@ -203,7 +227,7 @@ public class AttachmentWriteOperations {
     private void requireLockedTarget(int workspaceId, String entityType, int entityId, int userId) {
         boolean visible = switch (entityType) {
             case "company" -> {
-                Company company = companyMapper.getVisibleCompanyByIdForUpdate(workspaceId, entityId);
+                Company company = companyMapper.getVisibleCompanyByIdForUpdate(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), entityId);
                 yield company != null && (company.getWorkspaceId() == workspaceId
                     || Objects.equals(shareMapper.lockCompanyShareForWorkspace(entityId, workspaceId), entityId));
             }
@@ -224,7 +248,7 @@ public class AttachmentWriteOperations {
 
     private void requireTenantTarget(int workspaceId, String entityType, int entityId) {
         boolean exists = switch (entityType) {
-            case "company" -> companyMapper.exists(workspaceId, entityId);
+            case "company" -> companyMapper.exists(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), entityId);
             case "person" -> personMapper.exists(workspaceId, entityId);
             case "deal" -> dealMapper.exists(workspaceId, entityId);
             case "note" -> noteMapper.exists(workspaceId, entityId);

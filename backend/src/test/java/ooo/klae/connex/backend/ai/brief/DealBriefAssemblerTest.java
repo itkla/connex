@@ -79,7 +79,7 @@ class DealBriefAssemblerTest {
     @BeforeEach
     void setUp() {
         assembler = new DealBriefAssembler(
-            dealService, scoringService, dealRiskService, aiRelationshipContext, personMapper);
+            dealService, scoringService, dealRiskService, aiRelationshipContext, personMapper, ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
         lenient().when(personMapper.getByIds(eq(WORKSPACE_ID), anyList())).thenAnswer(invocation -> {
             List<?> ids = invocation.getArgument(1);
             List<Person> people = new ArrayList<>();

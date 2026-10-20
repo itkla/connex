@@ -24,4 +24,10 @@ public final class RecordVisibilityScopes {
             return RETURNS_DEFAULTS.answer(invocation);
         });
     }
+    /** Supplies the new constructor dependency in existing Mockito injection fixtures. */
+    public static void install(Object service) {
+        org.springframework.test.util.ReflectionTestUtils.setField(
+            service, "recordVisibilityScopeControlAccess", unfiltered());
+    }
+
 }

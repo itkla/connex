@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
+
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -60,6 +62,8 @@ public class AiChatMemoryService {
     private final AiWorkspaceGovernanceService governanceService;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     @org.springframework.beans.factory.annotation.Autowired
     private ooo.klae.connex.backend.ai.mission.AiAgentContextBuilder missionContextBuilder;
 
@@ -93,11 +97,26 @@ public class AiChatMemoryService {
             MaskingContext context,
             Instant deadline,
             Runnable ownershipGuard) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            turn.workspaceId(), () -> prepareWithinVisibilityScope(turn, context, deadline, ownershipGuard));
+    }
+
+    private AiChatMemory prepareWithinVisibilityScope(
+            AiChatQueuedTurn turn,
+            MaskingContext context,
+            Instant deadline,
+            Runnable ownershipGuard) {
         return prepare(turn, context, deadline, ownershipGuard, new AiChatResourceRegistry(context));
     }
 
     /** Prepares mission context with the exact fresh registry owned by the executing loop. */
     public AiChatMemory prepare(AiChatQueuedTurn turn, MaskingContext context, Instant deadline,
+            Runnable ownershipGuard, AiChatResourceRegistry resources) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            turn.workspaceId(), () -> prepareWithinVisibilityScope(turn, context, deadline, ownershipGuard, resources));
+    }
+
+    private AiChatMemory prepareWithinVisibilityScope(AiChatQueuedTurn turn, MaskingContext context, Instant deadline,
             Runnable ownershipGuard, AiChatResourceRegistry resources) {
         Objects.requireNonNull(ownershipGuard, "ownershipGuard");
         requireBeforeDeadline(deadline);

@@ -88,6 +88,8 @@ public class BusinessCardService {
     private final DuplicateDecisionLockService duplicateDecisionLockService;
     private final Clock clock;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     public BusinessCardService(
             BusinessCardProperties properties,
             BusinessCardImageValidator imageValidator,
@@ -104,7 +106,7 @@ public class BusinessCardService {
             BusinessCardRateLimiter rateLimiter,
             CapabilityEntitlement capabilityEntitlement,
             DuplicateDecisionLockService duplicateDecisionLockService,
-            Clock clock) {
+            Clock clock, RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess) {
         this.properties = properties;
         this.imageValidator = imageValidator;
         this.ocrClient = ocrClient;
@@ -121,6 +123,7 @@ public class BusinessCardService {
         this.capabilityEntitlement = capabilityEntitlement;
         this.duplicateDecisionLockService = duplicateDecisionLockService;
         this.clock = clock;
+        this.recordVisibilityScopeControlAccess = recordVisibilityScopeControlAccess;
     }
 
     /**
@@ -215,6 +218,8 @@ public class BusinessCardService {
         return withCompanyMatch(aiDraft(validated));
     }
 
+
+
     /**
      * Creates the reviewed contact, applies the explicit company action, and retains a sanitized
      * card copy as a private contact attachment in one transaction.
@@ -229,6 +234,16 @@ public class BusinessCardService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_CREATE)
     public BusinessCardImportResponse importCard(
+            MultipartFile image,
+            BusinessCardContactRequest contact,
+            BusinessCardPersonAction personAction,
+            BusinessCardCompanyAction companyAction,
+            String idempotencyKey) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> importCardWithinVisibilityScope(image, contact, personAction, companyAction, idempotencyKey));
+    }
+
+    private BusinessCardImportResponse importCardWithinVisibilityScope(
             MultipartFile image,
             BusinessCardContactRequest contact,
             BusinessCardPersonAction personAction,
@@ -359,6 +374,11 @@ public class BusinessCardService {
     @Transactional(readOnly = true)
     @RequirePermission(Permission.PERSON_CREATE)
     public BusinessCardImportResponse importStatus(String idempotencyKey) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> importStatusWithinVisibilityScope(idempotencyKey));
+    }
+
+    private BusinessCardImportResponse importStatusWithinVisibilityScope(String idempotencyKey) {
         requireEntitled(Capability.BUSINESS_CARD_IMPORT);
         String requestId = BusinessCardIdempotencyKey.canonicalize(idempotencyKey);
         workspaceService.requirePermission(Permission.ATTACHMENT_CREATE);

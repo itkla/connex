@@ -62,7 +62,7 @@ class AiSkillPlanRunnerTest {
                 new AiAssistantPromptAssembler(objectMapper, new AiAssistantToolCatalog()),
                 mock(AiChatRealtimeDispatcher.class),
                 workspaceService,
-                objectMapper);
+                objectMapper, ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
     }
 
     /**
@@ -185,7 +185,7 @@ class AiSkillPlanRunnerTest {
                 persistenceService, toolExecutor, scopeReadService,
                 mock(AiAssistantWorkBriefReadService.class),
                 new AiAssistantPromptAssembler(objectMapper, new AiAssistantToolCatalog()),
-                mock(AiChatRealtimeDispatcher.class), workspaceService, objectMapper);
+                mock(AiChatRealtimeDispatcher.class), workspaceService, objectMapper, ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
         AiChatResourceRegistry resources = new AiChatResourceRegistry();
         resources.register("person", 12);
         AiChatQueryScope declared = new AiChatQueryScope(
@@ -206,6 +206,32 @@ class AiSkillPlanRunnerTest {
 
         verify(toolExecutor).execute(
                 eq("list_activities"), any(), any(), anyBoolean(), eq(declared));
+    }
+
+    @Test
+    void fourRetrievalStepsKeepOneScopeAcrossIndependentTransactions() {
+        try (var operation = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(7)) {
+            AiAssistantToolExecutor executor = mock(AiAssistantToolExecutor.class);
+            java.util.function.Supplier<AiAssistantToolResult> read = () ->
+                new org.springframework.transaction.support.TransactionTemplate(operation.transactions).execute(status -> {
+                    assertEquals(List.of(7, 17), operation.scopes.getForWorkspace(7).workspaceIds());
+                    return new AiAssistantToolResult(java.util.Map.of("handle", "r1"), List.of());
+                });
+            when(executor.execute(anyString(), any(), any(), anyBoolean(), any())).thenAnswer(call -> read.get());
+            when(scopeReadService.relationshipMetrics(anyString(), anyInt(), anyString())).thenAnswer(call -> read.get());
+            AiSkillPlanRunner scoped = new AiSkillPlanRunner(persistenceService, executor, scopeReadService,
+                mock(AiAssistantWorkBriefReadService.class),
+                new AiAssistantPromptAssembler(objectMapper, new AiAssistantToolCatalog()),
+                mock(AiChatRealtimeDispatcher.class), workspaceService, objectMapper, operation.scopes);
+            AiChatResourceRegistry resources = new AiChatResourceRegistry();
+            resources.register("company", 41);
+            var result = scoped.run(TURN, new AiSkillRouter.Routing(
+                skillCatalog.find("relationship_brief_v1").orElseThrow(), AiSkillRouter.MATCHED,
+                new AiSkillRouter.Subject("company", 41), false), AiChatQueryScope.none(), resources, 16_384, () -> { });
+            assertEquals(4, result.lastStepNumber());
+            assertEquals(4, operation.transactions.beginCount());
+            verify(operation.control).findOrganizationWorkspacesForShare(7);
+        }
     }
 
     private AiSkillRouter.Routing routing(String key) {

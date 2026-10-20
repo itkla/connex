@@ -27,8 +27,15 @@ public class RelationshipSignalReconciliationService {
     private final RelationshipSignalWriteService writeService;
     private final Clock clock;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     /** Reconciles all three families for one explicitly routed workspace. */
     public Result reconcileWorkspace(int workspaceId) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceId, () -> reconcileWorkspaceWithinVisibilityScope(workspaceId));
+    }
+
+    private Result reconcileWorkspaceWithinVisibilityScope(int workspaceId) {
         Instant attemptedInstant = clock.instant();
         LocalDateTime attemptedAt = LocalDateTime.ofInstant(attemptedInstant, ZoneOffset.UTC);
         Set<String> successful = new LinkedHashSet<>();

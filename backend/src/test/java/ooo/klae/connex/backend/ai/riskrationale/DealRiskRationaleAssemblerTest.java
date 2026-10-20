@@ -54,7 +54,7 @@ class DealRiskRationaleAssemblerTest {
 
     @BeforeEach
     void setUp() {
-        assembler = new DealRiskRationaleAssembler(dealService, scoringService, aiRelationshipContext);
+        assembler = new DealRiskRationaleAssembler(dealService, scoringService, aiRelationshipContext, ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
     }
 
     @Test

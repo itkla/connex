@@ -64,12 +64,12 @@ class ShareReadIsolationMapperTest extends AbstractMapperTest {
         Company company = newCompanyIn(foreign);
         insertShare("company_share", "company_id", company.getId(), workspace.getId());
 
-        assertNull(companyMapper.getCompanyById(workspace.getId(), company.getId()),
+        assertNull(companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), company.getId()),
             "a cross-org share row must not make the record readable");
-        assertFalse(companyMapper.exists(workspace.getId(), company.getId()));
-        assertTrue(companyMapper.getAllCompanies(workspace.getId()).stream()
+        assertFalse(companyMapper.exists(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), company.getId()));
+        assertTrue(companyMapper.getAllCompanies(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId())).stream()
             .noneMatch(c -> c.getId() == company.getId()));
-        assertTrue(companyMapper.search(workspace.getId(), "%").stream()
+        assertTrue(companyMapper.search(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), "%").stream()
             .noneMatch(c -> c.getId() == company.getId()));
     }
 
@@ -79,9 +79,9 @@ class ShareReadIsolationMapperTest extends AbstractMapperTest {
         Company company = newCompanyIn(sibling);
         insertShare("company_share", "company_id", company.getId(), workspace.getId());
 
-        assertTrue(companyMapper.exists(workspace.getId(), company.getId()),
+        assertTrue(companyMapper.exists(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), company.getId()),
             "a same-org share row remains readable (positive control)");
-        assertTrue(companyMapper.getAllCompanies(workspace.getId()).stream()
+        assertTrue(companyMapper.getAllCompanies(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId())).stream()
             .anyMatch(c -> c.getId() == company.getId()));
     }
 

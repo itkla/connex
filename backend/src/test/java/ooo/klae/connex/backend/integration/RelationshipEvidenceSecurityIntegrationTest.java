@@ -364,14 +364,14 @@ class RelationshipEvidenceSecurityIntegrationTest {
         LocalDateTime reference = LocalDateTime.now(ZoneOffset.UTC).plusMinutes(1);
 
         RelationshipEvidenceTotalsDto exactTotals = companyMapper.getRelationshipEvidenceTotals(
-            workspace.getId(),
+            workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()),
             company.getId(),
             reference,
             RelationshipWarmthModel.current().sqlParameters(),
             10
         );
         RelationshipEvidenceTotalsDto cappedTotals = companyMapper.getRelationshipEvidenceTotals(
-            workspace.getId(),
+            workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()),
             company.getId(),
             reference,
             RelationshipWarmthModel.current().sqlParameters(),
@@ -379,7 +379,7 @@ class RelationshipEvidenceSecurityIntegrationTest {
         );
         List<RelationshipEvidenceRowDto> contributors =
             companyMapper.getRelationshipEvidenceContributors(
-                workspace.getId(),
+                workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()),
                 company.getId(),
                 reference,
                 RelationshipWarmthModel.current().sqlParameters(),

@@ -146,7 +146,7 @@ class AiAssistantToolExecutorTest {
                 searchService, personService, companyService,
                 dealService, activityService, taskService, historyService, scoringService, workspaceService,
                 personMapper, companyMapper, dealMapper, dateResolver,
-                mock(AiAssistantScopeReadService.class));
+                mock(AiAssistantScopeReadService.class), ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
     }
 
     /**

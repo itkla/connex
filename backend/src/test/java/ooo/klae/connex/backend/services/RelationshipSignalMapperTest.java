@@ -70,7 +70,7 @@ class RelationshipSignalMapperTest extends AbstractServiceTest {
                 asOfInstant));
         RelationshipSignalReconciliationService reconciliation =
             new RelationshipSignalReconciliationService(
-                detector, writer, Clock.fixed(asOfInstant, ZoneOffset.UTC));
+                detector, writer, Clock.fixed(asOfInstant, ZoneOffset.UTC), ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
         for (int cycle = 0; cycle < 3; cycle++) {
             reconciliation.reconcileWorkspace(workspace.getId());
         }
@@ -234,7 +234,7 @@ class RelationshipSignalMapperTest extends AbstractServiceTest {
             mock(CompanyMapper.class),
             mock(DealMapper.class),
             new ObjectMapper(),
-            Clock.fixed(firstAsOf, ZoneOffset.UTC));
+            Clock.fixed(firstAsOf, ZoneOffset.UTC), ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
         RelationshipSignalWriteService writer = new RelationshipSignalWriteService(signalMapper);
 
         Detection first = detector.detectDecay(workspace.getId(), "first");

@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
+
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -96,6 +98,8 @@ public class AiWatchEvaluationService {
     private final PlatformTransactionManager transactionManager;
     private final Clock clock;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     /** What one watch evaluation did. */
     public enum Outcome { FIRED, QUIET, SKIPPED }
 
@@ -136,6 +140,11 @@ public class AiWatchEvaluationService {
      * @return what the evaluation did
      */
     private Outcome evaluateAsOwner(AiWatch watch, User owner) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            watch.getWorkspaceId(), () -> evaluateAsOwnerWithinVisibilityScope(watch, owner));
+    }
+
+    private Outcome evaluateAsOwnerWithinVisibilityScope(AiWatch watch, User owner) {
         if (!featureGate.isFeatureGoverned(AiFeature.ASSISTANT_CHAT)) {
             return Outcome.SKIPPED;
         }

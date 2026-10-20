@@ -89,6 +89,11 @@ public class BulkOperationService {
 
     @RequirePermission(Permission.COMPANY_UPDATE)
     public BulkOperationResult addTagToCompanies(List<Integer> ids, int tagId) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> addTagToCompaniesWithinVisibilityScope(ids, tagId));
+    }
+
+    private BulkOperationResult addTagToCompaniesWithinVisibilityScope(List<Integer> ids, int tagId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requireTag(workspaceId, tagId);
         return apply(ids, id -> companyMapper.existsOwned(workspaceId, id), id -> companyService.addTag(id, tagId));
@@ -96,6 +101,11 @@ public class BulkOperationService {
 
     @RequirePermission(Permission.COMPANY_UPDATE)
     public BulkOperationResult removeTagFromCompanies(List<Integer> ids, int tagId) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> removeTagFromCompaniesWithinVisibilityScope(ids, tagId));
+    }
+
+    private BulkOperationResult removeTagFromCompaniesWithinVisibilityScope(List<Integer> ids, int tagId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requireTag(workspaceId, tagId);
         return apply(ids, id -> companyMapper.existsOwned(workspaceId, id), id -> companyService.removeTag(id, tagId));
@@ -103,12 +113,22 @@ public class BulkOperationService {
 
     @RequirePermission(Permission.COMPANY_DELETE)
     public BulkOperationResult archiveCompanies(List<Integer> ids) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> archiveCompaniesWithinVisibilityScope(ids));
+    }
+
+    private BulkOperationResult archiveCompaniesWithinVisibilityScope(List<Integer> ids) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         return apply(ids, id -> companyMapper.existsOwned(workspaceId, id), companyService::archiveCompany);
     }
 
     @RequirePermission(Permission.COMPANY_DELETE)
     public BulkOperationResult restoreCompanies(List<Integer> ids) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> restoreCompaniesWithinVisibilityScope(ids));
+    }
+
+    private BulkOperationResult restoreCompaniesWithinVisibilityScope(List<Integer> ids) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         return apply(ids, id -> companyMapper.existsOwnedArchived(workspaceId, id),
             companyService::restoreCompany);
@@ -116,6 +136,11 @@ public class BulkOperationService {
 
     @RequirePermission(Permission.COMPANY_UPDATE)
     public BulkOperationResult assignOwnerToCompanies(List<Integer> ids, Integer ownerId) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> assignOwnerToCompaniesWithinVisibilityScope(ids, ownerId));
+    }
+
+    private BulkOperationResult assignOwnerToCompaniesWithinVisibilityScope(List<Integer> ids, Integer ownerId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (ownerId != null) workspaceService.requireMember(workspaceId, ownerId);
         return apply(ids, id -> companyMapper.existsOwned(workspaceId, id),
@@ -144,6 +169,11 @@ public class BulkOperationService {
 
     @RequirePermission(Permission.DEAL_UPDATE)
     public BulkOperationResult assignOwnerToDeals(List<Integer> ids, Integer ownerId) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> assignOwnerToDealsWithinVisibilityScope(ids, ownerId));
+    }
+
+    private BulkOperationResult assignOwnerToDealsWithinVisibilityScope(List<Integer> ids, Integer ownerId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (ownerId != null) workspaceService.requireMember(workspaceId, ownerId);
         return apply(ids, id -> dealMapper.existsOwned(workspaceId, id), id -> dealService.updateOwner(id, ownerId));

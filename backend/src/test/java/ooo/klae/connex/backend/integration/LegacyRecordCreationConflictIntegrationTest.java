@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.integration;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
@@ -221,7 +223,7 @@ class LegacyRecordCreationConflictIntegrationTest {
     private int count(String table) {
         return switch (table) {
             case "person" -> personMapper.getAllPersons(workspace.getId()).size();
-            case "company" -> companyMapper.getAllCompanies(workspace.getId()).size();
+            case "company" -> companyMapper.getAllCompanies(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId())).size();
             default -> throw new IllegalArgumentException("Unexpected table");
         };
     }

@@ -82,8 +82,18 @@ public class RadarService {
     private final ObjectMapper objectMapper;
     private final Clock clock;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     /** Returns a bounded ranked Radar snapshot with explicit detector availability. */
     public RadarResponseDto get(
+            List<String> familyFilters,
+            List<String> stateFilters,
+            @Nullable String query) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> getWithinVisibilityScope(familyFilters, stateFilters, query));
+    }
+
+    private RadarResponseDto getWithinVisibilityScope(
             List<String> familyFilters,
             List<String> stateFilters,
             @Nullable String query) {
@@ -102,6 +112,16 @@ public class RadarService {
      * @return bounded ranked snapshot
      */
     public RadarResponseDto get(
+            List<String> familyFilters,
+            List<String> stateFilters,
+            @Nullable String query,
+            @Nullable String subjectType,
+            @Nullable Integer subjectId) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> getWithinVisibilityScope(familyFilters, stateFilters, query, subjectType, subjectId));
+    }
+
+    private RadarResponseDto getWithinVisibilityScope(
             List<String> familyFilters,
             List<String> stateFilters,
             @Nullable String query,
@@ -177,12 +197,23 @@ public class RadarService {
     /** Follows one signal for the current user. */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public RadarResponseDto.Signal follow(long signalId, String expectedVersion) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> followWithinVisibilityScope(signalId, expectedVersion));
+    }
+
+    private RadarResponseDto.Signal followWithinVisibilityScope(long signalId, String expectedVersion) {
         return disposition(signalId, expectedVersion, "followed", null, false);
     }
 
     /** Snoozes one signal until a validated future instant. */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public RadarResponseDto.Signal snooze(
+            long signalId, String expectedVersion, Instant until) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> snoozeWithinVisibilityScope(signalId, expectedVersion, until));
+    }
+
+    private RadarResponseDto.Signal snoozeWithinVisibilityScope(
             long signalId, String expectedVersion, Instant until) {
         Instant now = clock.instant();
         if (!until.isAfter(now) || until.isAfter(now.plus(MAX_SNOOZE))) {
@@ -199,6 +230,11 @@ public class RadarService {
     /** Dismisses the current source fingerprint for the current user. */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public RadarResponseDto.Signal dismiss(long signalId, String expectedVersion) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> dismissWithinVisibilityScope(signalId, expectedVersion));
+    }
+
+    private RadarResponseDto.Signal dismissWithinVisibilityScope(long signalId, String expectedVersion) {
         return disposition(signalId, expectedVersion, "dismissed", null, true);
     }
 
@@ -206,6 +242,14 @@ public class RadarService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.TASK_CREATE)
     public RadarResponseDto.Signal createTask(
+            long signalId,
+            String expectedVersion,
+            RadarTaskRequestDto request) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> createTaskWithinVisibilityScope(signalId, expectedVersion, request));
+    }
+
+    private RadarResponseDto.Signal createTaskWithinVisibilityScope(
             long signalId,
             String expectedVersion,
             RadarTaskRequestDto request) {
@@ -258,6 +302,11 @@ public class RadarService {
 
     /** Returns current authorized navigation context without trusting persisted labels. */
     public RadarContextDto context(long signalId) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> contextWithinVisibilityScope(signalId));
+    }
+
+    private RadarContextDto contextWithinVisibilityScope(long signalId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = workspaceService.getCurrentUserId();
         RelationshipSignal signal = signalMapper.getActiveForActor(
@@ -545,7 +594,7 @@ public class RadarService {
                 ? reference.withLabel(personLabels.get(reference.id()))
                 : null;
             case "company" -> {
-                Company company = companyMapper.getCompanyById(workspaceId, reference.id());
+                Company company = companyMapper.getCompanyById(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), reference.id());
                 yield company == null
                     ? null
                     : reference.withLabel(label(company.getName(), company.getId()));
@@ -664,7 +713,7 @@ public class RadarService {
                         "person", person.getId(), label(person.getName(), person.getId()));
             }
             case "company" -> {
-                Company company = companyMapper.getCompanyById(workspaceId, signal.getSubjectId());
+                Company company = companyMapper.getCompanyById(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), signal.getSubjectId());
                 yield company == null ? null : new CurrentSubject(
                     "company", company.getId(), label(company.getName(), company.getId()));
             }

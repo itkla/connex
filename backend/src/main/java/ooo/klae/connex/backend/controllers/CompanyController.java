@@ -111,12 +111,10 @@ public class CompanyController {
         MemberScope memberScope = resolveMemberScope(scope, memberIds);
         WarmthFilter warmth = warmthFilterResolver.resolve(
             warmthBands, noWarmth, goesColdWithinDays, sortKey);
-        List<CompanyDto> items = companyService.getCompaniesPage(
+        PageResponse<Company> result = companyService.queryCompaniesPage(
             query, sortKey, dir, industry, noIndustry, ids, memberScope, archived, warmth,
-            bounds.size(), bounds.offset())
-            .stream().map(CompanyDto::from).toList();
-        return new PageResponse<>(items, companyService.countCompanies(
-            query, industry, noIndustry, ids, memberScope, archived, warmth));
+            bounds.size(), bounds.offset());
+        return new PageResponse<>(result.items().stream().map(CompanyDto::from).toList(), result.total());
     }
 
     /** Returns bounded company-scoped engagement aggregates for one expanded company card. */
@@ -218,13 +216,7 @@ public class CompanyController {
     public CompanyFacets getCompanyFacets(
         @RequestParam(defaultValue = "false") boolean warmth
     ) {
-        return new CompanyFacets(
-            companyService.distinctIndustries(),
-            companyService.hasCompanyWithoutIndustry(),
-            companyService.countsByOwner(),
-            companyService.countArchivedCompanies(),
-            warmth ? companyService.countsByWarmthBand(warmthFilterResolver.forFacets()) : null
-        );
+        return companyService.getCompanyFacets(warmth ? warmthFilterResolver.forFacets() : null);
     }
 
     /**

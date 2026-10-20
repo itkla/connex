@@ -528,6 +528,11 @@ public class IntroductionService {
     @Transactional
     @RequirePermission(Permission.PERSON_UPDATE)
     public IntroductionDto createIntroduction(int personAId, int personBId, String note) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> createIntroductionWithinVisibilityScope(personAId, personBId, note));
+    }
+
+    private IntroductionDto createIntroductionWithinVisibilityScope(int personAId, int personBId, String note) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (personAId == personBId) {
             throw new BadRequestException("A contact cannot be introduced to itself");

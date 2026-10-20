@@ -84,6 +84,8 @@ public class DocumentAcceptanceService {
     private final TransactionTemplate transactionTemplate;
     private final ObjectMapper objectMapper;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     /**
      * Validates the emailed bearer once and returns the routed link a browser grant is issued for.
      * Applies the same per-token and per-source throttle the admission filter applies to grant
@@ -258,6 +260,7 @@ public class DocumentAcceptanceService {
 
     private DocumentAcceptanceDecisionDto acceptInTransaction(
             Admitted link, String typedName, String sourceAddress, String userAgent) {
+        recordVisibilityScopeControlAccess.getForWorkspace(link.workspace().getId());
         Aggregate aggregate = lockAggregate(link, true);
         if ("completed".equals(aggregate.recipient().getStatus())) {
             auditRecipientOperation(
@@ -309,6 +312,7 @@ public class DocumentAcceptanceService {
 
     private DocumentAcceptanceDecisionDto declineInTransaction(
             Admitted link, String reason, String sourceAddress, String userAgent) {
+        recordVisibilityScopeControlAccess.getForWorkspace(link.workspace().getId());
         Aggregate aggregate = lockAggregate(link, true);
         if ("declined".equals(aggregate.recipient().getStatus())) {
             auditRecipientOperation(

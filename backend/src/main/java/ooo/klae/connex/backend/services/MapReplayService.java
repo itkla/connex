@@ -54,6 +54,8 @@ public class MapReplayService {
     private final PersonEmploymentMapper personEmploymentMapper;
     private final Clock clock;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     /** Upper bound on emitted entries (frames x nodes) so a huge workspace can't produce a giant payload. */
     private static final long MAX_ENTRIES = 2_000_000L;
 
@@ -66,13 +68,18 @@ public class MapReplayService {
      * final frame is always exactly {@code to}.
      */
     public MapReplayDto buildReplay(int workspaceId, LocalDate from, LocalDate to, Period step) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceId, () -> buildReplayWithinVisibilityScope(workspaceId, from, to, step));
+    }
+
+    private MapReplayDto buildReplayWithinVisibilityScope(int workspaceId, LocalDate from, LocalDate to, Period step) {
         List<LocalDate> dates = frameDates(from, to, step);
         long now = Instant.now(clock).toEpochMilli();
         long[] cutoffs = new long[dates.size()];
         for (int i = 0; i < dates.size(); i++) cutoffs[i] = Math.min(endOfDayMillis(dates.get(i)), now);
 
         List<Person> persons = personMapper.getProcessablePersons(workspaceId);
-        List<Company> companies = companyMapper.getAllCompanies(workspaceId);
+        List<Company> companies = companyMapper.getAllCompanies(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson());
         List<Deal> deals = dealMapper.getAllDeals(workspaceId);
         if ((long) dates.size() * (persons.size() + companies.size() + deals.size()) > MAX_ENTRIES) {
             throw new BadRequestException(

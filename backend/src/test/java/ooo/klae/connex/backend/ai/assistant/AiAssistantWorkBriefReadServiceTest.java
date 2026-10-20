@@ -80,7 +80,7 @@ class AiAssistantWorkBriefReadServiceTest {
         service = new AiAssistantWorkBriefReadService(
                 taskMapper, activityMapper, personMapper, mock(CompanyMapper.class), dealMapper,
                 mock(ScoringService.class), workspaceService, workspaceScope,
-                Clock.fixed(Instant.parse("2026-08-23T04:00:00Z"), ZoneOffset.UTC), references);
+                Clock.fixed(Instant.parse("2026-08-23T04:00:00Z"), ZoneOffset.UTC), references, ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
     }
 
     @Test

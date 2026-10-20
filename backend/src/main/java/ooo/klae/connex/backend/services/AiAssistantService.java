@@ -73,6 +73,8 @@ public class AiAssistantService {
     private final AiChatRealtimeDispatcher realtimeDispatcher;
     private final AiChatProgressService progressService;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     /** Returns an ordered page of caller-owned and explicitly shared sessions. */
     @Transactional
     @RequirePermission(Permission.AI_USE)
@@ -148,6 +150,7 @@ public class AiAssistantService {
     public AiChatSessionDetailDto get(int id, int messagePage, int messageSize) {
         int offset = pageOffset(messagePage, messageSize);
         int workspaceId = currentWorkspaceId();
+        recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         int userId = currentUserId();
         AiChatSession session = requireAccessible(workspaceId, userId, id);
         sessionReadAudit.retainTranscriptAuditParents(workspaceId, userId);
@@ -157,12 +160,15 @@ public class AiAssistantService {
         return detail(workspaceId, userId, id, messageSize, offset, session);
     }
 
+
+
     /** Returns one retained session and records the metadata-only administrative read. */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.AI_SESSION_ADMIN)
     public AiChatSessionDetailDto getRetained(int id, int messagePage, int messageSize) {
         int offset = pageOffset(messagePage, messageSize);
         int workspaceId = currentWorkspaceId();
+        recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         int userId = currentUserId();
         List<Integer> activeMemberIds = activeMemberIds(workspaceId, userId);
         AiChatSession session = chatMapper.getRetainedSessionById(
@@ -181,6 +187,8 @@ public class AiAssistantService {
         requireStillRetained(workspaceId, userId, session);
         return detail(workspaceId, userId, id, messageSize, offset, session);
     }
+
+
 
     /**
      * Re-derives retention from a fresh membership read before any transcript is disclosed. The

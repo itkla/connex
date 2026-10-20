@@ -121,7 +121,7 @@ class AiAssistantScopeReadServiceTest {
                 activityMapper, segmentService, segmentMapper, savedViewService,
                 scoringService, dealRiskService, personMapper, companyMapper, dealMapper,
                 workspaceService, workspaceScopeControlAccess, objectMapper,
-                Clock.fixed(NOW, ZoneOffset.UTC), referenceService);
+                Clock.fixed(NOW, ZoneOffset.UTC), referenceService, ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
     }
 
     @Test
@@ -811,9 +811,9 @@ class AiAssistantScopeReadServiceTest {
         List<Integer> ids = IntStream.rangeClosed(1, size).boxed().toList();
         when(segmentService.evaluate(eq("company"), any(SegmentDefinition.class)))
                 .thenReturn(ids);
-        when(companyMapper.getByIds(eq(WORKSPACE_ID), anyList()))
+        when(companyMapper.getByIds(eq(WORKSPACE_ID), org.mockito.ArgumentMatchers.anyString(), anyList()))
                 .thenAnswer(invocation -> {
-                    List<Integer> requested = invocation.getArgument(1);
+                    List<Integer> requested = invocation.getArgument(2);
                     List<Company> companies = new ArrayList<>();
                     for (Integer id : requested) {
                         Company company = new Company();

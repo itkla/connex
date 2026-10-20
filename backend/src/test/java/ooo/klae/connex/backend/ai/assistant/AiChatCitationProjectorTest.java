@@ -175,7 +175,7 @@ class AiChatCitationProjectorTest {
         employer.setId(21);
         employer.setName("Atlas Manufacturing");
         employer.setIndustry("x".repeat(119) + "𩸽");
-        when(companyMapper.getByIds(3, List.of(21))).thenReturn(List.of(employer));
+        when(companyMapper.getByIds(3, "[7,8,9]", List.of(21))).thenReturn(List.of(employer));
 
         String detail = projector.project(3, List.of(message))
                 .citationsByMessage().get(23).getFirst().detail();
@@ -217,7 +217,7 @@ class AiChatCitationProjectorTest {
         stage.setId(5);
         stage.setName("Negotiation");
         when(personMapper.getByIds(3, List.of(11))).thenReturn(List.of(person));
-        when(companyMapper.getByIds(3, List.of(21))).thenReturn(List.of(employer));
+        when(companyMapper.getByIds(3, "[7,8,9]", List.of(21))).thenReturn(List.of(employer));
         when(dealMapper.getByIds(3, List.of(31))).thenReturn(List.of(deal));
         when(pipelineMapper.getAllStages(3, "[7,8,9]")).thenReturn(List.of(stage));
 
@@ -298,7 +298,7 @@ class AiChatCitationProjectorTest {
                 "observed":{"asOf":"the day of the review","detail":"Manufacturing"}}],
                 "resources":[{"handle":"r1","kind":"company","id":21}]}
                 """);
-        when(companyMapper.getByIds(3, List.of(21))).thenReturn(List.of(company()));
+        when(companyMapper.getByIds(3, "[7,8,9]", List.of(21))).thenReturn(List.of(company()));
 
         AiChatCitationDto citation = projector.project(3, List.of(message))
                 .citationsByMessage().get(23).getFirst();
@@ -319,7 +319,7 @@ class AiChatCitationProjectorTest {
                 "observed":{"asOf":null,"detail":null}}],
                 "resources":[{"handle":"r1","kind":"company","id":21}]}
                 """);
-        when(companyMapper.getByIds(3, List.of(21))).thenReturn(List.of(company()));
+        when(companyMapper.getByIds(3, "[7,8,9]", List.of(21))).thenReturn(List.of(company()));
 
         AiChatCitationDto citation = projector.project(3, List.of(message))
                 .citationsByMessage().get(23).getFirst();

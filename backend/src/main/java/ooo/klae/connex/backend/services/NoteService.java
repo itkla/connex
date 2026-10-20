@@ -77,6 +77,17 @@ public class NoteService {
             int limit,
             int offset,
             boolean workspaceOnly) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> getNotesPageWithinVisibilityScope(query, sort, dir, limit, offset, workspaceOnly));
+    }
+
+    private PageResponse<Note> getNotesPageWithinVisibilityScope(
+            String query,
+            String sort,
+            String dir,
+            int limit,
+            int offset,
+            boolean workspaceOnly) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId)
             .workspaceIdsJson();
@@ -140,11 +151,21 @@ public class NoteService {
      * private note never surfaces as a backlink to someone who cannot read it.
      */
     public List<Note> getNotesReferencing(String refType, int refId) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> getNotesReferencingWithinVisibilityScope(refType, refId));
+    }
+
+    private List<Note> getNotesReferencingWithinVisibilityScope(String refType, int refId) {
         return getNotesReferencing(refType, refId, 25, 0);
     }
 
     /** Returns bounded backlink previews after reader-specific reference redaction. */
     public List<Note> getNotesReferencing(String refType, int refId, int limit, int offset) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> getNotesReferencingWithinVisibilityScope(refType, refId, limit, offset));
+    }
+
+    private List<Note> getNotesReferencingWithinVisibilityScope(String refType, int refId, int limit, int offset) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int currentUserId = workspaceService.getCurrentUserId();
         String canonicalRefType = referenceService.requireVisibleTarget(
@@ -164,6 +185,11 @@ public class NoteService {
     @Transactional
     @RequirePermission(Permission.NOTE_CREATE)
     public Note create(Note note) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> createWithinVisibilityScope(note));
+    }
+
+    private Note createWithinVisibilityScope(Note note) {
         return create(note, MutationAdmission.UNRESTRICTED);
     }
 
@@ -171,6 +197,11 @@ public class NoteService {
     @Transactional
     @RequirePermission(Permission.NOTE_CREATE)
     public Note create(Note note, MutationAdmission admission) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> createWithinVisibilityScope(note, admission));
+    }
+
+    private Note createWithinVisibilityScope(Note note, MutationAdmission admission) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         User actor = authService.getCurrentUser();
         note.setWorkspaceId(workspaceId);
@@ -194,6 +225,11 @@ public class NoteService {
     @Transactional
     @RequirePermission(Permission.NOTE_UPDATE)
     public Note update(int id, Note note) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> updateWithinVisibilityScope(id, note));
+    }
+
+    private Note updateWithinVisibilityScope(int id, Note note) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         User actor = authService.getCurrentUser();
         WorkspaceService.LockedPermissionSnapshot authority = workspaceService.lockAndRequirePermissionsSnapshot(

@@ -48,7 +48,7 @@ class AiAgentContextBuilderTest {
     private final WorkspaceService workspace = mock(WorkspaceService.class);
     private final AiAgentRunPersistenceService persistence = mock(AiAgentRunPersistenceService.class);
     private final AiAgentContextBuilder builder = new AiAgentContextBuilder(
-            plans, evidence, tools, workspace, json);
+            plans, evidence, tools, workspace, json, ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
 
     @AfterEach
     void clearObservations() {
@@ -320,6 +320,37 @@ class AiAgentContextBuilderTest {
         assertEquals("mission_context_overflow", assertThrows(AiAssistantLoopException.class,
                 () -> assembler.assemble(List.of(), context, List.of(), new MaskingContext(),
                         new AiChatResourceRegistry(), List.of(), budget, null, AiAssistantToolCatalog.CORE)).terminalReason());
+    }
+
+    @Test
+    void oneHundredEvidenceReadsReuseOneOperationSnapshot() {
+        try (var operation = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(7)) {
+            var initial = codec.initialize(contextRun());
+            var checkpoint = initial.checkpoint();
+            var read = new AiAssistantToolResult(Map.of("handle", "r1"), List.of());
+            var reference = evidence.reference("person", 9, "record", 0, read);
+            var references = java.util.stream.IntStream.range(0, 100).mapToObj(i -> reference).toList();
+            var snapshot = new AiAgentContinuationCodec.Snapshot(initial.plan(),
+                new AiAgentCheckpoint(checkpoint.schemaVersion(), checkpoint.definitionVersion(), checkpoint.workspaceId(),
+                    checkpoint.runId(), checkpoint.scopeFingerprint(), checkpoint.privacyGeneration(), checkpoint.revision(),
+                    checkpoint.planRevision(), checkpoint.completedPlanItemKeys(), checkpoint.nextPlanItemKey(),
+                    checkpoint.lastCommittedSegmentNo(), checkpoint.completedFacts(), checkpoint.actionSlotReferences(),
+                    references, checkpoint.coverage(), checkpoint.continuation()), initial.memory());
+            var policy = policy(snapshot);
+            when(persistence.snapshot(policy)).thenReturn(snapshot);
+            when(workspace.getMembers(7)).thenReturn(List.of());
+            when(tools.execute(eq("get_record"), any(), any(), anyBoolean(), any())).thenAnswer(call ->
+                new org.springframework.transaction.support.TransactionTemplate(operation.transactions).execute(status -> {
+                    assertEquals(List.of(7, 17), operation.scopes.getForWorkspace(7).workspaceIds());
+                    return read;
+                }));
+            AiAgentContextBuilder scoped = new AiAgentContextBuilder(plans, evidence, tools, workspace, json, operation.scopes);
+            policy.execute(() -> scoped.build(policy, new MaskingContext(), new AiChatResourceRegistry()));
+            assertEquals(100, operation.transactions.beginCount());
+            org.mockito.Mockito.verify(tools, org.mockito.Mockito.times(100)).execute(
+                eq("get_record"), any(), any(), anyBoolean(), any());
+            verify(operation.control).findOrganizationWorkspacesForShare(7);
+        }
     }
 
     private String outbound(AiAgentExecutionPolicy policy, MaskingContext context,

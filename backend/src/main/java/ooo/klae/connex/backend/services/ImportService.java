@@ -205,6 +205,11 @@ public class ImportService {
      */
     @RequirePermission(Permission.PERSON_CREATE)
     public ImportPreviewResult previewPersons(ImportRequest request) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> previewPersonsWithinVisibilityScope(request));
+    }
+
+    private ImportPreviewResult previewPersonsWithinVisibilityScope(ImportRequest request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         String action = resolveAction(request.getOnDuplicate());
         ImportAnalysis analysis =
@@ -242,108 +247,112 @@ public class ImportService {
         DuplicatePreflightService.ImportCommitAdmission admission =
             duplicatePreflightService.claimImportCommit(
                 request.getDuplicateReviewProof(), reviewContext);
-        lockImportPermission(workspaceId, Permission.PERSON_CREATE);
-        duplicateDecisionLockService.lockCurrentOrganization();
-        int actorId = authService.getCurrentUser().getId();
-        ImportAnalysis analysis = analyzePersons(
-            request, workspaceId, ImportPhase.COMMIT, admission, reviewContext);
-        List<PlanRow> plan = analysis.plan();
-        List<PlanRow> mutations = analysis.mutations();
-        requireUpdatePermission(mutations, action, Permission.PERSON_UPDATE);
-        lockCustomFieldTemplateSetBeforeTargets(
-            "person", request.getMapping(), mutations, action);
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(workspaceId, scope, () -> {
 
-        Map<Integer, Person> lockedTargets = lockMatchedTargets(
-            mutations,
-            action,
-            id -> personMapper.getOwnedPersonByIdForUpdate(workspaceId, id),
-            "contact");
-        revalidatePersonTargets(mutations, lockedTargets);
-        serializeAndRevalidatePersonIdentities(workspaceId, mutations, action);
-        Map<String, Integer> columnToDef = resolveCustomDefinitions(
-            "person", request.getMapping(), mutations, action);
-        Map<Integer, Map<Integer, Object>> customValues =
-            existingCustomValues("person", mutations, action);
-        Map<String, Integer> tagByName = resolveTags(mutations, action);
-        Map<String, Integer> companyByName = resolveCompanies(mutations, action);
+            lockImportPermission(workspaceId, Permission.PERSON_CREATE);
+            duplicateDecisionLockService.lockCurrentOrganization();
+            int actorId = authService.getCurrentUser().getId();
+            ImportAnalysis analysis = analyzePersons(
+                request, workspaceId, ImportPhase.COMMIT, admission, reviewContext);
+            List<PlanRow> plan = analysis.plan();
+            List<PlanRow> mutations = analysis.mutations();
+            requireUpdatePermission(mutations, action, Permission.PERSON_UPDATE);
+            lockCustomFieldTemplateSetBeforeTargets(
+                "person", request.getMapping(), mutations, action);
 
-        List<PlanRow> toCreate = new ArrayList<>();
-        List<Person> beans = new ArrayList<>();
-        int updated = 0;
-        int skipped = 0;
+            Map<Integer, Person> lockedTargets = lockMatchedTargets(
+                mutations,
+                action,
+                id -> personMapper.getOwnedPersonByIdForUpdate(workspaceId, id),
+                "contact");
+            revalidatePersonTargets(mutations, lockedTargets);
+            serializeAndRevalidatePersonIdentities(workspaceId, mutations, action);
+            Map<String, Integer> columnToDef = resolveCustomDefinitions(
+                "person", request.getMapping(), mutations, action);
+            Map<Integer, Map<Integer, Object>> customValues =
+                existingCustomValues("person", mutations, action);
+            Map<String, Integer> tagByName = resolveTags(mutations, action);
+            Map<String, Integer> companyByName = resolveCompanies(mutations, action);
 
-        for (PlanRow row : mutations) {
-            if (INVALID.equals(row.status)) continue;
-            if (SKIP.equals(row.status)) { skipped++; continue; }
-            if (MATCH.equals(row.status)) {
-                if (SKIP.equals(action)) { skipped++; continue; }
-                if (applyPersonUpdate(
-                        workspaceId,
-                        row,
-                        action,
-                        columnToDef,
-                        customValues,
-                        tagByName,
-                        companyByName,
-                        lockedTargets)) {
-                    updated++;
+            List<PlanRow> toCreate = new ArrayList<>();
+            List<Person> beans = new ArrayList<>();
+            int updated = 0;
+            int skipped = 0;
+
+            for (PlanRow row : mutations) {
+                if (INVALID.equals(row.status)) continue;
+                if (SKIP.equals(row.status)) { skipped++; continue; }
+                if (MATCH.equals(row.status)) {
+                    if (SKIP.equals(action)) { skipped++; continue; }
+                    if (applyPersonUpdate(
+                            workspaceId,
+                            row,
+                            action,
+                            columnToDef,
+                            customValues,
+                            tagByName,
+                            companyByName,
+                            lockedTargets)) {
+                        updated++;
+                    }
+                    continue;
                 }
-                continue;
-            }
-            Person bean = new Person();
-            bean.setWorkspaceId(workspaceId);
-            bean.setOwnerId(actorId);
-            bean.setLeadSource(PersonLeadSource.IMPORT);
-            bean.setName(row.std.get("name"));
-            bean.setEmail(row.std.get("email"));
-            bean.setPhone(row.std.get("phone"));
-            bean.setTitle(row.std.get("title"));
-            Integer companyId = companyId(row, companyByName);
-            if (companyId != null) {
-                Company stub = new Company();
-                stub.setId(companyId);
-                bean.setCompany(stub);
-            }
-            beans.add(bean);
-            toCreate.add(row);
-        }
-
-        if (!beans.isEmpty()) {
-            RecordInsertBatches.people(beans).forEach(personMapper::insertBatch);
-            for (int i = 0; i < beans.size(); i++) {
-                Person bean = beans.get(i);
-                PlanRow row = toCreate.get(i);
-                recordPersonIdentities(
-                    workspaceId,
-                    bean,
-                    row,
-                    bean.getEmail() != null,
-                    bean.getPhone() != null);
-                Integer companyId = bean.getCompany() != null ? bean.getCompany().getId() : null;
+                Person bean = new Person();
+                bean.setWorkspaceId(workspaceId);
+                bean.setOwnerId(actorId);
+                bean.setLeadSource(PersonLeadSource.IMPORT);
+                bean.setName(row.std.get("name"));
+                bean.setEmail(row.std.get("email"));
+                bean.setPhone(row.std.get("phone"));
+                bean.setTitle(row.std.get("title"));
+                Integer companyId = companyId(row, companyByName);
                 if (companyId != null) {
-                    employmentService.recordInitial(workspaceId, bean.getId(), companyId, bean.getTitle());
+                    Company stub = new Company();
+                    stub.setId(companyId);
+                    bean.setCompany(stub);
                 }
-                attachTags(workspaceId, "person", bean.getId(), row.tagNames, tagByName);
-                applyCustomValues(
-                    "person",
-                    bean.getId(),
-                    row.custom,
-                    columnToDef,
-                    action,
-                    Map.of());
+                beans.add(bean);
+                toCreate.add(row);
             }
-        }
 
-        int created = beans.size();
-        List<RowError> failed = collectFailures(plan);
-        auditImport(
-            "person",
-            created,
-            updated,
-            skipped,
-            failed.size(),
-            allRowsFailedBecauseTargetsVanished(plan));
-        return new ImportResult(created, updated, skipped, failed);
+            if (!beans.isEmpty()) {
+                RecordInsertBatches.people(beans).forEach(personMapper::insertBatch);
+                for (int i = 0; i < beans.size(); i++) {
+                    Person bean = beans.get(i);
+                    PlanRow row = toCreate.get(i);
+                    recordPersonIdentities(
+                        workspaceId,
+                        bean,
+                        row,
+                        bean.getEmail() != null,
+                        bean.getPhone() != null);
+                    Integer companyId = bean.getCompany() != null ? bean.getCompany().getId() : null;
+                    if (companyId != null) {
+                        employmentService.recordInitial(workspaceId, bean.getId(), companyId, bean.getTitle());
+                    }
+                    attachTags(workspaceId, "person", bean.getId(), row.tagNames, tagByName);
+                    applyCustomValues(
+                        "person",
+                        bean.getId(),
+                        row.custom,
+                        columnToDef,
+                        action,
+                        Map.of());
+                }
+            }
+
+            int created = beans.size();
+            List<RowError> failed = collectFailures(plan);
+            auditImport(
+                "person",
+                created,
+                updated,
+                skipped,
+                failed.size(),
+                allRowsFailedBecauseTargetsVanished(plan));
+            return new ImportResult(created, updated, skipped, failed);
+        });
     }
 
     private ImportAnalysis analyzePersons(
@@ -565,6 +574,11 @@ public class ImportService {
      */
     @RequirePermission(Permission.COMPANY_CREATE)
     public ImportPreviewResult previewCompanies(ImportRequest request) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> previewCompaniesWithinVisibilityScope(request));
+    }
+
+    private ImportPreviewResult previewCompaniesWithinVisibilityScope(ImportRequest request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         String action = resolveAction(request.getOnDuplicate());
         ImportAnalysis analysis =
@@ -600,96 +614,100 @@ public class ImportService {
         DuplicatePreflightService.ImportCommitAdmission admission =
             duplicatePreflightService.claimImportCommit(
                 request.getDuplicateReviewProof(), reviewContext);
-        lockImportPermission(workspaceId, Permission.COMPANY_CREATE);
-        duplicateDecisionLockService.lockCurrentOrganization();
-        int actorId = authService.getCurrentUser().getId();
-        ImportAnalysis analysis = analyzeCompanies(
-            request, workspaceId, ImportPhase.COMMIT, admission, reviewContext);
-        List<PlanRow> plan = analysis.plan();
-        List<PlanRow> mutations = analysis.mutations();
-        requireUpdatePermission(mutations, action, Permission.COMPANY_UPDATE);
-        lockCustomFieldTemplateSetBeforeTargets(
-            "company", request.getMapping(), mutations, action);
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(workspaceId, scope, () -> {
 
-        Map<Integer, Company> lockedTargets = lockMatchedTargets(
-            mutations,
-            action,
-            id -> companyMapper.getOwnedCompanyByIdForUpdate(workspaceId, id),
-            "company");
-        serializeAndRevalidateCompanyIdentities(
-            workspaceId, mutations, action);
-        Map<String, Integer> columnToDef = resolveCustomDefinitions(
-            "company", request.getMapping(), mutations, action);
-        Map<Integer, Map<Integer, Object>> customValues =
-            existingCustomValues("company", mutations, action);
-        Map<String, Integer> tagByName = resolveTags(mutations, action);
+            lockImportPermission(workspaceId, Permission.COMPANY_CREATE);
+            duplicateDecisionLockService.lockCurrentOrganization();
+            int actorId = authService.getCurrentUser().getId();
+            ImportAnalysis analysis = analyzeCompanies(
+                request, workspaceId, ImportPhase.COMMIT, admission, reviewContext);
+            List<PlanRow> plan = analysis.plan();
+            List<PlanRow> mutations = analysis.mutations();
+            requireUpdatePermission(mutations, action, Permission.COMPANY_UPDATE);
+            lockCustomFieldTemplateSetBeforeTargets(
+                "company", request.getMapping(), mutations, action);
 
-        List<PlanRow> toCreate = new ArrayList<>();
-        List<Company> beans = new ArrayList<>();
-        int updated = 0;
-        int skipped = 0;
+            Map<Integer, Company> lockedTargets = lockMatchedTargets(
+                mutations,
+                action,
+                id -> companyMapper.getOwnedCompanyByIdForUpdate(workspaceId, id),
+                "company");
+            serializeAndRevalidateCompanyIdentities(
+                workspaceId, mutations, action);
+            Map<String, Integer> columnToDef = resolveCustomDefinitions(
+                "company", request.getMapping(), mutations, action);
+            Map<Integer, Map<Integer, Object>> customValues =
+                existingCustomValues("company", mutations, action);
+            Map<String, Integer> tagByName = resolveTags(mutations, action);
 
-        for (PlanRow row : mutations) {
-            if (INVALID.equals(row.status)) continue;
-            if (SKIP.equals(row.status)) { skipped++; continue; }
-            if (MATCH.equals(row.status)) {
-                if (SKIP.equals(action)) { skipped++; continue; }
-                if (applyCompanyUpdate(
-                        workspaceId,
-                        row,
-                        action,
-                        columnToDef,
-                        customValues,
-                        tagByName,
-                        lockedTargets)) {
-                    updated++;
+            List<PlanRow> toCreate = new ArrayList<>();
+            List<Company> beans = new ArrayList<>();
+            int updated = 0;
+            int skipped = 0;
+
+            for (PlanRow row : mutations) {
+                if (INVALID.equals(row.status)) continue;
+                if (SKIP.equals(row.status)) { skipped++; continue; }
+                if (MATCH.equals(row.status)) {
+                    if (SKIP.equals(action)) { skipped++; continue; }
+                    if (applyCompanyUpdate(
+                            workspaceId,
+                            row,
+                            action,
+                            columnToDef,
+                            customValues,
+                            tagByName,
+                            lockedTargets)) {
+                        updated++;
+                    }
+                    continue;
                 }
-                continue;
+                Company bean = new Company();
+                bean.setWorkspaceId(workspaceId);
+                bean.setOwnerId(actorId);
+                bean.setName(row.std.get("name"));
+                bean.setWebsite(row.std.get("website"));
+                bean.setIndustry(row.std.get("industry"));
+                bean.setPhone(row.std.get("phone"));
+                bean.setAddress(row.std.get("address"));
+                beans.add(bean);
+                toCreate.add(row);
             }
-            Company bean = new Company();
-            bean.setWorkspaceId(workspaceId);
-            bean.setOwnerId(actorId);
-            bean.setName(row.std.get("name"));
-            bean.setWebsite(row.std.get("website"));
-            bean.setIndustry(row.std.get("industry"));
-            bean.setPhone(row.std.get("phone"));
-            bean.setAddress(row.std.get("address"));
-            beans.add(bean);
-            toCreate.add(row);
-        }
 
-        if (!beans.isEmpty()) {
-            RecordInsertBatches.companies(beans).forEach(companyMapper::insertBatch);
-            for (int i = 0; i < beans.size(); i++) {
-                Company bean = beans.get(i);
-                PlanRow row = toCreate.get(i);
-                recordCompanyIdentities(
-                    workspaceId,
-                    bean,
-                    row,
-                    bean.getWebsite() != null,
-                    bean.getPhone() != null);
-                attachTags(workspaceId, "company", bean.getId(), row.tagNames, tagByName);
-                applyCustomValues(
-                    "company",
-                    bean.getId(),
-                    row.custom,
-                    columnToDef,
-                    action,
-                    Map.of());
+            if (!beans.isEmpty()) {
+                RecordInsertBatches.companies(beans).forEach(companyMapper::insertBatch);
+                for (int i = 0; i < beans.size(); i++) {
+                    Company bean = beans.get(i);
+                    PlanRow row = toCreate.get(i);
+                    recordCompanyIdentities(
+                        workspaceId,
+                        bean,
+                        row,
+                        bean.getWebsite() != null,
+                        bean.getPhone() != null);
+                    attachTags(workspaceId, "company", bean.getId(), row.tagNames, tagByName);
+                    applyCustomValues(
+                        "company",
+                        bean.getId(),
+                        row.custom,
+                        columnToDef,
+                        action,
+                        Map.of());
+                }
             }
-        }
 
-        int created = beans.size();
-        List<RowError> failed = collectFailures(plan);
-        auditImport(
-            "company",
-            created,
-            updated,
-            skipped,
-            failed.size(),
-            allRowsFailedBecauseTargetsVanished(plan));
-        return new ImportResult(created, updated, skipped, failed);
+            int created = beans.size();
+            List<RowError> failed = collectFailures(plan);
+            auditImport(
+                "company",
+                created,
+                updated,
+                skipped,
+                failed.size(),
+                allRowsFailedBecauseTargetsVanished(plan));
+            return new ImportResult(created, updated, skipped, failed);
+        });
     }
 
     private ImportAnalysis analyzeCompanies(
@@ -814,7 +832,7 @@ public class ImportService {
 
     private Company getOwnedCompany(int workspaceId, int companyId) {
         if (!companyMapper.existsOwned(workspaceId, companyId)) return null;
-        return companyMapper.getCompanyById(workspaceId, companyId);
+        return companyMapper.getCompanyById(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), companyId);
     }
 
     private String applyCompanyDuplicatePreflight(
@@ -1009,6 +1027,11 @@ public class ImportService {
      */
     @RequirePermission(Permission.DEAL_CREATE)
     public ImportPreviewResult previewDeals(ImportRequest request) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> previewDealsWithinVisibilityScope(request));
+    }
+
+    private ImportPreviewResult previewDealsWithinVisibilityScope(ImportRequest request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         String action = resolveAction(request.getOnDuplicate());
@@ -1051,111 +1074,114 @@ public class ImportService {
             duplicatePreflightService.claimImportCommit(
                 request.getDuplicateReviewProof(), reviewContext);
         RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
-        lockImportPermission(workspaceId, Permission.DEAL_CREATE);
-        duplicateDecisionLockService.lockCurrentOrganization();
-        int actorId = authService.getCurrentUser().getId();
-        ImportAnalysis analysis = analyzeDeals(
-            request,
-            workspaceId,
-            ImportPhase.COMMIT,
-            admission,
-            reviewContext, scope);
-        List<PlanRow> plan = analysis.plan();
-        List<PlanRow> mutations = analysis.mutations();
-        requireUpdatePermission(mutations, action, Permission.DEAL_UPDATE);
-        lockCustomFieldTemplateSetBeforeTargets(
-            "deal", request.getMapping(), mutations, action);
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(workspaceId, scope, () -> {
 
-        Map<Integer, Deal> lockedTargets = lockMatchedTargets(
-            mutations,
-            action,
-            id -> dealMapper.getDealByIdForUpdate(workspaceId, id),
-            "deal");
-        validateDealUpdates(workspaceId, mutations, action, lockedTargets);
-        Map<String, Integer> columnToDef = resolveCustomDefinitions(
-            "deal", request.getMapping(), mutations, action);
-        Map<Integer, Map<Integer, Object>> customValues =
-            existingCustomValues("deal", mutations, action);
-        Map<String, Integer> tagByName = resolveTags(mutations, action);
-        Map<String, Integer> companyByName = resolveCompanies(mutations, action);
-        Map<String, Integer> personByEmail =
-            resolveDealPeople(workspaceId, mutations, action);
-        Map<Integer, String> stageOutcome = new HashMap<>();
+            lockImportPermission(workspaceId, Permission.DEAL_CREATE);
+            duplicateDecisionLockService.lockCurrentOrganization();
+            int actorId = authService.getCurrentUser().getId();
+            ImportAnalysis analysis = analyzeDeals(
+                request,
+                workspaceId,
+                ImportPhase.COMMIT,
+                admission,
+                reviewContext, scope);
+            List<PlanRow> plan = analysis.plan();
+            List<PlanRow> mutations = analysis.mutations();
+            requireUpdatePermission(mutations, action, Permission.DEAL_UPDATE);
+            lockCustomFieldTemplateSetBeforeTargets(
+                "deal", request.getMapping(), mutations, action);
 
-        List<PlanRow> toCreate = new ArrayList<>();
-        List<Deal> beans = new ArrayList<>();
-        List<DealOutcomeWriter.NewDeal> newDeals = new ArrayList<>();
-        int updated = 0;
-        int skipped = 0;
+            Map<Integer, Deal> lockedTargets = lockMatchedTargets(
+                mutations,
+                action,
+                id -> dealMapper.getDealByIdForUpdate(workspaceId, id),
+                "deal");
+            validateDealUpdates(workspaceId, mutations, action, lockedTargets);
+            Map<String, Integer> columnToDef = resolveCustomDefinitions(
+                "deal", request.getMapping(), mutations, action);
+            Map<Integer, Map<Integer, Object>> customValues =
+                existingCustomValues("deal", mutations, action);
+            Map<String, Integer> tagByName = resolveTags(mutations, action);
+            Map<String, Integer> companyByName = resolveCompanies(mutations, action);
+            Map<String, Integer> personByEmail =
+                resolveDealPeople(workspaceId, mutations, action);
+            Map<Integer, String> stageOutcome = new HashMap<>();
 
-        for (PlanRow row : mutations) {
-            if (INVALID.equals(row.status)) continue;
-            if (SKIP.equals(row.status)) { skipped++; continue; }
-            if (MATCH.equals(row.status)) {
-                if (SKIP.equals(action)) { skipped++; continue; }
-                if (applyDealUpdate(
-                        workspaceId,
-                        row,
-                        action,
+            List<PlanRow> toCreate = new ArrayList<>();
+            List<Deal> beans = new ArrayList<>();
+            List<DealOutcomeWriter.NewDeal> newDeals = new ArrayList<>();
+            int updated = 0;
+            int skipped = 0;
+
+            for (PlanRow row : mutations) {
+                if (INVALID.equals(row.status)) continue;
+                if (SKIP.equals(row.status)) { skipped++; continue; }
+                if (MATCH.equals(row.status)) {
+                    if (SKIP.equals(action)) { skipped++; continue; }
+                    if (applyDealUpdate(
+                            workspaceId,
+                            row,
+                            action,
+                            columnToDef,
+                            customValues,
+                            tagByName,
+                            companyByName,
+                            personByEmail,
+                            stageOutcome,
+                            lockedTargets, scope)) {
+                        updated++;
+                    }
+                    continue;
+                }
+                Deal bean = new Deal();
+                bean.setWorkspaceId(workspaceId);
+                bean.setOwnerId(actorId);
+                bean.setName(row.std.get("name"));
+                bean.setValue(parseValue(row.std.get("value")));
+                String currency = row.std.get("currency");
+                bean.setCurrency(currency != null ? currency : DEFAULT_CURRENCY);
+                bean.setExpectedCloseDate(row.std.get("expectedCloseDate"));
+                bean.setPipelineId(row.resolvedPipelineId);
+                bean.setStageId(row.resolvedStageId);
+                bean.setCompanyId(companyId(row, companyByName));
+                newDeals.add(new DealOutcomeWriter.NewDeal(bean, bean.getValue(),
+                    outcomeFor(workspaceId, bean.getStageId(), stageOutcome)));
+                beans.add(bean);
+                toCreate.add(row);
+            }
+
+            if (!beans.isEmpty()) {
+                dealOutcomeWriter.createBatch(newDeals);
+                for (int i = 0; i < beans.size(); i++) {
+                    Deal bean = beans.get(i);
+                    PlanRow row = toCreate.get(i);
+                    if (bean.getStageId() != null) {
+                        dealStageHistoryService.recordInitial(
+                            workspaceId, bean.getId(), bean.getStageId(), bean.getWon(), scope);
+                    }
+                    attachDealTags(workspaceId, bean.getId(), row.tagNames, tagByName);
+                    linkDealPeople(workspaceId, bean.getId(), row.peopleEmails, personByEmail);
+                    applyCustomValues(
+                        "deal",
+                        bean.getId(),
+                        row.custom,
                         columnToDef,
-                        customValues,
-                        tagByName,
-                        companyByName,
-                        personByEmail,
-                        stageOutcome,
-                        lockedTargets, scope)) {
-                    updated++;
+                        action,
+                        Map.of());
                 }
-                continue;
             }
-            Deal bean = new Deal();
-            bean.setWorkspaceId(workspaceId);
-            bean.setOwnerId(actorId);
-            bean.setName(row.std.get("name"));
-            bean.setValue(parseValue(row.std.get("value")));
-            String currency = row.std.get("currency");
-            bean.setCurrency(currency != null ? currency : DEFAULT_CURRENCY);
-            bean.setExpectedCloseDate(row.std.get("expectedCloseDate"));
-            bean.setPipelineId(row.resolvedPipelineId);
-            bean.setStageId(row.resolvedStageId);
-            bean.setCompanyId(companyId(row, companyByName));
-            newDeals.add(new DealOutcomeWriter.NewDeal(bean, bean.getValue(),
-                outcomeFor(workspaceId, bean.getStageId(), stageOutcome)));
-            beans.add(bean);
-            toCreate.add(row);
-        }
 
-        if (!beans.isEmpty()) {
-            dealOutcomeWriter.createBatch(newDeals);
-            for (int i = 0; i < beans.size(); i++) {
-                Deal bean = beans.get(i);
-                PlanRow row = toCreate.get(i);
-                if (bean.getStageId() != null) {
-                    dealStageHistoryService.recordInitial(
-                        workspaceId, bean.getId(), bean.getStageId(), bean.getWon(), scope);
-                }
-                attachDealTags(workspaceId, bean.getId(), row.tagNames, tagByName);
-                linkDealPeople(workspaceId, bean.getId(), row.peopleEmails, personByEmail);
-                applyCustomValues(
-                    "deal",
-                    bean.getId(),
-                    row.custom,
-                    columnToDef,
-                    action,
-                    Map.of());
-            }
-        }
-
-        int created = beans.size();
-        List<RowError> failed = collectFailures(plan);
-        auditImport(
-            "deal",
-            created,
-            updated,
-            skipped,
-            failed.size(),
-            allRowsFailedBecauseTargetsVanished(plan));
-        return new ImportResult(created, updated, skipped, failed);
+            int created = beans.size();
+            List<RowError> failed = collectFailures(plan);
+            auditImport(
+                "deal",
+                created,
+                updated,
+                skipped,
+                failed.size(),
+                allRowsFailedBecauseTargetsVanished(plan));
+            return new ImportResult(created, updated, skipped, failed);
+        });
     }
 
     private ImportAnalysis analyzeDeals(

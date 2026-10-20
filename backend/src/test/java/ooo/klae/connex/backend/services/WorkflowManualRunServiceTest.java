@@ -57,6 +57,11 @@ import ooo.klae.connex.backend.services.WorkflowActionRetryPolicy.RetrySafety;
 
 @ExtendWith(MockitoExtension.class)
 class WorkflowManualRunServiceTest {
+    @org.junit.jupiter.api.BeforeEach
+    void installCompanyScopeFixture() {
+        ooo.klae.connex.backend.support.RecordVisibilityScopes.install(service);
+    }
+
 
     @Mock private WorkflowMapper workflowMapper;
     @Mock private WorkflowVersionMapper workflowVersionMapper;

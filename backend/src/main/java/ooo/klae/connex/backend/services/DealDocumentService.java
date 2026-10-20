@@ -82,6 +82,8 @@ public class DealDocumentService {
     private final ObjectMapper objectMapper;
     private final ApprovalMutationRetryService approvalMutationRetryService;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     private static final Set<String> CLIENT_TARGET_STATUSES = Set.of("draft", "final", "superseded");
     private static final int MAX_VERSION_ATTEMPTS = 5;
     private static final int MAX_BODY_DEPTH = 50;
@@ -166,6 +168,11 @@ public class DealDocumentService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DEAL_UPDATE)
     public DealDocumentDto generate(int dealId, int templateId) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> generateWithinVisibilityScope(dealId, templateId));
+    }
+
+    private DealDocumentDto generateWithinVisibilityScope(int dealId, int templateId) {
         return generate(dealId, templateId, MutationAdmission.UNRESTRICTED);
     }
 
@@ -173,6 +180,11 @@ public class DealDocumentService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DEAL_UPDATE)
     public DealDocumentDto generate(int dealId, int templateId, MutationAdmission admission) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> generateWithinVisibilityScope(dealId, templateId, admission));
+    }
+
+    private DealDocumentDto generateWithinVisibilityScope(int dealId, int templateId, MutationAdmission admission) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requireDeal(workspaceId, dealId);
         int actorId = workspaceService.getCurrentUserId();
@@ -187,7 +199,7 @@ public class DealDocumentService {
         }
         String currency = deal.getCurrency() == null || deal.getCurrency().isBlank() ? "USD" : deal.getCurrency();
 
-        Company company = deal.getCompanyId() == null ? null : companyMapper.getCompanyById(workspaceId, deal.getCompanyId());
+        Company company = deal.getCompanyId() == null ? null : companyMapper.getCompanyById(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), deal.getCompanyId());
         User owner = deal.getOwnerId() == null ? null : userMapper.getUserById(deal.getOwnerId());
         Workspace workspace = workspaceService.getCurrentWorkspace();
         DealLineItemsResponse lines = lineItemService.snapshotForDocument(workspaceId, deal);

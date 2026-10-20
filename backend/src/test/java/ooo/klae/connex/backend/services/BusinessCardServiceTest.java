@@ -133,7 +133,7 @@ class BusinessCardServiceTest {
                 rateLimiter,
                 capabilityEntitlement,
                 duplicateDecisionLockService,
-                clock);
+                clock, ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
         image = new MockMultipartFile("image", "card.jpg", "image/jpeg", new byte[] {1, 2, 3});
         validated = new ValidatedBusinessCardImage(
                 image.getBytes(), "image/jpeg", "jpg", 120, 70);

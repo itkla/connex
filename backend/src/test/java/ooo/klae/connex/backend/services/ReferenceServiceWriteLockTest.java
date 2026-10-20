@@ -28,6 +28,11 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 
 @ExtendWith(MockitoExtension.class)
 class ReferenceServiceWriteLockTest {
+    @org.junit.jupiter.api.BeforeEach
+    void installCompanyScopeFixture() {
+        ooo.klae.connex.backend.support.RecordVisibilityScopes.install(referenceService);
+    }
+
 
     @Mock EntityReferenceMapper entityReferenceMapper;
     @Mock WorkspaceService workspaceService;
@@ -48,7 +53,7 @@ class ReferenceServiceWriteLockTest {
         when(entityReferenceMapper.findBySource(9, ReferenceService.SOURCE_NOTE, 21))
             .thenReturn(List.of());
         when(workspaceService.getCurrentUserId()).thenReturn(5);
-        when(companyMapper.exists(9, 14)).thenReturn(true);
+        when(companyMapper.exists(9, "[7,8,9]", 14)).thenReturn(true);
 
         referenceService.syncReferences(9, ReferenceService.SOURCE_NOTE, 21, "[Acme](company:14)");
 

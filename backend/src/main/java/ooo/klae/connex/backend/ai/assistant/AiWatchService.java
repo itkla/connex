@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
+
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
@@ -67,10 +69,17 @@ public class AiWatchService {
     private final WorkspaceService workspaceService;
     private final Clock clock;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     /** Lists the calling member's watches, newest first, with currently readable subject labels. */
     @Transactional(readOnly = true)
     @RequirePermission(Permission.AI_USE)
     public List<AiWatchDto> list() {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> listWithinVisibilityScope());
+    }
+
+    private List<AiWatchDto> listWithinVisibilityScope() {
         List<AiWatch> watches = watchMapper.listForOwner(
                 workspaceService.getCurrentWorkspaceId(), workspaceService.getCurrentUserId());
         List<AiWatchDto> projected = new ArrayList<>(watches.size());
@@ -101,6 +110,11 @@ public class AiWatchService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.AI_USE)
     public AiWatchDto create(AiWatchCreateRequest request) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> createWithinVisibilityScope(request));
+    }
+
+    private AiWatchDto createWithinVisibilityScope(AiWatchCreateRequest request) {
         if (request == null) {
             throw new BadRequestException("Watch request is invalid");
         }
@@ -153,6 +167,11 @@ public class AiWatchService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.AI_USE)
     public AiWatchDto setActive(int id, boolean active) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> setActiveWithinVisibilityScope(id, active));
+    }
+
+    private AiWatchDto setActiveWithinVisibilityScope(int id, boolean active) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = workspaceService.getCurrentUserId();
         if (watchMapper.updateStatus(workspaceId, userId, id, active ? ACTIVE : PAUSED) != 1) {

@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
+
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -48,6 +50,8 @@ public class AiWatchScheduler {
     private final JobRunRecorder jobRunRecorder;
     private final Clock clock;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     /** Runs one evaluation sweep across every routed workspace. */
     @Scheduled(
         fixedDelayString = "${connex.ai.watches.sweep-delay-ms:900000}",
@@ -74,6 +78,11 @@ public class AiWatchScheduler {
      * context and can read the calendar the expiry was validated against.
      */
     void sweepWorkspace(int workspaceId) {
+        recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceId, () -> { sweepWorkspaceWithinVisibilityScope(workspaceId); return null; });
+    }
+
+    private void sweepWorkspaceWithinVisibilityScope(int workspaceId) {
         JobRunDetail started = JobRunDetail.startedUtc();
         String today = LocalDate.ofInstant(clock.instant(), ZoneOffset.UTC).minusDays(1).toString();
         int evaluated = 0;

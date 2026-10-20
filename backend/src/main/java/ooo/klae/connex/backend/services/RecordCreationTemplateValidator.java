@@ -113,8 +113,8 @@ public class RecordCreationTemplateValidator {
             LocalizedTextDto name,
             LocalizedTextDto description,
             RecordCreationTemplateDefinitionDto definition) {
-        String orgWorkspaceIdsJson = recordType == RecordCreationRecordType.deal
-            ? recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId()).workspaceIdsJson() : null;
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(
+            workspaceService.getCurrentWorkspaceId()).workspaceIdsJson();
         return validateAndCanonicalize(recordType, name, description, definition, orgWorkspaceIdsJson);
     }
 
@@ -395,7 +395,7 @@ public class RecordCreationTemplateValidator {
             throw defaultForbidden("A reference default must use a positive ID");
         }
         boolean exists = switch (fieldKey) {
-            case "company" -> companyMapper.exists(workspaceId, id);
+            case "company" -> companyMapper.exists(workspaceId, orgWorkspaceIdsJson, id);
             case "referrerPerson" -> personMapper.exists(workspaceId, id);
             case "pipeline" -> pipelineMapper.pipelineExists(workspaceId, orgWorkspaceIdsJson, id);
             case "stage" -> pipelineMapper.getVisibleStageById(workspaceId, orgWorkspaceIdsJson, id) != null;

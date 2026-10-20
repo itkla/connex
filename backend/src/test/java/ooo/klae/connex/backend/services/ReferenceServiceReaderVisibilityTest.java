@@ -43,7 +43,7 @@ class ReferenceServiceReaderVisibilityTest {
     private final ActivityMapper activities = mock(ActivityMapper.class);
     private final EntityReferenceMapper stored = mock(EntityReferenceMapper.class);
     private final ReferenceService service = new ReferenceService(stored, workspace, people, deals, companies,
-            notes, files, tasks, activities, members);
+            notes, files, tasks, activities, members, ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
 
     static Stream<String> ordinaryProse() {
         return ReferenceContentReaderTest.ordinaryProse();
@@ -194,7 +194,7 @@ class ReferenceServiceReaderVisibilityTest {
     @Test
     void referenceDiscoveryDoesNotStopAtTheWriteSideHundredReferenceCap() {
         String content = "[Visible](company:7) ".repeat(101) + "[Secret][n]\n\n> [n]: note:42";
-        when(companies.getVisibleIdsIn(7, List.of(7))).thenReturn(List.of(7));
+        when(companies.getVisibleIdsIn(7, "[7,8,9]", List.of(7))).thenReturn(List.of(7));
 
         assertEquals("(private note)", service.redactInvisibleTargets(7,
                 List.of(new ReferenceService.ReaderVisibleContent(content, List.of()))).getFirst().content());
@@ -215,7 +215,7 @@ class ReferenceServiceReaderVisibilityTest {
         EntityReference reference = new EntityReference();
         reference.setRefType("company");
         reference.setRefId(7);
-        when(companies.getVisibleIdsIn(7, List.of(7))).thenReturn(List.of(7));
+        when(companies.getVisibleIdsIn(7, "[7,8,9]", List.of(7))).thenReturn(List.of(7));
         String content = "x".repeat(ReferenceContentReader.MAX_INPUT_LENGTH + 1);
 
         var result = service.redactInvisibleTargets(7,
@@ -263,7 +263,7 @@ class ReferenceServiceReaderVisibilityTest {
             case "user" -> when(members.getMemberIdsIncludingPending(eq(7), anyList())).thenReturn(List.of(42));
             case "person" -> when(people.getVisibleIdsIn(eq(7), anyList())).thenReturn(List.of(42));
             case "deal" -> when(deals.getVisibleIdsIn(eq(7), anyList())).thenReturn(List.of(42));
-            case "company" -> when(companies.getVisibleIdsIn(eq(7), anyList())).thenReturn(List.of(42));
+            case "company" -> when(companies.getVisibleIdsIn(eq(7), org.mockito.ArgumentMatchers.anyString(), anyList())).thenReturn(List.of(42));
             case "note" -> when(notes.getVisibleNoteIdsIn(eq(7), anyList(), eq(13))).thenReturn(List.of(42));
             case "file" -> when(files.getVisibleIdsIn(eq(7), anyList(), eq(13))).thenReturn(List.of(42));
             case "task" -> when(tasks.getVisibleIdsIn(eq(7), anyList())).thenReturn(List.of(42));
@@ -277,7 +277,7 @@ class ReferenceServiceReaderVisibilityTest {
             case "user" -> verify(members).getMemberIdsIncludingPending(7, List.of(42));
             case "person" -> verify(people).getVisibleIdsIn(7, List.of(42));
             case "deal" -> verify(deals).getVisibleIdsIn(7, List.of(42));
-            case "company" -> verify(companies).getVisibleIdsIn(7, List.of(42));
+            case "company" -> verify(companies).getVisibleIdsIn(7, "[7,8,9]", List.of(42));
             case "note" -> verify(notes).getVisibleNoteIdsIn(7, List.of(42), 13);
             case "file" -> verify(files).getVisibleIdsIn(7, List.of(42), 13);
             case "task" -> verify(tasks).getVisibleIdsIn(7, List.of(42));

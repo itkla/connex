@@ -105,6 +105,11 @@ public class AiAssistantToolCallReadService {
     /** Returns up to 100 pending cards, or 100 history rows plus 100 newer undecided cards. */
     @Transactional
     public List<AiAssistantToolCallReadDto> list(int sessionId, boolean pendingOnly) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> listWithinVisibilityScope(sessionId, pendingOnly));
+    }
+
+    private List<AiAssistantToolCallReadDto> listWithinVisibilityScope(int sessionId, boolean pendingOnly) {
         Viewer viewer = currentViewer();
         AiChatSession session = requireReadableSession(viewer, sessionId);
         return list(viewer, session, pendingOnly, true);
@@ -114,6 +119,12 @@ public class AiAssistantToolCallReadService {
     @Transactional
     @RequirePermission(Permission.AI_SESSION_ADMIN)
     public List<AiAssistantToolCallReadDto> listRetained(
+            int sessionId, boolean pendingOnly) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> listRetainedWithinVisibilityScope(sessionId, pendingOnly));
+    }
+
+    private List<AiAssistantToolCallReadDto> listRetainedWithinVisibilityScope(
             int sessionId, boolean pendingOnly) {
         Viewer viewer = currentViewer();
         AiChatSession session = requireRetainedSession(viewer, sessionId);
@@ -126,6 +137,11 @@ public class AiAssistantToolCallReadService {
     /** Returns one safe write-tool card in an authorized session. */
     @Transactional
     public AiAssistantToolCallReadDto get(int sessionId, int toolCallId) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> getWithinVisibilityScope(sessionId, toolCallId));
+    }
+
+    private AiAssistantToolCallReadDto getWithinVisibilityScope(int sessionId, int toolCallId) {
         Viewer viewer = currentViewer();
         AiChatSession session = requireReadableSession(viewer, sessionId);
         return get(viewer, session, toolCallId, true);
@@ -135,6 +151,11 @@ public class AiAssistantToolCallReadService {
     @Transactional
     @RequirePermission(Permission.AI_SESSION_ADMIN)
     public AiAssistantToolCallReadDto getRetained(int sessionId, int toolCallId) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> getRetainedWithinVisibilityScope(sessionId, toolCallId));
+    }
+
+    private AiAssistantToolCallReadDto getRetainedWithinVisibilityScope(int sessionId, int toolCallId) {
         Viewer viewer = currentViewer();
         AiChatSession session = requireRetainedSession(viewer, sessionId);
         AiAssistantToolCallReadDto projected = get(viewer, session, toolCallId, false);
@@ -143,6 +164,15 @@ public class AiAssistantToolCallReadService {
     }
 
     private List<AiAssistantToolCallReadDto> list(
+            Viewer viewer,
+            AiChatSession session,
+            boolean pendingOnly,
+            boolean mutationsAvailable) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> listWithinVisibilityScope(viewer, session, pendingOnly, mutationsAvailable));
+    }
+
+    private List<AiAssistantToolCallReadDto> listWithinVisibilityScope(
             Viewer viewer,
             AiChatSession session,
             boolean pendingOnly,
@@ -166,6 +196,15 @@ public class AiAssistantToolCallReadService {
     }
 
     private AiAssistantToolCallReadDto get(
+            Viewer viewer,
+            AiChatSession session,
+            int toolCallId,
+            boolean mutationsAvailable) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> getWithinVisibilityScope(viewer, session, toolCallId, mutationsAvailable));
+    }
+
+    private AiAssistantToolCallReadDto getWithinVisibilityScope(
             Viewer viewer,
             AiChatSession session,
             int toolCallId,
@@ -431,7 +470,7 @@ public class AiAssistantToolCallReadService {
             }
         }
         if (!companyIds.isEmpty()) {
-            for (Company company : companyMapper.getByIds(workspaceId, companyIds)) {
+            for (Company company : companyMapper.getByIds(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), companyIds)) {
                 putVisible(visible, "company", company.getId(), new RecordSnapshot(
                         company.getName(), null, company.getOwnerId(), null,
                         company.getUpdatedAt(), companyFields(company),
@@ -984,7 +1023,7 @@ public class AiAssistantToolCallReadService {
         Set<RecordKey> live = new LinkedHashSet<>();
         List<Integer> companyIds = createdIds(candidates, "company");
         if (!companyIds.isEmpty()) {
-            for (Company company : companyMapper.getByIds(viewer.workspaceId(), companyIds)) {
+            for (Company company : companyMapper.getByIds(viewer.workspaceId(), recordVisibilityScopeControlAccess.getForWorkspace(viewer.workspaceId()).workspaceIdsJson(), companyIds)) {
                 live.add(new RecordKey("company", company.getId()));
             }
         }

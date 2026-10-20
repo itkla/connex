@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -297,10 +299,10 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
 
         assertEquals(
                 secondActor.getId(),
-                companyMapper.getCompanyById(workspace.getId(), firstCompany.getId()).getOwnerId());
+                companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), firstCompany.getId()).getOwnerId());
         assertEquals(
                 firstActor.getId(),
-                companyMapper.getCompanyById(workspace.getId(), secondCompany.getId()).getOwnerId());
+                companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), secondCompany.getId()).getOwnerId());
     }
 
     @Test
@@ -532,7 +534,7 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
                         workspace.getId(),
                         secondActor.getId()));
         assertNull(
-                companyMapper.getCompanyById(workspace.getId(), company.getId()).getOwnerId());
+                companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), company.getId()).getOwnerId());
         assertEquals(
                 "proposed",
                 jdbcTemplate.queryForObject(
@@ -1278,7 +1280,7 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
             releaseApproval.countDown();
             approval.get(20, TimeUnit.SECONDS);
             rename.get(20, TimeUnit.SECONDS);
-            assertEquals(secondActor.getId(), companyMapper.getCompanyById(workspace.getId(), target.getId()).getOwnerId());
+            assertEquals(secondActor.getId(), companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), target.getId()).getOwnerId());
             authenticate(firstActor);
             AiChatToolCall stored = chatMapper.getToolCallById(workspace.getId(), jdbcTemplate.queryForObject(
                     "SELECT message_id FROM ai_chat_tool_call WHERE id = ?", Integer.class, fixture.toolCallId()), fixture.toolCallId());

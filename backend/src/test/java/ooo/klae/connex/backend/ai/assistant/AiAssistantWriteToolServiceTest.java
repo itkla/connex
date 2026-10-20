@@ -199,7 +199,7 @@ class AiAssistantWriteToolServiceTest {
                 mock(CompanyMapper.class),
                 mock(DealMapper.class),
                 dateResolver,
-                mock(AiAssistantScopeReadService.class));
+                mock(AiAssistantScopeReadService.class), ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
         service = new AiAssistantWriteToolService(
                 catalog,
                 registry,

@@ -84,6 +84,8 @@ public class DuplicatePreflightService {
     private final DuplicatePreflightRateLimiter rateLimiter;
     private final DealDuplicateReviewProofService dealReviewProofService;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     /**
      * Checks one proposed person using {@code PERSON_CREATE}.
      *
@@ -127,6 +129,11 @@ public class DuplicatePreflightService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DEAL_CREATE)
     public DuplicatePreflightResponse preflightDeal(DealDuplicatePreflightRequest request) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> preflightDealWithinVisibilityScope(request));
+    }
+
+    private DuplicatePreflightResponse preflightDealWithinVisibilityScope(DealDuplicatePreflightRequest request) {
         NormalizedDealRequest normalized = normalizeDeal(
             Objects.requireNonNull(request, "request"));
         int workspaceId = workspaceService.getCurrentWorkspaceId();
@@ -163,6 +170,11 @@ public class DuplicatePreflightService {
     @Transactional(readOnly = true)
     @RequirePermission(Permission.DEAL_CREATE)
     public boolean dealCandidatesExist(DealDuplicatePreflightRequest request) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> dealCandidatesExistWithinVisibilityScope(request));
+    }
+
+    private boolean dealCandidatesExistWithinVisibilityScope(DealDuplicatePreflightRequest request) {
         NormalizedDealRequest normalized = normalizeDeal(Objects.requireNonNull(request, "request"));
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         rateLimiter.requireAllowed(1);
@@ -266,6 +278,13 @@ public class DuplicatePreflightService {
      * @param duplicateReviewToken token from the exact accepted duplicate review
      */
     public void requireReviewedDealCreation(
+            DealDuplicatePreflightRequest request,
+            String duplicateReviewToken) {
+        recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> { requireReviewedDealCreationWithinVisibilityScope(request, duplicateReviewToken); return null; });
+    }
+
+    private void requireReviewedDealCreationWithinVisibilityScope(
             DealDuplicatePreflightRequest request,
             String duplicateReviewToken) {
         NormalizedDealRequest normalized = normalizeDeal(
@@ -656,7 +675,7 @@ public class DuplicatePreflightService {
             || matched.size() > PUBLIC_CANDIDATE_LIMIT;
         Company company = request.companyId() == null
             ? null
-            : companyMapper.getCompanyById(workspaceId, request.companyId());
+            : companyMapper.getCompanyById(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), request.companyId());
         String companyName = company == null ? null : company.getName();
         DuplicateMatchEvidenceDto evidence = new DuplicateMatchEvidenceDto(
             DuplicateMatchKind.DEAL_KEY,

@@ -906,8 +906,8 @@ public class SegmentService {
             if (temperatures == null) {
                 temperatures = switch (recordType) {
                     case "company" -> candidateIds == null
-                            ? scoring.scoreCompanies(workspaceId)
-                            : scoring.scoreCompanies(workspaceId, candidateIds);
+                            ? scoring.scoreCompanies(workspaceId, orgWorkspaceIdsJson)
+                            : scoring.scoreCompanies(workspaceId, candidateIds, orgWorkspaceIdsJson);
                     case "person" -> candidateIds == null
                             ? scoring.scoreContacts(workspaceId)
                             : scoring.scoreContacts(workspaceId, candidateIds);

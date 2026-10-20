@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
+
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -49,6 +51,8 @@ public class AiSkillPlanRunner {
     private final WorkspaceService workspaceService;
     private final ObjectMapper objectMapper;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     /**
      * The outcome of one server-owned plan.
      *
@@ -91,6 +95,17 @@ public class AiSkillPlanRunner {
      * @return the plan outcome
      */
     public Execution run(
+            AiChatQueuedTurn turn,
+            AiSkillRouter.Routing routing,
+            AiChatQueryScope scope,
+            AiChatResourceRegistry resources,
+            int evidenceByteBudget,
+            Runnable guard) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            turn.workspaceId(), () -> runWithinVisibilityScope(turn, routing, scope, resources, evidenceByteBudget, guard));
+    }
+
+    private Execution runWithinVisibilityScope(
             AiChatQueuedTurn turn,
             AiSkillRouter.Routing routing,
             AiChatQueryScope scope,

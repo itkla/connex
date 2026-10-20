@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -196,7 +198,7 @@ class WarmthReconciliationIntegrationTest {
         Map<Integer, RelationshipTemperatureDto> aggregateCompanies = byId(
             scoringService.temperatures(
                 companyMapper.getRelationshipScoreAggregates(
-                    workspace.getId(),
+                    workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()),
                     LocalDateTime.ofInstant(REPORT_AS_OF, ZoneOffset.UTC),
                     MODEL.sqlParameters()),
                 REPORT_AS_OF),

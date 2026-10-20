@@ -261,7 +261,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 mock(CompanyMapper.class),
                 mock(DealMapper.class),
                 dateResolver,
-                mock(AiAssistantScopeReadService.class));
+                mock(AiAssistantScopeReadService.class), ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
         service = new AiAssistantWriteToolService(
                 catalog,
                 registry,
@@ -1281,7 +1281,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         Company company = new Company();
         company.setId(52);
         company.setName("Acme Holdings");
-        when(companyMapper.getByIds(TURN.workspaceId(), List.of(52)))
+        when(companyMapper.getByIds(TURN.workspaceId(), "[7,8,9]", List.of(52)))
                 .thenReturn(List.of(company));
         when(dealMapper.getByIds(TURN.workspaceId(), List.of(44))).thenReturn(List.of(deal()));
         AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
@@ -1603,7 +1603,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 .thenReturn(List.of());
         when(readPersonMapper.getByIds(TURN.workspaceId(), List.of(31)))
                 .thenReturn(List.of(ownedPerson(31, 21)));
-        when(companyMapper.getByIds(TURN.workspaceId(), List.of(52)))
+        when(companyMapper.getByIds(TURN.workspaceId(), "[7,8,9]", List.of(52)))
                 .thenReturn(List.of(ownedCompany(52, 11)));
         when(dealMapper.getByIds(TURN.workspaceId(), List.of(44)))
                 .thenReturn(List.of(ownedDeal(44, 77)));
@@ -1790,7 +1790,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         when(readChatMapper.listAssistantMessagesBySessionAndTurnIds(
                 TURN.workspaceId(), TURN.sessionId(), List.of(TURN.turnId()), 100))
                 .thenReturn(List.of());
-        when(companyMapper.getByIds(TURN.workspaceId(), List.of(52)))
+        when(companyMapper.getByIds(TURN.workspaceId(), "[7,8,9]", List.of(52)))
                 .thenReturn(List.of(ownedCompany(52, 11)));
         AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
         AiAssistantToolCallReadService readService = new AiAssistantToolCallReadService(

@@ -83,8 +83,20 @@ public class RecordCommentService {
     private final AuditService auditService;
     private final ObjectMapper objectMapper;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     /** Returns one bounded page of threads for a currently visible record. */
     public List<RecordCommentThread> listThreads(
+            String targetTypeRaw,
+            int targetId,
+            String stateRaw,
+            int limit,
+            int offset) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> listThreadsWithinVisibilityScope(targetTypeRaw, targetId, stateRaw, limit, offset));
+    }
+
+    private List<RecordCommentThread> listThreadsWithinVisibilityScope(
             String targetTypeRaw,
             int targetId,
             String stateRaw,
@@ -103,6 +115,11 @@ public class RecordCommentService {
 
     /** Counts threads for a currently visible record and state filter. */
     public long countThreads(String targetTypeRaw, int targetId, String stateRaw) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> countThreadsWithinVisibilityScope(targetTypeRaw, targetId, stateRaw));
+    }
+
+    private long countThreadsWithinVisibilityScope(String targetTypeRaw, int targetId, String stateRaw) {
         TargetType targetType = TargetType.parse(targetTypeRaw);
         ThreadState state = ThreadState.parse(stateRaw);
         requireTargetId(targetId);
@@ -114,6 +131,11 @@ public class RecordCommentService {
 
     /** Returns one thread after revalidating current target visibility. */
     public RecordCommentThread getThread(long threadId) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> getThreadWithinVisibilityScope(threadId));
+    }
+
+    private RecordCommentThread getThreadWithinVisibilityScope(long threadId) {
         requirePositiveId(threadId, "Thread");
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         RecordCommentThread thread = requireThread(workspaceId, threadId);
@@ -123,6 +145,13 @@ public class RecordCommentService {
 
     /** Returns open-thread counts for currently visible targets in one bounded batch. */
     public List<RecordCommentIndicatorDto> getIndicators(
+            String targetTypeRaw,
+            List<Integer> targetIds) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> getIndicatorsWithinVisibilityScope(targetTypeRaw, targetIds));
+    }
+
+    private List<RecordCommentIndicatorDto> getIndicatorsWithinVisibilityScope(
             String targetTypeRaw,
             List<Integer> targetIds) {
         TargetType targetType = TargetType.parse(targetTypeRaw);
@@ -140,6 +169,15 @@ public class RecordCommentService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.COMMENT_CREATE)
     public RecordCommentThread createThread(
+            String targetTypeRaw,
+            int targetId,
+            String contentRaw,
+            String clientTokenRaw) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> createThreadWithinVisibilityScope(targetTypeRaw, targetId, contentRaw, clientTokenRaw));
+    }
+
+    private RecordCommentThread createThreadWithinVisibilityScope(
             String targetTypeRaw,
             int targetId,
             String contentRaw,
@@ -192,6 +230,11 @@ public class RecordCommentService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.COMMENT_CREATE)
     public RecordComment reply(long threadId, String contentRaw, String clientTokenRaw) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> replyWithinVisibilityScope(threadId, contentRaw, clientTokenRaw));
+    }
+
+    private RecordComment replyWithinVisibilityScope(long threadId, String contentRaw, String clientTokenRaw) {
         requirePositiveId(threadId, "Thread");
         String content = requireContent(contentRaw);
         String clientToken = requireClientToken(clientTokenRaw);
@@ -257,6 +300,11 @@ public class RecordCommentService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.COMMENT_CREATE)
     public void deleteComment(long commentId) {
+        recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> { deleteCommentWithinVisibilityScope(commentId); return null; });
+    }
+
+    private void deleteCommentWithinVisibilityScope(long commentId) {
         requirePositiveId(commentId, "Comment");
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = workspaceService.getCurrentUserId();
@@ -309,6 +357,11 @@ public class RecordCommentService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.COMMENT_CREATE)
     public RecordComment editComment(long commentId, String contentRaw) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> editCommentWithinVisibilityScope(commentId, contentRaw));
+    }
+
+    private RecordComment editCommentWithinVisibilityScope(long commentId, String contentRaw) {
         requirePositiveId(commentId, "Comment");
         String content = requireContent(contentRaw);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
@@ -377,6 +430,11 @@ public class RecordCommentService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.COMMENT_CREATE)
     public List<RecordCommentReactionSummary> addReaction(long commentId, String reactionRaw) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> addReactionWithinVisibilityScope(commentId, reactionRaw));
+    }
+
+    private List<RecordCommentReactionSummary> addReactionWithinVisibilityScope(long commentId, String reactionRaw) {
         ReactionContext context = reactionContext(commentId, reactionRaw);
         if (context.comment().getDeletedAt() != null) {
             throw new BadRequestException("Redacted comments cannot receive new reactions");
@@ -400,6 +458,11 @@ public class RecordCommentService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.COMMENT_CREATE)
     public List<RecordCommentReactionSummary> removeReaction(long commentId, String reactionRaw) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> removeReactionWithinVisibilityScope(commentId, reactionRaw));
+    }
+
+    private List<RecordCommentReactionSummary> removeReactionWithinVisibilityScope(long commentId, String reactionRaw) {
         ReactionContext context = reactionContext(commentId, reactionRaw);
         recordCommentMapper.deleteReaction(
             context.workspaceId(), commentId, context.actorId(), context.reaction().wire());
@@ -429,6 +492,11 @@ public class RecordCommentService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.COMMENT_CREATE)
     public RecordCommentThread resolve(long threadId, int expectedVersion) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> resolveWithinVisibilityScope(threadId, expectedVersion));
+    }
+
+    private RecordCommentThread resolveWithinVisibilityScope(long threadId, int expectedVersion) {
         return transitionThread(threadId, expectedVersion, ThreadState.RESOLVED);
     }
 
@@ -436,6 +504,11 @@ public class RecordCommentService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.COMMENT_CREATE)
     public RecordCommentThread reopen(long threadId, int expectedVersion) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> reopenWithinVisibilityScope(threadId, expectedVersion));
+    }
+
+    private RecordCommentThread reopenWithinVisibilityScope(long threadId, int expectedVersion) {
         return transitionThread(threadId, expectedVersion, ThreadState.OPEN);
     }
 
@@ -734,7 +807,7 @@ public class RecordCommentService {
     private boolean isTargetVisible(int workspaceId, TargetType targetType, int targetId) {
         return switch (targetType) {
             case PERSON -> personMapper.exists(workspaceId, targetId);
-            case COMPANY -> companyMapper.exists(workspaceId, targetId);
+            case COMPANY -> companyMapper.exists(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), targetId);
             case DEAL -> dealMapper.exists(workspaceId, targetId);
         };
     }
@@ -747,7 +820,7 @@ public class RecordCommentService {
             case PERSON -> personMapper.getByIds(workspaceId, targetIds).stream()
                 .map(Person::getId)
                 .toList();
-            case COMPANY -> companyMapper.getByIds(workspaceId, targetIds).stream()
+            case COMPANY -> companyMapper.getByIds(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), targetIds).stream()
                 .map(Company::getId)
                 .toList();
             case DEAL -> dealMapper.getByIds(workspaceId, targetIds).stream()

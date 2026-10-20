@@ -172,8 +172,8 @@ class RecordCreationAugmentationServiceTest {
         submittedCompany.setId(55);
         Company contextCompany = new Company();
         contextCompany.setId(60);
-        when(companyMapper.getVisibleCompanyByIdForUpdate(7, 55)).thenReturn(submittedCompany);
-        when(companyMapper.getVisibleCompanyByIdForUpdate(7, 60)).thenReturn(contextCompany);
+        when(companyMapper.getVisibleCompanyByIdForUpdate(7, "[7,8,9]", 55)).thenReturn(submittedCompany);
+        when(companyMapper.getVisibleCompanyByIdForUpdate(7, "[7,8,9]", 60)).thenReturn(contextCompany);
         when(personMapper.insertTags(7, 101, List.of(4))).thenReturn(1);
 
         RecordCreationAugmentationService.PreparedAugmentation prepared =
@@ -191,8 +191,8 @@ class RecordCreationAugmentationServiceTest {
         order.verify(tagMapper).getTagByIdForUpdate(7, 4);
         order.verify(personMapper).getVisiblePersonByIdForUpdate(7, 50);
         order.verify(shareMapper).lockPersonShareForWorkspace(50, 7);
-        order.verify(companyMapper).getVisibleCompanyByIdForUpdate(7, 55);
-        order.verify(companyMapper).getVisibleCompanyByIdForUpdate(7, 60);
+        order.verify(companyMapper).getVisibleCompanyByIdForUpdate(7, "[7,8,9]", 55);
+        order.verify(companyMapper).getVisibleCompanyByIdForUpdate(7, "[7,8,9]", 60);
         order.verify(shareMapper).lockCompanyShareForWorkspace(55, 7);
         order.verify(shareMapper).lockCompanyShareForWorkspace(60, 7);
         order.verify(customFieldValueService).applyJsonValuesForCreate(

@@ -93,9 +93,18 @@ public class WorkflowManualRunService {
     private final SystemActor systemActor;
     private final ObjectMapper objectMapper;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     @Transactional
     @RequirePermission(Permission.RULE_MANAGE)
     public WorkflowManualPreparationDto prepare(
+            int workflowId,
+            WorkflowManualPrepareRequest request) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> prepareWithinVisibilityScope(workflowId, request));
+    }
+
+    private WorkflowManualPreparationDto prepareWithinVisibilityScope(
             int workflowId,
             WorkflowManualPrepareRequest request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();

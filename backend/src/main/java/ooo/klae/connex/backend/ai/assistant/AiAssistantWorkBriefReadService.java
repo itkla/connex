@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
+
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -74,6 +76,8 @@ public class AiAssistantWorkBriefReadService {
     private final Clock clock;
     private final ReferenceService referenceService;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     /**
      * Reads the actor's overdue and imminently due open commitments.
      *
@@ -84,6 +88,12 @@ public class AiAssistantWorkBriefReadService {
      * @return bounded commitments plus the counts, caps, and exclusions behind them
      */
     public AiAssistantToolResult workCommitments(
+            int userId, int periodDays, int limit, AiChatResourceRegistry resources) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> workCommitmentsWithinVisibilityScope(userId, periodDays, limit, resources));
+    }
+
+    private AiAssistantToolResult workCommitmentsWithinVisibilityScope(
             int userId, int periodDays, int limit, AiChatResourceRegistry resources) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int bound = bound(limit, AiChatScopeBounds.MAX_BRIEF_COMMITMENTS);
@@ -170,6 +180,11 @@ public class AiAssistantWorkBriefReadService {
      * @return bounded cooling contacts and companies with their authoritative warmth figures
      */
     public AiAssistantToolResult warmthMovement(int limit, AiChatResourceRegistry resources) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> warmthMovementWithinVisibilityScope(limit, resources));
+    }
+
+    private AiAssistantToolResult warmthMovementWithinVisibilityScope(int limit, AiChatResourceRegistry resources) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int bound = bound(limit, AiChatScopeBounds.MAX_BRIEF_WARMTH_MOVES);
         List<RelationshipTemperatureDto> readContacts =
@@ -219,6 +234,12 @@ public class AiAssistantWorkBriefReadService {
      * @return bounded scheduled activities plus the counts, caps, and exclusions behind them
      */
     public AiAssistantToolResult upcomingMeetings(
+            int userId, int periodDays, int limit, AiChatResourceRegistry resources) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> upcomingMeetingsWithinVisibilityScope(userId, periodDays, limit, resources));
+    }
+
+    private AiAssistantToolResult upcomingMeetingsWithinVisibilityScope(
             int userId, int periodDays, int limit, AiChatResourceRegistry resources) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int bound = bound(limit, AiChatScopeBounds.MAX_BRIEF_MEETINGS);
@@ -361,7 +382,7 @@ public class AiAssistantWorkBriefReadService {
             return Map.of();
         }
         Map<Integer, String> labels = new LinkedHashMap<>();
-        for (Company company : companyMapper.getByIds(workspaceId, ids)) {
+        for (Company company : companyMapper.getByIds(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), ids)) {
             if (company.getArchivedAt() != null
                     || company.getName() == null || company.getName().isBlank()) {
                 continue;

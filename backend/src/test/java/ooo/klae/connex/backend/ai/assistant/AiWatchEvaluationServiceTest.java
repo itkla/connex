@@ -78,7 +78,7 @@ class AiWatchEvaluationServiceTest {
                 watchMapper, featureGate, subjectReader, taskMapper, scoringService, dealRiskService,
                 workspaceScopeControlAccess, notificationDelivery, contextRunner, userService,
                 workspaceService, JsonMapper.builder().build(), transactionManager,
-                Clock.fixed(instant, ZoneOffset.UTC));
+                Clock.fixed(instant, ZoneOffset.UTC), ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
     }
 
     @BeforeEach

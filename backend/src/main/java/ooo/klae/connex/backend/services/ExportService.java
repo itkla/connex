@@ -119,9 +119,15 @@ public class ExportService {
     public String exportCompanies(String query, List<String> industry, boolean noIndustry, List<Integer> ids,
             MemberScope memberScope, WarmthFilter warmth) {
         requireExportStepUp();
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> exportCompaniesWithinVisibilityScope(query, industry, noIndustry, ids, memberScope, warmth));
+    }
+
+    private String exportCompaniesWithinVisibilityScope(String query, List<String> industry, boolean noIndustry, List<Integer> ids,
+            MemberScope memberScope, WarmthFilter warmth) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         List<Company> companies = companyMapper.getCompaniesFiltered(
-            workspaceId, query, industry, noIndustry, ids, memberScope, false, warmth);
+            workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), query, industry, noIndustry, ids, memberScope, false, warmth);
         List<CustomFieldDefinition> defs = activeDefinitions(workspaceId, "company");
         Map<Integer, Map<Integer, Object>> custom =
             customFieldValueService.getForEntities("company", companies.stream().map(Company::getId).toList());

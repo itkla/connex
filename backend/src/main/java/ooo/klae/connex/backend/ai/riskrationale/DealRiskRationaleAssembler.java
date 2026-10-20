@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai.riskrationale;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
+
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
@@ -59,6 +61,8 @@ public class DealRiskRationaleAssembler {
     private final ScoringService scoringService;
     private final AiRelationshipContext aiRelationshipContext;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     /**
      * Builds a masked rationale prompt from deterministic risk and the active workspace's deal view.
      * An interrupted worker stops immediately after each deal load, warmth scoring, the account
@@ -71,6 +75,11 @@ public class DealRiskRationaleAssembler {
      * @throws java.util.concurrent.CancellationException when the current thread is interrupted
      */
     public RationaleAssembly assemble(int workspaceId, int dealId, DealRiskDto risk) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceId, () -> assembleWithinVisibilityScope(workspaceId, dealId, risk));
+    }
+
+    private RationaleAssembly assembleWithinVisibilityScope(int workspaceId, int dealId, DealRiskDto risk) {
         Objects.requireNonNull(risk, "risk");
         Deal deal = dealService.getDealById(dealId);
         AiCancellation.throwIfInterrupted();

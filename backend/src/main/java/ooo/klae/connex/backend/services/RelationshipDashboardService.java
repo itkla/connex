@@ -41,11 +41,18 @@ public class RelationshipDashboardService {
     private final CompanyMapper companyMapper;
     private final DealMapper dealMapper;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     private static final int DASHBOARD_LIMIT = 6;
 
     /** Computes and hydrates the bounded dashboard relationship snapshot. */
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public RelationshipDashboardDto getDashboard(int workspaceId) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceId, () -> getDashboardWithinVisibilityScope(workspaceId));
+    }
+
+    private RelationshipDashboardDto getDashboardWithinVisibilityScope(int workspaceId) {
         ScoringService.WorkspaceScores scores = scoringService.scoreWorkspace(workspaceId);
         List<RelationshipTemperatureDto> contactScores = scores.contacts();
         List<RelationshipTemperatureDto> companyScores = scores.companies();
@@ -133,7 +140,7 @@ public class RelationshipDashboardService {
     private Map<Integer, Company> companiesById(int workspaceId, Set<Integer> ids) {
         if (ids.isEmpty()) return Map.of();
         Map<Integer, Company> result = new HashMap<>();
-        for (Company company : companyMapper.getByIds(workspaceId, List.copyOf(ids))) {
+        for (Company company : companyMapper.getByIds(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), List.copyOf(ids))) {
             result.put(company.getId(), company);
         }
         return result;

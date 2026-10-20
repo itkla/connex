@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai.brief;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
+
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -62,6 +64,8 @@ public class DealBriefAssembler {
     private final AiRelationshipContext aiRelationshipContext;
     private final PersonMapper personMapper;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     /**
      * Builds a masked brief prompt from the active workspace's view of a deal. An interrupted
      * worker stops immediately after the CRM load, person lookup batch, or stakeholder enrichment
@@ -73,6 +77,11 @@ public class DealBriefAssembler {
      * @throws java.util.concurrent.CancellationException when the current thread is interrupted
      */
     public BriefAssembly assemble(int workspaceId, int dealId) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceId, () -> assembleWithinVisibilityScope(workspaceId, dealId));
+    }
+
+    private BriefAssembly assembleWithinVisibilityScope(int workspaceId, int dealId) {
         Deal deal = dealService.getDealById(dealId);
         AiCancellation.throwIfInterrupted();
         if (deal == null) {

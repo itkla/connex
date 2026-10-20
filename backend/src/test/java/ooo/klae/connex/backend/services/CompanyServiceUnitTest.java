@@ -49,7 +49,7 @@ class CompanyServiceUnitTest {
         prefixOnly.setName("Analytical Labs Group");
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(mapper.findVisibleNameCandidates(
-                7, "analytical%labs%", "analytical labs", 17))
+                7, "[7,8,9]", "analytical%labs%", "analytical labs", 17))
             .thenReturn(List.of(exact, prefixOnly));
         CompanyService service = companyService(mapper, workspaceService);
 
@@ -57,8 +57,8 @@ class CompanyServiceUnitTest {
             service.findVisibleByNormalizedName("  Ａnalytical　Labs  ").companies());
 
         verify(mapper).findVisibleNameCandidates(
-            7, "analytical%labs%", "analytical labs", 17);
-        verify(mapper, never()).getAllCompanies(7);
+            7, "[7,8,9]", "analytical%labs%", "analytical labs", 17);
+        verify(mapper, never()).getAllCompanies(7, "[7,8,9]");
     }
 
     @Test
@@ -71,19 +71,19 @@ class CompanyServiceUnitTest {
         List<Integer> matchingIds = List.of(3);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(mapper.countCompanies(
-            7, "%Target%", industry, true, requestedIds, MemberScope.allTeam(), false, null))
+            7, "[7,8,9]", "%Target%", industry, true, requestedIds, MemberScope.allTeam(), false, null))
             .thenReturn(1L);
         when(mapper.getCompanyIdsFiltered(
-            7, "%Target%", industry, true, requestedIds, MemberScope.allTeam(), false, null, 1000, 0))
+            7, "[7,8,9]", "%Target%", industry, true, requestedIds, MemberScope.allTeam(), false, null, 1000, 0))
             .thenReturn(matchingIds);
 
         assertEquals(matchingIds, service.getMatchingCompanyIds(
             "%Target%", industry, true, requestedIds, MemberScope.allTeam(), false, null));
 
         verify(mapper).countCompanies(
-            7, "%Target%", industry, true, requestedIds, MemberScope.allTeam(), false, null);
+            7, "[7,8,9]", "%Target%", industry, true, requestedIds, MemberScope.allTeam(), false, null);
         verify(mapper).getCompanyIdsFiltered(
-            7, "%Target%", industry, true, requestedIds, MemberScope.allTeam(), false, null, 1000, 0);
+            7, "[7,8,9]", "%Target%", industry, true, requestedIds, MemberScope.allTeam(), false, null, 1000, 0);
     }
 
     @Test
@@ -93,13 +93,13 @@ class CompanyServiceUnitTest {
         CompanyService service = companyService(mapper, workspaceService);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(mapper.countCompanies(
-            7, "%Target%", null, false, null, MemberScope.allTeam(), false, null)).thenReturn(1001L);
+            7, "[7,8,9]", "%Target%", null, false, null, MemberScope.allTeam(), false, null)).thenReturn(1001L);
 
         assertThrows(BadRequestException.class, () -> service.getMatchingCompanyIds(
             "%Target%", null, false, null, MemberScope.allTeam(), false, null));
 
         verify(mapper, never()).getCompanyIdsFiltered(
-            7, "%Target%", null, false, null, MemberScope.allTeam(), false, null, 1000, 0);
+            7, "[7,8,9]", "%Target%", null, false, null, MemberScope.allTeam(), false, null, 1000, 0);
     }
 
     @Test
@@ -109,7 +109,7 @@ class CompanyServiceUnitTest {
         DealMapper dealMapper = mock(DealMapper.class);
         WorkspaceService workspaceService = mock(WorkspaceService.class);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
-        when(mapper.exists(7, 9)).thenReturn(true);
+        when(mapper.exists(7, "[7,8,9]", 9)).thenReturn(true);
         when(mapper.getCompanyEngagementCounts(7, 9))
             .thenReturn(new CompanyEngagementCountsDto(12, 4, 3, 1, 2, 1));
         when(mapper.getCompanyEngagementUsers(7, 9, 5)).thenReturn(List.of());
@@ -132,7 +132,7 @@ class CompanyServiceUnitTest {
             mock(MatchingService.class),
             mock(DuplicatePreflightService.class),
             mock(DuplicateDecisionLockService.class),
-            mock(RecordCreationAugmentationService.class));
+            mock(RecordCreationAugmentationService.class), ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
 
         var engagement = service.getCompanyEngagement(9);
 
@@ -158,7 +158,7 @@ class CompanyServiceUnitTest {
         Note note = new Note();
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(workspaceService.getCurrentUserId()).thenReturn(11);
-        when(mapper.exists(7, 9)).thenReturn(true);
+        when(mapper.exists(7, "[7,8,9]", 9)).thenReturn(true);
         when(activityMapper.getCompanyActivities(7, 9, 25)).thenReturn(List.of(activity));
         when(taskMapper.getCompanyTasks(7, 9, 25)).thenReturn(List.of(task));
         when(noteMapper.getVisibleCompanyNotes(7, 9, 11, 25)).thenReturn(List.of(note));
@@ -176,7 +176,7 @@ class CompanyServiceUnitTest {
             mock(MatchingService.class),
             mock(DuplicatePreflightService.class),
             mock(DuplicateDecisionLockService.class),
-            mock(RecordCreationAugmentationService.class));
+            mock(RecordCreationAugmentationService.class), ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
 
         CompanyService.CompanyTimelineData timeline = service.getCompanyTimeline(9, 25);
 
@@ -201,7 +201,7 @@ class CompanyServiceUnitTest {
 
         assertThrows(NullPointerException.class, () -> service.countsByWarmthBand(null));
 
-        verify(mapper, never()).countsByWarmthBand(anyInt(), any());
+        verify(mapper, never()).countsByWarmthBand(anyInt(), org.mockito.ArgumentMatchers.anyString(), any());
     }
 
     private CompanyService companyService(CompanyMapper mapper, WorkspaceService workspaceService) {
@@ -228,7 +228,7 @@ class CompanyServiceUnitTest {
             mock(DuplicatePreflightService.class),
             mock(DuplicateDecisionLockService.class),
             mock(RecordCreationAugmentationService.class)
-        );
+        , ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
     }
 
     private static MatchingService matchingService() {

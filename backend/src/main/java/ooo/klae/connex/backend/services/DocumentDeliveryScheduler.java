@@ -47,6 +47,8 @@ public class DocumentDeliveryScheduler {
     private final SignatureProperties properties;
     private final JobRunRecorder jobRunRecorder;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     /** Sweeps every active placement without opening a transaction at the scheduler entry point. */
     @Scheduled(
         fixedDelayString = "${connex.signature.expiry-delay-ms:300000}",
@@ -105,6 +107,7 @@ public class DocumentDeliveryScheduler {
     }
 
     private int expireWorkspace(int workspaceId) {
+        recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         if (properties.getExpiryBatchSize() <= 0) {
             throw new IllegalStateException("Document-delivery expiry batch size must be positive");
         }

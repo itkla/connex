@@ -46,7 +46,7 @@ class AiWatchServiceTest {
 
     private final AiWatchService service = new AiWatchService(
             watchMapper, workspaceMapper, featureGate, subjectReader, workspaceService,
-            Clock.fixed(NOW, ZoneOffset.UTC));
+            Clock.fixed(NOW, ZoneOffset.UTC), ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
 
     @BeforeEach
     void installIdentity() {

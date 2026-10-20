@@ -52,6 +52,11 @@ public class PipelineService {
     }
 
     public Pipeline getPipelineById(int id) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> getPipelineByIdWithinVisibilityScope(id));
+    }
+
+    private Pipeline getPipelineByIdWithinVisibilityScope(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         Pipeline pipeline = pipelineMapper.getPipelineById(workspaceId, orgWorkspaceIdsJson, id);
@@ -98,6 +103,11 @@ public class PipelineService {
     // Stage operations (will likely move to separate StageService in the future)
 
     public List<Stage> getStagesByPipelineId(int pipelineId) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> getStagesByPipelineIdWithinVisibilityScope(pipelineId));
+    }
+
+    private List<Stage> getStagesByPipelineIdWithinVisibilityScope(int pipelineId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         requirePipeline(workspaceId, orgWorkspaceIdsJson, pipelineId);
@@ -113,6 +123,11 @@ public class PipelineService {
     }
 
     public Stage getStageById(int id) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> getStageByIdWithinVisibilityScope(id));
+    }
+
+    private Stage getStageByIdWithinVisibilityScope(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         Stage stage = pipelineMapper.getVisibleStageById(workspaceId, orgWorkspaceIdsJson, id);
@@ -345,6 +360,11 @@ public class PipelineService {
      * Retrieves the deals associated with a pipeline in the active workspace.
      */
     public List<Deal> getDealsByPipelineId(int pipelineId) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> getDealsByPipelineIdWithinVisibilityScope(pipelineId));
+    }
+
+    private List<Deal> getDealsByPipelineIdWithinVisibilityScope(int pipelineId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         requirePipeline(workspaceId, orgWorkspaceIdsJson, pipelineId);
@@ -356,6 +376,11 @@ public class PipelineService {
      * Retrieves the deals associated with a stage in the active workspace.
      */
     public List<Deal> getDealsByStageId(int stageId) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> getDealsByStageIdWithinVisibilityScope(stageId));
+    }
+
+    private List<Deal> getDealsByStageIdWithinVisibilityScope(int stageId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         if (pipelineMapper.getVisibleStageById(workspaceId, orgWorkspaceIdsJson, stageId) == null)

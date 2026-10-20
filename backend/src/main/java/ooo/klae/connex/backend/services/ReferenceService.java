@@ -64,6 +64,8 @@ public class ReferenceService {
     private final ActivityMapper activityMapper;
     private final WorkspaceMapper workspaceMapper;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     public static final String SOURCE_NOTE = "note";
     public static final String SOURCE_TASK = "task";
     public static final String SOURCE_ACTIVITY = "activity";
@@ -124,6 +126,11 @@ public class ReferenceService {
      */
     @Transactional
     public List<Integer> syncReferences(int workspaceId, String sourceType, int sourceId, String content) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceId, () -> syncReferencesWithinVisibilityScope(workspaceId, sourceType, sourceId, content));
+    }
+
+    private List<Integer> syncReferencesWithinVisibilityScope(int workspaceId, String sourceType, int sourceId, String content) {
         List<EntityReference> previous = entityReferenceMapper.findBySource(workspaceId, sourceType, sourceId);
         Set<Integer> before = mentionedMemberIds(previous);
         int currentUserId = workspaceService.getCurrentUserId();
@@ -152,6 +159,11 @@ public class ReferenceService {
      */
     @Transactional
     public List<Integer> syncReferences(int workspaceId, int noteId, String content) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceId, () -> syncReferencesWithinVisibilityScope(workspaceId, noteId, content));
+    }
+
+    private List<Integer> syncReferencesWithinVisibilityScope(int workspaceId, int noteId, String content) {
         return syncReferences(workspaceId, SOURCE_NOTE, noteId, content);
     }
 
@@ -211,6 +223,11 @@ public class ReferenceService {
      * @return the same notes, each with its references populated
      */
     public List<Note> hydrate(int workspaceId, List<Note> notes) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceId, () -> hydrateWithinVisibilityScope(workspaceId, notes));
+    }
+
+    private List<Note> hydrateWithinVisibilityScope(int workspaceId, List<Note> notes) {
         if (notes == null || notes.isEmpty()) {
             return notes;
         }
@@ -225,6 +242,11 @@ public class ReferenceService {
 
     /** Hydrates a SQL-bounded note page and truncates content only after reader-specific redaction. */
     public List<Note> hydrateNotePreviews(int workspaceId, List<Note> notes) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceId, () -> hydrateNotePreviewsWithinVisibilityScope(workspaceId, notes));
+    }
+
+    private List<Note> hydrateNotePreviewsWithinVisibilityScope(int workspaceId, List<Note> notes) {
         List<Note> hydrated = hydrate(workspaceId, notes);
         if (hydrated == null) {
             return List.of();
@@ -247,6 +269,11 @@ public class ReferenceService {
      * @return the same tasks, each with its references populated
      */
     public List<Task> hydrateTasks(int workspaceId, List<Task> tasks) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceId, () -> hydrateTasksWithinVisibilityScope(workspaceId, tasks));
+    }
+
+    private List<Task> hydrateTasksWithinVisibilityScope(int workspaceId, List<Task> tasks) {
         if (tasks == null || tasks.isEmpty()) {
             return tasks;
         }
@@ -268,6 +295,11 @@ public class ReferenceService {
      * @return the same deals with reader-scoped close reasons and references
      */
     public List<Deal> hydrateDeals(int workspaceId, List<Deal> deals) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceId, () -> hydrateDealsWithinVisibilityScope(workspaceId, deals));
+    }
+
+    private List<Deal> hydrateDealsWithinVisibilityScope(int workspaceId, List<Deal> deals) {
         if (deals == null || deals.isEmpty()) {
             return deals;
         }
@@ -298,6 +330,11 @@ public class ReferenceService {
      * @return the same activities, each with its references populated
      */
     public List<Activity> hydrateActivities(int workspaceId, List<Activity> activities) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceId, () -> hydrateActivitiesWithinVisibilityScope(workspaceId, activities));
+    }
+
+    private List<Activity> hydrateActivitiesWithinVisibilityScope(int workspaceId, List<Activity> activities) {
         if (activities == null || activities.isEmpty()) {
             return activities;
         }
@@ -345,6 +382,12 @@ public class ReferenceService {
      * @return reader-visible pairs in input order
      */
     public List<ReaderVisibleContent> redactInvisibleTargets(
+            int workspaceId, List<ReaderVisibleContent> items) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceId, () -> redactInvisibleTargetsWithinVisibilityScope(workspaceId, items));
+    }
+
+    private List<ReaderVisibleContent> redactInvisibleTargetsWithinVisibilityScope(
             int workspaceId, List<ReaderVisibleContent> items) {
         if (items == null || items.isEmpty()) {
             return List.of();
@@ -414,7 +457,7 @@ public class ReferenceService {
             case TYPE_USER -> workspaceService.isMemberIncludingPending(workspaceId, refId);
             case TYPE_PERSON -> personMapper.exists(workspaceId, refId);
             case TYPE_DEAL -> dealMapper.exists(workspaceId, refId);
-            case TYPE_COMPANY -> companyMapper.exists(workspaceId, refId);
+            case TYPE_COMPANY -> companyMapper.exists(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), refId);
             case TYPE_NOTE -> noteMapper.getVisibleNoteById(workspaceId, refId, currentUserId) != null;
             case TYPE_FILE -> !attachmentMapper.getVisibleIdsIn(
                 workspaceId, List.of(refId), currentUserId).isEmpty();
@@ -447,6 +490,11 @@ public class ReferenceService {
      * @return the canonical reference type
      */
     public String requireVisibleTarget(int workspaceId, String type, int refId, int currentUserId) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceId, () -> requireVisibleTargetWithinVisibilityScope(workspaceId, type, refId, currentUserId));
+    }
+
+    private String requireVisibleTargetWithinVisibilityScope(int workspaceId, String type, int refId, int currentUserId) {
         String canonicalType = canonicalReferenceType(type);
         if (canonicalType == null || refId <= 0) {
             throw new ResourceNotFoundException("Reference target not found");
@@ -479,6 +527,17 @@ public class ReferenceService {
      * @param <T>           the source bean type
      */
     private <T> void redactInvisibleTargets(
+            int workspaceId,
+            List<T> items,
+            Function<T, List<EntityReference>> getReferences,
+            BiConsumer<T, List<EntityReference>> setReferences,
+            Function<T, String> getContent,
+            BiConsumer<T, String> setContent) {
+        recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceId, () -> { redactInvisibleTargetsWithinVisibilityScope(workspaceId, items, getReferences, setReferences, getContent, setContent); return null; });
+    }
+
+    private <T> void redactInvisibleTargetsWithinVisibilityScope(
             int workspaceId,
             List<T> items,
             Function<T, List<EntityReference>> getReferences,
@@ -605,7 +664,7 @@ public class ReferenceService {
             case TYPE_USER -> workspaceMapper.getMemberIdsIncludingPending(workspaceId, ids);
             case TYPE_PERSON -> personMapper.getVisibleIdsIn(workspaceId, ids);
             case TYPE_DEAL -> dealMapper.getVisibleIdsIn(workspaceId, ids);
-            case TYPE_COMPANY -> companyMapper.getVisibleIdsIn(workspaceId, ids);
+            case TYPE_COMPANY -> companyMapper.getVisibleIdsIn(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), ids);
             case TYPE_NOTE -> noteMapper.getVisibleNoteIdsIn(workspaceId, ids, currentUserId);
             case TYPE_FILE -> attachmentMapper.getVisibleIdsIn(workspaceId, ids, currentUserId);
             case TYPE_TASK -> taskMapper.getVisibleIdsIn(workspaceId, ids);
