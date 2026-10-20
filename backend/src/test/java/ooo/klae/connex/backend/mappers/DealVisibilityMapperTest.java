@@ -161,8 +161,10 @@ class DealVisibilityMapperTest {
         assertEquals(fixture.personIds.getFirst(), fixture.dealMapper.getPrimaryContactsByDealIds(
             fixture.workspaceId, scope(), List.of(fixture.dealIds.getFirst())).getFirst().personId());
         for (int index = 0; index < 12; index++) {
-            controlJdbc.update("INSERT INTO deal (workspace_id, name, value, currency) VALUES (?, ?, 1, 'USD')",
-                fixture.workspaceId, "Search Needle %02d".formatted(index));
+            controlJdbc.update("INSERT INTO deal (workspace_id, name, value, currency, pipeline_id, stage_id) "
+                    + "VALUES (?, ?, 1, 'USD', ?, ?)",
+                fixture.workspaceId, "Search Needle %02d".formatted(index),
+                fixture.pipelineIds.getFirst(), fixture.stageIds.getFirst());
         }
         var read = DealVisibilityParity.cases(fixture, 0).stream()
             .filter(item -> "search".equals(item.statement())).findFirst().orElseThrow();
