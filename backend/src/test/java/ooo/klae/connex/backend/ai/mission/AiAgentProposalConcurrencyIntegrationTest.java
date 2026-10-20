@@ -45,9 +45,77 @@ class AiAgentProposalConcurrencyIntegrationTest extends AbstractAiAgentProposalI
     @MockitoSpyBean private AiAgentRunMapper runLocks;
     @MockitoSpyBean private WorkspaceService authority;
     @MockitoSpyBean private CompanyMapper companyLocks;
+    @MockitoSpyBean private ooo.klae.connex.backend.mappers.AiChatMapper chatLocks;
+    @MockitoSpyBean private ooo.klae.connex.backend.mappers.AiAgentPrivacyMapper privacyLocks;
     @Autowired private SqlSessionTemplate sqlSessions;
     @Autowired private AiAgentRealtimePublisher realtime;
     @MockitoBean private org.springframework.messaging.simp.SimpMessagingTemplate messaging;
+
+    @Test
+    void listReleasesEachItemsBarrierBeforePurgeAndQueuedBarrierWriterContend() throws Exception {
+        var older = frozen("assign_owner");
+        frozen("assign_owner");
+        String operation = invalidate();
+        CountDownLatch listBarrierHeld = new CountDownLatch(1);
+        CountDownLatch releaseList = new CountDownLatch(1);
+        CountDownLatch purgeSessionHeld = new CountDownLatch(1);
+        CountDownLatch releasePurge = new CountDownLatch(1);
+        CountDownLatch writerReached = new CountDownLatch(1);
+        CountDownLatch purgeBarrierReached = new CountDownLatch(1);
+        AtomicLong writerConnection = new AtomicLong();
+        AtomicLong purgeConnection = new AtomicLong();
+        AtomicBoolean firstListBarrier = new AtomicBoolean();
+        var real = sqlSessions.getMapper(ooo.klae.connex.backend.mappers.AiChatMapper.class);
+        doAnswer(invocation -> {
+            var barrier = real.lockPrivacyBarrierForShare(invocation.getArgument(0));
+            if (Thread.currentThread().getName().equals("mission-list") && firstListBarrier.compareAndSet(false, true)) {
+                listBarrierHeld.countDown();
+                await(releaseList);
+            }
+            return barrier;
+        }).when(chatLocks).lockPrivacyBarrierForShare(workspace.getId());
+        var realPrivacy = sqlSessions.getMapper(ooo.klae.connex.backend.mappers.AiAgentPrivacyMapper.class);
+        doAnswer(invocation -> {
+            if (Thread.currentThread().getName().equals("mission-purge")) {
+                purgeConnection.set(jdbc.queryForObject("SELECT CONNECTION_ID()", Long.class));
+                purgeBarrierReached.countDown();
+            }
+            return realPrivacy.lockBarrierForShare(invocation.getArgument(0));
+        }).when(privacyLocks).lockBarrierForShare(workspace.getId());
+        doAnswer(invocation -> {
+            var session = real.getSessionByIdForMaintenanceUpdate(invocation.getArgument(0), invocation.getArgument(1));
+            if (Thread.currentThread().getName().equals("mission-purge")) {
+                purgeSessionHeld.countDown();
+                await(releasePurge);
+            }
+            return session;
+        }).when(chatLocks).getSessionByIdForMaintenanceUpdate(workspace.getId(), older.sessionId());
+        try (var executor = Executors.newFixedThreadPool(3)) {
+            var listing = executor.submit(() -> asActor("mission-list", () -> service.list(20, null, null, null)));
+            try {
+                assertTrue(listBarrierHeld.await(10, TimeUnit.SECONDS));
+                var pruning = executor.submit(() -> asActor("mission-purge", () -> privacyService.batch(workspace.getId(), operation)));
+                assertTrue(purgeSessionHeld.await(10, TimeUnit.SECONDS));
+                var writer = executor.submit(() -> asActor("barrier-writer", () -> transaction().execute(status -> {
+                    writerConnection.set(jdbc.queryForObject("SELECT CONNECTION_ID()", Long.class));
+                    writerReached.countDown();
+                    return jdbc.queryForList("SELECT workspace_id FROM ai_agent_privacy_barrier WHERE workspace_id=? FOR UPDATE", workspace.getId());
+                })));
+                assertTrue(writerReached.await(10, TimeUnit.SECONDS));
+                MySqlLockWaitProbe.awaitExclusiveRecordLock(jdbc, writerConnection.get(), "ai_agent_privacy_barrier", Integer.toString(workspace.getId()));
+                releasePurge.countDown();
+                assertTrue(purgeBarrierReached.await(10, TimeUnit.SECONDS));
+                MySqlLockWaitProbe.awaitSharedRecordLockBehindQueuedWriter(jdbc, purgeConnection.get(), "ai_agent_privacy_barrier", Integer.toString(workspace.getId()));
+                releaseList.countDown();
+                assertNull(listing.get(10, TimeUnit.SECONDS).error());
+                assertNull(pruning.get(10, TimeUnit.SECONDS).error());
+                assertNull(writer.get(10, TimeUnit.SECONDS).error());
+            } finally {
+                releaseList.countDown();
+                releasePurge.countDown();
+            }
+        }
+    }
 
     @Test
     void twoFirstBindingsCommitOneOriginalEnvelope() throws Exception {

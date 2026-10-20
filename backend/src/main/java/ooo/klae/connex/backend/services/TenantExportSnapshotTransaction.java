@@ -339,7 +339,7 @@ public class TenantExportSnapshotTransaction {
         var references = checkpoint.path("actionSlotReferences");
         boolean associated = false;
         for (var reference : references) {
-            associated |= java.util.Objects.equals(missionText(row, "action_slot"), reference.path("actionSlot").asString())
+            associated |= java.util.Objects.equals(missionText(row, "action_slot"), reference.path("slotKey").asString())
                     && java.util.Objects.equals(missionText(row, "plan_item_key"), reference.path("planItemKey").asString());
         }
         if (!references.isArray() || !associated || references.size() != missionNumber(row, "mission_export_slot_count")

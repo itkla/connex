@@ -94,6 +94,15 @@ class AiAgentProposalReadServiceTest {
     }
 
     @Test
+    void inaccessiblePrimaryReturnsWithheldMetadataWithoutEscapingTheParticipant() {
+        when(tools.pageContext(anyList(), any())).thenThrow(
+                new ooo.klae.connex.backend.exceptions.ResourceNotFoundException("Company not found"));
+        var metadata = assertDoesNotThrow(() -> service.metadata(run));
+        org.junit.jupiter.api.Assertions.assertTrue(metadata.contentWithheld());
+        org.junit.jupiter.api.Assertions.assertNull(metadata.counts());
+    }
+
+    @Test
     void malformedSourcesRefuseKnownItemBeforeCardProjection() {
         doReturn(new AiAgentProposalReadService.Authorized(run, session)).when(service).authorize(31);
         when(proposals.readFrozen(run)).thenThrow(new IllegalArgumentException("mission_continuation_refused"));

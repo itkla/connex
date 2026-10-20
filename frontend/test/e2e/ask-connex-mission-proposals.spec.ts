@@ -79,7 +79,7 @@ for (const locale of ['en', 'ja'] as const) {
                 goal: 'connex_script_browser_mission_proposals review this record and prepare changes',
                 scope: { kind: 'record', recordKind: 'person', recordId: contactId },
             } });
-            expect(created.status()).toBe(201);
+            expect(created.status()).toBe(202);
             const runId = positiveId(await created.json());
             await expect.poll(async () => {
                 const response = await api.get(`/api/ai/assistant/missions/${runId}`, { headers });

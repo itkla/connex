@@ -155,6 +155,24 @@ class AiAgentProposalIntegrationTest extends AbstractAiAgentProposalIntegrationT
     }
 
     @Test
+    void archivedPrimaryRetainsMetadataAndSafeCancellation() {
+        var fixture = frozen("assign_owner");
+        jdbc.update("UPDATE company SET archived_at=CURRENT_TIMESTAMP WHERE workspace_id=? AND id=?",
+                workspace.getId(), primary.getId());
+        var metadata = service.get(fixture.runId());
+        assertTrue(metadata.contentWithheld());
+        assertNull(metadata.goal());
+        assertNull(metadata.proposalCounts());
+        assertEquals(List.of("cancel"), metadata.availableActions());
+        var listed = service.list(20, fixture.sessionId(), null, null).items();
+        assertEquals(1, listed.size());
+        assertTrue(listed.getFirst().contentWithheld());
+        service.control(fixture.runId(), new AiAgentRunControlRequest(metadata.stateVersion()), "cancel");
+        assertEquals("cancelled", runs.getRun(workspace.getId(), fixture.runId()).getStatus());
+        assertEquals("failed", chatMapper.getMissionToolCall(workspace.getId(), fixture.runId(), fixture.selected().getFirst().getId()).getStatus());
+    }
+
+    @Test
     void unsupportedRuntimeRetainsMetadataAndCancellationWithdrawsCanonicalSources() {
         var fixture = frozen("assign_owner");
         jdbc.update("UPDATE ai_agent_run SET runtime_contract_version=4,mission_type='future_preparation_v1',checkpoint_schema_version=99 WHERE workspace_id=? AND id=?",

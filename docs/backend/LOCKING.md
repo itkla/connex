@@ -2121,3 +2121,8 @@ publication under mission roots. Approval/discard batches have no enclosing tran
 Retry deadlocks only from fresh bounded transactions. Provider/network work stays outside
 transactions. Review projections retain A → exact session S → root S → barrier S through all
 DTO materialization; they are not database-read-only because A includes membership locks.
+List discovery holds no transaction. Each item enters its own proxied REQUIRES_NEW projection
+and releases A/session/run/barrier locks before the next item. No transaction retains one
+item's barrier while acquiring a later item's content roots. Expected content-access refusals
+settle inside the metadata projection participant, without crossing a REQUIRED proxy and
+marking the enclosing metadata read rollback-only; safe metadata and cancellation remain available.

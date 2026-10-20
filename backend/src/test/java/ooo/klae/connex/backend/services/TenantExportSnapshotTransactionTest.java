@@ -110,9 +110,30 @@ class TenantExportSnapshotTransactionTest {
         row.put("mission_export_privacy", 1L);
         row.put("mission_export_plan_revision", 1L);
         row.put("mission_export_slot_count", 1);
-        row.put("mission_export_checkpoint", "{\"actionSlotReferences\":[{\"actionSlot\":\"00000000-0000-0000-0000-000000000001\",\"planItemKey\":\"p0001\"}]}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        row.put("mission_export_scope", "{\"kind\":\"record\",\"recordKind\":\"person\",\"recordId\":41}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        row.put("mission_export_plan", "{\"items\":[{\"key\":\"p0001\"}]}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        var run = new ooo.klae.connex.backend.beans.AiAgentRun();
+        run.setId(31);
+        run.setWorkspaceId(7);
+        run.setMissionType("record_preparation_v1");
+        run.setDefinitionVersion(1);
+        run.setRuntimeContractVersion(3);
+        run.setPrivacyGeneration(1);
+        run.setScopeJson("{\"kind\":\"record\",\"recordKind\":\"person\",\"recordId\":41}");
+        run.setScopeFingerprint(new byte[32]);
+        var codec = new ooo.klae.connex.backend.ai.mission.AiAgentContinuationCodec();
+        var initial = codec.initialize(run);
+        var checkpoint = initial.checkpoint();
+        var referenced = new ooo.klae.connex.backend.ai.mission.AiAgentCheckpoint(
+                checkpoint.schemaVersion(), checkpoint.definitionVersion(), checkpoint.workspaceId(), checkpoint.runId(),
+                checkpoint.scopeFingerprint(), checkpoint.privacyGeneration(), checkpoint.revision(), checkpoint.planRevision(),
+                checkpoint.completedPlanItemKeys(), checkpoint.nextPlanItemKey(), checkpoint.lastCommittedSegmentNo(),
+                checkpoint.completedFacts(), List.of(new ooo.klae.connex.backend.ai.mission.AiAgentCheckpoint.ActionSlotReference(
+                        "00000000-0000-0000-0000-000000000001", "p0001")), checkpoint.evidenceReferences(),
+                checkpoint.coverage(), checkpoint.continuation(), checkpoint.sourceObservations());
+        codec.apply(run, new ooo.klae.connex.backend.ai.mission.AiAgentContinuationCodec.Snapshot(
+                initial.plan(), referenced, initial.memory()));
+        row.put("mission_export_checkpoint", run.getCheckpointJson().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        row.put("mission_export_scope", run.getScopeJson().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        row.put("mission_export_plan", run.getPlanJson().getBytes(java.nio.charset.StandardCharsets.UTF_8));
         row.put("mission_export_frozen", java.time.LocalDateTime.of(2026, 10, 19, 0, 2));
         row.put("mission_export_bound_count", 1);
         row.put("mission_export_output_count", 1);

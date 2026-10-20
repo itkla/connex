@@ -63,6 +63,13 @@ class AiAgentRunServiceTest {
 
     @BeforeEach
     void setUp() {
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "self",
+                new org.springframework.beans.factory.ObjectProvider<AiAgentRunService>() {
+                    @Override
+                    public AiAgentRunService getObject() {
+                        return service;
+                    }
+                });
         when(workspaces.getCurrentWorkspaceId()).thenReturn(7);
         when(workspaces.getCurrentUserId()).thenReturn(11);
         when(workspaces.isMember(7, 11)).thenReturn(true);

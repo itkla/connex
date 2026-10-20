@@ -133,6 +133,8 @@ class AiGenerationEndpointSecurityTest {
     @MockitoBean private ClientIpResolver clientIpResolver;
     @MockitoBean private AiAssistantService aiAssistantService;
     @MockitoBean private ooo.klae.connex.backend.ai.mission.AiAgentRunService missions;
+    @MockitoBean private ooo.klae.connex.backend.ai.mission.AiAgentProposalReadService missionProposals;
+    @MockitoBean private ooo.klae.connex.backend.ai.mission.AiAgentProposalDecisionService missionDecisions;
     @MockitoBean private AiAssistantTurnService aiAssistantTurnService;
     @MockitoBean private AiAssistantToolCallReadService aiAssistantToolCallReadService;
     @MockitoBean private AiAssistantWriteToolService aiAssistantWriteToolService;
@@ -142,6 +144,8 @@ class AiGenerationEndpointSecurityTest {
 
     @Test
     void missionControlsRequireCsrf() throws Exception {
+        when(requestBodySizeProperties.getMissionDecisionMaxBodyBytes())
+                .thenReturn(new RequestBodySizeProperties().getMissionDecisionMaxBodyBytes());
         for (String action : List.of("pause", "resume", "cancel")) {
             String path = "/api/ai/assistant/missions/17/" + action;
             mockMvc.perform(post(path).contentType("application/json")
@@ -153,13 +157,20 @@ class AiGenerationEndpointSecurityTest {
         }
         mockMvc.perform(post("/api/ai/assistant/sessions/42/missions").contentType("application/json").content("{}"))
                 .andExpect(status().isForbidden());
+        String decisions = "/api/ai/assistant/missions/17/proposal-decisions";
+        String body = "{\"expectedProposalRevision\":\"1\",\"items\":[{\"actionSlot\":\"00000000-0000-0000-0000-000000000001\","
+                + "\"expectedPreparationId\":\"00000000-0000-0000-0000-000000000002\",\"decision\":\"approve\"}]}";
+        mockMvc.perform(post(decisions).contentType("application/json").content(body))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post(decisions).with(csrf().asHeader()).contentType("application/json").content(body))
+                .andExpect(status().isOk());
     }
 
     @Test
     @WithAnonymousUser
     void missionReadsRequireAuthentication() throws Exception {
         for (String path : List.of("/api/ai/assistant/missions", "/api/ai/assistant/missions/17",
-                "/api/ai/assistant/missions/17/output")) {
+                "/api/ai/assistant/missions/17/output", "/api/ai/assistant/missions/17/proposals/00000000-0000-0000-0000-000000000001")) {
             mockMvc.perform(get(path)).andExpect(status().isUnauthorized());
         }
     }

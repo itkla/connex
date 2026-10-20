@@ -305,7 +305,8 @@
         state_version = #{run.stateVersion}
     WHERE workspace_id = #{run.workspaceId} AND id = #{run.id}
       AND state_version = #{expectedStateVersion} AND execution_generation = #{expectedExecutionGeneration}
-      AND runtime_contract_version = 2 AND active_segment_id &lt;=&gt; #{expectedActiveSegmentId,jdbcType=INTEGER}
+      AND runtime_contract_version = #{run.runtimeContractVersion}
+      AND runtime_contract_version IN (2, 3) AND active_segment_id &lt;=&gt; #{expectedActiveSegmentId,jdbcType=INTEGER}
       AND plan_revision = #{expectedPlanRevision} AND checkpoint_revision = #{expectedCheckpointRevision}
   </update>
 
@@ -317,7 +318,7 @@
 
   <select id="interruptedReadRuns" resultMap="runResult" useCache="false" flushCache="true">
     SELECT *, <include refid="continuationBytes" /> FROM ai_agent_run
-    WHERE workspace_id = #{workspaceId} AND runtime_contract_version = 2
+    WHERE workspace_id = #{workspaceId} AND runtime_contract_version IN (2, 3)
       AND status = 'paused' AND reason_code = 'interrupted'
       AND next_attempt_at &lt;= CURRENT_TIMESTAMP(6)
       AND execution_deadline_at &gt; CURRENT_TIMESTAMP(6) AND hard_deadline_at &gt; CURRENT_TIMESTAMP(6)

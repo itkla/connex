@@ -161,20 +161,55 @@ describe('Ask Connex durable mission state', () => {
         await mounted.unmount();
     });
 
-    it('preserves earlier committed results when the post-decision canonical read fails', async () => {
+    it.each(['refused', 'indeterminate'] as const)('preserves earlier committed results and a %s sibling when the post-decision canonical read fails', async (outcome) => {
         const output = missionProposalOutput();
         const available = run({ missionType: 'record_preparation_v1', state: 'waiting_approval', outputAvailable: true,
             outputRevision: '3', proposalMembershipRevision: '2', availableActions: ['cancel', 'view_output'] });
         api.getAiAgentRuns.mockResolvedValue({ items: [available], nextCursor: null });
         api.getAiAgentRun.mockResolvedValue({ ...available, stateVersion: '4', outputRevision: '4' });
         api.getAiAgentOutput.mockResolvedValueOnce(output).mockRejectedValue(new Error('Canonical reload unavailable'));
-        api.decideAiAgentProposals.mockResolvedValue(missionPartialDecision('indeterminate'));
+        const decision = missionPartialDecision(outcome);
+        decision.items[1].code = 'access_lost';
+        api.decideAiAgentProposals.mockResolvedValue(decision);
         const mounted = await mount();
         await act(async () => mounted.current().viewOutput(available));
+        api.getAiAgentRuns.mockResolvedValue({ items: [{ ...available, stateVersion: '4', outputRevision: '4' }], nextCursor: null });
         await act(async () => mounted.current().decide([31, 32], 'approve'));
-        expect(mounted.current().decisionResult?.items.map((item) => item.outcome)).toEqual(['executed', 'indeterminate']);
+        expect(mounted.current().decisionResult?.items.map((item) => item.outcome)).toEqual(['executed', outcome]);
         expect(mounted.current().proposalGroup?.cards.map((item) => item.status)).toEqual(['executed', 'proposed']);
-        expect(mounted.current().proposalGroup?.cards[1].failure).toBe('proposalUnavailable');
+        expect(mounted.current().proposalGroup?.cards[1].failure)
+            .toBe(outcome === 'refused' ? 'proposalPermissionLost' : 'proposalUnavailable');
+        await mounted.unmount();
+    });
+
+    it.each(['refused', 'indeterminate'] as const)('settles a %s batch response after realtime advances the output revision', async (outcome) => {
+        const output = missionProposalOutput();
+        const available = run({ missionType: 'record_preparation_v1', state: 'waiting_approval', outputAvailable: true,
+            outputRevision: '3', proposalMembershipRevision: '2', availableActions: ['cancel', 'view_output'] });
+        api.getAiAgentRuns.mockResolvedValue({ items: [available], nextCursor: null });
+        api.getAiAgentOutput.mockResolvedValue(output);
+        const response = deferred<import('@/app/lib/types').AiAgentProposalDecisionResult>();
+        api.decideAiAgentProposals.mockReturnValue(response.promise);
+        const mounted = await mount();
+        await act(async () => mounted.current().viewOutput(available));
+        let deciding: Promise<void> | undefined;
+        await act(async () => { deciding = mounted.current().decide([31, 32], 'approve'); });
+        expect(mounted.current().proposalGroup?.cards.map((card) => card.pendingAction)).toEqual(['approve', 'approve']);
+        const refreshed = { ...output, outputRevision: '4', proposalSet: { ...output.proposalSet,
+            items: output.proposalSet.items.map((item, index) => index === 0
+                ? { ...item, card: { ...item.card, status: 'executed' as const, reviewState: 'applied' as const } } : item) } };
+        api.getAiAgentRuns.mockResolvedValue({ items: [{ ...available, stateVersion: '4', outputRevision: '4' }], nextCursor: null });
+        api.getAiAgentOutput.mockResolvedValue(refreshed);
+        await mounted.render('user:workspace', 1);
+        expect(mounted.current().output?.outputRevision).toBe('4');
+        api.getAiAgentRun.mockRejectedValue(new Error('Canonical reload unavailable'));
+        await act(async () => { response.resolve(missionPartialDecision(outcome)); await deciding; });
+        expect(mounted.current().pendingId).toBeNull();
+        expect(mounted.current().proposalGroup?.cards.map((card) => card.pendingAction)).toEqual([null, null]);
+        expect(mounted.current().decisionResult?.items.map((item) => item.outcome)).toEqual(['executed', outcome]);
+        expect(mounted.current().proposalGroup?.cards[1].failure).not.toBeNull();
+        await act(async () => mounted.current().decide([32], 'approve'));
+        expect(api.decideAiAgentProposals).toHaveBeenCalledOnce();
         await mounted.unmount();
     });
 
@@ -196,6 +231,89 @@ describe('Ask Connex durable mission state', () => {
         expect(mounted.current().proposalGroup?.cards[1]?.failure).toBe('proposalUnavailable');
         await act(async () => mounted.current().decide([32], 'approve'));
         expect(api.decideAiAgentProposals).toHaveBeenCalledOnce();
+        await mounted.unmount();
+    });
+
+    it('keeps review closed when its pending decision completes', async () => {
+        const output = missionProposalOutput();
+        const available = run({ missionType: 'record_preparation_v1', state: 'waiting_approval', outputAvailable: true,
+            outputRevision: '3', proposalMembershipRevision: '2', availableActions: ['cancel', 'view_output'] });
+        api.getAiAgentRuns.mockResolvedValue({ items: [available], nextCursor: null });
+        api.getAiAgentOutput.mockResolvedValue(output);
+        const response = deferred<import('@/app/lib/types').AiAgentProposalDecisionResult>();
+        api.decideAiAgentProposals.mockReturnValue(response.promise);
+        const mounted = await mount();
+        await act(async () => mounted.current().viewOutput(available));
+        let deciding: Promise<void> | undefined;
+        await act(async () => { deciding = mounted.current().decide([31, 32], 'approve'); });
+        await act(async () => mounted.current().closeOutput());
+        api.getAiAgentRun.mockClear();
+        await act(async () => { response.resolve(missionPartialDecision()); await deciding; });
+        expect(mounted.current().output).toBeNull();
+        expect(mounted.current().decisionResult).toBeNull();
+        expect(mounted.current().pendingId).toBeNull();
+        expect(api.getAiAgentRun).not.toHaveBeenCalled();
+        await mounted.unmount();
+    });
+
+    it('retains newer realtime output when an older decision reload finishes', async () => {
+        const output = missionProposalOutput();
+        const available = run({ missionType: 'record_preparation_v1', state: 'waiting_approval', outputAvailable: true,
+            outputRevision: '3', proposalMembershipRevision: '2', availableActions: ['cancel', 'view_output'] });
+        api.getAiAgentRuns.mockResolvedValue({ items: [available], nextCursor: null });
+        const canonical = deferred<AiAgentOutput>();
+        const metadata = deferred<AiAgentRun>();
+        api.getAiAgentOutput.mockResolvedValueOnce(output).mockReturnValueOnce(canonical.promise)
+            .mockResolvedValue({ ...output, outputRevision: '5' });
+        api.getAiAgentRun.mockReturnValue(metadata.promise);
+        api.decideAiAgentProposals.mockResolvedValue(missionPartialDecision());
+        const mounted = await mount();
+        await act(async () => mounted.current().viewOutput(available));
+        let deciding: Promise<void> | undefined;
+        await act(async () => { deciding = mounted.current().decide([31, 32], 'approve'); });
+        api.getAiAgentRuns.mockResolvedValue({ items: [{ ...available, stateVersion: '5', outputRevision: '5' }], nextCursor: null });
+        await mounted.render('user:workspace', 1);
+        expect(mounted.current().output?.outputRevision).toBe('5');
+        await act(async () => {
+            metadata.resolve({ ...available, stateVersion: '4', outputRevision: '4' });
+            canonical.resolve({ ...output, outputRevision: '4' });
+            await deciding;
+        });
+        expect(mounted.current().output?.outputRevision).toBe('5');
+        expect(mounted.current().runs[0].stateVersion).toBe('5');
+        await mounted.unmount();
+    });
+
+    it.each([401, 403, 404, 410])('keeps output withheld when a decision reload finishes after refresh returns %s', async (status) => {
+        const output = missionProposalOutput();
+        const available = run({ missionType: 'record_preparation_v1', state: 'waiting_approval', outputAvailable: true,
+            outputRevision: '3', proposalMembershipRevision: '2', availableActions: ['cancel', 'view_output'] });
+        api.getAiAgentRuns.mockResolvedValue({ items: [available], nextCursor: null });
+        const canonical = deferred<AiAgentOutput>();
+        const metadata = deferred<AiAgentRun>();
+        api.getAiAgentOutput.mockResolvedValueOnce(output).mockReturnValueOnce(canonical.promise);
+        api.getAiAgentRun.mockReturnValue(metadata.promise);
+        api.decideAiAgentProposals.mockResolvedValue(missionPartialDecision());
+        const mounted = await mount();
+        await act(async () => mounted.current().viewOutput(available));
+        let deciding: Promise<void> | undefined;
+        await act(async () => { deciding = mounted.current().decide([31, 32], 'approve'); });
+        api.getAiAgentRuns.mockRejectedValue(new ApiError('Access lost', status));
+        await mounted.render('user:workspace', 1);
+        expect(mounted.current().output).toBeNull();
+        const problem = mounted.current().problem;
+        expect(problem).not.toBeNull();
+        expect(mounted.invalidated).toHaveBeenCalledWith(7);
+        await act(async () => {
+            metadata.resolve({ ...available, stateVersion: '4', outputRevision: '4' });
+            canonical.resolve({ ...output, outputRevision: '4' });
+            await deciding;
+        });
+        expect(mounted.current().output).toBeNull();
+        expect(mounted.current().runs).toEqual([]);
+        expect(mounted.current().decisionResult).toBeNull();
+        expect(mounted.current().pendingId).toBeNull();
+        expect(mounted.current().problem).toBe(problem);
         await mounted.unmount();
     });
 

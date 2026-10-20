@@ -94,6 +94,17 @@ class AiAgentProposalDecisionServiceTest {
     }
 
     @Test
+    void lostDomainPermissionRefusesAttemptedItemAndSkipsRemainingSelection() {
+        when(transaction.decideOne(anyInt(), anyString(), any(), any()))
+                .thenReturn("executed").thenThrow(new ForbiddenException("permission revoked"));
+        var result = service.decide(31, request(first, second, item("discard")));
+        assertFalse(result.contentWithheld());
+        assertEquals("access_lost", result.stopReason());
+        assertEquals(List.of("executed", "refused", "not_processed"),
+                result.items().stream().map(item -> item.outcome()).toList());
+    }
+
+    @Test
     void infrastructureFailureStopsBatchAfterCommittedResults() {
         when(transaction.decideOne(anyInt(), anyString(), any(), any()))
                 .thenReturn("executed").thenThrow(new IllegalStateException("connection lost"));

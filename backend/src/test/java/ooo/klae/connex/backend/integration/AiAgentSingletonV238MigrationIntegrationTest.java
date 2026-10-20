@@ -137,6 +137,8 @@ class AiAgentSingletonV238MigrationIntegrationTest {
             execute(connection, "DELETE FROM ai_agent_action WHERE workspace_id=238100");
             assertEquals(List.of("0"), rows(connection, "SELECT COUNT(*) FROM ai_chat_tool_call WHERE workspace_id=238100"));
             execute(connection, "UPDATE ai_agent_run SET status='cancelled', purged_at=CURRENT_TIMESTAMP(6), "
+                    + "withheld_at=CURRENT_TIMESTAMP(6), session_id=NULL, request_hash=NULL, goal=NULL, scope_json=NULL, "
+                    + "scope_fingerprint=NULL, active_segment_id=NULL, report_message_id=NULL, "
                     + "proposal_membership_revision=0, proposal_frozen_at=NULL, proposal_first_prepared_at=NULL, "
                     + "review_expires_at=NULL WHERE id=238100");
         }

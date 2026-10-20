@@ -65,6 +65,7 @@ class AiAgentDsrPurgeHttpIntegrationTest {
     @Autowired private ObjectMapper json;
     @Autowired private TenantWorkScope workScope;
     @Autowired private AiAgentPrivacyService privacy;
+    @Autowired private ooo.klae.connex.backend.ai.mission.AiAgentDsrPurgeService purge;
     private MockMvc mvc;
     private Organization organization;
     private Workspace workspace;
@@ -265,6 +266,7 @@ class AiAgentDsrPurgeHttpIntegrationTest {
                 assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM ai_agent_run WHERE workspace_id=? AND "
                         + "(proposal_membership_revision<>0 OR proposal_frozen_at IS NOT NULL OR proposal_first_prepared_at IS NOT NULL OR review_expires_at IS NOT NULL)", Integer.class, target));
             }
+            purge.recoverAccepted();
             mvc.perform(get(progressPath(operation)).session(session.http()).header("X-Workspace-Id", workspace.getId()))
                     .andExpect(status().isOk()).andExpect(jsonPath("$.state").value("complete"));
         } finally {

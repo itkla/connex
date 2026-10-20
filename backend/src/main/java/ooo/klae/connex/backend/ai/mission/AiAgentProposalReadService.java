@@ -53,6 +53,30 @@ public class AiAgentProposalReadService {
     /** Exact content authorization deliberately leaves metadata and safe-stop authorization separate. */
     public record Authorized(AiAgentRun run, AiChatSession session) {}
 
+    /** Content availability and counts for an independently authorized metadata projection. */
+    public record Metadata(boolean contentWithheld, AiAgentOutputDto.Counts counts) {}
+
+    /** Expected content refusals settle inside this participant without poisoning metadata reads. */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public Metadata metadata(AiAgentRun run) {
+        try {
+            requireContent(run, true);
+            if (run.getReportMessageId() == null) {
+                return new Metadata(false, null);
+            }
+            var session = chat.getAccessibleSessionById(run.getWorkspaceId(), workspaces.getCurrentUserId(), run.getSessionId());
+            if (session == null) {
+                throw inaccessible();
+            }
+            return new Metadata(false, output(new Authorized(run, session)).proposalSet().derivedCounts());
+        } catch (AiAgentGoneException | ConflictException | ResourceNotFoundException
+                | ooo.klae.connex.backend.exceptions.ForbiddenException
+                | ooo.klae.connex.backend.ai.assistant.AiAssistantLoopException
+                | IllegalArgumentException | IllegalStateException exception) {
+            return new Metadata(true, null);
+        }
+    }
+
     /** Locks content read roots and refuses unsupported or withheld content before materialization. */
     public Authorized authorize(int id) {
         return authorize(id, true);
@@ -76,7 +100,12 @@ public class AiAgentProposalReadService {
                     && (!"shared".equals(session.getVisibility()) || !chat.isParticipant(workspaceId, session.getId(), owner)))) {
             throw inaccessible();
         }
-        var barrier = chat.lockPrivacyBarrierForShare(workspaceId);
+        requireContent(run, requireSource);
+        return new Authorized(run, session);
+    }
+
+    private void requireContent(AiAgentRun run, boolean requireSource) {
+        var barrier = chat.lockPrivacyBarrierForShare(run.getWorkspaceId());
         if (barrier == null || barrier.isBlocked() || barrier.getGeneration() != run.getPrivacyGeneration()
                 || run.getWithheldAt() != null || run.getPurgedAt() != null) {
             throw new AiAgentGoneException("mission_output_withheld");
@@ -102,7 +131,6 @@ public class AiAgentProposalReadService {
                 throw inaccessible();
             }
         }
-        return new Authorized(run, session);
     }
 
     /** Rechecks current disclosure authority without depending on content/card projection infrastructure. */
@@ -116,8 +144,12 @@ public class AiAgentProposalReadService {
     @RequirePermission(Permission.AI_USE)
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public AiAgentOutputDto output(int id) {
-        Authorized authorized = authorize(id);
+        return output(authorize(id));
+    }
+
+    private AiAgentOutputDto output(Authorized authorized) {
         AiAgentRun run = authorized.run();
+        int id = run.getId();
         if (run.getReportMessageId() == null) {
             throw new ConflictException("mission_output_not_ready");
         }

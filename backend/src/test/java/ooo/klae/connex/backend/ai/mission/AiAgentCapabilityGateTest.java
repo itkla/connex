@@ -2,7 +2,9 @@ package ooo.klae.connex.backend.ai.mission;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -25,6 +27,36 @@ import ooo.klae.connex.backend.services.AiWorkspaceGovernanceService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 
 class AiAgentCapabilityGateTest {
+
+    @Test
+    void browserStackBindsItsExactScriptedMissionCapability() throws Exception {
+        Object document = new org.yaml.snakeyaml.Yaml().load(java.nio.file.Files.readString(
+                java.nio.file.Path.of("../.github/workflows/ci.yml")));
+        java.util.Map<?, ?> root = org.junit.jupiter.api.Assertions.assertInstanceOf(java.util.Map.class, document);
+        java.util.Map<?, ?> jobs = org.junit.jupiter.api.Assertions.assertInstanceOf(java.util.Map.class, root.get("jobs"));
+        java.util.Map<?, ?> frontend = org.junit.jupiter.api.Assertions.assertInstanceOf(java.util.Map.class, jobs.get("frontend-tests"));
+        java.util.List<?> steps = org.junit.jupiter.api.Assertions.assertInstanceOf(java.util.List.class, frontend.get("steps"));
+        String configuration = steps.stream().filter(java.util.Map.class::isInstance).map(step -> (java.util.Map<?, ?>) step)
+                .filter(step -> "Boot backend (dev profile, fresh schema)".equals(step.get("name")))
+                .map(step -> org.junit.jupiter.api.Assertions.assertInstanceOf(java.util.Map.class, step.get("env")))
+                .map(env -> org.junit.jupiter.api.Assertions.assertInstanceOf(String.class, env.get("SPRING_APPLICATION_JSON")))
+                .findFirst().orElseThrow();
+        var environment = new org.springframework.core.env.StandardEnvironment();
+        environment.getPropertySources().addFirst(new org.springframework.core.env.SystemEnvironmentPropertySource(
+                "mission-browser-test", java.util.Map.of("SPRING_APPLICATION_JSON", configuration)));
+        new org.springframework.boot.support.SpringApplicationJsonEnvironmentPostProcessor()
+                .postProcessEnvironment(environment, new org.springframework.boot.SpringApplication());
+        var bound = org.springframework.boot.context.properties.bind.Binder.get(environment).bind(
+                "connex.ai", org.springframework.boot.context.properties.bind.Bindable.of(AiProperties.class)).get();
+        assertTrue(bound.isMissionsEnabled());
+        assertTrue(bound.isMissionsSingleJvmConfirmed());
+        assertEquals(1, bound.getMissionCapabilities().size());
+        var declaration = bound.getMissionCapabilities().getFirst();
+        assertEquals("openai_compatible", declaration.getProvider());
+        assertEquals("http://127.0.0.1:8080/v1", declaration.getEndpoint());
+        assertEquals("scripted-native", declaration.getModel());
+        assertEquals("missions_v1", declaration.getCapability());
+    }
     private final AiProperties properties = new AiProperties();
     private final AiAgentPrivacyInitializer initializer = mock(AiAgentPrivacyInitializer.class);
     private final AiFeatureGate featureGate = mock(AiFeatureGate.class);

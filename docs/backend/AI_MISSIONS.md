@@ -460,7 +460,13 @@ DTO materialization. Frozen membership is read independently of transcript limit
 retained, overflow and known-ID reactive paths exclude mission proposals. Metadata/control
 authorization is separate: unsupported schemas and blocked/stale generations preserve safe
 list/detail metadata with `contentWithheld` and cancellation; content and counts remain hidden.
+Primary-record visibility loss follows the same metadata path: expected content refusals are
+handled within a non-throwing projection participant, so they do not mark its metadata
+transaction rollback-only. Lists discover a bounded page without locks, then project each
+item in its own transaction, releasing its content roots and barrier before the next item.
 Requester-only product visibility does not restrict lawful tenant export authority.
+Direct proposal-item HTTP reads retain support-journal failures. The shipped client refreshes
+complete output; it does not issue automatic item reads that justify suppressing those failures.
 
 My Work projects one authorized, unexpired waiting root with pending proposals, normal urgency,
 review due date and frozen freshness. Bounded discovery counts only projected roots and reports
@@ -470,6 +476,12 @@ After commit, publication retains current requester authority, exact session/roo
 and restriction/privacy fences through the local broker enqueue. Revoked or superseded sources
 produce no frame.
 The existing session UI reloads exact output on revision/focus/reconnect and uses shared cards.
+Decision responses bind to frozen membership and preparation identity across concurrent
+state/output revision changes. Every settled batch clears pending indicators; refused and
+indeterminate selections remain disarmed even when canonical reload fails. An attempted item
+that loses domain permission is refused; only skipped selections are `not_processed`.
+Access-refusing refreshes invalidate pending decision reads before clearing private output,
+so a late canonical response cannot restore content after access is lost.
 
 Actions participate in tenant lifecycle at order 451, export and unconditional residual checks.
 Privacy pruning locks all actions before all canonical calls, withdraws pending proposals,

@@ -77,7 +77,7 @@ public class AiAgentProposalDecisionService {
                 publishInvalidation(id);
             } catch (ForbiddenException | ResourceNotFoundException | AiAgentGoneException exception) {
                 stopped = "access_lost";
-                results.add(new AiAgentProposalDecisionResponse.Item(selected.actionSlot(), "not_processed", stopped));
+                results.add(new AiAgentProposalDecisionResponse.Item(selected.actionSlot(), "refused", stopped));
             } catch (ConflictException | AiAssistantLoopException exception) {
                 stopped = "proposal_conflict";
                 results.add(new AiAgentProposalDecisionResponse.Item(selected.actionSlot(), "refused", stopped));

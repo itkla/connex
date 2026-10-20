@@ -469,6 +469,10 @@ jobs:
           # never a way to reach the scripted adapter — that one stays forbidden everywhere
           # (DeploymentProfileValidator.FORBIDDEN_KEYS_BY_PROFILE).
           CONNEX_AI_ALLOW_INTERNAL_ENDPOINTS: "true"
+          SPRING_APPLICATION_JSON: >-
+            {"connex":{"ai":{"missions-enabled":true,"missions-single-jvm-confirmed":true,
+            "mission-capabilities":[{"provider":"openai_compatible","endpoint":"http://127.0.0.1:8080/v1",
+            "model":"scripted-native","capability":"missions_v1"}]}}}
         run: |
           set -euo pipefail
           WAR=$(find build/libs -name '*.war' ! -name '*-plain.war' | head -1)

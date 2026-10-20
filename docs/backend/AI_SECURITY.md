@@ -682,7 +682,7 @@ In a test, activate it with `@ActiveProfiles({"test", ScriptedAiProviderProfile.
 
 ### The browser-stack recipe
 
-This is the only copy of the recipe; [`FRONTEND_TESTING.md`](../FRONTEND_TESTING.md) and `frontend/AGENTS.md` point here rather than repeat it. A backend that `ask-connex-trajectory.spec.ts` can drive is the root guide's `dev` boot with the profile added and four more settings, exactly as the `Frontend — unit & e2e` CI job's backend boot step sets them:
+This is the only copy of the recipe; [`FRONTEND_TESTING.md`](../FRONTEND_TESTING.md) and `frontend/AGENTS.md` point here rather than repeat it. The assistant and mission-proposal browser scenarios use the root guide's `dev` boot with the profile and settings below, exactly as the `Frontend — unit & e2e` CI job's backend boot step sets them:
 
 ```bash
 SPRING_PROFILES_ACTIVE=dev,ai-scripted-provider
@@ -690,11 +690,13 @@ CONNEX_AI_ENABLED=true
 CONNEX_AI_SCRIPTED_PROVIDER_ENABLED=true
 CONNEX_AI_SCRIPTED_PROVIDER_FIXTURE_DIR=<absolute path to the checkout>/frontend/test/e2e/fixtures/ai-scripted
 CONNEX_AI_ALLOW_INTERNAL_ENDPOINTS=true
+SPRING_APPLICATION_JSON='{"connex":{"ai":{"missions-enabled":true,"missions-single-jvm-confirmed":true,"mission-capabilities":[{"provider":"openai_compatible","endpoint":"http://127.0.0.1:8080/v1","model":"scripted-native","capability":"missions_v1"}]}}}'
 ```
 
 - **The profile, the flag and the fixture directory** install the seam. Leave the profile and the flag out and the real `openai_compatible` adapter dials the spec's loopback endpoint, so the turn settles `provider_error`; set one without the other, or both without a readable fixture directory, and the boot refuses (layers 3 and 5 above).
 - **The AI master switch** defaults to `false` in `application.yml`, and `AiFeatureGate` checks it before provider readiness. Without it the seam boots but every turn is refused, so the spec never reaches send, tools and answer.
 - **The internal-endpoint opt-in** is needed because the spec *saves* its provider row through `PUT /api/ai/provider`. The save path resolves the submitted endpoint's address, so the loopback literal the browser suite configures fails `AiEndpointAddressValidator.isFetchable` with a 400 without it — while the scripted adapter never dials the endpoint at all, whatever it says. That opt-in is part of the browser recipe and nothing wider: it is confined to a job declaring no deployment profile, the saas edition forbids the key outright, and on silo and on-prem it is a deliberate operator posture for an internal model host rather than a route to this seam. The trajectory harness needs none of it, because it inserts its row directly and readiness there is shape-only.
+- **The mission switches and exact capability declaration** admit the mission-proposal browser scenario on this single test JVM. They bind only the scripted model and endpoint configured by the test; ordinary provider readiness and per-organization governance still apply.
 
 `ScriptedAiProviderArchTest` pins the whole recipe to that one CI job and step, so a second workflow booting a stack this way fails the backend suite, and it requires this block to carry every `CONNEX_AI_*` setting that step sets and to be the only place the recipe is written down.
 

@@ -113,6 +113,7 @@ class AiAgentContinuationV235MigrationIntegrationTest {
         }
         assertEquals(MigrationVersion.fromVersion("235"),
                 Objects.requireNonNull(migrate("235").info().current()).getVersion());
+        migrate("238");
     }
 
     @AfterAll

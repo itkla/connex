@@ -16,6 +16,7 @@ import java.util.Set;
 import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
@@ -62,6 +63,8 @@ public class AiAgentRunService {
     private AiAgentProposalReadService proposalReads;
     @org.springframework.beans.factory.annotation.Autowired
     private AiAgentProposalBudgetService proposalBudget;
+    @org.springframework.beans.factory.annotation.Autowired
+    private org.springframework.beans.factory.ObjectProvider<AiAgentRunService> self;
 
     /** Creates or replays the same immutable request without refreshing its lifetime. */
     @RequirePermission(Permission.AI_USE)
@@ -81,7 +84,7 @@ public class AiAgentRunService {
             if (!Arrays.equals(existing.getRequestHash(), hash)) {
                 throw new ConflictException("mission_request_conflict");
             }
-            return project(existing);
+            return self.getObject().get(existing.getId());
         }
         if ("record_preparation_v1".equals(request.missionType())) {
             proposalBudget.requireFeasibleCreation(json.writeValueAsBytes(request.goal()).length,
@@ -100,19 +103,19 @@ public class AiAgentRunService {
         AiAgentRun run = persistence.create(sessionId, request, locale, hash,
                 json.writeValueAsString(request.scope()), epoch);
         publisher.publish(run, "mission_created");
-        return get(run.getId());
+        return self.getObject().get(run.getId());
     }
 
     /** Returns only metadata when privacy has permanently or temporarily withheld the content. */
     @RequirePermission(Permission.AI_USE)
-    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
     public AiAgentRunDto get(int id) {
         return project(ownedForRead(id));
     }
 
     /** Lists independently of transcript/tool limits with an owner/filter-bound keyset cursor. */
     @RequirePermission(Permission.AI_USE)
-    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public AiAgentRunPage list(int limit, Integer sessionId, String state, String cursor) {
         if (limit < 1 || limit > 50 || (sessionId != null && sessionId <= 0)
                 || (state != null && !STATES.contains(state))) {
@@ -144,7 +147,7 @@ public class AiAgentRunService {
         List<AiAgentRunDto> items = new ArrayList<>();
         for (AiAgentRun run : page) {
             if (sessionAccessible(run, owner)) {
-                items.add(project(ownedForRead(run.getId())));
+                items.add(self.getObject().get(run.getId()));
             }
         }
         String next = more ? Base64.getUrlEncoder().withoutPadding().encodeToString(json.writeValueAsString(
@@ -202,7 +205,7 @@ public class AiAgentRunService {
         }
         AiAgentRun changed = persistence.control(run, version, action);
         publisher.publish(changed, changed.getReportMessageId() == null ? "mission_state" : "mission_output");
-        return project(changed);
+        return self.getObject().get(changed.getId());
     }
 
     /** Missing or blocked privacy state refuses admission before any attempt is reserved. */
@@ -292,18 +295,9 @@ public class AiAgentRunService {
         boolean hidden = withheld(run);
         AiAgentOutputDto.Counts proposalCounts = null;
         if (!hidden && AiAgentMissionCatalog.proposals(run)) {
-            try {
-                if (run.getReportMessageId() == null) {
-                    proposalReads.currentVersion(run.getId());
-                } else {
-                    proposalCounts = proposalReads.output(run.getId()).proposalSet().derivedCounts();
-                }
-            } catch (AiAgentGoneException | ConflictException | ResourceNotFoundException
-                    | ooo.klae.connex.backend.exceptions.ForbiddenException
-                    | ooo.klae.connex.backend.ai.assistant.AiAssistantLoopException
-                    | IllegalArgumentException | IllegalStateException exception) {
-                hidden = true;
-            }
+            var metadata = proposalReads.metadata(run);
+            hidden = metadata.contentWithheld();
+            proposalCounts = metadata.counts();
         }
         boolean output = !hidden && run.getReportMessageId() != null;
         List<String> actions = new ArrayList<>();

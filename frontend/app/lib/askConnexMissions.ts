@@ -98,6 +98,7 @@ export function askConnexMissionDecisionFailure(code: string | null): AskConnexT
         case 'mission_preparation_conflict': return 'proposalChanged';
         case 'ai_proposal_permission_lost':
         case 'permission_lost':
+        case 'access_lost':
         case 'forbidden': return 'proposalPermissionLost';
         default: return 'proposalUnavailable';
     }

@@ -13,17 +13,24 @@ public final class MySqlLockWaitProbe {
     /** Requires a real MySQL wait in the observer's catalog before the holder may be released. */
     public static void awaitExclusiveRecordLock(
             JdbcTemplate jdbc, long connectionId, String table, String primaryKey) {
-        awaitRecordLock(jdbc, connectionId, table, primaryKey, "X%");
+        awaitRecordLock(jdbc, connectionId, table, primaryKey, "X%", "GRANTED", "%");
     }
 
     /** Requires a real wait for a shared record lock, such as a {@code FOR SHARE} read, on the record. */
     public static void awaitSharedRecordLock(
             JdbcTemplate jdbc, long connectionId, String table, String primaryKey) {
-        awaitRecordLock(jdbc, connectionId, table, primaryKey, "S%");
+        awaitRecordLock(jdbc, connectionId, table, primaryKey, "S%", "GRANTED", "%");
+    }
+
+    /** Observes a shared reader waiting behind an exclusive writer already queued on the exact row. */
+    public static void awaitSharedRecordLockBehindQueuedWriter(
+            JdbcTemplate jdbc, long connectionId, String table, String primaryKey) {
+        awaitRecordLock(jdbc, connectionId, table, primaryKey, "S%", "WAITING", "X%");
     }
 
     private static void awaitRecordLock(
-            JdbcTemplate jdbc, long connectionId, String table, String primaryKey, String lockMode) {
+            JdbcTemplate jdbc, long connectionId, String table, String primaryKey, String lockMode,
+            String blockerStatus, String blockerMode) {
         if (connectionId <= 0) {
             throw new AssertionError("The waiting transaction did not expose its connection id");
         }
@@ -53,9 +60,10 @@ public final class MySqlLockWaitProbe {
                   AND blocking_lock.OBJECT_NAME = requested_lock.OBJECT_NAME
                   AND blocking_lock.INDEX_NAME = requested_lock.INDEX_NAME
                   AND blocking_lock.LOCK_TYPE = requested_lock.LOCK_TYPE
-                  AND blocking_lock.LOCK_STATUS = 'GRANTED'
+                  AND blocking_lock.LOCK_STATUS = ?
+                  AND blocking_lock.LOCK_MODE LIKE ?
                   AND blocking_lock.LOCK_DATA = requested_lock.LOCK_DATA
-                """, Integer.class, connectionId, table, lockMode, primaryKey, primaryKey);
+                """, Integer.class, connectionId, table, lockMode, primaryKey, primaryKey, blockerStatus, blockerMode);
             if (waiting != null && waiting > 0) {
                 return;
             }

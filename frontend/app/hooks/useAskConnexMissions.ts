@@ -76,6 +76,7 @@ export function useAskConnexMissions({
     const proposalGroup = current?.output ? askConnexMissionProposalGroup(current.output,
         review?.excluded ?? new Set(), review?.pending ?? new Map(), review?.result ?? null, now) : null;
     const retainedOutputRef = useRef<AiAgentOutput | null>(null);
+    const outputViewRef = useRef(0);
     useEffect(() => { retainedOutputRef.current = current?.output ?? null; }, [current?.output]);
     const controllerRef = useRef<AbortController | null>(null);
     const refreshRef = useRef(0);
@@ -107,7 +108,10 @@ export function useAskConnexMissions({
     }, [enabled, key, sessionId]);
 
     useEffect(() => {
-        if (!visible) setSnapshot(null);
+        if (!visible) {
+            outputViewRef.current++;
+            setSnapshot(null);
+        }
     }, [visible]);
 
     const refresh = useCallback(async (reloadOutput = false) => {
@@ -141,7 +145,10 @@ export function useAskConnexMissions({
                     ? Math.min(previousPoll.delay * 2, MAX_REFRESH_INTERVAL_MS) : REFRESH_INTERVAL_MS };
             const openOutput = retainedOutputRef.current;
             const outputRun = runs.find((run) => run.id === openOutput?.runId && run.outputAvailable && !run.contentWithheld);
-            if (openOutput !== null && outputRun === undefined) setReviewState(null);
+            if (openOutput !== null && outputRun === undefined) {
+                outputViewRef.current++;
+                setReviewState(null);
+            }
             const outputChanged = openOutput !== null && outputRun !== undefined
                 && (reloadOutput || outputRun.outputRevision !== openOutput.outputRevision);
             setSnapshot((previous) => ({
@@ -151,6 +158,7 @@ export function useAskConnexMissions({
                 pendingId: previous?.key === key ? previous.pendingId : null,
             }));
             if (contentInvalidated) {
+                outputViewRef.current++;
                 setReviewState(null);
                 invalidatedRef.current?.(sessionId);
             } else if (outputChanged && outputRun) {
@@ -163,6 +171,11 @@ export function useAskConnexMissions({
             }
         } catch (error) {
             if (signal.aborted || revision !== refreshRef.current) return;
+            if (error instanceof ApiError && [401, 403, 404, 410].includes(error.status)) {
+                outputViewRef.current++;
+                setReviewState(null);
+                invalidatedRef.current?.(sessionId);
+            }
             setSnapshot({ key, runs: [], nextCursor: null, loading: false, output: null, pendingId: null,
                 problem: error instanceof ApiError ? askConnexMissionProblem(error.status, error.code) : 'failed' });
         }
@@ -268,6 +281,7 @@ export function useAskConnexMissions({
         const signal = controllerRef.current?.signal;
         if (!enabled || operationRef.current || !signal || signal.aborted || !run.availableActions.includes(action)) return;
         operationRef.current = true;
+        outputViewRef.current++;
         setSnapshot((value) => value?.key === key ? { ...value, pendingId: run.id, problem: null, output: null } : value);
         try {
             const updated = await controlAiAgentRun(run.id, action, run.stateVersion, workspacePinnedRequest(workspaceId, { signal }));
@@ -298,6 +312,7 @@ export function useAskConnexMissions({
         const signal = controllerRef.current?.signal;
         if (!enabled || operationRef.current || !signal || signal.aborted || !run.outputAvailable || run.contentWithheld) return;
         operationRef.current = true;
+        outputViewRef.current++;
         setReviewState(null);
         setSnapshot((value) => value?.key === key ? { ...value, pendingId: run.id, output: null, problem: null } : value);
         try {
@@ -332,6 +347,7 @@ export function useAskConnexMissions({
         if (items.length === 0) return;
         const pinned = workspacePinnedRequest(workspaceId, { signal });
         let settled: AiAgentProposalDecisionResult | null = null;
+        const outputView = outputViewRef.current;
         operationRef.current = true;
         setSnapshot((previous) => previous?.key === key ? { ...previous, pendingId: output.runId } : previous);
         setReviewState({ key: reviewKey, excluded: review?.excluded ?? new Set(), result: review?.result ?? null,
@@ -341,8 +357,11 @@ export function useAskConnexMissions({
                 expectedProposalRevision: output.proposalSet.revision, items,
             }, pinned);
             settled = result;
-            if (signal.aborted || retainedOutputRef.current?.runId !== output.runId
-                || retainedOutputRef.current.outputRevision !== output.outputRevision) return;
+            const retained = retainedOutputRef.current;
+            if (signal.aborted || outputViewRef.current !== outputView || (retained !== null && (retained.runId !== output.runId
+                || retained.proposalSet.revision !== output.proposalSet.revision
+                || items.some((selected) => !retained.proposalSet.items.some((member) =>
+                    member.actionSlot === selected.actionSlot && member.preparationId === selected.expectedPreparationId))))) return;
             setReviewState((previous) => previous?.key === reviewKey ? { ...previous, pending: new Map(), result } : previous);
             if (result.contentWithheld) {
                 setSnapshot((previous) => previous?.key === key ? { ...previous, output: null,
@@ -355,13 +374,15 @@ export function useAskConnexMissions({
             const [run, canonical] = await Promise.all([
                 getAiAgentRun(output.runId, { signal }), getAiAgentOutput(output.runId, { signal }),
             ]);
-            if (signal.aborted) return;
+            if (signal.aborted || outputViewRef.current !== outputView) return;
             upsert(run);
             setSnapshot((previous) => previous?.key === key && !run.contentWithheld
-                && run.outputRevision === canonical.outputRevision ? { ...previous, output: canonical } : previous);
+                && previous.runs.some((retained) => retained.id === canonical.runId && !retained.contentWithheld
+                    && retained.outputAvailable && retained.outputRevision === canonical.outputRevision)
+                ? { ...previous, output: canonical } : previous);
             if (sessionId !== null) changedRef.current(sessionId);
         } catch (error) {
-            if (signal.aborted) return;
+            if (signal.aborted || outputViewRef.current !== outputView) return;
             if (isWorkspaceUnavailableError(error)) showApiError(error);
             const inaccessible = error instanceof ApiError && [401, 403, 404, 410].includes(error.status);
             const refusal = settled === null && error instanceof ApiError && error.status === 409;
@@ -379,10 +400,11 @@ export function useAskConnexMissions({
             }
             setSnapshot((previous) => previous?.key === key ? { ...previous,
                 problem: error instanceof ApiError ? askConnexMissionProblem(error.status, error.code) : 'failed' } : previous);
-            await refresh();
+            if (settled === null) await refresh();
         } finally {
             if (!signal.aborted) {
                 operationRef.current = false;
+                setReviewState((previous) => previous?.key === reviewKey ? { ...previous, pending: new Map() } : previous);
                 setSnapshot((previous) => previous?.key === key ? { ...previous, pendingId: null } : previous);
             }
         }
@@ -427,6 +449,6 @@ export function useAskConnexMissions({
         output: current?.output ?? null, pendingId: current?.pendingId ?? null, hasMore: current?.nextCursor != null,
         proposalGroup, decisionResult: review?.result ?? null, toggleInclusion, decide,
         create, control, viewOutput, loadMore, retry: () => setReload((value) => value + 1),
-        closeOutput: () => { setReviewState(null); setSnapshot((value) => value?.key === key ? { ...value, output: null } : value); },
+        closeOutput: () => { outputViewRef.current++; setReviewState(null); setSnapshot((value) => value?.key === key ? { ...value, output: null } : value); },
     };
 }

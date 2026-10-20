@@ -13,8 +13,12 @@ import org.springframework.web.bind.annotation.RestController;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.mission.AiAgentProposalDecisionService;
+import ooo.klae.connex.backend.ai.mission.AiAgentProposalReadService;
 import ooo.klae.connex.backend.ai.mission.AiAgentRunService;
 import ooo.klae.connex.backend.dto.AiAgentOutputDto;
+import ooo.klae.connex.backend.dto.AiAgentProposalDecisionRequest;
+import ooo.klae.connex.backend.dto.AiAgentProposalDecisionResponse;
 import ooo.klae.connex.backend.dto.AiAgentRunControlRequest;
 import ooo.klae.connex.backend.dto.AiAgentRunCreateRequest;
 import ooo.klae.connex.backend.dto.AiAgentRunDto;
@@ -29,8 +33,8 @@ import ooo.klae.connex.backend.tenant.TenantJournalClientDriven;
 @TenantJournalAttributable
 public class AiAgentRunController {
     private final AiAgentRunService service;
-    private final ooo.klae.connex.backend.ai.mission.AiAgentProposalReadService proposals;
-    private final ooo.klae.connex.backend.ai.mission.AiAgentProposalDecisionService decisions;
+    private final AiAgentProposalReadService proposals;
+    private final AiAgentProposalDecisionService decisions;
 
     @PostMapping("/sessions/{sessionId}/missions")
     public ResponseEntity<AiAgentRunDto> create(@PathVariable int sessionId,
@@ -59,15 +63,16 @@ public class AiAgentRunController {
         return service.output(id);
     }
 
+    /** Direct item reads retain failures; the shipped client refreshes complete mission output. */
     @GetMapping("/missions/{id}/proposals/{actionSlot}")
-    @TenantJournalClientDriven(retainFailures = false)
+    @TenantJournalClientDriven
     public AiAgentOutputDto.ProposalItem proposal(@PathVariable int id, @PathVariable String actionSlot) {
         return proposals.item(id, actionSlot);
     }
 
     @PostMapping("/missions/{id}/proposal-decisions")
-    public ooo.klae.connex.backend.dto.AiAgentProposalDecisionResponse decide(@PathVariable int id,
-            @Valid @RequestBody ooo.klae.connex.backend.dto.AiAgentProposalDecisionRequest request) {
+    public AiAgentProposalDecisionResponse decide(@PathVariable int id,
+            @Valid @RequestBody AiAgentProposalDecisionRequest request) {
         return decisions.decide(id, request);
     }
 
