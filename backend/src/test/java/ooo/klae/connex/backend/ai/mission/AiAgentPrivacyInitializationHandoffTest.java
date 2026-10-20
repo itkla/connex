@@ -169,6 +169,25 @@ class AiAgentPrivacyInitializationHandoffTest {
     }
 
     @Test
+    void organizationReconciliationTraversesPagesPastEarlierPendingOrganizations() {
+        when(workspaces.findWorkspaceIdsPage(0, 100)).thenReturn(List.of());
+        var earlier = java.util.stream.IntStream.rangeClosed(1, 100).boxed().toList();
+        when(assistantPrivacy.incompleteOrganizationIdsPage(0, 100)).thenReturn(earlier);
+        when(assistantPrivacy.incompleteOrganizationIdsPage(100, 100)).thenReturn(List.of(900));
+        when(assistantPrivacy.incompleteOrganizationIdsPage(900, 100)).thenReturn(List.of());
+        var initializer = initializer();
+
+        initializer.reconcile();
+
+        for (int organizationId : earlier) {
+            verify(assistantPrivacy).reconcileOrganizationCompletion(organizationId);
+        }
+        verify(assistantPrivacy).reconcileOrganizationCompletion(900);
+        verifyNoInteractions(privacy, recovery);
+        assertTrue(initializer.isReady());
+    }
+
+    @Test
     void organizationCompletionFailureKeepsReadinessClosedAndIsRetriedWithoutWorkspaceRoots() {
         when(workspaces.findWorkspaceIdsPage(0, 100)).thenReturn(List.of());
         when(assistantPrivacy.incompleteOrganizationIdsPage(0, 100)).thenReturn(List.of(900));

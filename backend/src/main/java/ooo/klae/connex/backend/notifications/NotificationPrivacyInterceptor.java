@@ -18,10 +18,9 @@ import org.apache.ibatis.plugin.Signature;
 import org.apache.ibatis.session.ResultHandler;
 import org.apache.ibatis.session.RowBounds;
 
-import ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyPublicationGuard;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWorkspacePrivacy;
 
-/** Binds scoped authority before filtering and revalidates materialized results under publication fences. */
+/** Hydrates scoped generations for SQL filtering of content-free assistant notification pointers. */
 @Intercepts({
     @Signature(type = Executor.class, method = "update", args = {MappedStatement.class, Object.class}),
     @Signature(type = Executor.class, method = "query",
@@ -71,8 +70,6 @@ public final class NotificationPrivacyInterceptor implements Interceptor {
         Integer recipientId = identity(parameters, "recipientId");
         Integer workspaceId = identity(parameters, "workspaceId");
         List<AiAssistantWorkspacePrivacy> captured = authority.apply(recipientId, workspaceId);
-        Set<Integer> organizations = captured.stream().map(AiAssistantWorkspacePrivacy::organizationId)
-                .collect(Collectors.toSet());
         parameters.put("assistantWorkspaceGenerations", captured.stream().collect(Collectors.toUnmodifiableMap(
                 AiAssistantWorkspacePrivacy::workspaceId, AiAssistantWorkspacePrivacy::generation)));
         arguments[1] = parameters;
@@ -82,13 +79,7 @@ public final class NotificationPrivacyInterceptor implements Interceptor {
             arguments[4] = ((Executor) invocation.getTarget()).createCacheKey(
                     statement, parameters, (RowBounds) arguments[2], bound);
         }
-        Object result = invocation.proceed();
-        try (var publication = AiAssistantPrivacyPublicationGuard.retainPublicationReads(organizations)) {
-            if (!authority.apply(recipientId, workspaceId).containsAll(captured)) {
-                throw new ooo.klae.connex.backend.exceptions.ConflictException("assistant_privacy_unavailable");
-            }
-            return result;
-        }
+        return invocation.proceed();
     }
 
     private static Integer identity(Map<String, Object> parameters, String name) {

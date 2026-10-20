@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -20,6 +21,8 @@ import java.time.ZoneOffset;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.transaction.PlatformTransactionManager;
 
@@ -202,6 +205,34 @@ class AiBriefRunServiceTest {
         assertEquals(AiBriefRunService.NOTIFICATION_TYPE, notification.getValue().getType());
         assertEquals("/ask-connex/3", notification.getValue().getActionUrl());
         assertEquals("ai.brief:daily:9", notification.getValue().getDedupeKey());
+    }
+
+    /** Content-free pointers permit notification reads without taking a publication fence. */
+    @ParameterizedTest
+    @CsvSource({"daily,Daily brief ready", "weekly,Weekly review ready"})
+    void briefNotificationsNeverCopyAssistantText(String kind, String title) {
+        var pending = pending(kind);
+        chatMapper.getSessionByIdForMaintenanceUpdate(7, 3).setTitle("Assistant-derived private session title");
+        when(persistenceService.readTurn(3, 9)).thenReturn(turn("resolved"));
+        when(scheduleMapper.releasePendingTurn(
+                eq(7), eq(4), eq(9), eq(true), any(), anyString())).thenReturn(1);
+
+        assertEquals(AiBriefRunService.Outcome.DELIVERED, service.deliverPending(pending));
+
+        var captured = ArgumentCaptor.forClass(Notification.class);
+        verify(notificationDelivery).deliver(captured.capture());
+        var notification = captured.getValue();
+        assertEquals(title, notification.getTitle());
+        var json = JsonMapper.builder().build();
+        assertEquals(json.valueToTree(java.util.Map.of("kind", kind, "sessionId", 3)),
+                json.readTree(notification.getData()));
+        assertEquals("ai_chat_session", notification.getSourceType());
+        assertEquals(3, notification.getSourceId());
+        assertEquals("/ask-connex/3", notification.getActionUrl());
+        assertNull(notification.getBody());
+        assertNull(notification.getSourceLabel());
+        assertNull(notification.getActorLabel());
+        assertNull(notification.getContextLabel());
     }
 
     @Test

@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -76,8 +75,8 @@ class NotificationPrivacyRoutingTest {
                 assertTrue(TransactionSynchronizationManager.isActualTransactionActive());
                 assertEquals("cnx_tenant_privacy", context.getCatalog());
             });
-            verify(authority, times(2)).notificationWorkspaceGenerations(11, null);
-            assertEquals(2, transactions.suspendCount());
+            verify(authority).notificationWorkspaceGenerations(11, null);
+            assertEquals(1, transactions.suspendCount());
         } finally {
             context.clear();
         }

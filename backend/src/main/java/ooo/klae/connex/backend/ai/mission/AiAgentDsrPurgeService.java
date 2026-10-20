@@ -74,11 +74,20 @@ public class AiAgentDsrPurgeService {
         return projection(accepted);
     }
 
-    /** Recovers accepted authority without consulting mutable request subject linkage or actor membership. */
+    /**
+     * Recovers accepted authority without consulting mutable subject linkage or actor membership.
+     * An exhausted keyset wraps once within the same invocation so changed receipts behind the
+     * cursor are retried without an empty scheduled pass; at most twenty receipts are processed.
+     */
     @Scheduled(fixedDelayString = "${connex.ai.mission-dsr-recovery-delay:10s}", initialDelay = 15000)
     public void recoverAccepted() {
+        int afterId = recoveryCursor.get();
         List<AuditLog> receipts = tenantWorkScope.unroutedRead(
-                () -> controlMapper.pendingAcceptances(recoveryCursor.get(), 20));
+                () -> controlMapper.pendingAcceptances(afterId, 20));
+        if (receipts.isEmpty() && afterId != 0) {
+            recoveryCursor.set(0);
+            receipts = tenantWorkScope.unroutedRead(() -> controlMapper.pendingAcceptances(0, 20));
+        }
         if (receipts.isEmpty()) {
             recoveryCursor.set(0);
             return;

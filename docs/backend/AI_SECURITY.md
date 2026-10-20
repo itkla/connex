@@ -1175,8 +1175,17 @@ Clients compare the session's original decimal authority, retire affected caches
 responses while preserving newer chats. Missing provenance is withheld after a known cutoff.
 Every successful socket connection, including the first subscription, refreshes the active session,
 transcript and session list so a cutoff missed between initial REST load and subscription is observed.
-Notification inbox authority is limited to recipient candidate workspaces and revalidated under
-ordered publication fences after materialization; a concurrent cutoff refuses the stale result.
+Notification generation hydration is limited to recipient candidate workspaces, and the SQL
+predicate hides pointers to sessions invalidated at that captured generation. Brief notifications
+are the only assistant-content-sourced notifications: their titles are the fixed literals
+`Daily brief ready` / `Weekly review ready`, their data keys are exactly `kind` and `sessionId`,
+and their action links point to `/ask-connex/{sessionId}`. They contain no generated title, preview,
+record name or other assistant-derived text; the inbox localizes them from type and kind rather
+than rendering the stored title. Watch notifications use deterministic CRM evidence, not assistant
+output. Notification reads acquire no publication fence. A read racing invalidation may expose
+only that a brief existed, and page items/counts may reflect different generations. Opening the
+pointer still passes through the fully fenced session/transcript read; every content read retains
+its privacy authority through projection. `AiBriefRunServiceTest` pins this content-free payload.
 
 Accepted v1 DSR authority remains unchanged. New all-chat requests require both explicit v2
 acknowledgments and all existing admin, recent-authentication, CSRF, subject-proof and snapshot gates.
@@ -1193,6 +1202,9 @@ Verification waiting only on residual obligations stays incomplete and backs off
 Due work is selected by next-attempt time, then identity, so older object failures yield to later
 restriction erasure. Organization completion is retried for completed tenant work from both batch
 replay and initializer reconciliation, covering interruption after the placement receipt commits.
+Organization discovery traverses keyset pages rather than relying on the first global page.
+DSR receipt recovery wraps an exhausted cursor once in the same invocation and processes at most
+twenty receipts, so changed deleted-workspace evidence does not wait through an empty scheduled pass.
 
 If a tenant catalog is restored from before cleanup while newer control coordination survives,
 initialization reopens the placement receipt and operation/bootstrap completion whenever local work

@@ -89,6 +89,47 @@ class AiAgentDsrPurgeRecoveryTest {
         fixture.context.clear();
     }
 
+    @Test
+    void exhaustedCursorRetriesNewDeletedWorkspaceEvidenceWithinTheSamePass() {
+        var fixture = new RecoveryFixture();
+        fixture.service.recoverAccepted();
+        verify(fixture.operations, never()).completeMissionPurge(any());
+        when(fixture.authority.deletedWorkspaceVerifiedAt(11, fixture.accepted.operationId(), 8))
+            .thenReturn(LocalDateTime.of(2026, 10, 19, 1, 0));
+
+        fixture.service.recoverAccepted();
+
+        verify(fixture.receipts).pendingAcceptances(fixture.accepted.auditId(), 20);
+        verify(fixture.receipts, org.mockito.Mockito.times(2)).pendingAcceptances(0, 20);
+        verify(fixture.operations).completeMissionPurge(fixture.accepted);
+        assertEquals("complete", fixture.service.get(11, 19, 5, fixture.accepted.operationId()).state());
+        fixture.context.clear();
+    }
+
+    @Test
+    void recoveryDoesNotWrapWhileLaterReceiptsRemain() {
+        var fixture = new RecoveryFixture();
+        var later = new AiAgentPurgeAcceptance(fixture.accepted.auditId() + 1, 11, 20,
+            UUID.randomUUID().toString(), UUID.randomUUID().toString(), List.of(7, 8),
+            fixture.accepted.acceptedAt(), 2, AiAgentPurgeAcceptance.ASSISTANT_SCOPE,
+            AiAgentPurgeAcceptance.ASSISTANT_CUTOFF_POLICY, 1L, 2L);
+        var receipt = new AuditLog();
+        receipt.setId(later.auditId());
+        receipt.setOrgId(later.orgId());
+        receipt.setAction(AiAgentPurgeAcceptance.ACCEPTED);
+        receipt.setChanges(new ObjectMapper().writeValueAsString(later.metadata()));
+        when(fixture.receipts.pendingAcceptances(fixture.accepted.auditId(), 20))
+            .thenReturn(List.of(receipt));
+
+        fixture.service.recoverAccepted();
+        fixture.service.recoverAccepted();
+
+        verify(fixture.receipts).pendingAcceptances(0, 20);
+        verify(fixture.receipts).pendingAcceptances(fixture.accepted.auditId(), 20);
+        verify(fixture.operations, never()).completeMissionPurge(any());
+        fixture.context.clear();
+    }
+
     private static final class RecoveryFixture {
         final AiAgentPurgeAcceptance accepted = new AiAgentPurgeAcceptance(42, 11, 19, UUID.randomUUID().toString(),
             UUID.randomUUID().toString(), List.of(7, 8), "2026-10-18T00:00:00Z", 2,
@@ -98,14 +139,14 @@ class AiAgentDsrPurgeRecoveryTest {
         final AiAgentPrivacyMapper work = mock(AiAgentPrivacyMapper.class);
         final DataSubjectRequestControlOperations operations = mock(DataSubjectRequestControlOperations.class);
         final JobRunRecorder recorder = mock(JobRunRecorder.class);
+        final AiAgentDsrControlMapper receipts = mock(AiAgentDsrControlMapper.class);
+        final AuditLog receipt = new AuditLog();
         final AiAssistantPrivacyOperation operation = new AiAssistantPrivacyOperation();
         final TenantContext context = new TenantContext();
         final AiAgentDsrPurgeService service;
 
         RecoveryFixture() {
             var json = new ObjectMapper();
-            var receipts = mock(AiAgentDsrControlMapper.class);
-            var receipt = new AuditLog();
             receipt.setId(accepted.auditId());
             receipt.setOrgId(accepted.orgId());
             receipt.setAction(AiAgentPurgeAcceptance.ACCEPTED);

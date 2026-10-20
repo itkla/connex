@@ -2,7 +2,6 @@ package ooo.klae.connex.backend.ai.mission;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -32,7 +31,7 @@ class AiAssistantPrivacyOrganizationRecoveryIntegrationTest extends AbstractAiAg
                 transaction().executeWithoutResult(status -> authority.provision(empty.getId()));
                 return null;
             });
-            assertTrue(control.incompleteOrganizationIdsPage(0, 100).contains(empty.getId()));
+            assertEquals(List.of(empty.getId()), control.incompleteOrganizationIdsPage(empty.getId() - 1, 1));
 
             workScope.unrouted(() -> {
                 authority.reconcileOrganizationCompletion(empty.getId());

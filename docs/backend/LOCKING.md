@@ -2312,11 +2312,15 @@ V236 bootstraps and retries completion after the last workspace disappears witho
 
 Notification source predicates hydrate only active recipient memberships, optionally the exact
 requested workspace; workspace maintenance hydrates that workspace alone. Suspend any tenant
-transaction before installing the control route for each separate fresh authority read. Materialize
-notification queries and updates before acquiring publication read stripes, since locking inbox reads
-also acquire workspace roots. Then acquire distinct physical stripes in ascending order, re-read
-fresh authority and reject changed or missing captured authority through materialized mapper return.
-Cursors and result handlers are refused because they can expose rows before final validation.
+transaction before installing the control route for each fresh authority read. Notification reads
+and updates acquire no publication stripes: brief delivery already retains database organization S,
+and acquiring publication S there would invert invalidation's publication X → database organization
+X order. The SQL generation predicate still hides pointers invalidated at the captured generation.
+Brief notifications contain only fixed titles, `{kind, sessionId}` data and a session action link;
+they carry no assistant-derived text. A read racing invalidation can reveal only that a brief
+existed, including temporary page/count skew. Session/transcript content reads retain their full
+privacy authority through projection. The brief payload guard test must change before any content
+can be copied into notifications, and such a change requires revisiting this bounded guarantee.
 
 Actual realtime, export and chat-file output holds its read fence and performs a fresh control read
 on a separate READ COMMITTED transaction; an export snapshot is never that authority. Do not hold
