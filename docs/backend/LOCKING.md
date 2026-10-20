@@ -1793,7 +1793,11 @@ inherited or copied to executors. Validated control-only selections have no usab
 
 Routed provisioning's `AFTER_COMMIT` callback submits initialization without waiting, because that
 callback still retains the provisioning connection. The worker resolves its own route before tenant
-transactions; failed submissions or initialization remain covered by periodic reconciliation.
+transactions. Its dedicated managed executor has one worker and a bounded queue; saturation and
+shutdown reject rather than running initialization on the callback thread. Rejection is logged and
+periodic reconciliation rediscovers the committed workspace. Handoff or initialization failure keeps
+global mission readiness closed until reconciliation succeeds. Accepted work drains at shutdown with
+a 30-second termination wait.
 Single-database provisioning stays synchronous.
 
 CSV commits claim their one-use review proof first, then lock and revalidate the actor's create

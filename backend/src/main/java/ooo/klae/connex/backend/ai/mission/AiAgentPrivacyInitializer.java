@@ -19,6 +19,7 @@ import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import lombok.extern.slf4j.Slf4j;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.observability.JobRunRecorder;
 import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunDetail;
@@ -29,6 +30,7 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /** Placement-aware reconciliation that never invents a replacement privacy generation. */
 @Component
+@Slf4j
 public class AiAgentPrivacyInitializer {
     private final WorkspaceMapper workspaceMapper;
     private final TenantWorkScope tenantWorkScope;
@@ -41,12 +43,12 @@ public class AiAgentPrivacyInitializer {
     private final ObjectProvider<TaskExecutor> initializationExecutor;
     private final AtomicBoolean ready = new AtomicBoolean();
 
-    /** Creates initialization with the application's ordinary, non-propagating async executor. */
+    /** Creates initialization with its bounded, managed, non-propagating provisioning executor. */
     public AiAgentPrivacyInitializer(WorkspaceMapper workspaceMapper, TenantWorkScope tenantWorkScope,
             AiAgentPrivacyService privacyService, AiAgentStartupRecoveryService startupRecovery,
             JobRunRecorder jobRunRecorder, PlatformTransactionManager transactionManager,
             AutomationExecutor automationExecutor, SystemActor systemActor,
-            @Qualifier("applicationTaskExecutor") ObjectProvider<TaskExecutor> initializationExecutor) {
+            @Qualifier("aiAgentPrivacyInitializationExecutor") ObjectProvider<TaskExecutor> initializationExecutor) {
         this.workspaceMapper = workspaceMapper;
         this.tenantWorkScope = tenantWorkScope;
         this.privacyService = privacyService;
@@ -127,6 +129,8 @@ public class AiAgentPrivacyInitializer {
      * Routed provisioning hands off without waiting: AFTER_COMMIT retains the provisioning
      * connection until this callback returns. Workers install their own route and prepared scopes.
      * Single-database provisioning retains synchronous initialization and scheduled recovery.
+     * A rejected handoff or failed initialization keeps global mission readiness closed until a
+     * successful scheduled reconciliation, without affecting the committed workspace provision.
      */
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void provisioned(WorkspaceProvisioned event) {
@@ -135,6 +139,8 @@ public class AiAgentPrivacyInitializer {
                 initializationExecutor.getObject().execute(() -> initializeProvisioned(event.workspaceId()));
             } catch (RuntimeException failure) {
                 ready.set(false);
+                log.warn("AI privacy initialization handoff failed for workspace {}; scheduled reconciliation will retry",
+                    event.workspaceId());
             }
             return;
         }

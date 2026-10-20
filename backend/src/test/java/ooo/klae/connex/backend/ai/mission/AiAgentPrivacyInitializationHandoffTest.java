@@ -154,7 +154,7 @@ class AiAgentPrivacyInitializationHandoffTest {
 
     private AiAgentPrivacyInitializer initializer() {
         var beans = new StaticListableBeanFactory();
-        beans.addBean("applicationTaskExecutor", (TaskExecutor) pending::add);
+        beans.addBean("aiAgentPrivacyInitializationExecutor", (TaskExecutor) pending::add);
         return new AiAgentPrivacyInitializer(workspaces, scope, privacy, recovery,
             mock(JobRunRecorder.class), new TestTransactionManager(),
             new AutomationExecutor(context, new AutomationScope(), scope), system,

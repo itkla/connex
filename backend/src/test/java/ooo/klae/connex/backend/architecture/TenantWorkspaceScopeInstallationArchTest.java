@@ -5,11 +5,14 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.io.File;
 import java.net.URI;
+import java.net.URLClassLoader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -17,7 +20,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 
+import javax.lang.model.element.TypeElement;
+import javax.lang.model.type.TypeKind;
+import javax.lang.model.type.TypeMirror;
+import javax.lang.model.util.Types;
+import javax.tools.Diagnostic;
+import javax.tools.DiagnosticCollector;
 import javax.tools.JavaFileObject;
 import javax.tools.SimpleJavaFileObject;
 import javax.tools.ToolProvider;
@@ -31,10 +41,11 @@ import com.sun.source.tree.MemberReferenceTree;
 import com.sun.source.tree.MemberSelectTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.MethodTree;
-import com.sun.source.tree.Tree;
-import com.sun.source.tree.VariableTree;
 import com.sun.source.util.JavacTask;
+import com.sun.source.util.TreePath;
+import com.sun.source.util.TreePathScanner;
 import com.sun.source.util.TreeScanner;
+import com.sun.source.util.Trees;
 
 /** Pins reviewed scope installers and restorers without inferring transitive application behavior. */
 class TenantWorkspaceScopeInstallationArchTest {
@@ -82,7 +93,19 @@ class TenantWorkspaceScopeInstallationArchTest {
     void localAliasAndMethodReferenceCannotHideAnInstaller() throws IOException {
         assertEquals(Set.of("set"), fixture("var alias = context; alias.set(7, 900, 42, \"member\", null);")
             .get("fixture.Unreviewed.install"));
-        assertEquals(Set.of("set"), fixture("var writer = context::set;").get("fixture.Unreviewed.install"));
+        assertEquals(Set.of("set"), fixture("Installer writer = context::set;").get("fixture.Unreviewed.install"));
+    }
+
+    @Test
+    void providerReceiverCannotHideAnInstaller() throws IOException {
+        assertEquals(Set.of("set"), fixture("provider.getObject().set(7, 900, 42, \"member\", null);")
+            .get("fixture.Unreviewed.install"));
+    }
+
+    @Test
+    void constructedReceiverCannotHideAnInstaller() throws IOException {
+        assertEquals(Set.of("set"), fixture("new TenantContext().set(7, 900, 42, \"member\", null);")
+            .get("fixture.Unreviewed.install"));
     }
 
     @Test
@@ -106,9 +129,17 @@ class TenantWorkspaceScopeInstallationArchTest {
         String source = """
             package fixture;
             import ooo.klae.connex.backend.tenant.TenantContext;
+            import org.springframework.beans.factory.ObjectProvider;
             class Unreviewed {
                 TenantContext context;
-                Object previous;
+                ObjectProvider<TenantContext> provider;
+                TenantContext.State previous;
+                interface Installer {
+                    void install(int workspaceId, int orgId, int userId, String role, String catalog);
+                }
+                static class Other {
+                    void set(int value) {}
+                }
                 void install() { %s }
             }
             """.formatted(body);
@@ -125,35 +156,90 @@ class TenantWorkspaceScopeInstallationArchTest {
     private static Map<String, Set<String>> scan(Iterable<? extends JavaFileObject> sources) throws IOException {
         var compiler = Objects.requireNonNull(ToolProvider.getSystemJavaCompiler());
         try (var manager = compiler.getStandardFileManager(null, null, StandardCharsets.UTF_8)) {
-            JavacTask task = (JavacTask) compiler.getTask(null, manager, null, List.of("-proc:none"), null, sources);
+            var diagnostics = new DiagnosticCollector<JavaFileObject>();
+            JavacTask parser = (JavacTask) compiler.getTask(null, manager, diagnostics, List.of("-proc:none"), null, sources);
+            List<JavaFileObject> candidates = new ArrayList<>();
+            for (CompilationUnitTree unit : parser.parse()) {
+                var calls = new TreeScanner<Boolean, Void>() {
+                    @Override
+                    public Boolean visitMethodInvocation(MethodInvocationTree tree, Void ignored) {
+                        return MUTATORS.contains(methodName(tree)) || Boolean.TRUE.equals(super.visitMethodInvocation(tree, ignored));
+                    }
+
+                    @Override
+                    public Boolean visitMemberReference(MemberReferenceTree tree, Void ignored) {
+                        return MUTATORS.contains(tree.getName().toString()) || Boolean.TRUE.equals(super.visitMemberReference(tree, ignored));
+                    }
+
+                    @Override
+                    public Boolean reduce(Boolean first, Boolean second) {
+                        return Boolean.TRUE.equals(first) || Boolean.TRUE.equals(second);
+                    }
+                };
+                if (Boolean.TRUE.equals(calls.scan(unit, null))) {
+                    candidates.add(unit.getSourceFile());
+                }
+            }
+            assertTrue(diagnostics.getDiagnostics().stream().noneMatch(d -> d.getKind() == Diagnostic.Kind.ERROR),
+                () -> "Cannot parse scope installers: " + diagnostics.getDiagnostics());
             Map<String, Set<String>> actual = new LinkedHashMap<>();
+            if (candidates.isEmpty()) {
+                return actual;
+            }
+            JavacTask task = (JavacTask) compiler.getTask(null, manager, diagnostics,
+                List.of("-proc:none", "-implicit:none", "-Xmaxerrs", "10000", "-classpath", runtimeClasspath()), null, candidates);
+            List<CompilationUnitTree> units = new ArrayList<>();
             for (CompilationUnitTree unit : task.parse()) {
-                new InstallerScanner(unit, actual).scan(unit, null);
+                units.add(unit);
+            }
+            task.analyze();
+            Trees trees = Trees.instance(task);
+            TypeElement context = Objects.requireNonNull(task.getElements().getTypeElement(ROOT + "tenant.TenantContext"));
+            for (CompilationUnitTree unit : units) {
+                new InstallerScanner(unit, actual, trees, task.getTypes(), context.asType()).scan(unit, null);
             }
             return actual;
         }
     }
 
-    private static final class InstallerScanner extends TreeScanner<Void, Void> {
+    private static String runtimeClasspath() {
+        List<String> entries = new ArrayList<>();
+        entries.add(System.getProperty("java.class.path"));
+        for (ClassLoader loader = TenantWorkspaceScopeInstallationArchTest.class.getClassLoader();
+                loader != null; loader = loader.getParent()) {
+            if (loader instanceof URLClassLoader urls) {
+                for (var url : urls.getURLs()) {
+                    if (url.getProtocol().equals("file")) {
+                        entries.add(Path.of(URI.create(url.toString())).toString());
+                    }
+                }
+            }
+        }
+        return entries.stream().distinct().collect(Collectors.joining(File.pathSeparator));
+    }
+
+    private static String methodName(MethodInvocationTree tree) {
+        return tree.getMethodSelect() instanceof MemberSelectTree select ? select.getIdentifier().toString()
+            : ((IdentifierTree) tree.getMethodSelect()).getName().toString();
+    }
+
+    /** Attributes candidate receivers against compiled dependencies; this does not infer call chains. */
+    private static final class InstallerScanner extends TreePathScanner<Void, Void> {
         private final String packageName;
         private final Map<String, Set<String>> actual;
         private final Deque<String> owners = new ArrayDeque<>();
-        private final Set<String> contexts = new HashSet<>();
+        private final Trees trees;
+        private final Types types;
+        private final TypeMirror contextType;
         private String method;
 
-        private InstallerScanner(CompilationUnitTree unit, Map<String, Set<String>> actual) {
+        private InstallerScanner(CompilationUnitTree unit, Map<String, Set<String>> actual,
+                Trees trees, Types types, TypeMirror contextType) {
             this.packageName = unit.getPackageName().toString();
             this.actual = actual;
-            new TreeScanner<Void, Void>() {
-                @Override
-                public Void visitVariable(VariableTree tree, Void ignored) {
-                    String type = tree.getType() == null ? "" : tree.getType().toString();
-                    if (type.equals("TenantContext") || type.endsWith(".TenantContext")) {
-                        contexts.add(tree.getName().toString());
-                    }
-                    return super.visitVariable(tree, ignored);
-                }
-            }.scan(unit, null);
+            this.trees = trees;
+            this.types = types;
+            this.contextType = contextType;
         }
 
         @Override
@@ -174,36 +260,35 @@ class TenantWorkspaceScopeInstallationArchTest {
         }
 
         @Override
-        public Void visitVariable(VariableTree tree, Void ignored) {
-            String type = tree.getType() == null ? "" : tree.getType().toString();
-            if (type.equals("TenantContext") || type.endsWith(".TenantContext") || isContext(tree.getInitializer())) {
-                contexts.add(tree.getName().toString());
-            }
-            return super.visitVariable(tree, ignored);
-        }
-
-        @Override
         public Void visitMethodInvocation(MethodInvocationTree tree, Void ignored) {
-            if (tree.getMethodSelect() instanceof MemberSelectTree select && isContext(select.getExpression())) {
-                record(select.getIdentifier().toString());
-            } else if (tree.getMethodSelect() instanceof IdentifierTree identifier
-                    && owner().equals(ROOT + "tenant.TenantContext")) {
-                record(identifier.getName().toString());
+            String name = methodName(tree);
+            if (MUTATORS.contains(name)) {
+                if (tree.getMethodSelect() instanceof MemberSelectTree select) {
+                    var selected = new TreePath(getCurrentPath(), select);
+                    if (isContext(new TreePath(selected, select.getExpression()))) {
+                        record(name);
+                    }
+                } else if (owner().equals(ROOT + "tenant.TenantContext")) {
+                    record(name);
+                }
             }
             return super.visitMethodInvocation(tree, ignored);
         }
 
         @Override
         public Void visitMemberReference(MemberReferenceTree tree, Void ignored) {
-            if (isContext(tree.getQualifierExpression())) {
+            if (MUTATORS.contains(tree.getName().toString())
+                    && isContext(new TreePath(getCurrentPath(), tree.getQualifierExpression()))) {
                 record(tree.getName().toString());
             }
             return super.visitMemberReference(tree, ignored);
         }
 
-        private boolean isContext(Tree tree) {
-            return tree instanceof IdentifierTree id && contexts.contains(id.getName().toString())
-                || tree instanceof MemberSelectTree select && contexts.contains(select.getIdentifier().toString());
+        private boolean isContext(TreePath receiver) {
+            TypeMirror type = trees.getTypeMirror(receiver);
+            assertTrue(type != null && type.getKind() != TypeKind.ERROR,
+                () -> "Cannot resolve installer receiver type in " + owner() + ": " + receiver.getLeaf());
+            return types.isSubtype(types.erasure(type), types.erasure(contextType));
         }
 
         private void record(String mutator) {
