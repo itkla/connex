@@ -266,6 +266,15 @@
     </if>
   </sql>
 
+  <sql id="dealUnit">
+    <choose>
+      <when test="query.measure == 'won_revenue' or query.measure == 'new_pipeline_value' or query.measure == 'open_pipeline_value'">COALESCE(d.currency, '')</when>
+      <when test="query.measure == 'win_rate'">'percent'</when>
+      <when test="query.measure == 'avg_cycle_days'">'days'</when>
+      <otherwise>'count'</otherwise>
+    </choose>
+  </sql>
+
   <select id="aggregateDeals" resultType="ooo.klae.connex.backend.dto.ReportAggregateRow">
     SELECT
       <choose>
@@ -280,12 +289,7 @@
         </when>
         <otherwise><include refid="dealGroupLabel"/></otherwise>
       </choose> AS group_label,
-      <choose>
-        <when test="query.measure == 'won_revenue' or query.measure == 'new_pipeline_value' or query.measure == 'open_pipeline_value'">COALESCE(d.currency, '')</when>
-        <when test="query.measure == 'win_rate'">'percent'</when>
-        <when test="query.measure == 'avg_cycle_days'">'days'</when>
-        <otherwise>'count'</otherwise>
-      </choose> AS unit,
+      <include refid="dealUnit"/> AS unit,
       <choose>
         <when test="query.measure == 'won_revenue'">COALESCE(SUM(d.actual_value), 0)</when>
         <when test="query.measure == 'new_pipeline_value' or query.measure == 'open_pipeline_value'">COALESCE(SUM(d.value), 0)</when>
@@ -313,7 +317,7 @@
     <if test="query.measure == 'win_rate'">AND d.won IS NOT NULL</if>
     <if test="query.measure == 'open_pipeline_value' or query.measure == 'open_deal_count'">AND d.won IS NULL</if>
     <include refid="dealFilters"/>
-    GROUP BY group_key, group_label, unit
+    GROUP BY group_key, group_label, <include refid="dealUnit"/>
     <choose>
       <when test="query.groupBy == 'stage'">ORDER BY MIN(d.pipeline_id), MIN(s.position), group_key</when>
       <otherwise>ORDER BY group_key</otherwise>
@@ -388,11 +392,15 @@
     )
   </sql>
 
+  <sql id="forecastUnit">
+    COALESCE(d.currency, '')
+  </sql>
+
   <select id="aggregateForecast" resultType="ooo.klae.connex.backend.dto.ReportForecastAggregateRow">
     SELECT
       CONCAT(COALESCE(d.currency, ''), ':', <include refid="forecastGroupKey"/>) AS group_key,
       CONCAT(COALESCE(d.currency, ''), ' · ', <include refid="forecastGroupLabel"/>) AS group_label,
-      COALESCE(d.currency, '') AS unit,
+      <include refid="forecastUnit"/> AS unit,
       COALESCE(SUM(GREATEST(d.value, 0)), 0) AS best_value,
       COALESCE(SUM(GREATEST(d.value, 0) * <include refid="forecastWinRate"/>), 0)
         AS weighted_value,
@@ -441,7 +449,7 @@
       AND d.expected_close_date &gt;= #{query.startDate}
       AND d.expected_close_date &lt; #{query.endDateExclusive}
     <include refid="dealFilters"/>
-    GROUP BY group_key, group_label, unit
+    GROUP BY group_key, group_label, <include refid="forecastUnit"/>
     <choose>
       <when test="query.groupBy == 'stage'">ORDER BY MIN(d.pipeline_id), MIN(s.position), group_key</when>
       <otherwise>ORDER BY group_key</otherwise>
@@ -867,7 +875,7 @@
       AND dd.generated_at &gt;= #{query.startUtc}
       AND dd.generated_at &lt; #{query.endUtc}
     <include refid="dealFilters"/>
-    GROUP BY group_key, group_label, unit
+    GROUP BY group_key, group_label
     ORDER BY group_key
   </select>
 
@@ -890,7 +898,7 @@
       AND first_document.first_generated_at &gt;= #{query.startUtc}
       AND first_document.first_generated_at &lt; #{query.endUtc}
     <include refid="dealFilters"/>
-    GROUP BY group_key, group_label, unit
+    GROUP BY group_key, group_label
     ORDER BY group_key
   </select>
 
@@ -917,9 +925,16 @@
       AND a.decided_at &gt;= #{query.startUtc}
       AND a.decided_at &lt; #{query.endUtc}
     <include refid="dealFilters"/>
-    GROUP BY group_key, group_label, unit
+    GROUP BY group_key, group_label
     ORDER BY group_key
   </select>
+
+  <sql id="coverageGapUnit">
+    <choose>
+      <when test="query.measure == 'coverage_gap_open_pipeline_value'">COALESCE(open_deal.currency, '')</when>
+      <otherwise>'count'</otherwise>
+    </choose>
+  </sql>
 
   <select id="aggregateCoverageGaps" resultType="ooo.klae.connex.backend.dto.ReportAggregateRow">
     SELECT
@@ -945,10 +960,7 @@
         <when test="query.groupBy == 'company'">gap_company.name</when>
         <otherwise>'Total'</otherwise>
       </choose> AS group_label,
-      <choose>
-        <when test="query.measure == 'coverage_gap_open_pipeline_value'">COALESCE(open_deal.currency, '')</when>
-        <otherwise>'count'</otherwise>
-      </choose> AS unit,
+      <include refid="coverageGapUnit"/> AS unit,
       <choose>
         <when test="query.measure == 'coverage_gap_open_pipeline_value'">COALESCE(SUM(open_deal.value), 0)</when>
         <otherwise>COUNT(DISTINCT gap_company.id)</otherwise>
@@ -1066,9 +1078,16 @@
         or query.statuses != null and !query.statuses.isEmpty()">
       WHERE open_deal.id IS NOT NULL
     </if>
-    GROUP BY group_key, group_label, unit
+    GROUP BY group_key, group_label, <include refid="coverageGapUnit"/>
     ORDER BY value DESC, group_label, group_key
   </select>
+
+  <sql id="singleThreadedDealUnit">
+    <choose>
+      <when test="query.measure == 'single_threaded_deal_value'">single_deal.currency</when>
+      <otherwise>'count'</otherwise>
+    </choose>
+  </sql>
 
   <select id="aggregateSingleThreadedDeals" resultType="ooo.klae.connex.backend.dto.ReportAggregateRow">
     SELECT
@@ -1098,10 +1117,7 @@
         <when test="query.groupBy == 'company'">COALESCE(single_company.name, 'Unassigned')</when>
         <otherwise>'Total'</otherwise>
       </choose> AS group_label,
-      <choose>
-        <when test="query.measure == 'single_threaded_deal_value'">single_deal.currency</when>
-        <otherwise>'count'</otherwise>
-      </choose> AS unit,
+      <include refid="singleThreadedDealUnit"/> AS unit,
       <choose>
         <when test="query.measure == 'single_threaded_deal_value'">SUM(single_deal.value)</when>
         <otherwise>COUNT(*)</otherwise>
@@ -1133,7 +1149,7 @@
         )
       )
       AND single_company.archived_at IS NULL
-    GROUP BY group_key, group_label, unit
+    GROUP BY group_key, group_label, <include refid="singleThreadedDealUnit"/>
     ORDER BY value DESC, group_label, group_key
   </select>
 

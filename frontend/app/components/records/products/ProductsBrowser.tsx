@@ -24,6 +24,13 @@ import ProductListRow from '@/app/components/records/products/ProductListRow';
 import ProductDialog from '@/app/components/records/products/ProductDialog';
 import { formatEffectiveRange, formatTaxRate } from '@/app/components/records/products/productDisplay';
 import {
+    PRODUCT_AVAILABILITY_FILTER_KEY,
+    PRODUCT_BILLING_FILTER_KEY,
+    PRODUCT_BOUNDED_FACET_KEY,
+    PRODUCT_EFFECTIVE_DATES_FILTER_KEY,
+    productExportParams,
+} from '@/app/components/records/products/productExport';
+import {
     applyRecordFilters,
     countActiveFilters,
     deriveFilterOptions,
@@ -128,7 +135,7 @@ export default function ProductsBrowser({ products: initial }: { products: Produ
             ),
         },
         {
-            key: 'billingFrequency',
+            key: PRODUCT_BILLING_FILTER_KEY,
             label: t('columnBilling'),
             getSortValue: (product) => product.billingFrequency,
             render: (product) => (product.billingFrequency === 'recurring' ? t('recurring') : t('oneTime')),
@@ -144,7 +151,7 @@ export default function ProductsBrowser({ products: initial }: { products: Produ
             render: (product) => <span className="tabular-nums">{formatTaxRate(product, locale)}</span>,
         },
         {
-            key: 'active',
+            key: PRODUCT_AVAILABILITY_FILTER_KEY,
             label: t('columnAvailability'),
             getSortValue: (product) => (product.active ? 1 : 0),
             render: (product) => (
@@ -160,12 +167,14 @@ export default function ProductsBrowser({ products: initial }: { products: Produ
             },
         },
         {
-            key: 'effectiveStart',
+            key: PRODUCT_EFFECTIVE_DATES_FILTER_KEY,
             label: t('effectiveDates'),
             getSortValue: (product) => (product.effectiveStart ? Date.parse(product.effectiveStart) : null),
             render: (product) => formatEffectiveRange(product, locale, t),
             filter: {
-                getValue: (product) => (product.effectiveStart || product.effectiveEnd ? 'bounded' : null),
+                getValue: (product) => (
+                    product.effectiveStart || product.effectiveEnd ? PRODUCT_BOUNDED_FACET_KEY : null
+                ),
                 formatValue: () => t('filterBounded'),
                 emptyLabel: t('noDateLimit'),
             },
@@ -202,17 +211,15 @@ export default function ProductsBrowser({ products: initial }: { products: Produ
     };
 
     /**
-     * Exports what `GET /api/exports/products` can express, which is the search and nothing else.
-     * The facets on this browser are client-side, and the endpoint takes no filter params, so the
-     * action's copy names the search rather than claiming the whole view; widening the endpoint is
-     * a backend change this surface does not make.
+     * Exports exactly what this browser lists: the server applies the same search and the same
+     * Billing, Availability, and Effective dates facets the rows are filtered by client-side.
      */
     const exportProducts = useCallback(
         (signal: AbortSignal, workspaceId: number) => exportProductsCsv(
-            { q: trimmedQuery || undefined },
+            productExportParams(query, filterState),
             { signal, headers: { 'X-Workspace-Id': String(workspaceId) } },
         ),
-        [trimmedQuery],
+        [query, filterState],
     );
 
     const editOne = useCallback((product: Product) => setDialog({ mode: 'edit', product }), []);

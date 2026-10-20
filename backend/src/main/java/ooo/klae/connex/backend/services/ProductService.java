@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.beans.Product;
+import ooo.klae.connex.backend.dto.ProductFacetFilter;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.ProductMapper;
@@ -40,7 +41,8 @@ public class ProductService {
 
     /** Products matching the current catalog search in the active workspace, ordered by name. */
     public List<Product> getAll(String query) {
-        return productMapper.getFiltered(workspaceService.getCurrentWorkspaceId(), query);
+        return productMapper.getFiltered(
+            workspaceService.getCurrentWorkspaceId(), query, ProductFacetFilter.none());
     }
 
     /** A single product in the active workspace, or 404. */

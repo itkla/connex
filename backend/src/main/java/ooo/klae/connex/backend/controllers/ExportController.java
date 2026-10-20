@@ -20,6 +20,7 @@ import ooo.klae.connex.backend.beans.PersonFirstResponseState;
 import ooo.klae.connex.backend.beans.PersonLeadSource;
 import ooo.klae.connex.backend.beans.PersonLifecycleStage;
 import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.dto.ProductFacetFilter;
 import ooo.klae.connex.backend.services.ExportService;
 import ooo.klae.connex.backend.services.MemberScopeResolver;
 import ooo.klae.connex.backend.services.WarmthFilterResolver;
@@ -97,11 +98,20 @@ public class ExportController {
             warmthFilterResolver.resolve(warmthBands, noWarmth, goesColdWithinDays, null)));
     }
 
-    /** Export products as CSV, honoring the product catalog's search. */
+    /**
+     * Export products as CSV, honoring the product catalog's search and the browser's Billing,
+     * Availability, and Effective dates facets, so the file holds exactly the products the view
+     * lists.
+     */
     @GetMapping("/products")
-    public ResponseEntity<byte[]> exportProducts(@RequestParam(required = false) String q) {
+    public ResponseEntity<byte[]> exportProducts(
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) List<String> billingFrequency,
+            @RequestParam(required = false) List<String> active,
+            @RequestParam(required = false) List<String> effectiveDates) {
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q.trim());
-        return csv("products.csv", exportService.exportProducts(query));
+        ProductFacetFilter facets = ProductFacetFilter.fromRequest(billingFrequency, active, effectiveDates);
+        return csv("products.csv", exportService.exportProducts(query, facets));
     }
 
     /**
