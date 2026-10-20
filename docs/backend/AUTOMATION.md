@@ -13,6 +13,10 @@ Smart-segment evaluation is the shared state-matching language used by automatio
 
 Evaluation returns workspace- and current-user-scoped record ids through `SegmentService`/`SegmentMapper`. Segments describe current state; automation adds a trigger/transition plus actions. Do not create a second condition language for workflows, campaigns, or adjacent features.
 
+Calendar dates for `within_days` use the active workspace's analytics zone when its context matches
+the evaluated workspace. Session-free evaluation reads the evaluated workspace's persisted timezone,
+falling back to UTC when absent. Definition validation does not resolve a zone or read the clock.
+
 ## Catalog is the vocabulary
 
 `SegmentCatalog` declares the supported record types, field kinds/value sources/operators, predicate applicability/bounds, enum options, and definition shape limits.
@@ -103,6 +107,9 @@ stay available in both cases.
 ## Adding actions
 
 Add a new action to the closed validated vocabulary and `RuleActionExecutor`, delegating to the existing domain service rather than reproducing domain logic.
+
+Automated task due dates use today in the active workspace's analytics zone (workspace, then actor,
+then UTC). An action without a workspace context uses UTC; other resolution failures propagate.
 
 - Map the action to its required permission in the validator/guard.
 - Extend `SystemActor`'s permission set only when system mode must legitimately perform the action.

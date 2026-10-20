@@ -302,6 +302,7 @@ public class RuleEngineService {
         return rule.getCreatedById() != null ? rule.getCreatedById() : systemActor.user().getId();
     }
 
+    /** Uses UTC by design so internal deduplication buckets agree across deployment hosts. */
     private String scheduleBucket(String cadence) {
         LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         return switch (cadence == null ? "daily" : cadence.trim().toLowerCase()) {

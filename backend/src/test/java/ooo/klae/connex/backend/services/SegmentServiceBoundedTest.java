@@ -22,6 +22,9 @@ import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.SegmentMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
+import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.tenant.TenantContext;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 class SegmentServiceBoundedTest {
 
@@ -37,7 +40,10 @@ class SegmentServiceBoundedTest {
             mock(PersonEdgeReadService.class),
             mock(PersonMapper.class),
             mock(TagMapper.class),
-            new SegmentCatalog());
+            new SegmentCatalog(),
+            mock(WorkspaceMapper.class),
+            new TenantContext(),
+            mock(TenantWorkScope.class));
         List<Integer> firstPage = IntStream.rangeClosed(1, 201).boxed().toList();
         when(segmentMapper.maximumEntityId(7, "company")).thenReturn(202);
         when(segmentMapper.entityIdsPage(7, "company", 0, 202, 201))
@@ -77,7 +83,10 @@ class SegmentServiceBoundedTest {
             edgeReader,
             personMapper,
             mock(TagMapper.class),
-            new SegmentCatalog());
+            new SegmentCatalog(),
+            mock(WorkspaceMapper.class),
+            new TenantContext(),
+            mock(TenantWorkScope.class));
         when(segmentMapper.maximumEntityId(7, "company")).thenReturn(3);
         when(segmentMapper.entityIdsPage(7, "company", 0, 3, 3))
             .thenReturn(List.of(1, 2, 3));

@@ -16,12 +16,16 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.SegmentMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
+import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.tenant.TenantContext;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 class SegmentServiceCatalogTest {
     private final SegmentService segmentService = new SegmentService(
         mock(WorkspaceService.class), mock(AuthService.class), mock(ScoringService.class),
         mock(DealRiskService.class), mock(SegmentMapper.class), mock(PersonEdgeReadService.class),
-        mock(PersonMapper.class), mock(TagMapper.class), new SegmentCatalog());
+        mock(PersonMapper.class), mock(TagMapper.class), new SegmentCatalog(),
+        mock(WorkspaceMapper.class), new TenantContext(), mock(TenantWorkScope.class));
 
     @Test
     void catalog_company_exposesFieldsPredicatesAndLimits() {
