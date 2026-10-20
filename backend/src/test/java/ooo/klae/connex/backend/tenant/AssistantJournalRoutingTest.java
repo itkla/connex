@@ -121,8 +121,7 @@ class AssistantJournalRoutingTest {
             catalogResolver,
             requestResolver,
             workspaceCookie,
-            correlationPseudonymizer,
-            org.mockito.Mockito.mock(ooo.klae.connex.backend.tenant.TenantWorkScope.class));
+            correlationPseudonymizer);
         when(requestResolver.resolve(any(), eq(7))).thenReturn(11);
         when(workspaceService.getRole(11, 7)).thenReturn("owner");
         when(workspaceService.getOrgId(11)).thenReturn(3);

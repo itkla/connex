@@ -313,6 +313,19 @@ transaction. The locked authorization recheck remains inside the transaction. Ac
 pending-invitation decline, and leave all use this boundary so audit attribution and tenant-plane
 cleanup cannot inherit the active-header workspace.
 
+Fresh membership follows the same route-before-transaction rule. `InviteService` creation,
+existing-user grants and both acceptance entries, `InviteLinkService` redemption entries, and
+`SsoLoginService.resolve` use `FreshMembershipTransaction.execute` before their `READ_COMMITTED`
+unit. `WorkspaceService.addPendingMember` and `ensureActiveMember` are also public transaction
+entries: `executeWithPreparedScopes` prepares their target before opening or joining the unit in
+routed mode, including when it differs from the request workspace. Their residual-cleanup call to
+`UserOffboardingService.prepareFreshMembership` then reuses that prepared route under the locks.
+Single-database member primitives open the same `READ_COMMITTED` transaction directly and retain
+their existing lazy placement reads; token and SSO entries retain their existing routing behavior.
+An already-open routed transaction may only reuse an exact prepared target. It cannot discover a
+different target or suspend to prepare one. Nested provisioning restores the caller's identity,
+catalog and prepared data.
+
 ### Bounded goal and approval departure cleanup (#1953)
 
 The sole named approver guard uses fresh non-locking MyBatis reads (`flushCache="true"`) inside each

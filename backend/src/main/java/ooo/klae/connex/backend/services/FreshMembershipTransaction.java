@@ -34,4 +34,20 @@ public class FreshMembershipTransaction {
             () -> OwnershipOfferReadCommittedTransactions.from(transactionTemplate).execute(status -> work.get()));
         return Objects.requireNonNull(result, "fresh-membership transaction result");
     }
+
+    /**
+     * Prepares a routed membership target before its transaction. Single-database callers keep
+     * their original transaction and lazy placement reads, without an additional route lookup.
+     * The callback may return null, as the existing membership primitives permit.
+     */
+    public <T> T executeWithPreparedScopes(int workspaceId, Supplier<T> work) {
+        if (tenantWorkScope.isCatalogPerPlacement()) {
+            return tenantWorkScope.inWorkspace(workspaceId, () -> inTransaction(work));
+        }
+        return inTransaction(work);
+    }
+
+    private <T> T inTransaction(Supplier<T> work) {
+        return OwnershipOfferReadCommittedTransactions.from(transactionTemplate).execute(status -> work.get());
+    }
 }

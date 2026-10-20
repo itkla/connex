@@ -61,6 +61,7 @@ import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.support.RecordVisibilityPlaneFixture;
 import ooo.klae.connex.backend.support.RecordVisibilityPlaneFixture.Records;
 import ooo.klae.connex.backend.tenant.TenantRoutingProperties;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /** Exercises real duplicate decisions and authorization against a tenant catalog containing no control tables. */
 @SpringBootTest
@@ -74,6 +75,7 @@ class DuplicateReviewPlaneRoutingIntegrationTest {
     @Autowired private DuplicateReviewMapper mapper;
     @Autowired private DataSource dataSource;
     @Autowired private PlatformTransactionManager transactionManager;
+    @Autowired private TenantWorkScope tenantWorkScope;
     @MockitoBean private IdentityBackfillRunner identityBackfillRunner;
     @MockitoBean private LegacyWorkflowBackfillRunner legacyWorkflowBackfillRunner;
 
@@ -201,19 +203,20 @@ class DuplicateReviewPlaneRoutingIntegrationTest {
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
         TransactionTemplate transaction = new TransactionTemplate(transactionManager);
         transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
-        assertThrows(RollbackProbe.class, () -> transaction.executeWithoutResult(status -> {
-            Connection original = DataSourceUtils.getConnection(dataSource);
-            service.dismiss(new DuplicateReviewDecisionRequest("person", "email", fixture.personIds.get(0),
-                fixture.personIds.get(1), RecordVisibilityPlaneFixture.fingerprint(1), null));
-            assertSame(original, DataSourceUtils.getConnection(dataSource));
-            try {
-                assertEquals(fixture.tenantCatalog, original.getCatalog());
-                assertDecisionLockedOnAnotherConnection();
-            } catch (SQLException exception) {
-                throw new IllegalStateException(exception);
-            }
-            throw new RollbackProbe();
-        }));
+        tenantWorkScope.inWorkspace(fixture.workspaceId, () -> assertThrows(RollbackProbe.class,
+            () -> transaction.executeWithoutResult(status -> {
+                Connection original = DataSourceUtils.getConnection(dataSource);
+                service.dismiss(new DuplicateReviewDecisionRequest("person", "email", fixture.personIds.get(0),
+                    fixture.personIds.get(1), RecordVisibilityPlaneFixture.fingerprint(1), null));
+                assertSame(original, DataSourceUtils.getConnection(dataSource));
+                try {
+                    assertEquals(fixture.tenantCatalog, original.getCatalog());
+                    assertDecisionLockedOnAnotherConnection();
+                } catch (SQLException exception) {
+                    throw new IllegalStateException(exception);
+                }
+                throw new RollbackProbe();
+            })));
         String scope = fixture.scopeAccess.getForWorkspace(fixture.workspaceId).workspaceIdsJson();
         assertEquals("open", mapper.findVisibleItemById(fixture.workspaceId, scope, fixture.pairIds.getFirst(), 20).getState());
     }

@@ -266,6 +266,13 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   shared placement. Outside transactions the control lookup remains available. `single-database`
   installs no eager data and preserves its existing lazy reads, query counts and transaction paths.
   Same-workspace nested `runAs` reuses the payload; different workspace routing remains independent.
+  Fresh-membership entries prepare their target before the `READ_COMMITTED` transaction, including
+  direct `WorkspaceService.ensureActiveMember` and pending-member calls whose target differs from
+  the request workspace. Invitation, invite-link and SSO wrappers reuse the same target preparation;
+  cleanup cannot discover it under membership locks. Single-database member primitives retain their
+  original lazy query path. Request preparation is reached through the interceptor's existing
+  `WorkspaceService` collaborator; the production service requires the preparation boundary, while
+  single-database MVC slices need no additional interceptor or `WebConfig` dependency.
   Identity-only switches never load scopes and discard unusable bindings. Control-only selections
   stay unresolved and have no usable snapshot; catalog-only enumeration prepares none.
   Captured lifecycle routes carry prepared data across root deletion. Inactive or absent anchors

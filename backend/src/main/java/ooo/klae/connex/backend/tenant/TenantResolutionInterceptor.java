@@ -161,7 +161,6 @@ public class TenantResolutionInterceptor implements AsyncHandlerInterceptor {
     private final WorkspaceRequestResolver workspaceRequestResolver;
     private final WorkspaceCookie workspaceCookie;
     private final ClientAssertedCorrelationPseudonymizer correlationPseudonymizer;
-    private final TenantWorkScope tenantWorkScope;
 
     /**
      * Retains a validated public credential scope or discards any scope left on
@@ -248,7 +247,7 @@ public class TenantResolutionInterceptor implements AsyncHandlerInterceptor {
             tenantContext.setControlSelection(candidate, orgId, user.getId(), role);
         } else {
             String catalog = tenantCatalogResolver.resolveCatalog(orgId);
-            var scopes = tenantWorkScope.prepareWorkspaceScopes(candidate, orgId, catalog);
+            var scopes = workspaceService.prepareWorkspaceScopes(candidate, orgId, catalog);
             if (scopes != null) {
                 tenantContext.setWithWorkspaceScopes(candidate, orgId, user.getId(), role, catalog, scopes);
             } else {

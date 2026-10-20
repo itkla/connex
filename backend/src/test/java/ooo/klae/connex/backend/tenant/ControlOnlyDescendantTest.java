@@ -88,8 +88,7 @@ class ControlOnlyDescendantTest {
         RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
         TenantResolutionInterceptor interceptor = new TenantResolutionInterceptor(memberships, probe.context,
             probe.catalogs, new WorkspaceRequestResolver(memberships), mock(WorkspaceCookie.class),
-            mock(ClientAssertedCorrelationPseudonymizer.class),
-            org.mockito.Mockito.mock(ooo.klae.connex.backend.tenant.TenantWorkScope.class));
+            mock(ClientAssertedCorrelationPseudonymizer.class));
         interceptor.preHandle(request, new MockHttpServletResponse(),
             new HandlerMethod(mock(WorkspaceController.class), WorkspaceController.class.getMethod("myWorkspaces")));
         assertTrue(ControlOnlyHandlerPolicy.isActive());

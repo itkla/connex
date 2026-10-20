@@ -55,8 +55,8 @@ class OwnershipGrantArchTest {
     @Test void rawWritersAndConsentWritersHaveOnlyTheirExactReviewedCallSites() throws IOException {
         Map<String, Set<String>> expected = Map.ofEntries(
             Map.entry("WorkspaceMapper.updateMemberRole", Set.of("WorkspaceService.changeMemberRole", "OwnershipMembershipWriter.grantAccepted")),
-            Map.entry("WorkspaceMapper.addMember", Set.of("WorkspaceService.provisionWorkspace", "WorkspaceService.ensureActiveMember", "InviteService.acceptResolvedInvite", "InviteLinkService.redeemResolvedLink", "SeederBatchWriter.write")),
-            Map.entry("WorkspaceMapper.addPendingMember", Set.of("WorkspaceService.addPendingMember")),
+            Map.entry("WorkspaceMapper.addMember", Set.of("WorkspaceService.provisionWorkspace", "WorkspaceService.ensureActiveMemberInWorkspace", "InviteService.acceptResolvedInvite", "InviteLinkService.redeemResolvedLink", "SeederBatchWriter.write")),
+            Map.entry("WorkspaceMapper.addPendingMember", Set.of("WorkspaceService.addPendingMemberInWorkspace")),
             Map.entry("WorkspaceMapper.activateMember", Set.of("WorkspaceService.approveMembership")),
             Map.entry("OrgMemberMapper.addMember", Set.of("OrgMemberService.applyMember", "SeederBatchWriter.write")),
             Map.entry("OrgMemberMapper.addMemberClearingFounder", Set.of("OrgMemberService.applyMember", "OwnershipMembershipWriter.grantAccepted")),
