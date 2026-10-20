@@ -33,13 +33,15 @@ overrides:
   # and two copies break ProseMirror's Fragment/Node identity checks ("multiple versions of
   # prosemirror-model were loaded") on reparse, paste, drop and collaboration.
   prosemirror-model: ^1.25.12
+  # GHSA-587h-7wmj-h5pm (high): vitest pulls vite 8.0.0 to 8.1.5; fixed in 8.1.6. Caret keeps 8.x.
+  vite: ^8.1.6
   # GHSA-68fv-2mgg-jv7q (high): next > postcss > source-map-js below 1.2.2.
   source-map-js: ^1.2.2
   # GHSA-jqcg-44mw-7w3h (critical): shadcn > MCP SDK > express > proxy-addr below 2.0.8.
   proxy-addr: ^2.0.8
   'baseline-browser-mapping@<2.11.0': 2.11.0
   # GHSA-253c-mchw-3w2r (moderate): quadratic linkify paths, fixed in 14.3.1.
-  markdown-it: ^14.3.1
+  markdown-it: ^14.3.3
   # GHSA-rj75-hqrm-r3gf (moderate): quadratic flat-selector parsing, fixed in 7.1.6.
   postcss-selector-parser: ^7.1.6
   # React's optional menu ranges otherwise select releases with newer exact core/PM peers.
