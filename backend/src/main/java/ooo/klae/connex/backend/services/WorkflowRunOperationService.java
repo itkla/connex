@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.Set;
 
@@ -54,7 +55,7 @@ public class WorkflowRunOperationService {
         boolean requested = run.getCancelRequestedAt() != null;
         boolean changed = false;
         if ("queued".equals(priorStatus) || "waiting".equals(priorStatus)) {
-            LocalDateTime finishedAt = LocalDateTime.now();
+            LocalDateTime finishedAt = LocalDateTime.now(ZoneOffset.UTC);
             cancelCurrentStep(run, finishedAt);
             if (runMapper.cancelImmediately(workspaceId, run.getId(), finishedAt) != 1) {
                 throw new IllegalStateException("Workflow run was not cancelled");
@@ -64,7 +65,7 @@ public class WorkflowRunOperationService {
             changed = true;
         } else if ("running".equals(priorStatus)) {
             if (!requested) {
-                LocalDateTime requestedAt = LocalDateTime.now();
+                LocalDateTime requestedAt = LocalDateTime.now(ZoneOffset.UTC);
                 if (runMapper.requestCancellation(
                         workspaceId, run.getId(), requestedAt) != 1) {
                     throw new IllegalStateException("Workflow cancellation was not requested");

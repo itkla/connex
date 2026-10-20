@@ -131,6 +131,8 @@ def testPartitionFixtureRoot = 'ooo/klae/connex/backend/testpartition/TestPartit
 def testPartitionFixturePatterns = [testPartitionFixtureRoot + '.class', testPartitionFixtureRoot + '$*.class']
 
 tasks.withType(Test).configureEach {
+	systemProperty 'user.timezone', 'UTC'
+	inputs.file('../docs/backend/UTC_CUTOVER.md')
 	exclude testPartitionFixturePatterns
 }
 

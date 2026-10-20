@@ -22,6 +22,7 @@ public final class SeederApplication {
      * @param arguments seeder command-line arguments
      */
     public static void main(String[] arguments) {
+        BackendApplication.pinDefaultTimeZone();
         createSpringApplication(BackendApplication.class).run(arguments);
     }
 

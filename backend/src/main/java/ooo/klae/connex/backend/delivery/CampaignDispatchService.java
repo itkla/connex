@@ -892,7 +892,7 @@ public class CampaignDispatchService {
                 return "frequency_capped";
             }
         }
-        if (inQuietHours(LocalDateTime.now())) {
+        if (inQuietHours(LocalDateTime.now(ZoneOffset.UTC))) {
             return "quiet_hours";
         }
         return null;

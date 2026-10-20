@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
@@ -104,7 +105,7 @@ public class WorkflowRuntimeClaimTransaction {
         if (run == null) {
             return;
         }
-        LocalDateTime finishedAt = LocalDateTime.now();
+        LocalDateTime finishedAt = LocalDateTime.now(ZoneOffset.UTC);
         WorkflowStepRun step = runMapper.getStepByNodeForUpdate(
             workspaceId, run.getId(), run.getCurrentNodeId());
         if (step != null) {
@@ -123,7 +124,7 @@ public class WorkflowRuntimeClaimTransaction {
     }
 
     private void failExhaustedRun(WorkflowRun run) {
-        LocalDateTime finishedAt = LocalDateTime.now();
+        LocalDateTime finishedAt = LocalDateTime.now(ZoneOffset.UTC);
         WorkflowStepRun step = runMapper.getStepByNodeForUpdate(
             run.getWorkspaceId(), run.getId(), run.getCurrentNodeId());
         if (step != null) {

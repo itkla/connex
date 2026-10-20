@@ -419,6 +419,6 @@ public class ActivityService {
         if (fallback != null && !fallback.isBlank()) {
             return fallback;
         }
-        return LocalDateTime.now().format(TIMESTAMP_FORMAT);
+        return LocalDateTime.now(ZoneOffset.UTC).format(TIMESTAMP_FORMAT);
     }
 }

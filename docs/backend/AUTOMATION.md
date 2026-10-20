@@ -13,6 +13,12 @@ Smart-segment evaluation is the shared state-matching language used by automatio
 
 Evaluation returns workspace- and current-user-scoped record ids through `SegmentService`/`SegmentMapper`. Segments describe current state; automation adds a trigger/transition plus actions. Do not create a second condition language for workflows, campaigns, or adjacent features.
 
+Calendar dates for `within_days` are UTC by design until workspace-local relative dates land,
+matching the UTC timestamp columns they filter. One date is retained across candidate pages.
+Workspace-local relative dates, including the existing `CURDATE()` overdue comparison, need a
+separate change that converts both calendar boundaries and compared timestamps consistently.
+Definition validation does not resolve a zone or read the clock.
+
 Each evaluation resolves one unfiltered organization workspace scope through
 `RecordVisibilityScopeControlAccess` for Segment SQL's shared-person and related-company ceilings
 (#485). Nested groups, condition/group negation, and every bounded keyset page reuse that snapshot.
@@ -31,6 +37,7 @@ The bounded warm-intro query keeps its legacy engaged-person archived/suspended 
 `provision_ceased_at` filter. The unbounded warm-intro company projection still returns an owned
 person's `company_id` without a company visibility join, so it can differ from bounded owned-company
 candidates and label projection. Changing either behavior requires a separate decision.
+
 
 ## Catalog is the vocabulary
 
@@ -122,6 +129,9 @@ stay available in both cases.
 ## Adding actions
 
 Add a new action to the closed validated vocabulary and `RuleActionExecutor`, delegating to the existing domain service rather than reproducing domain logic.
+
+Automated task due dates use today in the active workspace's analytics zone (workspace, then actor,
+then UTC). An action without a workspace context uses UTC; other resolution failures propagate.
 
 - Map the action to its required permission in the validator/guard.
 - Extend `SystemActor`'s permission set only when system mode must legitimately perform the action.

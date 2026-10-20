@@ -1,6 +1,9 @@
 package ooo.klae.connex.backend.services;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 
 import org.springframework.stereotype.Component;
@@ -20,6 +23,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.mappers.DealDocumentMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
+import ooo.klae.connex.backend.tenant.TenantContext;
 
 /**
  * Performs a single rule {@link RuleAction} within an already-established automation context (the
@@ -44,6 +48,8 @@ public class RuleActionExecutor {
     private final TagMapper tagMapper;
     private final DealDocumentMapper documentMapper;
     private final CampaignTriggeredSendService campaignTriggeredSendService;
+    private final WorkspaceService workspaceService;
+    private final TenantContext tenantContext;
 
     private static final DateTimeFormatter TIMESTAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd");
@@ -110,7 +116,9 @@ public class RuleActionExecutor {
         Task task = new Task();
         task.setDescription(action.getTitle());
         int dueDays = action.getDueInDays() != null && action.getDueInDays() > 0 ? action.getDueInDays() : DEFAULT_DUE_DAYS;
-        task.setDueDate(LocalDateTime.now().toLocalDate().plusDays(dueDays).format(DATE));
+        ZoneId zone = tenantContext.isResolved() || tenantContext.hasControlSelection()
+            ? ZoneId.of(workspaceService.getCurrentAnalyticsTimezone()) : ZoneOffset.UTC;
+        task.setDueDate(LocalDate.now(zone).plusDays(dueDays).format(DATE));
         User assignee = new User();
         assignee.setId(ctx.targetUserId());
         task.setAssignedTo(assignee);
@@ -183,7 +191,7 @@ public class RuleActionExecutor {
         notification.setSourceType(ctx.recordType());
         notification.setSourceId(ctx.entityId());
         notification.setDedupeKey(ctx.notificationDedupeKey());
-        notification.setTriggeredAt(LocalDateTime.now().format(TIMESTAMP));
+        notification.setTriggeredAt(LocalDateTime.now(ZoneOffset.UTC).format(TIMESTAMP));
         notificationDelivery.deliver(notification);
     }
 

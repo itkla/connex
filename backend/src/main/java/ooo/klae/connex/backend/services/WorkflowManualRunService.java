@@ -6,6 +6,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashSet;
@@ -269,7 +270,7 @@ public class WorkflowManualRunService {
         }
         operationsMapper.cancelPendingInvocationRecords(workspaceId, invocationId);
         operationsMapper.cancelInvocation(
-            workspaceId, invocationId, LocalDateTime.now());
+            workspaceId, invocationId, LocalDateTime.now(ZoneOffset.UTC));
         return result(workspaceId, workflowId, invocationId);
     }
 
@@ -290,7 +291,7 @@ public class WorkflowManualRunService {
         if (terminalInvocation(status)) {
             if (invocation.getCompletedAt() == null) {
                 operationsMapper.completeInvocationIfActive(
-                    workspaceId, invocationId, status, LocalDateTime.now());
+                    workspaceId, invocationId, status, LocalDateTime.now(ZoneOffset.UTC));
                 invocation = requireInvocationForUpdate(
                     workspaceId, workflowId, invocationId);
                 status = invocationStatus(invocation, counts, records.size());
@@ -659,7 +660,7 @@ public class WorkflowManualRunService {
         invocation.setReadyCount(ready);
         invocation.setSkippedCount(records.size() - ready);
         invocation.setStatus("prepared");
-        LocalDateTime createdAt = LocalDateTime.now();
+        LocalDateTime createdAt = LocalDateTime.now(ZoneOffset.UTC);
         invocation.setCreatedAt(createdAt);
         invocation.setExpiresAt(createdAt.plusMinutes(15));
         return invocation;

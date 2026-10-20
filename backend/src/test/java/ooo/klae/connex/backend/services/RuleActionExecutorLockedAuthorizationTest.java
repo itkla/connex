@@ -15,6 +15,7 @@ import ooo.klae.connex.backend.mappers.DealDocumentMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
 import ooo.klae.connex.backend.tenant.Permission;
+import ooo.klae.connex.backend.tenant.TenantContext;
 
 class RuleActionExecutorLockedAuthorizationTest {
 
@@ -33,7 +34,9 @@ class RuleActionExecutorLockedAuthorizationTest {
             mock(NotificationDelivery.class),
             mock(TagMapper.class),
             mock(DealDocumentMapper.class),
-            triggeredSendService);
+            triggeredSendService,
+            mock(WorkspaceService.class),
+            new TenantContext());
         RuleAction action = new RuleAction();
         action.setType("send_message");
         action.setCampaignMessageId(31);

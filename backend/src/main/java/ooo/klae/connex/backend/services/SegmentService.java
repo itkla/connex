@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -87,7 +88,7 @@ public class SegmentService {
         return evaluate(workspaceId, userId, recordType, definition, false);
     }
 
-    /** Returns at most {@code limit} deterministic matches for a bounded automation enrollment. */
+    /** Returns at most {@code limit} deterministic matches using one calendar date across candidate pages. */
     public List<Integer> evaluate(
             int workspaceId,
             int userId,
@@ -113,17 +114,18 @@ public class SegmentService {
         String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         List<Integer> result = new ArrayList<>(limit);
         int afterId = 0;
+        LocalDate today = null;
         while (afterId < upperId && result.size() < limit) {
             List<Integer> candidates = segmentMapper.entityIdsPage(
                 workspaceId, type, afterId, upperId, limit);
             if (candidates.isEmpty()) {
                 break;
             }
-            Set<Integer> matched = evaluateGroup(
-                definition,
-                new EvalContext(
-                    workspaceId, userId, type, false, new HashSet<>(candidates), orgWorkspaceIdsJson),
-                1);
+            EvalContext ctx = new EvalContext(
+                workspaceId, userId, type, false, new HashSet<>(candidates), orgWorkspaceIdsJson);
+            ctx.today = today;
+            Set<Integer> matched = evaluateGroup(definition, ctx, 1);
+            today = ctx.today;
             for (int candidate : candidates) {
                 if (matched.contains(candidate)) {
                     result.add(candidate);
@@ -630,7 +632,20 @@ public class SegmentService {
         params.put("includeRestrictedPeople", ctx.includeRestrictedPeople());
         params.put("candidateIds", ctx.candidateIds());
         bindValue(kind, op, condition, params);
+        if (kind == SegmentCatalog.Kind.DATE && "within_days".equals(op)) {
+            LocalDate today = today(ctx);
+            params.put("dateFrom", today.toString());
+            params.put("dateTo", today.plusDays(catalog.clampDays(condition.getDays())).toString());
+        }
         return new HashSet<>(runFieldQuery(ctx.recordType(), params));
+    }
+
+    /** UTC by design until workspace-local relative dates land, matching the compared UTC timestamps. */
+    private LocalDate today(EvalContext ctx) {
+        if (ctx.today == null) {
+            ctx.today = LocalDate.now(ZoneOffset.UTC);
+        }
+        return ctx.today;
     }
 
     private List<Integer> runFieldQuery(String recordType, Map<String, Object> params) {
@@ -667,11 +682,6 @@ public class SegmentService {
             case DATE -> {
                 switch (op) {
                     case "before", "after" -> params.put("value", requireDate(condition));
-                    case "within_days" -> {
-                        LocalDate today = LocalDate.now();
-                        params.put("dateFrom", today.toString());
-                        params.put("dateTo", today.plusDays(catalog.clampDays(condition.getDays())).toString());
-                    }
                     default -> { }
                 }
             }
@@ -848,6 +858,7 @@ public class SegmentService {
         private Set<Integer> universe;
         private List<RelationshipTemperatureDto> temperatures;
         private List<DealRiskDto> dealRisks;
+        private LocalDate today;
 
         private EvalContext(int workspaceId, int userId, String recordType, boolean includeRestrictedPeople,
                 Set<Integer> candidateIds, String orgWorkspaceIdsJson) {
