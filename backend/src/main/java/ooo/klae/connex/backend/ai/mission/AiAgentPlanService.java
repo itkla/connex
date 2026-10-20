@@ -236,7 +236,7 @@ public final class AiAgentPlanService {
                 current.plan().revision(), oldCheckpoint.completedFacts(), nextKey, segmentNo,
                 List.copyOf(inventory), inventory.isEmpty() ? new Coverage(0, 0, 0, 1, List.of())
                         : new Coverage(1, 0, 0, 0, List.of()),
-                new Continuation("record_review_v1", 1, phase));
+                new Continuation(current.checkpoint().continuation().type(), 1, phase));
         var snapshot = new Snapshot(current.plan(), checkpoint, memory);
         codec.validateTransition(current, snapshot, true);
         admit(snapshot);
@@ -405,7 +405,9 @@ public final class AiAgentPlanService {
         return new AiAgentCheckpoint(previous.schemaVersion(), previous.definitionVersion(), previous.workspaceId(),
                 previous.runId(), previous.scopeFingerprint(), previous.privacyGeneration(), revision, planRevision,
                 facts.stream().map(CompletedFact::planItemKey).toList(), nextKey, cursor, facts,
-                previous.actionSlotReferences(), inventory, coverage, continuation);
+                previous.actionSlotReferences(), inventory, coverage, continuation,
+                previous.sourceObservations() == null ? null
+                        : previous.sourceObservations().merge(AiAgentEvidenceService.currentAnchors()));
     }
 
     private static void requireRevisions(Snapshot current, JsonNode arguments) {

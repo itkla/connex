@@ -7,6 +7,36 @@ migration-discipline part of #87 §9 / #102).
 > The specific support window below is a **proposed** policy; confirm it before it is published to
 > customers.
 
+## Mission singleton proposals (tenant V238)
+
+V238 adds mission-owned singleton action slots, immutable preparation/source provenance,
+canonical proposal-origin linkage, and frozen review metadata. `record_preparation_v1`
+explicitly creates runtime-contract-3 runs. Existing runtime-1/2 runs and the runtime-2
+database default remain unchanged. There is no content backfill; V233 proposal-set storage
+stays dormant. V236/V237 are allocated to P1.3 slice 4 and must precede this migration.
+
+Drain serving binaries and mission workers before the cutover. Keep missions disabled until
+compatible publication, decisions, expiry, privacy cleanup, export and runtime guards are
+deployed. The single-serving-JVM activation requirement remains.
+
+Hot column additions use `ALGORITHM=INSTANT, LOCK=DEFAULT`; hot indexes and the nullable
+source FK use `ALGORITHM=INPLACE, LOCK=NONE`. Triggers preserve source and frozen-review
+invariants without retained-table CHECK rebuilds. New action binding predicates that involve
+FK columns also use triggers. FK validation is suspended only on the migration connection
+while adding the previously unused nullable link, then restored. Do not remove algorithm
+guards or permit COPY fallback. Online algorithms still require metadata-lock acquisition.
+
+DDL auto-commits. If migration fails, retain the drain, inspect applied statements and Flyway
+history, and recover forward. The rollback floor is
+`tenant/V238__ai_agent_singleton_proposals.sql`, including when missions are disabled. Earlier
+binaries cannot safely purge/export source-linked proposals or preserve frozen-review
+invariants. Returning below the floor requires a separately reviewed drain, settlement,
+complete enrolled privacy purge and unconditional residual verification.
+
+Review expires at the earlier of earliest authoritative preparation plus 72 hours and the
+fixed hard deadline. Publication, retries and restart never refresh preparation age. Waiting
+review is independent of the execution deadline.
+
 ## Dormant assistant proposal-set storage (tenant V233)
 
 V233 adds the chat-owned proposal-set parent, nullable membership/preparation columns on tool

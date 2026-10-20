@@ -290,3 +290,14 @@ screened memory refusal and repair/fallback accounting. Outbound assertions cove
 model projections without canonical provenance/evidence bindings. Existing leakage, special-care,
 write/question and secondary-gate-loss controls remain. No live runner, fixture protocol
 relaxation or live-model-quality claim is introduced.
+
+## Mission singleton preparation trajectories
+
+Runtime-3 fixtures cover CONFIRM preparation without effects, continuation across fresh
+segments, immutable replay/conflict, source change before freeze, independent partial review,
+cancellation of staged/frozen proposals and unsafe-result refusal. Assert literal recorded and
+dispatched attempt counts separately, including repair/fallback, and inspect all retained
+requests below 64. Runtime-1/2 write-refusal goldens stay unchanged. Test-only interception
+controls contention; production hooks are not added. The browser flow applies/discards only
+explicitly selected frozen items and reloads exact output after transcript overflow/reconnect.
+Approved live staging evidence remains a separate phase activation requirement.

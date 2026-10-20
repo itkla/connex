@@ -166,7 +166,8 @@ class AiAgentPrivacySessionRoutingTest {
             default -> List.of();
         });
         var privacy = new AiAgentPrivacyService(sessions.getMapper(AiAgentPrivacyMapper.class),
-                sessions.getMapper(AiAgentRunMapper.class), mock(AiChatMapper.class), mock(AiRestrictionEpoch.class),
+                sessions.getMapper(AiAgentRunMapper.class),
+                mock(ooo.klae.connex.backend.mappers.AiAgentActionMapper.class), mock(AiChatMapper.class), mock(AiRestrictionEpoch.class),
                 mock(AiRunLeaseService.class), transactions, sessions.getMapper(WorkspaceMapper.class), lifecycle,
                 mock(UserMapper.class), scope, catalogs, context, Clock.systemUTC());
         var persistence = mock(AiAgentRunPersistenceService.class);

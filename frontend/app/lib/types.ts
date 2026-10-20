@@ -2011,7 +2011,7 @@ export type ApprovalPolicyStep = {
 };
 
 /** Authoritative source family behind one My Work item. */
-export type WorkItemSource = "task" | "notification" | "document_approval";
+export type WorkItemSource = "task" | "notification" | "document_approval" | "ai_mission";
 
 /** Deterministic urgency band computed by the backend ranking contract. */
 export type WorkItemUrgency = "critical" | "high" | "normal" | "low";
@@ -2039,7 +2039,8 @@ export type WorkItemReasonCode =
     | "task_open"
     | "deal_close_overdue"
     | "deal_closing_soon"
-    | "document_approval_pending";
+    | "document_approval_pending"
+    | "mission_review_pending";
 
 /** Structured, prose-free reason payload for one work item. */
 export type WorkItemReason = {
@@ -2051,7 +2052,7 @@ export type WorkItemReason = {
 
 /** One evidence row backing a work item, always sourced from authoritative state. */
 export type WorkItemEvidence = {
-    code: "task_due" | "task_open" | "deal_close_date" | "approval_requested";
+    code: "task_due" | "task_open" | "deal_close_date" | "approval_requested" | "mission_output_prepared";
     sourceType: WorkItemSource;
     sourceId: number;
     occurredAt: string;
@@ -3272,13 +3273,14 @@ export type AiAgentRecordScope = {
 
 export type AiAgentRunState = 'queued' | 'running' | 'waiting_approval' | 'paused' | 'done' | 'failed' | 'cancelled';
 export type AiAgentRunControl = 'pause' | 'resume' | 'cancel';
+export type AiAgentMissionType = 'record_review_v1' | 'record_preparation_v1';
 
 /** Mission revisions remain decimal strings throughout the browser. */
 export type AiAgentRun = {
     schemaVersion: 1;
     id: number;
     sessionId: number | null;
-    missionType: 'record_review_v1';
+    missionType: AiAgentMissionType;
     definitionVersion: 1;
     state: AiAgentRunState;
     reasonCode: string | null;
@@ -3291,10 +3293,16 @@ export type AiAgentRun = {
     startedAt: string | null;
     finishedAt: string | null;
     outputAvailable: boolean;
+    outputRevision: string | null;
+    proposalMembershipRevision: string | null;
+    proposalFrozenAt: string | null;
+    proposalFirstPreparedAt: string | null;
+    reviewExpiresAt: string | null;
+    proposalCounts: AiAgentProposalCounts | null;
     contentWithheld: boolean;
     availableActions: (AiAgentRunControl | 'view_output')[];
     progress: {
-        phase: 'queued' | 'reading' | 'writing_report';
+        phase: 'queued' | 'reading' | 'writing_report' | 'preparing_changes' | 'waiting_review';
         completedRecords: number;
         totalRecords: number;
     } | null;
@@ -3302,7 +3310,7 @@ export type AiAgentRun = {
 
 export type AiAgentRunCreateRequest = {
     clientRequestKey: string;
-    missionType: 'record_review_v1';
+    missionType: AiAgentMissionType;
     goal: string;
     scope: AiAgentRecordScope;
     limits?: {
@@ -3314,11 +3322,64 @@ export type AiAgentRunCreateRequest = {
 
 export type AiAgentRunPage = { items: AiAgentRun[]; nextCursor: string | null };
 
-/** Slice one has a canonical report and no proposals or write receipts. */
+/** Counts reflect canonical decisions, including completed actions that were undone. */
+export type AiAgentProposalCounts = {
+    pending: number;
+    executed: number;
+    rejected: number;
+    withdrawn: number;
+    undone: number;
+};
+
+/** One immutable member and its current authorized card projection. */
+export type AiAgentProposalItem = {
+    actionSlot: string;
+    preparationId: string;
+    ordinal: number;
+    preparedAt: string;
+    card: AiAssistantToolCall;
+};
+
+/** Membership belongs to the root run and remains separate from transcript history. */
+export type AiAgentProposalSet = {
+    id: number;
+    revision: string;
+    frozen: true;
+    frozenAt: string | null;
+    firstPreparedAt: string | null;
+    reviewExpiresAt: string | null;
+    items: AiAgentProposalItem[];
+    derivedCounts: AiAgentProposalCounts;
+};
+
+export type AiAgentProposalDecisionRequest = {
+    expectedProposalRevision: string;
+    items: {
+        actionSlot: string;
+        expectedPreparationId: string;
+        decision: 'approve' | 'discard';
+    }[];
+};
+
+/** A batch can stop after earlier changes have committed; uncertainty requires a fresh read. */
+export type AiAgentProposalDecisionResult = {
+    complete: boolean;
+    stopReason: string | null;
+    items: {
+        actionSlot: string;
+        outcome: 'executed' | 'rejected' | 'withdrawn' | 'undone' | 'refused' | 'not_processed' | 'indeterminate';
+        code: string | null;
+    }[];
+    stateVersion: string | null;
+    outputRevision: string | null;
+    contentWithheld: boolean;
+};
+
+/** Canonical report and exact proposal membership, independent of transcript limits. */
 export type AiAgentOutput = {
     schemaVersion: 1;
     runId: number;
-    outputRevision: '1';
+    outputRevision: string;
     report: {
         messageId: number;
         markdown: string;
@@ -3326,14 +3387,7 @@ export type AiAgentOutput = {
         coverage: { processed: number; skipped: number; failed: number; unprocessed: number };
         generatedAt: string;
     };
-    proposalSet: {
-        id: number;
-        revision: '0';
-        frozen: true;
-        reviewExpiresAt: null;
-        items: never[];
-        derivedCounts: { pending: 0; executed: 0; rejected: 0; withdrawn: 0 };
-    };
+    proposalSet: AiAgentProposalSet;
     autoWriteReceipts: never[];
 };
 
@@ -3692,7 +3746,8 @@ export type LegacyProposalReviewState =
     | 'undone'
     | 'discarded'
     | 'failed'
-    | 'unavailable';
+    | 'unavailable'
+    | 'withdrawn';
 
 /** Immutable review deadline shared by read and mutation responses. */
 export type ProposalExpiryFields = {
@@ -3705,7 +3760,7 @@ export type AiAssistantToolCall = {
     id: number;
     toolName: string;
     tier: 'auto' | 'confirm';
-    status: 'proposed' | 'executed' | 'rejected' | 'failed' | 'undone';
+    status: 'proposed' | 'executed' | 'rejected' | 'failed' | 'undone' | 'withdrawn';
     target: AiAssistantToolCallTarget;
     requestSummary: string;
     outcomeSummary: string | null;
@@ -3727,7 +3782,7 @@ export type AiAssistantToolCallMutation = {
     id: number;
     tool: string;
     tier: 'auto' | 'confirm';
-    status: 'proposed' | 'executed' | 'rejected' | 'failed' | 'undone';
+    status: 'proposed' | 'executed' | 'rejected' | 'failed' | 'undone' | 'withdrawn';
     result: unknown;
     undoAvailable: boolean;
     undoExpiresAt: string | null;

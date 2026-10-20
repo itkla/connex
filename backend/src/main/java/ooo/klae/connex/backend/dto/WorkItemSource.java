@@ -4,5 +4,6 @@ package ooo.klae.connex.backend.dto;
 public enum WorkItemSource {
     task,
     notification,
-    document_approval
+    document_approval,
+    ai_mission
 }

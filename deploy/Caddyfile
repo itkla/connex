@@ -104,6 +104,14 @@
 			import backend_proxy
 		}
 
+		@mission_decisions path_regexp mission_decisions ^/api/ai/assistant/missions/[0-9]+/proposal-decisions$
+		handle @mission_decisions {
+			request_body {
+				max_size {$CONNEX_MISSION_DECISION_MAX_BODY_BYTES:16384}
+			}
+			import backend_proxy
+		}
+
 		@workflows path /api/workflows /api/workflows/*
 		handle @workflows {
 			request_body {

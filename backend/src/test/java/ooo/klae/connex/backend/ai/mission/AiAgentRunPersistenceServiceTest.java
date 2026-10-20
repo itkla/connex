@@ -98,6 +98,7 @@ class AiAgentRunPersistenceServiceTest {
         service = new AiAgentRunPersistenceService(runs, chat, workspaces, restriction, leases,
                 JsonMapper.builder().build(), Clock.fixed(NOW, ZoneOffset.UTC),
                 factory.getBeanProvider(AiAgentRunPersistenceService.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "proposals", mock(AiAgentProposalSetPort.class));
         when(workspaces.getCurrentWorkspaceId()).thenReturn(WORKSPACE);
         when(workspaces.getCurrentUserId()).thenReturn(OWNER);
         when(workspaces.isMember(WORKSPACE, OWNER)).thenReturn(true);

@@ -79,6 +79,8 @@
     <id property="id" column="id"/>
     <result property="missionRunId" column="mission_run_id"/>
     <result property="artifactOrigin" column="artifact_origin"/>
+    <result property="proposalOrigin" column="proposal_origin"/>
+    <result property="missionActionId" column="mission_action_id"/>
     <result property="privacyGeneration" column="privacy_generation"/>
     <result property="workspaceId" column="workspace_id"/>
     <result property="messageId" column="message_id"/>
@@ -113,7 +115,8 @@
   </sql>
 
   <sql id="eligibleReactiveTool">
-    tc.mission_run_id IS NULL AND EXISTS (
+    tc.mission_run_id IS NULL AND tc.artifact_origin = 'reactive'
+    AND tc.proposal_origin = 'legacy' AND tc.mission_action_id IS NULL AND EXISTS (
       SELECT 1 FROM ai_chat_session privacy_session
       LEFT JOIN ai_agent_privacy_barrier privacy_barrier
         ON privacy_barrier.workspace_id = privacy_session.workspace_id
@@ -282,6 +285,14 @@
     WHERE s.workspace_id = #{workspaceId}
       AND s.id = #{id}
     FOR UPDATE
+  </select>
+
+  <select id="getMissionSessionForShare" resultMap="sessionResult" flushCache="true" useCache="false">
+    SELECT <include refid="lockedSessionColumns"/>
+    FROM ai_chat_session s
+    WHERE s.workspace_id = #{workspaceId}
+      AND s.id = #{id}
+    FOR SHARE
   </select>
 
   <!--
@@ -1019,6 +1030,7 @@
            CAST(tc.arguments_json AS BINARY) AS arguments_json, tc.thought_signature, CAST(tc.result_json AS BINARY) AS result_json,
            tc.executed_by_user_id, tc.executed_at,
            tc.idempotency_key, tc.server_proposal, tc.mission_run_id, tc.artifact_origin,
+           tc.proposal_origin, tc.mission_action_id,
            tc.privacy_generation, tc.created_at, tc.updated_at
     FROM ai_chat_tool_call tc
     JOIN ai_chat_message m
@@ -1034,6 +1046,7 @@
            CAST(tc.arguments_json AS BINARY) AS arguments_json, tc.thought_signature, CAST(tc.result_json AS BINARY) AS result_json,
            tc.executed_by_user_id, tc.executed_at,
            tc.idempotency_key, tc.server_proposal, tc.mission_run_id, tc.artifact_origin,
+           tc.proposal_origin, tc.mission_action_id,
            tc.privacy_generation, tc.created_at, tc.updated_at
     FROM ai_chat_tool_call tc
     JOIN ai_chat_message m
@@ -1057,6 +1070,7 @@
            CAST(tc.arguments_json AS BINARY) AS arguments_json, tc.thought_signature, CAST(tc.result_json AS BINARY) AS result_json,
            tc.executed_by_user_id, tc.executed_at,
            tc.idempotency_key, tc.server_proposal, tc.mission_run_id, tc.artifact_origin,
+           tc.proposal_origin, tc.mission_action_id,
            tc.privacy_generation, tc.created_at, tc.updated_at
     FROM ai_chat_tool_call tc
     JOIN ai_chat_message m
@@ -1078,7 +1092,8 @@
            m.author_user_id AS requested_by_user_id, tc.tool_name, tc.status,
            CAST(tc.arguments_json AS BINARY) AS arguments_json, tc.thought_signature, CAST(tc.result_json AS BINARY) AS result_json,
            tc.executed_by_user_id, tc.executed_at,
-           tc.idempotency_key, tc.server_proposal, tc.created_at, tc.updated_at
+           tc.idempotency_key, tc.server_proposal, tc.mission_run_id, tc.artifact_origin,
+           tc.proposal_origin, tc.mission_action_id, tc.privacy_generation, tc.created_at, tc.updated_at
     FROM ai_chat_tool_call tc
     JOIN ai_chat_message m
       ON m.workspace_id = tc.workspace_id AND m.id = tc.message_id
@@ -1086,6 +1101,7 @@
       ON boundary.workspace_id = m.workspace_id AND boundary.session_id = m.session_id
       AND boundary.id = #{afterMessageId}
     WHERE tc.workspace_id = #{workspaceId}
+      AND <include refid="eligibleReactiveTool"/>
       AND m.session_id = #{sessionId}
       AND tc.status = 'proposed'
       AND tc.server_proposal = TRUE
@@ -1100,6 +1116,7 @@
            CAST(tc.arguments_json AS BINARY) AS arguments_json, tc.thought_signature, CAST(tc.result_json AS BINARY) AS result_json,
            tc.executed_by_user_id, tc.executed_at,
            tc.idempotency_key, tc.server_proposal, tc.mission_run_id, tc.artifact_origin,
+           tc.proposal_origin, tc.mission_action_id,
            tc.privacy_generation, tc.created_at, tc.updated_at
     FROM ai_chat_tool_call tc
     JOIN ai_chat_message m
@@ -1118,6 +1135,7 @@
            CAST(tc.arguments_json AS BINARY) AS arguments_json, tc.thought_signature, CAST(tc.result_json AS BINARY) AS result_json,
            tc.executed_by_user_id, tc.executed_at,
            tc.idempotency_key, tc.server_proposal, tc.mission_run_id, tc.artifact_origin,
+           tc.proposal_origin, tc.mission_action_id,
            tc.privacy_generation, tc.created_at, tc.updated_at
     FROM ai_chat_tool_call tc
     JOIN ai_chat_message m
@@ -1150,4 +1168,59 @@
       AND status = 'executed'
   </update>
 
+  <select id="getMissionToolCall" resultMap="toolCallResult" flushCache="true" useCache="false">
+    SELECT tc.id, tc.workspace_id, tc.message_id, tc.tool_name, tc.status,
+      tc.idempotency_key, tc.server_proposal, tc.mission_run_id, tc.artifact_origin,
+      tc.proposal_origin, tc.mission_action_id, tc.privacy_generation,
+      tc.executed_by_user_id, tc.executed_at, tc.created_at, tc.updated_at,
+      CAST(tc.arguments_json AS BINARY) AS arguments_json,
+      CAST(tc.result_json AS BINARY) AS result_json,
+      (SELECT r.session_id FROM ai_agent_run r
+        WHERE r.workspace_id = tc.workspace_id AND r.id = tc.mission_run_id) AS session_id,
+      (SELECT r.owner_user_id FROM ai_agent_run r
+        WHERE r.workspace_id = tc.workspace_id AND r.id = tc.mission_run_id) AS requested_by_user_id
+    FROM ai_chat_tool_call tc
+    WHERE tc.workspace_id = #{workspaceId} AND tc.mission_run_id = #{rootRunId}
+      AND tc.mission_action_id = #{actionId} AND tc.proposal_origin = 'mission'
+      AND tc.artifact_origin = 'mission' AND tc.server_proposal = TRUE
+  </select>
+
+  <select id="lockMissionToolCall" resultMap="toolCallResult" flushCache="true" useCache="false">
+    SELECT tc.id, tc.workspace_id, tc.message_id, tc.tool_name, tc.status,
+      tc.idempotency_key, tc.server_proposal, tc.mission_run_id, tc.artifact_origin,
+      tc.proposal_origin, tc.mission_action_id, tc.privacy_generation,
+      tc.executed_by_user_id, tc.executed_at, tc.created_at, tc.updated_at,
+      CAST(tc.arguments_json AS BINARY) AS arguments_json,
+      CAST(tc.result_json AS BINARY) AS result_json,
+      (SELECT r.session_id FROM ai_agent_run r
+        WHERE r.workspace_id = tc.workspace_id AND r.id = tc.mission_run_id) AS session_id,
+      (SELECT r.owner_user_id FROM ai_agent_run r
+        WHERE r.workspace_id = tc.workspace_id AND r.id = tc.mission_run_id) AS requested_by_user_id
+    FROM ai_chat_tool_call tc
+    WHERE tc.workspace_id = #{workspaceId} AND tc.mission_run_id = #{rootRunId}
+      AND tc.mission_action_id = #{actionId} AND tc.proposal_origin = 'mission'
+      AND tc.artifact_origin = 'mission' AND tc.server_proposal = TRUE
+    FOR UPDATE
+  </select>
+
+  <insert id="insertMissionToolCall" useGeneratedKeys="true" keyProperty="call.id">
+    INSERT INTO ai_chat_tool_call
+      (workspace_id, message_id, tool_name, status, arguments_json, result_json,
+       idempotency_key, server_proposal, mission_run_id, artifact_origin, privacy_generation,
+       proposal_origin, mission_action_id)
+    VALUES
+      (#{call.workspaceId}, #{call.messageId}, #{call.toolName}, #{call.status},
+       CONVERT(#{call.argumentsJson,jdbcType=VARBINARY,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),
+       CONVERT(#{call.resultJson,jdbcType=VARBINARY,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),
+       #{call.idempotencyKey,jdbcType=VARCHAR}, TRUE, #{call.missionRunId}, 'mission',
+       #{call.privacyGeneration}, 'mission', #{call.missionActionId})
+  </insert>
+
+  <update id="withdrawPendingMissionCalls">
+    UPDATE ai_chat_tool_call tc SET status = 'failed',
+      result_json = JSON_SET(COALESCE(CONVERT(#{resultJson,jdbcType=VARBINARY,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4), JSON_OBJECT()),
+        '$.reason', 'mission_withdrawn', '$.withdrawalReason', #{reason})
+    WHERE tc.workspace_id = #{workspaceId} AND tc.mission_run_id = #{rootRunId}
+      AND tc.proposal_origin = 'mission' AND tc.mission_action_id IS NOT NULL AND tc.status = 'proposed'
+  </update>
 </mapper>

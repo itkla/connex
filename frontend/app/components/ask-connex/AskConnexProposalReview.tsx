@@ -225,6 +225,15 @@ export default function AskConnexProposalReview({
                                         </span>
                                     )}
                                 </div>
+                                {card.status !== 'proposed' ? (
+                                    <p role="status" className="text-xs text-muted-foreground">
+                                        {card.status === 'executed' ? cardLabels.executedStatus
+                                            : card.status === 'rejected' ? cardLabels.rejectedStatus
+                                                : card.status === 'undone' ? cardLabels.undoneStatus
+                                                    : card.status === 'withdrawn' ? cardLabels.withdrawnDetail ?? cardLabels.proposalUnavailable
+                                                        : cardLabels.failedStatus}
+                                    </p>
+                                ) : null}
                                 {changes.map((change) => (
                                     <Fragment key={change.field}>
                                         <AskConnexChangeRow

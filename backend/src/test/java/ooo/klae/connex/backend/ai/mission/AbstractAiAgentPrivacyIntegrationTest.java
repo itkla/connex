@@ -79,6 +79,7 @@ abstract class AbstractAiAgentPrivacyIntegrationTest extends AbstractServiceTest
         }
         int id = workspace.getId();
         jdbc.update("UPDATE ai_agent_run SET status='cancelled', active_segment_id=NULL, report_message_id=NULL WHERE workspace_id=?", id);
+        jdbc.update("DELETE FROM ai_agent_action WHERE workspace_id=?", id);
         jdbc.update("UPDATE ai_agent_segment SET status='cancelled', settled_at=CURRENT_TIMESTAMP(6), turn_id=NULL WHERE workspace_id=?", id);
         jdbc.update("DELETE FROM ai_chat_turn WHERE workspace_id=?", id);
         jdbc.update("DELETE FROM ai_chat_tool_call WHERE workspace_id=?", id);

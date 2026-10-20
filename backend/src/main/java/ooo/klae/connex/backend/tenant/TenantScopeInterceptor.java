@@ -64,6 +64,7 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "AiBriefScheduleMapper",
         MAPPERS + "AiChatMapper",
         MAPPERS + "AiAgentRunMapper",
+        MAPPERS + "AiAgentActionMapper",
         MAPPERS + "AiAgentPrivacyMapper",
         MAPPERS + "AiRunLeaseMapper",
         MAPPERS + "AiWatchMapper",

@@ -44,6 +44,10 @@ public class AiAgentRun {
     private Integer memorySchemaVersion;
     private String memoryJson;
     private int lastCommittedSegmentNo;
+    private long proposalMembershipRevision;
+    private LocalDateTime proposalFrozenAt;
+    private LocalDateTime proposalFirstPreparedAt;
+    private LocalDateTime reviewExpiresAt;
     private LocalDateTime executionDeadlineAt;
     private LocalDateTime hardDeadlineAt;
     private LocalDateTime nextAttemptAt;

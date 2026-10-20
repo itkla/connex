@@ -538,4 +538,24 @@ public interface AiChatMapper {
         @Param("id") int id,
         @Param("resultJson") String resultJson,
         @Param("executedByUserId") int executedByUserId);
+    /** Reads a canonical mission singleton using explicit root/action ownership. */
+    AiChatToolCall getMissionToolCall(@Param("workspaceId") int workspaceId,
+            @Param("rootRunId") int rootRunId, @Param("actionId") int actionId);
+
+    /** Locks the canonical singleton only after its action and root have been locked. */
+    AiChatToolCall lockMissionToolCall(@Param("workspaceId") int workspaceId,
+            @Param("rootRunId") int rootRunId, @Param("actionId") int actionId);
+
+    /** Inserts a trusted source-linked singleton with V233 membership left unused. */
+    int insertMissionToolCall(@Param("call") AiChatToolCall call);
+
+    /** Withdraws pending source-linked proposals while preserving terminal receipts. */
+    int withdrawPendingMissionCalls(@Param("workspaceId") int workspaceId,
+            @Param("rootRunId") int rootRunId, @Param("reason") String reason,
+            @Param("resultJson") String resultJson);
+
+    /** Retains the exact session shared through an authorized mission content projection. */
+    AiChatSession getMissionSessionForShare(@Param("workspaceId") int workspaceId,
+            @Param("userId") int userId, @Param("id") int id);
+
 }

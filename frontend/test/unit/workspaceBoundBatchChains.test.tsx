@@ -27,7 +27,7 @@ vi.mock("@/app/hooks/useWorkspace", () => ({ useWorkspace: () => ({ activeWorksp
 vi.mock("@/app/hooks/usePermissions", () => ({ usePermissionCheck: (permission: string) => ["AI_USE", "ATTACHMENT_CREATE"].includes(permission) ? "granted" : "denied" }));
 vi.mock("@/app/hooks/useAskConnexSkills", () => ({ useAskConnexSkills: () => [] }));
 vi.mock("@/app/hooks/useIsMobile", () => ({ useIsMobile: () => false }));
-vi.mock("@/app/hooks/useNow", () => ({ useLiveNow: () => Date.parse("2026-10-19T12:00:00Z") }));
+vi.mock("@/app/hooks/useNow", () => ({ useLiveNow: () => Date.parse("2026-10-19T12:00:00Z"), useNow: () => Date.parse("2026-10-19T12:00:00Z") }));
 vi.mock("@/app/hooks/useAccountStorageGeneration", () => ({ useAccountStorageGeneration: () => boundary.canPersist }));
 vi.mock("@/app/lib/realtime", () => ({ createAiChatSocket: () => ({ activate: boundary.noop, deactivate: boundary.noop }) }));
 vi.mock("@/app/lib/toast", () => ({ toastError: vi.fn(), toastInfo: vi.fn(), toastSuccess: vi.fn(), toastDismiss: vi.fn() }));
@@ -110,7 +110,8 @@ describe("sequential batch origins", () => {
             scope: { kind: "record", recordKind: "person", recordId: 41 },
             createdAt: "2026-10-19T12:00:00Z", executionDeadlineAt: "2026-10-19T12:15:00Z",
             hardDeadlineAt: "2026-10-19T12:15:00Z", startedAt: "2026-10-19T12:00:00Z", finishedAt: "2026-10-19T12:01:00Z",
-            outputAvailable: false, contentWithheld: false, availableActions: [], progress: null,
+            outputAvailable: false, outputRevision: null, proposalMembershipRevision: null, proposalFrozenAt: null,
+            proposalFirstPreparedAt: null, reviewExpiresAt: null, proposalCounts: null, contentWithheld: false, availableActions: [], progress: null,
         };
         const path = "/api/ai/assistant/sessions";
         const backend = stubBackend(path, (requestPath, method) => {
@@ -128,7 +129,7 @@ describe("sequential batch origins", () => {
         expect(mission.disabled).toBe(false);
         expect(mission.recordLabel).toBe("Origin contact");
         let pending: Promise<boolean> | undefined;
-        await act(async () => { pending = mission.onCreate(goal); await backend.started.promise; });
+        await act(async () => { pending = mission.onCreate(goal, "record_review_v1"); await backend.started.promise; });
         switchWorkspace();
         let created: boolean | undefined;
         await act(async () => { backend.held.resolve(backend.response(path)); created = await pending; });

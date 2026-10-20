@@ -28,14 +28,14 @@ vi.mock('@/app/components/ask-connex/AskConnexDrawer', () => ({ default: harness
 vi.mock('@/app/components/ask-connex/AskConnexMissionCreate', () => ({ default: () => null }));
 vi.mock('@/app/components/ask-connex/AskConnexMissionProgress', () => ({ default: () => null }));
 vi.mock('next-intl', () => ({ useLocale: () => 'en', useTranslations: () => harness.translate }));
-vi.mock('next/navigation', () => ({ useParams: () => ({ sessionId: '7' }), usePathname: () => '/ask-connex/7', useRouter: () => harness.router }));
+vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams(), useParams: () => ({ sessionId: '7' }), usePathname: () => '/ask-connex/7', useRouter: () => harness.router }));
 vi.mock('@/app/hooks/useActions', () => ({ useActions: () => ({ context: harness.context }), useRegisterActions: () => {} }));
 vi.mock('@/app/hooks/useWorkspace', () => ({ useWorkspace: () => ({ activeWorkspaceId: 1, switching: false }) }));
 vi.mock('@/app/hooks/usePermissions', () => ({ usePermissionCheck: () => 'granted' }));
 vi.mock('@/app/hooks/useAskConnexSkills', () => ({ useAskConnexSkills: () => [] }));
 vi.mock('@/app/hooks/useApiErrorToast', () => ({ useApiErrorToast: () => harness.toast }));
 vi.mock('@/app/hooks/useIsMobile', () => ({ useIsMobile: () => false }));
-vi.mock('@/app/hooks/useNow', () => ({ useLiveNow: () => 0 }));
+vi.mock('@/app/hooks/useNow', () => ({ useLiveNow: () => 0, useNow: () => 0 }));
 vi.mock('@/app/hooks/useAccountStorageGeneration', () => ({ useAccountStorageGeneration: () => harness.persist }));
 vi.mock('@/app/lib/realtime', () => ({ createAiChatSocket: harness.socket }));
 vi.mock('@/app/lib/api', async (importOriginal) => ({
@@ -68,7 +68,8 @@ function mission(overrides: Partial<AiAgentRun> = {}): AiAgentRun {
         scope: { kind: 'record', recordKind: 'person', recordId: 4 },
         createdAt: '2026-10-15T10:00:00Z', executionDeadlineAt: '2026-10-15T10:15:00Z',
         hardDeadlineAt: '2026-10-15T10:15:00Z', startedAt: null, finishedAt: null,
-        outputAvailable: true, contentWithheld: false, availableActions: ['view_output'], progress: null,
+        outputAvailable: true, outputRevision: '1', proposalMembershipRevision: null, proposalFrozenAt: null,
+        proposalFirstPreparedAt: null, reviewExpiresAt: null, proposalCounts: null, contentWithheld: false, availableActions: ['view_output'], progress: null,
         ...overrides,
     };
 }

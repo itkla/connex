@@ -709,7 +709,7 @@ the same roots remain held through domain cleanup and trailing mission privacy i
 
 Every transaction that combines these scoped resources uses this single acquisition order:
 
-1. Content roots: exact session → run (missions) → existing tool call → turn → segment.
+1. Content roots: exact session → run (missions) → all action rows → all canonical tool calls → turn → segment.
    The session mutex serializes message/summary children and child-set discovery; their writes
    and private inserts under that retained mutex do not acquire another independent root.
 2. Domain record/board roots and their enclosing duplicate mutex, in the domain's existing
@@ -2086,3 +2086,38 @@ catalog commits retain their existing behavior. Routed offer closure
 accepts an already-deleted tenant notice, because catalog erasure may have removed it first; it
 never recreates that notice or releases the reservation. Per-catalog erasure keeps its existing
 isolation.
+
+### Mission singleton proposals (V238)
+
+All mutation units use READ COMMITTED. A is the existing assistant authority order:
+actor/named users S ascending, workspace S, memberships X ascending, then custom-role and
+permission rows X ascending, with organization lifecycle validation. Discover principal/source
+keys outside the mutation transaction and revalidate exact identities under locks.
+
+| Operation | Acquisition order and atomic contents |
+|---|---|
+| Allocate | A → session X → run X → existing actions X; allocate slots; restriction fence → barrier S; claim lease last if applicable. |
+| Bind/replay | A → session X → run X → action X → existing tool X → current turn X → segment X → required domain roots → restriction fence → barrier S; bind/canonical insert/revision together; no lease. |
+| Bookkeeping/checkpoint | A → session X → run X → affected actions X → tools X → turn X → segment X; preserve action/source inventory; fences before exact lease release last. |
+| Freeze/report | A → session X → run X → all actions X by Java ID order → all canonical calls X by Java ID order → turn X → segment X → source validation → report/membership/accounting/state → restriction fence → barrier S → lease release last. |
+| Approve one | A including named principals → session X → run X → action X → canonical call X → existing domain hierarchy → final MutationAdmission restriction fence/barrier S/deadline → audit → result/state; no lease. |
+| Discard one | A → session X → run X → action X → call X → restriction fence → barrier S → deadline/rejection/state; no domain-edit locks or lease. |
+| Undo | Discover source before legacy transaction; A → session X → run X → action X → call X → inverse hierarchy/admission; no waiting requirement or lease. |
+| Waiting cancel | A → session X → run X → all actions X → all calls X → withdrawal/state → applicable fences; no attempt/lease acquisition. |
+| Running cancel/fail | Authority/maintenance roots → session X → run X → all actions X → all calls X → turn X → segment X → withdrawal/accounting/state → fences → exact lease release last. |
+| Review expiry | Maintenance session X → run X → all actions X → all calls X → conditional withdrawal/failed review_expired; independent of owner permission/provider and lease. |
+| Realtime enqueue | A → exact session S → run S → restriction fence → barrier S; revalidate current requester, source version and privacy generation through local broker enqueue after the mutation commits. |
+| Privacy pruning | Session/run → all actions → all calls → attempts only when settling → barrier S → exact privacy-work X → bounded deletion/cursor revision; lease last only when settling. |
+| Privacy completion | Barrier X → work X → unconditional fresh residual reads; no content roots/leases. |
+
+Acquire every action before any tool, never alternating pairs. All action/canonical writes
+retain root X. Locking selects flush MyBatis cache and disable cached results. Do not seed a
+mutation transaction with permission reads before A. Domain roots precede retained fences;
+MutationAdmission checks deadline after remaining lock/fence contention, immediately before
+mutation or admitted no-op. No trailing privacy fence follows audited delegate execution.
+The audit-integrity head still precedes lease release and follows restriction/privacy fences.
+Mission participants are proxied MANDATORY helpers; never enter reactive REQUIRES_NEW
+publication under mission roots. Approval/discard batches have no enclosing transaction.
+Retry deadlocks only from fresh bounded transactions. Provider/network work stays outside
+transactions. Review projections retain A → exact session S → root S → barrier S through all
+DTO materialization; they are not database-read-only because A includes membership locks.

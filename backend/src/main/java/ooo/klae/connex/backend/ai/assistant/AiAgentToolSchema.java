@@ -13,7 +13,7 @@ final class AiAgentToolSchema {
 
     static boolean enabled() {
         var policy = ooo.klae.connex.backend.ai.mission.AiAgentExecutionPolicy.current();
-        return policy != null && policy.runtimeContractVersion() == 2;
+        return policy != null && ooo.klae.connex.backend.ai.mission.AiAgentMissionCatalog.continuation(policy.runtimeContractVersion());
     }
 
     static boolean bookkeeping(String name) {

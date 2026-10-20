@@ -216,6 +216,8 @@ class AiAssistantWriteToolServiceTest {
                 objectMapper,
                 VALIDATORS.getValidator(),
                 CLOCK, tagService);
+        service.setTransactionProvider(new org.springframework.beans.factory.support.StaticListableBeanFactory(
+                Map.of("service", service)).getBeanProvider(AiAssistantWriteToolService.class));
         session = new AiChatSession();
         session.setId(TURN.sessionId());
         session.setWorkspaceId(TURN.workspaceId());
@@ -1055,6 +1057,11 @@ class AiAssistantWriteToolServiceTest {
     void missionOriginCannotEnterLegacyDecisionLocks(String decision) {
         when(chatMapper.getToolArtifactOrigin(TURN.workspaceId(), TURN.sessionId(), 29))
                 .thenReturn("mission");
+        var missionDecisions = mock(ooo.klae.connex.backend.ai.mission.AiAgentProposalDecisionService.class);
+        when(missionDecisions.undo(TURN.sessionId(), 29)).thenThrow(new ConflictException("Assistant tool cannot be undone"));
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "missionDecisions",
+                new org.springframework.beans.factory.support.StaticListableBeanFactory(Map.of("decisions", missionDecisions))
+                        .getBeanProvider(ooo.klae.connex.backend.ai.mission.AiAgentProposalDecisionService.class));
 
         ConflictException failure = assertThrows(ConflictException.class, () -> {
             if ("reject".equals(decision)) {
@@ -1064,7 +1071,10 @@ class AiAssistantWriteToolServiceTest {
             }
         });
 
-        assertEquals("mission_control_required", failure.getMessage());
+        assertEquals("undo".equals(decision) ? "Assistant tool cannot be undone" : "mission_control_required", failure.getMessage());
+        if ("undo".equals(decision)) {
+            verify(missionDecisions).undo(TURN.sessionId(), 29);
+        }
         verify(workspaceService, never()).lockAndRequirePermissionsSnapshot(anyInt(), any());
         verify(chatMapper, never()).getSessionByIdForUpdate(anyInt(), anyInt(), anyInt());
         verify(chatMapper, never()).getToolCallBySessionForUpdate(anyInt(), anyInt(), anyInt());

@@ -741,7 +741,7 @@ Streaming remains inside `AiInvocationService`:
 
 V232 introduces `record_review_v1` inside an existing Ask Connex session. [AI_MISSIONS.md](AI_MISSIONS.md) defines its durable generation/taint predicate, conservative cleanup enrollment, DSR authority, and drained single-JVM activation boundary. Every ordinary message writer uses the same durable session sequence allocator; every derived execution retains its original privacy token through reads, secondary provider dispatch, writes, and deferred requester publication. Missing barriers and stale tokens fail closed after restart and after purge unblocks.
 
-Missions use the existing invocation, masking, leak scan, organization budget, audit and provider transport. Their server policy narrows the catalog and execution boundary to five read tools, enforces the selected primary record before retrieval/registration/handle resolution (including preclaim validation), and never enables CONFIRM/AUTO or question tools. Linked tasks are bounded evidence without task handles in this slice. Shared prompt serialization and envelope constants are unchanged. One `AGENT_RUN` lease covers each attempt; legacy `CHAT_TURN` routes cannot claim or control it.
+Missions use the existing invocation, masking, leak scan, organization budget, audit and provider transport. Read-only runtime-1/2 policy narrows the catalog and execution boundary to five read tools, enforces the selected primary record before retrieval/registration/handle resolution (including preclaim validation), and never enables CONFIRM/AUTO or question tools. Linked tasks are bounded evidence without task handles. Runtime 3 adds only the selected-record CONFIRM allowlist described under [Mission proposal authority](#mission-proposal-authority-v238). One `AGENT_RUN` lease covers each attempt; legacy `CHAT_TURN` routes cannot claim or control it.
 
 Mission realtime sends only requester-authorized metadata invalidations, with fresh membership, permission, session and generation checks inside the local fence. Ordinary content frames revalidate their immutable stored turn provenance and source state at send time. Output is fetched through the canonical owner-only report API; no mission model prose is broadcast.
 
@@ -1129,3 +1129,28 @@ Every actual dispatch, including repair/fallback, carries its exact mission ordi
 usage settlement. Continuation never resets organization gates, root caps, deadlines or
 outbound leak/special-care screening. Slice 2 adds no write, proposal, question or live-evaluation
 surface. See the mission contract for checkpoint-only closing decisions and retry exclusions.
+
+## Mission proposal authority (V238)
+
+Only `record_preparation_v1/1/3` can prepare mission CONFIRM proposals. Its selected-record
+allowlist and exact immutable target are independently checked at preparation, binding and
+decision boundaries. AUTO, mandates/standing approvals, task writes and creation remain
+unreachable. Mission publication uses ordered MANDATORY participants and source-linked
+canonical tool rows, without the reactive REQUIRES_NEW facade or V233 set producer.
+
+Original preparation/source observations and typed intent are immutable; replay uses original
+pins. Source vectors and privacy ancestry remain server-only. Explicit output/item projection
+supplies origin turn through action→segment ancestry, preparation anchor and frozen deadline.
+Ordinary/retained readers and overflow fallbacks exclude mission rows; legacy known-ID
+approve/reject require mission controls. Unsupported/blocked content retains safe metadata and
+cancel authority while refusing all proposal content/counts.
+
+Batch decisions prevalidate the complete immutable membership before effects, use independent
+item transactions and preserve partial outcomes on later failure. Fresh authorized canonical
+reconciliation resolves uncertain commit acknowledgments; unresolved outcomes are explicitly
+indeterminate and disarmed until reload. Authority loss suppresses disclosures without erasing
+committed effects. Final mutation admission uses the original deadline after domain contention.
+Source holdings are enrolled in action-first bounded privacy deletion, unconditional residuals
+and validated UTF-8 tenant export. See [AI_MISSIONS](AI_MISSIONS.md) and [LOCKING](LOCKING.md).
+After-commit realtime publication retains requester authority, session/root shared locks and
+restriction/privacy fences through local broker enqueue, suppressing revoked or superseded sources.

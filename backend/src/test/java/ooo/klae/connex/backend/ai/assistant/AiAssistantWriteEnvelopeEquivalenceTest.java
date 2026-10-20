@@ -278,6 +278,8 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 objectMapper,
                 VALIDATORS.getValidator(),
                 CLOCK, tagService);
+        service.setTransactionProvider(new org.springframework.beans.factory.support.StaticListableBeanFactory(
+                Map.of("service", service)).getBeanProvider(AiAssistantWriteToolService.class));
         AiChatSession session = new AiChatSession();
         session.setId(TURN.sessionId());
         session.setWorkspaceId(TURN.workspaceId());

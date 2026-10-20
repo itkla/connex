@@ -87,6 +87,7 @@
   <select id="countInitializationEvidence" resultType="long" useCache="false" flushCache="true">
     SELECT (SELECT COUNT(*) FROM ai_agent_run WHERE workspace_id = #{workspaceId})
       + (SELECT COUNT(*) FROM ai_agent_segment WHERE workspace_id = #{workspaceId})
+      + (SELECT COUNT(*) FROM ai_agent_action WHERE workspace_id = #{workspaceId})
       + (SELECT COUNT(*) FROM ai_agent_privacy_work WHERE workspace_id = #{workspaceId})
       + (SELECT COUNT(*) FROM ai_chat_session
          WHERE workspace_id = #{workspaceId} AND mission_taint_generation IS NOT NULL)
@@ -167,7 +168,11 @@
       OR r.report_message_id IS NOT NULL OR r.active_segment_id IS NOT NULL
       OR r.plan_schema_version IS NOT NULL OR r.plan_revision &lt;&gt; 0 OR r.plan_json IS NOT NULL
       OR r.checkpoint_schema_version IS NOT NULL OR r.checkpoint_revision &lt;&gt; 0 OR r.checkpoint_json IS NOT NULL
-      OR r.memory_schema_version IS NOT NULL OR r.memory_json IS NOT NULL OR r.last_committed_segment_no &lt;&gt; 0)
+      OR r.memory_schema_version IS NOT NULL OR r.memory_json IS NOT NULL OR r.last_committed_segment_no &lt;&gt; 0
+      OR r.proposal_membership_revision &lt;&gt; 0 OR r.proposal_frozen_at IS NOT NULL
+      OR r.proposal_first_prepared_at IS NOT NULL OR r.review_expires_at IS NOT NULL
+      OR EXISTS (SELECT 1 FROM ai_agent_action a
+        WHERE a.workspace_id = r.workspace_id AND a.root_run_id = r.id))
   </sql>
 
   <select id="listAffectedRunIds" resultType="int" useCache="false" flushCache="true">
@@ -317,6 +322,11 @@
     + (SELECT COUNT(*) FROM ai_agent_run r
        WHERE r.workspace_id = #{workspaceId} AND r.privacy_generation &lt;= #{cutoffGeneration}
          AND <include refid="runHasResidualPayload" />)
+    + (SELECT COUNT(*) FROM ai_agent_action a
+       WHERE a.workspace_id = #{workspaceId} AND a.privacy_generation &lt;= #{cutoffGeneration})
+    + (SELECT COUNT(*) FROM ai_chat_tool_call tc
+       WHERE tc.workspace_id = #{workspaceId} AND tc.proposal_origin = 'mission'
+         AND tc.privacy_generation &lt;= #{cutoffGeneration})
     + (SELECT COUNT(*) FROM ai_agent_segment g
        WHERE g.workspace_id = #{workspaceId} AND g.privacy_generation &lt;= #{cutoffGeneration})
     + (SELECT COUNT(*) FROM ai_run_lease l

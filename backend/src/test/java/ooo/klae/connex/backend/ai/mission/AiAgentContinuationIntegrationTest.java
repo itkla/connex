@@ -107,6 +107,8 @@ class AiAgentContinuationIntegrationTest extends AbstractAiAgentPrivacyIntegrati
         factory.addBean("persistence", persistence);
         var recreated = new AiAgentRunPersistenceService(runs, chat, workspaces, restriction, leases,
                 json, clock, factory.getBeanProvider(AiAgentRunPersistenceService.class));
+        org.springframework.test.util.ReflectionTestUtils.setField(recreated, "proposals",
+                org.mockito.Mockito.mock(AiAgentProposalSetPort.class));
         var second = Objects.requireNonNull(transaction().execute(status -> recreated.claim(before, new byte[32],
                 new AiRunLeaseGuard(properties.getRunLeaseTtl()), capability)));
         var after = stored(run);

@@ -1,13 +1,24 @@
-import type { AiAgentRealtimeFrame, AiAgentRun, AiAgentRunState, AiChatMessage } from '@/app/lib/types';
+import { askConnexProposalAppliable, type AskConnexProposalGroup, type AskConnexToolCardFailure, type AskConnexToolCardState } from '@/app/lib/askConnex';
+import type { AiAgentOutput, AiAgentProposalDecisionResult, AiAgentRealtimeFrame, AiAgentRun, AiAgentRunState, AiChatMessage } from '@/app/lib/types';
 
 /** Displayable reasons are selected locally; provider and server prose never become UI copy. */
-export type AskConnexMissionProblem = 'busy' | 'conflict' | 'expired' | 'allowance' | 'withheld' | 'unavailable' | 'forbidden' | 'budgetInfeasible' | 'failed';
+export type AskConnexMissionProblem = 'busy' | 'conflict' | 'expired' | 'allowance' | 'withheld' | 'unavailable' | 'forbidden' | 'budgetInfeasible' | 'preparationConflict' | 'failed';
 
 export function askConnexMissionProblem(status: number, code?: string): AskConnexMissionProblem {
     switch (code?.toLowerCase()) {
         case 'mission_session_busy': return 'busy';
         case 'mission_version_conflict':
         case 'mission_state_conflict': return 'conflict';
+        case 'action_intent_conflict':
+        case 'mission_action_conflict':
+        case 'mission_preparation_conflict':
+        case 'mission_proposal_preparation_conflict': return 'preparationConflict';
+        case 'mission_proposal_not_ready':
+        case 'mission_proposal_conflict':
+        case 'mission_proposal_revision_conflict': return 'conflict';
+        case 'mission_review_expired':
+        case 'ai_proposal_expired':
+        case 'proposal_expired':
         case 'mission_expired': return 'expired';
         case 'mission_budget_infeasible': return 'budgetInfeasible';
         case 'mission_budget_exhausted':
@@ -69,5 +80,60 @@ export function reconcileAskConnexDurableMessages(
     return {
         messages: durable,
         freshMessageIds,
+    };
+}
+
+/** Maps stable decision refusals without displaying server prose. */
+export function askConnexMissionDecisionFailure(code: string | null): AskConnexToolCardFailure {
+    switch (code?.toLowerCase()) {
+        case 'ai_proposal_expired':
+        case 'proposal_expired':
+        case 'mission_review_expired': return 'proposalExpired';
+        case 'mission_proposal_conflict':
+        case 'proposal_conflict':
+        case 'action_intent_conflict':
+        case 'ai_proposal_changed':
+        case 'proposal_changed':
+        case 'record_changed':
+        case 'mission_preparation_conflict': return 'proposalChanged';
+        case 'ai_proposal_permission_lost':
+        case 'permission_lost':
+        case 'forbidden': return 'proposalPermissionLost';
+        default: return 'proposalUnavailable';
+    }
+}
+
+/** Adapts exact mission membership to the shared proposal review, including terminal outcomes. */
+export function askConnexMissionProposalGroup(
+    output: AiAgentOutput,
+    excluded: ReadonlySet<number>,
+    pending: ReadonlyMap<number, 'approve' | 'reject'>,
+    decisions: AiAgentProposalDecisionResult | null,
+    now: number,
+): AskConnexProposalGroup {
+    const cards: AskConnexToolCardState[] = output.proposalSet.items.map((item) => {
+        const decision = decisions?.items.find((result) => result.actionSlot === item.actionSlot);
+        const canonicalStatus = item.card.reviewState === 'withdrawn' ? 'withdrawn'
+            : item.card.reviewState === 'undone' ? 'undone' : item.card.status;
+        const status = canonicalStatus === 'proposed' && decision && (
+            decision.outcome === 'executed' || decision.outcome === 'rejected' || decision.outcome === 'withdrawn' || decision.outcome === 'undone')
+            ? decision.outcome : canonicalStatus;
+        const reviewState = status !== item.card.status ? status === 'executed' ? 'applied'
+            : status === 'rejected' ? 'discarded' : status === 'withdrawn' ? 'withdrawn' : 'undone' : item.card.reviewState;
+        return { ...item.card, status, reviewState, reviewExpiresAt: output.proposalSet.reviewExpiresAt,
+            pendingAction: pending.get(item.card.id) ?? null, undoBlocked: false,
+            failure: decision?.outcome === 'refused' || decision?.outcome === 'indeterminate'
+                ? decision.outcome === 'indeterminate' ? 'proposalUnavailable' : askConnexMissionDecisionFailure(decision.code) : null };
+    });
+    const included = new Set(cards.filter((card) => !excluded.has(card.id)).map((card) => card.id));
+    return {
+        turnId: cards[0]?.turnId ?? 0,
+        messageId: output.report.messageId,
+        cards, included,
+        applicable: cards.filter((card) => askConnexProposalAppliable(card, now)).length,
+        selected: cards.filter((card) => included.has(card.id) && askConnexProposalAppliable(card, now)).length,
+        applied: cards.filter((card) => card.status === 'executed').length,
+        discarded: cards.filter((card) => card.status === 'rejected').length,
+        failed: cards.filter((card) => card.failure !== null).length,
     };
 }

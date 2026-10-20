@@ -42,6 +42,107 @@ import tools.jackson.databind.json.JsonMapper;
 class TenantExportSnapshotTransactionTest {
 
     @Test
+    void missionActionExportsValidateSourceVersionsAndRuntime() {
+        var transaction = new TenantExportSnapshotTransaction(mock(TenantLifecycleMapper.class),
+                JsonMapper.builder().build(), mock(ClientErrorService.class), new TenantLifecycleProperties());
+        var row = actionRow();
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(() ->
+                org.springframework.test.util.ReflectionTestUtils.invokeMethod(transaction, "validateMissionAction", new java.util.HashMap<>(row)));
+        String sources = (String) row.get("source_versions_json");
+        for (String malformed : List.of("{}", sources.replace("2026-10-19", "2027-10-19"),
+                sources.replace("\"record\"", "\"unknown\""), sources.replace("\"id\":41", "\"id\":42"))) {
+            row.put("source_versions_json", malformed);
+            org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () ->
+                    org.springframework.test.util.ReflectionTestUtils.invokeMethod(transaction, "validateMissionAction", row));
+        }
+        row.put("source_versions_json", sources);
+        row.put("source_observed_at", java.time.LocalDateTime.of(2026, 10, 19, 0, 0, 0, 1000));
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class, () ->
+                org.springframework.test.util.ReflectionTestUtils.invokeMethod(transaction, "validateMissionAction", row));
+    }
+
+    @Test
+    void purgedMissionReviewFieldsMustMatchErasedShape() {
+        var transaction = new TenantExportSnapshotTransaction(mock(TenantLifecycleMapper.class),
+                JsonMapper.builder().build(), mock(ClientErrorService.class), new TenantLifecycleProperties());
+        Map<String, Object> row = new java.util.HashMap<>();
+        row.put("purged_at", java.time.LocalDateTime.now());
+        for (String column : List.of("plan_revision", "checkpoint_revision", "last_committed_segment_no", "proposal_membership_revision")) {
+            row.put(column, 0L);
+        }
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(() ->
+                org.springframework.test.util.ReflectionTestUtils.invokeMethod(transaction, "validateMission", row));
+        for (String column : List.of("proposal_frozen_at", "proposal_first_prepared_at", "review_expires_at")) {
+            row.put(column, java.time.LocalDateTime.now());
+            org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class, () ->
+                    org.springframework.test.util.ReflectionTestUtils.invokeMethod(transaction, "validateMission", row));
+            row.remove(column);
+        }
+        row.put("proposal_membership_revision", 1L);
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class, () ->
+                org.springframework.test.util.ReflectionTestUtils.invokeMethod(transaction, "validateMission", row));
+    }
+
+    @Test
+    void actionSourceEnvelopeUsesStrictUtf8ByteTransport() throws Exception {
+        var transaction = new TenantExportSnapshotTransaction(mock(TenantLifecycleMapper.class),
+                JsonMapper.builder().build(), mock(ClientErrorService.class), new TenantLifecycleProperties());
+        Map<String, Object> row = new java.util.HashMap<>();
+        String text = "日本語😀";
+        row.put("source_versions_json", "corrupted connection value");
+        row.put("utf8_source_versions_json", text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        org.springframework.test.util.ReflectionTestUtils.invokeMethod(transaction, "restoreUtf8Payloads", row);
+        assertEquals(text, row.get("source_versions_json"));
+        assertFalse(row.containsKey("utf8_source_versions_json"));
+        row.put("utf8_source_versions_json", new byte[] {(byte) 0xc3, 0x28});
+        Method restore = TenantExportSnapshotTransaction.class.getDeclaredMethod("restoreUtf8Payloads", Map.class);
+        restore.setAccessible(true);
+        var failure = org.junit.jupiter.api.Assertions.assertThrows(java.lang.reflect.InvocationTargetException.class,
+                () -> restore.invoke(transaction, row));
+        org.junit.jupiter.api.Assertions.assertInstanceOf(java.io.IOException.class, failure.getCause());
+    }
+
+    private Map<String, Object> actionRow() {
+        Map<String, Object> row = new java.util.HashMap<>();
+        row.put("mission_export_type", "record_preparation_v1");
+        row.put("mission_export_definition", 1);
+        row.put("mission_export_runtime", 3);
+        row.put("mission_export_privacy", 1L);
+        row.put("mission_export_plan_revision", 1L);
+        row.put("mission_export_slot_count", 1);
+        row.put("mission_export_checkpoint", "{\"actionSlotReferences\":[{\"actionSlot\":\"00000000-0000-0000-0000-000000000001\",\"planItemKey\":\"p0001\"}]}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        row.put("mission_export_scope", "{\"kind\":\"record\",\"recordKind\":\"person\",\"recordId\":41}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        row.put("mission_export_plan", "{\"items\":[{\"key\":\"p0001\"}]}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        row.put("mission_export_frozen", java.time.LocalDateTime.of(2026, 10, 19, 0, 2));
+        row.put("mission_export_bound_count", 1);
+        row.put("mission_export_output_count", 1);
+        row.put("mission_export_max_ordinal", 1);
+        row.put("mission_export_canonical_count", 1);
+        row.put("mission_export_origin_generation", 1L);
+        row.put("mission_export_origin_privacy", 1L);
+        row.put("root_run_id", 31);
+        row.put("producer_run_id", 31);
+        row.put("privacy_generation", 1L);
+        row.put("action_slot", "00000000-0000-0000-0000-000000000001");
+        row.put("plan_item_key", "p0001");
+        row.put("plan_revision", 1L);
+        row.put("target_kind", "person");
+        row.put("target_id", 41);
+        row.put("tool_name", "assign_owner");
+        row.put("semantic_slot_key", "person:41:assign_owner");
+        row.put("preparation_id", "00000000-0000-0000-0000-000000000002");
+        row.put("intent_fingerprint", new byte[32]);
+        row.put("prepared_at", java.time.LocalDateTime.of(2026, 10, 19, 0, 1));
+        row.put("source_observed_at", java.time.LocalDateTime.of(2026, 10, 19, 0, 0));
+        row.put("origin_segment_id", 71);
+        row.put("origin_execution_generation", 1L);
+        row.put("output_ordinal", 1);
+        row.put("source_versions_json", "{\"schemaVersion\":1,\"sources\":[{\"kind\":\"person\",\"id\":41,\"source\":\"record\","
+                + "\"limit\":0,\"sha256\":\"" + "a".repeat(64) + "\",\"observedAt\":\"2026-10-19T00:00:00Z\"}]}");
+        return row;
+    }
+
+    @Test
     void captureUsesOneIndependentReadOnlyRepeatableReadTransaction() throws Exception {
         Method capture = TenantExportSnapshotTransaction.class.getMethod(
             "capture",
@@ -71,6 +172,7 @@ class TenantExportSnapshotTransactionTest {
         run.setScopeFingerprint(new byte[32]);
         new ooo.klae.connex.backend.ai.mission.AiAgentContinuationCodec().initialize(run);
         Map<String, Object> row = new java.util.HashMap<>();
+        row.put("proposal_membership_revision", 0L);
         row.put("id", 31);
         row.put("workspace_id", 7);
         row.put("mission_type", run.getMissionType());
@@ -102,6 +204,7 @@ class TenantExportSnapshotTransactionTest {
                 org.springframework.test.util.ReflectionTestUtils.invokeMethod(transaction, "validateMission", row));
         row.clear();
         row.put("purged_at", java.time.LocalDateTime.now());
+        row.put("proposal_membership_revision", 0L);
         row.put("plan_revision", 0L);
         row.put("checkpoint_revision", 0L);
         row.put("last_committed_segment_no", 0);

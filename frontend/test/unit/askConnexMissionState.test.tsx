@@ -1,9 +1,16 @@
 import { act } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { NextIntlClientProvider } from 'next-intl';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import AskConnexMissionProgress from '@/app/components/ask-connex/AskConnexMissionProgress';
+import enCommon from '@/messages/en/common.json';
+import jaCommon from '@/messages/ja/common.json';
 import { installInteractiveDocument } from '@/test/unit/helpers/interactiveDocument';
 import type { AiAgentOutput, AiAgentRun, AiAgentRunCreateRequest, AiAgentRunPage } from '@/app/lib/types';
+import { NowProvider } from '@/app/hooks/useNow';
 import { useAskConnexMissions } from '@/app/hooks/useAskConnexMissions';
+import { missionPartialDecision, missionProposalOutput } from '@/test/unit/helpers/askConnexMissions';
 import { ApiError } from '@/app/lib/api';
 import { bindRenderedWorkspace, releaseRenderedWorkspace } from '@/app/lib/renderedWorkspace';
 
@@ -13,6 +20,7 @@ const api = vi.hoisted(() => ({
     getAiAgentRun: vi.fn<() => Promise<AiAgentRun>>(),
     getAiAgentOutput: vi.fn<() => Promise<AiAgentOutput>>(),
     controlAiAgentRun: vi.fn<(id: number, action: string, version: string, init: RequestInit) => Promise<AiAgentRun>>(),
+    decideAiAgentProposals: vi.fn<() => Promise<import('@/app/lib/types').AiAgentProposalDecisionResult>>(),
     showApiError: vi.fn(),
 }));
 
@@ -33,7 +41,8 @@ function run(overrides: Partial<AiAgentRun> = {}): AiAgentRun {
         scope: { kind: 'record', recordKind: 'person', recordId: 4 },
         createdAt: '2026-10-15T10:00:00Z', executionDeadlineAt: '2026-10-15T10:15:00Z',
         hardDeadlineAt: '2026-10-15T10:15:00Z', startedAt: null, finishedAt: null,
-        outputAvailable: false, contentWithheld: false, availableActions: ['pause', 'cancel'], progress: null,
+        outputAvailable: false, outputRevision: '1', proposalMembershipRevision: null, proposalFrozenAt: null,
+        proposalFirstPreparedAt: null, reviewExpiresAt: null, proposalCounts: null, contentWithheld: false, availableActions: ['pause', 'cancel'], progress: null,
         ...overrides,
     };
 }
@@ -61,7 +70,7 @@ async function mount() {
         return null;
     }
     async function render(identity = 'user:workspace', refreshVersion = 0, contentVersion = 0) {
-        await act(async () => root.render(<Harness identity={identity} refreshVersion={refreshVersion} contentVersion={contentVersion} />));
+        await act(async () => root.render(<NowProvider value={Date.parse('2026-10-19T12:00:00Z')}><Harness identity={identity} refreshVersion={refreshVersion} contentVersion={contentVersion} /></NowProvider>));
     }
     await render();
     return {
@@ -73,6 +82,122 @@ async function mount() {
 describe('Ask Connex durable mission state', () => {
     beforeEach(() => { vi.useFakeTimers(); });
     afterEach(() => { vi.clearAllMocks(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+    it.each([{ locale: 'en', messages: enCommon }, { locale: 'ja', messages: jaCommon }])(
+        'retains safe cancellation while withholding review content in $locale', ({ locale, messages }) => {
+            const withheld = run({ missionType: 'record_preparation_v1', state: 'waiting_approval', contentWithheld: true,
+                goal: null, scope: null, availableActions: ['cancel'], proposalCounts: null });
+            const markup = renderToStaticMarkup(<NowProvider value={Date.parse('2026-10-19T12:00:00Z')}>
+                <NextIntlClientProvider locale={locale} messages={messages} timeZone="UTC">
+                    <AskConnexMissionProgress runs={[withheld]} loading={false} problem={null} pendingId={null}
+                        output={null} hasMore={false} onControl={() => {}} onOutput={() => {}}
+                        onCloseOutput={() => {}} onRetry={() => {}} onMore={() => {}} />
+                </NextIntlClientProvider>
+            </NowProvider>);
+            expect(markup).toContain(messages.AskConnex.missions.controls.cancel);
+            expect(markup).not.toContain(messages.AskConnex.missions.controls.pause);
+            expect(markup).not.toContain(messages.AskConnex.missions.controls.resume);
+            expect(markup).not.toContain('Private review');
+        });
+
+    it('invalidates and reloads an open waiting output when its revision changes', async () => {
+        const output = missionProposalOutput();
+        const available = run({ missionType: 'record_preparation_v1', state: 'waiting_approval', outputAvailable: true,
+            outputRevision: '3', proposalMembershipRevision: '2', availableActions: ['cancel', 'view_output'] });
+        api.getAiAgentRuns.mockResolvedValue({ items: [available], nextCursor: null });
+        api.getAiAgentOutput.mockResolvedValue(output);
+        const mounted = await mount();
+        await act(async () => mounted.current().viewOutput(available));
+        expect(mounted.current().output?.outputRevision).toBe('3');
+        const nextOutput = deferred<AiAgentOutput>();
+        api.getAiAgentOutput.mockReturnValue(nextOutput.promise);
+        api.getAiAgentRuns.mockResolvedValue({ items: [{ ...available, outputRevision: '4', stateVersion: '4' }], nextCursor: null });
+        await mounted.render('user:workspace', 1);
+        expect(mounted.current().output).toBeNull();
+        await act(async () => nextOutput.resolve({ ...output, outputRevision: '4' }));
+        expect(mounted.current().output?.outputRevision).toBe('4');
+        await mounted.unmount();
+    });
+
+    it('reloads canonical cards on invalidation even when the output revision is unchanged', async () => {
+        const output = missionProposalOutput();
+        const available = run({ missionType: 'record_preparation_v1', state: 'waiting_approval', outputAvailable: true,
+            outputRevision: '3', proposalMembershipRevision: '2', availableActions: ['cancel', 'view_output'] });
+        api.getAiAgentRuns.mockResolvedValue({ items: [available], nextCursor: null });
+        api.getAiAgentOutput.mockResolvedValue(output);
+        const mounted = await mount();
+        await act(async () => mounted.current().viewOutput(available));
+        const changed = missionProposalOutput();
+        changed.proposalSet.items[0].card.change = { ...changed.proposalSet.items[0].card.change,
+            field: 'owner', currentValue: 'Another owner', currentValueUnresolved: false,
+            proposedValue: 'Grace Hopper', state: 'recordChanged' };
+        api.getAiAgentOutput.mockResolvedValue(changed);
+        await mounted.render('user:workspace', 1);
+        expect(api.getAiAgentOutput).toHaveBeenCalledTimes(2);
+        expect(mounted.current().output?.proposalSet.items[0].card.change?.state).toBe('recordChanged');
+        await mounted.unmount();
+    });
+
+    it('withdraws private output immediately when a successful decision is followed by a withheld canonical read', async () => {
+        const output = missionProposalOutput();
+        const available = run({ missionType: 'record_preparation_v1', state: 'waiting_approval', outputAvailable: true,
+            outputRevision: '3', proposalMembershipRevision: '2', availableActions: ['cancel', 'view_output'] });
+        api.getAiAgentRuns.mockResolvedValue({ items: [available], nextCursor: null });
+        api.getAiAgentRun.mockResolvedValue({ ...available, stateVersion: '4', outputRevision: '4' });
+        api.getAiAgentOutput.mockResolvedValueOnce(output).mockRejectedValue(new ApiError('Withheld', 410, 'mission_output_withheld'));
+        api.decideAiAgentProposals.mockResolvedValue(missionPartialDecision());
+        const mounted = await mount();
+        await act(async () => mounted.current().viewOutput(available));
+        const reload = deferred<AiAgentRunPage>();
+        api.getAiAgentRuns.mockReturnValue(reload.promise);
+        let deciding: Promise<void> | undefined;
+        await act(async () => { deciding = mounted.current().decide([31, 32], 'approve'); });
+        expect(mounted.current().output).toBeNull();
+        expect(mounted.current().decisionResult).toBeNull();
+        expect(mounted.current().runs[0]?.goal).toBeNull();
+        expect(mounted.invalidated).toHaveBeenCalledWith(7);
+        await act(async () => { reload.resolve({ items: [{ ...available, contentWithheld: true, goal: null,
+            scope: null, outputAvailable: false, proposalCounts: null }], nextCursor: null }); await deciding; });
+        await mounted.unmount();
+    });
+
+    it('preserves earlier committed results when the post-decision canonical read fails', async () => {
+        const output = missionProposalOutput();
+        const available = run({ missionType: 'record_preparation_v1', state: 'waiting_approval', outputAvailable: true,
+            outputRevision: '3', proposalMembershipRevision: '2', availableActions: ['cancel', 'view_output'] });
+        api.getAiAgentRuns.mockResolvedValue({ items: [available], nextCursor: null });
+        api.getAiAgentRun.mockResolvedValue({ ...available, stateVersion: '4', outputRevision: '4' });
+        api.getAiAgentOutput.mockResolvedValueOnce(output).mockRejectedValue(new Error('Canonical reload unavailable'));
+        api.decideAiAgentProposals.mockResolvedValue(missionPartialDecision('indeterminate'));
+        const mounted = await mount();
+        await act(async () => mounted.current().viewOutput(available));
+        await act(async () => mounted.current().decide([31, 32], 'approve'));
+        expect(mounted.current().decisionResult?.items.map((item) => item.outcome)).toEqual(['executed', 'indeterminate']);
+        expect(mounted.current().proposalGroup?.cards.map((item) => item.status)).toEqual(['executed', 'proposed']);
+        expect(mounted.current().proposalGroup?.cards[1].failure).toBe('proposalUnavailable');
+        await mounted.unmount();
+    });
+
+    it('keeps committed results and disarms an indeterminate sibling until explicit reload', async () => {
+        vi.setSystemTime(new Date('2026-10-19T12:00:00Z'));
+        const output = missionProposalOutput();
+        const available = run({ missionType: 'record_preparation_v1', state: 'waiting_approval', outputAvailable: true,
+            outputRevision: '3', proposalMembershipRevision: '2', availableActions: ['cancel', 'view_output'] });
+        api.getAiAgentRuns.mockResolvedValue({ items: [available], nextCursor: null });
+        api.getAiAgentRun.mockResolvedValue({ ...available, stateVersion: '4', outputRevision: '4' });
+        api.getAiAgentOutput.mockResolvedValue(output);
+        api.getAiAgentOutput.mockResolvedValueOnce(output).mockResolvedValue({ ...output, outputRevision: '4' });
+        api.decideAiAgentProposals.mockResolvedValue(missionPartialDecision('indeterminate'));
+        const mounted = await mount();
+        await act(async () => mounted.current().viewOutput(available));
+        await act(async () => mounted.current().decide([31, 32], 'approve'));
+        expect(api.decideAiAgentProposals).toHaveBeenCalledOnce();
+        expect(mounted.current().decisionResult?.items.map((item) => item.outcome)).toEqual(['executed', 'indeterminate']);
+        expect(mounted.current().proposalGroup?.cards[1]?.failure).toBe('proposalUnavailable');
+        await act(async () => mounted.current().decide([32], 'approve'));
+        expect(api.decideAiAgentProposals).toHaveBeenCalledOnce();
+        await mounted.unmount();
+    });
 
     it('does not poll an idle session when its parent rerenders', async () => {
         api.getAiAgentRuns.mockResolvedValue({ items: [], nextCursor: null });
@@ -268,8 +393,8 @@ describe('Ask Connex durable mission state', () => {
             response.resolve({ schemaVersion: 1, runId: 12, outputRevision: '1', report: {
                 messageId: 10, markdown: 'Private report', citations: [], generatedAt: '2026-10-15T10:00:00Z',
                 coverage: { processed: 1, skipped: 0, failed: 0, unprocessed: 0 },
-            }, proposalSet: { id: 12, revision: '0', frozen: true, reviewExpiresAt: null, items: [],
-                derivedCounts: { pending: 0, executed: 0, rejected: 0, withdrawn: 0 } }, autoWriteReceipts: [] });
+            }, proposalSet: { id: 12, revision: '0', frozen: true, frozenAt: null, firstPreparedAt: null, reviewExpiresAt: null, items: [],
+                derivedCounts: { pending: 0, executed: 0, rejected: 0, withdrawn: 0, undone: 0 } }, autoWriteReceipts: [] });
             await viewing;
         });
         expect(mounted.current().output).toBeNull();
@@ -284,8 +409,8 @@ describe('Ask Connex durable mission state', () => {
             schemaVersion: 1, runId: 12, outputRevision: '1', report: {
                 messageId: 10, markdown: 'Private report', citations: [], generatedAt: '2026-10-15T10:00:00Z',
                 coverage: { processed: 1, skipped: 0, failed: 0, unprocessed: 0 },
-            }, proposalSet: { id: 12, revision: '0', frozen: true, reviewExpiresAt: null, items: [],
-                derivedCounts: { pending: 0, executed: 0, rejected: 0, withdrawn: 0 } }, autoWriteReceipts: [],
+            }, proposalSet: { id: 12, revision: '0', frozen: true, frozenAt: null, firstPreparedAt: null, reviewExpiresAt: null, items: [],
+                derivedCounts: { pending: 0, executed: 0, rejected: 0, withdrawn: 0, undone: 0 } }, autoWriteReceipts: [],
         };
         api.getAiAgentRuns.mockResolvedValue({ items: [available], nextCursor: null });
         api.getAiAgentOutput.mockResolvedValue(output);
@@ -325,8 +450,8 @@ describe('Ask Connex durable mission state', () => {
             oldOutput.resolve({ schemaVersion: 1, runId: 12, outputRevision: '1', report: {
                 messageId: 10, markdown: 'Withdrawn report', citations: [], generatedAt: '2026-10-15T10:00:00Z',
                 coverage: { processed: 1, skipped: 0, failed: 0, unprocessed: 0 },
-            }, proposalSet: { id: 12, revision: '0', frozen: true, reviewExpiresAt: null, items: [],
-                derivedCounts: { pending: 0, executed: 0, rejected: 0, withdrawn: 0 } }, autoWriteReceipts: [] });
+            }, proposalSet: { id: 12, revision: '0', frozen: true, frozenAt: null, firstPreparedAt: null, reviewExpiresAt: null, items: [],
+                derivedCounts: { pending: 0, executed: 0, rejected: 0, withdrawn: 0, undone: 0 } }, autoWriteReceipts: [] });
             await viewing;
         });
         expect(mounted.current().runs).toEqual([]);

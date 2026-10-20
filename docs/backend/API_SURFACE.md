@@ -262,3 +262,14 @@ were not available in this lane.
 ## Ownership consent (#1534 slice 4o)
 
 Existing-scope owner promotions create offers; acceptance grants ownership. The HTTP, MFA, locking, control-plane, notice and cleanup contracts are in [Ownership offers](OWNERSHIP_OFFERS.md). Founding, admin changes and last-owner checks retain their existing behavior. The self-offer card is authoritative on every catalog layout; ordinary inbox delivery retains the existing cross-catalog limitation.
+
+## Mission singleton review
+
+`GET /api/ai/assistant/missions/{runId}/proposals/{actionSlot}` returns one exact frozen
+requester-owned item. `POST /api/ai/assistant/missions/{runId}/proposal-decisions` accepts a
+16 KiB body with a positive decimal-string membership revision and 1–50 unique canonical
+slot/preparation UUID pairs with approve/discard choices. Unknown properties are refused.
+Authentication, CSRF and the pinned workspace remain mandatory. Each item commits separately;
+HTTP 200 batch stop results preserve prior outcomes, including explicit indeterminate status
+when fresh authorized reconciliation cannot establish a failing item's outcome. Safe metadata
+and cancellation remain accessible when content is withheld or schemas are unsupported.

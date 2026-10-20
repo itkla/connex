@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -121,6 +122,7 @@ class AiAgentDsrPurgeHttpIntegrationTest {
     @AfterEach
     void removeFixtures() {
         if (workspace != null) {
+            cleanupSingletons(workspace.getId());
             jdbc.update("UPDATE ai_agent_privacy_barrier SET latest_operation_key=NULL WHERE workspace_id=?", workspace.getId());
             jdbc.update("DELETE FROM ai_agent_privacy_work WHERE workspace_id=?", workspace.getId());
             jdbc.update("DELETE FROM ai_agent_privacy_barrier WHERE workspace_id=?", workspace.getId());
@@ -236,6 +238,79 @@ class AiAgentDsrPurgeHttpIntegrationTest {
                 "SELECT generation FROM ai_agent_privacy_barrier WHERE workspace_id=?", Long.class, workspace.getId()));
     }
 
+    @Test
+    void missionHoldingsPurgeErasesSingletonSourcesAcrossFrozenWorkspaceSet() throws Exception {
+        Workspace second = new Workspace();
+        second.setOrgId(organization.getId());
+        second.setName("Second accepted mission workspace");
+        second.setSlug("mission-http-second-" + UUID.randomUUID());
+        workspaces.insert(second);
+        try {
+            privacyInWorkspace(second.getId(), () -> { privacy.initialize(second.getId()); return null; });
+            seedSingleton(workspace.getId());
+            seedSingleton(second.getId());
+            String accepted = mvc.perform(postRequest().content(body())).andExpect(status().isAccepted())
+                    .andExpect(jsonPath("$.workspaceCount").value(2)).andReturn().getResponse().getContentAsString();
+            String operation = json.readTree(accepted).path("operationId").asString();
+            for (int target : List.of(workspace.getId(), second.getId())) {
+                assertTrue(privacyInWorkspace(target, () -> {
+                    for (int batch = 0; batch < 30; batch++) {
+                        if (privacy.batch(target, operation)) return true;
+                    }
+                    return false;
+                }));
+                assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM ai_agent_action WHERE workspace_id=?", Integer.class, target));
+                assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM ai_chat_tool_call WHERE workspace_id=?", Integer.class, target));
+                assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM ai_agent_segment WHERE workspace_id=?", Integer.class, target));
+                assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM ai_agent_run WHERE workspace_id=? AND "
+                        + "(proposal_membership_revision<>0 OR proposal_frozen_at IS NOT NULL OR proposal_first_prepared_at IS NOT NULL OR review_expires_at IS NOT NULL)", Integer.class, target));
+            }
+            mvc.perform(get(progressPath(operation)).session(session.http()).header("X-Workspace-Id", workspace.getId()))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.state").value("complete"));
+        } finally {
+            cleanupSingletons(second.getId());
+            jdbc.update("UPDATE ai_agent_privacy_barrier SET latest_operation_key=NULL WHERE workspace_id=?", second.getId());
+            jdbc.update("DELETE FROM ai_agent_privacy_work WHERE workspace_id=?", second.getId());
+            jdbc.update("DELETE FROM ai_agent_privacy_barrier WHERE workspace_id=?", second.getId());
+            jdbc.update("DELETE FROM workspace WHERE id=?", second.getId());
+        }
+    }
+
+    private void seedSingleton(int workspaceId) {
+        jdbc.update("INSERT INTO ai_chat_session (workspace_id,created_by_user_id,title,mission_taint_generation,mission_taint_seq,message_seq_high_water,title_privacy_generation) "
+                + "VALUES (?,?,'Mission singleton HTTP fixture',1,1,1,1)", workspaceId, actor.getId());
+        int chatId = Objects.requireNonNull(jdbc.queryForObject("SELECT MAX(id) FROM ai_chat_session WHERE workspace_id=?", Integer.class, workspaceId));
+        jdbc.update("INSERT INTO ai_agent_run (workspace_id,session_id,owner_user_id,client_request_key,request_hash,mission_type,definition_version,"
+                + "runtime_contract_version,locale,goal,scope_json,scope_fingerprint,privacy_generation,execution_deadline_at,hard_deadline_at) "
+                + "VALUES (?,?,?,?,UNHEX(REPEAT('ab',32)),'record_preparation_v1',1,3,'en','Prepare changes',"
+                + "'{\"kind\":\"record\",\"recordKind\":\"person\",\"recordId\":1}',UNHEX(REPEAT('cd',32)),1,"
+                + "TIMESTAMPADD(MINUTE,15,UTC_TIMESTAMP(6)),TIMESTAMPADD(HOUR,73,UTC_TIMESTAMP(6)))", workspaceId, chatId, actor.getId(), UUID.randomUUID().toString());
+        int run = Objects.requireNonNull(jdbc.queryForObject("SELECT MAX(id) FROM ai_agent_run WHERE workspace_id=?", Integer.class, workspaceId));
+        jdbc.update("INSERT INTO ai_chat_message (workspace_id,session_id,seq,author_kind,author_user_id,content,mission_run_id,mission_message_kind,privacy_generation) "
+                + "VALUES (?,?,1,'user',?,'Prepare changes',?,'goal',1)", workspaceId, chatId, actor.getId(), run);
+        int message = Objects.requireNonNull(jdbc.queryForObject("SELECT MAX(id) FROM ai_chat_message WHERE workspace_id=?", Integer.class, workspaceId));
+        jdbc.update("INSERT INTO ai_agent_segment (workspace_id,run_id,segment_no,attempt_no,execution_generation,privacy_generation,status,reserved_steps,reserved_tokens,"
+                + "provider_declaration_fingerprint,deadline_at,settled_at) VALUES (?,?,1,1,1,1,'completed',1,8192,UNHEX(REPEAT('ab',32)),UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))", workspaceId, run);
+        int segment = Objects.requireNonNull(jdbc.queryForObject("SELECT MAX(id) FROM ai_agent_segment WHERE workspace_id=?", Integer.class, workspaceId));
+        String source = "{\"schemaVersion\":1,\"sources\":[{\"kind\":\"person\",\"id\":1,\"source\":\"record\",\"limit\":0,\"sha256\":\""
+                + "a".repeat(64) + "\",\"observedAt\":\"2026-01-01T00:00:00Z\"}]}";
+        jdbc.update("INSERT INTO ai_agent_action (workspace_id,root_run_id,producer_run_id,action_slot,semantic_slot_key,target_kind,target_id,tool_name,"
+                + "plan_item_key,plan_revision,preparation_id,intent_fingerprint,prepared_at,source_observed_at,source_versions_json,origin_segment_id,origin_execution_generation,privacy_generation) "
+                + "VALUES (?,?,?,?,'person:1:assign_owner','person',1,'assign_owner','p0001',1,?,UNHEX(REPEAT('ab',32)),'2026-01-02','2026-01-01',CONVERT(? USING utf8mb4),?,1,1)",
+                workspaceId, run, run, UUID.randomUUID().toString(), UUID.randomUUID().toString(), source.getBytes(java.nio.charset.StandardCharsets.UTF_8), segment);
+        jdbc.update("INSERT INTO ai_chat_tool_call (workspace_id,message_id,tool_name,status,arguments_json,server_proposal,mission_run_id,artifact_origin,privacy_generation,proposal_origin,mission_action_id) "
+                + "SELECT workspace_id,?,'assign_owner','proposed','{}',TRUE,root_run_id,'mission',privacy_generation,'mission',id FROM ai_agent_action WHERE workspace_id=? AND root_run_id=?", message, workspaceId, run);
+    }
+
+    private void cleanupSingletons(int workspaceId) {
+        jdbc.update("DELETE FROM ai_agent_action WHERE workspace_id=?", workspaceId);
+        jdbc.update("DELETE FROM ai_chat_tool_call WHERE workspace_id=?", workspaceId);
+        jdbc.update("DELETE FROM ai_chat_message WHERE workspace_id=?", workspaceId);
+        jdbc.update("DELETE FROM ai_agent_segment WHERE workspace_id=?", workspaceId);
+        jdbc.update("DELETE FROM ai_agent_run WHERE workspace_id=?", workspaceId);
+        jdbc.update("DELETE FROM ai_chat_session WHERE workspace_id=?", workspaceId);
+    }
+
     private String body() {
         return json.writeValueAsString(Map.of("idempotencyKey", UUID.randomUUID().toString(),
                 "snapshotToken", DataSubjectRequestSnapshot.token(requests.findById(organization.getId(), requestId)),
@@ -244,10 +319,14 @@ class AiAgentDsrPurgeHttpIntegrationTest {
     }
 
     private <T> T privacyMaintenance(Supplier<T> work) {
+        return privacyInWorkspace(workspace.getId(), work);
+    }
+
+    private <T> T privacyInWorkspace(int workspaceId, Supplier<T> work) {
         var requestAttributes = RequestContextHolder.getRequestAttributes();
         RequestContextHolder.resetRequestAttributes();
         try {
-            return workScope.inWorkspace(workspace.getId(), work);
+            return workScope.inWorkspace(workspaceId, work);
         } finally {
             RequestContextHolder.setRequestAttributes(requestAttributes);
         }

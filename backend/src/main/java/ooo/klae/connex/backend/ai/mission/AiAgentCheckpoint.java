@@ -12,7 +12,21 @@ public record AiAgentCheckpoint(int schemaVersion, int definitionVersion, int wo
         String planRevision, List<String> completedPlanItemKeys, String nextPlanItemKey,
         int lastCommittedSegmentNo, List<CompletedFact> completedFacts,
         List<ActionSlotReference> actionSlotReferences, List<EvidenceReference> evidenceReferences,
-        Coverage coverage, Continuation continuation) {
+        Coverage coverage, Continuation continuation,
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        AiAgentSourceObservations sourceObservations) {
+    /** Preserves schema-one construction without adding a serialized observation property. */
+    public AiAgentCheckpoint(int schemaVersion, int definitionVersion, int workspaceId,
+            int runId, String scopeFingerprint, String privacyGeneration, String revision,
+            String planRevision, List<String> completedPlanItemKeys, String nextPlanItemKey,
+            int lastCommittedSegmentNo, List<CompletedFact> completedFacts,
+            List<ActionSlotReference> actionSlotReferences, List<EvidenceReference> evidenceReferences,
+            Coverage coverage, Continuation continuation) {
+        this(schemaVersion, definitionVersion, workspaceId, runId, scopeFingerprint, privacyGeneration,
+                revision, planRevision, completedPlanItemKeys, nextPlanItemKey, lastCommittedSegmentNo,
+                completedFacts, actionSlotReferences, evidenceReferences, coverage, continuation, null);
+    }
+
     public AiAgentCheckpoint {
         Objects.requireNonNull(scopeFingerprint);
         Objects.requireNonNull(privacyGeneration);

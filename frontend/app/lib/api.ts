@@ -6808,7 +6808,7 @@ export function cancelAiChatTurn(
     );
 }
 
-/** Creates one bounded, read-only mission with a caller-stable idempotency key. */
+/** Creates one bounded mission with a caller-stable idempotency key. */
 export function createAiAgentRun(sessionId: number, payload: Types.AiAgentRunCreateRequest, init: RequestInit = {}) {
     return postJson<Types.AiAgentRun>(`/api/ai/assistant/sessions/${sessionId}/missions`, payload, init);
 }
@@ -6903,6 +6903,17 @@ export function getAiGenerationStatus<T>(handle: string, init: RequestInit = {})
         `/api/ai/generations/${encodeURIComponent(handle)}`,
         { cache: 'no-store', ...init },
     );
+}
+
+/** Reads one exact mission member under current requester and source authorization. */
+export function getAiAgentProposal(id: number, actionSlot: string, init: RequestInit = {}) {
+    return getJson<Types.AiAgentProposalItem>(`/api/ai/assistant/missions/${id}/proposals/${encodeURIComponent(actionSlot)}`, { cache: 'no-store', ...init });
+}
+
+/** Pins the rendered workspace before the shared JSON helper awaits identity or CSRF. */
+export function decideAiAgentProposals(id: number, payload: Types.AiAgentProposalDecisionRequest, init: RequestInit = {}) {
+    const path = `/api/ai/assistant/missions/${id}/proposal-decisions`;
+    return postJson<Types.AiAgentProposalDecisionResult>(path, payload, pinWriteNow(path, init));
 }
 
 /**

@@ -121,7 +121,10 @@
         "queuePageEmptyTitle": "このページに項目はありません",
         "queuePageEmptyBody": "2ページ目以降の項目は対応済みか移動しました。",
         "queueBackToFirstPage": "最初のページへ戻る",
-        "queueAsOf": "確認：{at}"
+        "queueAsOf": "確認：{at}",
+        "queueSource_ai_mission": "レコードの変更案作成",
+        "queueReason_mission_review_pending": "変更案を確認できます。",
+        "queueEvidence_mission_output_prepared": "変更案を作成しました"
     },
     "MeNoteList": {
         "emptyTitle": "メモはまだありません",

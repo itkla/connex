@@ -55,14 +55,19 @@ public final class AiAgentContinuationCodec {
     /** Initializes only a newly created runtime-2 run with its generated immutable identity. */
     public Snapshot initialize(AiAgentRun run) {
         AiAgentMissionCatalog.requireSupported(run);
-        require(run.getRuntimeContractVersion() == 2 && erased(run));
+        require(AiAgentMissionCatalog.continuation(run.getRuntimeContractVersion()) && erased(run));
         require(run.getId() > 0 && run.getWorkspaceId() > 0 && run.getPrivacyGeneration() > 0);
         require(run.getScopeFingerprint() != null && run.getScopeFingerprint().length == 32);
-        var plan = new AiAgentPlan(1, "1", 1, List.of(), List.of());
-        var checkpoint = new AiAgentCheckpoint(1, 1, run.getWorkspaceId(), run.getId(),
+        boolean preparation = AiAgentMissionCatalog.proposals(run);
+        var plan = preparation
+                ? new AiAgentPlan(1, "1", 2, List.of(new AiAgentPlan.Item("p0001",
+                        new DurableText("ja".equals(run.getLocale()) ? "変更案を作成" : "Prepare changes", List.of()), "active")), List.of("p0001"))
+                : new AiAgentPlan(1, "1", 1, List.of(), List.of());
+        var checkpoint = new AiAgentCheckpoint(preparation ? 2 : 1, 1, run.getWorkspaceId(), run.getId(),
                 HexFormat.of().formatHex(run.getScopeFingerprint()), Long.toString(run.getPrivacyGeneration()),
                 "1", "1", List.of(), null, 0, List.of(), List.of(), List.of(),
-                new Coverage(0, 0, 0, 1, List.of()), new Continuation("record_review_v1", 1, "reading"));
+                new Coverage(0, 0, 0, 1, List.of()), new Continuation(run.getMissionType(), 1, "reading"),
+                preparation ? new AiAgentSourceObservations(1, List.of()) : null);
         var snapshot = new Snapshot(plan, checkpoint, new AiAgentMemory(1,
                 new DurableText("", List.of()), List.of()));
         apply(run, snapshot);
@@ -77,7 +82,7 @@ public final class AiAgentContinuationCodec {
             return null;
         }
         require(Objects.equals(run.getPlanSchemaVersion(), 1)
-                && Objects.equals(run.getCheckpointSchemaVersion(), 1)
+                && Objects.equals(run.getCheckpointSchemaVersion(), AiAgentMissionCatalog.proposals(run) ? 2 : 1)
                 && Objects.equals(run.getMemorySchemaVersion(), 1));
         var snapshot = new Snapshot(decodePlan(run.getPlanJson()), decodeCheckpoint(run.getCheckpointJson()),
                 decodeMemory(run.getMemoryJson()));
@@ -88,12 +93,13 @@ public final class AiAgentContinuationCodec {
     /** Validates exact run bindings and all cross-envelope ledgers without modifying the run. */
     public void validate(AiAgentRun run, Snapshot snapshot) {
         AiAgentMissionCatalog.requireSupported(run);
-        require(run.getRuntimeContractVersion() == 2 && snapshot != null);
+        require(AiAgentMissionCatalog.continuation(run.getRuntimeContractVersion()) && snapshot != null);
         validatePlan(snapshot.plan());
         validateCheckpoint(snapshot.checkpoint());
         validateMemory(snapshot.memory());
         var plan = snapshot.plan();
         var checkpoint = snapshot.checkpoint();
+        require(checkpoint.schemaVersion() == (AiAgentMissionCatalog.proposals(run) ? 2 : 1));
         require(run.getWorkspaceId() == checkpoint.workspaceId() && run.getId() == checkpoint.runId());
         require(run.getDefinitionVersion() == checkpoint.definitionVersion());
         require(run.getScopeFingerprint() != null && run.getScopeFingerprint().length == 32
@@ -151,7 +157,7 @@ public final class AiAgentContinuationCodec {
             return;
         }
         validate(run, snapshot);
-        require(snapshot.checkpoint().actionSlotReferences().isEmpty());
+        require(run.getRuntimeContractVersion() != 2 || snapshot.checkpoint().actionSlotReferences().isEmpty());
     }
 
     /** Validates append-only identity and fact ledgers at the authoritative write boundary. */
@@ -171,6 +177,9 @@ public final class AiAgentContinuationCodec {
                 && decimal(after.revision()) == nextRevision(decimal(before.revision())));
         require(after.actionSlotReferences().equals(before.actionSlotReferences())
                 && after.evidenceReferences().containsAll(before.evidenceReferences())
+                && (before.sourceObservations() == null ? after.sourceObservations() == null
+                        : after.sourceObservations() != null
+                            && after.sourceObservations().merge(before.sourceObservations()).equals(after.sourceObservations()))
                 && after.completedFacts().size() >= before.completedFacts().size()
                 && after.completedFacts().subList(0, before.completedFacts().size()).equals(before.completedFacts())
                 && after.completedPlanItemKeys().size() >= before.completedPlanItemKeys().size()
@@ -209,7 +218,7 @@ public final class AiAgentContinuationCodec {
         run.setPlanSchemaVersion(1);
         run.setPlanRevision(planRevision);
         run.setPlanJson(plan);
-        run.setCheckpointSchemaVersion(1);
+        run.setCheckpointSchemaVersion(snapshot.checkpoint().schemaVersion());
         run.setCheckpointRevision(checkpointRevision);
         run.setCheckpointJson(checkpoint);
         run.setMemorySchemaVersion(1);
@@ -263,10 +272,17 @@ public final class AiAgentContinuationCodec {
     /** Strictly reads the complete execution ledger without accepting replacement defaults. */
     public AiAgentCheckpoint decodeCheckpoint(String value) {
         var node = read(value, CHECKPOINT_BYTES);
+        if (integer(node, "schemaVersion") == 2) {
+            fields(node, "schemaVersion", "definitionVersion", "workspaceId", "runId", "scopeFingerprint",
+                    "privacyGeneration", "revision", "planRevision", "completedPlanItemKeys", "nextPlanItemKey",
+                    "lastCommittedSegmentNo", "completedFacts", "actionSlotReferences", "evidenceReferences",
+                    "coverage", "continuation", "sourceObservations");
+        } else {
         fields(node, "schemaVersion", "definitionVersion", "workspaceId", "runId", "scopeFingerprint",
                 "privacyGeneration", "revision", "planRevision", "completedPlanItemKeys", "nextPlanItemKey",
                 "lastCommittedSegmentNo", "completedFacts", "actionSlotReferences", "evidenceReferences",
                 "coverage", "continuation");
+        }
         List<CompletedFact> facts = new ArrayList<>();
         for (var fact : array(node, "completedFacts")) {
             fields(fact, "planItemKey", "summary", "evidenceReferences", "recordedSegmentNo");
@@ -295,7 +311,8 @@ public final class AiAgentContinuationCodec {
                 new Coverage(integer(coverage, "processed"), integer(coverage, "skipped"),
                         integer(coverage, "failed"), integer(coverage, "unprocessed"), reasons),
                 new Continuation(string(continuation, "type"), integer(continuation, "version"),
-                        string(continuation, "phase")));
+                        string(continuation, "phase")), integer(node, "schemaVersion") == 2
+                        ? new AiAgentSourceObservationsCodec().decodeNode(node.get("sourceObservations")) : null);
         validateCheckpoint(checkpoint);
         return checkpoint;
     }
@@ -327,7 +344,9 @@ public final class AiAgentContinuationCodec {
         return run.getPlanSchemaVersion() == null && run.getPlanRevision() == 0 && run.getPlanJson() == null
                 && run.getCheckpointSchemaVersion() == null && run.getCheckpointRevision() == 0
                 && run.getCheckpointJson() == null && run.getMemorySchemaVersion() == null
-                && run.getMemoryJson() == null && run.getLastCommittedSegmentNo() == 0;
+                && run.getMemoryJson() == null && run.getLastCommittedSegmentNo() == 0
+                && run.getProposalMembershipRevision() == 0 && run.getProposalFrozenAt() == null
+                && run.getProposalFirstPreparedAt() == null && run.getReviewExpiresAt() == null;
     }
 
     private static AiAgentRun copyBinding(AiAgentRun run, long planRevision, long checkpointRevision, int cursor) {
@@ -375,7 +394,7 @@ public final class AiAgentContinuationCodec {
     }
 
     private static void validateCheckpoint(AiAgentCheckpoint checkpoint) {
-        require(checkpoint != null && checkpoint.schemaVersion() == 1 && checkpoint.definitionVersion() == 1
+        require(checkpoint != null && (checkpoint.schemaVersion() == 1 || checkpoint.schemaVersion() == 2) && checkpoint.definitionVersion() == 1
                 && checkpoint.workspaceId() > 0 && checkpoint.runId() > 0);
         require(checkpoint.scopeFingerprint().matches("[0-9a-f]{64}"));
         decimal(checkpoint.privacyGeneration());
@@ -398,7 +417,7 @@ public final class AiAgentContinuationCodec {
             require(fact.recordedSegmentNo() >= 1 && fact.recordedSegmentNo() <= 8);
         }
         require(factKeys.equals(new HashSet<>(checkpoint.completedPlanItemKeys())));
-        require(checkpoint.actionSlotReferences().size() <= MAX_ITEMS);
+        require(checkpoint.actionSlotReferences().size() <= (checkpoint.schemaVersion() == 2 ? 50 : MAX_ITEMS));
         Set<String> slots = new HashSet<>();
         for (var slot : checkpoint.actionSlotReferences()) {
             key(slot.planItemKey());
@@ -419,8 +438,15 @@ public final class AiAgentContinuationCodec {
         }
         require(reasonCount <= 1);
         var continuation = checkpoint.continuation();
-        require("record_review_v1".equals(continuation.type()) && continuation.version() == 1
-                && Set.of("reading", "reporting").contains(continuation.phase()));
+        require((checkpoint.schemaVersion() == 1 ? "record_review_v1" : "record_preparation_v1")
+                .equals(continuation.type()) && continuation.version() == 1
+                && Set.of("reading", "reporting", "preparing_changes").contains(continuation.phase()));
+        require(checkpoint.schemaVersion() == 2 ? checkpoint.sourceObservations() != null
+                : checkpoint.sourceObservations() == null);
+        if (checkpoint.sourceObservations() != null) {
+            var observed = checkpoint.sourceObservations().sources().stream().map(AiAgentSourceObservations.Observation::reference).toList();
+            require(observed.containsAll(checkpoint.evidenceReferences()));
+        }
     }
 
     private static void evidence(List<EvidenceReference> references) {

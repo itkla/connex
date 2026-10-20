@@ -157,4 +157,10 @@ public interface AiAgentRunMapper {
     AiChatToolCall findMissionBookkeepingCall(@Param("workspaceId") int workspaceId, @Param("runId") int runId,
             @Param("idempotencyKey") String idempotencyKey);
 
+    /** Retains the root through a complete authorized content projection. */
+    AiAgentRun lockRunForShare(@Param("workspaceId") int workspaceId, @Param("id") int id);
+
+    /** Discovers review expiry independently of execution deadlines and provider availability. */
+    List<AiAgentRun> reviewExpiredRuns(@Param("workspaceId") int workspaceId, @Param("limit") int limit);
+
 }

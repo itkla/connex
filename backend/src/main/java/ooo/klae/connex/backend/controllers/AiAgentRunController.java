@@ -29,6 +29,8 @@ import ooo.klae.connex.backend.tenant.TenantJournalClientDriven;
 @TenantJournalAttributable
 public class AiAgentRunController {
     private final AiAgentRunService service;
+    private final ooo.klae.connex.backend.ai.mission.AiAgentProposalReadService proposals;
+    private final ooo.klae.connex.backend.ai.mission.AiAgentProposalDecisionService decisions;
 
     @PostMapping("/sessions/{sessionId}/missions")
     public ResponseEntity<AiAgentRunDto> create(@PathVariable int sessionId,
@@ -55,6 +57,18 @@ public class AiAgentRunController {
     @TenantJournalClientDriven(retainFailures = false)
     public AiAgentOutputDto output(@PathVariable int id) {
         return service.output(id);
+    }
+
+    @GetMapping("/missions/{id}/proposals/{actionSlot}")
+    @TenantJournalClientDriven(retainFailures = false)
+    public AiAgentOutputDto.ProposalItem proposal(@PathVariable int id, @PathVariable String actionSlot) {
+        return proposals.item(id, actionSlot);
+    }
+
+    @PostMapping("/missions/{id}/proposal-decisions")
+    public ooo.klae.connex.backend.dto.AiAgentProposalDecisionResponse decide(@PathVariable int id,
+            @Valid @RequestBody ooo.klae.connex.backend.dto.AiAgentProposalDecisionRequest request) {
+        return decisions.decide(id, request);
     }
 
     @PostMapping("/missions/{id}/pause")

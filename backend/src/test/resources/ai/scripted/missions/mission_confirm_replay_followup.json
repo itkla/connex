@@ -1,0 +1,36 @@
+{
+  "id": "mission_confirm_replay_followup",
+  "selector": "connex_script_mission_confirm_replay_followup",
+  "capabilityClass": "scripted-json",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "json",
+      "closing": false,
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "find_tools",
+        "arguments": "{\"toolset\":\"write_pipeline\"}"
+      }
+    },
+    {
+      "afterToolCalls": 1,
+      "protocol": "json",
+      "closing": false,
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "assign_owner",
+        "arguments": "{\"handle\":\"r1\",\"owner\":\"unassigned\"}"
+      }
+    },
+    {
+      "afterToolCalls": 2,
+      "protocol": "json",
+      "closing": true,
+      "emit": {
+        "kind": "final",
+        "text": "{\"tool\":null,\"final\":{\"text\":\"The proposed change is ready for review.\",\"citations\":[\"r1\"],\"suggestions\":[],\"title\":null}}"
+      }
+    }
+  ]
+}

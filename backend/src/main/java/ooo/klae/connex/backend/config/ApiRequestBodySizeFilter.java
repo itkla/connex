@@ -134,7 +134,9 @@ public class ApiRequestBodySizeFilter extends OncePerRequestFilter {
 
     private long limitFor(String path, HttpServletRequest request) {
         long routeLimit;
-        if (path.matches("^/api/ai/assistant/sessions/[0-9]+/missions$")) {
+        if (path.matches("^/api/ai/assistant/missions/[0-9]+/proposal-decisions$")) {
+            routeLimit = properties.getMissionDecisionMaxBodyBytes();
+        } else if (path.matches("^/api/ai/assistant/sessions/[0-9]+/missions$")) {
             routeLimit = 96L * 1024;
         } else if (path.matches("^/api/ai/assistant/missions/[0-9]+/(pause|resume|cancel)$")
                 || path.matches("^/api/orgs/[0-9]+/data-subject-requests/[0-9]+/mission-holdings-purge$")) {

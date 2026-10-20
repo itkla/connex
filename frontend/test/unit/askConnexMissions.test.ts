@@ -10,7 +10,8 @@ export function mission(overrides: Partial<AiAgentRun> = {}): AiAgentRun {
         scope: { kind: 'record', recordKind: 'person', recordId: 4 },
         createdAt: '2026-10-15T10:00:00Z', executionDeadlineAt: '2026-10-15T10:15:00Z',
         hardDeadlineAt: '2026-10-15T10:15:00Z', startedAt: null, finishedAt: null,
-        outputAvailable: false, contentWithheld: false, availableActions: ['pause', 'cancel'], progress: null,
+        outputAvailable: false, outputRevision: '1', proposalMembershipRevision: null, proposalFrozenAt: null,
+        proposalFirstPreparedAt: null, reviewExpiresAt: null, proposalCounts: null, contentWithheld: false, availableActions: ['pause', 'cancel'], progress: null,
         ...overrides,
     };
 }

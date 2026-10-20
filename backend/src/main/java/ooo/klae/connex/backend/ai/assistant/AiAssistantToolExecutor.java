@@ -114,6 +114,7 @@ public class AiAssistantToolExecutor {
         }
         AiChatScopedToolPolicy.requireHonorsDeclaredScope(name, scope);
         try {
+            ooo.klae.connex.backend.ai.mission.AiAgentEvidenceService.beforeRead(name);
             AiAssistantToolResult shaped = switch (name) {
                 case "search_records" -> search(args, resources);
                 case "get_record" -> getRecord(args, resources, includePrivateNotes);

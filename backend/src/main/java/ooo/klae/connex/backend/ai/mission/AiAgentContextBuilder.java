@@ -30,12 +30,28 @@ public class AiAgentContextBuilder {
     private final AiAssistantToolExecutor toolExecutor;
     private final WorkspaceService workspaceService;
     private final ObjectMapper objectMapper;
+    @org.springframework.beans.factory.annotation.Autowired
+    private ooo.klae.connex.backend.mappers.AiAgentActionMapper actions;
+    @org.springframework.beans.factory.annotation.Autowired
+    private ooo.klae.connex.backend.mappers.AiChatMapper chat;
+    @org.springframework.beans.factory.annotation.Autowired
+    private AiAgentProposalService proposals;
+
+    private static boolean initialPreparation(AiAgentExecutionPolicy policy, AiAgentContinuationCodec.Snapshot snapshot) {
+        return policy.proposalCapable() && "1".equals(snapshot.checkpoint().revision())
+                && "1".equals(snapshot.plan().revision()) && snapshot.plan().items().size() == 1
+                && "p0001".equals(snapshot.plan().items().getFirst().key())
+                && Set.of("Prepare changes", "変更案を作成").contains(snapshot.plan().items().getFirst().label().text())
+                && snapshot.checkpoint().completedFacts().isEmpty() && snapshot.memory().summary().text().isEmpty()
+                && snapshot.memory().evidenceReferences().isEmpty();
+    }
 
     /** Builds a separate model projection without provenance, canonical IDs, or session history. */
     public AiAssistantToolResult build(AiAgentExecutionPolicy policy, MaskingContext context,
             AiChatResourceRegistry resources) {
         var snapshot = policy.persistence().snapshot(policy);
-        if (AiAgentContentScreen.texts(snapshot).stream().anyMatch(text -> !text.text().isBlank())
+        if (!initialPreparation(policy, snapshot)
+                && AiAgentContentScreen.texts(snapshot).stream().anyMatch(text -> !text.text().isBlank())
                 && snapshot.checkpoint().evidenceReferences().stream()
                         .noneMatch(reference -> "record".equals(reference.version().source()))) {
             throw new AiAssistantLoopException("source_changed", "source_changed");
@@ -54,6 +70,11 @@ public class AiAgentContextBuilder {
         }
         AiAssistantMemberIdentifiers.seed(members, context);
         evidenceService.begin(policy);
+        List<ooo.klae.connex.backend.beans.AiAgentAction> actionInventory = policy.proposalCapable()
+                ? actions.listByRoot(policy.turn().workspaceId(), policy.runId()) : List.of();
+        if (policy.proposalCapable()) {
+            proposals.revalidate(policy, actionInventory);
+        }
         String handle = resources.register(policy.scope().kind(), policy.scope().id());
         List<AiAssistantToolResult> reads = new ArrayList<>(evidenceService.revalidate(
                 snapshot.checkpoint().evidenceReferences(), reference -> read(reference, handle, resources)));
@@ -83,6 +104,17 @@ public class AiAgentContextBuilder {
             }
         }
         Map<String, Object> continuation = new LinkedHashMap<>();
+        if (policy.proposalCapable()) {
+            continuation.put("preparedChanges", actionInventory.stream().filter(action -> action.getPreparationId() != null)
+                    .map(action -> {
+                        var call = chat.getMissionToolCall(policy.turn().workspaceId(), policy.runId(), action.getId());
+                        if (call == null) {
+                            throw new AiAssistantLoopException("mission_content_refused", "mission_content_refused");
+                        }
+                        return Map.of("tool", call.getToolName(), "status", call.getStatus(),
+                                "preparedAt", action.getPreparedAt().toInstant(java.time.ZoneOffset.UTC).toString());
+                    }).toList());
+        }
         continuation.put("plan", planService.modelPlanText(snapshot.plan(), text -> text.text()));
         Map<String, Object> checkpoint = new LinkedHashMap<>();
         checkpoint.put("revision", snapshot.checkpoint().revision());

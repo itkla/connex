@@ -86,13 +86,51 @@ class AiAgentRunServiceTest {
         barrier.setWorkspaceId(7);
         barrier.setGeneration(4);
         when(runs.getRun(7, 31)).thenReturn(run);
+        when(runs.lockRunForShare(7, 31)).thenReturn(run);
         session.setId(13);
         session.setWorkspaceId(7);
         session.setCreatedByUserId(11);
         session.setVisibility("private");
         session.setStatus("active");
         when(chat.getAccessibleSessionById(7, 11, 13)).thenReturn(session);
+        when(chat.getMissionSessionForShare(7, 11, 13)).thenReturn(session);
+        when(chat.lockPrivacyBarrierForShare(7)).thenReturn(barrier);
         when(chat.getPrivacyBarrier(7)).thenReturn(barrier);
+    }
+
+    @Test
+    void waitingCannotPauseOrResume() {
+        run.setStatus("waiting_approval");
+        var request = new AiAgentRunControlRequest(Long.toString(run.getStateVersion()));
+        assertEquals("mission_state_conflict", assertThrows(ConflictException.class,
+                () -> service.control(31, request, "pause")).getMessage());
+        assertEquals("mission_state_conflict", assertThrows(ConflictException.class,
+                () -> service.control(31, request, "resume")).getMessage());
+        verifyNoInteractions(gate, persistence);
+    }
+
+    @Test
+    void blockedGenerationRetainsSafeMetadataAndCancellation() {
+        barrier.setBlocked(true);
+        var result = service.get(31);
+        assertTrue(result.contentWithheld());
+        assertEquals("queued", result.state());
+        assertEquals(List.of("cancel"), result.availableActions());
+        assertNull(result.proposalCounts());
+        assertNull(result.proposalMembershipRevision());
+        assertThrows(AiAgentGoneException.class, () -> service.output(31));
+    }
+
+    @Test
+    void unsupportedSchemaRetainsSafeMetadataAndCancellation() {
+        run.setMissionType("record_preparation_v1");
+        run.setRuntimeContractVersion(3);
+        run.setCheckpointSchemaVersion(99);
+        var result = service.get(31);
+        assertTrue(result.contentWithheld());
+        assertEquals(List.of("cancel"), result.availableActions());
+        assertNull(result.proposalCounts());
+        assertThrows(AiAgentGoneException.class, () -> service.output(31));
     }
 
     @Test

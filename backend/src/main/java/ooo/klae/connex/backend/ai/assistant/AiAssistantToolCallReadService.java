@@ -250,15 +250,16 @@ public class AiAssistantToolCallReadService {
             List<AiAssistantToolCallReadDto.Change> changes = readable
                     ? changes(call, status, visibleTarget, viewerPermissions, review)
                     : List.of();
-            Instant deadline = call.toolCall().isServerProposal()
-                    ? AiAssistantProposalExpiry.reviewExpiresAt(call.toolCall().getCreatedAt()) : null;
+            Instant deadline = call.reviewDeadline() != null ? call.reviewDeadline()
+                    : call.toolCall().isServerProposal()
+                        ? AiAssistantProposalExpiry.reviewExpiresAt(call.toolCall().getCreatedAt()) : null;
             String reviewState = switch (status) {
                 case PROPOSED -> deadline == null ? "unavailable"
                         : AiAssistantProposalExpiry.isExpired(deadline, now) ? "expired" : "open";
                 case EXECUTED -> "applied";
                 case "undone" -> "undone";
                 case "rejected" -> "discarded";
-                case "failed" -> "failed";
+                case "failed" -> missionWithdrawn(call.toolCall()) ? "withdrawn" : "failed";
                 default -> "unavailable";
             };
             projected.add(new AiAssistantToolCallReadDto(
@@ -338,6 +339,32 @@ public class AiAssistantToolCallReadService {
     }
 
     private StoredToolCall readStored(AiChatToolCall toolCall) {
+        if (!"reactive".equals(toolCall.getArtifactOrigin()) || toolCall.getMissionRunId() != null
+                || !"legacy".equals(toolCall.getProposalOrigin())) {
+            return null;
+        }
+        return readStored(toolCall, null, null, null);
+    }
+
+    /** Projects a mission-owned singleton with explicit original ancestry and review anchors. */
+    public AiAssistantToolCallReadDto projectMission(AiChatSession session, AiChatToolCall call,
+            int originatingTurnId, String preparedAt, Instant reviewDeadline) {
+        if (!"mission".equals(call.getProposalOrigin()) || call.getMissionActionId() == null) {
+            throw inaccessible();
+        }
+        StoredToolCall stored = readStored(call, originatingTurnId, preparedAt, reviewDeadline);
+        if (stored == null) {
+            throw inaccessible();
+        }
+        var result = project(currentViewer(), session, List.of(stored), true, clock.instant());
+        if (result.size() != 1) {
+            throw inaccessible();
+        }
+        return result.getFirst();
+    }
+
+    private StoredToolCall readStored(AiChatToolCall toolCall, Integer originatingTurnId,
+            String preparedAt, Instant reviewDeadline) {
         if (toolCall.getArgumentsJson() == null || !hasTrustedEnvelope(toolCall)) {
             return null;
         }
@@ -351,7 +378,7 @@ public class AiAssistantToolCallReadService {
             JsonNode target = root.get("target");
             String targetKind = text(target, "kind");
             int targetId = positiveInteger(target, "id");
-            int turnId = turnId(toolCall.getIdempotencyKey());
+            int turnId = originatingTurnId == null ? turnId(toolCall.getIdempotencyKey()) : originatingTurnId;
             AiAssistantWriteTool tool = writeToolRegistry.find(toolName).orElse(null);
             if (!toolCall.getToolName().equals(toolName)
                     || !toolCatalog.isExecutable(toolName)
@@ -370,7 +397,7 @@ public class AiAssistantToolCallReadService {
                     AiAssistantProposalPins.read(root),
                     tool.freshness() == AiAssistantWriteTool.Freshness.TARGET_FINGERPRINT
                             ? text(root, "targetVersion") : null,
-                    AiAssistantToolProposalPin.read(root));
+                    AiAssistantToolProposalPin.read(root), preparedAt, reviewDeadline);
         } catch (JacksonException | IllegalArgumentException | AiAssistantLoopException exception) {
             return null;
         }
@@ -578,7 +605,7 @@ public class AiAssistantToolCallReadService {
             int viewerUserId,
             Set<Permission> viewerPermissions,
             boolean mutationsAvailable, Instant now) {
-        if (call.tier() != ToolTier.AUTO
+        if ((call.tier() != ToolTier.AUTO && !"mission".equals(call.toolCall().getProposalOrigin()))
                 || !"executed".equals(status)
                 || call.toolCall().getResultJson() == null) {
             return UndoProjection.NONE;
@@ -600,7 +627,7 @@ public class AiAssistantToolCallReadService {
                 return new UndoProjection(false, canonicalInstant(undo.get("expiresAt")), false);
             }
             String expiresAt = canonicalInstant(undo.get("expiresAt"));
-            boolean available = mutationsAvailable
+            boolean available = mutationsAvailable && call.tier() == ToolTier.AUTO
                     && expiresAt != null
                     && Objects.equals(call.toolCall().getRequestedByUserId(), viewerUserId)
                     && hasUndoPermissions(call, viewerPermissions)
@@ -840,6 +867,17 @@ public class AiAssistantToolCallReadService {
         return call.tool().reviewInputs().contains(input);
     }
 
+    private boolean missionWithdrawn(AiChatToolCall call) {
+        if (!"mission".equals(call.getProposalOrigin()) || call.getResultJson() == null) {
+            return false;
+        }
+        try {
+            return "mission_withdrawn".equals(objectMapper.readTree(call.getResultJson()).path("reason").asString());
+        } catch (JacksonException exception) {
+            return false;
+        }
+    }
+
     private JsonNode storedOutcome(AiChatToolCall toolCall) {
         if (toolCall.getResultJson() == null) {
             return null;
@@ -888,7 +926,7 @@ public class AiAssistantToolCallReadService {
         boolean changed = call.tool().freshness() == AiAssistantWriteTool.Freshness.TARGET_FINGERPRINT
                 ? call.targetVersion() == null || !call.targetVersion().equals(target.targetVersion())
                 : AiAssistantProposalFreshness.changedSince(
-                        target.updatedAt(), call.toolCall().getCreatedAt());
+                        target.updatedAt(), call.preparedAt() == null ? call.toolCall().getCreatedAt() : call.preparedAt());
         return changed
                 ? "recordChanged"
                 : "ready";
@@ -1203,7 +1241,7 @@ public class AiAssistantToolCallReadService {
             JsonNode request,
             AiAssistantProposalPins pins,
             String targetVersion,
-            Map<String, Object> pinned) {
+            Map<String, Object> pinned, String preparedAt, Instant reviewDeadline) {
     }
 
     private record RecordKey(String kind, int id) {

@@ -42,6 +42,7 @@ import tools.jackson.databind.ObjectMapper;
 /** Real control and tenant transactions retain accepted authority across erasure failures. */
 class AiAgentDsrPurgeIntegrationTest extends AbstractAiAgentPrivacyIntegrationTest {
     @Autowired private AiAgentDsrPurgeService purgeService;
+    @Autowired private AiAgentRunPersistenceService missionPersistence;
     @Autowired private DataSubjectRequestService requestService;
     @Autowired private DataSubjectRequestMapper requestMapper;
     @Autowired private AiAgentDsrControlMapper receipts;
@@ -279,6 +280,44 @@ class AiAgentDsrPurgeIntegrationTest extends AbstractAiAgentPrivacyIntegrationTe
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM ai_chat_message WHERE session_id=?", Integer.class, sessionId));
         assertEquals("complete", purgeService.initiate(workspace.getOrgId(), requestId, currentUser.getId(), command).state());
         assertEquals(installed.getMaxSessionId(), privacyMapper.getWork(workspace.getId(), accepted.operationId()).getMaxSessionId());
+    }
+
+    @Test
+    void acceptedMissionPurgeIncludesProposalsPreparedBeforeTenantInvalidation() {
+        var command = command();
+        AiAgentPurgeAcceptance accepted = requestService.acceptMissionPurge(workspace.getOrgId(), requestId, currentUser.getId(), command);
+        int sessionId = newTaintedSession("Accepted-cutoff proposal fixture");
+        var scope = new ooo.klae.connex.backend.dto.AiAgentRunCreateRequest.Scope("record", "person", personId);
+        var request = new ooo.klae.connex.backend.dto.AiAgentRunCreateRequest(UUID.randomUUID().toString(),
+                "record_preparation_v1", "Prepare changes", scope, null);
+        var run = missionPersistence.create(sessionId, request, "en", AiAgentCapabilityGate.hash(request.clientRequestKey()),
+                json.writeValueAsString(scope), epochs.current(workspace.getId()));
+        jdbc.update("INSERT INTO ai_agent_segment (workspace_id,run_id,segment_no,attempt_no,execution_generation,privacy_generation,"
+                + "status,reserved_steps,reserved_tokens,provider_declaration_fingerprint,deadline_at,settled_at) "
+                + "VALUES (?,?,1,1,1,1,'completed',1,8192,UNHEX(REPEAT('ab',32)),UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))",
+                workspace.getId(), run.getId());
+        int segment = java.util.Objects.requireNonNull(jdbc.queryForObject(
+                "SELECT id FROM ai_agent_segment WHERE workspace_id=? AND run_id=?", Integer.class, workspace.getId(), run.getId()));
+        String source = "{\"schemaVersion\":1,\"sources\":[{\"kind\":\"person\",\"id\":" + personId
+                + ",\"source\":\"record\",\"limit\":0,\"sha256\":\"" + "a".repeat(64)
+                + "\",\"observedAt\":\"2026-01-01T00:00:00Z\"}]}";
+        jdbc.update("INSERT INTO ai_agent_action (workspace_id,root_run_id,producer_run_id,action_slot,semantic_slot_key,target_kind,target_id,"
+                + "tool_name,plan_item_key,plan_revision,preparation_id,intent_fingerprint,prepared_at,source_observed_at,source_versions_json,"
+                + "origin_segment_id,origin_execution_generation,privacy_generation) VALUES (?,?,?,?,?,'person',?,'assign_owner','p0001',1,?,"
+                + "UNHEX(REPEAT('ab',32)),'2026-01-02','2026-01-01',CONVERT(? USING utf8mb4),?,1,1)", workspace.getId(), run.getId(), run.getId(),
+                UUID.randomUUID().toString(), "person:" + personId + ":assign_owner", personId, UUID.randomUUID().toString(),
+                source.getBytes(java.nio.charset.StandardCharsets.UTF_8), segment);
+        int message = chatMapper.getMissionMessage(workspace.getId(), run.getId(), "goal").getId();
+        jdbc.update("INSERT INTO ai_chat_tool_call (workspace_id,message_id,tool_name,status,arguments_json,server_proposal,mission_run_id,"
+                + "artifact_origin,privacy_generation,proposal_origin,mission_action_id) SELECT workspace_id,?,'assign_owner','proposed','{}',"
+                + "TRUE,root_run_id,'mission',privacy_generation,'mission',id FROM ai_agent_action WHERE workspace_id=? AND root_run_id=?",
+                message, workspace.getId(), run.getId());
+        purgeService.initiate(workspace.getOrgId(), requestId, currentUser.getId(), command);
+        assertTrue(privacyMapper.getWork(workspace.getId(), accepted.operationId()).getMaxRunId() >= run.getId());
+        finish(accepted.operationId());
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM ai_agent_action WHERE workspace_id=?", Integer.class, workspace.getId()));
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM ai_chat_tool_call WHERE workspace_id=?", Integer.class, workspace.getId()));
+        assertEquals(0, privacyMapper.residualCount(workspace.getId(), 1));
     }
 
     @Test

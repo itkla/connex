@@ -21,6 +21,7 @@ import {
     CurrencyYenIcon,
     LockClosedIcon,
     ShieldCheckIcon,
+    SparklesIcon,
     XMarkIcon,
 } from "@heroicons/react/24/outline";
 import { EllipsisHorizontalIcon } from "@heroicons/react/20/solid";
@@ -103,9 +104,10 @@ const SOURCE_ICON: Record<WorkItemSource, React.ComponentType<{ className?: stri
     task: ClipboardDocumentCheckIcon,
     notification: CurrencyYenIcon,
     document_approval: ShieldCheckIcon,
+    ai_mission: SparklesIcon,
 };
 
-const SOURCES: WorkItemSource[] = ["task", "notification", "document_approval"];
+const SOURCES: WorkItemSource[] = ["task", "notification", "document_approval", "ai_mission"];
 const URGENCIES: WorkItemUrgency[] = ["critical", "high", "normal", "low"];
 const AUTO_ADVANCE_ACTION_GUARD_MS = 500;
 
@@ -880,6 +882,8 @@ function reasonLabel(t: Translate, format: Format, item: WorkItem): string {
             return date != null
                 ? t("queueReason_deal_closing_soon", { date: formatDay(format, date) })
                 : t("queueReason_deal_closing_soon_undated");
+        case "mission_review_pending":
+            return t("queueReason_mission_review_pending");
         case "document_approval_pending":
             return requestedByLabel != null && requestedByLabel.length > 0
                 ? t("queueReason_document_approval_pending_by", { name: requestedByLabel })
@@ -932,6 +936,9 @@ function PrimaryAction({
                 {t("queueDismiss")}
             </Button>
         );
+    }
+    if (item.source === "ai_mission" && item.permittedActions.includes("open_context")) {
+        return <Button size="inline" variant="outline" asChild><Link href={contextHref(item)}>{t("queueOpenContext")}</Link></Button>;
     }
     return null;
 }
