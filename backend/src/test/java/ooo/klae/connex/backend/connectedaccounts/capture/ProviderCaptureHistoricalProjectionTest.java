@@ -23,9 +23,12 @@ import ooo.klae.connex.backend.mappers.ProviderConnectionMapper;
 import ooo.klae.connex.backend.services.DuplicateDecisionLockService;
 import ooo.klae.connex.backend.services.MatchingService;
 import ooo.klae.connex.backend.services.ProviderCaptureHistoricalBaselineService;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
 import ooo.klae.connex.backend.services.WorkspaceService;
 
 class ProviderCaptureHistoricalProjectionTest {
+    private static final RecordVisibilityScope RECORD_SCOPE = new RecordVisibilityScope(1, List.of(7));
 
     @Test
     void delayedReviewProjectionPersistsHistoricalNotificationBaseline() {
@@ -43,7 +46,8 @@ class ProviderCaptureHistoricalProjectionTest {
                 new ObjectMapper(),
                 mock(DuplicateDecisionLockService.class),
                 mock(WorkspaceService.class),
-                baselineService);
+                baselineService,
+                mock(RecordVisibilityScopeControlAccess.class));
         ProviderCapturedInteraction interaction =
             new ProviderCapturedInteraction();
         interaction.setId(101);
@@ -64,14 +68,14 @@ class ProviderCaptureHistoricalProjectionTest {
         ProviderCaptureHistoricalBaselineService.Snapshot baseline =
             mock(ProviderCaptureHistoricalBaselineService.Snapshot.class);
         when(baselineService.snapshot(
-                eq(7), any(), eq(Set.of(44)), eq(Set.of())))
+                eq(7), any(), eq(Set.of(44)), eq(Set.of()), eq(RECORD_SCOPE)))
             .thenReturn(baseline);
         when(captureMapper.getActivityIdByProjectionKey(
                 eq(7), anyString()))
             .thenReturn(303);
 
         persistence.projectHistorical(
-            7, 9, interaction, List.of(participant));
+            7, 9, interaction, List.of(participant), RECORD_SCOPE);
 
         verify(captureMapper).insertProviderActivity(
             eq(7), eq(interaction), eq(participant), eq(9), anyString());

@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.connectedaccounts.capture;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -25,10 +26,37 @@ import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.DuplicateDecisionLockService;
 import ooo.klae.connex.backend.services.MatchingService;
 import ooo.klae.connex.backend.services.PersonService;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 class ProviderCaptureReviewServiceTest {
+
+    @Test
+    void participantDecisionsResolveScopeBeforeTransactionAndOrganizationLocks() {
+        Fixture fixture = fixture();
+        assertThrows(ConflictException.class, () -> fixture.service().decide("google", 41,
+            new ProviderCaptureReviewRequest("ignore", 1, false, null, null, null)));
+        assertScopeBeforeLocks(fixture);
+    }
+
+    @Test
+    void approvalsResolveScopeBeforeTransactionAndOrganizationLocks() {
+        Fixture fixture = fixture();
+        assertThrows(ConflictException.class, () -> fixture.service().approve("google", 51, 3));
+        assertScopeBeforeLocks(fixture);
+    }
+
+    private static void assertScopeBeforeLocks(Fixture fixture) {
+        var order = inOrder(fixture.recordVisibilityScopeControlAccess(), fixture.transactionManager(),
+            fixture.duplicateDecisionLockService(), fixture.connectionMapper());
+        order.verify(fixture.recordVisibilityScopeControlAccess()).getForWorkspace(7);
+        order.verify(fixture.transactionManager()).getTransaction(any());
+        order.verify(fixture.duplicateDecisionLockService()).lockCurrentOrganization();
+        order.verify(fixture.connectionMapper()).getByUserAndProviderForShare(9, "google");
+        verify(fixture.recordVisibilityScopeControlAccess()).getForWorkspace(7);
+    }
 
     @Test
     void disabledCaptureRejectsParticipantDecisionsBeforeMutation() {
@@ -85,6 +113,11 @@ class ProviderCaptureReviewServiceTest {
         TenantWorkScope tenantWorkScope = mock(TenantWorkScope.class);
         PlatformTransactionManager transactionManager =
             mock(PlatformTransactionManager.class);
+        RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess =
+            mock(RecordVisibilityScopeControlAccess.class);
+        DuplicateDecisionLockService duplicateDecisionLockService = mock(DuplicateDecisionLockService.class);
+        when(recordVisibilityScopeControlAccess.getForWorkspace(7))
+            .thenReturn(new RecordVisibilityScope(1, List.of(7)));
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(workspaceService.getCurrentUserId()).thenReturn(9);
         when(transactionManager.getTransaction(any()))
@@ -130,14 +163,19 @@ class ProviderCaptureReviewServiceTest {
                 mock(AuditService.class),
                 transactionManager,
                 tenantWorkScope,
-                mock(DuplicateDecisionLockService.class));
-        return new Fixture(service, captureMapper, connectionMapper);
+                duplicateDecisionLockService,
+                recordVisibilityScopeControlAccess);
+        return new Fixture(service, captureMapper, connectionMapper, recordVisibilityScopeControlAccess,
+            duplicateDecisionLockService, transactionManager);
     }
 
     private record Fixture(
         ProviderCaptureReviewService service,
         ProviderCaptureMapper captureMapper,
-        ProviderConnectionMapper connectionMapper
+        ProviderConnectionMapper connectionMapper,
+        RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess,
+        DuplicateDecisionLockService duplicateDecisionLockService,
+        PlatformTransactionManager transactionManager
     ) {
     }
 }

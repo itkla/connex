@@ -66,6 +66,7 @@ public interface DuplicateReviewMapper {
 
     List<DuplicateReviewItemRow> findVisibleItems(
         @Param("workspaceId") int workspaceId,
+        @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
         @Param("recordType") String recordType,
         @Param("kind") String kind,
         @Param("state") String state,
@@ -100,6 +101,7 @@ public interface DuplicateReviewMapper {
 
     DuplicateReviewItemRow findVisibleItemById(
         @Param("workspaceId") int workspaceId,
+        @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
         @Param("id") long id,
         @Param("maximumPairGroupSize") int maximumPairGroupSize);
 }

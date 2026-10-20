@@ -23,7 +23,7 @@ Read the relevant section before adding/changing `FOR UPDATE`, transaction isola
     - cursor iteration in `TenantExportSnapshotTransaction`;
     - a failure swallowed inside another synchronization's `beforeCommit` or `beforeCompletion`, which registers too late for the commit it occurs in.
   - A lock failure that also crossed a participating `@Transactional` proxy has already marked the transaction rollback-only. Its commit therefore rolls back before any callback runs and fails with a cause-less `UnexpectedRollbackException`. Nothing is lost, but both engines classify that as permanent.
-- Read control-plane data that a tenant write needs only for its response — deal-collaborator profile hydration, for example — after that write's transaction has completed. Suspending a routed tenant transaction to read the control catalog borrows a second pooled connection while the write still holds its row locks and the workspace audit-chain head, so under `catalog-per-placement` enough concurrent requests exhaust the pool and hold those locks for a whole connection timeout. Control-plane state a write must consult before it commits keeps the suspend-and-read shape, and those paths budget two pooled connections per concurrent request — except control-plane **locks** the write relies on until it commits, which must be taken on the transaction's own connection through the control-catalog scope (`ControlCatalogRoutingInterceptor`), never by suspending and reading, or the lock is released before the tenant write commits. Deal-collaborator replacement locks its members' rows that way. The suspend-and-read paths are: quiet-hours evaluation, and `ShareService.share()`, whose organization workspace snapshot is the ceiling the tenant grant statement enforces and so must be read before the grant. `ShareService.share()` takes that snapshot before it acquires any row lock, and `ShareService.listShares()` reads it after the tenant listing and skips it entirely when there is nothing to hydrate.
+- Read control-plane data that a tenant write needs only for its response — deal-collaborator profile hydration, for example — after that write's transaction has completed. Suspending a routed tenant transaction to read the control catalog borrows a second pooled connection while the write still holds its row locks and the workspace audit-chain head, so under `catalog-per-placement` enough concurrent requests exhaust the pool and hold those locks for a whole connection timeout. Control-plane state a write must consult before it commits keeps the suspend-and-read shape, and those paths budget two pooled connections per concurrent request — except control-plane **locks** the write relies on until it commits, which must be taken on the transaction's own connection through the control-catalog scope (`ControlCatalogRoutingInterceptor`), never by suspending and reading, or the lock is released before the tenant write commits. Deal-collaborator replacement locks its members' rows that way. The suspend-and-read paths are quiet-hours evaluation, `ShareService.share()`, and the pre-lock record-visibility snapshot for duplicate-review decisions described below. The sharing snapshot is the ceiling the tenant grant statement enforces and so must be read before the grant. Both sharing and duplicate-review decisions take their snapshot before acquiring any row lock. `ShareService.listShares()` reads it after the tenant listing and skips it entirely when there is nothing to hydrate.
 - Changes to lock order or transaction isolation are Tier 3/high-risk and receive focused concurrency/correctness review.
 
 Interactive and public API requests return HTTP 409 for Spring pessimistic lock failures and exact
@@ -1731,6 +1731,57 @@ identity lock. The shared organization mutex serializes the decision against ide
 after obtaining it, the service rechecks the evidence fingerprint and current visibility before
 writing. This places the decision row after the organization mutex without introducing an ordering
 edge against record targets or identity groups.
+
+Record-visibility scopes must be resolved before any authorization, organization mutex, provider
+connection, or tenant record lock. A routed scope lookup suspends the tenant transaction and borrows
+a second pooled connection; doing that while holding a mutex can exhaust the pool with waiters and
+leave the mutex owner waiting for its own second connection. Thread the same immutable
+`RecordVisibilityScope` through the locked operation instead of resolving it again in a nested read.
+
+In `catalog-per-placement` mode, a scope read inside an open tenant transaction borrows a second
+connection. `DuplicateReviewService.list` resolves its scope before opening the repeatable-read
+transaction shared by count and page. The general guarantee of a context-installed scope snapshot
+and a fail-fast guard is tracked in #485 as lane L-scope and must land before the flag can be enabled.
+
+The locked call chains are:
+
+- `NotificationReconciliationService.reconcileWorkspace`: preload the scope before opening its
+  `REQUIRES_NEW` transaction and before `lockBackgroundOrganization`, then pass it into scoped
+  introduction ranking. Keeping the preload outside that transaction also preserves the first
+  repeatable-read snapshot after the mutex wait. A failed preload
+  keeps the intro pass unmanaged while the other reminder passes retain their existing isolation.
+- `InteractionHistoryImportService.commit`: resolve after claiming the one-use proof and before
+  `lockCurrentOrganization`, task-board or person locks. Reuse it for actual and counterfactual
+  notification snapshots before and after all three kinds of history import.
+- `ProviderCapturePagePersistence.commit`: resolve the initial-history scope after nonlocking
+  owner discovery and before the provider connection `FOR SHARE`, organization mutex or sync-state
+  `FOR UPDATE`. Preload even when initial sync appears complete because that preliminary flag can
+  change before the locked recheck. Reuse it across the historical notification snapshots.
+- `ProviderCaptureReviewService.decide` and `approve`: resolve before opening their mutation
+  transaction and pass it through explicit and automatic historical projection. The opaque
+  historical before-state retains the scope for persistence and counterfactual checks.
+- `DuplicateReviewService` dismissal and reopen: resolve before authorization and decision locks,
+  as described below.
+
+The no-lock introduction entry points resolve their own scope. Cancellable AI ranking checks
+interruption immediately after that lookup and before loading candidates. Warm-path signal
+detection completes before signal replacement acquires write locks. Reverse-intro report figures
+are generated before manual or delivery snapshot persistence locks; the scheduled occurrence claim
+commits before generation. Neither read chain inherits those subsequent write locks.
+
+Before any authorization or duplicate-decision lock, dismissal and reopen resolve one unfiltered
+`RecordVisibilityScopeControlAccess` snapshot for both their pre-decision visibility projection and
+their returned projection (#485). The boundary delegates to the existing sharing snapshot: a routed
+transaction is suspended for the control read and then restored, while a default-catalog transaction
+keeps the read in its existing snapshot. Budget two pooled connections per concurrent routed decision
+during this pre-lock read; the same two-connection budget applies to routed history-import and
+provider-page transactions during their pre-lock lookup. Notification reconciliation and provider
+review preload before opening their own transaction and need only the control-read connection at
+that point. Never defer that read
+until a lock is held, and never move authorization
+locks or `lockCurrentPair` to the suspended connection. Those locks remain on the tenant transaction's
+own connection until commit. Duplicate queue count and page retain one repeatable-read transaction;
+the count has no employer-label joins and summary counts need no control snapshot.
 
 CSV commits claim their one-use review proof first, then lock and revalidate the actor's create
 permission before entering the duplicate-decision hierarchy. This retains the actor's custom-role
