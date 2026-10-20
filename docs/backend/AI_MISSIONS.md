@@ -443,8 +443,11 @@ ordered READ COMMITTED transaction; there is no batch transaction. Immutable col
 preparation contracts for the complete request are validated before processing. Later failures
 stop the batch while preserving earlier committed outcomes under current disclosure authority.
 Infrastructure failures reconcile the failing item using a fresh authorized canonical read;
-failed reconciliation produces `indeterminate`, stops processing and disarms that item until
-reload. Terminal retries return the actual executed, rejected, withdrawn or undone outcome
+failed reconciliation produces `indeterminate`, stops processing and disarms that item. The
+frontend retains outcomes by action slot and preparation UUID across decision batches and
+reopened review. Only a successful canonical read showing that preparation settled removes its
+retained outcome; a pending read keeps uncertainty disarmed. Terminal retries return the actual
+executed, rejected, withdrawn or undone outcome
 before checking waiting state/deadline. Business refusal leaves a pending item disarmed.
 Discard needs AI/session authority without domain-edit authority. Final approval admission
 checks the immutable deadline after domain-lock and privacy contention.

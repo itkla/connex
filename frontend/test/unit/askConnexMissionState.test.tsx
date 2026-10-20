@@ -12,6 +12,7 @@ import { NowProvider } from '@/app/hooks/useNow';
 import { useAskConnexMissions } from '@/app/hooks/useAskConnexMissions';
 import { missionPartialDecision, missionProposalOutput } from '@/test/unit/helpers/askConnexMissions';
 import { ApiError } from '@/app/lib/api';
+import { askConnexToolCardAffordances } from '@/app/lib/askConnex';
 import { bindRenderedWorkspace, releaseRenderedWorkspace } from '@/app/lib/renderedWorkspace';
 
 const api = vi.hoisted(() => ({
@@ -219,6 +220,67 @@ describe('Ask Connex durable mission state', () => {
         await mounted.unmount();
     });
 
+    it.each(['indeterminate', 'executed', 'rejected'] as const)('retains an earlier %s item when another batch settles and canonical reloads fail', async (outcome) => {
+        const output = missionProposalOutput();
+        const available = run({ missionType: 'record_preparation_v1', state: 'waiting_approval', outputAvailable: true,
+            outputRevision: '3', proposalMembershipRevision: '2', availableActions: ['cancel', 'view_output'] });
+        api.getAiAgentRuns.mockResolvedValue({ items: [available], nextCursor: null });
+        api.getAiAgentRun.mockRejectedValue(new Error('Canonical reload unavailable'));
+        api.getAiAgentOutput.mockResolvedValueOnce(output).mockRejectedValue(new Error('Canonical reload unavailable'));
+        const first = { ...missionPartialDecision('indeterminate'), items: [
+            { actionSlot: output.proposalSet.items[0].actionSlot, outcome, code: null },
+        ] };
+        const second = { ...missionPartialDecision(), items: [
+            { actionSlot: output.proposalSet.items[1].actionSlot, outcome: 'executed' as const, code: null },
+        ] };
+        api.decideAiAgentProposals.mockResolvedValueOnce(first);
+        const mounted = await mount();
+        await act(async () => mounted.current().viewOutput(available));
+        await act(async () => mounted.current().decide([31], 'approve'));
+        expect(mounted.current().proposalGroup?.cards[1].status).toBe('proposed');
+        const response = deferred<import('@/app/lib/types').AiAgentProposalDecisionResult>();
+        api.decideAiAgentProposals.mockReturnValueOnce(response.promise);
+        let deciding: Promise<void> | undefined;
+        await act(async () => { deciding = mounted.current().decide([32], 'approve'); });
+        expect(mounted.current().proposalGroup?.cards[0].status).toBe(outcome === 'indeterminate' ? 'proposed' : outcome);
+        await act(async () => { response.resolve(second); await deciding; });
+        expect(mounted.current().decisionResult?.items.map((item) => item.outcome)).toEqual([outcome, 'executed']);
+        const cards = mounted.current().proposalGroup?.cards;
+        expect(cards?.map((card) => card.status)).toEqual([outcome === 'indeterminate' ? 'proposed' : outcome, 'executed']);
+        expect(cards?.[0].failure).toBe(outcome === 'indeterminate' ? 'proposalUnavailable' : null);
+        expect(cards?.map((card) => askConnexToolCardAffordances(card, Date.parse('2026-10-19T12:00:00Z')))).toEqual([[], []]);
+        expect(mounted.current().pendingId).toBeNull();
+        expect(cards?.map((card) => card.pendingAction)).toEqual([null, null]);
+        await act(async () => mounted.current().decide([31, 32], 'approve'));
+        await act(async () => mounted.current().decide([31, 32], 'discard'));
+        expect(api.decideAiAgentProposals).toHaveBeenCalledTimes(2);
+        await mounted.unmount();
+    });
+
+    it.each(['refused', 'indeterminate'] as const)('retains earlier uncertainty when a later decision request is %s', async (outcome) => {
+        const output = missionProposalOutput();
+        const available = run({ missionType: 'record_preparation_v1', state: 'waiting_approval', outputAvailable: true,
+            outputRevision: '3', proposalMembershipRevision: '2', availableActions: ['cancel', 'view_output'] });
+        api.getAiAgentRuns.mockResolvedValue({ items: [available], nextCursor: null });
+        api.getAiAgentRun.mockRejectedValue(new Error('Canonical reload unavailable'));
+        api.getAiAgentOutput.mockResolvedValueOnce(output).mockRejectedValue(new Error('Canonical reload unavailable'));
+        api.decideAiAgentProposals.mockResolvedValueOnce({ ...missionPartialDecision('indeterminate'),
+            items: [{ actionSlot: output.proposalSet.items[0].actionSlot, outcome: 'indeterminate', code: null }] })
+            .mockRejectedValueOnce(outcome === 'refused' ? new ApiError('Conflict', 409, 'mission_preparation_conflict')
+                : new Error('Decision response unavailable'));
+        const mounted = await mount();
+        await act(async () => mounted.current().viewOutput(available));
+        await act(async () => mounted.current().decide([31], 'approve'));
+        await act(async () => mounted.current().decide([32], 'approve'));
+        expect(mounted.current().decisionResult?.items.map((item) => item.outcome)).toEqual(['indeterminate', outcome]);
+        expect(mounted.current().proposalGroup?.cards[0].failure).toBe('proposalUnavailable');
+        expect(mounted.current().pendingId).toBeNull();
+        expect(mounted.current().proposalGroup?.cards.map((card) => card.pendingAction)).toEqual([null, null]);
+        await act(async () => mounted.current().decide([31], 'discard'));
+        expect(api.decideAiAgentProposals).toHaveBeenCalledTimes(2);
+        await mounted.unmount();
+    });
+
     it.each(['refused', 'indeterminate'] as const)('settles a %s batch response after realtime advances the output revision', async (outcome) => {
         const output = missionProposalOutput();
         const available = run({ missionType: 'record_preparation_v1', state: 'waiting_approval', outputAvailable: true,
@@ -250,7 +312,7 @@ describe('Ask Connex durable mission state', () => {
         await mounted.unmount();
     });
 
-    it('keeps committed results and disarms an indeterminate sibling until explicit reload', async () => {
+    it('keeps committed results and disarms an indeterminate sibling while canonical reload still shows it pending', async () => {
         vi.setSystemTime(new Date('2026-10-19T12:00:00Z'));
         const output = missionProposalOutput();
         const available = run({ missionType: 'record_preparation_v1', state: 'waiting_approval', outputAvailable: true,
@@ -268,6 +330,99 @@ describe('Ask Connex durable mission state', () => {
         expect(mounted.current().proposalGroup?.cards[1]?.failure).toBe('proposalUnavailable');
         await act(async () => mounted.current().decide([32], 'approve'));
         expect(api.decideAiAgentProposals).toHaveBeenCalledOnce();
+        await mounted.unmount();
+    });
+
+    it('retains uncertainty across reopened pending reads and clears only canonically settled preparations', async () => {
+        const output = missionProposalOutput();
+        const available = run({ missionType: 'record_preparation_v1', state: 'waiting_approval', outputAvailable: true,
+            outputRevision: '3', proposalMembershipRevision: '2', availableActions: ['cancel', 'view_output'] });
+        api.getAiAgentRuns.mockResolvedValue({ items: [available], nextCursor: null });
+        api.getAiAgentRun.mockRejectedValue(new Error('Canonical reload unavailable'));
+        api.getAiAgentOutput.mockResolvedValueOnce(output).mockRejectedValue(new Error('Canonical reload unavailable'));
+        api.decideAiAgentProposals.mockResolvedValue(missionPartialDecision('indeterminate'));
+        const mounted = await mount();
+        await act(async () => mounted.current().viewOutput(available));
+        await act(async () => mounted.current().decide([31, 32], 'approve'));
+        await act(async () => mounted.current().closeOutput());
+        api.getAiAgentOutput.mockResolvedValue(missionProposalOutput());
+        await act(async () => mounted.current().viewOutput(available));
+        expect(mounted.current().decisionResult?.items.map((item) => item.outcome)).toEqual(['executed', 'indeterminate']);
+        await act(async () => mounted.current().decide([32], 'discard'));
+        expect(api.decideAiAgentProposals).toHaveBeenCalledOnce();
+        const partiallySettled = missionProposalOutput();
+        partiallySettled.proposalSet.items[0].card.status = 'executed';
+        partiallySettled.proposalSet.items[0].card.reviewState = 'applied';
+        api.getAiAgentOutput.mockResolvedValue(partiallySettled);
+        await mounted.render('user:workspace', 1);
+        expect(mounted.current().decisionResult?.items.map((item) => item.outcome)).toEqual(['indeterminate']);
+        expect(mounted.current().proposalGroup?.cards[1].failure).toBe('proposalUnavailable');
+        const settled = missionProposalOutput();
+        settled.proposalSet.items[0].card.status = 'executed';
+        settled.proposalSet.items[0].card.reviewState = 'applied';
+        settled.proposalSet.items[1].card.status = 'rejected';
+        settled.proposalSet.items[1].card.reviewState = 'discarded';
+        api.getAiAgentOutput.mockResolvedValue(settled);
+        await mounted.render('user:workspace', 2);
+        expect(mounted.current().decisionResult).toBeNull();
+        expect(mounted.current().proposalGroup?.cards.map((card) => card.status)).toEqual(['executed', 'rejected']);
+        expect(mounted.current().proposalGroup?.cards.map((card) => card.failure)).toEqual([null, null]);
+        await mounted.unmount();
+    });
+
+    it('retains unresolved outcomes when another mission is reviewed and decided', async () => {
+        const output = missionProposalOutput();
+        const available = run({ missionType: 'record_preparation_v1', state: 'waiting_approval', outputAvailable: true,
+            outputRevision: '3', proposalMembershipRevision: '2', availableActions: ['cancel', 'view_output'] });
+        const otherRun = { ...available, id: 13 };
+        const otherOutput = { ...missionProposalOutput(), runId: 13 };
+        api.getAiAgentRuns.mockResolvedValue({ items: [otherRun, available], nextCursor: null });
+        api.getAiAgentRun.mockRejectedValue(new Error('Canonical reload unavailable'));
+        api.getAiAgentOutput.mockResolvedValueOnce(output).mockRejectedValue(new Error('Canonical reload unavailable'));
+        api.decideAiAgentProposals.mockResolvedValue(missionPartialDecision('indeterminate'));
+        const mounted = await mount();
+        await act(async () => mounted.current().viewOutput(available));
+        await act(async () => mounted.current().decide([31, 32], 'approve'));
+        await act(async () => mounted.current().closeOutput());
+        api.getAiAgentOutput.mockResolvedValue(otherOutput);
+        await act(async () => mounted.current().viewOutput(otherRun));
+        expect(mounted.current().decisionResult).toBeNull();
+        await act(async () => mounted.current().toggleInclusion(31));
+        await act(async () => mounted.current().decide([31, 32], 'approve'));
+        api.getAiAgentOutput.mockResolvedValue(missionProposalOutput());
+        await act(async () => mounted.current().viewOutput(available));
+        expect(mounted.current().decisionResult?.items.map((item) => item.outcome)).toEqual(['executed', 'indeterminate']);
+        expect(mounted.current().proposalGroup?.cards.map((card) => card.status)).toEqual(['executed', 'proposed']);
+        expect(mounted.current().proposalGroup?.cards[1].failure).toBe('proposalUnavailable');
+        await act(async () => mounted.current().decide([32], 'approve'));
+        expect(api.decideAiAgentProposals).toHaveBeenCalledTimes(2);
+        await mounted.unmount();
+    });
+
+    it('does not apply a retained outcome to a different preparation in the same slot', async () => {
+        const output = missionProposalOutput();
+        const available = run({ missionType: 'record_preparation_v1', state: 'waiting_approval', outputAvailable: true,
+            outputRevision: '3', proposalMembershipRevision: '2', availableActions: ['cancel', 'view_output'] });
+        api.getAiAgentRuns.mockResolvedValue({ items: [available], nextCursor: null });
+        api.getAiAgentRun.mockRejectedValue(new Error('Canonical reload unavailable'));
+        api.getAiAgentOutput.mockResolvedValueOnce(output).mockRejectedValue(new Error('Canonical reload unavailable'));
+        api.decideAiAgentProposals.mockResolvedValue({ ...missionPartialDecision('indeterminate'),
+            items: [{ actionSlot: output.proposalSet.items[0].actionSlot, outcome: 'indeterminate', code: null }] });
+        const mounted = await mount();
+        await act(async () => mounted.current().viewOutput(available));
+        await act(async () => mounted.current().decide([31], 'approve'));
+        const otherPreparation = missionProposalOutput();
+        otherPreparation.proposalSet.items[0].preparationId = 'a4d9f701-b418-4208-8a0a-e727fd4dc949';
+        otherPreparation.proposalSet.items[0].card.status = 'executed';
+        otherPreparation.proposalSet.items[0].card.reviewState = 'applied';
+        api.getAiAgentOutput.mockResolvedValue(otherPreparation);
+        await mounted.render('user:workspace', 1);
+        expect(mounted.current().decisionResult?.items).toEqual([]);
+        expect(mounted.current().proposalGroup?.cards[0].failure).toBeNull();
+        api.getAiAgentOutput.mockResolvedValue(missionProposalOutput());
+        await mounted.render('user:workspace', 2);
+        expect(mounted.current().decisionResult?.items[0].outcome).toBe('indeterminate');
+        expect(mounted.current().proposalGroup?.cards[0].failure).toBe('proposalUnavailable');
         await mounted.unmount();
     });
 
