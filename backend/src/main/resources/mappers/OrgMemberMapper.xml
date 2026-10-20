@@ -137,6 +137,15 @@
     SELECT org_id FROM org_member WHERE user_id = #{userId} AND org_role = 'owner' ORDER BY org_id
   </select>
 
+  <select id="discoverAccountMembershipOrgIds" resultType="int" flushCache="true" useCache="false">
+    SELECT org_id FROM org_member WHERE user_id = #{userId}
+  </select>
+
+  <select id="lockAccountMembershipOrgIds" resultType="int" flushCache="true" useCache="false">
+    SELECT org_id FROM org_member FORCE INDEX (idx_org_member_user)
+    WHERE user_id = #{userId} FOR UPDATE
+  </select>
+
   <select id="getMembers" resultType="ooo.klae.connex.backend.dto.OrgMemberDto">
     SELECT u.id, u.username, u.display_name AS displayName, u.email,
            u.profile_picture_url AS profilePictureUrl, om.org_role AS orgRole

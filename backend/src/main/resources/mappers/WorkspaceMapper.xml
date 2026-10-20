@@ -238,6 +238,24 @@
     FOR UPDATE NOWAIT
   </select>
 
+  <select id="discoverAccountMembershipWorkspaceIds" resultType="int" flushCache="true" useCache="false">
+    SELECT workspace_id FROM workspace_member WHERE user_id = #{userId}
+  </select>
+
+  <select id="lockAccountMembershipForUpdate" resultType="WorkspaceMember" flushCache="true" useCache="false">
+    SELECT workspace_id, user_id, role, role_id, status, created_at
+    FROM workspace_member FORCE INDEX (idx_workspace_member_user)
+    WHERE user_id = #{userId} AND workspace_id = #{workspaceId}
+    FOR UPDATE
+  </select>
+
+  <select id="lockAccountMembershipWithoutWaiting" resultType="WorkspaceMember" flushCache="true" useCache="false">
+    SELECT workspace_id, user_id, role, role_id, status, created_at
+    FROM workspace_member FORCE INDEX (idx_workspace_member_user)
+    WHERE user_id = #{userId} AND workspace_id = #{workspaceId}
+    FOR UPDATE NOWAIT
+  </select>
+
   <select id="workspaceIdsOwnedBy" resultType="int">
     SELECT workspace_id FROM workspace_member
     WHERE user_id = #{userId} AND role = 'owner' AND status = 'active'

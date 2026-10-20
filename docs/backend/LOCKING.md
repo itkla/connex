@@ -132,10 +132,10 @@ Account offboarding takes the union of owner/workflow workspace roots in one asc
 
 ## Post-delete assignment recovery (#1941)
 
-The deletion reservation, initial per-catalog erasure, and final control-plane transaction retain
-their existing ordering. Initial erasure can commit before a locking assignment writer finishes.
-The final `app_user` delete cascades memberships and waits for their exclusive locks, so its commit
-is the assignment barrier. `UserService` then runs a fresh sweep, including when an absence read
+Initial per-catalog erasure can commit before a locking assignment writer finishes. The final
+control-plane transaction now retains every deleting-user membership before organization and audit
+locks; its `app_user` cascade reuses those locks. Its commit remains the assignment barrier.
+`UserService` then runs a fresh sweep, including when an absence read
 confirms that an ambiguous deletion commit succeeded, before expiring sessions. Sweep failures
 leave recovery pending and do not replace the deletion result or prevent session revocation.
 
@@ -441,18 +441,71 @@ Removal, decline and leave retain the target account X before cleanup. Fresh cle
 existing caller authorization and routed transaction boundary. Path-workspace routing remains
 outside `WorkspaceMembershipRemovalTransaction`'s transaction; cleanup, membership deletion,
 scoped audits and captured-reference cleanup commit or roll back together. Final control-plane
-account deletion's remaining membership cascade is unchanged.
+account deletion retains its complete membership set before its organization and audit tail.
 
 #### Account erasure
 
-Account erasure locks the account root, discovers credential-referenced `(workspace_id,
-organization_id)` pairs without locks, then takes exactly one ascending workspace-root pass over
-owned roots, referenced roots, and the current tenant workspace when resolved. Owned workspace
-roots are exclusive; referenced-only and current-only roots are shared. It next takes one ascending
-organization-root pass over owned, referenced, and current tenant organizations with the same mode
-rule before locking owner rows. Credential cleanup acquires no roots itself. It locks exact
-credential children in `(workspace_id, credential_id)` order and deletes them, and returns the
-retained audits unemitted. Nothing is re-checked afterwards.
+Final control-plane erasure (`UserDeletionTransaction.delete`) runs at READ COMMITTED; reservation,
+renewal and tenant-catalog erasure retain their existing isolation. A joined transaction with another
+isolation is refused before membership discovery. This is necessary because a REPEATABLE READ
+completeness scan can retain the next user-index gap: an unrelated invite can hold organization S
+and wait to insert into that gap while erasure requests organization X, adding a new two-party cycle.
+The neighboring-insert drill pins the absence of that cross-account gap fence.
+
+Under deleting-account X, discover all workspace and organization memberships without status,
+ownership or lifecycle predicates. The membership user foreign keys fence concurrent insertions:
+an already-inserted, uncommitted membership holds account S, so deletion waits for its commit before
+discovery. Add every membership workspace to the single ascending root union of owned, referenced,
+offer and current scopes. Owned workspaces stay X; all others stay S, with X winning overlaps.
+Lock exact deleting-user memberships X in user-major, workspace-minor order, using NOWAIT for owned
+scopes. The existing owner scans revalidate those already-retained X locks without an upgrade or
+new waiting acquisition. Each exact workspace-membership read forces the user-leading index,
+matching mark-all and the cascade's secondary-index-before-primary-row order. Primary-first exact
+reads followed by the user-index completeness scan would add a new two-party index-order cycle
+with notification mark-all, which takes no account root. A cache-flushed current locking read checks the complete deleting-user
+membership set before the owner-role phase; an unplanned scope aborts instead of extending the
+acquired root union. Completeness scans force the baseline user-leading indexes to avoid locking
+unrelated accounts on a small-table full scan. They do not substitute an optimizer-dependent
+multirow scan for the canonical exact acquisitions.
+
+Next acquire the single ascending organization-root union, owned X and other S, including every
+organization membership. Retain owner rows, exact non-owner organization memberships X, and check
+completeness through a current locking read before offer rows, credentials or heads. The account
+cascade therefore meets only retained workspace and organization memberships. No S-to-X root or
+membership upgrade is introduced, and owner contention keeps exact 3572/HY000 to 409 translation
+without an in-transaction retry.
+
+Credential cleanup acquires no roots itself. It locks exact children in `(workspace_id, id)` order,
+deletes them all and returns their retained audits unemitted. The complete order is account X →
+sorted workspace X/S union → exact deleting-user memberships → per-workspace owner NOWAIT snapshots,
+overlays and permissions → sorted organization X/S union → organization memberships → offer rows →
+sorted credential children and deletions → sorted audit emission/heads → account cascade.
+
+The FIFO cycle comparison with phase 2 is explicit:
+
+- **A:** account X is unchanged. The writer actor is distinct from the erased account; no new
+  account acquisition is added after membership retention. Insertions and membership-authority
+  writers naming the erased account are already fenced by its account root.
+- **W:** deletion can now hold non-owned workspace S while waiting on that account's exact
+  membership held by writer T1. If T3 queues workspace X, T1's late audit workspace S queues
+  behind T3, producing deletion → T1 → T3 → deletion. This accepted three-party FIFO residual
+  replaces main's direct two-party organization/head-to-membership cycle. Owned roots remain X
+  and their owner scans remain NOWAIT. Other owners retain main's per-workspace snapshot/role
+  sequence: moving all snapshots before roles could add a distinct cycle with a passkey operation
+  holding an earlier overlay role and waiting on a later owner membership. Only deleting-user
+  rows move ahead of all roles; passkey operations by that user are already fenced by account X.
+- **O:** every workspace membership precedes organization acquisition, removing deletion's late
+  cascade wait against a membership holder's organization audit. Organization-membership holders
+  already retain the affected account or organization root. READ COMMITTED avoids introducing a
+  neighboring-insert gap cycle before organization acquisition.
+- **H:** complete memberships and all credential deletions precede sorted heads. The account
+  cascade adds no membership wait after a head, removing the direct head-to-membership cycle;
+  scope sorting and head modes are unchanged.
+
+`AccountDeletionMembershipTailConcurrencyIntegrationTest` observes exact membership waits before
+organization, credential and head acquisition, checks retained membership locks at the cascade
+boundary, exercises both account-reference roles and inactive memberships, and validates committed
+audit chains and assignment recovery. No new cycle beyond the accepted W FIFO residual is intended.
 
 Because the erasure appends into one chain scope per credential workspace plus the scope of its own
 `user.delete` row, all of those appends are emitted in one pass sorted by class 7's order rather than
@@ -465,25 +518,22 @@ trade. `UserDeletionAuditOrderTest` captures the emitted scope sequence instead.
 The price of that is a widened audit-write freeze: between its first credential audit and commit —
 across the whole `app_user` cascade — the erasure holds an exclusive `audit_log_integrity_head` row
 for every workspace in which the erased account created or revoked a credential, so audit writes in
-each of those workspaces wait, where on `origin/main` the same transaction froze exactly one chain
-scope.
+each of those workspaces wait. This multi-head freeze was introduced before the membership-tail
+prelocks and remains unchanged by them.
 
-There is no residual reference count, and re-adding one would be a defect rather than a belt. A
-count issued after the deletions is a consistent read, so it still counts every planned row another
-transaction deleted after this transaction's read view was created, and it aborts the erasure in
-exactly the case the loop is built to tolerate — two erasures that plan the same credential, one
-account having revoked the other account's credential, meet that case on every run. A locking count
-is worse still: an equality scan of the non-unique creator and revoker indexes takes next-key locks
-on neighbouring rows in workspaces the erasure holds no root for.
+No residual reference count is needed: the reservation closes reference creation and each exact
+locked credential is revalidated before deletion. Already-vanished rows remain skippable, including
+when two erasures discover the same credential because one account revoked the other's credential.
+Completeness belongs to the reservation and exact-row protocol, rather than a second reference-index
+scan after deletion.
 
-The plan needs no re-check because the reservation already closes it. `reserve` commits in its own
+The credential-reference plan needs no re-check because the reservation already closes it. `reserve` commits in its own
 transaction — `UserService.delete` runs the catalog fan-out with `Propagation.NOT_SUPPORTED` — and
 its `app_user` update waits behind the `FOR SHARE` that `lockedMemberAuthorization` holds on that
 row for every in-flight issuance and revocation, so each of those has committed before the
 reservation becomes visible. Once it is visible, `lockedMemberAuthorization` refuses the flagged
-account, so no further `created_by_id` or `revoked_by_id` reference can be born. The erasure's read
-view is created after the reservation committed, so `listByAccountReference` observes every
-reference that will ever exist. A row that vanishes between that read and its `FOR UPDATE` was
+account, so no further `created_by_id` or `revoked_by_id` reference can be born. The final transaction reads after the reservation committed, so `listByAccountReference` observes
+every reference that will ever exist. A row that vanishes between that read and its `FOR UPDATE` was
 deleted by another transaction — membership cleanup, a workspace or organization cascade, or
 another account erasure — and needs no action here. Both account foreign keys (`ON DELETE CASCADE`
 on the creator, `ON DELETE SET NULL` on the revoker) mean a stray row could not block the
@@ -496,7 +546,11 @@ service-level cleanup.
 
 #### Ordering rules recorded here so round 17 does not reopen them
 
-- **No path may take an `organization` root EXCLUSIVELY and then lock a `workspace_member` row.** The one carve-out is the `app_user` cascade at the end of account erasure, which X-locks `workspace_member` rows after the owned organization roots were taken exclusively; that path is identical on `origin/main`, is invisible to the file-scoped `OrganizationRootLockOrderArchTest`, and is tracked under #1582 rather than by this rule.
+- **No path may take an `organization` root EXCLUSIVELY and then lock a `workspace_member` row.**
+  The historical carve-out for the final `app_user` cascade remains tracked under #1582 pending
+  the real-MySQL boundary proof that every cascaded membership is already retained. The prelock
+  implementation above is invisible to this file-scoped grep's cross-service analysis; remove
+  the documented exception only after that drill passes.
   Management takes the organization root before the membership row, while removal and owner leave
   already retain memberships before organization S. `OrganizationRootLockOrderArchTest` enforces
   the explicit exclusive-root rule; it does not prove safety against queued exclusive requesters
@@ -505,8 +559,8 @@ service-level cleanup.
   Removal/owner leave acquire memberships before organization S; credential authorization retains
   organization S before its exact membership. Shared modes alone do not prove these paths safe
   against a queued organization X requester. Membership-first record mutations still acquire
-  audit actor, workspace and organization S late, and final account erasure still cascades remaining
-  memberships after organization/head acquisition. This change adds no early account/workspace/
+  audit actor, workspace and organization S late. Final erasure now retains deleting-user
+  memberships before organization/head acquisition. This change adds no early account/workspace/
   organization S prefix to those writers. The first-head `ensureHead` upsert and existing
   aggregate/reference cleanup inversions remain separate retryable races.
 - Deal-collaborator replacement (#1793) takes every requested membership `FOR UPDATE` in ascending user-id order, then the deal row `FOR UPDATE`, then the collaborator rows, then its trailing audit. It replaced a collaborator-rows-first order (the clear, then the deal and membership rows `FOR SHARE` inside an `INSERT ... SELECT`) that inverted against `updateOwner`, deal deletion and offboarding. Through its trailing audit it stays in the #1582 class above, and its membership locks are now exclusive and held across the wait for the deal row: a replacement queued behind a stage `move`, which locks whole stage columns, blocks the listed members' own writes until it completes. A cap on the size of the collaborator list, still a follow-up, would bound that.

@@ -66,10 +66,10 @@ public class ApiCredentialLifecycleService {
      * waits behind the {@code FOR SHARE} that every in-flight issuance and revocation holds on that
      * row, and {@code WorkspaceService.lockedMemberAuthorization} then refuses a
      * reservation-flagged account. No {@code created_by_id} or {@code revoked_by_id} reference can
-     * therefore be born after the reservation, and every earlier one is already inside this
-     * transaction's read view. A row that vanished was deleted by another transaction and needs no
-     * action here, while a consistent-read count would still see it and abort a compliance-critical
-     * erasure.
+     * therefore be born after the reservation, and every earlier one is visible to final
+     * erasure's READ COMMITTED transaction. A row that vanished was deleted by another transaction
+     * and needs no action here. A residual count adds no completeness beyond the reservation and
+     * exact locked-row revalidation.
      *
      * @param userId account being erased
      * @param lockedReferenceRoots tenant roots the caller has already locked

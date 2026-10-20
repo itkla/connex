@@ -7,7 +7,10 @@ import java.util.Set;
 import java.util.TreeSet;
 
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import lombok.RequiredArgsConstructor;
 
@@ -80,14 +83,21 @@ public class UserDeletionTransaction {
      * Revalidates, erases, audits, and deletes the reserved control user atomically. This is the only
      * transaction in the branch that appends into more than one audit-integrity chain, so every
      * append is emitted in one pass ordered by audit scope rather than in deletion order.
+     * READ COMMITTED keeps membership completeness scans from retaining neighboring insertion
+     * gaps before the organization phase. An ambient transaction must preserve that isolation.
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public void delete(int id, String owner) {
         if (userMapper.lockById(id) == null) {
             throw new ResourceNotFoundException("User not found with id: " + id);
         }
         if (!userMapper.isAccountDeletionReservationOwner(id, owner)) {
             throw new ConflictException("Account deletion was not reserved");
+        }
+        if (TransactionSynchronizationManager.isActualTransactionActive()
+                && !Integer.valueOf(TransactionDefinition.ISOLATION_READ_COMMITTED).equals(
+                    TransactionSynchronizationManager.getCurrentTransactionIsolationLevel())) {
+            throw new IllegalStateException("Final account deletion requires READ COMMITTED");
         }
         AccountDeletionGuard guarded = guard(id, true);
         User before = guarded.user();
@@ -163,6 +173,10 @@ public class UserDeletionTransaction {
             throw new ResourceNotFoundException("User not found with id: " + id);
         }
         List<Integer> ownedWorkspaceIds = workspaceService.discoverOwnedWorkspaceIds(id);
+        List<Integer> membershipWorkspaceIds = includeCredentialReferences
+            ? workspaceService.discoverAccountMembershipWorkspaceIds(id) : List.of();
+        List<Integer> membershipOrgIds = includeCredentialReferences
+            ? orgMemberService.discoverAccountMembershipOrgIds(id) : List.of();
         List<ApiCredentialReferenceRoot> credentialReferenceRoots = includeCredentialReferences
             ? apiCredentialLifecycleService.discoverAccountReferenceRoots(id)
             : List.of();
@@ -170,6 +184,8 @@ public class UserDeletionTransaction {
             ? ownershipOfferMapper.discoverAccount(id) : List.of();
         TreeSet<Integer> sharedWorkspaceIds = new TreeSet<>();
         TreeSet<Integer> sharedOrgIds = new TreeSet<>();
+        sharedWorkspaceIds.addAll(membershipWorkspaceIds);
+        sharedOrgIds.addAll(membershipOrgIds);
         for (ApiCredentialReferenceRoot root : credentialReferenceRoots) {
             sharedWorkspaceIds.add(root.workspaceId());
             sharedOrgIds.add(root.organizationId());
@@ -195,8 +211,13 @@ public class UserDeletionTransaction {
         }
         workspaceService.lockAccountWorkspaceRoots(
             ownedWorkspaceIds, new ArrayList<>(sharedWorkspaceIds));
-        workspaceService.assertNotSoleOwnerOfWorkspaces(id, ownedWorkspaceIds);
-        orgMemberService.assertNotSoleOwnerOfAnyOrg(id, new ArrayList<>(sharedOrgIds));
+        if (includeCredentialReferences) {
+            workspaceService.assertAccountDeletionWorkspaceRecovery(id, ownedWorkspaceIds, membershipWorkspaceIds);
+            orgMemberService.assertAccountDeletionOrganizationRecovery(id, new ArrayList<>(sharedOrgIds), membershipOrgIds);
+        } else {
+            workspaceService.assertNotSoleOwnerOfWorkspaces(id, ownedWorkspaceIds);
+            orgMemberService.assertNotSoleOwnerOfAnyOrg(id, new ArrayList<>(sharedOrgIds));
+        }
         User before = userMapper.getUserById(id);
         if (before == null) {
             throw new ResourceNotFoundException("User not found with id: " + id);

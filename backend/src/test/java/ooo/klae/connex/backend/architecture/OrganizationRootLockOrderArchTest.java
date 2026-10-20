@@ -35,11 +35,11 @@ import org.junit.jupiter.api.Test;
  * membership-first record mutation that already holds the {@code workspace_member} row the
  * authoring chain locks next.
  *
- * <p>Because the check is file-scoped, a cycle spread over two sources is invisible to it. The
- * {@code app_user} cascade at the end of account erasure X-locking
- * {@code workspace_member} rows after owned organization roots were taken exclusively — is
- * identical on {@code origin/main} and is carved out in {@code docs/backend/LOCKING.md} under
- * GitHub issue #1582 rather than by this test.
+ * <p>Because the check is file-scoped, a cycle spread over two sources is invisible to it. Final
+ * erasure now retains the deleting user's memberships before organization roots. The historical
+ * {@code app_user} cascade carve-out remains documented under #1582 in
+ * {@code docs/backend/LOCKING.md} until the real-MySQL boundary drills prove that every cascaded
+ * membership was already retained; this grep cannot establish that runtime footprint.
  */
 class OrganizationRootLockOrderArchTest {
     private static final Path SOURCE_ROOT = Path.of("src/main/java");
@@ -60,6 +60,8 @@ class OrganizationRootLockOrderArchTest {
         "workspaceMapper.lockActiveOwnerMembers(",
         "workspaceMapper.lockRoleAssignees(",
         "workspaceMapper.lockAuthorizationMembership(",
+        "workspaceMapper.lockAccountMembershipForUpdate(",
+        "workspaceMapper.lockAccountMembershipWithoutWaiting(",
         "workspaceMapper.lockActiveMembership(",
         "workspaceMapper.getMembershipForUserForShare(",
         "notificationMapper.lockRecipientMemberships(",

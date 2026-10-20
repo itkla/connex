@@ -1143,6 +1143,37 @@ public class WorkspaceService {
         return List.copyOf(workspaceMapper.workspaceIdsOwnedBy(userId));
     }
 
+    List<Integer> discoverAccountMembershipWorkspaceIds(int userId) {
+        return workspaceMapper.discoverAccountMembershipWorkspaceIds(userId).stream().distinct().sorted().toList();
+    }
+
+    /**
+     * Retains the account's complete membership set before any owner overlay or erasure tail.
+     * Owned scopes use NOWAIT and their owner guard reuses the retained exclusive row locks.
+     * The current locking completeness read also fences an older caller snapshot; an unplanned
+     * scope refuses the transaction rather than extending its already-acquired root union.
+     * Other owners keep the per-workspace snapshot/role order: retaining later owner rows before
+     * waiting on an earlier role could cycle with an account-wide passkey role-authority read.
+     * Exact reads use the user index first, matching mark-all and the cascade instead of reversing
+     * their secondary-index/clustered-row order at the completeness scan.
+     */
+    void assertAccountDeletionWorkspaceRecovery(
+            int userId, List<Integer> ownedWorkspaceIds, List<Integer> membershipWorkspaceIds) {
+        Set<Integer> owned = new HashSet<>(ownedWorkspaceIds);
+        for (int workspaceId : new TreeSet<>(membershipWorkspaceIds)) {
+            if (owned.contains(workspaceId)) {
+                lockWithoutWaiting(() -> workspaceMapper.lockAccountMembershipWithoutWaiting(workspaceId, userId));
+            } else {
+                workspaceMapper.lockAccountMembershipForUpdate(workspaceId, userId);
+            }
+        }
+        List<Integer> current = notificationMapper.lockRecipientMemberships(userId);
+        if (!new HashSet<>(membershipWorkspaceIds).containsAll(current)) {
+            throw new ConflictException("Account memberships changed; retry account deletion");
+        }
+        assertNotSoleOwnerOfWorkspaces(userId, ownedWorkspaceIds);
+    }
+
     void lockAccountWorkspaceRoots(
             List<Integer> ownedWorkspaceIds, List<Integer> sharedWorkspaceIds) {
         Set<Integer> owned = new HashSet<>(ownedWorkspaceIds);

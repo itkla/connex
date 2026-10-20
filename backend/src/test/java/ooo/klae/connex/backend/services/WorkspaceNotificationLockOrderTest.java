@@ -89,6 +89,61 @@ class WorkspaceNotificationLockOrderTest {
     @Mock private OwnershipOfferWriter ownershipOfferWriter;
     @InjectMocks private WorkspaceService service;
 
+    @Test
+    void finalErasureRetainsEveryExactMembershipBeforePreservingOwnerSnapshotAndOverlayOrder() {
+        when(workspaceMapper.lockActiveOwnerMembers(7)).thenReturn(List.of(
+            membership(9, "owner", 5, "active"), membership(12, "owner", null, "active")));
+        when(workspaceMapper.lockActiveOwnerMembers(11)).thenReturn(List.of(
+            membership(9, "owner", 13, "active"), membership(12, "owner", null, "active")));
+        when(notificationMapper.lockRecipientMemberships(9)).thenReturn(List.of(3, 7, 11));
+        when(roleMapper.lockRole(7, 5)).thenReturn(5);
+        when(roleMapper.lockRole(11, 13)).thenReturn(13);
+
+        service.assertAccountDeletionWorkspaceRecovery(9, List.of(7, 11), List.of(11, 3, 7));
+
+        InOrder order = inOrder(workspaceMapper, notificationMapper, roleMapper);
+        order.verify(workspaceMapper).lockAccountMembershipForUpdate(3, 9);
+        order.verify(workspaceMapper).lockAccountMembershipWithoutWaiting(7, 9);
+        order.verify(workspaceMapper).lockAccountMembershipWithoutWaiting(11, 9);
+        order.verify(notificationMapper).lockRecipientMemberships(9);
+        order.verify(workspaceMapper).lockActiveOwnerMembers(7);
+        order.verify(roleMapper).lockRole(7, 5);
+        order.verify(roleMapper).lockPermissions(7, 5);
+        order.verify(workspaceMapper).lockActiveOwnerMembers(11);
+        order.verify(roleMapper).lockRole(11, 13);
+        verify(workspaceMapper, never()).lockAccountMembershipForUpdate(7, 9);
+        verify(workspaceMapper, never()).lockAccountMembershipForUpdate(11, 9);
+    }
+
+    @Test
+    void finalErasureRefusesAnUnplannedCurrentMembershipBeforeAnyOverlay() {
+        when(notificationMapper.lockRecipientMemberships(9)).thenReturn(List.of(3, 11));
+
+        assertThrows(ConflictException.class,
+            () -> service.assertAccountDeletionWorkspaceRecovery(9, List.of(), List.of(3)));
+
+        verify(workspaceMapper).lockAccountMembershipForUpdate(3, 9);
+        verifyNoInteractions(roleMapper, auditService);
+    }
+
+    @Test
+    void finalErasureOwnerPrelockPreservesExactNowaitTranslationWithoutRetry() {
+        RuntimeException timeout = new IllegalStateException(new SQLException("busy", "HY000", 1205));
+        RuntimeException wrongState = new IllegalStateException(new SQLException("busy", "42000", 3572));
+        when(workspaceMapper.lockAccountMembershipWithoutWaiting(7, 9))
+            .thenThrow(new IllegalStateException(new SQLException("busy", "HY000", 3572)))
+            .thenThrow(timeout)
+            .thenThrow(wrongState);
+
+        assertThrows(ConflictException.class,
+            () -> service.assertAccountDeletionWorkspaceRecovery(9, List.of(7), List.of(7)));
+        assertSame(timeout, assertThrows(IllegalStateException.class,
+            () -> service.assertAccountDeletionWorkspaceRecovery(9, List.of(7), List.of(7))));
+        assertSame(wrongState, assertThrows(IllegalStateException.class,
+            () -> service.assertAccountDeletionWorkspaceRecovery(9, List.of(7), List.of(7))));
+        verifyNoInteractions(notificationMapper, roleMapper, auditService);
+    }
+
     private void runMembershipRemovalWork() {
         doAnswer(invocation -> {
             int workspaceId = invocation.getArgument(0);

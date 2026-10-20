@@ -94,6 +94,21 @@ public class OrgMemberService {
      */
     public void assertNotSoleOwnerOfAnyOrg(
             int userId, Collection<Integer> sharedOrgIds) {
+        assertAccountOrganizationRecovery(userId, sharedOrgIds, null);
+    }
+
+    List<Integer> discoverAccountMembershipOrgIds(int userId) {
+        return orgMemberMapper.discoverAccountMembershipOrgIds(userId).stream().distinct().sorted().toList();
+    }
+
+    /** Retains all organization memberships before credentials, audit heads and account cascade. */
+    void assertAccountDeletionOrganizationRecovery(
+            int userId, Collection<Integer> sharedOrgIds, List<Integer> membershipOrgIds) {
+        assertAccountOrganizationRecovery(userId, sharedOrgIds, membershipOrgIds);
+    }
+
+    private void assertAccountOrganizationRecovery(
+            int userId, Collection<Integer> sharedOrgIds, List<Integer> membershipOrgIds) {
         if (userMapper.lockById(userId) == null) {
             throw new ResourceNotFoundException("User not found: " + userId);
         }
@@ -104,6 +119,9 @@ public class OrgMemberService {
         Set<Integer> owned = new HashSet<>(ownedOrgIds);
         TreeSet<Integer> ordered = new TreeSet<>(ownedOrgIds);
         ordered.addAll(sharedOrgIds);
+        if (membershipOrgIds != null) {
+            ordered.addAll(membershipOrgIds);
+        }
         for (int orgId : ordered) {
             if (owned.contains(orgId)) {
                 organizationMapper.lockById(orgId);
@@ -114,6 +132,16 @@ public class OrgMemberService {
         for (int orgId : ownedOrgIds) {
             if (orgMemberMapper.lockOwnerIds(orgId).size() <= 1) {
                 throw new BadRequestException("Transfer organization ownership before deleting your account");
+            }
+        }
+        if (membershipOrgIds != null) {
+            for (int orgId : new TreeSet<>(membershipOrgIds)) {
+                if (!owned.contains(orgId)) {
+                    orgMemberMapper.lockExactRole(orgId, userId);
+                }
+            }
+            if (!new HashSet<>(membershipOrgIds).containsAll(orgMemberMapper.lockAccountMembershipOrgIds(userId))) {
+                throw new ConflictException("Account organization memberships changed; retry account deletion");
             }
         }
     }
