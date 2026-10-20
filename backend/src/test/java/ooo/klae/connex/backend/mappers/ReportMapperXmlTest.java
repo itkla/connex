@@ -43,9 +43,11 @@ class ReportMapperXmlTest {
                 "group_key,\n group_label,\n unit",
                 "group_key, group_label, <include refid=\"forecastUnit\"/>, unit",
                 "group_key, <choose><when test=\"value\">unit</when><otherwise>'count'</otherwise></choose>"}) {
-            assertThrows(AssertionError.class,
-                    () -> assertNoBareUnitGrouping("GROUP BY " + grouping + " ORDER BY group_key"));
+            assertThrows(AssertionError.class, () -> assertNoBareUnitGrouping(
+                    "<sql id=\"forecastUnit\">COALESCE(d.currency, '')</sql> GROUP BY " + grouping + " ORDER BY group_key"));
         }
+        assertThrows(AssertionError.class, () -> assertNoBareUnitGrouping(
+                "GROUP BY group_key, <include refid=\"renamedFragment\"/> ORDER BY group_key"));
         assertThrows(AssertionError.class, () -> assertNoBareUnitGrouping(
                 "<sql id=\"bad\">unit</sql> GROUP BY group_key, group_label, <include refid=\"bad\"/> ORDER BY group_key"));
         assertThrows(AssertionError.class, () -> assertNoBareUnitGrouping(
@@ -86,8 +88,11 @@ class ReportMapperXmlTest {
                 "(?s)<include\\s+refid=\"([^\"]+)\"\\s*(?:/>|>.*?</include>)");
         String expanded = mapper;
         for (int depth = 0; depth < 16 && include.matcher(expanded).find(); depth++) {
-            expanded = include.matcher(expanded).replaceAll(match -> java.util.regex.Matcher.quoteReplacement(
-                    " " + fragments.getOrDefault(match.group(1), "") + " "));
+            expanded = include.matcher(expanded).replaceAll(match -> {
+                String fragment = fragments.get(match.group(1));
+                assertNotNull(fragment, "Unknown <include refid=\"" + match.group(1) + "\"> in mapper text");
+                return java.util.regex.Matcher.quoteReplacement(" " + fragment + " ");
+            });
         }
         assertFalse(include.matcher(expanded).find(), "Unresolved or cyclic <include> in mapper text");
         return expanded;
