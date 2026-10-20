@@ -79,7 +79,7 @@ class AiAssistantProvisioningScriptedTrajectoryTest extends AbstractScriptedTraj
     @Test
     void missingBarrierRefusesReadAndTurnUntilReconciliationThenRetrySucceeds() throws Exception {
         int sessionId = createSession();
-        jdbc.update("DELETE FROM ai_agent_privacy_barrier WHERE workspace_id=?", workspaceId());
+        ooo.klae.connex.backend.support.TestEntityFixtures.deleteChatPrivacy(jdbc, workspaceId());
         mvc.perform(get(path(sessionId)).param("page", "1").param("size", "50"))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(header().string("Retry-After", "60"))
@@ -103,7 +103,7 @@ class AiAssistantProvisioningScriptedTrajectoryTest extends AbstractScriptedTraj
         int sessionId = createSession();
         jdbc.update("UPDATE ai_chat_session SET message_seq_high_water=1, mission_taint_seq=1,"
                 + " mission_taint_generation=7 WHERE workspace_id=? AND id=?", workspaceId(), sessionId);
-        jdbc.update("DELETE FROM ai_agent_privacy_barrier WHERE workspace_id=?", workspaceId());
+        ooo.klae.connex.backend.support.TestEntityFixtures.deleteChatPrivacy(jdbc, workspaceId());
 
         assertThrows(ServiceUnavailableException.class, () -> initializer.initialize(workspaceId()));
 

@@ -82,7 +82,6 @@ class AiAgentScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
     @Autowired private AiAgentRunMapper runs;
     @Autowired private AiChatMapper chat;
     @MockitoSpyBean private AiAgentCapabilityGate capability;
-    @Autowired private AiAgentPrivacyInitializer initializer;
     @Autowired private AiAgentPrivacyService privacy;
     @Autowired private ooo.klae.connex.backend.mappers.AiAgentPrivacyMapper privacyMapper;
     @Autowired private org.springframework.transaction.PlatformTransactionManager transactionManager;
@@ -93,8 +92,6 @@ class AiAgentScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
 
     @BeforeEach
     void prepareMissionBudget() {
-        initializer.reconcile();
-        assertTrue(initializer.isReady(), "mission readiness must be established, not mocked");
         jdbc.update("INSERT INTO organization_ai_budget (org_id, daily_token_limit) VALUES (?, ?)",
                 organizationId(), 1_000_000L);
     }

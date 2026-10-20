@@ -413,6 +413,12 @@ direct maintenance calls still run normally.
 with unresolved HTTP request attributes before testing session create/read/turn completion.
 Shared scripted trajectories also use production provisioning. Direct SQL privacy fixtures
 model pre-existing workspaces only; they must not be used to verify provisioning.
+Each scripted Spring context owns a disposable MySQL catalog: global readiness must not consume
+the preceding DB shard's directly inserted or deliberately incomplete fixtures. Before a golden
+runs, the harness verifies after-commit initialization, drives bounded bootstrap batches to verified
+organization completion, then reconciles and asserts real initializer readiness for ordinary chat and missions.
+Replay hooks retain the running turn's persisted organization generation and provisioned organization
+identity, including when that original generation has since been invalidated.
 
 ## All-chat privacy cutover (control V236, tenant V237)
 

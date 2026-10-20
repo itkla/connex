@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
@@ -175,5 +176,36 @@ class AiAgentPrivacyEnrollmentTest {
         verify(control, never()).reopenWorkspace(11, operation.getOperationKey(), 7);
         verify(control, never()).reopenOperation(11, operation.getOperationKey());
         verify(control, never()).reopenBootstrap(11, operation.getOperationKey());
+    }
+
+    @Test
+    void newOrganizationBootstrapCompletesThroughRoutedWorkAndCoverageVerification() {
+        local = null;
+        verified = false;
+        operation.setCompletedAt(null);
+        fence.setBootstrapCompletedAt(null);
+        String key = operation.getOperationKey();
+        when(work.getWork(7, key)).thenAnswer(call -> local);
+        when(control.lockFenceForShare(11)).thenReturn(fence);
+        when(control.getOperation(11, key)).thenReturn(operation);
+        doAnswer(call -> { verified = true; return 1; }).when(control)
+                .verifyWorkspace(eq(11), eq(key), eq(7), eq("restored_catalog"), anyLong());
+        doAnswer(call -> { operation.setCompletedAt(local.getCompletedAt()); return 1; })
+                .when(control).completeOperation(11, key);
+        doAnswer(call -> { fence.setBootstrapCompletedAt(operation.getCompletedAt()); return 1; })
+                .when(control).completeBootstrap(11, key);
+
+        service.initialize(7);
+
+        assertNotNull(local);
+        assertNull(fence.getBootstrapCompletedAt());
+        assertFalse(service.batch(7, key));
+        assertFalse(service.batch(7, key));
+        assertTrue(service.batch(7, key));
+        assertTrue(verified);
+        assertNotNull(fence.getBootstrapCompletedAt());
+        assertEquals("complete", local.getPhase());
+        assertEquals(1, fence.getGeneration());
+        verify(work, never()).advanceBarrier(eq(7), anyLong(), any());
     }
 }
