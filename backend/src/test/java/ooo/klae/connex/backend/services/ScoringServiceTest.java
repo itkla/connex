@@ -78,6 +78,19 @@ class ScoringServiceTest {
     private static final Instant NOW = Instant.parse("2026-06-30T00:00:00Z");
 
     @Test
+    void emptyOrNullOnlyCompanySelectionsDoNotTouchTheScopeBoundary() {
+        var scopes = mock(RecordVisibilityScopeControlAccess.class);
+        var companies = mock(CompanyMapper.class);
+        var service = new ScoringService(mock(PersonMapper.class), companies, mock(DealMapper.class),
+            mock(ActivityMapper.class), mock(NoteMapper.class), mock(TaskMapper.class), Clock.systemUTC(), scopes);
+        assertEquals(List.of(), service.scoreCompanies(7, Set.of()));
+        Set<Integer> nullOnly = new LinkedHashSet<>();
+        nullOnly.add(null);
+        assertEquals(List.of(), service.scoreCompanies(7, nullOnly));
+        verifyNoInteractions(scopes, companies);
+    }
+
+    @Test
     void contactSourceStateIsClockStableAndDetectsBackdatedWeightChange() {
         PersonMapper personMapper = mock(PersonMapper.class);
         CompanyMapper companyMapper = mock(CompanyMapper.class);

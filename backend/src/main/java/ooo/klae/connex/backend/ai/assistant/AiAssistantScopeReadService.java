@@ -133,7 +133,7 @@ public class AiAssistantScopeReadService {
             int limit,
             int perRecordLimit,
             AiChatResourceRegistry resources) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
             workspaceService.getCurrentWorkspaceId(), () -> scopeActivitiesWithinVisibilityScope(scope, requestedKind, contextKind, requestedBands, requestedDays, limit, perRecordLimit, resources));
     }
 
@@ -270,7 +270,7 @@ public class AiAssistantScopeReadService {
      * @return warmth score, band, trend, recency, and decay prediction
      */
     public AiAssistantToolResult relationshipMetrics(String kind, int recordId, String handle) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
             workspaceService.getCurrentWorkspaceId(), () -> relationshipMetricsWithinVisibilityScope(kind, recordId, handle));
     }
 
@@ -322,7 +322,7 @@ public class AiAssistantScopeReadService {
      */
     public AiAssistantToolResult dealAttention(
             AiChatQueryScope scope, int limit, AiChatResourceRegistry resources) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
             workspaceService.getCurrentWorkspaceId(), () -> dealAttentionWithinVisibilityScope(scope, limit, resources));
     }
 
@@ -409,7 +409,7 @@ public class AiAssistantScopeReadService {
      */
     public Cohort previewCohort(
             AiChatQueryScope scope, String contextKind, boolean dealAttentionPlan) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
             workspaceService.getCurrentWorkspaceId(), () -> previewCohortWithinVisibilityScope(scope, contextKind, dealAttentionPlan));
     }
 
@@ -432,7 +432,7 @@ public class AiAssistantScopeReadService {
      * @return capped cohort ids plus the true match count and whether the cap was reached
      */
     public Cohort cohort(String kind, AiChatQueryScope scope, List<String> bands) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
             workspaceService.getCurrentWorkspaceId(), () -> cohortWithinVisibilityScope(kind, scope, bands));
     }
 

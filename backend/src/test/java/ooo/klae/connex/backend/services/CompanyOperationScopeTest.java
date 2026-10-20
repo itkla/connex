@@ -184,6 +184,33 @@ class CompanyOperationScopeTest {
         verify(control).findOrganizationWorkspacesForShare(7);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"addTag", "removeTag", "archive", "restore", "owner", "dealOwner"})
+    void emptyOrUnownedBulkSelectionsNeverReadTheScope(String operation) {
+        var tags = mock(ooo.klae.connex.backend.mappers.TagMapper.class);
+        when(tags.getTagById(7, 23)).thenReturn(new Tag());
+        var companyService = mock(CompanyService.class);
+        var dealService = mock(DealService.class);
+        var service = new BulkOperationService(workspaces, mock(PersonService.class), companyService, dealService,
+            mock(ooo.klae.connex.backend.mappers.PersonMapper.class), companies,
+            mock(ooo.klae.connex.backend.mappers.DealMapper.class), tags,
+            mock(ooo.klae.connex.backend.mappers.PipelineMapper.class), scopes);
+        for (List<Integer> ids : List.of(List.<Integer>of(), List.of(41, 42))) {
+            var result = switch (operation) {
+                case "addTag" -> service.addTagToCompanies(ids, 23);
+                case "removeTag" -> service.removeTagFromCompanies(ids, 23);
+                case "archive" -> service.archiveCompanies(ids);
+                case "restore" -> service.restoreCompanies(ids);
+                case "owner" -> service.assignOwnerToCompanies(ids, 17);
+                case "dealOwner" -> service.assignOwnerToDeals(ids, 17);
+                default -> throw new AssertionError(operation);
+            };
+            assertEquals(0, result.getSucceeded());
+            assertEquals(ids.size(), result.getFailed());
+        }
+        verifyNoInteractions(control, companyService, dealService);
+    }
+
     @Test
     void oneHundredReferenceTokensAcrossThreeWritesReadOnce() {
         when(companies.exists(eq(7), eq("[7,11]"), anyInt())).thenReturn(true);
@@ -554,4 +581,49 @@ class CompanyOperationScopeTest {
         @Override protected void doCommit(DefaultTransactionStatus status) { }
         @Override protected void doRollback(DefaultTransactionStatus status) { }
     }
+    @Test
+    void emptyAndDisappearedExpiryCandidatesDoNotReadControlScopes() {
+        var deliveries = mock(ooo.klae.connex.backend.mappers.DocumentDeliveryMapper.class);
+        var service = new DocumentDeliveryScheduler(deliveries,
+            mock(ooo.klae.connex.backend.mappers.DealDocumentMapper.class),
+            mock(ooo.klae.connex.backend.mappers.DealMapper.class), mock(DocumentDeliveryLifecycleService.class),
+            mock(PlacementRegistry.class), mock(TenantWorkScope.class), mock(AutomationExecutor.class),
+            mock(SystemActor.class), new TransactionTemplate(new UnitTransactions()),
+            new ooo.klae.connex.backend.signature.SignatureProperties(),
+            mock(ooo.klae.connex.backend.observability.JobRunRecorder.class), scopes);
+        assertEquals(0, org.springframework.test.util.ReflectionTestUtils.<Integer>invokeMethod(service, "expireWorkspace", 7));
+        when(deliveries.findDueDeliveryIds(eq(7), any(), anyInt())).thenReturn(List.of(41, 42));
+        assertEquals(0, org.springframework.test.util.ReflectionTestUtils.<Integer>invokeMethod(service, "expireWorkspace", 7));
+        verifyNoInteractions(control);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void expirySnapshotRefusalsEscapeBothCatalogAndWorkspaceHandlers(boolean insideWorkspace) {
+        var refusal = new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotMissingException("workspace 7");
+        var placements = mock(PlacementRegistry.class);
+        when(placements.activeCatalogs()).thenReturn(List.of("tenant_catalog"));
+        var routing = mock(TenantWorkScope.class);
+        if (insideWorkspace) {
+            when(routing.withCatalog(eq("tenant_catalog"),
+                org.mockito.ArgumentMatchers.<java.util.function.Supplier<java.util.TreeSet<Integer>>>any()))
+                .thenReturn(new java.util.TreeSet<>(List.of(7)));
+            org.mockito.Mockito.doThrow(refusal).when(routing).inWorkspace(eq(7), any(Runnable.class));
+        } else {
+            when(routing.withCatalog(eq("tenant_catalog"),
+                org.mockito.ArgumentMatchers.<java.util.function.Supplier<java.util.TreeSet<Integer>>>any()))
+                .thenThrow(refusal);
+        }
+        var jobs = mock(ooo.klae.connex.backend.observability.JobRunRecorder.class);
+        var service = new DocumentDeliveryScheduler(mock(ooo.klae.connex.backend.mappers.DocumentDeliveryMapper.class),
+            mock(ooo.klae.connex.backend.mappers.DealDocumentMapper.class),
+            mock(ooo.klae.connex.backend.mappers.DealMapper.class), mock(DocumentDeliveryLifecycleService.class),
+            placements, routing, mock(AutomationExecutor.class), mock(SystemActor.class),
+            new TransactionTemplate(new UnitTransactions()), new ooo.klae.connex.backend.signature.SignatureProperties(),
+            jobs, scopes);
+        assertSame(refusal, assertThrows(ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException.class,
+            service::expire));
+        verifyNoInteractions(control, jobs);
+    }
+
 }

@@ -860,4 +860,18 @@ class AiAssistantScopeReadServiceTest {
     private static List<String> exclusions(AiAssistantToolResult result) {
         return (List<String>) result.data().get("exclusions");
     }
+    @Test
+    void emptyBareCohortsKeepTheirPreviousResultWithoutAControlRead() {
+        try (var operation = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(WORKSPACE_ID)) {
+            org.springframework.test.util.ReflectionTestUtils.setField(service, "recordVisibilityScopeControlAccess", operation.scopes);
+            assertEquals(List.of(), service.cohort("company", AiChatQueryScope.none(), List.of()).ids());
+            assertEquals(List.of(), service.previewCohort(AiChatQueryScope.none(), "company", false).ids());
+            var result = service.scopeActivities(AiChatQueryScope.none(), "company", null,
+                List.of(), 30, 25, 5, new AiChatResourceRegistry());
+            assertEquals(0, result.data().get("readRecords"));
+            assertEquals(List.of(), result.data().get("activities"));
+            org.mockito.Mockito.verifyNoInteractions(operation.control);
+        }
+    }
+
 }

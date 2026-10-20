@@ -134,7 +134,9 @@ public class AiChatTurnPersistenceService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = workspaceService.getCurrentUserId();
         requireActiveAiAccess(workspaceId, userId);
-        recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        if (!request.pageContext().isEmpty()) {
+            recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        }
         sessionReadAudit.retainTranscriptAuditParents(workspaceId, userId);
         workspaceService.lockAndRequireMember(workspaceId, userId);
         workspaceService.requirePermission(workspaceId, userId, Permission.AI_USE);

@@ -75,13 +75,16 @@ public class AiWatchService {
     @Transactional(readOnly = true)
     @RequirePermission(Permission.AI_USE)
     public List<AiWatchDto> list() {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceService.getCurrentWorkspaceId(), () -> listWithinVisibilityScope());
-    }
-
-    private List<AiWatchDto> listWithinVisibilityScope() {
         List<AiWatch> watches = watchMapper.listForOwner(
                 workspaceService.getCurrentWorkspaceId(), workspaceService.getCurrentUserId());
+        if (watches.stream().noneMatch(watch -> "company".equals(watch.getSubjectKind()))) {
+            return project(watches);
+        }
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> project(watches));
+    }
+
+    private List<AiWatchDto> project(List<AiWatch> watches) {
         List<AiWatchDto> projected = new ArrayList<>(watches.size());
         for (AiWatch watch : watches) {
             projected.add(AiWatchDto.from(
@@ -110,11 +113,6 @@ public class AiWatchService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.AI_USE)
     public AiWatchDto create(AiWatchCreateRequest request) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceService.getCurrentWorkspaceId(), () -> createWithinVisibilityScope(request));
-    }
-
-    private AiWatchDto createWithinVisibilityScope(AiWatchCreateRequest request) {
         if (request == null) {
             throw new BadRequestException("Watch request is invalid");
         }
@@ -126,6 +124,14 @@ public class AiWatchService {
             throw new BadRequestException(
                     "Watch type cannot be created against this record kind");
         }
+        if (!"company".equals(request.subjectKind())) {
+            return createWithinVisibilityScope(request, type);
+        }
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> createWithinVisibilityScope(request, type));
+    }
+
+    private AiWatchDto createWithinVisibilityScope(AiWatchCreateRequest request, AiWatchType type) {
         String label = subjectReader.label(request.subjectKind(), request.subjectId())
                 .orElseThrow(() -> new ResourceNotFoundException("Watched record not found"));
         int workspaceId = workspaceService.getCurrentWorkspaceId();

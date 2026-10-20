@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException;
+
 import java.util.Map;
 
 import org.slf4j.Logger;
@@ -41,6 +43,8 @@ public class RelationshipSignalScheduler {
         for (Integer workspaceId : tenantWorkScope.unrouted(workspaceMapper::findWorkspaceIds)) {
             try {
                 tenantWorkScope.inWorkspace(workspaceId, () -> reconcile(workspaceId));
+            } catch (TenantScopeSnapshotException exception) {
+                throw exception;
             } catch (RuntimeException exception) {
                 log.error(
                     "Relationship signal reconciliation failed workspace={} exceptionClass={}",
@@ -63,6 +67,8 @@ public class RelationshipSignalScheduler {
                 status,
                 new JobRunDetail(
                     started.startedAt(), Map.of("failedCount", result.failedCount())));
+        } catch (TenantScopeSnapshotException exception) {
+            throw exception;
         } catch (RuntimeException exception) {
             jobRunRecorder.record(
                 JobRunRecorder.RELATIONSHIP_SIGNAL_RECONCILIATION,

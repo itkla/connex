@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException;
+
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -101,7 +103,7 @@ public class ShareWorkspaceControlAccess {
         if (tenantContext.isResolved()
                 && (tenantContext.getWorkspaceId().intValue() != workspaceId
                     || tenantContext.getOrgId().intValue() != organizationWorkspaces.orgId())) {
-            throw new IllegalStateException(
+            throw new TenantScopeSnapshotException(
                 "Workspace scope does not match the resolved tenant context");
         }
     }
@@ -118,10 +120,10 @@ public class ShareWorkspaceControlAccess {
             orgId = row.getOrgId();
         }
         if (orgId == null) {
-            throw new IllegalStateException("Workspace " + workspaceId + " does not exist");
+            throw new TenantScopeSnapshotException("Workspace " + workspaceId + " does not exist");
         }
         if (!orderedNamesById.containsKey(workspaceId)) {
-            throw new IllegalStateException(
+            throw new TenantScopeSnapshotException(
                 "Workspace " + workspaceId + " is missing from organization " + orgId);
         }
         return new OrganizationWorkspaces(orgId, orderedNamesById);

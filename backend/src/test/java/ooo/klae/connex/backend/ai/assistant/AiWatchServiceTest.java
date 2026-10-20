@@ -215,4 +215,16 @@ class AiWatchServiceTest {
         assertEquals(Optional.empty(), AiWatchType.from("saved_view_threshold"));
         assertEquals(Optional.empty(), AiWatchType.from(null));
     }
+    @Test
+    void emptyWatchListsAndInvalidRequestsNeverReadRecordVisibilityScopes() {
+        try (var operation = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(7)) {
+            org.springframework.test.util.ReflectionTestUtils.setField(service, "recordVisibilityScopeControlAccess", operation.scopes);
+            assertEquals(java.util.List.of(), service.list());
+            assertThrows(BadRequestException.class, () -> service.create(null));
+            assertThrows(BadRequestException.class, () -> service.create(new AiWatchCreateRequest(
+                "removed_type", "company", 42, "cold", null, null, 7, null)));
+            org.mockito.Mockito.verifyNoInteractions(operation.control);
+        }
+    }
+
 }

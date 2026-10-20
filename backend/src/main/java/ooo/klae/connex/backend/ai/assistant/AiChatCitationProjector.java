@@ -61,12 +61,6 @@ public class AiChatCitationProjector {
     /** Returns authorized citations and messages withheld by current record visibility. */
     public Projection project(
             int workspaceId, List<AiChatMessage> messages) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceId, () -> projectWithinVisibilityScope(workspaceId, messages));
-    }
-
-    private Projection projectWithinVisibilityScope(
-            int workspaceId, List<AiChatMessage> messages) {
         Map<Integer, List<StoredCitation>> storedByMessage = new LinkedHashMap<>();
         Map<Integer, StoredResources> resourcesByMessage = new LinkedHashMap<>();
         Set<RecordKey> requested = new LinkedHashSet<>();
@@ -102,15 +96,6 @@ public class AiChatCitationProjector {
 
     /** Returns validated demasked follow-up suggestions only to each turn's original asker. */
     public Map<Integer, List<String>> suggestions(
-            int workspaceId,
-            int sessionId,
-            int userId,
-            List<AiChatMessage> messages) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceId, () -> suggestionsWithinVisibilityScope(workspaceId, sessionId, userId, messages));
-    }
-
-    private Map<Integer, List<String>> suggestionsWithinVisibilityScope(
             int workspaceId,
             int sessionId,
             int userId,
@@ -355,6 +340,7 @@ public class AiChatCitationProjector {
         List<Integer> personIds = ids(requested, "person");
         List<Integer> companyIds = ids(requested, "company");
         List<Integer> dealIds = ids(requested, "deal");
+        String orgWorkspaceIdsJson = null;
         Map<RecordKey, VisibleRecord> visible = new LinkedHashMap<>();
         if (!personIds.isEmpty()) {
             personMapper.getByIds(workspaceId, personIds).stream()
@@ -369,7 +355,8 @@ public class AiChatCitationProjector {
                                             : person.getCompany().getName()))));
         }
         if (!companyIds.isEmpty()) {
-            companyMapper.getByIds(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), companyIds)
+            orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+            companyMapper.getByIds(workspaceId, orgWorkspaceIdsJson, companyIds)
                     .forEach(company -> visible.put(
                             new RecordKey("company", company.getId()),
                             new VisibleRecord(
@@ -379,9 +366,12 @@ public class AiChatCitationProjector {
         }
         if (!dealIds.isEmpty()) {
             List<Deal> deals = dealMapper.getByIds(workspaceId, dealIds);
+            if (!deals.isEmpty() && orgWorkspaceIdsJson == null) {
+                orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+            }
             Map<Integer, String> stageNames = deals.isEmpty()
                     ? Map.of()
-                    : stageNames(workspaceId);
+                    : stageNames(workspaceId, orgWorkspaceIdsJson);
             deals.forEach(deal -> visible.put(
                     new RecordKey("deal", deal.getId()),
                     new VisibleRecord(
@@ -394,8 +384,7 @@ public class AiChatCitationProjector {
         return Map.copyOf(visible);
     }
 
-    private Map<Integer, String> stageNames(int workspaceId) {
-        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+    private Map<Integer, String> stageNames(int workspaceId, String orgWorkspaceIdsJson) {
         Map<Integer, String> names = new LinkedHashMap<>();
         for (Stage stage : pipelineMapper.getAllStages(workspaceId, orgWorkspaceIdsJson)) {
             if (stage.getName() != null) {
@@ -466,14 +455,6 @@ public class AiChatCitationProjector {
      * @return snapshot per cited handle, omitting records that are not currently visible
      */
     public Map<String, AiChatRecordObservation> observe(
-            int workspaceId,
-            List<String> citations,
-            Map<String, AiChatResourceRegistry.ResourceRef> resources) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceId, () -> observeWithinVisibilityScope(workspaceId, citations, resources));
-    }
-
-    private Map<String, AiChatRecordObservation> observeWithinVisibilityScope(
             int workspaceId,
             List<String> citations,
             Map<String, AiChatResourceRegistry.ResourceRef> resources) {

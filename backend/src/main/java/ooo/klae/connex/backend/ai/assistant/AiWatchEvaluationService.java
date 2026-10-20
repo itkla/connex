@@ -140,11 +140,6 @@ public class AiWatchEvaluationService {
      * @return what the evaluation did
      */
     private Outcome evaluateAsOwner(AiWatch watch, User owner) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            watch.getWorkspaceId(), () -> evaluateAsOwnerWithinVisibilityScope(watch, owner));
-    }
-
-    private Outcome evaluateAsOwnerWithinVisibilityScope(AiWatch watch, User owner) {
         if (!featureGate.isFeatureGoverned(AiFeature.ASSISTANT_CHAT)) {
             return Outcome.SKIPPED;
         }
@@ -155,6 +150,14 @@ public class AiWatchEvaluationService {
         if (type == null || !type.subjectKinds().contains(watch.getSubjectKind())) {
             return Outcome.SKIPPED;
         }
+        if (!"company".equals(watch.getSubjectKind())) {
+            return evaluateAsOwnerWithinVisibilityScope(watch, owner, type);
+        }
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            watch.getWorkspaceId(), () -> evaluateAsOwnerWithinVisibilityScope(watch, owner, type));
+    }
+
+    private Outcome evaluateAsOwnerWithinVisibilityScope(AiWatch watch, User owner, AiWatchType type) {
         Optional<String> label = subjectReader.label(watch.getSubjectKind(), watch.getSubjectId());
         if (label.isEmpty()) {
             watchMapper.recordEvaluated(watch.getWorkspaceId(), watch.getId(), nowUtc());

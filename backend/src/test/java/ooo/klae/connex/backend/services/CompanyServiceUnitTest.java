@@ -204,6 +204,23 @@ class CompanyServiceUnitTest {
         verify(mapper, never()).countsByWarmthBand(anyInt(), org.mockito.ArgumentMatchers.anyString(), any());
     }
 
+    @Test
+    void blankNamesAndEmptySegmentsDoNotReadControlScopes() {
+        try (var operation = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(7)) {
+            CompanyMapper mapper = mock(CompanyMapper.class);
+            WorkspaceService workspace = mock(WorkspaceService.class);
+            when(workspace.getCurrentWorkspaceId()).thenReturn(7);
+            CompanyService service = companyService(mapper, workspace);
+            org.springframework.test.util.ReflectionTestUtils.setField(service, "recordVisibilityScopeControlAccess", operation.scopes);
+            assertEquals(List.of(), service.findVisibleByNormalizedName(" ").companies());
+            assertEquals(0, service.getSegmentCompaniesPage(null, null, "name", "asc", null, false,
+                MemberScope.allTeam(), null, 25, 0).total());
+            assertEquals(List.of(), service.getMatchingSegmentCompanyIds(
+                null, null, null, false, MemberScope.allTeam(), null));
+            org.mockito.Mockito.verifyNoInteractions(operation.control, mapper);
+        }
+    }
+
     private CompanyService companyService(CompanyMapper mapper, WorkspaceService workspaceService) {
         return new CompanyService(
             mapper,

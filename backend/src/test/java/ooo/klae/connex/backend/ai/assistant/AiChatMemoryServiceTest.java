@@ -1143,4 +1143,23 @@ class AiChatMemoryServiceTest {
         }
     }
 
+    @Test
+    void historyThatNeedsNoCompactionNeverTouchesTheScopeBoundary() {
+        Instant now = Instant.parse("2026-08-12T00:00:00Z");
+        var scopes = mock(ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.class);
+        MemoryFixture fixture = memoryFixture(1_024, Clock.fixed(now, ZoneOffset.UTC), scopes, emptyToolExecutor());
+        AiChatQueuedTurn turn = new AiChatQueuedTurn(
+            3, 12, 5, 7, 101, 1, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false,
+            AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null, 1, 1L));
+        when(fixture.invocationService().currentProviderCapabilities(AiFeature.ASSISTANT_CHAT)).thenReturn(
+            new AiProviderCapabilities(AiStructuredOutputEnforcement.JSON_SCHEMA, AiReasoningMode.TAGGED, 200_000, 50_000));
+        when(fixture.invocationService().serializedPromptBytes(any(MaskedPrompt.class),
+            argThat(AiChatMemoryServiceTest::isReservationStepSchema), eq(AiReasoningMode.TAGGED))).thenReturn(8_192);
+        AiChatMessage initiating = message(101, 1, "user", "Summarize today");
+        when(fixture.persistenceService().loadHistory(turn, 100)).thenReturn(List.of(initiating));
+        assertEquals(List.of(initiating), fixture.service().prepare(
+            turn, new MaskingContext(), now.plusSeconds(70), NO_STOP).history());
+        verifyNoInteractions(scopes);
+    }
+
 }

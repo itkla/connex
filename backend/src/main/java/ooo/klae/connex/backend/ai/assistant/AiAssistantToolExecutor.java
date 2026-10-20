@@ -118,7 +118,10 @@ public class AiAssistantToolExecutor {
         }
         AiChatScopedToolPolicy.requireHonorsDeclaredScope(name, scope);
 
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        if ("set_todos".equals(name)) {
+            return executeWithinVisibilityScope(name, args, resources, includePrivateNotes, scope);
+        }
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
             workspaceService.getCurrentWorkspaceId(), () -> executeWithinVisibilityScope(name, args, resources, includePrivateNotes, scope));
     }
 
@@ -202,7 +205,17 @@ public class AiAssistantToolExecutor {
     /** Resolves authorized page context into handles without placing tenant-local ids in prompt data. */
     public AiAssistantToolResult pageContext(
             List<AiChatPageContextDto> pageContext, AiChatResourceRegistry resources) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        if (pageContext.isEmpty()) {
+            return result(Map.of("records", List.of()), List.of());
+        }
+        var mission = ooo.klae.connex.backend.ai.mission.AiAgentScopePolicy.current();
+        if (mission != null) {
+            pageContext.forEach(record -> mission.requireRecord(record.kind(), record.id()));
+        } else if (pageContext.stream().noneMatch(record -> record != null && record.kind() != null
+                && RECORD_KINDS.contains(record.kind()) && record.id() > 0)) {
+            return result(Map.of("records", List.of()), List.of());
+        }
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
             workspaceService.getCurrentWorkspaceId(), () -> pageContextWithinVisibilityScope(pageContext, resources));
     }
 

@@ -488,16 +488,18 @@ public class ScoringService {
      * {@link AttributionRule#PRESENT_DAY_PERSON_COMPANY_OR_DEAL_COMPANY}.
      */
     public List<RelationshipTemperatureDto> scoreCompanies(int workspaceId, Set<Integer> companyIds) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceId, () -> scoreCompaniesWithinVisibilityScope(workspaceId, companyIds));
-    }
-
-    private List<RelationshipTemperatureDto> scoreCompaniesWithinVisibilityScope(int workspaceId, Set<Integer> companyIds) {
-        return scoreCompanies(workspaceId, companyIds,
-            recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson());
+        List<Integer> requested = requestedCompanyIds(companyIds);
+        if (requested.isEmpty()) return List.of();
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(workspaceId,
+            () -> scoreCompanyIds(workspaceId, requested,
+                recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson()));
     }
 
     List<RelationshipTemperatureDto> scoreCompanies(int workspaceId, Set<Integer> companyIds, String orgWorkspaceIdsJson) {
+        return scoreCompanyIds(workspaceId, requestedCompanyIds(companyIds), orgWorkspaceIdsJson);
+    }
+
+    private static List<Integer> requestedCompanyIds(Set<Integer> companyIds) {
         List<Integer> requested = companyIds.stream()
             .filter(java.util.Objects::nonNull)
             .distinct()
@@ -506,6 +508,11 @@ public class ScoringService {
             throw new BadRequestException(
                 "At most " + MAX_BATCH_COMPANIES + " companies may be scored in one request");
         }
+        return requested;
+    }
+
+    private List<RelationshipTemperatureDto> scoreCompanyIds(
+            int workspaceId, List<Integer> requested, String orgWorkspaceIdsJson) {
         if (requested.isEmpty()) return List.of();
         Instant reference = scoringInstant(Instant.now(clock));
         Map<Integer, RelationshipTemperatureDto> scores = new HashMap<>();

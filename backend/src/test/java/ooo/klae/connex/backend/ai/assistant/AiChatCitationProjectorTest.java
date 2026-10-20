@@ -396,4 +396,20 @@ class AiChatCitationProjectorTest {
         person.setId(id);
         return person;
     }
+    @Test
+    void projectionsWithoutRecordTargetsNeverReadControlScopes() {
+        var scopes = mock(ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(projector, "recordVisibilityScopeControlAccess", scopes);
+        assertEquals(Map.of(), projector.project(3, List.of()).citationsByMessage());
+        AiChatMessage prose = new AiChatMessage();
+        prose.setId(23);
+        prose.setAuthorKind("assistant");
+        prose.setContent("No record citations");
+        assertEquals(List.of(), projector.project(3, List.of(prose)).citationsByMessage().get(23));
+        assertEquals(Map.of(), projector.observe(3, List.of(), Map.of()));
+        assertEquals(Map.of(), projector.observe(3, List.of("r1"), Map.of()));
+        assertEquals(Map.of(), projector.suggestions(3, 5, 11, List.of()));
+        org.mockito.Mockito.verifyNoInteractions(scopes);
+    }
+
 }

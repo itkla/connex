@@ -15,7 +15,8 @@ public final class RecordVisibilityScopes {
     /** Supplies a fresh boundary mock without registering unused stubs for unrelated test paths. */
     public static RecordVisibilityScopeControlAccess unfiltered() {
         return mock(RecordVisibilityScopeControlAccess.class, invocation -> {
-            if ("withWorkspaceScope".equals(invocation.getMethod().getName())) {
+            if ("withWorkspaceScope".equals(invocation.getMethod().getName())
+                    || "withDeferredWorkspaceScope".equals(invocation.getMethod().getName())) {
                 return ((java.util.function.Supplier<?>) invocation.getArgument(invocation.getArguments().length - 1)).get();
             }
             if ("getForWorkspace".equals(invocation.getMethod().getName())) {

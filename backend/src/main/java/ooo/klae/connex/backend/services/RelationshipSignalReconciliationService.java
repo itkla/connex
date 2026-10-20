@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.services.RelationshipSignalDetectorService.Detection;
+import ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException;
 
 /** Coordinates independent deterministic detectors without collapsing partial failure into emptiness. */
 @Service
@@ -31,7 +32,7 @@ public class RelationshipSignalReconciliationService {
 
     /** Reconciles all three families for one explicitly routed workspace. */
     public Result reconcileWorkspace(int workspaceId) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
             workspaceId, () -> reconcileWorkspaceWithinVisibilityScope(workspaceId));
     }
 
@@ -80,6 +81,8 @@ public class RelationshipSignalReconciliationService {
                 LocalDateTime.ofInstant(detection.evidenceAsOf(), ZoneOffset.UTC));
             successful.add(family);
             return 0;
+        } catch (TenantScopeSnapshotException exception) {
+            throw exception;
         } catch (RuntimeException exception) {
             writeService.markUnavailable(
                 workspaceId, family, attemptedAt, "detector_failed");

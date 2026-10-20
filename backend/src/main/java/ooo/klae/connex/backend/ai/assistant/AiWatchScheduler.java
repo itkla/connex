@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
 import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
+import ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException;
 
 import java.time.Clock;
 import java.time.LocalDate;
@@ -60,6 +61,8 @@ public class AiWatchScheduler {
         for (Integer workspaceId : tenantWorkScope.unrouted(workspaceMapper::findWorkspaceIds)) {
             try {
                 tenantWorkScope.inWorkspace(workspaceId, () -> sweepWorkspace(workspaceId));
+            } catch (TenantScopeSnapshotException exception) {
+                throw exception;
             } catch (RuntimeException exception) {
                 log.warn("Ask Connex watch sweep failed workspace={} exceptionClass={}",
                         workspaceId, exception.getClass().getSimpleName());
@@ -78,7 +81,7 @@ public class AiWatchScheduler {
      * context and can read the calendar the expiry was validated against.
      */
     void sweepWorkspace(int workspaceId) {
-        recordVisibilityScopeControlAccess.withWorkspaceScope(
+        recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
             workspaceId, () -> { sweepWorkspaceWithinVisibilityScope(workspaceId); return null; });
     }
 
@@ -94,6 +97,8 @@ public class AiWatchScheduler {
                 if (evaluationService.evaluate(watch) == AiWatchEvaluationService.Outcome.FIRED) {
                     fired++;
                 }
+            } catch (TenantScopeSnapshotException exception) {
+                throw exception;
             } catch (RuntimeException exception) {
                 failed++;
                 log.warn("Ask Connex watch evaluation failed workspace={} exceptionClass={}",

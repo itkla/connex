@@ -89,7 +89,7 @@ public class AiAssistantWorkBriefReadService {
      */
     public AiAssistantToolResult workCommitments(
             int userId, int periodDays, int limit, AiChatResourceRegistry resources) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
             workspaceService.getCurrentWorkspaceId(), () -> workCommitmentsWithinVisibilityScope(userId, periodDays, limit, resources));
     }
 
@@ -180,7 +180,7 @@ public class AiAssistantWorkBriefReadService {
      * @return bounded cooling contacts and companies with their authoritative warmth figures
      */
     public AiAssistantToolResult warmthMovement(int limit, AiChatResourceRegistry resources) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
             workspaceService.getCurrentWorkspaceId(), () -> warmthMovementWithinVisibilityScope(limit, resources));
     }
 
@@ -234,12 +234,6 @@ public class AiAssistantWorkBriefReadService {
      * @return bounded scheduled activities plus the counts, caps, and exclusions behind them
      */
     public AiAssistantToolResult upcomingMeetings(
-            int userId, int periodDays, int limit, AiChatResourceRegistry resources) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceService.getCurrentWorkspaceId(), () -> upcomingMeetingsWithinVisibilityScope(userId, periodDays, limit, resources));
-    }
-
-    private AiAssistantToolResult upcomingMeetingsWithinVisibilityScope(
             int userId, int periodDays, int limit, AiChatResourceRegistry resources) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int bound = bound(limit, AiChatScopeBounds.MAX_BRIEF_MEETINGS);

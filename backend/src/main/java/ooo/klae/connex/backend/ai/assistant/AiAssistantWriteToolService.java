@@ -204,7 +204,7 @@ public class AiAssistantWriteToolService {
             target = new Target(resource.kind(), resource.id());
         }
         tool.validateFor(target.kind(), args);
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(workspaceService.getCurrentWorkspaceId(), () -> {
+        java.util.function.Supplier<AiAssistantPreparedWrite> preparedOperation = () -> {
             if (storedArgumentsJson.isEmpty() && tool.requiresOwnedTarget()) {
                 requireOwnedTarget(target);
             }
@@ -270,7 +270,11 @@ public class AiAssistantWriteToolService {
                     target.kind(),
                     target.id(),
                     serialize(durable));
-        });
+        };
+        return storedArgumentsJson.isPresent()
+                ? preparedOperation.get()
+                : recordVisibilityScopeControlAccess.withWorkspaceScope(
+                        workspaceService.getCurrentWorkspaceId(), preparedOperation);
     }
 
     /** Strict assistant-create policy: any visible candidate or truncation refuses a proposal. */

@@ -146,15 +146,15 @@ public class CompanyService {
      * an ambiguous OCR candidate automatically.
      */
     public NormalizedCompanyMatches findVisibleByNormalizedName(String name) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceService.getCurrentWorkspaceId(), () -> findVisibleByNormalizedNameWithinVisibilityScope(name));
-    }
-
-    private NormalizedCompanyMatches findVisibleByNormalizedNameWithinVisibilityScope(String name) {
         String key = matchingService.normalizeName(name).orElse("");
         if (key.isBlank()) {
             return new NormalizedCompanyMatches(List.of(), false);
         }
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> findVisibleByNormalizedNameWithinVisibilityScope(key));
+    }
+
+    private NormalizedCompanyMatches findVisibleByNormalizedNameWithinVisibilityScope(String key) {
         String pattern = java.util.Arrays.stream(key.split(" "))
                 .map(LikePattern::escape)
                 .collect(Collectors.joining("%", "", "%"));
@@ -308,12 +308,12 @@ public class CompanyService {
      * @return one bucket per band, plus {@code __none__}
      */
     public List<FacetCount> countsByWarmthBand(WarmthFilter warmth) {
+        Objects.requireNonNull(warmth, "warmth is required to compute warmth band facets");
         return recordVisibilityScopeControlAccess.withWorkspaceScope(
             workspaceService.getCurrentWorkspaceId(), () -> countsByWarmthBandWithinVisibilityScope(warmth));
     }
 
     private List<FacetCount> countsByWarmthBandWithinVisibilityScope(WarmthFilter warmth) {
-        Objects.requireNonNull(warmth, "warmth is required to compute warmth band facets");
         return companyMapper.countsByWarmthBand(workspaceService.getCurrentWorkspaceId(), recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId()).workspaceIdsJson(), warmth);
     }
 
@@ -331,7 +331,7 @@ public class CompanyService {
     public PageResponse<Company> getSegmentCompaniesPage(SegmentDefinition definition, String query,
             String sort, String dir, List<String> industry, boolean noIndustry, MemberScope memberScope,
             WarmthFilter warmth, int limit, int offset) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
             workspaceService.getCurrentWorkspaceId(), () -> getSegmentCompaniesPageWithinVisibilityScope(definition, query, sort, dir, industry, noIndustry, memberScope, warmth, limit, offset));
     }
 
@@ -360,7 +360,7 @@ public class CompanyService {
      */
     public List<Integer> getMatchingSegmentCompanyIds(SegmentDefinition definition, String query,
             List<String> industry, boolean noIndustry, MemberScope memberScope, WarmthFilter warmth) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
             workspaceService.getCurrentWorkspaceId(), () -> getMatchingSegmentCompanyIdsWithinVisibilityScope(definition, query, industry, noIndustry, memberScope, warmth));
     }
 
@@ -401,7 +401,7 @@ public class CompanyService {
      */
     public List<Integer> getMatchingCompanyIds(String query, List<String> industry, boolean noIndustry,
             List<Integer> ids, MemberScope memberScope, boolean archived, WarmthFilter warmth) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
             workspaceService.getCurrentWorkspaceId(), () -> getMatchingCompanyIdsWithinVisibilityScope(query, industry, noIndustry, ids, memberScope, archived, warmth));
     }
 

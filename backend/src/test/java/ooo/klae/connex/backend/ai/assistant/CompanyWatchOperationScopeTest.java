@@ -51,4 +51,81 @@ class CompanyWatchOperationScopeTest {
             verify(fixture.control).findOrganizationWorkspacesForShare(7);
         }
     }
+    @Test
+    void anEmptySweepRecordsItsResultWithoutReadingControlScopes() {
+        try (var fixture = new RecordVisibilityOperationFixture(7)) {
+            var evaluations = mock(AiWatchEvaluationService.class);
+            var jobs = mock(JobRunRecorder.class);
+            var scheduler = new AiWatchScheduler(mock(AiWatchMapper.class), evaluations, mock(WorkspaceMapper.class),
+                mock(TenantWorkScope.class), jobs, Clock.systemUTC(), fixture.scopes);
+            scheduler.sweepWorkspace(7);
+            org.mockito.Mockito.verifyNoInteractions(fixture.control, evaluations);
+            verify(jobs).record(eq(JobRunRecorder.AI_WATCH_EVALUATION), eq(7),
+                eq(ooo.klae.connex.backend.observability.JobRunRecorder.JobRunStatus.SUCCEEDED), any());
+        }
+    }
+
+    @Test
+    void anOrdinaryScopeFailureStaysInsideEachWatchHandlerAndLaterIndependentWatchesRun() {
+        try (var fixture = new RecordVisibilityOperationFixture(7)) {
+            when(fixture.control.findOrganizationWorkspacesForShare(7))
+                .thenThrow(new org.springframework.dao.DataAccessResourceFailureException("control unavailable"));
+            var watches = mock(AiWatchMapper.class);
+            var evaluations = mock(AiWatchEvaluationService.class);
+            var jobs = mock(JobRunRecorder.class);
+            AiWatch first = new AiWatch();
+            first.setId(1);
+            AiWatch second = new AiWatch();
+            second.setId(2);
+            AiWatch independent = new AiWatch();
+            independent.setId(3);
+            when(watches.findEvaluable(eq(7), any())).thenReturn(List.of(first, second, independent));
+            when(evaluations.evaluate(first)).thenAnswer(call -> {
+                fixture.scopes.getForWorkspace(7);
+                return AiWatchEvaluationService.Outcome.QUIET;
+            });
+            when(evaluations.evaluate(second)).thenAnswer(call -> {
+                fixture.scopes.getForWorkspace(7);
+                return AiWatchEvaluationService.Outcome.QUIET;
+            });
+            when(evaluations.evaluate(independent)).thenReturn(AiWatchEvaluationService.Outcome.SKIPPED);
+            var scheduler = new AiWatchScheduler(watches, evaluations, mock(WorkspaceMapper.class),
+                mock(TenantWorkScope.class), jobs, Clock.systemUTC(), fixture.scopes);
+            scheduler.sweepWorkspace(7);
+            verify(evaluations).evaluate(independent);
+            verify(fixture.control).findOrganizationWorkspacesForShare(7);
+            var detail = org.mockito.ArgumentCaptor.forClass(JobRunRecorder.JobRunDetail.class);
+            verify(jobs).record(eq(JobRunRecorder.AI_WATCH_EVALUATION), eq(7),
+                eq(JobRunRecorder.JobRunStatus.FAILED), detail.capture());
+            assertEquals(2, detail.getValue().metadata().get("failedCount"));
+        }
+    }
+
+    @Test
+    void aSnapshotRefusalStopsTheSweepWithoutRecordingAnOrdinaryFailedWatch() {
+        try (var fixture = new RecordVisibilityOperationFixture(7)) {
+            var refusal = new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotMissingException("workspace 7");
+            when(fixture.control.findOrganizationWorkspacesForShare(7)).thenThrow(refusal);
+            var watches = mock(AiWatchMapper.class);
+            var evaluations = mock(AiWatchEvaluationService.class);
+            var jobs = mock(JobRunRecorder.class);
+            AiWatch first = new AiWatch();
+            first.setId(1);
+            AiWatch later = new AiWatch();
+            later.setId(2);
+            when(watches.findEvaluable(eq(7), any())).thenReturn(List.of(first, later));
+            when(evaluations.evaluate(first)).thenAnswer(call -> {
+                fixture.scopes.getForWorkspace(7);
+                return AiWatchEvaluationService.Outcome.QUIET;
+            });
+            var scheduler = new AiWatchScheduler(watches, evaluations, mock(WorkspaceMapper.class),
+                mock(TenantWorkScope.class), jobs, Clock.systemUTC(), fixture.scopes);
+            org.junit.jupiter.api.Assertions.assertSame(refusal,
+                org.junit.jupiter.api.Assertions.assertThrows(ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException.class,
+                    () -> scheduler.sweepWorkspace(7)));
+            verify(evaluations, org.mockito.Mockito.never()).evaluate(later);
+            org.mockito.Mockito.verifyNoInteractions(jobs);
+        }
+    }
+
 }

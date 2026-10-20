@@ -42,8 +42,24 @@ class ReferenceServiceReaderVisibilityTest {
     private final TaskMapper tasks = mock(TaskMapper.class);
     private final ActivityMapper activities = mock(ActivityMapper.class);
     private final EntityReferenceMapper stored = mock(EntityReferenceMapper.class);
+    private final RecordVisibilityScopeControlAccess recordScopes =
+            ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
     private final ReferenceService service = new ReferenceService(stored, workspace, people, deals, companies,
-            notes, files, tasks, activities, members, ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
+            notes, files, tasks, activities, members, recordScopes);
+
+    @ParameterizedTest
+    @ValueSource(strings = {"hydrate", "hydrateNotePreviews", "hydrateTasks", "hydrateDeals", "hydrateActivities", "redactInvisibleTargets"})
+    void nullAndEmptyHydrationNeverTouchesTheScopeBoundary(String method) {
+        Object empty = org.springframework.test.util.ReflectionTestUtils.invokeMethod(service, method, 7, List.of());
+        assertEquals(List.of(), empty);
+        Object absent = org.springframework.test.util.ReflectionTestUtils.invokeMethod(service, method, 7, null);
+        if (method.equals("hydrateNotePreviews") || method.equals("redactInvisibleTargets")) {
+            assertEquals(List.of(), absent);
+        } else {
+            org.junit.jupiter.api.Assertions.assertNull(absent);
+        }
+        verifyNoInteractions(recordScopes, members, people, deals, companies, notes, files, tasks, activities, stored);
+    }
 
     static Stream<String> ordinaryProse() {
         return ReferenceContentReaderTest.ordinaryProse();
@@ -54,7 +70,7 @@ class ReferenceServiceReaderVisibilityTest {
     void ordinaryEnglishAndJapaneseProseRemainsVisibleWithoutTargetLookups(String content) {
         assertEquals(content, service.redactInvisibleTargets(7,
                 List.of(new ReferenceService.ReaderVisibleContent(content, List.of()))).getFirst().content());
-        verifyNoInteractions(members, people, deals, companies, notes, files, tasks, activities, stored);
+        verifyNoInteractions(recordScopes, members, people, deals, companies, notes, files, tasks, activities, stored);
     }
 
     @Test
@@ -81,7 +97,7 @@ class ReferenceServiceReaderVisibilityTest {
     void unsupportedFootnotesWithoutInternalDestinationsPreserveTheReaderBody(String content) {
         assertEquals(content, service.redactInvisibleTargets(7,
                 List.of(new ReferenceService.ReaderVisibleContent(content, List.of()))).getFirst().content());
-        verifyNoInteractions(members, people, deals, companies, notes, files, tasks, activities, stored);
+        verifyNoInteractions(recordScopes, members, people, deals, companies, notes, files, tasks, activities, stored);
     }
 
     static Stream<Arguments> referenceLayouts() {
@@ -111,7 +127,7 @@ class ReferenceServiceReaderVisibilityTest {
         String content = "| x ".repeat(258) + "\n10:30";
         assertEquals(content, service.redactInvisibleTargets(7,
                 List.of(new ReferenceService.ReaderVisibleContent(content, List.of()))).getFirst().content());
-        verifyNoInteractions(members, people, deals, companies, notes, files, tasks, activities, stored);
+        verifyNoInteractions(recordScopes, members, people, deals, companies, notes, files, tasks, activities, stored);
     }
 
     @Test
@@ -155,7 +171,7 @@ class ReferenceServiceReaderVisibilityTest {
     void externalUrlsAndEmbeddedWordsRemainVisibleWithoutInternalLookups(String type, String content) {
         assertEquals(content, service.redactInvisibleTargets(7,
                 List.of(new ReferenceService.ReaderVisibleContent(content, List.of()))).getFirst().content(), type);
-        verifyNoInteractions(members, people, deals, companies, notes, files, tasks, activities, stored);
+        verifyNoInteractions(recordScopes, members, people, deals, companies, notes, files, tasks, activities, stored);
     }
 
     @ParameterizedTest

@@ -97,26 +97,11 @@ public class AiChatMemoryService {
             MaskingContext context,
             Instant deadline,
             Runnable ownershipGuard) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            turn.workspaceId(), () -> prepareWithinVisibilityScope(turn, context, deadline, ownershipGuard));
-    }
-
-    private AiChatMemory prepareWithinVisibilityScope(
-            AiChatQueuedTurn turn,
-            MaskingContext context,
-            Instant deadline,
-            Runnable ownershipGuard) {
         return prepare(turn, context, deadline, ownershipGuard, new AiChatResourceRegistry(context));
     }
 
     /** Prepares mission context with the exact fresh registry owned by the executing loop. */
     public AiChatMemory prepare(AiChatQueuedTurn turn, MaskingContext context, Instant deadline,
-            Runnable ownershipGuard, AiChatResourceRegistry resources) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            turn.workspaceId(), () -> prepareWithinVisibilityScope(turn, context, deadline, ownershipGuard, resources));
-    }
-
-    private AiChatMemory prepareWithinVisibilityScope(AiChatQueuedTurn turn, MaskingContext context, Instant deadline,
             Runnable ownershipGuard, AiChatResourceRegistry resources) {
         Objects.requireNonNull(ownershipGuard, "ownershipGuard");
         requireBeforeDeadline(deadline);
@@ -177,6 +162,23 @@ public class AiChatMemoryService {
         }
         int summaryThroughSeq = summaryThroughSeq(summary);
         List<AiChatMessage> dialogue = dialogueAfter(recent, summaryThroughSeq);
+        if (!shouldCompact(summary, dialogue, budget)) {
+            return new AiChatMemory(
+                    boundedHistory(summary, dialogue, initiatingMessage, budget.historyBytes()),
+                    budget, 0, 0, nativeTools, capabilities.parallelToolCalls());
+        }
+        AiChatMessage retainedInitiatingMessage = initiatingMessage;
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(turn.workspaceId(), () -> compact(
+                turn, context, deadline, ownershipGuard, budget, nativeTools,
+                capabilities.parallelToolCalls(), recent, retainedInitiatingMessage, summary,
+                summaryThroughSeq, dialogue));
+    }
+
+    private AiChatMemory compact(
+            AiChatQueuedTurn turn, MaskingContext context, Instant deadline, Runnable ownershipGuard,
+            AiAssistantPromptBudget budget, boolean nativeTools, int parallelToolCalls,
+            List<AiChatMessage> recent, AiChatMessage initiatingMessage, AiChatMessage summary,
+            int summaryThroughSeq, List<AiChatMessage> dialogue) {
         int inputTokens = 0;
         int outputTokens = 0;
         if (shouldCompact(summary, dialogue, budget)) {
@@ -301,7 +303,7 @@ public class AiChatMemoryService {
                 inputTokens,
                 outputTokens,
                 nativeTools,
-                capabilities.parallelToolCalls());
+                parallelToolCalls);
     }
 
     static List<AiChatMessage> boundedHistory(

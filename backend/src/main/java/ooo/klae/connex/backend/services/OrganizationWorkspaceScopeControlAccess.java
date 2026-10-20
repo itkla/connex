@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException;
+
 
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -45,7 +47,7 @@ public class OrganizationWorkspaceScopeControlAccess {
         WorkspaceScope scope = execute(() -> controlOperations.getForWorkspace(workspaceId));
         if (tenantContext.isResolved() && (tenantContext.getWorkspaceId().intValue() != workspaceId
                 || tenantContext.getOrgId().intValue() != scope.orgId())) {
-            throw new IllegalStateException("Workspace scope does not match the resolved tenant context");
+            throw new TenantScopeSnapshotException("Workspace scope does not match the resolved tenant context");
         }
         return scope;
     }

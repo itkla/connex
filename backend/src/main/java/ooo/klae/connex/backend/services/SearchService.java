@@ -158,16 +158,7 @@ public class SearchService {
     }
 
     private SearchResultsDto searchWithinVisibilityScope(String query, Set<String> types) {
-        validateTypes(types);
-        if (query == null || query.isBlank()) {
-            return empty();
-        }
-
         String trimmed = query.trim();
-        if (trimmed.length() > MAX_QUERY_LENGTH) {
-            throw new BadRequestException("Search query is too long (max " + MAX_QUERY_LENGTH + " characters)");
-        }
-
         String pattern = LikePattern.containing(trimmed);
         String needle = foldSearchText(trimmed);
         int workspaceId = workspaceService.getCurrentWorkspaceId();

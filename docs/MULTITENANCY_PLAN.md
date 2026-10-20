@@ -277,7 +277,15 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   Company validation and reference-hydrating mutation roots resolve scope before their first
   authorization lock or mutex. Bulk mutations, import previews, signal reconciliation, watch sweeps,
   workflow deliveries, AI evidence/skill retrieval and history compaction reuse `withWorkspaceScope`
-  across independent transactions; this does not change commits or lock ownership. The Company
+  across independent transactions; this does not change commits or lock ownership. Read-only and
+  independently handled work may use `withDeferredWorkspaceScope`, the deferred entry to that same
+  synchronous memo: skipped work reads nothing, and each item observes the first ordinary lookup
+  failure through its existing handler without another control query. Mutation delegates still
+  preload before authorization locks; skill steps prime the memo before their first guard/proposal,
+  and actual history compaction preloads before its first ownership guard. Snapshot-invariant
+  refusals use `TenantScopeSnapshotException` (including its existing missing-snapshot subtype)
+  and escape partial-result handlers. Routed reads always revalidate prepared data and destructive
+  fresh reads bypass both memos. The Company
   parity corpus extends the shared frozen oracle and minimal tenant-catalog fixture without changing
   existing corpora, and its scratch catalog contains only the ten tenant tables used by these statements.
   These mappers' crossing baseline entries are removed. Segment calls already inside campaign and
