@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.io.ByteArrayOutputStream;
@@ -26,6 +27,7 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
+import ooo.klae.connex.backend.mappers.AiAssistantPrivacyControlMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.OrgMemberMapper;
 import ooo.klae.connex.backend.support.TestEntityFixtures;
@@ -40,6 +42,7 @@ class TenantLifecycleAuthorizationIntegrationTest extends AbstractServiceTest {
     @Autowired private TenantExportGrantService exportGrantService;
     @Autowired private TenantTeardownService teardownService;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private AiAssistantPrivacyControlMapper assistantPrivacyControl;
 
     private final List<Integer> organizationIds = new ArrayList<>();
     private final List<Integer> workspaceIds = new ArrayList<>();
@@ -174,6 +177,7 @@ class TenantLifecycleAuthorizationIntegrationTest extends AbstractServiceTest {
     void cleanupTombstoneRoutesRetryAfterWorkspaceRootIsGone() {
         Organization organization = createOrganization(currentUser);
         Workspace workspace = createWorkspace(organization, currentUser);
+        assertEquals("active", assistantPrivacyControl.workspaceLifecycleState(workspace.getId()));
         jdbcTemplate.update(
             "INSERT INTO tenant_cleanup_tombstone"
                 + " (workspace_id, org_id, workspace_name, workspace_slug)"
@@ -182,9 +186,11 @@ class TenantLifecycleAuthorizationIntegrationTest extends AbstractServiceTest {
             organization.getId(),
             workspace.getName(),
             workspace.getSlug());
+        assertEquals("active", assistantPrivacyControl.workspaceLifecycleState(workspace.getId()));
         jdbcTemplate.update(
             "DELETE FROM workspace WHERE id = ?",
             workspace.getId());
+        assertEquals("tearing_down", assistantPrivacyControl.workspaceLifecycleState(workspace.getId()));
         jdbcTemplate.update(
             "INSERT INTO ai_output_cache"
                 + " (workspace_id, feature, subject_a_id, content_hash, payload, generated_at)"
@@ -206,6 +212,7 @@ class TenantLifecycleAuthorizationIntegrationTest extends AbstractServiceTest {
             "SELECT COUNT(*) FROM tenant_cleanup_tombstone WHERE workspace_id = ?",
             Integer.class,
             workspace.getId()));
+        assertNull(assistantPrivacyControl.workspaceLifecycleState(workspace.getId()));
     }
 
     @Test

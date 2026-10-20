@@ -18,7 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 
 import ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService;
 import ooo.klae.connex.backend.beans.AiAssistantPrivacyOperation;
-import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.AiAssistantPrivacyControlMapper;
 import ooo.klae.connex.backend.services.AiAssistantService;
 
@@ -119,7 +119,8 @@ class AiAssistantPrivacyResidualIntegrationTest extends AbstractAiAgentPrivacyIn
         }
         assertNotNull(chatMapper.getRetainedSessionById(workspace.getId(), currentUser.getId(), restored,
                 List.of(currentUser.getId()), 0));
-        assertThrows(ResourceNotFoundException.class, () -> assistant.getRetained(restored, 1, 100));
+        assertEquals("AI assistant session is not accessible",
+                assertThrows(ForbiddenException.class, () -> assistant.getRetained(restored, 1, 100)).getMessage());
 
         privacyService.initialize(workspace.getId());
 
@@ -130,7 +131,8 @@ class AiAssistantPrivacyResidualIntegrationTest extends AbstractAiAgentPrivacyIn
         }
         assertEquals(Boolean.FALSE,
                 transaction().execute(status -> organizationPrivacy.reconcileCompletion(workspace.getOrgId(), key)));
-        assertThrows(ResourceNotFoundException.class, () -> assistant.getRetained(restored, 1, 100));
+        assertEquals("AI assistant session is not accessible",
+                assertThrows(ForbiddenException.class, () -> assistant.getRetained(restored, 1, 100)).getMessage());
         var resumed = privacyMapper.getWork(workspace.getId(), key);
         assertNotEquals("complete", resumed.getPhase());
         assertEquals(accepted.getCutoffGeneration(), resumed.getCutoffGeneration());

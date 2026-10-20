@@ -1189,3 +1189,8 @@ is absent or unfinished. Completed local work with restored residuals is also re
 operation identity, cutoff and organization generation remain unchanged; only fresh uncapped local
 holdings, lease and object verification can restore the receipt and completion evidence. Content
 admission continues to reject historical generations throughout recovery.
+
+Assistant session detail and retained-detail reads return the generic 403
+`AI assistant session is not accessible` for historical generations, including restored rows
+before and after initialization reopens cleanup evidence. Reopening never makes those rows readable
+or changes the refusal to 404.

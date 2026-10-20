@@ -449,3 +449,8 @@ The lifecycle fence additionally authorizes bounded full-workspace chat/run/obje
 the same engine, with a separate uncapped lifecycle residual check. That local full scan neither
 creates a synthetic organization generation nor invalidates unrelated workspaces. Departure and
 account-owner erasure retain their narrower existing behavior.
+
+After control-root deletion, the durable cleanup tombstone supplies the `tearing_down` authority
+for the second residual sweep and later teardown retries. An existing workspace root takes
+precedence over a tombstone; without either root or tombstone, lifecycle cleanup remains unavailable.
+The tombstone does not replace missing accepted organization-operation placement evidence.

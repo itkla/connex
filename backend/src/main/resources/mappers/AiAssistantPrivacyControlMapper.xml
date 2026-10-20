@@ -118,6 +118,17 @@
         WHERE w.organization_id = o.organization_id AND w.operation_key = o.operation_key AND w.state &lt;&gt; 'verified'))
   </select>
   <select id="workspaceLifecycleState" resultType="string" useCache="false" flushCache="true">
-    SELECT lifecycle_state FROM workspace WHERE id = #{workspaceId}
+    SELECT lifecycle_state
+    FROM (
+      SELECT w.lifecycle_state, 0 AS targetOrder
+      FROM workspace w
+      WHERE w.id = #{workspaceId}
+      UNION ALL
+      SELECT 'tearing_down' AS lifecycle_state, 1 AS targetOrder
+      FROM tenant_cleanup_tombstone t
+      WHERE t.workspace_id = #{workspaceId}
+    ) lifecycle_target
+    ORDER BY targetOrder
+    LIMIT 1
   </select>
 </mapper>
