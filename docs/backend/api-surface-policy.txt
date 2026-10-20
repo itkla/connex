@@ -610,7 +610,7 @@ src/main/java/ooo/klae/connex/backend/services/ScheduleService.java	aa72423cab1c
 src/main/java/ooo/klae/connex/backend/services/ScoringService.java	91b3f2a7f4b40b965fa89e30c2bd5eb8ec13088730f532084c2cb61fbbc328ad
 src/main/java/ooo/klae/connex/backend/services/SearchService.java	f7752d9bf414f894e849812c011ee54955b81fe51b8a7f2e9fa38108a5eb817c
 src/main/java/ooo/klae/connex/backend/services/SegmentCatalog.java	8ab11cfeab370615a8eab1b4d84e650e411623b7d88fdf02bd7c5225bd933d7e
-src/main/java/ooo/klae/connex/backend/services/SegmentService.java	130edadf2934e5f88e557486dbaac12814b4f63e2bd2a97648bbe8c385343152
+src/main/java/ooo/klae/connex/backend/services/SegmentService.java	c502f9cf5eaac2adc0fcee9e6ba3287ac3bd4899eacb6b6c7f67c27c1a9675a6
 src/main/java/ooo/klae/connex/backend/services/SequenceMergeFieldResolver.java	2d3a4fe2238e62af3637511b7737ac2316175fd597d26b6a5833cbc93182cc00
 src/main/java/ooo/klae/connex/backend/services/SequencePreviewService.java	9232fd41e0736ad0fa9948ad36b7e45e67760b13374c483d38ac68ce98c5a0d6
 src/main/java/ooo/klae/connex/backend/services/SequenceService.java	4f1a6b9873000d928e12949db0863a93391d582a858e20c32d526064cf962d52

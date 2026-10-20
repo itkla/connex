@@ -21,7 +21,8 @@ class SegmentServiceCatalogTest {
     private final SegmentService segmentService = new SegmentService(
         mock(WorkspaceService.class), mock(AuthService.class), mock(ScoringService.class),
         mock(DealRiskService.class), mock(SegmentMapper.class), mock(PersonEdgeReadService.class),
-        mock(PersonMapper.class), mock(TagMapper.class), new SegmentCatalog());
+        mock(PersonMapper.class), mock(TagMapper.class), new SegmentCatalog(),
+        mock(RecordVisibilityScopeControlAccess.class));
 
     @Test
     void catalog_company_exposesFieldsPredicatesAndLimits() {
