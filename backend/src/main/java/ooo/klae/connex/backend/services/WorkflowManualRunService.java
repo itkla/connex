@@ -100,7 +100,7 @@ public class WorkflowManualRunService {
     public WorkflowManualPreparationDto prepare(
             int workflowId,
             WorkflowManualPrepareRequest request) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
             workspaceService.getCurrentWorkspaceId(), () -> prepareWithinVisibilityScope(workflowId, request));
     }
 

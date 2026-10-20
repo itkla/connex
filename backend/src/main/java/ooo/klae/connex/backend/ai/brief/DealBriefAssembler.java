@@ -77,7 +77,7 @@ public class DealBriefAssembler {
      * @throws java.util.concurrent.CancellationException when the current thread is interrupted
      */
     public BriefAssembly assemble(int workspaceId, int dealId) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
             workspaceId, () -> assembleWithinVisibilityScope(workspaceId, dealId));
     }
 

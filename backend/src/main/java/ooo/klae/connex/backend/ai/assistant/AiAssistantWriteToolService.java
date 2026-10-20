@@ -273,7 +273,7 @@ public class AiAssistantWriteToolService {
         };
         return storedArgumentsJson.isPresent()
                 ? preparedOperation.get()
-                : recordVisibilityScopeControlAccess.withWorkspaceScope(
+                : recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
                         workspaceService.getCurrentWorkspaceId(), preparedOperation);
     }
 

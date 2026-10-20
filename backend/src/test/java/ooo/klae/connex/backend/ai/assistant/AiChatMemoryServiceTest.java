@@ -1162,4 +1162,31 @@ class AiChatMemoryServiceTest {
         verifyNoInteractions(scopes);
     }
 
+    @Test
+    void emptyCompactionCandidatesSkipTheScopeEvenWhenControlReadsFail() {
+        Instant now = Instant.parse("2026-08-12T00:00:00Z");
+        try (var operation = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(3)) {
+            when(operation.control.findOrganizationWorkspacesForShare(3))
+                .thenThrow(new org.springframework.dao.DataAccessResourceFailureException("control unavailable"));
+            MemoryFixture fixture = memoryFixture(1_024, Clock.fixed(now, ZoneOffset.UTC),
+                operation.scopes, emptyToolExecutor());
+            AiChatQueuedTurn turn = new AiChatQueuedTurn(
+                3, 12, 5, 7, 102, 2, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false,
+                AiChatQueryScope.none(), new AiChatPrivacyToken(3, 5, 1, null, 1, 1L));
+            when(fixture.invocationService().currentProviderCapabilities(AiFeature.ASSISTANT_CHAT)).thenReturn(
+                new AiProviderCapabilities(AiStructuredOutputEnforcement.JSON_SCHEMA, AiReasoningMode.TAGGED, 200_000, 50_000));
+            when(fixture.invocationService().serializedPromptBytes(any(MaskedPrompt.class),
+                argThat(AiChatMemoryServiceTest::isReservationStepSchema), eq(AiReasoningMode.TAGGED))).thenReturn(8_192);
+            AiChatMessage historical = message(101, 1, "assistant", "Historical context ".repeat(10_000));
+            AiChatMessage initiating = message(102, 2, "user", "Summarize today");
+            when(fixture.persistenceService().loadHistory(turn, 100)).thenReturn(List.of(historical, initiating));
+
+            assertEquals(List.of(initiating), fixture.service().prepare(
+                turn, new MaskingContext(), now.plusSeconds(70), NO_STOP).history());
+
+            verify(fixture.persistenceService()).loadCompactionCandidates(eq(turn), eq(0), anyInt(), eq(500));
+            verifyNoInteractions(operation.control);
+        }
+    }
+
 }

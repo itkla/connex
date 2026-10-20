@@ -38,7 +38,7 @@ public class AiAgentContextBuilder {
     /** Builds a separate model projection without provenance, canonical IDs, or session history. */
     public AiAssistantToolResult build(AiAgentExecutionPolicy policy, MaskingContext context,
             AiChatResourceRegistry resources) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
             policy.turn().workspaceId(), () -> buildWithinVisibilityScope(policy, context, resources));
     }
 

@@ -67,6 +67,23 @@ class RecordCreationTemplateValidatorTest {
             objectMapper, unfiltered());
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(RecordCreationRecordType.class)
+    void definitionsWithoutReferenceDefaultsSkipTheScope(RecordCreationRecordType type) {
+        try (var fixture = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(7)) {
+            when(fixture.control.findOrganizationWorkspacesForShare(7))
+                .thenThrow(new org.springframework.dao.DataAccessResourceFailureException("control unavailable"));
+            var guarded = new RecordCreationTemplateValidator(
+                new RecordCreationFieldRegistry(), customFieldMapper, tagMapper, companyMapper,
+                personMapper, pipelineMapper, workspaceService, objectMapper, fixture.scopes);
+
+            guarded.validateAndCanonicalize(type, new LocalizedTextDto("Basic", "基本"), null,
+                definition(field("name", false, null)));
+
+            org.mockito.Mockito.verifyNoInteractions(fixture.control, companyMapper, pipelineMapper);
+        }
+    }
+
     @Test
     void canonicalizesLocalizedContentAndProducesStableHash() {
         var first = validator.validateAndCanonicalize(

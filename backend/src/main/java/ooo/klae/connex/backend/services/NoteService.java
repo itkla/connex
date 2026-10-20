@@ -154,7 +154,7 @@ public class NoteService {
      * private note never surfaces as a backlink to someone who cannot read it.
      */
     public List<Note> getNotesReferencing(String refType, int refId) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
             workspaceService.getCurrentWorkspaceId(), () -> getNotesReferencingWithinVisibilityScope(refType, refId));
     }
 
@@ -164,7 +164,7 @@ public class NoteService {
 
     /** Returns bounded backlink previews after reader-specific reference redaction. */
     public List<Note> getNotesReferencing(String refType, int refId, int limit, int offset) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScopeRead(
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
             workspaceService.getCurrentWorkspaceId(), () -> getNotesReferencingWithinVisibilityScope(refType, refId, limit, offset));
     }
 

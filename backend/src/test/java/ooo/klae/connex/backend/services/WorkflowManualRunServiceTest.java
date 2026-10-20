@@ -166,6 +166,24 @@ class WorkflowManualRunServiceTest {
     }
 
     @Test
+    void emptyManualSelectionSkipsTheScopeEvenWhenControlReadsFail() throws Exception {
+        stubSavedView("{\"segments\":{\"match\":\"all\",\"conditions\":[]}}");
+        try (var fixture = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(7)) {
+            org.mockito.Mockito.lenient().when(fixture.control.findOrganizationWorkspacesForShare(7))
+                .thenThrow(new org.springframework.dao.DataAccessResourceFailureException("control unavailable"));
+            org.springframework.test.util.ReflectionTestUtils.setField(
+                service, "recordVisibilityScopeControlAccess", fixture.scopes);
+
+            var result = service.prepare(11, new WorkflowManualPrepareRequest(
+                "saved_view", new WorkflowManualScope.SavedView(5)));
+
+            assertEquals(0, result.exactCount());
+            assertEquals(List.of("scope_empty"), result.blockers());
+            verifyNoInteractions(fixture.control, dealService, actionGuard);
+        }
+    }
+
+    @Test
     void zeroResultSavedViewSegmentWithoutNativeFiltersStaysEmpty() throws Exception {
         stubSavedView("{\"segments\":{\"match\":\"all\",\"conditions\":[]}}");
 
