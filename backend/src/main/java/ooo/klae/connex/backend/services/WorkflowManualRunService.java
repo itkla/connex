@@ -409,7 +409,11 @@ public class WorkflowManualRunService {
             } catch (JacksonException exception) {
                 throw new BadRequestException("Saved view scope is malformed");
             }
-            matches.addAll(segmentService.evaluate(view.getRecordType(), definition));
+            try {
+                matches.addAll(segmentService.evaluate(view.getRecordType(), definition));
+            } catch (BadRequestException | IllegalArgumentException invalidDefinition) {
+                throw new BadRequestException("Saved view scope is malformed");
+            }
         }
         WorkflowManualFilter filter = filterFromSavedView(config, recordType);
         boolean nativeFilterConfigured = hasNativeFilter(filter);
