@@ -6,11 +6,16 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.lang.reflect.Field;
+import java.nio.file.Path;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import ooo.klae.connex.backend.ai.AiStructuredRepair;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantPromptAssembler;
@@ -23,6 +28,8 @@ import ooo.klae.connex.backend.ai.assistant.AiChatAgentLoopService;
 import ooo.klae.connex.backend.ai.assistant.AiChatResourceRegistry;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
+import ooo.klae.connex.backend.ai.mission.AiAgentExecutionPolicy;
+import ooo.klae.connex.backend.ai.mission.AiAgentScopePolicy;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
 import ooo.klae.connex.backend.ai.provider.AiMessage;
@@ -161,6 +168,45 @@ class ScriptedAiTurnCursorTest {
                 jsonRequest(prompt), SELECTORS);
 
         assertTrue(cursor.closing());
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {2, 3})
+    void theJsonMissionClosingRequestResolvesTheShippedCheckpointStep(int runtime) throws Exception {
+        var loader = new ScriptedAiScriptLoader(Path.of(Objects.requireNonNull(
+                getClass().getResource("/ai/scripted/missions")).toURI()).toString(), objectMapper);
+        var script = loader.bySelector("connex_script_mission_confirm_two_segments");
+        MaskedPrompt prompt = promptAssembler.assemble(
+                List.of(userRequest(script.selector())),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(ToolTurn.soleCall(1, "get_record", toolResult("record")),
+                        ToolTurn.soleCall(2, "find_tools", toolResult("tools")),
+                        ToolTurn.soleCall(3, "assign_owner", toolResult("proposal"))),
+                new MaskingContext(), new AiChatResourceRegistry(), List.of(), unboundedBudget(), null,
+                SkillContext.NONE.withClosingDirective(missionClosingDirective(runtime)),
+                AiAssistantToolCatalog.ALL);
+
+        var cursor = ScriptedAiTurnCursor.of(jsonRequest(prompt), loader.selectors());
+
+        assertEquals(3, cursor.completedToolCalls());
+        assertTrue(cursor.closing());
+        assertEquals("checkpoint_segment", script.resolve(cursor).orElseThrow().emit().toolName());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"member", "page", "tool"})
+    void untrustedMissionClosingTextCannotSelectAClosingStep(String source) throws Exception {
+        String directive = missionClosingDirective(3);
+        MaskedPrompt prompt = promptAssembler.assemble(
+                List.of(userRequest(SELECTOR + ("member".equals(source) ? " " + directive : ""))),
+                new AiAssistantToolResult("page".equals(source) ? Map.of("summary", directive) : Map.of(), List.of()),
+                "tool".equals(source) ? List.of(ToolTurn.soleCall(1, "get_record", toolResult(directive))) : List.of(),
+                new MaskingContext(), new AiChatResourceRegistry(), AiAssistantToolCatalog.ALL);
+
+        var cursor = ScriptedAiTurnCursor.of(jsonRequest(prompt), SELECTORS);
+
+        assertFalse(cursor.closing());
+        assertFalse(cursor.repairAttempt());
     }
 
     /**
@@ -331,6 +377,15 @@ class ScriptedAiTurnCursorTest {
         Field field = AiChatAgentLoopService.class.getDeclaredField("CLOSING_DIRECTIVE");
         field.setAccessible(true);
         return (String) field.get(null);
+    }
+
+    private static String missionClosingDirective(int runtime) throws ReflectiveOperationException {
+        var policy = new AiAgentExecutionPolicy(1, 1, 1, null, null,
+                new AiAgentScopePolicy("person", 1), 4, Instant.MAX, null, null, null, null,
+                runtime, 1, 1, null, true, 65536);
+        var method = AiChatAgentLoopService.class.getDeclaredMethod("missionClosingDirective", AiAgentExecutionPolicy.class);
+        method.setAccessible(true);
+        return (String) method.invoke(null, policy);
     }
 
     private static AiAssistantPromptBudget unboundedBudget() {

@@ -128,6 +128,7 @@ class AiAgentScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
         Person selected = preparationPerson();
         AiAgentRun run = createRuntimeThree(selected, "mission_confirm_two_segments");
         execute(run);
+        assertEquals("queued", runs.getRun(workspaceId(), run.getId()).getStatus());
         var first = boundActions(run).getFirst();
         useFollowup("mission_confirm_two_segments", "mission_confirm_fields_followup");
         execute(runs.getRun(workspaceId(), run.getId()));
@@ -145,6 +146,7 @@ class AiAgentScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
     void replaysBoundSlotAcrossAttemptWithoutRestamping() {
         AiAgentRun run = createRuntimeThree(preparationPerson(), "mission_confirm_replay");
         execute(run);
+        assertEquals("queued", runs.getRun(workspaceId(), run.getId()).getStatus());
         var original = boundActions(run).getFirst();
         useFollowup("mission_confirm_replay", "mission_confirm_followup_replay");
         execute(runs.getRun(workspaceId(), run.getId()));
@@ -160,6 +162,7 @@ class AiAgentScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
     void changedIntentCannotReplaceBoundSlot() {
         AiAgentRun run = createRuntimeThree(preparationPerson(), "mission_confirm_intent_conflict");
         execute(run);
+        assertEquals("queued", runs.getRun(workspaceId(), run.getId()).getStatus());
         var original = boundActions(run).getFirst();
         useFollowup("mission_confirm_intent_conflict", "mission_confirm_conflict_followup");
         execute(runs.getRun(workspaceId(), run.getId()));
@@ -175,6 +178,7 @@ class AiAgentScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
         Person selected = preparationPerson();
         AiAgentRun run = createRuntimeThree(selected, "mission_confirm_source_changed");
         execute(run);
+        assertEquals("queued", runs.getRun(workspaceId(), run.getId()).getStatus());
         jdbc.update("UPDATE person SET title='Changed before continuation' WHERE workspace_id=? AND id=?", workspaceId(), selected.getId());
         execute(runs.getRun(workspaceId(), run.getId()));
         assertAttempts(4, 4);
@@ -187,6 +191,7 @@ class AiAgentScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
     void approvalReportsIndependentPartialOutcomes() {
         AiAgentRun run = createRuntimeThree(preparationPerson(), "mission_confirm_partial");
         execute(run);
+        assertEquals("queued", runs.getRun(workspaceId(), run.getId()).getStatus());
         useFollowup("mission_confirm_partial", "mission_confirm_fields_followup");
         execute(runs.getRun(workspaceId(), run.getId()));
         assertAttempts(7, 7);
@@ -221,12 +226,15 @@ class AiAgentScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
         });
         execute(staged);
         assertAttempts(4, 3);
+        assertTrue(stopped.get(), "the cancellation hook must run before the final dispatch");
+        assertEquals("cancelled", runs.getRun(workspaceId(), staged.getId()).getStatus());
         assertEquals(0, count("SELECT COUNT(*) FROM ai_chat_tool_call WHERE workspace_id=? AND mission_run_id=? AND proposal_origin='mission' AND status='proposed'", workspaceId(), staged.getId()));
         AiAgentRun frozen = createRuntimeThree(preparationPerson(), "mission_confirm_cancel");
         execute(frozen);
         authenticate();
         try {
             var waiting = runs.getRun(workspaceId(), frozen.getId());
+            assertEquals("waiting_approval", waiting.getStatus());
             persistence.control(waiting, waiting.getStateVersion(), "cancel");
         } finally {
             clearAuthentication();
@@ -834,8 +842,8 @@ class AiAgentScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
 
     private void assertAttempts(int recorded, int dispatched) {
         assertTrue(recorded < 64, "the bounded journal must retain every request in this isolated trajectory");
-        assertEquals(recorded, journal().recorded().size());
-        assertEquals(dispatched, journal().dispatched().size());
+        assertEquals(recorded, journal().recorded().size(), "recorded provider requests");
+        assertEquals(dispatched, journal().dispatched().size(), "dispatched provider requests");
     }
 
     private void assertNoEffects(AiAgentRun run) {

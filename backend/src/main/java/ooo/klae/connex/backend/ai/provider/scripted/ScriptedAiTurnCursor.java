@@ -70,6 +70,9 @@ public record ScriptedAiTurnCursor(
     /** Opening sentence of the loop's server-authored closing directive. */
     private static final String CLOSING_MARKER = "You have no investigation steps left.";
 
+    /** Opening sentence of the loop's server-authored checkpoint-or-report directive. */
+    private static final String MISSION_CLOSING_MARKER = "This is the last decision of this segment.";
+
     public ScriptedAiTurnCursor {
         Objects.requireNonNull(selector, "selector");
         if (completedToolCalls < 0) {
@@ -153,9 +156,11 @@ public record ScriptedAiTurnCursor(
      */
     private static boolean isClosing(List<AiMessage> messages) {
         for (AiMessage message : messages) {
-            if (isServerAuthoredDirective(message)
-                    && message.content().strip().startsWith(CLOSING_MARKER)) {
-                return true;
+            if (isServerAuthoredDirective(message)) {
+                String content = message.content().strip();
+                if (content.startsWith(CLOSING_MARKER) || content.startsWith(MISSION_CLOSING_MARKER)) {
+                    return true;
+                }
             }
         }
         return false;

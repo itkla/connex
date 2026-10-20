@@ -9,6 +9,8 @@ import { activeWorkspaceId, configureScriptedAiProvider, csrfBootstrap, register
 import { useLocale } from './support/locale';
 import { message } from './support/messages';
 
+test.use({ storageState: { cookies: [], origins: [] } });
+
 function positiveId(value: unknown): number {
     if (typeof value !== 'object' || value === null || !('id' in value)
         || typeof value.id !== 'number' || !Number.isSafeInteger(value.id) || value.id <= 0) {
@@ -48,13 +50,10 @@ async function enrollPasskey(page: Page, password: string): Promise<() => Promis
 }
 
 for (const locale of ['en', 'ja'] as const) {
-    test(`scripted mission prepares, reloads and independently applies or discards changes in ${locale} @mobile`, async ({ browser }, testInfo) => {
+    test(`scripted mission prepares, reloads and independently applies or discards changes in ${locale} @mobile`, async ({ page, context }, testInfo) => {
         test.setTimeout(180_000);
         const t = createTranslator({ locale, messages: locale === 'en' ? enCommon : jaCommon, namespace: 'AskConnex' });
-        const context = await browser.newContext({ storageState: { cookies: [], origins: [] },
-            baseURL: testInfo.project.use.baseURL, reducedMotion: 'reduce', locale: 'en-US', timezoneId: 'UTC' });
         const errors: string[] = [];
-        const page = await context.newPage();
         page.on('pageerror', (error) => errors.push(error.message));
         page.on('console', (entry) => { if (entry.type() === 'error') errors.push(entry.text()); });
         let cleanup: (() => Promise<void>) | null = null;
@@ -169,8 +168,12 @@ for (const locale of ['en', 'ja'] as const) {
             await page.getByRole('menuitem').filter({ hasText: destinationName }).click();
             await expect(page).toHaveURL(/\/dashboard$/);
             await expect(page.getByText('Negotiation', { exact: true })).toHaveCount(0);
-            const signedOut = await api.post('/api/auth/logout', { headers: { [csrf.headerName]: csrf.token } });
-            expect(signedOut.ok()).toBe(true);
+            await page.goto('/auth/logout');
+            const signedOut = page.waitForResponse((response) => response.request().method() === 'POST'
+                && response.url().endsWith('/api/auth/logout'));
+            await page.getByRole('button', { name: message(locale, 'auth', 'AuthLogout.confirm'), exact: true }).click();
+            expect((await signedOut).ok()).toBe(true);
+            await expect(page).toHaveURL(/\/$/);
             await registerUser(api, { username: `e2e_mission_other_${unique}`,
                 email: `e2e_mission_other_${unique}@example.com`, password });
             await page.goto('/ask-connex');
@@ -179,7 +182,6 @@ for (const locale of ['en', 'ja'] as const) {
             expect(errors).toEqual([]);
         } finally {
             if (cleanup) await cleanup();
-            await context.close();
         }
     });
 }
