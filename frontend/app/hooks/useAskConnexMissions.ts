@@ -122,6 +122,7 @@ export function useAskConnexMissions({
             pollTimerRef.current = null;
         }
         const revision = ++refreshRef.current;
+        const outputView = outputViewRef.current;
         try {
             let page = await getAiAgentRuns({ sessionId, limit: 20 }, { signal });
             const runs = [...page.items];
@@ -163,7 +164,7 @@ export function useAskConnexMissions({
                 invalidatedRef.current?.(sessionId);
             } else if (outputChanged && outputRun) {
                 const output = await getAiAgentOutput(outputRun.id, { signal });
-                if (!signal.aborted && revision === refreshRef.current) {
+                if (!signal.aborted && revision === refreshRef.current && outputView === outputViewRef.current) {
                     setSnapshot((previous) => previous?.key === key && previous.runs.some((run) =>
                         run.id === output.runId && run.outputRevision === output.outputRevision && !run.contentWithheld)
                         ? { ...previous, output } : previous);

@@ -146,7 +146,7 @@ class AiAgentScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
         AiAgentRun run = createRuntimeThree(preparationPerson(), "mission_confirm_replay");
         execute(run);
         var original = boundActions(run).getFirst();
-        useFollowup("mission_confirm_replay", "mission_confirm_replay_followup");
+        useFollowup("mission_confirm_replay", "mission_confirm_followup_replay");
         execute(runs.getRun(workspaceId(), run.getId()));
         assertAttempts(7, 7);
         var replayed = boundActions(run).getFirst();

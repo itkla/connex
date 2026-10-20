@@ -29,6 +29,29 @@ import ooo.klae.connex.backend.services.WorkspaceService;
 class AiAgentCapabilityGateTest {
 
     @Test
+    void trajectoryProfileDeclaresEveryScriptedMissionModel() throws Exception {
+        var environment = new org.springframework.core.env.StandardEnvironment();
+        var configuration = AiAgentScriptedTrajectoryTest.class.getAnnotation(
+                org.springframework.test.context.TestPropertySource.class);
+        org.springframework.test.context.support.TestPropertySourceUtils.addInlinedPropertiesToEnvironment(
+                environment, configuration.properties());
+        var bound = org.springframework.boot.context.properties.bind.Binder.get(environment).bind(
+                "connex.ai", org.springframework.boot.context.properties.bind.Bindable.of(AiProperties.class)).get();
+        var trajectoryGate = new AiAgentCapabilityGate(bound, initializer, featureGate, invocation,
+                providers, governance, workspaces);
+        var directory = java.nio.file.Path.of(java.util.Objects.requireNonNull(
+                getClass().getResource("/ai/scripted")).toURI()).resolve(environment.getRequiredProperty(
+                        "connex.test.scripted-fixture-subdirectory"));
+        var loader = new ooo.klae.connex.backend.ai.provider.scripted.ScriptedAiScriptLoader(
+                directory.toString(), tools.jackson.databind.json.JsonMapper.builder().build());
+        assertEquals(2, bound.getMissionCapabilities().size());
+        for (var script : loader.scripts()) {
+            assertDoesNotThrow(() -> trajectoryGate.requireTarget(target(
+                    "openai_compatible", "https://scripted.invalid/v1", script.capabilityClass().modelId())));
+        }
+    }
+
+    @Test
     void browserStackBindsItsExactScriptedMissionCapability() throws Exception {
         Object document = new org.yaml.snakeyaml.Yaml().load(java.nio.file.Files.readString(
                 java.nio.file.Path.of("../.github/workflows/ci.yml")));

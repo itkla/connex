@@ -127,7 +127,13 @@ for (const locale of ['en', 'ja'] as const) {
             await useLocale(context, locale);
             await page.emulateMedia({ colorScheme: locale === 'ja' ? 'dark' : 'light' });
             await page.goto('/me');
-            await page.locator(`a[href='/ask-connex/${sessionId}?mission=${runId}']`).first().click();
+            const missionLink = page.locator(`a[href='/ask-connex/${sessionId}?mission=${runId}']`);
+            if (testInfo.project.use.isMobile) {
+                await page.getByRole('button').filter({ hasText: message(locale, 'common', 'AskConnex.missions.preparation.title') }).click();
+                await page.getByRole('dialog').locator(`a[href='/ask-connex/${sessionId}?mission=${runId}']`).first().click();
+            } else {
+                await missionLink.first().click();
+            }
             const review = page.getByRole('dialog', { name: message(locale, 'common', 'AskConnex.missions.preparation.outputTitle') });
             await expect(review).toBeVisible();
             await expect(review.getByText('Negotiation', { exact: true })).toBeVisible();
@@ -154,6 +160,11 @@ for (const locale of ['en', 'ja'] as const) {
             expect(afterDiscard).not.toHaveProperty('ownerId');
             await page.keyboard.press('Escape');
             await expect(review).toHaveCount(0);
+            if (testInfo.project.use.isMobile) {
+                await page.getByRole('button', { name: message(locale, 'common', 'AskConnex.closeWorkspace') }).click();
+                await expect(page).toHaveURL(/\/dashboard$/);
+                await page.getByRole('button', { name: message(locale, 'common', 'CommonContentShell.showSidebar') }).click();
+            }
             await page.getByRole('button', { name: message(locale, 'workspace', 'WorkspaceSwitcher.switchAria') }).click();
             await page.getByRole('menuitem').filter({ hasText: destinationName }).click();
             await expect(page).toHaveURL(/\/dashboard$/);

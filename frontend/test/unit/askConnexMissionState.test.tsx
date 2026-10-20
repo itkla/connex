@@ -138,6 +138,43 @@ describe('Ask Connex durable mission state', () => {
         await mounted.unmount();
     });
 
+    it('keeps output closed when a canonical refresh finishes after dismissal', async () => {
+        const output = missionProposalOutput();
+        const available = run({ missionType: 'record_preparation_v1', state: 'waiting_approval', outputAvailable: true,
+            outputRevision: '3', proposalMembershipRevision: '2', availableActions: ['cancel', 'view_output'] });
+        api.getAiAgentRuns.mockResolvedValue({ items: [available], nextCursor: null });
+        api.getAiAgentOutput.mockResolvedValue(output);
+        const mounted = await mount();
+        await act(async () => mounted.current().viewOutput(available));
+        const canonical = deferred<AiAgentOutput>();
+        api.getAiAgentOutput.mockReturnValueOnce(canonical.promise);
+        await mounted.render('user:workspace', 1);
+        expect(api.getAiAgentOutput).toHaveBeenCalledTimes(2);
+        await act(async () => mounted.current().closeOutput());
+        await act(async () => canonical.resolve(output));
+        expect(mounted.current().output).toBeNull();
+        await mounted.unmount();
+    });
+
+    it('keeps output closed when dismissal and a pending list refresh settle together', async () => {
+        const output = missionProposalOutput();
+        const available = run({ missionType: 'record_preparation_v1', state: 'waiting_approval', outputAvailable: true,
+            outputRevision: '3', proposalMembershipRevision: '2', availableActions: ['cancel', 'view_output'] });
+        api.getAiAgentRuns.mockResolvedValue({ items: [available], nextCursor: null });
+        api.getAiAgentOutput.mockResolvedValue(output);
+        const mounted = await mount();
+        await act(async () => mounted.current().viewOutput(available));
+        const list = deferred<AiAgentRunPage>();
+        api.getAiAgentRuns.mockReturnValueOnce(list.promise);
+        await mounted.render('user:workspace', 1);
+        await act(async () => {
+            mounted.current().closeOutput();
+            list.resolve({ items: [available], nextCursor: null });
+        });
+        expect(mounted.current().output).toBeNull();
+        await mounted.unmount();
+    });
+
     it('withdraws private output immediately when a successful decision is followed by a withheld canonical read', async () => {
         const output = missionProposalOutput();
         const available = run({ missionType: 'record_preparation_v1', state: 'waiting_approval', outputAvailable: true,

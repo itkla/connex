@@ -183,7 +183,7 @@ import { LEAD_SOURCES } from '@/app/lib/contactProvenance';
 import { proposalReviewNow } from '@/app/lib/proposalReviewClock';
 import { createAiChatSocket } from '@/app/lib/realtime';
 import { workspaceUnavailableDescription } from '@/app/lib/errorMessages';
-import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
+import { renderedWorkspaceId, renderedWorkspaceNavigationVersion, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { formatDate, formatRelativeTime, formatUtcDateTime } from '@/app/lib/utils';
 import type {
@@ -601,6 +601,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const durableFollowerRef = useRef<number | null>(null);
     const workspaceReturnRef = useRef(false);
     const workspaceSessionIdRef = useRef(workspaceSessionId);
+    const workspaceRouteNavigationRef = useRef(renderedWorkspaceNavigationVersion());
 
     /** Cleanup-returning refs receive no null callback; React's ref type still requires nullability. */
     const registerDesktopRoot = useCallback((node: HTMLElement | null) => {
@@ -835,7 +836,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
 
     useEffect(() => {
         workspaceSessionIdRef.current = workspaceSessionId;
-    }, [workspaceSessionId]);
+        workspaceRouteNavigationRef.current = renderedWorkspaceNavigationVersion();
+    }, [pathname, workspaceSessionId]);
 
     const turnActive = turn.phase === 'accepted' || turn.phase === 'running';
     const activeTurn = useMemo(
@@ -1630,7 +1632,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         sessionControllerRef.current?.abort();
         sessionControllerRef.current = null;
         const storedSessionId = parseStoredAskConnexSession(safeStorageGet(sessionKey));
-        const selectedSessionId = workspaceSessionIdRef.current ?? storedSessionId;
+        const selectedSessionId = workspaceRouteNavigationRef.current === renderedWorkspaceNavigationVersion()
+            ? workspaceSessionIdRef.current ?? storedSessionId : storedSessionId;
         const storedTurn = parseStoredAskConnexTurn(safeStorageGet(turnKey));
 
         const initialize = async () => {
@@ -1776,6 +1779,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
 
     useEffect(() => {
         if (!workspaceMode || stateIdentity !== identity || switching) return;
+        if (workspaceRouteNavigationRef.current !== renderedWorkspaceNavigationVersion()) return;
+        const navigationVersion = renderedWorkspaceNavigationVersion();
         if (activeTurn !== null) {
             const activeSessionId = activeSessionRef.current?.id ?? null;
             if (activeSessionId !== null && workspaceSessionId !== activeSessionId) {
@@ -1810,6 +1815,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 if (detail?.activeTurn) void followDurableTurn(detail.activeTurn, signal);
             } catch (error) {
                 if (signal.aborted) return;
+                if (navigationVersion !== renderedWorkspaceNavigationVersion()) return;
                 if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
                     clearActiveSession();
                     router.replace('/ask-connex');
