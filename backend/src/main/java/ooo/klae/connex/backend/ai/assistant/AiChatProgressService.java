@@ -41,6 +41,7 @@ public class AiChatProgressService {
     static final Set<String> PROGRESS_STATUSES = Set.of(
             "running", "proposed", "complete", "failed", "skipped", "timed_out", "cancelled");
 
+    private final AiChatPrivacyGuard privacyGuard;
     private final AiChatMapper chatMapper;
     private final ObjectMapper objectMapper;
     private final AiAssistantToolCatalog toolCatalog;
@@ -51,6 +52,12 @@ public class AiChatProgressService {
      */
     public AiChatTurnDto projectTurn(
             AiChatTurn turn, Integer viewerUserId, AiChatQueryScopeDto scope) {
+        if (turn.getPrivacyGeneration() == null || turn.getOrganizationPrivacyGeneration() <= 0) {
+            throw new AiAssistantLoopException("restrictions_changed", "restrictions_changed");
+        }
+        privacyGuard.requireCurrent(chatMapper, new AiChatPrivacyToken(turn.getWorkspaceId(), turn.getSessionId(),
+                turn.getPrivacyGeneration(), turn.getPrivacyTaintSeq(), privacyGuard.organizationId(turn.getWorkspaceId()),
+                turn.getOrganizationPrivacyGeneration()));
         List<AiChatToolCall> toolCalls = toolCalls(
                 turn.getWorkspaceId(), turn.getSessionId(), turn.getId());
         return AiChatTurnDto.from(
@@ -88,7 +95,7 @@ public class AiChatProgressService {
     private List<AiChatToolCall> toolCalls(int workspaceId, int sessionId, int turnId) {
         return chatMapper.listToolCallsByTurn(
                 workspaceId, sessionId, AiAssistantToolCallKey.turnPrefix(turnId),
-                AiChatAgentLoopService.MAX_TOOL_CALL_ROWS_PER_TURN);
+                AiChatAgentLoopService.MAX_TOOL_CALL_ROWS_PER_TURN, privacyGuard.currentGeneration(workspaceId));
     }
 
     private List<AiChatProgressItemDto> project(

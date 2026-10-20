@@ -276,7 +276,7 @@ export default function DataRequestsPanel({
                                             </DropdownMenuItem>
                                             {request.orgId === orgId && request.identityVerifiedAt && request.subjectPersonId && request.subjectWorkspaceId && request.snapshotToken ? (
                                                 <DropdownMenuItem onClick={() => { if (orgId !== null) setPurging({ orgId, request }); }}>
-                                                    {t("missionPurge.action")}
+                                                    {t("assistantPurge.action")}
                                                 </DropdownMenuItem>
                                             ) : null}
                                             {request.requestType === "disclosure" && (

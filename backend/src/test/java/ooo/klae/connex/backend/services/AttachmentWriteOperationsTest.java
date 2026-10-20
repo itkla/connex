@@ -66,12 +66,17 @@ class AttachmentWriteOperationsTest {
     @Mock private WorkspaceMapper workspaceMapper;
     @Mock private ShareMapper shareMapper;
 
+    private final ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService organizationAuthority =
+            mock(ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService.class);
+    private final ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard privacyGuard =
+            new ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard(organizationAuthority);
     private AttachmentWriteOperations operations;
 
     @BeforeEach
     void setUp() {
         operations = new AttachmentWriteOperations(
             attachmentMapper,
+            privacyGuard,
             aiChatMapper,
             companyMapper,
             personMapper,
@@ -327,7 +332,7 @@ class AttachmentWriteOperationsTest {
             new MalwareScanReport(MalwareScanVerdict.CLEAN, null, null, "test-database", false));
         StoredBinary stored = new StoredBinary(
             "/api/attachments/content/token.jpg", "image.jpg", "image/jpeg", content.length);
-        when(aiChatMapper.sessionExists(5, 43)).thenReturn(true);
+        when(aiChatMapper.sessionExists(5, 43, 1L)).thenReturn(true);
         when(managedObjectService.storeInspectedAttachment(5, scanned)).thenReturn(stored);
         AtomicReference<Attachment> insertedAttachment = new AtomicReference<>();
         doAnswer(invocation -> {
@@ -339,7 +344,14 @@ class AttachmentWriteOperationsTest {
         when(attachmentMapper.getCreatedById(5, 77))
             .thenAnswer(invocation -> insertedAttachment.get());
 
-        Attachment attachment = operations.uploadAssistantSession(5, 43, scanned, uploader);
+        when(organizationAuthority.organizationId(5)).thenReturn(1);
+        when(organizationAuthority.current(1)).thenReturn(1L);
+        Runnable privacyAdmission = mock(Runnable.class);
+        Attachment attachment = operations.uploadAssistantSession(5, 43, scanned, uploader, privacyAdmission);
+        var order = inOrder(managedObjectService, privacyAdmission, attachmentMapper);
+        order.verify(managedObjectService).storeInspectedAttachment(5, scanned);
+        order.verify(privacyAdmission).run();
+        order.verify(attachmentMapper).insert(any(Attachment.class));
 
         assertEquals(content.length, attachment.getSize());
         assertEquals("clean", attachment.getScanState());
@@ -386,7 +398,8 @@ class AttachmentWriteOperationsTest {
                 int.class,
                 int.class,
                 ScannedUpload.class,
-                User.class)
+                User.class,
+                Runnable.class)
             .getAnnotation(Transactional.class));
     }
 

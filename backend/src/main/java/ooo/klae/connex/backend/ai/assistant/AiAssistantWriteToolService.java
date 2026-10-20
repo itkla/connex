@@ -108,6 +108,7 @@ public class AiAssistantWriteToolService {
     private final AiAssistantToolCatalog toolCatalog;
     private final AiAssistantWriteToolRegistry writeToolRegistry;
     private final AiAssistantToolExecutor readToolExecutor;
+    private final AiChatPrivacyGuard privacyGuard;
     private final AiChatMapper chatMapper;
     private final WorkspaceService workspaceService;
     private final TaskService taskService;
@@ -469,7 +470,7 @@ public class AiAssistantWriteToolService {
         if (ooo.klae.connex.backend.ai.mission.AiAgentExecutionPolicy.forTurn(turn) != null) {
             throw new ConflictException("mission_control_required");
         }
-        AiChatPrivacyGuard.requireCurrent(chatMapper, turn.privacyToken());
+        privacyGuard.requireCurrent(chatMapper, turn.privacyToken());
         requireMutationAllowed(turn.workspaceId(), turn.userId());
         AuthorizedToolCall authorized = lockAuthorizedToolCall(
                 turn.workspaceId(), turn.userId(), turn.sessionId(), toolCallId, List.of());
@@ -519,7 +520,7 @@ public class AiAssistantWriteToolService {
                             turn.workspaceId(), turn.restrictionEpoch())) {
                         throw new AiAssistantLoopException("restrictions_changed", "restrictions_changed");
                     }
-                    AiChatPrivacyGuard.retain(chatMapper, authorized.privacyToken());
+                    privacyGuard.retain(chatMapper, authorized.privacyToken());
                 }));
         String resultJson = resultEnvelope(write, outcome, null);
         toolCall.setStatus(EXECUTED);
@@ -571,7 +572,7 @@ public class AiAssistantWriteToolService {
                             actor.workspaceId(), write.restrictionEpoch())) {
                         throw new ConflictException("Assistant proposal restrictions changed");
                     }
-                    AiChatPrivacyGuard.retain(chatMapper, authorized.privacyToken());
+                    privacyGuard.retain(chatMapper, authorized.privacyToken());
                 }));
         Map<String, Object> approval = new LinkedHashMap<>();
         approval.put("status", "approved");
@@ -654,7 +655,12 @@ public class AiAssistantWriteToolService {
         if (!write.tool().inverseAvailable()) {
             throw new ConflictException("Assistant tool has no owned inverse");
         }
-        PrivacyAdmission admission = new PrivacyAdmission(() -> retainPrivacy(authorized));
+        PrivacyAdmission admission = new PrivacyAdmission(() -> {
+            retainPrivacy(authorized);
+            if (clock.instant().isAfter(expiresAt)) {
+                throw new ConflictException("Assistant tool undo window has expired");
+            }
+        });
         write.tool().undo(
                 new Authority(
                         actor.workspaceId(), actor.userId(), toolCall.getId(), clock.instant()),
@@ -833,13 +839,13 @@ public class AiAssistantWriteToolService {
         if (toolCall.getMissionRunId() != null || !"reactive".equals(toolCall.getArtifactOrigin())) {
             throw new ConflictException("mission_control_required");
         }
-        AiChatPrivacyToken captured = AiChatPrivacyGuard.capture(chatMapper, session);
+        AiChatPrivacyToken captured = privacyGuard.capture(chatMapper, session);
         Long artifactGeneration = toolCall.getPrivacyGeneration() == null
                 ? session.getMissionTaintGeneration() : toolCall.getPrivacyGeneration();
         AiChatPrivacyToken token = new AiChatPrivacyToken(workspaceId, sessionId,
                 artifactGeneration == null ? captured.privacyGeneration() : artifactGeneration,
-                captured.taintSeqAtAdmission());
-        AiChatPrivacyGuard.requireCurrent(chatMapper, token);
+                captured.taintSeqAtAdmission(), privacyGuard.organizationId(workspaceId), toolCall.getOrganizationPrivacyGeneration());
+        privacyGuard.requireCurrent(chatMapper, token);
         return new AuthorizedToolCall(toolCall, authority, token, restrictionEpoch.current(workspaceId));
     }
 
@@ -848,7 +854,7 @@ public class AiAssistantWriteToolService {
                 authorized.privacyToken().workspaceId(), authorized.restrictionEpoch())) {
             throw new ConflictException("Assistant proposal restrictions changed");
         }
-        AiChatPrivacyGuard.retain(chatMapper, authorized.privacyToken());
+        privacyGuard.retain(chatMapper, authorized.privacyToken());
     }
 
     private void requireMutationAllowed(int workspaceId, int userId) {
@@ -888,9 +894,9 @@ public class AiAssistantWriteToolService {
     private PreliminaryPrincipals preliminaryPrincipals(
             Actor actor, int sessionId, int toolCallId) {
         AiChatSession session = chatMapper.getAccessibleSessionById(
-                actor.workspaceId(), actor.userId(), sessionId);
+                actor.workspaceId(), actor.userId(), sessionId, privacyGuard.currentGeneration(actor.workspaceId()));
         AiChatToolCall toolCall = chatMapper.getToolCallBySession(
-                actor.workspaceId(), sessionId, toolCallId);
+                actor.workspaceId(), sessionId, toolCallId, privacyGuard.currentGeneration(actor.workspaceId()));
         if (session == null || toolCall == null
                 || !Objects.equals(toolCall.getRequestedByUserId(), actor.userId())) {
             throw inaccessible();

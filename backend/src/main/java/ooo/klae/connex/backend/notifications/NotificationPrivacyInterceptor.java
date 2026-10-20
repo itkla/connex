@@ -1,0 +1,72 @@
+package ooo.klae.connex.backend.notifications;
+
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Supplier;
+
+import org.apache.ibatis.cache.CacheKey;
+import org.apache.ibatis.executor.Executor;
+import org.apache.ibatis.mapping.BoundSql;
+import org.apache.ibatis.mapping.MappedStatement;
+import org.apache.ibatis.plugin.Interceptor;
+import org.apache.ibatis.plugin.Intercepts;
+import org.apache.ibatis.plugin.Invocation;
+import org.apache.ibatis.plugin.Signature;
+import org.apache.ibatis.session.ResultHandler;
+import org.apache.ibatis.session.RowBounds;
+
+/** Binds fresh control authority to notification source predicates before filtering and pagination. */
+@Intercepts({
+    @Signature(type = Executor.class, method = "update", args = {MappedStatement.class, Object.class}),
+    @Signature(type = Executor.class, method = "query",
+            args = {MappedStatement.class, Object.class, RowBounds.class, ResultHandler.class}),
+    @Signature(type = Executor.class, method = "query",
+            args = {MappedStatement.class, Object.class, RowBounds.class, ResultHandler.class, CacheKey.class, BoundSql.class}),
+    @Signature(type = Executor.class, method = "queryCursor",
+            args = {MappedStatement.class, Object.class, RowBounds.class})
+})
+public final class NotificationPrivacyInterceptor implements Interceptor {
+    private static final String NAMESPACE = "ooo.klae.connex.backend.mappers.NotificationMapper.";
+    private static final Set<String> STATEMENTS = Set.of(
+            "findPage", "countPage", "countsByCategory", "countsBySeverity", "countsByWorkspace",
+            "getUnreadCounts", "getNextSnoozeExpiry", "getInboxCutoffId", "findById", "findByIdForUpdate",
+            "markRead", "markUnread", "dismiss", "restore", "restoreActionableApprovalRequest",
+            "restoreResolvedApprovalRequest", "snooze", "unsnooze", "markAllRead",
+            "findInaccessibleNotificationRecipientIds", "resolveInaccessibleNotifications");
+    private final Supplier<Map<Integer, Long>> authority;
+
+    /** Defers control mapper resolution until after SqlSessionFactory construction. */
+    public NotificationPrivacyInterceptor(Supplier<Map<Integer, Long>> authority) {
+        this.authority = java.util.Objects.requireNonNull(authority);
+    }
+
+    @Override
+    public Object intercept(Invocation invocation) throws Throwable {
+        Object[] arguments = invocation.getArgs();
+        MappedStatement statement = (MappedStatement) arguments[0];
+        String id = statement.getId();
+        if (!id.startsWith(NAMESPACE) || !STATEMENTS.contains(id.substring(NAMESPACE.length()))) {
+            return invocation.proceed();
+        }
+        if (!(arguments[1] instanceof Map<?, ?> source)) {
+            throw new IllegalStateException("Notification privacy parameters are unavailable");
+        }
+        Map<String, Object> parameters = new HashMap<>();
+        for (Map.Entry<?, ?> entry : source.entrySet()) {
+            if (!(entry.getKey() instanceof String key)) {
+                throw new IllegalStateException("Notification privacy parameter identity is invalid");
+            }
+            parameters.put(key, entry.getValue());
+        }
+        parameters.put("assistantWorkspaceGenerations", Map.copyOf(authority.get()));
+        arguments[1] = parameters;
+        if (arguments.length == 6) {
+            BoundSql bound = statement.getBoundSql(parameters);
+            arguments[5] = bound;
+            arguments[4] = ((Executor) invocation.getTarget()).createCacheKey(
+                    statement, parameters, (RowBounds) arguments[2], bound);
+        }
+        return invocation.proceed();
+    }
+}

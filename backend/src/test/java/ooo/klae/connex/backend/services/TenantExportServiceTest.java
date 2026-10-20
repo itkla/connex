@@ -108,10 +108,18 @@ class TenantExportServiceTest {
 
     private final TenantLifecycleProperties properties = new TenantLifecycleProperties();
     private final ObjectMapper objectMapper = JsonMapper.builder().build();
+    @Mock private ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService assistantPrivacyService;
+    @Mock private ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyPublicationGuard publicationGuard;
     private TenantExportService service;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws java.io.IOException {
+        lenient().when(assistantPrivacyService.current(org.mockito.ArgumentMatchers.anyInt())).thenReturn(1L);
+        lenient().doAnswer(call -> {
+            call.<ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyPublicationGuard.IoAction>getArgument(2).run();
+            return null;
+        }).when(publicationGuard).withCurrent(org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyLong(), any());
         service = new TenantExportService(
             orgMemberService,
             sessionSecurityService,
@@ -123,7 +131,8 @@ class TenantExportServiceTest {
             auditService,
             properties,
             objectMapper,
-            Clock.fixed(Instant.parse("2026-07-27T12:00:00Z"), ZoneOffset.UTC));
+            Clock.fixed(Instant.parse("2026-07-27T12:00:00Z"), ZoneOffset.UTC),
+            assistantPrivacyService, publicationGuard);
         lenient().doAnswer(invocation -> invocation.<Supplier<?>>getArgument(0).get())
             .when(tenantWorkScope).unrouted(any());
     }
@@ -144,6 +153,7 @@ class TenantExportServiceTest {
             properties,
             objectMapper,
             Clock.fixed(Instant.parse("2026-07-27T12:00:00Z"), ZoneOffset.UTC),
+            assistantPrivacyService, publicationGuard,
             nanoTime,
             admissionWait,
             deadlineExecutor);
@@ -249,6 +259,35 @@ class TenantExportServiceTest {
 
         verify(controlOperations).release(OPERATION_LEASE);
         verify(tenantWorkScope, times(2)).unrouted(any());
+    }
+
+    @Test
+    void invalidationCancelsActualZipWriteAndDeletesPrivateSpool() throws Exception {
+        stubStreamingRoute();
+        AtomicReference<Path> capturedSpool = new AtomicReference<>();
+        java.util.concurrent.atomic.AtomicInteger writes = new java.util.concurrent.atomic.AtomicInteger();
+        doAnswer(call -> {
+            if (writes.incrementAndGet() == 2) {
+                throw new IOException("Assistant content is no longer available");
+            }
+            call.<ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyPublicationGuard.IoAction>getArgument(2).run();
+            return null;
+        }).when(publicationGuard).withCurrent(eq(ORG_ID), eq(1L), any());
+        doAnswer(call -> {
+            Path spool = call.getArgument(2);
+            capturedSpool.set(spool);
+            java.util.zip.ZipOutputStream zip = call.getArgument(1);
+            zip.putNextEntry(new java.util.zip.ZipEntry("data/ai_chat_message.jsonl"));
+            zip.write("retained content".getBytes(StandardCharsets.UTF_8));
+            zip.closeEntry();
+            return new Snapshot(List.of(), 0);
+        }).when(snapshotTransaction).capture(eq(WORKSPACE_ID), any(), any(Path.class), any());
+        TenantExportDownload download = service.prepare(ORG_ID, WORKSPACE_ID, ACTOR_ID);
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        assertThrows(IOException.class, () -> download.writeTo(output));
+        assertFalse(Files.exists(capturedSpool.get()));
+        verify(controlOperations).release(OPERATION_LEASE);
+        assertFalse(output.toString(StandardCharsets.UTF_8).contains("manifest.json"));
     }
 
     @Test
@@ -551,7 +590,8 @@ class TenantExportServiceTest {
 
         assertTrue(input.closed());
         assertTrue(releasedAfterClose.get());
-        assertFalse(entryNames(output.toByteArray()).contains("manifest.json"));
+        assertThrows(IOException.class, () -> entryNames(output.toByteArray()));
+        assertFalse(output.toString(StandardCharsets.ISO_8859_1).contains("manifest.json"));
     }
 
     @ParameterizedTest

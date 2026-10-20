@@ -229,6 +229,17 @@
         SELECT 1 FROM ai_chat_session source_session
         WHERE source_session.workspace_id = n.workspace_id
           AND source_session.id = n.source_id
+          AND
+          <choose>
+            <when test="assistantWorkspaceGenerations != null and !assistantWorkspaceGenerations.isEmpty()">
+              <foreach collection="assistantWorkspaceGenerations" index="privacyWorkspaceId" item="privacyGeneration"
+                  open="(" separator=" OR " close=")">
+                (source_session.workspace_id = #{privacyWorkspaceId}
+                  AND source_session.organization_privacy_generation = #{privacyGeneration})
+              </foreach>
+            </when>
+            <otherwise>FALSE</otherwise>
+          </choose>
           AND (source_session.mission_taint_generation IS NULL OR EXISTS (
             SELECT 1 FROM ai_agent_privacy_barrier source_barrier
             WHERE source_barrier.workspace_id = source_session.workspace_id

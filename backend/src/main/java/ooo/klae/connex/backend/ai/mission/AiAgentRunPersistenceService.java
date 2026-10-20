@@ -54,6 +54,7 @@ import tools.jackson.databind.ObjectMapper;
 @RequiredArgsConstructor
 public class AiAgentRunPersistenceService {
     private final AiAgentRunMapper runs;
+    private final AiChatPrivacyGuard privacyGuard;
     private final AiChatMapper chat;
     private final WorkspaceService workspaces;
     private final AiRestrictionEpoch restriction;
@@ -74,6 +75,9 @@ public class AiAgentRunPersistenceService {
         AiChatSession session = lockSession(workspaceId, owner, sessionId);
         AiAgentRun existing = runs.findByRequestKey(workspaceId, owner, request.clientRequestKey());
         if (existing != null) {
+            privacyGuard.retain(chat, new AiChatPrivacyToken(workspaceId, sessionId,
+                    existing.getPrivacyGeneration(), session.getMissionTaintSeq(),
+                    privacyGuard.organizationId(workspaceId), existing.getOrganizationPrivacyGeneration()));
             if (existing.getPurgedAt() != null) {
                 throw new AiAgentGoneException("mission_purged");
             }
@@ -89,7 +93,7 @@ public class AiAgentRunPersistenceService {
         if (barrier == null || barrier.isBlocked()) {
             throw new AiAgentUnavailableException();
         }
-        AiChatPrivacyToken captured = AiChatPrivacyGuard.capture(chat, session);
+        AiChatPrivacyToken captured = privacyGuard.capture(chat, session);
         int sequence = chat.nextMessageSequence(workspaceId, sessionId);
         if (session.getMissionTaintSeq() == null) {
             if (chat.taintSession(workspaceId, sessionId, captured.privacyGeneration(), sequence) != 1) {
@@ -99,7 +103,7 @@ public class AiAgentRunPersistenceService {
             session.setMissionTaintGeneration(captured.privacyGeneration());
         }
         AiChatPrivacyToken token = new AiChatPrivacyToken(workspaceId, sessionId,
-                captured.privacyGeneration(), session.getMissionTaintSeq());
+                captured.privacyGeneration(), session.getMissionTaintSeq(), privacyGuard.organizationId(workspaceId), captured.organizationPrivacyGeneration());
         AiAgentRun run = new AiAgentRun();
         run.setWorkspaceId(workspaceId);
         run.setSessionId(sessionId);
@@ -116,6 +120,7 @@ public class AiAgentRunPersistenceService {
         run.setStatus("queued");
         run.setStateVersion(1);
         run.setPrivacyGeneration(token.privacyGeneration());
+        run.setOrganizationPrivacyGeneration(token.organizationPrivacyGeneration());
         run.setMaxSteps(request.limits().maxSteps());
         run.setMaxTokens(request.limits().maxTokens());
         run.setNextAttemptAt(now());
@@ -155,8 +160,8 @@ public class AiAgentRunPersistenceService {
             throw new ConflictException("mission_session_busy");
         }
         AiChatPrivacyToken token = new AiChatPrivacyToken(workspaceId, sessionId,
-                run.getPrivacyGeneration(), session.getMissionTaintSeq());
-        AiChatPrivacyGuard.requireCurrent(chat, token);
+                run.getPrivacyGeneration(), session.getMissionTaintSeq(), privacyGuard.organizationId(workspaceId), run.getOrganizationPrivacyGeneration());
+        privacyGuard.requireCurrent(chat, token);
         Snapshot snapshot = codec.decode(run);
         if (snapshot != null) {
             codec.validateExecutable(run, snapshot);
@@ -177,6 +182,7 @@ public class AiAgentRunPersistenceService {
         turn.setRequestedByUserId(owner);
         turn.setStatus("running");
         turn.setPrivacyGeneration(token.privacyGeneration());
+        turn.setOrganizationPrivacyGeneration(token.organizationPrivacyGeneration());
         turn.setPrivacyTaintSeq(token.taintSeqAtAdmission());
         chat.insertTurn(turn);
         AiAgentSegment segment = new AiAgentSegment();
@@ -187,6 +193,7 @@ public class AiAgentRunPersistenceService {
         segment.setAttemptNo(attempts + 1);
         segment.setExecutionGeneration(run.getExecutionGeneration());
         segment.setPrivacyGeneration(run.getPrivacyGeneration());
+        segment.setOrganizationPrivacyGeneration(run.getOrganizationPrivacyGeneration());
         segment.setStatus("running");
         var reservation = budget.reserve(run, logicalSegment, clock.instant());
         segment.setReservedSteps(reservation.steps());
@@ -228,13 +235,13 @@ public class AiAgentRunPersistenceService {
     /** Current-state nonlocking execution predicate, safe inside dispatch/publication fences. */
     public void requireRunning(AiAgentExecutionPolicy policy) {
         AiChatQueuedTurn turn = policy.turn();
-        AiChatPrivacyGuard.requireCurrent(chat, turn.privacyToken());
+        privacyGuard.requireCurrent(chat, turn.privacyToken());
         AiAgentRun run = runs.getRun(turn.workspaceId(), policy.runId());
         requireIdentity(run, policy);
         if (!clock.instant().isBefore(policy.deadline())) {
             throw new AiAssistantLoopException("mission_expired", "mission_expired");
         }
-        AiChatSession session = chat.getAccessibleSessionById(turn.workspaceId(), turn.userId(), turn.sessionId());
+        AiChatSession session = chat.getAccessibleSessionById(turn.workspaceId(), turn.userId(), turn.sessionId(), privacyGuard.currentGeneration(turn.workspaceId()));
         if (!workspaces.isMember(turn.workspaceId(), turn.userId()) || session == null
                 || session.getCreatedByUserId() == null
                 || !workspaces.isMember(turn.workspaceId(), session.getCreatedByUserId())) {
@@ -395,6 +402,7 @@ public class AiAgentRunPersistenceService {
         call.setMissionRunId(policy.runId());
         call.setArtifactOrigin("mission");
         call.setPrivacyGeneration(policy.turn().privacyToken().privacyGeneration());
+        call.setOrganizationPrivacyGeneration(policy.turn().privacyToken().organizationPrivacyGeneration());
         call.setToolName(name);
         call.setStatus("executed");
         call.setArgumentsJson(arguments);
@@ -445,6 +453,7 @@ public class AiAgentRunPersistenceService {
         call.setMissionRunId(policy.runId());
         call.setArtifactOrigin("mission");
         call.setPrivacyGeneration(policy.turn().privacyToken().privacyGeneration());
+        call.setOrganizationPrivacyGeneration(policy.turn().privacyToken().organizationPrivacyGeneration());
         call.setToolName(name);
         call.setStatus("proposed");
         call.setArgumentsJson(arguments);
@@ -530,7 +539,7 @@ public class AiAgentRunPersistenceService {
                 throw new ConflictException("mission_attempt_limit");
             }
             var token = new AiChatPrivacyToken(run.getWorkspaceId(), run.getSessionId(), run.getPrivacyGeneration(),
-                    session.getMissionTaintSeq());
+                    session.getMissionTaintSeq(), privacyGuard.organizationId(run.getWorkspaceId()), run.getOrganizationPrivacyGeneration());
             long version = run.getStateVersion();
             run.setStatus("queued");
             run.setReasonCode(null);
@@ -684,7 +693,7 @@ public class AiAgentRunPersistenceService {
             return false;
         }
         var token = new AiChatPrivacyToken(run.getWorkspaceId(), run.getSessionId(), run.getPrivacyGeneration(),
-                session.getMissionTaintSeq());
+                session.getMissionTaintSeq(), privacyGuard.organizationId(run.getWorkspaceId()), run.getOrganizationPrivacyGeneration());
         long version = run.getStateVersion();
         run.setStatus("queued");
         run.setReasonCode(null);
@@ -719,7 +728,7 @@ public class AiAgentRunPersistenceService {
         if (requireOpenDeadline && !clock.instant().isBefore(policy.deadline())) {
             throw new AiAssistantLoopException("mission_expired", "mission_expired");
         }
-        AiChatPrivacyGuard.requireCurrent(chat, turn.privacyToken());
+        privacyGuard.requireCurrent(chat, turn.privacyToken());
         return run;
     }
 
@@ -801,6 +810,7 @@ public class AiAgentRunPersistenceService {
                     && (!"shared".equals(session.getVisibility()) || !chat.isParticipant(workspaceId, sessionId, owner)))) {
             throw new ResourceNotFoundException("Mission session inaccessible");
         }
+        privacyGuard.capture(chat, session);
         return session;
     }
 
@@ -858,6 +868,7 @@ public class AiAgentRunPersistenceService {
         message.setMissionRunId(run.getId());
         message.setMissionMessageKind(kind);
         message.setPrivacyGeneration(run.getPrivacyGeneration());
+        message.setOrganizationPrivacyGeneration(run.getOrganizationPrivacyGeneration());
         message.setSeq(seq);
         message.setAuthorKind(author);
         message.setContent(content);
@@ -875,7 +886,7 @@ public class AiAgentRunPersistenceService {
         if (!restriction.retainReadFenceUntilTransactionCompletionIfCurrent(token.workspaceId(), epoch)) {
             throw new AiAssistantLoopException("restrictions_changed", "restrictions_changed");
         }
-        AiChatPrivacyGuard.retain(chat, token);
+        privacyGuard.retain(chat, token);
     }
 
     private LocalDateTime now() {

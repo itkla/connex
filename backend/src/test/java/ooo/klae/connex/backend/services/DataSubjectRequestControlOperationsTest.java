@@ -78,7 +78,8 @@ class DataSubjectRequestControlOperationsTest {
             auditService,
             sessionSecurityService,
             missionPurgeMapper,
-            json);
+            json, org.mockito.Mockito.mock(ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService.class),
+            org.mockito.Mockito.mock(ooo.klae.connex.backend.ai.AiRestrictionEpoch.class));
         lenient().when(userMapper.lockByIdForShare(ACTOR_ID)).thenReturn(ACTOR_ID);
     }
 

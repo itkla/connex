@@ -209,6 +209,10 @@ same frontend files through its normal sync script.
 
 ## Privacy authority
 
+Organization authority is unconditional after V237, including for never-tainted chats. The
+workspace-generation and taint rules below govern the additional mission-v1 namespace; they do not
+exempt any chat from organization invalidation. See [the all-chat contract](#organization-wide-assistant-privacy-v236v237).
+
 Each workspace owns one `ai_agent_privacy_barrier`. Its generation is durable and
 monotonic. A missing barrier fails closed. Runtime generation and revision values use
 positive Java `long` values and refuse increments at `Long.MAX_VALUE`, conservatively
@@ -221,14 +225,14 @@ allocates through the session's durable `message_seq_high_water`; deleting messa
 not lower it. Generated chat holdings in a tainted session are enrolled in privacy
 cleanup, including titles, summaries, partials, progress, tools, and source notifications.
 A user message is enrolled when mission-owned or its immutable sequence is at or above
-the taint boundary. Earlier ordinary user input remains unchanged.
+the taint boundary. Earlier ordinary user input remains unchanged under v1 work. V2 work erases the whole affected session.
 
 Every execution retains its original generation and captured taint sequence. Current
 privacy requires an unchanged taint identity, the current unblocked barrier generation,
 current access, and an unwithheld mission source. Reader predicates apply before physical
 erasure, including ordinary transcript, retained content, notification sources, and tenant
 export. Transcript detail reads use READ COMMITTED, lock the actor/workspace/organization audit parents
-shared before barrier S, append strict read audits after the barrier, and retain it through projection. They flush the
+shared before organization S and workspace barrier S, append strict read audits afterward, and retain both through projection. They flush the
 mapper cache at that lock, and reload session metadata afterward. Ordinary turn polling likewise holds
 barrier S through partial, progress, and scope DTO construction, with fresh provenance validation
 after acquiring the barrier. Admission retains audit parents early and appends its audit only after
@@ -238,14 +242,14 @@ partials replace local text exactly. Withdrawal invalidates mission output snaps
 Export residual counting remains unconditional: privacy filtering cannot hide
 remaining rows from teardown verification.
 
-Restrictions invalidate all workspaces in the affected organization in the same
-transaction as the person mutation. Existing authorization and person roots precede
-stripe-ordered local write fences; exact workspace barriers lock in ascending order,
-then work rows are inserted. No mission/session locks are acquired by invalidation.
-Current placement must agree for every workspace. Tenant routing is installed before the
-transaction starts; in-transaction control-mapper reads revalidate placement on the same connection
-without switching the tenant work scope. Clearing a person restriction never
-revives old content.
+New person restrictions advance organization authority and create durable all-chat operations and
+workspace intents in the person mutation transaction. Authorization and person roots precede local
+restriction stripes, the publication write fence and organization X. Invalidation acquires no chat
+roots and does not advance or block workspace barriers. Organization authority covers omitted
+workspaces immediately; routed reconciliation installs v2 work afterward. Explicit v1 operations
+retain ascending workspace-barrier X before their work rows and preserve their original cutoffs.
+Placement is installed before routed transactions; control locks use the same transaction-bound
+connection. Clearing a restriction never revives retired content.
 
 ## Bounded erasure
 
@@ -257,7 +261,7 @@ revision and integer keyset cursors advance in the same transaction as deletion.
 
 The run phase permanently withholds content, invalidates execution authority, settles
 reserved allowance conservatively, severs report/active pointers, detaches terminal
-attempts, deletes turn/segment children, and retains a minimal consumed-key tombstone. All nine continuation fields clear to null/zero.
+attempts, detaches terminal-turn segment references before deleting segments, and retains a minimal consumed-key tombstone. All nine continuation fields clear to null/zero.
 A shared run-residual predicate enrolls continuation JSON, schema versions, revisions and
 cursor both in bounded discovery and unconditional final verification. Purged rows with
 residue are repaired without decoding their content; runtime-2 inventories up to 24
@@ -265,30 +269,34 @@ attempts remain erasable. Existing table-based lifecycle/export/DSR/account-eras
 covers these columns; tenant teardown counts remain unconditional. Before serializing an
 unpurged mission export row, validate its versioned continuation; malformed/unsupported
 content aborts the artifact. Tombstones must match the erased shape.
-The session phase settles ordinary active turns, removes tool payloads and enrolled
-messages, removes terminal turns, resets generated titles to the static Ask Connex title,
-recomputes preview timing, and removes notification/brief projections. Deletion batches
+The session phase settles active turns, drains tool children and proposal parents before messages
+and terminal turns, and removes notification/brief projections. V1 preserves reusable sessions and
+pre-taint input while resetting generated titles and preview timing. V2 also drains chat files with
+durable object disposition, then deletes affected sessions and participants. Deletion batches
 contain at most 100 rows; a settlement transaction handles one leased subject.
 
 Mutation order follows [the global locking rule](LOCKING.md#global-privacy-restriction-and-audit-order):
-session/run/content roots, domain roots if any, restriction fences if needed, barrier S,
-exact work X, audit head if needed, lease last. No barrier or restriction fence follows an audit
-head or lease. Existing authority-parent contracts remain unchanged. Initializers and completion hold barrier X without acquiring content roots afterward.
+session/run/proposal-parent/tool/turn/segment roots, domain/storage roots, local restriction and
+publication fences, organization authority, ascending workspace barriers, operation/placement/work
+rows, audit heads, then leases last. Privacy authority never follows an audit head or lease.
+Initialization and completion acquire no content/domain roots after privacy locks.
 Discovery occurs outside the transaction. Changed work revisions abort a stale batch.
 Failure preserves blocking and schedules metadata-only retries from one second up to
 five minutes; exception payloads are not persisted.
 
-Completion takes barrier X then exact work X and performs fresh residual queries without
-watermark or cursor limits. A work item completes only with zero residuals. Unblocking
-also requires every work item complete and no enrolled residual below the current
-barrier generation. Completion of an older operation cannot clear a newer invalidation.
+V1 completion retains organization S, then workspace barrier X and exact work X and performs uncapped residual queries.
+Unblocking requires all v1 work complete and no v1 residual below the current workspace generation.
+V2 retains organization authority before workspace S and its exact operation/work rows; completion
+requires uncapped all-chat/object/lease verification and reconciled placement receipts. It never
+unblocks the v1 barrier. Older completion cannot complete or clear a newer organization operation.
 
 ## Authorized DSR execution
 
 A workflow status change never initiates deletion. Organization administrators explicitly
 POST to `/api/orgs/{orgId}/data-subject-requests/{requestId}/mission-holdings-purge`.
-First acceptance requires recent authentication, identity verification, a linked subject,
-a current full-state `dsr1` snapshot token, a UUID key, and both exact acknowledgments:
+Both versions retain recent authentication, identity verification, linked-subject proof, the current
+full-state `dsr1` snapshot and UUID key requirements. New browser submissions use v2, described in
+[the all-chat contract](#organization-wide-assistant-privacy-v236v237). The original v1 pair remains:
 
 - `organization_mission_holdings_v1`
 - `contents_at_each_workspace_first_invalidation_v1`
@@ -300,11 +308,12 @@ submitted snapshot.
 
 C1 reuses the linked-person proof and ordered control roots, serializes on the request,
 and strictly appends the immutable acceptance envelope to the organization audit ledger.
-The envelope contains only operation/key/request IDs, fixed policy identifiers, frozen
-workspace IDs, schema version, and acceptance time. Stored JSON must equal the accepted
+The v1 envelope contains only operation/key/request IDs, fixed policy identifiers, frozen workspace
+IDs, schema version and acceptance time. V2 adds decimal organization cutoff/invalidated generations
+and creates its organization operation/intents in C1 before the strict acceptance audit. Stored JSON must equal the accepted
 metadata after audit sanitization or the transaction aborts.
 
-T1 runs after C1 commits. It uses only the frozen workspace list; each workspace installs
+T1 runs after C1 commits. V1 uses only its frozen workspace list; each workspace installs
 its cutoff exactly once under `(workspace_id,operation_key)` and operation fingerprint.
 Initiation attempts T1 synchronously before projecting progress. C1's reserved linked-person
 session owns an independent routed JDBC connection, so a surrounding nontransactional Spring
@@ -314,29 +323,31 @@ accepted authority; they do not require workspace membership. Progress reads ope
 READ COMMITTED transactions after placement installation, including scheduled recovery after
 control-ledger enumeration, and lifecycle progress continues to use lifecycle placement. Initiation and
 scheduled recovery failures log the recovery job name and exception class without exception payloads.
-T2 is the bounded privacy worker. C2 strictly records completion only after all accepted
-workspaces have completed residual-verified work. Recovery scans the acceptance ledger
+T2 is the bounded privacy worker. C2 strictly records completion after residual-verified work
+for the v1 accepted list or reconciled v2 placement coverage, including managed-object evidence. Recovery scans the acceptance ledger
 in bounded keyset pages. It does not reauthorize against mutable subject linkage or the
 initiating administrator's later membership. API replays and progress reads still require
 current administrator access.
 
-The cutoff is established at each workspace's first T1 invalidation, not at control
-acceptance. Workspaces created afterward are excluded. Domain records and effects are
+For v1, the cutoff is established at each workspace's first T1 invalidation, and later workspaces
+are excluded. V2 fixes the organization cutoff at C1; initial workspace IDs are discovery only and
+later-discovered old-generation holdings remain covered. New current-generation chats are excluded. Domain records and effects are
 not reversed. Missing lifecycle completion evidence is a refusal, never invented success. The current
 teardown flow verifies residuals but deletes its final cleanup marker without retaining a
 durable success receipt. An accepted DSR operation whose workspace disappears therefore
 remains incomplete and refuses projection/recovery instead of reporting erased holdings.
 #2101 must track a reviewed durable supersession contract and verified operator recovery;
 missing roots or work rows cannot be used as a completion signal.
-Acceptance/completion ledger records and operation tombstones must remain available until
+V1 acceptance/completion records and operation tombstones must remain available until
 workspace teardown; audit retention must preserve these records if introduced later.
 
 ## Initialization and lifecycle
 
 Startup and periodic reconciliation enumerate control-plane workspace IDs, resolve each
 placement, and initialize only an empty workspace. Existing barriers are preserved.
-Missing barriers with run/segment/work/taint evidence fail readiness. An incomplete work
-record under an unblocked barrier also fails readiness. Pre-V232 active ordinary turns
+Missing barriers with run/segment/v1-work/taint evidence fail readiness. An incomplete v1 work
+record under an unblocked barrier also fails readiness. V2 work does not block that barrier.
+Pre-V232 active ordinary turns
 without durable tokens are settled without content before mission admission.
 
 Self-service, signup/bootstrap, and volume seeding publish the same workspace-provisioned
@@ -370,10 +381,11 @@ before work rows and barriers. Tenant registry residual verification remains man
 ## Deployment and verification
 
 Missions remain disabled by default. Initial activation requires one serving application
-JVM, initialized barriers, completed active-attempt reconciliation, and the full compatible
-reader/writer rollout. Drain all older serving binaries and background message writers
-before V232's one-time sequence backfill; keep writes stopped until the allocator cutover.
-V235 is the rollback floor, including with missions disabled. Multi-instance activation requires the separately reviewed
+JVM, initialized workspace and organization authority, completed active-attempt reconciliation,
+and the full compatible reader/writer rollout. Drain incompatible serving binaries, scheduled
+workers and in-flight writers before V236/V237. Upgrades crossing V232 must also retain that
+version's stopped-writer sequence-backfill procedure.
+V237 is the rollback floor, including with AI and missions disabled. Multi-instance activation requires the separately reviewed
 #941 distributed fencing contract.
 
 Focused continuation selectors are `AiAgentContinuationCodecTest`, `AiAgentPlanServiceTest`,
@@ -401,3 +413,39 @@ direct maintenance calls still run normally.
 with unresolved HTTP request attributes before testing session create/read/turn completion.
 Shared scripted trajectories also use production provisioning. Direct SQL privacy fixtures
 model pre-existing workspaces only; they must not be used to verify provisioning.
+
+## All-chat privacy cutover (control V236, tenant V237)
+
+Option A invalidates every retained pre-cutover chat, including archived, private, shared, invited,
+never mission-tainted chats and departed authors. Existing content stays organization generation 0;
+control authority starts at 1. Session provenance is immutable. Every dependent writer preserves its
+original execution generation, and every read/input/decision/publication requires current authority.
+New chats remain usable while historical cleanup is pending. Clearing a contact hold never revives
+a retired chat. Saved CRM changes and ordinary domain audit history remain.
+
+The existing privacy initializer and worker reconcile stable organization operations and placement
+receipts. V2 work uses `organization_assistant_holdings_v2`; it neither advances nor blocks the
+workspace mission barrier. Legacy `organization_mission_holdings_v1` work retains its exact
+fingerprint, cutoff and reusable-session semantics. V2 retires and physically removes whole affected
+sessions, explicitly drains proposal parents/children and attachments in bounded phases, and clears
+mission continuation payloads while retaining minimal consumed-key tombstones.
+
+Completion uses uncapped holdings/lease/object residuals and placement coverage. Bounded repair
+finds restored rows above initial watermarks or behind cursors without changing the semantic cutoff.
+Startup revalidates historical bootstrap completion; unavailable placements and missing workspace
+evidence keep progress pending. Pending object obligations require positive final queue receipts;
+independent CRM file references retain bytes but never preserve the old chat link.
+
+The existing DSR endpoint additionally accepts schema version 2 with exact scope
+`organization_assistant_holdings_v2` and policy `organization_generation_at_acceptance_v2`.
+C1 fixes decimal-string organization cutoff/invalidated generations once; T1 enrolls routed work,
+T2 cleans, and C2 requires reconciled placement/object/residual evidence. Same-key replay precedes
+mutable snapshots and cannot change scope. Existing v1 eight-field receipts retain their authority.
+Status/resolution edits never execute erasure, and ordinary departure never triggers blanket erasure.
+
+Workspace teardown first drains accepted organization operations and preserves their placement
+evidence. Its existing v1 offboarding work retains the original workspace-generation cutoff.
+The lifecycle fence additionally authorizes bounded full-workspace chat/run/object cleanup through
+the same engine, with a separate uncapped lifecycle residual check. That local full scan neither
+creates a synthetic organization generation nor invalidates unrelated workspaces. Departure and
+account-owner erasure retain their narrower existing behavior.

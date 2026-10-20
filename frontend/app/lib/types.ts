@@ -3130,6 +3130,7 @@ export type AiChatAttachment = {
 export type AiChatSession = {
     id: number;
     workspaceId: number;
+    organizationPrivacyGeneration?: string;
     createdByUserId: number | null;
     title: string;
     visibility: string;
@@ -3350,16 +3351,16 @@ export type AiAgentRealtimeFrame = {
 export type AiAgentHoldingsPurgeRequest = {
     idempotencyKey: string;
     snapshotToken: string;
-    scopeAcknowledgement: 'organization_mission_holdings_v1';
-    cutoffPolicyAcknowledgement: 'contents_at_each_workspace_first_invalidation_v1';
+    scopeAcknowledgement: 'organization_mission_holdings_v1' | 'organization_assistant_holdings_v2';
+    cutoffPolicyAcknowledgement: 'contents_at_each_workspace_first_invalidation_v1' | 'organization_generation_at_acceptance_v2';
 };
 
 export type AiAgentHoldingsPurge = {
-    schemaVersion: 1;
+    schemaVersion: 1 | 2;
     operationId: string;
     requestId: string;
-    scope: 'organization_mission_holdings_v1';
-    cutoffPolicy: 'contents_at_each_workspace_first_invalidation_v1';
+    scope: 'organization_mission_holdings_v1' | 'organization_assistant_holdings_v2';
+    cutoffPolicy: 'contents_at_each_workspace_first_invalidation_v1' | 'organization_generation_at_acceptance_v2';
     acceptedAt: string;
     state: 'invalidation_pending' | 'purging' | 'retrying' | 'complete';
     workspaceCount: number;
@@ -3433,6 +3434,13 @@ export type AiChatNarrationFrame = {
 };
 
 /** Every frame the assistant session's metadata path can deliver. */
+/** Committed workspace cutoff metadata remains available after affected chat roots are erased. */
+export type AiChatPrivacyFrame = {
+    workspaceId: number;
+    kind: 'privacy_invalidated';
+    cutoffGeneration: string;
+};
+
 export type AiChatRealtimeFrame =
     | AiChatMetadataFrame
     | AiChatThinkingFrame

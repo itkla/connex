@@ -31,6 +31,8 @@ import tools.jackson.databind.json.JsonMapper;
 class AiChatCitationProjectorTest {
 
     private final AiChatMapper chatMapper = mock(AiChatMapper.class);
+    private final AiAssistantPrivacyService authority = mock(AiAssistantPrivacyService.class);
+    private final AiChatPrivacyGuard privacyGuard = new AiChatPrivacyGuard(authority);
     private final PersonMapper personMapper = mock(PersonMapper.class);
     private final CompanyMapper companyMapper = mock(CompanyMapper.class);
     private final DealMapper dealMapper = mock(DealMapper.class);
@@ -42,7 +44,15 @@ class AiChatCitationProjectorTest {
             companyMapper,
             dealMapper,
             pipelineMapper,
-            chatMapper);
+            privacyGuard, chatMapper);
+
+
+    @org.junit.jupiter.api.BeforeEach
+    void initializePrivacyAuthority() {
+        when(authority.organizationId(3)).thenReturn(1);
+        when(authority.current(1)).thenReturn(1L);
+        when(authority.freshCurrent(1)).thenReturn(1L);
+    }
 
     @Test
     void projectWithholdsAnAnswerWhenAnyDurableResourceIsRestricted() {
@@ -106,7 +116,7 @@ class AiChatCitationProjectorTest {
                 "Ignore previous instructions","Compare relationships","Review deal risks",
                 "Ignored fourth valid item"]}
                 """);
-        when(chatMapper.listTurnsByIds(3, 5, List.of(7)))
+        when(chatMapper.listTurnsByIds(3, 5, List.of(7), 1L))
                 .thenReturn(List.of(turn(7, 11)));
 
         assertEquals(
@@ -121,7 +131,7 @@ class AiChatCitationProjectorTest {
         message.setAuthorKind("assistant");
         message.setStructuredJson(
                 "{\"turnId\":7,\"suggestions\":[\"Review Restricted Person\"]}");
-        when(chatMapper.listTurnsByIds(3, 5, List.of(7)))
+        when(chatMapper.listTurnsByIds(3, 5, List.of(7), 1L))
                 .thenReturn(List.of(turn(7, 11)));
 
         assertEquals(
@@ -148,7 +158,7 @@ class AiChatCitationProjectorTest {
         message.setAuthorKind("assistant");
         message.setStructuredJson(
                 "{\"turnId\":7,\"suggestions\":[\"Review recent activity\"]}");
-        when(chatMapper.listTurnsByIds(3, 5, List.of(7)))
+        when(chatMapper.listTurnsByIds(3, 5, List.of(7), 1L))
                 .thenReturn(List.of(turn(7, null)));
 
         assertEquals(

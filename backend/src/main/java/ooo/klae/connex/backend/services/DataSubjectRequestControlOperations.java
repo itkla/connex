@@ -60,6 +60,8 @@ public class DataSubjectRequestControlOperations {
     private final SessionSecurityService sessionSecurityService;
     private final ooo.klae.connex.backend.mappers.AiAgentDsrControlMapper missionPurgeMapper;
     private final tools.jackson.databind.ObjectMapper missionJson;
+    private final ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService assistantPrivacyService;
+    private final ooo.klae.connex.backend.ai.AiRestrictionEpoch restrictionEpoch;
 
     @Transactional(readOnly = true)
     public List<DataSubjectRequestDto> list(int orgId, int actorId, String status, int limit, int offset) {
@@ -213,7 +215,9 @@ public class DataSubjectRequestControlOperations {
         }
         var existing = missionPurgeMapper.findAcceptanceByKey(orgId, requestId, request.idempotencyKey());
         if (existing != null) {
-            return ooo.klae.connex.backend.ai.mission.AiAgentPurgeAcceptance.from(existing, missionJson);
+            var replay = ooo.klae.connex.backend.ai.mission.AiAgentPurgeAcceptance.from(existing, missionJson);
+            replay.requireAcknowledgments(request.scopeAcknowledgement(), request.cutoffPolicyAcknowledgement());
+            return replay;
         }
         if (!DataSubjectRequestSnapshot.token(locked).equals(request.snapshotToken())
                 || !Integer.valueOf(provenWorkspaceId).equals(locked.getSubjectWorkspaceId())
@@ -228,9 +232,23 @@ public class DataSubjectRequestControlOperations {
         if (!current.equals(workspaceIds)) {
             throw new ConflictException("dsr_workspace_scope_conflict");
         }
-        var accepted = new ooo.klae.connex.backend.ai.mission.AiAgentPurgeAcceptance(
-                0, orgId, requestId, java.util.UUID.randomUUID().toString(), request.idempotencyKey(),
-                workspaceIds, java.time.Instant.now().toString());
+        String operationId = java.util.UUID.randomUUID().toString();
+        boolean allChats = ooo.klae.connex.backend.ai.mission.AiAgentPurgeAcceptance.ASSISTANT_SCOPE
+                .equals(request.scopeAcknowledgement());
+        if (allChats) {
+            restrictionEpoch.retainWriteFencesUntilTransactionCompletion(workspaceIds);
+        }
+        var operation = allChats ? assistantPrivacyService.invalidateOrganization(
+                orgId, java.util.UUID.fromString(operationId), "dsr", requestId, null) : null;
+        var accepted = operation == null
+                ? new ooo.klae.connex.backend.ai.mission.AiAgentPurgeAcceptance(
+                    0, orgId, requestId, operationId, request.idempotencyKey(), workspaceIds,
+                    java.time.Instant.now().toString())
+                : new ooo.klae.connex.backend.ai.mission.AiAgentPurgeAcceptance(
+                    0, orgId, requestId, operationId, request.idempotencyKey(), workspaceIds,
+                    java.time.Instant.now().toString(), 2, request.scopeAcknowledgement(),
+                    request.cutoffPolicyAcknowledgement(), operation.getCutoffGeneration(),
+                    operation.getInvalidatedGeneration());
         auditService.recordStrictScoped(
                 ooo.klae.connex.backend.ai.mission.AiAgentPurgeAcceptance.ACCEPTED,
                 "organization", orgId, null, orgId, "Mission holdings purge",
@@ -238,6 +256,9 @@ public class DataSubjectRequestControlOperations {
         var saved = missionPurgeMapper.findAcceptanceByKey(orgId, requestId, request.idempotencyKey());
         if (saved == null || !missionJson.readTree(saved.getChanges()).equals(missionJson.readTree(missionJson.writeValueAsString(accepted.metadata())))) {
             throw new IllegalStateException("Mission purge acceptance audit did not preserve its contract");
+        }
+        if (allChats) {
+            assistantPrivacyService.attachAcceptanceAudit(orgId, operationId, saved.getId());
         }
         return ooo.klae.connex.backend.ai.mission.AiAgentPurgeAcceptance.from(saved, missionJson);
     }
@@ -263,7 +284,11 @@ public class DataSubjectRequestControlOperations {
                 && authentication.getPrincipal() instanceof ooo.klae.connex.backend.beans.User actor) {
             userMapper.lockByIdForShare(actor.getId());
         }
-        for (int workspaceId : accepted.workspaceIds()) {
+        List<Integer> workspaceIds = accepted.schemaVersion() == 1 ? accepted.workspaceIds()
+                : java.util.stream.Stream.concat(accepted.workspaceIds().stream(),
+                    assistantPrivacyService.operationWorkspaceIds(accepted.orgId(), accepted.operationId()).stream())
+                    .distinct().sorted().toList();
+        for (int workspaceId : workspaceIds) {
             var workspace = tenantLifecycleControlMapper.lockWorkspaceForShare(workspaceId);
             if (workspace == null || workspace.orgId() != accepted.orgId()) {
                 throw new ConflictException("dsr_lifecycle_evidence_required");
@@ -275,6 +300,10 @@ public class DataSubjectRequestControlOperations {
         }
         if (missionPurgeMapper.findCompletion(accepted.orgId(), accepted.requestId(), accepted.operationId()) != null) {
             return;
+        }
+        if (accepted.schemaVersion() == 2
+                && !assistantPrivacyService.reconcileCompletion(accepted.orgId(), accepted.operationId())) {
+            throw new ConflictException("dsr_lifecycle_evidence_required");
         }
         auditService.recordStrictScoped(
                 ooo.klae.connex.backend.ai.mission.AiAgentPurgeAcceptance.COMPLETED,

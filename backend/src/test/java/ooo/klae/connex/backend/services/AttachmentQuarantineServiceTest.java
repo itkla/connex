@@ -156,6 +156,16 @@ class AttachmentQuarantineServiceTest {
     }
 
     @Test
+    void chatDeleteBeforePrivacyDiscoveryDefersWithoutDroppingItsReference() {
+        attachment.setEntityType("ai_chat_session");
+        attachment.setEntityId(29);
+        assertThrows(ooo.klae.connex.backend.exceptions.ConflictException.class, () -> service.delete(19));
+        verify(attachmentMapper, never()).delete(7, 19);
+        verify(objects, never()).deleteAttachmentAfterCommit(7, attachment.getUrl());
+        verifyNoInteractions(references, audit);
+    }
+
+    @Test
     void deletingSharedReferencePreservesBytesForRemainingReference() {
         when(attachmentMapper.lockIdsByUrl(7, attachment.getUrl())).thenReturn(List.of(18, 19));
 

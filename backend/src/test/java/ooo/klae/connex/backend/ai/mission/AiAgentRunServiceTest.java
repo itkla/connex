@@ -49,6 +49,10 @@ class AiAgentRunServiceTest {
     private static final Instant NOW = Instant.parse("2026-10-15T12:00:00Z");
     private final AiAgentRunMapper runs = mock(AiAgentRunMapper.class);
     private final AiChatMapper chat = mock(AiChatMapper.class);
+    private final ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService organizationAuthority =
+            mock(ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService.class);
+    private final ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard privacyGuard =
+            new ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard(organizationAuthority);
     private final AiAgentRunPersistenceService persistence = mock(AiAgentRunPersistenceService.class);
     private final AiAgentCapabilityGate gate = mock(AiAgentCapabilityGate.class);
     private final AiAgentRealtimePublisher publisher = mock(AiAgentRealtimePublisher.class);
@@ -57,17 +61,24 @@ class AiAgentRunServiceTest {
     private final AiAgentRun run = new AiAgentRun();
     private final AiChatSession session = new AiChatSession();
     private final AiAgentPrivacyBarrier barrier = new AiAgentPrivacyBarrier();
-    private final AiAgentRunService service = new AiAgentRunService(runs, chat, persistence, gate, publisher,
+    private final org.springframework.transaction.PlatformTransactionManager transactions =
+            mock(org.springframework.transaction.PlatformTransactionManager.class);
+    private final AiAgentRunService service = new AiAgentRunService(privacyGuard,
+            mock(ooo.klae.connex.backend.ai.assistant.AiAssistantSessionReadAudit.class), transactions, runs, chat, persistence, gate, publisher,
             mock(AiAssistantToolExecutor.class), citations, new AiRestrictionEpoch(), workspaces,
             JsonMapper.builder().build(), Clock.fixed(NOW, ZoneOffset.UTC));
 
     @BeforeEach
     void setUp() {
+        when(organizationAuthority.organizationId(org.mockito.ArgumentMatchers.anyInt())).thenReturn(1);
+        when(organizationAuthority.current(1)).thenReturn(1L);
+        when(organizationAuthority.freshCurrent(1)).thenReturn(1L);
         when(workspaces.getCurrentWorkspaceId()).thenReturn(7);
         when(workspaces.getCurrentUserId()).thenReturn(11);
         when(workspaces.isMember(7, 11)).thenReturn(true);
         run.setId(31);
         run.setWorkspaceId(7);
+        run.setOrganizationPrivacyGeneration(1L);
         run.setSessionId(13);
         run.setOwnerUserId(11);
         run.setMissionType("record_review_v1");
@@ -88,11 +99,15 @@ class AiAgentRunServiceTest {
         when(runs.getRun(7, 31)).thenReturn(run);
         session.setId(13);
         session.setWorkspaceId(7);
+        session.setOrganizationPrivacyGeneration(1L);
         session.setCreatedByUserId(11);
         session.setVisibility("private");
         session.setStatus("active");
-        when(chat.getAccessibleSessionById(7, 11, 13)).thenReturn(session);
+        when(chat.getAccessibleSessionById(7, 11, 13, 1L)).thenReturn(session);
         when(chat.getPrivacyBarrier(7)).thenReturn(barrier);
+        when(chat.lockPrivacyBarrierForShare(7)).thenReturn(barrier);
+        when(transactions.getTransaction(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new org.springframework.transaction.support.SimpleTransactionStatus());
     }
 
     @Test
@@ -161,7 +176,7 @@ class AiAgentRunServiceTest {
         session.setVisibility("shared");
         session.setCreatedByUserId(12);
         when(workspaces.isMember(7, 12)).thenReturn(false);
-        when(runs.listRuns(7, 11, null, null, null, 21)).thenReturn(List.of(run));
+        when(runs.listRuns(7, 11, null, null, null, 21, 1L)).thenReturn(List.of(run));
 
         assertThrows(ResourceNotFoundException.class, () -> service.get(31));
         assertThrows(ResourceNotFoundException.class, () -> service.output(31));
@@ -215,7 +230,7 @@ class AiAgentRunServiceTest {
         String cursor = Base64.getUrlEncoder().withoutPadding().encodeToString(value.getBytes(StandardCharsets.UTF_8));
 
         assertThrows(BadRequestException.class, () -> service.list(20, 13, "queued", cursor));
-        verify(runs, never()).listRuns(anyInt(), anyInt(), any(), any(), any(), anyInt());
+        verify(runs, never()).listRuns(anyInt(), anyInt(), any(), any(), any(), anyInt(), org.mockito.ArgumentMatchers.eq(1L));
     }
 
     @Test
@@ -236,6 +251,7 @@ class AiAgentRunServiceTest {
         report.setId(43);
         report.setContent("Grounded report");
         report.setWorkspaceId(7);
+        report.setOrganizationPrivacyGeneration(1L);
         report.setSessionId(13);
         report.setMissionRunId(31);
         report.setMissionMessageKind("report");

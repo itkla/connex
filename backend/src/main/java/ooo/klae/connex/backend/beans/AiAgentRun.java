@@ -11,6 +11,7 @@ import lombok.NoArgsConstructor;
 public class AiAgentRun {
     private int id;
     private int workspaceId;
+    private long organizationPrivacyGeneration;
     private int definitionVersion;
     private int runtimeContractVersion;
     private int maxSteps;

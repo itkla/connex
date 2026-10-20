@@ -64,6 +64,8 @@ class AiAgentDsrPurgeHttpIntegrationTest {
     @Autowired private ObjectMapper json;
     @Autowired private TenantWorkScope workScope;
     @Autowired private AiAgentPrivacyService privacy;
+    @Autowired private ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService assistantPrivacy;
+    @Autowired private org.springframework.transaction.PlatformTransactionManager transactions;
     private MockMvc mvc;
     private Organization organization;
     private Workspace workspace;
@@ -79,6 +81,8 @@ class AiAgentDsrPurgeHttpIntegrationTest {
         organization.setName("Mission purge HTTP");
         organization.setSlug("mission-purge-http-" + UUID.randomUUID());
         organizations.insert(organization);
+        new org.springframework.transaction.support.TransactionTemplate(transactions)
+                .executeWithoutResult(status -> assistantPrivacy.provision(organization.getId()));
         workspace = new Workspace();
         workspace.setOrgId(organization.getId());
         workspace.setName("Mission purge HTTP");
@@ -122,6 +126,7 @@ class AiAgentDsrPurgeHttpIntegrationTest {
     void removeFixtures() {
         if (workspace != null) {
             jdbc.update("UPDATE ai_agent_privacy_barrier SET latest_operation_key=NULL WHERE workspace_id=?", workspace.getId());
+            jdbc.update("DELETE FROM ai_agent_privacy_object WHERE workspace_id=?", workspace.getId());
             jdbc.update("DELETE FROM ai_agent_privacy_work WHERE workspace_id=?", workspace.getId());
             jdbc.update("DELETE FROM ai_agent_privacy_barrier WHERE workspace_id=?", workspace.getId());
             jdbc.update("DELETE FROM person WHERE workspace_id=?", workspace.getId());
@@ -131,6 +136,9 @@ class AiAgentDsrPurgeHttpIntegrationTest {
         if (organization != null) {
             jdbc.update("DELETE FROM data_subject_request WHERE org_id=?", organization.getId());
             jdbc.update("DELETE FROM org_member WHERE org_id=?", organization.getId());
+            jdbc.update("DELETE FROM ai_assistant_privacy_operation_workspace WHERE organization_id=?", organization.getId());
+            jdbc.update("DELETE FROM ai_assistant_privacy_operation WHERE organization_id=?", organization.getId());
+            jdbc.update("DELETE FROM ai_assistant_privacy_fence WHERE organization_id=?", organization.getId());
             jdbc.update("DELETE FROM organization WHERE id=?", organization.getId());
         }
         if (actor != null) {
@@ -234,6 +242,50 @@ class AiAgentDsrPurgeHttpIntegrationTest {
         assertEquals(0, acceptedCount());
         assertEquals(Long.valueOf(1), jdbc.queryForObject(
                 "SELECT generation FROM ai_agent_privacy_barrier WHERE workspace_id=?", Long.class, workspace.getId()));
+    }
+
+    @Test
+    void allChatPurgeRequiresExactAcknowledgments() throws Exception {
+        String body = allChatBody();
+        mvc.perform(postRequest().content(body.replace(AiAgentPurgeAcceptance.ASSISTANT_CUTOFF_POLICY,
+                AiAgentPurgeAcceptance.CUTOFF_POLICY))).andExpect(status().isBadRequest());
+        assertEquals(0, acceptedCount());
+        String accepted = mvc.perform(postRequest().content(body)).andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.schemaVersion").value(2))
+                .andExpect(jsonPath("$.scope").value(AiAgentPurgeAcceptance.ASSISTANT_SCOPE))
+                .andReturn().getResponse().getContentAsString();
+        String operation = json.readTree(accepted).path("operationId").asString();
+        long generation = assistantPrivacy.current(organization.getId());
+        mvc.perform(postRequest().content(body)).andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.operationId").value(operation));
+        assertEquals(generation, assistantPrivacy.current(organization.getId()));
+        mvc.perform(get(progressPath(operation)).session(session.http()).header("X-Workspace-Id", workspace.getId()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.schemaVersion").value(2));
+        mvc.perform(postRequest().content(body.replace(AiAgentPurgeAcceptance.ASSISTANT_SCOPE,
+                AiAgentPurgeAcceptance.SCOPE).replace(AiAgentPurgeAcceptance.ASSISTANT_CUTOFF_POLICY,
+                AiAgentPurgeAcceptance.CUTOFF_POLICY))).andExpect(status().isConflict());
+    }
+
+    @Test
+    void allChatPurgePreservesAdminCsrfAndRecentAuthGates() throws Exception {
+        String body = allChatBody();
+        mvc.perform(post(initiatePath()).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(post(initiatePath()).session(session.http()).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isForbidden());
+        session.http().setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR, 1L);
+        mvc.perform(postRequest().content(body)).andExpect(status().isForbidden());
+        OwnershipOfferTestFixtures.stepUp(jdbc, actor, session.http(),
+                OwnershipOfferTestFixtures.approvedPasskey(jdbc, actor));
+        jdbc.update("DELETE FROM org_member WHERE org_id=? AND user_id=?", organization.getId(), actor.getId());
+        mvc.perform(postRequest().content(body)).andExpect(status().isForbidden());
+        assertEquals(0, acceptedCount());
+        assertEquals(1, assistantPrivacy.current(organization.getId()));
+    }
+
+    private String allChatBody() {
+        return body().replace(AiAgentPurgeAcceptance.SCOPE, AiAgentPurgeAcceptance.ASSISTANT_SCOPE)
+                .replace(AiAgentPurgeAcceptance.CUTOFF_POLICY, AiAgentPurgeAcceptance.ASSISTANT_CUTOFF_POLICY);
     }
 
     private String body() {

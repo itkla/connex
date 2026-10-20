@@ -33,12 +33,31 @@ class AiChatProgressServiceTest {
     private static final int ROW_LIMIT = AiChatAgentLoopService.MAX_TOOL_CALL_ROWS_PER_TURN;
 
     private final AiChatMapper chatMapper = mock(AiChatMapper.class);
+    private final AiAssistantPrivacyService authority = mock(AiAssistantPrivacyService.class);
+    private final AiChatPrivacyGuard privacyGuard = new AiChatPrivacyGuard(authority);
     private final AiChatProgressService service = new AiChatProgressService(
-            chatMapper, JsonMapper.builder().build(), new AiAssistantToolCatalog());
+            privacyGuard, chatMapper, JsonMapper.builder().build(), new AiAssistantToolCatalog());
+
+
+    @org.junit.jupiter.api.BeforeEach
+    void initializePrivacyAuthority() {
+        when(authority.organizationId(3)).thenReturn(1);
+        when(authority.current(1)).thenReturn(1L);
+        when(authority.freshCurrent(1)).thenReturn(1L);
+        var session = new ooo.klae.connex.backend.beans.AiChatSession();
+        session.setId(5);
+        session.setWorkspaceId(3);
+        session.setOrganizationPrivacyGeneration(1L);
+        var barrier = new ooo.klae.connex.backend.beans.AiAgentPrivacyBarrier();
+        barrier.setWorkspaceId(3);
+        barrier.setGeneration(1L);
+        when(chatMapper.getPrivacySession(3, 5)).thenReturn(session);
+        when(chatMapper.getPrivacyBarrier(3)).thenReturn(barrier);
+    }
 
     @Test
     void turnEvidenceUsesCatalogTiersAndDurableStatesFromOneBoundedRead() {
-        when(chatMapper.listToolCallsByTurn(3, 5, "turn-7-step-", ROW_LIMIT))
+        when(chatMapper.listToolCallsByTurn(3, 5, "turn-7-step-", ROW_LIMIT, 1L))
                 .thenReturn(List.of(
                         toolCall(1, "list_tasks", "executed", "{\"tasks\":[{}]}"),
                         toolCall(2, "create_task", "executed", "{}"),
@@ -63,12 +82,12 @@ class AiChatProgressServiceTest {
                 new AiChatTurnToolCallDto("assign_owner", AiAssistantToolCatalog.ToolTier.CONFIRM, "rejected")),
                 projected.toolCalls());
         assertEquals("timed_out", projected.progress().getLast().status());
-        verify(chatMapper).listToolCallsByTurn(3, 5, "turn-7-step-", ROW_LIMIT);
+        verify(chatMapper).listToolCallsByTurn(3, 5, "turn-7-step-", ROW_LIMIT, 1L);
     }
 
     @Test
     void turnEvidenceIsUnavailableToSharedViewersAndAnonymousReaders() {
-        when(chatMapper.listToolCallsByTurn(3, 5, "turn-7-step-", ROW_LIMIT))
+        when(chatMapper.listToolCallsByTurn(3, 5, "turn-7-step-", ROW_LIMIT, 1L))
                 .thenReturn(List.of(toolCall(1, "list_tasks", "executed", "{\"tasks\":[{}]}")));
 
         AiChatTurnDto shared = service.projectTurn(turn(), 12, null);
@@ -79,7 +98,7 @@ class AiChatProgressServiceTest {
 
     @Test
     void requesterWithNoDurableCallsReceivesAnEmptyEvidenceList() {
-        when(chatMapper.listToolCallsByTurn(3, 5, "turn-7-step-", ROW_LIMIT)).thenReturn(List.of());
+        when(chatMapper.listToolCallsByTurn(3, 5, "turn-7-step-", ROW_LIMIT, 1L)).thenReturn(List.of());
 
         assertEquals(List.of(), service.projectTurn(turn(), 11, null).toolCalls());
     }
@@ -87,6 +106,8 @@ class AiChatProgressServiceTest {
     private static AiChatTurn turn() {
         AiChatTurn turn = new AiChatTurn();
         turn.setWorkspaceId(3);
+        turn.setOrganizationPrivacyGeneration(1L);
+        turn.setPrivacyGeneration(1L);
         turn.setSessionId(5);
         turn.setId(7);
         turn.setRequestedByUserId(11);
@@ -96,7 +117,7 @@ class AiChatProgressServiceTest {
 
     @Test
     void projectsBoundedSourceMilestonesFromDurableToolCalls() {
-        when(chatMapper.listToolCallsByTurn(3, 5, "turn-7-step-", ROW_LIMIT))
+        when(chatMapper.listToolCallsByTurn(3, 5, "turn-7-step-", ROW_LIMIT, 1L))
                 .thenReturn(List.of(
                         toolCall(1, "search_records", "executed",
                                 "{\"records\":[{},{}],\"truncated\":true}"),
@@ -119,7 +140,7 @@ class AiChatProgressServiceTest {
      */
     @Test
     void aFindToolsRowRaisesNoMilestoneSoLiveAndSettledCoverageAgree() {
-        when(chatMapper.listToolCallsByTurn(3, 5, "turn-7-step-", ROW_LIMIT))
+        when(chatMapper.listToolCallsByTurn(3, 5, "turn-7-step-", ROW_LIMIT, 1L))
                 .thenReturn(List.of(
                         toolCall(1, AiAssistantToolCatalog.FIND_TOOLS, "executed",
                                 "{\"loaded\":\"analytics\",\"active\":[\"core\",\"analytics\"]}"),
@@ -155,7 +176,7 @@ class AiChatProgressServiceTest {
 
     @Test
     void settledConfirmProposalStaysAwaitingApprovalRatherThanReadingAsComplete() {
-        when(chatMapper.listToolCallsByTurn(3, 5, "turn-7-step-", ROW_LIMIT))
+        when(chatMapper.listToolCallsByTurn(3, 5, "turn-7-step-", ROW_LIMIT, 1L))
                 .thenReturn(List.of(toolCall(1, "assign_owner", "proposed", null)));
 
         assertEquals(
@@ -215,7 +236,7 @@ class AiChatProgressServiceTest {
 
     @Test
     void onlyTheExecutorsOwnTruncationFlagsBoundTheReportedProgress() {
-        when(chatMapper.listToolCallsByTurn(3, 5, "turn-7-step-", ROW_LIMIT))
+        when(chatMapper.listToolCallsByTurn(3, 5, "turn-7-step-", ROW_LIMIT, 1L))
                 .thenReturn(List.of(toolCall(1, "list_activities", "executed",
                         "{\"activities\":[{\"subject\":\"Renewal\",\"truncatedByOwner\":true}]}")));
 
@@ -223,7 +244,7 @@ class AiChatProgressServiceTest {
                 new AiChatProgressItemDto(1, "activities", "complete", 1, false),
                 service.project(3, 5, 7, "resolved").get(1));
 
-        when(chatMapper.listToolCallsByTurn(3, 5, "turn-7-step-", ROW_LIMIT))
+        when(chatMapper.listToolCallsByTurn(3, 5, "turn-7-step-", ROW_LIMIT, 1L))
                 .thenReturn(List.of(toolCall(1, "list_activities", "executed",
                         "{\"activities\":[{\"notesTruncated\":true}]}")));
 
@@ -245,7 +266,7 @@ class AiChatProgressServiceTest {
     void aKeyNamingACallOrdinalStillProjectsUnderItsOwnStep() {
         AiChatToolCall batched = toolCall(2, "list_activities", "executed", "{\"activities\":[]}");
         batched.setIdempotencyKey("turn-7-step-2-call-3");
-        when(chatMapper.listToolCallsByTurn(3, 5, "turn-7-step-", ROW_LIMIT))
+        when(chatMapper.listToolCallsByTurn(3, 5, "turn-7-step-", ROW_LIMIT, 1L))
                 .thenReturn(List.of(
                         toolCall(1, "search_records", "executed", "{\"records\":[{}]}"),
                         batched));
@@ -278,7 +299,7 @@ class AiChatProgressServiceTest {
             AiChatToolCall refused =
                     toolCall(2, "list_activities", "executed", "{\"activities\":[]}");
             refused.setIdempotencyKey(key);
-            when(chatMapper.listToolCallsByTurn(3, 5, "turn-7-step-", ROW_LIMIT))
+            when(chatMapper.listToolCallsByTurn(3, 5, "turn-7-step-", ROW_LIMIT, 1L))
                     .thenReturn(List.of(refused));
 
             assertEquals(
@@ -310,7 +331,7 @@ class AiChatProgressServiceTest {
      */
     @Test
     void theProjectionReadsEveryRowABatchedTurnCouldHaveWritten() {
-        when(chatMapper.listToolCallsByTurn(3, 5, "turn-7-step-", ROW_LIMIT))
+        when(chatMapper.listToolCallsByTurn(3, 5, "turn-7-step-", ROW_LIMIT, 1L))
                 .thenReturn(List.of(
                         toolCall(1, "search_records", "executed", "{\"records\":[]}")));
 
@@ -321,7 +342,7 @@ class AiChatProgressServiceTest {
                 5,
                 "turn-7-step-",
                 AiChatAgentLoopService.HARD_MAX_STEPS
-                        * AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS);
+                        * AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS, 1L);
         assertTrue(
                 ROW_LIMIT > AiChatAgentLoopService.HARD_MAX_STEPS,
                 "the projection must read past one row per model step");
@@ -340,7 +361,7 @@ class AiChatProgressServiceTest {
                 toolCall(2, "list_activities", "executed", "{\"activities\":[]}");
         impossible.setIdempotencyKey("turn-7-step-2-call-"
                 + (AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS + 1));
-        when(chatMapper.listToolCallsByTurn(3, 5, "turn-7-step-", ROW_LIMIT))
+        when(chatMapper.listToolCallsByTurn(3, 5, "turn-7-step-", ROW_LIMIT, 1L))
                 .thenReturn(List.of(impossible));
 
         assertEquals(

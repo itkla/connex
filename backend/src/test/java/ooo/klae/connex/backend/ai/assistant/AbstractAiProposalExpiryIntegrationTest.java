@@ -280,6 +280,7 @@ abstract class AbstractAiProposalExpiryIntegrationTest {
     Proposal proposal(String tool, String kind, Map<String, Object> recordFields) {
         AiChatSession session = new AiChatSession();
         session.setWorkspaceId(workspace.getId());
+        session.setOrganizationPrivacyGeneration(1L);
         session.setCreatedByUserId(actor.getId());
         session.setTitle("Expiry review");
         session.setVisibility("private");
@@ -347,6 +348,7 @@ abstract class AbstractAiProposalExpiryIntegrationTest {
                 restrictionEpoch.current(workspace.getId()));
         AiChatMessage message = new AiChatMessage();
         message.setWorkspaceId(workspace.getId());
+        message.setOrganizationPrivacyGeneration(1L);
         message.setSessionId(sessionId);
         message.setSeq(sequence);
         message.setAuthorKind("user");
@@ -357,6 +359,7 @@ abstract class AbstractAiProposalExpiryIntegrationTest {
                 + " WHERE workspace_id = ? AND id = ?", sequence, workspace.getId(), sessionId);
         AiChatTurn turn = new AiChatTurn();
         turn.setWorkspaceId(workspace.getId());
+        turn.setOrganizationPrivacyGeneration(1L);
         turn.setSessionId(sessionId);
         turn.setRequestedByUserId(actor.getId());
         turn.setStatus("running");
@@ -364,6 +367,7 @@ abstract class AbstractAiProposalExpiryIntegrationTest {
         chats.insertTurn(turn);
         AiChatToolCall call = new AiChatToolCall();
         call.setWorkspaceId(workspace.getId());
+        call.setOrganizationPrivacyGeneration(1L);
         call.setMessageId(message.getId());
         call.setToolName(tool);
         call.setServerProposal(true);
@@ -376,7 +380,7 @@ abstract class AbstractAiProposalExpiryIntegrationTest {
         return new Proposal(sessionId, call.getId(), new AiChatQueuedTurn(workspace.getId(), actor.getId(),
                 sessionId, turn.getId(), message.getId(), sequence, restrictionEpoch.current(workspace.getId()),
                 true, List.of(), List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(),
-                new AiChatPrivacyToken(workspace.getId(), sessionId, 1, null)), write.tier() == AiAssistantToolCatalog.ToolTier.AUTO);
+                new AiChatPrivacyToken(workspace.getId(), sessionId, 1, null, organization.getId(), 1L)), write.tier() == AiAssistantToolCatalog.ToolTier.AUTO);
     }
 
     void execute(Proposal proposal) {
@@ -423,7 +427,7 @@ abstract class AbstractAiProposalExpiryIntegrationTest {
     }
 
     void assertPending(Proposal proposal) {
-        AiChatToolCall call = chats.getToolCallBySession(workspace.getId(), proposal.sessionId(), proposal.id());
+        AiChatToolCall call = chats.getToolCallBySession(workspace.getId(), proposal.sessionId(), proposal.id(), 1L);
         assertNotNull(call);
         assertEquals("proposed", call.getStatus());
         assertEquals(null, call.getResultJson());

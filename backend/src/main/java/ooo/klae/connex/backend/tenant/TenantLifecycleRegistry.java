@@ -324,6 +324,7 @@ public final class TenantLifecycleRegistry {
         raw.add(direct("ai_chat_turn", 454));
         raw.add(direct("ai_agent_segment", 455, nullify("turn_id")));
         raw.add(direct("ai_agent_run", 456, nullify("report_message_id"), nullify("active_segment_id")));
+        raw.add(direct("ai_agent_privacy_object", 456));
         raw.add(direct("ai_agent_privacy_work", 457));
         raw.add(direct("ai_agent_privacy_barrier", 458, nullify("latest_operation_key")));
         raw.add(direct("attachment", 460));

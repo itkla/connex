@@ -69,6 +69,7 @@ class AiAgentDsrPurgeRecoveryTest {
         var recorder = mock(JobRunRecorder.class);
         var service = new AiAgentDsrPurgeService(requests, mock(DataSubjectRequestControlOperations.class),
             receipts, mock(AiAgentPrivacyMapper.class), mock(AiAgentPrivacyService.class),
+            mock(ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService.class),
             mock(TenantLifecycleControlMapper.class), scope, context, system, mock(PlatformTransactionManager.class), json, recorder);
         var logger = (Logger) LoggerFactory.getLogger(AiAgentDsrPurgeService.class);
         var events = new ListAppender<ILoggingEvent>();

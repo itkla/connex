@@ -36,4 +36,13 @@ public class MyBatisConfig {
         return new TenantScopeInterceptor(tenantContext, enforce,
             TenantRoutingProperties.MODE_CATALOG_PER_PLACEMENT.equals(routingMode));
     }
+    /** Hydrates notification source authority through independent control reads without plane joins. */
+    @Bean
+    ooo.klae.connex.backend.notifications.NotificationPrivacyInterceptor notificationPrivacyInterceptor(
+            org.springframework.beans.factory.ObjectProvider<ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService> authority,
+            org.springframework.beans.factory.ObjectProvider<ooo.klae.connex.backend.tenant.TenantWorkScope> workScope) {
+        return new ooo.klae.connex.backend.notifications.NotificationPrivacyInterceptor(
+                () -> workScope.getObject().unroutedRead(() -> authority.getObject().notificationWorkspaceGenerations()));
+    }
+
 }

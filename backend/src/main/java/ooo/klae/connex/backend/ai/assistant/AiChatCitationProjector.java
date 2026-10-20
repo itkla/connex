@@ -53,6 +53,7 @@ public class AiChatCitationProjector {
     private final CompanyMapper companyMapper;
     private final DealMapper dealMapper;
     private final PipelineMapper pipelineMapper;
+    private final AiChatPrivacyGuard privacyGuard;
     private final AiChatMapper chatMapper;
 
     /** Returns authorized citations and messages withheld by current record visibility. */
@@ -112,7 +113,7 @@ public class AiChatCitationProjector {
         }
         Map<Integer, Integer> requesterByTurn = new LinkedHashMap<>();
         for (AiChatTurn turn : chatMapper.listTurnsByIds(
-                workspaceId, sessionId, List.copyOf(turnIds))) {
+                workspaceId, sessionId, List.copyOf(turnIds), privacyGuard.currentGeneration(workspaceId))) {
             if (turn.getRequestedByUserId() != null) {
                 requesterByTurn.put(turn.getId(), turn.getRequestedByUserId());
             }
@@ -263,7 +264,7 @@ public class AiChatCitationProjector {
             int workspaceId, int sessionId, Set<Integer> turnIds) {
         Map<Integer, Integer> requesterByTurn = new LinkedHashMap<>();
         for (AiChatTurn turn : chatMapper.listTurnsByIds(
-                workspaceId, sessionId, List.copyOf(turnIds))) {
+                workspaceId, sessionId, List.copyOf(turnIds), privacyGuard.currentGeneration(workspaceId))) {
             if (turn.getRequestedByUserId() != null) {
                 requesterByTurn.put(turn.getId(), turn.getRequestedByUserId());
             }

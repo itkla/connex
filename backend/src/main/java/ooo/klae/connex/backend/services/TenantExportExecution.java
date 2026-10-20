@@ -35,6 +35,7 @@ final class TenantExportExecution {
     private final AtomicBoolean completionPublished = new AtomicBoolean();
     private final AtomicBoolean cancellationDispatchClaimed = new AtomicBoolean();
 
+    private long organizationPrivacyGeneration;
     private State state = State.NEW;
     private boolean writerStarted;
     private boolean cancellationDispatchCompleted;
@@ -62,6 +63,25 @@ final class TenantExportExecution {
         }
         long timeoutNanos = timeout.toNanos();
         deadlineNanos = nanoTime.getAsLong() + timeoutNanos;
+    }
+
+    /** Binds the immutable source authority before any snapshot or response output. */
+    void bindOrganizationGeneration(long generation) {
+        synchronized (monitor) {
+            if (generation <= 0 || organizationPrivacyGeneration != 0 || state != State.NEW) {
+                throw new IllegalStateException("Tenant export privacy authority is unavailable");
+            }
+            organizationPrivacyGeneration = generation;
+        }
+    }
+
+    long organizationPrivacyGeneration() {
+        synchronized (monitor) {
+            if (organizationPrivacyGeneration <= 0) {
+                throw new IllegalStateException("Tenant export privacy authority is unavailable");
+            }
+            return organizationPrivacyGeneration;
+        }
     }
 
     void armDeadline(ScheduledThreadPoolExecutor deadlineExecutor) {

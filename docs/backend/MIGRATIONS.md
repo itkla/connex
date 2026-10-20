@@ -75,3 +75,12 @@ Before merge:
 - If earlier binaries cannot safely serve after this migration, `deploy/staging/rollback-floor` names this migration and `docs/UPGRADING.md` documents the rollback floor. That applies when the schema breaks them, and also when they would still start but violate the migration's invariants (V225).
 - MyBatis mappings use parameter binding and tenant scoping.
 - Relevant migration, plane, tenancy, and lifecycle architecture tests pass locally through targeted selectors; exhaustive suite is CI-owned.
+
+## Assistant privacy cutover allocation
+
+Control V236 creates organization coordination authority and stable bootstrap identities; tenant
+V237 appends immutable organization provenance with historical default 0, versions existing work
+scopes and adds object obligations. Separate explicit INSTANT column operations and INPLACE index
+operations must fail if unsupported; no retained-content UPDATE backfill, COPY fallback or disabled
+FK validation is authorized. Scope triggers precede replacement of affected legacy work checks.
+The incompatible serving-binary rollback floor is tenant V237.

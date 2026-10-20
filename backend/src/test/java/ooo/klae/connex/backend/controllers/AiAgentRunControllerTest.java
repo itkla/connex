@@ -116,7 +116,12 @@ class AiAgentRunControllerTest {
         when(workspaces.getCurrentWorkspaceId()).thenReturn(7);
         when(workspaces.getCurrentUserId()).thenReturn(11);
         when(workspaces.isMember(7, 11)).thenReturn(true);
-        var realService = new AiAgentRunService(runs, null, persistence, gate, null, null, null,
+        var realService = new AiAgentRunService(
+                new ooo.klae.connex.backend.ai.assistant.AiChatPrivacyGuard(
+                        mock(ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService.class)),
+                mock(ooo.klae.connex.backend.ai.assistant.AiAssistantSessionReadAudit.class),
+                mock(org.springframework.transaction.PlatformTransactionManager.class),
+                runs, null, persistence, gate, null, null, null,
                 new AiRestrictionEpoch(), workspaces, new ObjectMapper(), Clock.systemUTC());
         var boundary = MockMvcBuilders.standaloneSetup(new AiAgentRunController(realService))
                 .setControllerAdvice(new GlobalExceptionHandler(errors, new TenantContext())).build();

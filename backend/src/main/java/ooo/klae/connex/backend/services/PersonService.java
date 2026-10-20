@@ -741,8 +741,6 @@ public class PersonService {
         int revokedShares = provisionCeased ? shareMapper.revokePersonShares(id, workspaceId) : 0;
         int purgedAiOutputs = 0;
         if (suspended || provisionCeased) {
-            aiAgentPrivacyService.invalidateWorkspaces(
-                    restrictionWorkspaceIds, java.util.UUID.randomUUID(), "restriction", null, null);
             purgedAiOutputs = aiOutputCacheMapper.deleteForPerson(workspaceId, id);
         }
         Person after = requireOwnedPerson(workspaceId, id);
@@ -758,6 +756,10 @@ public class PersonService {
         }
         if (after.getSuspendedAt() == null && after.getProvisionCeasedAt() == null) {
             providerCaptureMapper.releaseRestoredParticipantReviews(workspaceId, id);
+        }
+        if (suspended || provisionCeased) {
+            aiAgentPrivacyService.invalidateAssistantOrganization(
+                    orgId, restrictionWorkspaceIds, java.util.UUID.randomUUID(), "restriction", null, null);
         }
         Map<String, Object> diff = auditService.diff(before, after, RESTRICTION_AUDIT_FIELDS);
         if (diff != null || revokedShares > 0 || purgedAiOutputs > 0) {

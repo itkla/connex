@@ -14,52 +14,62 @@ import ooo.klae.connex.backend.beans.AiChatTurnRef;
 
 /** Workspace-scoped persistence for assistant sessions, participants, messages, turns, and tools. */
 public interface AiChatMapper {
+
     List<AiChatSession> listAccessibleSessions(
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId,
         @Param("limit") int limit,
-        @Param("offset") int offset);
+        @Param("offset") int offset,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     long countAccessibleSessions(
         @Param("workspaceId") int workspaceId,
-        @Param("userId") int userId);
+        @Param("userId") int userId,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     List<AiChatSession> listInvitedSessions(
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId,
         @Param("limit") int limit,
-        @Param("offset") int offset);
+        @Param("offset") int offset,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     long countInvitedSessions(
         @Param("workspaceId") int workspaceId,
-        @Param("userId") int userId);
+        @Param("userId") int userId,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     List<AiChatSession> listRetainedSessions(
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId,
         @Param("activeMemberIds") List<Integer> activeMemberIds,
         @Param("limit") int limit,
-        @Param("offset") int offset);
+        @Param("offset") int offset,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     long countRetainedSessions(
         @Param("workspaceId") int workspaceId,
-        @Param("activeMemberIds") List<Integer> activeMemberIds);
+        @Param("activeMemberIds") List<Integer> activeMemberIds,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     AiChatSession getAccessibleSessionById(
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId,
-        @Param("id") int id);
+        @Param("id") int id,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     AiChatSession getRetainedSessionById(
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId,
         @Param("id") int id,
-        @Param("activeMemberIds") List<Integer> activeMemberIds);
+        @Param("activeMemberIds") List<Integer> activeMemberIds,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     AiChatSession getSessionById(
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId,
-        @Param("id") int id);
+        @Param("id") int id,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     AiChatSession getSessionByIdForUpdate(
         @Param("workspaceId") int workspaceId,
@@ -85,7 +95,8 @@ public interface AiChatMapper {
 
     boolean sessionExists(
         @Param("workspaceId") int workspaceId,
-        @Param("id") int id);
+        @Param("id") int id,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     int insertSession(AiChatSession session);
 
@@ -178,7 +189,8 @@ public interface AiChatMapper {
 
     int countAssistantMessages(
         @Param("workspaceId") int workspaceId,
-        @Param("sessionId") int sessionId);
+        @Param("sessionId") int sessionId,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     /** Allocates under the session mutex; deletion never makes a committed sequence reusable. */
     default int nextMessageSequence(int workspaceId, int sessionId) {
@@ -230,41 +242,48 @@ public interface AiChatMapper {
     AiChatMessage getMessageById(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,
-        @Param("id") int id);
+        @Param("id") int id,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     List<AiChatMessage> listMessages(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,
         @Param("limit") int limit,
-        @Param("offset") int offset);
+        @Param("offset") int offset,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     List<AiChatMessage> listAssistantMessagesBySessionAndTurnIds(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,
         @Param("turnIds") List<Integer> turnIds,
-        @Param("limit") int limit);
+        @Param("limit") int limit,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     List<AiChatMessage> listRecentMessages(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,
         @Param("maxSeq") int maxSeq,
-        @Param("limit") int limit);
+        @Param("limit") int limit,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     /** Loads the latest assistant answer within one workspace and session. */
     AiChatMessage getLatestAnswer(
         @Param("workspaceId") int workspaceId,
-        @Param("sessionId") int sessionId);
+        @Param("sessionId") int sessionId,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     AiChatMessage getHistorySummary(
         @Param("workspaceId") int workspaceId,
-        @Param("sessionId") int sessionId);
+        @Param("sessionId") int sessionId,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     List<AiChatMessage> listMessagesForCompaction(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,
         @Param("afterSeq") int afterSeq,
         @Param("beforeSeq") int beforeSeq,
-        @Param("limit") int limit);
+        @Param("limit") int limit,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     int updateHistorySummary(
         @Param("workspaceId") int workspaceId,
@@ -277,7 +296,8 @@ public interface AiChatMapper {
 
     long countMessages(
         @Param("workspaceId") int workspaceId,
-        @Param("sessionId") int sessionId);
+        @Param("sessionId") int sessionId,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     int updateLastMessageAt(
         @Param("workspaceId") int workspaceId,
@@ -411,7 +431,8 @@ public interface AiChatMapper {
     AiChatTurn getTurnById(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,
-        @Param("id") int id);
+        @Param("id") int id,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     AiChatTurn getTurnByIdForUpdate(
         @Param("workspaceId") int workspaceId,
@@ -426,11 +447,13 @@ public interface AiChatMapper {
     List<AiChatTurn> listTurnsByIds(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,
-        @Param("ids") List<Integer> ids);
+        @Param("ids") List<Integer> ids,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     AiChatTurn getLatestActiveTurnBySession(
         @Param("workspaceId") int workspaceId,
-        @Param("sessionId") int sessionId);
+        @Param("sessionId") int sessionId,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     int markTurnRunning(
         @Param("workspaceId") int workspaceId,
@@ -477,16 +500,19 @@ public interface AiChatMapper {
     AiChatToolCall getToolCallById(
         @Param("workspaceId") int workspaceId,
         @Param("messageId") int messageId,
-        @Param("id") int id);
+        @Param("id") int id,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     AiChatToolCall getToolCallByIdempotencyKey(
         @Param("workspaceId") int workspaceId,
-        @Param("idempotencyKey") String idempotencyKey);
+        @Param("idempotencyKey") String idempotencyKey,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     AiChatToolCall getToolCallBySession(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,
-        @Param("id") int id);
+        @Param("id") int id,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     /** Discovers immutable origin before entering legacy decision lock order without reading payloads. */
     String getToolArtifactOrigin(
@@ -504,7 +530,8 @@ public interface AiChatMapper {
         @Param("sessionId") int sessionId,
         @Param("pendingOnly") boolean pendingOnly,
         @Param("limit") int limit,
-        @Param("reviewCreatedAfter") LocalDateTime reviewCreatedAfter);
+        @Param("reviewCreatedAfter") LocalDateTime reviewCreatedAfter,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     /** Returns the newest trusted undecided rows beyond a session's raw history window, newest first. */
     List<AiChatToolCall> listUndecidedToolCallsAfterHistory(
@@ -512,13 +539,15 @@ public interface AiChatMapper {
         @Param("sessionId") int sessionId,
         @Param("afterMessageId") int afterMessageId,
         @Param("afterToolCallId") int afterToolCallId,
-        @Param("limit") int limit);
+        @Param("limit") int limit,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     List<AiChatToolCall> listToolCallsByTurn(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,
         @Param("idempotencyPrefix") String idempotencyPrefix,
-        @Param("limit") int limit);
+        @Param("limit") int limit,
+        @Param("organizationPrivacyGeneration") long organizationPrivacyGeneration);
 
     AiChatToolCall getToolCallBySessionForUpdate(
         @Param("workspaceId") int workspaceId,

@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.ai.mission;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -24,7 +25,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
-import org.junit.jupiter.params.provider.ValueSource;
 import org.mybatis.spring.SqlSessionTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
@@ -72,6 +72,7 @@ class AiAssistantPrivacyLockOrderIntegrationTest extends AbstractAiAgentPrivacyI
     @MockitoSpyBean private AiAgentPrivacyMapper privacy;
     @MockitoSpyBean private AuditIntegrityMapper audit;
     @MockitoSpyBean private AiRestrictionEpoch epochs;
+    @MockitoSpyBean private ooo.klae.connex.backend.mappers.AiAssistantPrivacyControlMapper organizationPrivacy;
 
     private User writer;
     private Person target;
@@ -181,24 +182,27 @@ class AiAssistantPrivacyLockOrderIntegrationTest extends AbstractAiAgentPrivacyI
         }
     }
 
-    /** Both real holders release their downstream wait before their contender can finish. */
+    /** Both arrival orders observe the actual organization lock or downstream audit-head wait. */
     @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    void undoAndRestrictionCompleteInBothArrivalOrders(boolean undoFirst) throws Exception {
-        ToolFixture fixture = authenticated(writer, () -> proposal(false));
-        authenticated(writer, () -> writes.executeAuto(fixture.turn(), fixture.toolCallId(), result -> {}));
+    @CsvSource({"false,false", "true,false", "false,true", "true,true"})
+    void approvalAndUndoSerializeWithRestrictionInBothArrivalOrders(boolean decisionFirst, boolean approval) throws Exception {
+        ToolFixture fixture = authenticated(writer, () -> proposal(approval));
+        if (!approval) {
+            authenticated(writer, () -> writes.executeAuto(fixture.turn(), fixture.toolCallId(), result -> {}));
+        }
         authenticateAs(currentUser, workspace.getId());
-        CountDownLatch undoEntered = new CountDownLatch(1);
-        CountDownLatch undoAtHead = new CountDownLatch(1);
+        int priorAuditCount = auditCount();
+        CountDownLatch decisionEntered = new CountDownLatch(1);
+        CountDownLatch decisionAtHead = new CountDownLatch(1);
         CountDownLatch restrictionAtFence = new CountDownLatch(1);
-        CountDownLatch restrictionAtBarrier = new CountDownLatch(1);
-        AtomicLong undoConnection = new AtomicLong();
+        CountDownLatch restrictionAtAuthority = new CountDownLatch(1);
+        AtomicLong decisionConnection = new AtomicLong();
         AtomicLong restrictionConnection = new AtomicLong();
-        AiAgentPrivacyMapper realPrivacy = sqlSessions.getMapper(AiAgentPrivacyMapper.class);
+        var realControl = sqlSessions.getMapper(ooo.klae.connex.backend.mappers.AiAssistantPrivacyControlMapper.class);
         AuditIntegrityMapper realAudit = sqlSessions.getMapper(AuditIntegrityMapper.class);
         doAnswer(invocation -> {
             if (named(UNDO)) {
-                undoEntered.countDown();
+                decisionEntered.countDown();
             }
             return invocation.callRealMethod();
         }).when(epochs).current(workspace.getId());
@@ -216,53 +220,62 @@ class AiAssistantPrivacyLockOrderIntegrationTest extends AbstractAiAgentPrivacyI
         }).when(epochs).retainWriteFencesUntilTransactionCompletion(anyList());
         doAnswer(invocation -> {
             if (named(UNDO)) {
-                undoConnection.set(connectionId());
-                undoAtHead.countDown();
+                decisionConnection.set(connectionId());
+                decisionAtHead.countDown();
             }
-            return realAudit.ensureHead(invocation.getArgument(0), invocation.getArgument(1),
-                    invocation.getArgument(2));
+            return realAudit.ensureHead(invocation.getArgument(0), invocation.getArgument(1), invocation.getArgument(2));
         }).when(audit).ensureHead(eq("workspace"), eq(workspace.getId()), anyString());
         doAnswer(invocation -> {
             if (named(RESTRICTION)) {
                 restrictionConnection.set(connectionId());
-                restrictionAtBarrier.countDown();
+                restrictionAtAuthority.countDown();
             }
-            return realPrivacy.lockBarrier(workspace.getId());
-        }).when(privacy).lockBarrier(workspace.getId());
+            return realControl.lockFence(invocation.getArgument(0));
+        }).when(organizationPrivacy).lockFence(workspace.getOrgId());
         try (var workers = Executors.newFixedThreadPool(2)) {
-            Callable<String> undo = () -> named(UNDO, () -> authenticated(writer,
-                    () -> writes.undo(fixture.sessionId(), fixture.toolCallId()).status()));
+            Callable<String> decide = () -> named(UNDO, () -> authenticated(writer,
+                    () -> approval ? writes.approve(fixture.sessionId(), fixture.toolCallId()).status()
+                            : writes.undo(fixture.sessionId(), fixture.toolCallId()).status()));
             Callable<Person> restrict = () -> named(RESTRICTION, () -> authenticated(currentUser,
                     () -> persons.updateProcessingRestrictions(restrictionTarget.getId(), true, false)));
-            AtomicReference<Future<String>> undone = new AtomicReference<>();
+            AtomicReference<Future<String>> decided = new AtomicReference<>();
             AtomicReference<Future<Person>> restricted = new AtomicReference<>();
             transaction().executeWithoutResult(status -> {
-                if (undoFirst) {
+                if (decisionFirst) {
                     assertNotNull(realAudit.lockHead("workspace", workspace.getId()));
-                    undone.set(workers.submit(undo));
-                    await(undoAtHead);
-                    MySqlLockWaitProbe.awaitExclusiveRecordLock(jdbc, undoConnection.get(),
+                    decided.set(workers.submit(decide));
+                    await(decisionAtHead);
+                    MySqlLockWaitProbe.awaitExclusiveRecordLock(jdbc, decisionConnection.get(),
                             "audit_log_integrity_head", "'workspace', " + workspace.getId());
                     restricted.set(workers.submit(restrict));
                     await(restrictionAtFence);
                 } else {
-                    privacyMapper.lockBarrierForShare(workspace.getId());
+                    assertNotNull(realControl.lockFenceForShare(workspace.getOrgId()));
                     restricted.set(workers.submit(restrict));
-                    await(restrictionAtBarrier);
+                    await(restrictionAtAuthority);
                     MySqlLockWaitProbe.awaitExclusiveRecordLock(jdbc, restrictionConnection.get(),
-                            "ai_agent_privacy_barrier", Integer.toString(workspace.getId()));
-                    undone.set(workers.submit(undo));
-                    await(undoEntered);
+                            "ai_assistant_privacy_fence", Integer.toString(workspace.getOrgId()));
+                    decided.set(workers.submit(decide));
+                    await(decisionEntered);
                 }
             });
-            assertEquals("undone", undone.get().get(20, TimeUnit.SECONDS));
             assertNotNull(restricted.get().get(20, TimeUnit.SECONDS).getSuspendedAt());
-            assertEquals(0, Objects.requireNonNull(jdbc.queryForObject(
-                    "SELECT COUNT(*) FROM task WHERE workspace_id=?", Integer.class, workspace.getId())));
-            assertEquals("undone", objectMapper.readTree(chatMapper.getToolCallBySession(
-                    workspace.getId(), fixture.sessionId(), fixture.toolCallId()).getResultJson())
-                    .path("undo").path("status").asString());
-            assertEquals(3, auditCount());
+            if (decisionFirst) {
+                assertEquals(approval ? "executed" : "undone", decided.get().get(20, TimeUnit.SECONDS));
+                assertEquals(priorAuditCount + 2, auditCount());
+            } else {
+                var refused = assertThrows(java.util.concurrent.ExecutionException.class,
+                        () -> decided.get().get(20, TimeUnit.SECONDS));
+                assertTrue(refused.getCause() instanceof ooo.klae.connex.backend.exceptions.ConflictException
+                        || refused.getCause() instanceof ooo.klae.connex.backend.ai.assistant.AiAssistantLoopException);
+                assertEquals(priorAuditCount + 1, auditCount());
+            }
+            assertEquals(approval ? 1 : decisionFirst ? 0 : 1, jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM task WHERE workspace_id=?", Integer.class, workspace.getId()));
+            assertEquals(approval && decisionFirst ? 1 : 0, jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM task WHERE workspace_id=? AND completed=TRUE", Integer.class, workspace.getId()));
+            assertEquals(2L, realControl.getFence(workspace.getOrgId()).getGeneration());
+            assertEquals(1L, privacyMapper.getBarrier(workspace.getId()).getGeneration());
         }
     }
 
@@ -292,6 +305,7 @@ class AiAssistantPrivacyLockOrderIntegrationTest extends AbstractAiAgentPrivacyI
         AiChatSession session = session(writer, "private");
         AiChatMessage message = new AiChatMessage();
         message.setWorkspaceId(workspace.getId());
+        message.setOrganizationPrivacyGeneration(1L);
         message.setSessionId(session.getId());
         message.setSeq(1);
         message.setAuthorKind("user");
@@ -300,6 +314,7 @@ class AiAssistantPrivacyLockOrderIntegrationTest extends AbstractAiAgentPrivacyI
         chatMapper.insertMessage(message);
         AiChatTurn turn = new AiChatTurn();
         turn.setWorkspaceId(workspace.getId());
+        turn.setOrganizationPrivacyGeneration(1L);
         turn.setSessionId(session.getId());
         turn.setRequestedByUserId(writer.getId());
         turn.setStatus("running");
@@ -308,6 +323,7 @@ class AiAssistantPrivacyLockOrderIntegrationTest extends AbstractAiAgentPrivacyI
         AiChatToolCall call = new AiChatToolCall();
         call.setServerProposal(true);
         call.setWorkspaceId(workspace.getId());
+        call.setOrganizationPrivacyGeneration(1L);
         call.setMessageId(message.getId());
         call.setToolName(prepared.toolName());
         call.setStatus("proposed");
@@ -317,13 +333,14 @@ class AiAssistantPrivacyLockOrderIntegrationTest extends AbstractAiAgentPrivacyI
         AiChatQueuedTurn queued = new AiChatQueuedTurn(workspace.getId(), writer.getId(), session.getId(),
                 turn.getId(), message.getId(), message.getSeq(), epoch, true, List.of(), List.of(),
                 AiPrivacyMode.MASKED, false, AiChatQueryScope.none(),
-                new AiChatPrivacyToken(workspace.getId(), session.getId(), 1, null));
+                new AiChatPrivacyToken(workspace.getId(), session.getId(), 1, null, workspace.getOrgId(), 1L));
         return new ToolFixture(session.getId(), call.getId(), queued);
     }
 
     private AiChatSession session(User author, String visibility) {
         AiChatSession session = new AiChatSession();
         session.setWorkspaceId(workspace.getId());
+        session.setOrganizationPrivacyGeneration(1L);
         session.setCreatedByUserId(author.getId());
         session.setTitle("Lock-order fixture");
         session.setVisibility(visibility);

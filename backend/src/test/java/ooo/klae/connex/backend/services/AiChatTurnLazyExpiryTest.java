@@ -53,7 +53,7 @@ class AiChatTurnLazyExpiryTest extends AbstractServiceTest {
 
         AiChatTurn expired = stored(session, stale);
         AiChatTurn replacement = Objects.requireNonNull(chatMapper.getTurnById(
-                workspace.getId(), session.getId(), accepted.turnId()));
+                workspace.getId(), session.getId(), accepted.turnId(), 1L));
         assertNotEquals(stale.getId(), accepted.turnId());
         assertEquals("timed_out", expired.getStatus());
         assertEquals("generation_timeout", expired.getTerminalReason());
@@ -148,6 +148,7 @@ class AiChatTurnLazyExpiryTest extends AbstractServiceTest {
     private AiChatSession session(Workspace owningWorkspace, User owner) {
         AiChatSession session = new AiChatSession();
         session.setWorkspaceId(owningWorkspace.getId());
+        session.setOrganizationPrivacyGeneration(1L);
         session.setCreatedByUserId(owner.getId());
         session.setTitle("Turn " + unique());
         session.setVisibility("private");
@@ -159,6 +160,7 @@ class AiChatTurnLazyExpiryTest extends AbstractServiceTest {
     private AiChatTurn turn(AiChatSession session, User requester, String status) {
         AiChatTurn turn = new AiChatTurn();
         turn.setWorkspaceId(session.getWorkspaceId());
+        turn.setOrganizationPrivacyGeneration(1L);
         turn.setSessionId(session.getId());
         turn.setRequestedByUserId(requester.getId());
         turn.setStatus(status);
@@ -175,7 +177,7 @@ class AiChatTurnLazyExpiryTest extends AbstractServiceTest {
 
     private AiChatTurn stored(AiChatSession session, AiChatTurn turn) {
         return Objects.requireNonNull(chatMapper.getTurnById(
-                session.getWorkspaceId(), session.getId(), turn.getId()));
+                session.getWorkspaceId(), session.getId(), turn.getId(), 1L));
     }
 
     private static AiGenerationStatusDto acceptedStatus() {

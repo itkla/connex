@@ -739,7 +739,7 @@ Streaming remains inside `AiInvocationService`:
 
 ## Read-only missions and durable chat privacy
 
-V232 introduces `record_review_v1` inside an existing Ask Connex session. [AI_MISSIONS.md](AI_MISSIONS.md) defines its durable generation/taint predicate, conservative cleanup enrollment, DSR authority, and drained single-JVM activation boundary. Every ordinary message writer uses the same durable session sequence allocator; every derived execution retains its original privacy token through reads, secondary provider dispatch, writes, and deferred requester publication. Missing barriers and stale tokens fail closed after restart and after purge unblocks.
+V232 introduces `record_review_v1` inside an existing Ask Connex session. [AI_MISSIONS.md](AI_MISSIONS.md) defines its durable generation/taint predicate, conservative cleanup enrollment, DSR authority, and drained single-JVM activation boundary. Every ordinary message writer uses the same durable session sequence allocator; every derived execution retains its original privacy token through reads, secondary provider dispatch, writes, and deferred requester publication. Missing barriers and stale tokens fail closed after restart and after purge unblocks. V237 adds unconditional organization authority before the workspace check, including for never-tainted chats; workspace taint does not exempt any retained content from all-chat invalidation.
 
 Missions use the existing invocation, masking, leak scan, organization budget, audit and provider transport. Their server policy narrows the catalog and execution boundary to five read tools, enforces the selected primary record before retrieval/registration/handle resolution (including preclaim validation), and never enables CONFIRM/AUTO or question tools. Linked tasks are bounded evidence without task handles in this slice. Shared prompt serialization and envelope constants are unchanged. One `AGENT_RUN` lease covers each attempt; legacy `CHAT_TURN` routes cannot claim or control it.
 
@@ -913,7 +913,7 @@ anchor; legacy rows retain null membership columns. BEFORE INSERT/UPDATE trigger
 membership metadata, ordinal bounds and server trust without adding a COPY-requiring CHECK to the
 retained tool-call table; parent constraints remain CHECKs. The guarded online DDL and migration-only
 FK installation procedure are documented in [UPGRADING](../UPGRADING.md#dormant-assistant-proposal-set-storage-tenant-v233).
-Their creation timestamp and privacy generation are copied from the parent, separately from the
+Their creation timestamp and both privacy generations are copied from the parent, separately from the
 earlier preparation anchor. Children remain ordinary reactive chat artifacts with no mission run;
 read-only missions use their separate persistence path and do not produce proposal sets.
 Proposal-key FK columns explicitly use
@@ -921,10 +921,11 @@ the same ASCII binary collation. Account erasure clears the parent's requester b
 authors and turn requesters; membership departure retains attribution and never transfers it.
 The table's `TenantLifecycleRegistry` message cascade supplies tenant export, teardown and
 residual reach while chat messages, tools and turns retain their direct lifecycle declarations.
-Export applies the existing mission privacy barrier and parent message/turn visibility to set
-metadata; residual counts remain unconditional. V232 restriction and DSR cleanup remove sets
-through their message and origin-turn cascades, including sets attached to retained pre-taint
-user input, because the originating turn remains enrolled. The mapper reads no person rows, so
+Export applies organization authority, the mission barrier and consistent parent/message/turn
+provenance to set metadata and children; residual counts remain unconditional. Cleanup explicitly
+drains children before parents, including parents anchored to preserved pre-taint input in v1 work.
+Turn ancestry survives mission cleanup until ordered session cleanup. V2 additionally retires and
+physically removes the entire affected session. The mapper reads no person rows, so
 the person-reader restriction registry does not apply. Account erasure discovers proposal-set
 requester provenance when locking session roots and clears it in the chat-child phase before
 domain mutations, restriction fences and privacy invalidation.
@@ -937,12 +938,12 @@ publication transition. Exact reads return all children in ordinal order, withou
 creation/preparation anchors. It is an integrity check, not authorization or readiness. MySQL
 constraints alone cannot enforce a cross-row child count at commit.
 
-The later creation service must establish current authority, privacy generation and exact
-turn/message association under the session mutex, insert the parent and every member in one
-transaction, and require complete membership before commit. Existing chat readers and writers
-retain their legacy behavior. Production set creation, effective-tier decisions, whole-call
-publication, set-specific privacy admission and discovery remain disabled until their own slices. V233
-preserves the existing V232 rollback floor; activation requires a fresh semantic cutover.
+A future creation service must retain the originating organization/workspace authority and exact
+turn/message association under the session mutex, insert parent and members in one transaction,
+and require complete membership before commit. Storage provenance guards and privacy cleanup are
+active at V237. Production set creation, effective-tier decisions and whole-call publication/decision
+routes remain disabled until their own slices. V233 itself retained its then-V232 floor; the current
+V237 privacy floor applies independently of future producer activation.
 
 ### Adding an assistant write tool
 
@@ -1129,3 +1130,29 @@ Every actual dispatch, including repair/fallback, carries its exact mission ordi
 usage settlement. Continuation never resets organization gates, root caps, deadlines or
 outbound leak/special-care screening. Slice 2 adds no write, proposal, question or live-evaluation
 surface. See the mission contract for checkpoint-only closing decisions and retry exclusions.
+
+## Organization-wide assistant erasure (V236/V237)
+
+All retained pre-cutover Ask Connex content is unavailable immediately at organization generation
+cutover, including ordinary input, user-set titles, summaries, archived chats, proposal envelopes and
+chat-owned files. Organization provenance is immutable and independent of workspace mission taint.
+Capture authority before admitting input and preserve that token through deferred preparation,
+provider attempts, summaries, proposals, decisions, replay and callbacks. Missing authority fails
+closed without lazy creation. Proposal-set production remains disabled.
+
+Organization S precedes workspace S after existing content/domain roots. Public projection and
+decision paths cannot use a current token to relabel stale execution. Actual realtime, file and export
+output checks original authority under the organization-local publication read fence against fresh
+control metadata. Invalidation retains its write fence through transaction completion. Withdrawals
+contain only invalidation metadata and still require recipient access. These local fences require
+one serving JVM and do not solve distributed provider dispatch (#941).
+
+Committed invalidation separately sends workspace ID, invalidation kind and decimal cutoff to
+current active members with `AI_USE` or `AI_SESSION_ADMIN`. It loads no session content or audience
+rows, so physical cleanup cannot suppress withdrawal for invitees or retained-chat administrators.
+Clients compare the session's original decimal authority, retire affected caches and reject late
+responses while preserving newer chats. Missing provenance is withheld after a known cutoff.
+
+Accepted v1 DSR authority remains unchanged. New all-chat requests require both explicit v2
+acknowledgments and all existing admin, recent-authentication, CSRF, subject-proof and snapshot gates.
+Erasure completion requires positive file-deletion receipts and current placement coverage.

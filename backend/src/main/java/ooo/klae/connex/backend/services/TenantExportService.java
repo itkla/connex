@@ -31,6 +31,8 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import jakarta.annotation.PreDestroy;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyPublicationGuard;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService;
 import ooo.klae.connex.backend.dto.ActiveObjectReference;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
@@ -81,6 +83,8 @@ public class TenantExportService {
     private final TenantLifecycleProperties properties;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final AiAssistantPrivacyService assistantPrivacyService;
+    private final AiAssistantPrivacyPublicationGuard publicationGuard;
     private final LongSupplier nanoTime;
     private final LongConsumer admissionWait;
     private final ScheduledThreadPoolExecutor deadlineExecutor;
@@ -99,7 +103,9 @@ public class TenantExportService {
             AuditService auditService,
             TenantLifecycleProperties properties,
             ObjectMapper objectMapper,
-            Clock clock) {
+            Clock clock,
+            AiAssistantPrivacyService assistantPrivacyService,
+            AiAssistantPrivacyPublicationGuard publicationGuard) {
         this(
             orgMemberService,
             sessionSecurityService,
@@ -112,6 +118,8 @@ public class TenantExportService {
             properties,
             objectMapper,
             clock,
+            assistantPrivacyService,
+            publicationGuard,
             System::nanoTime,
             LockSupport::parkNanos,
             deadlineExecutor());
@@ -129,6 +137,8 @@ public class TenantExportService {
             TenantLifecycleProperties properties,
             ObjectMapper objectMapper,
             Clock clock,
+            AiAssistantPrivacyService assistantPrivacyService,
+            AiAssistantPrivacyPublicationGuard publicationGuard,
             LongSupplier nanoTime,
             LongConsumer admissionWait,
             ScheduledThreadPoolExecutor deadlineExecutor) {
@@ -143,6 +153,8 @@ public class TenantExportService {
         this.properties = properties;
         this.objectMapper = objectMapper;
         this.clock = clock;
+        this.assistantPrivacyService = assistantPrivacyService;
+        this.publicationGuard = publicationGuard;
         this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
         this.admissionWait = Objects.requireNonNull(admissionWait, "admissionWait");
         this.deadlineExecutor = Objects.requireNonNull(deadlineExecutor, "deadlineExecutor");
@@ -239,6 +251,31 @@ public class TenantExportService {
             TenantExportExecution execution) throws IOException {
         Instant generatedAt = clock.instant();
         OutputStream ownedOutput = new FilterOutputStream(output) {
+            @Override
+            public void write(int value) throws IOException {
+                guardedWrite(() -> out.write(value));
+            }
+
+            @Override
+            public void write(byte[] bytes, int offset, int length) throws IOException {
+                guardedWrite(() -> out.write(bytes, offset, length));
+            }
+
+            @Override
+            public void flush() throws IOException {
+                guardedWrite(out::flush);
+            }
+
+            private void guardedWrite(AiAssistantPrivacyPublicationGuard.IoAction action) throws IOException {
+                execution.checkActive();
+                try {
+                    publicationGuard.withCurrent(orgId, execution.organizationPrivacyGeneration(), action);
+                } catch (IOException | RuntimeException failure) {
+                    execution.cancel();
+                    throw failure;
+                }
+            }
+
             @Override
             public void close() throws IOException {
                 outputResource.close();
@@ -517,6 +554,7 @@ public class TenantExportService {
                 cancellationExecutor,
                 this::cleanupOwnedResources,
                 nanoTime);
+            execution.bindOrganizationGeneration(assistantPrivacyService.current(orgId));
             execution.armDeadline(deadlineExecutor);
         }
 

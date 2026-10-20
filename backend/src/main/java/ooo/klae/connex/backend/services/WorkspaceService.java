@@ -71,6 +71,7 @@ public class WorkspaceService {
     private final WorkspaceMapper workspaceMapper;
     private final UserMapper userMapper;
     private final OrganizationMapper organizationMapper;
+    private final ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService assistantPrivacyService;
     private final OrgMemberService orgMemberService;
     private final OrgAllowedDomainService orgAllowedDomainService;
     private final RoleMapper roleMapper;
@@ -423,6 +424,7 @@ public class WorkspaceService {
         organization.setName(name.trim());
         organization.setSlug(generateSlug(name));
         organizationMapper.insert(organization);
+        assistantPrivacyService.provision(organization.getId());
         int foundingPasskeys = orgMemberService.addFoundingOwner(organization.getId(), ownerUserId);
         auditService.record("org.create", "organization", organization.getId(), organization.getName(),
                 "Organization created", Map.of("ownerUserId", ownerUserId));

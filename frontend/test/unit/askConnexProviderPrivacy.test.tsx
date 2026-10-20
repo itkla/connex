@@ -6,6 +6,7 @@ import type AskConnexDrawer from '@/app/components/ask-connex/AskConnexDrawer';
 import type AskConnexMissionProgress from '@/app/components/ask-connex/AskConnexMissionProgress';
 import { ASK_CONNEX_REALTIME_REFRESH_DELAY_MS } from '@/app/components/ask-connex/realtimeRefreshCoalescer';
 import { ApiError } from '@/app/lib/api';
+import type { AskConnexScopeDraft } from '@/app/lib/askConnexScope';
 import type { AiChatSocketHandlers } from '@/app/lib/realtime';
 import type { AiAgentRun, AiAgentRunPage, AiChatSession, AiChatSessionDetail, AiChatTurn } from '@/app/lib/types';
 import { installInteractiveDocument } from '@/test/unit/helpers/interactiveDocument';
@@ -17,6 +18,7 @@ const harness = vi.hoisted(() => ({
     getSession: vi.fn<() => Promise<AiChatSessionDetail>>(),
     getTurn: vi.fn<() => Promise<AiChatTurn>>(),
     getMissions: vi.fn<() => Promise<AiAgentRunPage>>(),
+    preview: vi.fn<typeof import('@/app/lib/api').previewAiChatScope>(),
     translate: (key: string) => key,
     persist: () => true,
     toast: vi.fn(),
@@ -48,10 +50,12 @@ vi.mock('@/app/lib/api', async (importOriginal) => ({
     getAiChatAttachments: async () => [],
     getAiAssistantToolCalls: async () => [],
     getAiAgentRuns: harness.getMissions,
+    previewAiChatScope: harness.preview,
 }));
 
 const session: AiChatSession = {
     id: 7, workspaceId: 1, createdByUserId: 1, title: 'Ask Connex', visibility: 'private',
+    organizationPrivacyGeneration: '1',
     status: 'active', archived: false, ownedByCurrentUser: true, historySummarized: false,
     participationStatus: null, lastMessageAt: null, archivedAt: null,
     createdAt: '2026-10-15T10:00:00Z', updatedAt: '2026-10-15T10:00:00Z',
@@ -97,7 +101,7 @@ async function flushRealtimeRefresh() {
     await act(async () => { await vi.advanceTimersByTimeAsync(ASK_CONNEX_REALTIME_REFRESH_DELAY_MS); });
 }
 
-async function mount(active = true) {
+async function mount(active = true, generation = '1') {
     const interactive = installInteractiveDocument();
     Object.assign(window, {
         setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout,
@@ -107,7 +111,8 @@ async function mount(active = true) {
         localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
     });
     const running: AiChatTurn = { turnId: 9, sessionId: 7, status: 'running', terminalReason: null, progress: [] };
-    harness.getSession.mockResolvedValue(detail(active ? running : null));
+    harness.getSession.mockResolvedValue({ ...detail(active ? running : null),
+        session: { ...session, organizationPrivacyGeneration: generation } });
     harness.getTurn.mockResolvedValue(running);
     const { createRoot } = await import('react-dom/client');
     const root = createRoot(interactive.container);
@@ -219,6 +224,8 @@ describe('Ask Connex provider privacy withdrawal', () => {
 
     it('discards buffered and rendered text on a privacy frame before a suspended transcript refresh', async () => {
         const mounted = await mount();
+        await act(async () => props().scope.onEditorOpenChange(true));
+        expect(props().scope.editorOpen).toBe(true);
         await stream('Withdrawn text');
         expect(props().streamStore.getSnapshot()?.text).toBe('Withdrawn text');
         await stream('Buffered withdrawn text', 50);
@@ -232,10 +239,59 @@ describe('Ask Connex provider privacy withdrawal', () => {
 
         expect(props().streamStore.getSnapshot()).toBeNull();
         expect(props().streaming).toBe(false);
+        expect(props().fileAttachments).toEqual([]);
+        expect(props().scope.editorOpen).toBe(false);
+        expect(props().scope.filterCount).toBe(0);
+        expect(props().unavailable?.body).toBe('privacyUnavailable');
         expect(props().messages).toEqual([]);
         expect(props().continuePrompt).toBeNull();
         await stream('Late withdrawn text');
         expect(props().streamStore.getSnapshot()).toBeNull();
+        await mounted.unmount();
+    });
+
+    it.each(['1', '9007199254740993'])(
+        'withdraws idle content using original decimal authority %s after session deletion', async (generation) => {
+        const mounted = await mount(false, generation);
+        await act(async () => socket().onPrivacyFrame?.({
+            workspaceId: 1, kind: 'privacy_invalidated', cutoffGeneration: generation,
+        }));
+        expect(props().activeSession).toBeNull();
+        expect(props().unavailable?.body).toBe('privacyUnavailable');
+        await mounted.unmount();
+    });
+
+    it('keeps a newly admitted current chat usable after an older workspace withdrawal', async () => {
+        const mounted = await mount(false, '9007199254740993');
+        await act(async () => socket().onPrivacyFrame?.({
+            workspaceId: 1, kind: 'privacy_invalidated', cutoffGeneration: '9007199254740992',
+        }));
+        expect(props().activeSession?.id).toBe(7);
+        expect(props().unavailable).toBeNull();
+        await mounted.unmount();
+    });
+
+    it('cannot restore a cached scope preview when its callback races privacy withdrawal', async () => {
+        const mounted = await mount(false);
+        const pending = Promise.withResolvers<Awaited<ReturnType<typeof import('@/app/lib/api').previewAiChatScope>>>();
+        harness.preview.mockReturnValueOnce(pending.promise);
+        const draft: AskConnexScopeDraft = { ...props().scope.draft, periodMode: 'days', periodDays: 30 };
+        await act(async () => {
+            props().scope.onDraftChange(draft);
+        });
+        await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+        expect(harness.preview).toHaveBeenCalledOnce();
+        const signal = harness.preview.mock.calls[0]?.[1]?.signal;
+        await act(async () => {
+            socket().onPrivacyFrame?.({ workspaceId: 1, kind: 'privacy_invalidated', cutoffGeneration: '1' });
+            pending.reject(new ApiError('Old preview response', 429));
+            await pending.promise.catch(() => {});
+            await Promise.resolve();
+            expect(signal?.aborted).toBe(false);
+        });
+        expect(props().scope.filterCount).toBe(0);
+        await act(async () => props().scope.onDraftChange(draft));
+        expect(props().scope.preview.status).toBe('loading');
         await mounted.unmount();
     });
 

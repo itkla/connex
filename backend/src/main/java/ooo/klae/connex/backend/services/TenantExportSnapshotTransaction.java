@@ -144,7 +144,7 @@ public class TenantExportSnapshotTransaction {
         long rows = 0;
         boolean entryOpen = false;
         try (Cursor<Map<String, Object>> cursor =
-                mapper.streamRows(workspaceId, registered)) {
+                mapper.streamRows(workspaceId, registered, execution.organizationPrivacyGeneration())) {
             for (Map<String, Object> row : cursor) {
                 execution.checkActive();
                 if (!entryOpen) {
@@ -266,7 +266,7 @@ public class TenantExportSnapshotTransaction {
                 StandardOpenOption.TRUNCATE_EXISTING);
         try (TrackedResource outputResource = execution.track(output)) {
             try (Cursor<ActiveObjectReference> cursor =
-                    mapper.streamActiveObjectReferences(workspaceId)) {
+                    mapper.streamActiveObjectReferences(workspaceId, execution.organizationPrivacyGeneration())) {
                 for (ActiveObjectReference reference : cursor) {
                     execution.checkActive();
                     output.write(objectMapper.writeValueAsBytes(reference));

@@ -362,7 +362,7 @@ public abstract class AbstractScriptedTrajectoryTest {
      */
     final AiChatTurn turnRow(Trajectory trajectory) {
         return chatMapper.getTurnById(
-                workspace.getId(), trajectory.sessionId(), trajectory.turnId());
+                workspace.getId(), trajectory.sessionId(), trajectory.turnId(), 1L);
     }
 
     /**
@@ -411,8 +411,8 @@ public abstract class AbstractScriptedTrajectoryTest {
                     accepted.turnId(),
                     settled.getStatus(),
                     settled.getTerminalReason(),
-                    chatMapper.listToolCallsBySession(workspace.getId(), sessionId, false, 50, null),
-                    chatMapper.listMessages(workspace.getId(), sessionId, 50, 0).stream()
+                    chatMapper.listToolCallsBySession(workspace.getId(), sessionId, false, 50, null, 1L),
+                    chatMapper.listMessages(workspace.getId(), sessionId, 50, 0, 1L).stream()
                             .filter(message -> "assistant".equals(message.getAuthorKind()))
                             .toList());
         } finally {
@@ -631,7 +631,7 @@ public abstract class AbstractScriptedTrajectoryTest {
                 List.of(), AiPrivacyMode.MASKED, false, AiChatQueryScope.none(),
                 new AiChatPrivacyToken(workspace.getId(), number(turn, "session_id").intValue(),
                         number(turn, "privacy_generation").longValue(),
-                        turn.get("privacy_taint_seq") == null ? null : number(turn, "privacy_taint_seq").intValue()));
+                        turn.get("privacy_taint_seq") == null ? null : number(turn, "privacy_taint_seq").intValue(), 1, 1L));
     }
 
     private static Number number(Map<String, Object> row, String field) {
@@ -801,6 +801,7 @@ public abstract class AbstractScriptedTrajectoryTest {
     protected final int session() {
         AiChatSession session = new AiChatSession();
         session.setWorkspaceId(workspace.getId());
+        session.setOrganizationPrivacyGeneration(1L);
         session.setCreatedByUserId(member.getId());
         session.setTitle(UNTITLED_SESSION);
         session.setTitleUserSet(false);
@@ -867,7 +868,7 @@ public abstract class AbstractScriptedTrajectoryTest {
     private AiChatTurn poll(int sessionId, int turnId, Duration bound, List<String> statuses) {
         Instant deadline = Instant.now().plus(bound);
         while (true) {
-            AiChatTurn turn = chatMapper.getTurnById(workspace.getId(), sessionId, turnId);
+            AiChatTurn turn = chatMapper.getTurnById(workspace.getId(), sessionId, turnId, 1L);
             assertNotNull(turn, "the durable turn row disappeared while the trajectory ran");
             if (statuses.contains(turn.getStatus())) {
                 return turn;

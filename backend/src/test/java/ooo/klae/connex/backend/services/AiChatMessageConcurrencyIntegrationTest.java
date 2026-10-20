@@ -185,7 +185,7 @@ class AiChatMessageConcurrencyIntegrationTest {
         }
 
         List<AiChatMessage> messages = chatMapper.listMessages(
-            workspace.getId(), session.getId(), 100, 0);
+            workspace.getId(), session.getId(), 100, 0, 1L);
         assertEquals(APPEND_COUNT, messages.size());
         assertEquals(
             IntStream.rangeClosed(1, APPEND_COUNT).boxed().toList(),

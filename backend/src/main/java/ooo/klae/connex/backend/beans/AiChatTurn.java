@@ -13,6 +13,7 @@ public class AiChatTurn {
     private Long privacyGeneration;
     private Integer privacyTaintSeq;
     private int workspaceId;
+    private long organizationPrivacyGeneration;
     private int sessionId;
     private Integer requestedByUserId;
     private String status;
