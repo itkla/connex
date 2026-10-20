@@ -46,12 +46,20 @@ class ReportMapperXmlTest {
             assertThrows(AssertionError.class,
                     () -> assertNoBareUnitGrouping("GROUP BY " + grouping + " ORDER BY group_key"));
         }
+        assertThrows(AssertionError.class, () -> assertNoBareUnitGrouping(
+                "<sql id=\"bad\">unit</sql> GROUP BY group_key, group_label, <include refid=\"bad\"/> ORDER BY group_key"));
+        assertThrows(AssertionError.class, () -> assertNoBareUnitGrouping(
+                "<sql id=\"outer\"><include refid=\"inner\"/></sql><sql id=\"inner\">unit</sql>"
+                        + " GROUP BY group_key, <include refid=\"outer\"></include> ORDER BY group_key"));
         assertNoBareUnitGrouping("GROUP BY group_key, group_label, COALESCE(d.currency, '') ORDER BY group_key");
         assertNoBareUnitGrouping("GROUP BY product.unit, 'unit' ORDER BY product.unit");
+        assertNoBareUnitGrouping("<sql id=\"currency\">COALESCE(d.currency, '')</sql>"
+                + " GROUP BY group_key, <include refid=\"currency\"/> ORDER BY group_key");
     }
 
     private static void assertNoBareUnitGrouping(String mapper) {
-        String sqlText = mapper.replaceAll("(?s)<!--.*?-->", "").replaceAll("(?s)<[^>]+>", " ");
+        String sqlText = expandIncludes(mapper.replaceAll("(?s)<!--.*?-->", ""))
+                .replaceAll("(?s)<[^>]+>", " ");
         var clauses = Pattern.compile(
                 "(?is)\\bGROUP\\s+BY\\b(.*?)(?=\\b(?:ORDER\\s+BY|HAVING|LIMIT|SELECT|FROM|WHERE|JOIN|GROUP\\s+BY)\\b|;|$)")
                 .matcher(sqlText);
@@ -65,6 +73,24 @@ class ReportMapperXmlTest {
                             + "use an explicit expression in ReportMapper.xml (#1313): " + clauses.group());
         }
         assertTrue(clauseCount > 0);
+    }
+
+    /** Inlines each {@code <include refid>} with its same-mapper {@code <sql>} fragment, nested includes included. */
+    private static String expandIncludes(String mapper) {
+        Map<String, String> fragments = new java.util.HashMap<>();
+        var definitions = Pattern.compile("(?s)<sql\\s+id=\"([^\"]+)\"\\s*>(.*?)</sql>").matcher(mapper);
+        while (definitions.find()) {
+            fragments.put(definitions.group(1), definitions.group(2));
+        }
+        Pattern include = Pattern.compile(
+                "(?s)<include\\s+refid=\"([^\"]+)\"\\s*(?:/>|>.*?</include>)");
+        String expanded = mapper;
+        for (int depth = 0; depth < 16 && include.matcher(expanded).find(); depth++) {
+            expanded = include.matcher(expanded).replaceAll(match -> java.util.regex.Matcher.quoteReplacement(
+                    " " + fragments.getOrDefault(match.group(1), "") + " "));
+        }
+        assertFalse(include.matcher(expanded).find(), "Unresolved or cyclic <include> in mapper text");
+        return expanded;
     }
 
     @Test
