@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -89,6 +90,9 @@ class RecordCreationTemplateServiceTest {
     private final AuditService auditService = mock(AuditService.class);
     private final RecordCreationFieldRegistry registry = new RecordCreationFieldRegistry();
 
+    private final RecordVisibilityScopeControlAccess scopes =
+        unfiltered();
+
     private RecordCreationTemplateService service;
     private RecordCreationTemplateDefinitionDto definition;
 
@@ -98,12 +102,12 @@ class RecordCreationTemplateServiceTest {
         when(workspaceService.getCurrentUserId()).thenReturn(11);
         definition = definition("name");
         RecordCreationPresetService presetService = new RecordCreationPresetService(
-            mapper, resolver, registry, workspaceService);
+            mapper, resolver, registry, workspaceService, unfiltered());
         service = new RecordCreationTemplateService(
             mapper,
             customFieldMapper,
             tagMapper,
-            pipelineMapper,
+            pipelineMapper, scopes,
             companyMapper,
             personMapper,
             shareMapper,
@@ -122,7 +126,7 @@ class RecordCreationTemplateServiceTest {
         when(mapper.getSetForUpdate(7, "person")).thenReturn(set);
         when(mapper.listRootsForUpdate(7, "person")).thenReturn(List.of());
         var validated = validated("canonical", definition);
-        when(validator.validateAndCanonicalize(any(), any(), any(), any())).thenReturn(validated);
+        when(validator.validateAndCanonicalize(any(), any(), any(), any(), eq("[7,8,9]"))).thenReturn(validated);
         doAnswer(invocation -> {
             invocation.<RecordCreationTemplate>getArgument(0).setId(42);
             return null;
@@ -138,7 +142,7 @@ class RecordCreationTemplateServiceTest {
         when(mapper.getRoot(7, 42)).thenReturn(stored);
         when(mapper.getCurrentVersion(7, 42)).thenReturn(version);
         when(validator.parseDefinition("canonical")).thenReturn(definition);
-        when(resolver.resolveWorkspace(stored, version, null)).thenReturn(
+        when(resolver.resolveWorkspace(stored, version, null, "[7,8,9]")).thenReturn(
             available("workspace:42", RecordCreationRecordType.person, false));
 
         var created = service.create(new RecordCreationTemplateCreateRequestDto(
@@ -168,9 +172,9 @@ class RecordCreationTemplateServiceTest {
         when(mapper.getSet(7, "person")).thenReturn(set(3, 42));
         when(mapper.listRoots(7, "person", true)).thenReturn(List.of(root));
         when(mapper.getCurrentVersion(7, 42)).thenReturn(version);
-        when(resolver.resolveWorkspace(root, version, null)).thenReturn(
+        when(resolver.resolveWorkspace(root, version, null, "[7,8,9]")).thenReturn(
             available("workspace:42", RecordCreationRecordType.person, false));
-        when(resolver.resolveSystem(RecordCreationRecordType.person, null)).thenReturn(
+        when(resolver.resolveSystem(RecordCreationRecordType.person, null, "[7,8,9]")).thenReturn(
             available("system:person:standard", RecordCreationRecordType.person, true));
 
         var listed = service.list(RecordCreationRecordType.person, true);
@@ -178,8 +182,8 @@ class RecordCreationTemplateServiceTest {
         assertEquals("workspace:42", listed.selectedTemplateId());
         assertEquals(List.of("workspace:42", "system:person:standard"),
             listed.templates().stream().map(template -> template.id()).toList());
-        verify(resolver, times(1)).resolveWorkspace(root, version, null);
-        verify(resolver, times(1)).resolveSystem(RecordCreationRecordType.person, null);
+        verify(resolver, times(1)).resolveWorkspace(root, version, null, "[7,8,9]");
+        verify(resolver, times(1)).resolveSystem(RecordCreationRecordType.person, null, "[7,8,9]");
     }
 
     @Test
@@ -223,8 +227,8 @@ class RecordCreationTemplateServiceTest {
 
     @Test
     void zeroPipelinesFailCatalogAndSystemPreviewClosed() {
-        when(pipelineMapper.getAllPipelines(7)).thenReturn(List.of());
-        when(pipelineMapper.getAllStages(7)).thenReturn(List.of());
+        when(pipelineMapper.getAllPipelines(7, "[7,8,9]")).thenReturn(List.of());
+        when(pipelineMapper.getAllStages(7, "[7,8,9]")).thenReturn(List.of());
         RecordCreationTemplateService liveService = serviceWithLiveResolver();
 
         assertCatalogUnavailable(() -> liveService.catalog(RecordCreationRecordType.deal));
@@ -236,8 +240,8 @@ class RecordCreationTemplateServiceTest {
         Pipeline first = pipeline(3, "Empty");
         Pipeline later = pipeline(9, "Material");
         Stage laterStage = stage(12, later, 0, "Material stage");
-        when(pipelineMapper.getAllPipelines(7)).thenReturn(List.of(first, later));
-        when(pipelineMapper.getAllStages(7)).thenReturn(List.of(laterStage));
+        when(pipelineMapper.getAllPipelines(7, "[7,8,9]")).thenReturn(List.of(first, later));
+        when(pipelineMapper.getAllStages(7, "[7,8,9]")).thenReturn(List.of(laterStage));
         RecordCreationTemplateService liveService = serviceWithLiveResolver();
 
         assertCatalogUnavailable(() -> liveService.catalog(RecordCreationRecordType.deal));
@@ -253,14 +257,14 @@ class RecordCreationTemplateServiceTest {
         when(mapper.getSetForUpdate(7, "person")).thenReturn(set);
         when(mapper.getRootForUpdate(7, 42)).thenReturn(root);
         when(mapper.getCurrentVersion(7, 42)).thenReturn(current);
-        when(validator.validateAndCanonicalize(any(), any(), any(), any()))
+        when(validator.validateAndCanonicalize(any(), any(), any(), any(), eq("[7,8,9]")))
             .thenReturn(validated("same", definition));
         when(validator.parseDefinition("same")).thenReturn(definition);
-        when(resolver.resolveWorkspace(root, current, null)).thenReturn(
+        when(resolver.resolveWorkspace(root, current, null, "[7,8,9]")).thenReturn(
             available("workspace:42", RecordCreationRecordType.person, false));
         when(mapper.listRoots(7, "person", false)).thenReturn(List.of(root));
         when(mapper.getSet(7, "person")).thenReturn(set);
-        when(resolver.resolveSystem(RecordCreationRecordType.person, null)).thenReturn(
+        when(resolver.resolveSystem(RecordCreationRecordType.person, null, "[7,8,9]")).thenReturn(
             available("system:person:standard", RecordCreationRecordType.person, true));
 
         var result = service.update("workspace:42", new RecordCreationTemplateUpdateRequestDto(
@@ -284,7 +288,7 @@ class RecordCreationTemplateServiceTest {
         when(mapper.getRootForUpdate(7, 42)).thenReturn(root);
         when(mapper.getCurrentVersion(7, 42)).thenReturn(current, published);
         when(mapper.nextVersionNumber(7, 42)).thenReturn(3);
-        when(validator.validateAndCanonicalize(any(), any(), any(), any()))
+        when(validator.validateAndCanonicalize(any(), any(), any(), any(), eq("[7,8,9]")))
             .thenReturn(validated("new", definition));
         when(validator.parseDefinition("old")).thenReturn(definition);
         when(validator.parseDefinition("new")).thenReturn(definition);
@@ -294,7 +298,7 @@ class RecordCreationTemplateServiceTest {
         }).when(mapper).insertVersion(any());
         when(mapper.installCurrentVersion(7, 42, 202, 3, 11)).thenReturn(1);
         when(mapper.advanceSetRevision(7, "person", 8)).thenReturn(1);
-        when(resolver.resolveWorkspace(any(), any(), org.mockito.ArgumentMatchers.isNull()))
+        when(resolver.resolveWorkspace(any(), any(), org.mockito.ArgumentMatchers.isNull(), eq("[7,8,9]")))
             .thenReturn(available("workspace:42", RecordCreationRecordType.person, false));
 
         var result = service.update("workspace:42", new RecordCreationTemplateUpdateRequestDto(
@@ -323,9 +327,9 @@ class RecordCreationTemplateServiceTest {
         when(mapper.getCurrentVersion(7, 42)).thenReturn(current);
         when(mapper.getSet(7, "person")).thenReturn(set(8, 42));
         when(mapper.listRoots(7, "person", false)).thenReturn(List.of(root));
-        when(resolver.resolveWorkspace(root, current, null)).thenReturn(
+        when(resolver.resolveWorkspace(root, current, null, "[7,8,9]")).thenReturn(
             available("workspace:42", RecordCreationRecordType.person, false));
-        when(resolver.resolveSystem(RecordCreationRecordType.person, null)).thenReturn(
+        when(resolver.resolveSystem(RecordCreationRecordType.person, null, "[7,8,9]")).thenReturn(
             available("system:person:standard", RecordCreationRecordType.person, true));
 
         RecordCreationTemplateException confirmation = assertThrows(
@@ -350,7 +354,7 @@ class RecordCreationTemplateServiceTest {
         when(mapper.setDefault(7, "person", null, 8)).thenReturn(1);
         when(mapper.getSet(7, "person")).thenReturn(after);
         when(mapper.listRoots(7, "person", false)).thenReturn(List.of());
-        when(resolver.resolveSystem(RecordCreationRecordType.person, null)).thenReturn(
+        when(resolver.resolveSystem(RecordCreationRecordType.person, null, "[7,8,9]")).thenReturn(
             available("system:person:standard", RecordCreationRecordType.person, true));
 
         var catalog = service.reset(new RecordCreationTemplateResetRequestDto(
@@ -385,11 +389,11 @@ class RecordCreationTemplateServiceTest {
         when(mapper.listRoots(7, "person", false)).thenReturn(List.of(first, explicit));
         when(mapper.getCurrentVersion(7, 1)).thenReturn(firstVersion);
         when(mapper.getCurrentVersion(7, 2)).thenReturn(explicitVersion);
-        when(resolver.resolveWorkspace(first, firstVersion, null)).thenReturn(
+        when(resolver.resolveWorkspace(first, firstVersion, null, "[7,8,9]")).thenReturn(
             available("workspace:1", RecordCreationRecordType.person, false));
-        when(resolver.resolveWorkspace(explicit, explicitVersion, null)).thenReturn(
+        when(resolver.resolveWorkspace(explicit, explicitVersion, null, "[7,8,9]")).thenReturn(
             unavailable("workspace:2"));
-        when(resolver.resolveSystem(RecordCreationRecordType.person, null)).thenReturn(
+        when(resolver.resolveSystem(RecordCreationRecordType.person, null, "[7,8,9]")).thenReturn(
             available("system:person:standard", RecordCreationRecordType.person, true));
 
         var catalog = service.catalog(RecordCreationRecordType.person);
@@ -403,7 +407,7 @@ class RecordCreationTemplateServiceTest {
         RecordCreationTemplateSet locked = set(6, null);
         when(mapper.getSetForUpdate(7, "person")).thenReturn(locked);
         when(mapper.listRootsForUpdate(7, "person")).thenReturn(List.of());
-        when(validator.validateAndCanonicalize(any(), any(), any(), any()))
+        when(validator.validateAndCanonicalize(any(), any(), any(), any(), eq("[7,8,9]")))
             .thenReturn(validated("copy", registry.systemPreset(RecordCreationRecordType.person).definition()));
         doAnswer(invocation -> {
             invocation.<RecordCreationTemplate>getArgument(0).setId(44);
@@ -421,7 +425,7 @@ class RecordCreationTemplateServiceTest {
         when(mapper.getCurrentVersion(7, 44)).thenReturn(version);
         when(validator.parseDefinition("copy"))
             .thenReturn(registry.systemPreset(RecordCreationRecordType.person).definition());
-        when(resolver.resolveWorkspace(stored, version, null)).thenReturn(
+        when(resolver.resolveWorkspace(stored, version, null, "[7,8,9]")).thenReturn(
             available("workspace:44", RecordCreationRecordType.person, false));
 
         var copy = service.duplicate(
@@ -455,11 +459,11 @@ class RecordCreationTemplateServiceTest {
         when(mapper.listRoots(7, "company", false)).thenReturn(List.of(second, first));
         when(mapper.getCurrentVersion(7, 1)).thenReturn(firstVersion);
         when(mapper.getCurrentVersion(7, 2)).thenReturn(secondVersion);
-        when(resolver.resolveWorkspace(first, firstVersion, null)).thenReturn(
+        when(resolver.resolveWorkspace(first, firstVersion, null, "[7,8,9]")).thenReturn(
             available("workspace:1", RecordCreationRecordType.company, false));
-        when(resolver.resolveWorkspace(second, secondVersion, null)).thenReturn(
+        when(resolver.resolveWorkspace(second, secondVersion, null, "[7,8,9]")).thenReturn(
             available("workspace:2", RecordCreationRecordType.company, false));
-        when(resolver.resolveSystem(RecordCreationRecordType.company, null)).thenReturn(
+        when(resolver.resolveSystem(RecordCreationRecordType.company, null, "[7,8,9]")).thenReturn(
             available("system:company:standard", RecordCreationRecordType.company, true));
 
         var reordered = service.reorder(new RecordCreationTemplateReorderRequestDto(
@@ -485,12 +489,12 @@ class RecordCreationTemplateServiceTest {
         when(mapper.getSetForUpdate(7, "deal")).thenReturn(set(5, null));
         when(mapper.getRootForUpdate(7, 42)).thenReturn(root);
         when(mapper.getCurrentVersion(7, 42)).thenReturn(version);
-        when(resolver.resolveWorkspace(root, version, null)).thenReturn(
+        when(resolver.resolveWorkspace(root, version, null, "[7,8,9]")).thenReturn(
             available("workspace:42", RecordCreationRecordType.deal, false));
         when(mapper.setDefault(7, "deal", 42, 5)).thenReturn(1);
         when(mapper.getSet(7, "deal")).thenReturn(set(6, 42));
         when(mapper.listRoots(7, "deal", false)).thenReturn(List.of(root));
-        when(resolver.resolveSystem(RecordCreationRecordType.deal, null)).thenReturn(
+        when(resolver.resolveSystem(RecordCreationRecordType.deal, null, "[7,8,9]")).thenReturn(
             available("system:deal:standard", RecordCreationRecordType.deal, true));
 
         var catalog = service.setDefault(new RecordCreationTemplateDefaultRequestDto(
@@ -511,17 +515,18 @@ class RecordCreationTemplateServiceTest {
         when(mapper.getSetForUpdate(7, "person")).thenReturn(set(5, null));
         when(mapper.getRootForUpdate(7, 42)).thenReturn(root);
         when(mapper.getCurrentVersion(7, 42)).thenReturn(version);
-        when(resolver.resolveWorkspace(root, version, null)).thenReturn(resolved);
+        when(resolver.resolveWorkspace(root, version, null, "[7,8,9]")).thenReturn(resolved);
         when(mapper.setDefault(7, "person", 42, 5)).thenReturn(1);
         when(mapper.getSet(7, "person")).thenReturn(set(6, 42));
         when(mapper.listRoots(7, "person", false)).thenReturn(List.of());
-        when(resolver.resolveSystem(RecordCreationRecordType.person, null)).thenReturn(
+        when(resolver.resolveSystem(RecordCreationRecordType.person, null, "[7,8,9]")).thenReturn(
             available("system:person:standard", RecordCreationRecordType.person, true));
 
         service.setDefault(new RecordCreationTemplateDefaultRequestDto(
             RecordCreationRecordType.person, "workspace:42", 5));
 
         InOrder order = inOrder(
+            scopes,
             workspaceService,
             mapper,
             resolver,
@@ -531,26 +536,71 @@ class RecordCreationTemplateServiceTest {
             companyMapper,
             personMapper,
             shareMapper);
+        order.verify(scopes).getForWorkspace(7);
         order.verify(workspaceService).lockAndRequirePermissions(
             7, Map.of(11, Set.of(Permission.CUSTOM_FIELD_MANAGE)));
         order.verify(mapper).insertSetIfAbsent(7, "person");
         order.verify(mapper).getSetForUpdate(7, "person");
         order.verify(mapper).getRootForUpdate(7, 42);
         order.verify(mapper).getCurrentVersion(7, 42);
-        order.verify(resolver).resolveWorkspace(root, version, null);
+        order.verify(resolver).resolveWorkspace(root, version, null, "[7,8,9]");
         order.verify(customFieldMapper).getByIdForUpdate(7, 3);
         order.verify(customFieldMapper).getByIdForUpdate(7, 8);
         order.verify(tagMapper).getTagByIdForUpdate(7, 4);
         order.verify(tagMapper).getTagByIdForUpdate(7, 9);
-        order.verify(pipelineMapper).getVisibleStageByIdForUpdate(7, 6);
-        order.verify(pipelineMapper).getVisiblePipelineByIdForUpdate(7, 7);
+        order.verify(pipelineMapper).getVisibleStageByIdForUpdate(7, "[7,8,9]", 6);
+        order.verify(pipelineMapper).getVisiblePipelineByIdForUpdate(7, "[7,8,9]", 7);
         order.verify(shareMapper).lockPipelineShareForWorkspace(7, 7);
         order.verify(personMapper).getVisiblePersonByIdForUpdate(7, 2);
         order.verify(shareMapper).lockPersonShareForWorkspace(2, 7);
         order.verify(companyMapper).getVisibleCompanyByIdForUpdate(7, 5);
         order.verify(shareMapper).lockCompanyShareForWorkspace(5, 7);
-        order.verify(resolver).resolveWorkspace(root, version, null);
+        order.verify(resolver).resolveWorkspace(root, version, null, "[7,8,9]");
         order.verify(mapper).setDefault(7, "person", 42, 5);
+        verify(scopes, times(1)).getForWorkspace(7);
+    }
+
+    @Test
+    void revokedPipelineShareAfterCachedDependencyReadsRetainsTheCatalogUnavailableRefusal() throws Exception {
+        RecordCreationTemplate root = root(42, "deal", "enabled", 0, 1);
+        RecordCreationTemplateVersion version = version(42, 1, "deal");
+        ResolvedCreationTemplateDto visible = new ResolvedCreationTemplateDto(
+            "workspace:42", RecordCreationRecordType.deal, false, 1, names(), null,
+            RecordCreationTemplateAvailability.available,
+            List.of(new ResolvedCreationGroupDto("basics", names(), null, List.of(
+                resolvedField("pipeline", null, JsonMapper.builder().build().valueToTree(7)),
+                resolvedField("stage", null, JsonMapper.builder().build().valueToTree(6))))), List.of());
+        ResolvedCreationTemplateDto revoked = new ResolvedCreationTemplateDto(
+            "workspace:42", RecordCreationRecordType.deal, false, 1, names(), null,
+            RecordCreationTemplateAvailability.unavailable, List.of(), List.of());
+        ResolvedCreationTemplateDto systemRevoked = new ResolvedCreationTemplateDto(
+            "system:deal:standard", RecordCreationRecordType.deal, true, 1, names(), null,
+            RecordCreationTemplateAvailability.unavailable, List.of(), List.of());
+        when(mapper.getSetForUpdate(7, "deal")).thenReturn(set(1, null));
+        when(mapper.getRootForUpdate(7, 42)).thenReturn(root);
+        when(mapper.getCurrentVersion(7, 42)).thenReturn(version);
+        when(resolver.resolveWorkspace(root, version, null, "[7,8,9]"))
+            .thenReturn(visible, visible, revoked);
+        when(mapper.setDefault(7, "deal", 42, 1)).thenReturn(1);
+        when(mapper.getSet(7, "deal")).thenReturn(set(2, 42));
+        when(mapper.listRoots(7, "deal", false)).thenReturn(List.of(root));
+        when(resolver.resolveSystem(RecordCreationRecordType.deal, null, "[7,8,9]"))
+            .thenReturn(systemRevoked);
+
+        RecordCreationTemplateException refused = assertThrows(RecordCreationTemplateException.class,
+            () -> service.setDefault(new RecordCreationTemplateDefaultRequestDto(
+                RecordCreationRecordType.deal, "workspace:42", 1)));
+
+        assertEquals("TEMPLATE_CATALOG_UNAVAILABLE", refused.error().code());
+        InOrder order = inOrder(resolver, pipelineMapper, shareMapper, mapper);
+        order.verify(resolver).resolveWorkspace(root, version, null, "[7,8,9]");
+        order.verify(pipelineMapper).getVisibleStageByIdForUpdate(7, "[7,8,9]", 6);
+        order.verify(pipelineMapper).getVisiblePipelineByIdForUpdate(7, "[7,8,9]", 7);
+        order.verify(shareMapper).lockPipelineShareForWorkspace(7, 7);
+        order.verify(resolver).resolveWorkspace(root, version, null, "[7,8,9]");
+        order.verify(mapper).setDefault(7, "deal", 42, 1);
+        order.verify(resolver).resolveWorkspace(root, version, null, "[7,8,9]");
+        verify(scopes, times(1)).getForWorkspace(7);
     }
 
     @Test
@@ -580,13 +630,13 @@ class RecordCreationTemplateServiceTest {
         when(mapper.getCurrentVersion(7, 42)).thenReturn(version);
         when(mapper.getSet(7, "person")).thenReturn(set(8, 42));
         when(mapper.listRoots(7, "person", false)).thenReturn(List.of(enabled));
-        when(resolver.resolveWorkspace(enabled, version, null)).thenReturn(
+        when(resolver.resolveWorkspace(enabled, version, null, "[7,8,9]")).thenReturn(
             available("workspace:42", RecordCreationRecordType.person, false));
-        when(resolver.resolveWorkspace(archived, version, null)).thenReturn(
+        when(resolver.resolveWorkspace(archived, version, null, "[7,8,9]")).thenReturn(
             available("workspace:42", RecordCreationRecordType.person, false));
-        when(resolver.resolveWorkspace(restored, version, null)).thenReturn(
+        when(resolver.resolveWorkspace(restored, version, null, "[7,8,9]")).thenReturn(
             available("workspace:42", RecordCreationRecordType.person, false));
-        when(resolver.resolveSystem(RecordCreationRecordType.person, null)).thenReturn(
+        when(resolver.resolveSystem(RecordCreationRecordType.person, null, "[7,8,9]")).thenReturn(
             available("system:person:standard", RecordCreationRecordType.person, true));
         when(mapper.updateStatus(7, 42, "archived", java.time.LocalDateTime.of(
             2026, 8, 31, 10, 0), 3, 11)).thenReturn(1);
@@ -634,12 +684,12 @@ class RecordCreationTemplateServiceTest {
         when(mapper.getSetForUpdate(7, "person")).thenReturn(set(8, null));
         when(mapper.getRootForUpdate(7, 42)).thenReturn(root);
         when(mapper.getCurrentVersion(7, 42)).thenReturn(current);
-        when(validator.validateAndCanonicalize(any(), any(), any(), any()))
+        when(validator.validateAndCanonicalize(any(), any(), any(), any(), eq("[7,8,9]")))
             .thenReturn(validated("same", definition));
         when(validator.parseDefinition("same")).thenReturn(definition);
         when(mapper.updateStatus(7, 42, newStatus, null, 3, 11)).thenReturn(1);
         when(mapper.advanceSetRevision(7, "person", 8)).thenReturn(1);
-        when(resolver.resolveWorkspace(stored, current, null)).thenReturn(
+        when(resolver.resolveWorkspace(stored, current, null, "[7,8,9]")).thenReturn(
             available("workspace:42", RecordCreationRecordType.person, false));
 
         var result = service.update("workspace:42", new RecordCreationTemplateUpdateRequestDto(
@@ -665,18 +715,18 @@ class RecordCreationTemplateServiceTest {
             customFieldMapper,
             companyMapper,
             personMapper,
-            pipelineMapper,
+            pipelineMapper, scopes,
             tagMapper,
             workspaceService,
             JsonMapper.builder().findAndAddModules().build());
         when(userCalendarService.today()).thenReturn(java.time.LocalDate.parse("2026-08-31"));
         RecordCreationPresetService presetService = new RecordCreationPresetService(
-            mapper, liveResolver, registry, workspaceService);
+            mapper, liveResolver, registry, workspaceService, unfiltered());
         return new RecordCreationTemplateService(
             mapper,
             customFieldMapper,
             tagMapper,
-            pipelineMapper,
+            pipelineMapper, scopes,
             companyMapper,
             personMapper,
             shareMapper,

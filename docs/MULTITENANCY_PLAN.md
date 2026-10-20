@@ -247,8 +247,9 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   This preserves legacy `JOIN workspace` ceilings that had no lifecycle predicate; lifecycle
   tightening requires a separate explicit decision. It deliberately differs from the active-only
   `OrganizationWorkspaceScopeControlAccess` used by Identity, PersonEdge and assistant ceilings.
-  `IntroductionMapper`, `DuplicateReviewMapper`, `NoteMapper`, `ReportMapper`, and `SegmentMapper` now
-  bind this set through `JSON_TABLE` and read tenant tables only; duplicate counts omit the optional employer-label joins.
+  `IntroductionMapper`, `DuplicateReviewMapper`, `NoteMapper`, `ReportMapper`, `SegmentMapper`, and
+  `PipelineMapper` now bind this set through `JSON_TABLE` and read tenant tables only; duplicate
+  counts omit the optional employer-label joins.
   Note pages and their counts reuse one scope and author-ID snapshot, and global note search reuses
   one scope across both bounded candidate streams. Private-note evidence resolves its scope after
   the existing subject-visibility refusal. Note assistant history retains its separate active-only
@@ -256,6 +257,16 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   and bounded keyset pages, including both ordinary and restricted person-company field statements.
   Its five converted statements preserve the bounded warm-intro engaged-person provision-ceased
   exception and the unbounded owned-person company-ID projection without a company visibility join.
+  Pipeline's nine visibility statements retain their unfiltered organization ceiling, including
+  `getAllStages`' distinct `stage.workspace_id` anchor. Full visible and owned pipeline reads project
+  the viewer's scope JSON into a private SQL column for the nested ordered `Stage[]` query; its
+  `workspaceId` remains the parent's owning workspace. Empty pipelines retain an empty array and
+  `getAllPipelines` stays lightweight. Import and export keep their per-pipeline stage queries with
+  one scope for the operation; filtering, ordering and search limits remain in tenant SQL.
+  Bulk stage changes pass the same scope into each independently committed mutation and stage-history
+  write. Workflow traversal and workspace batches explicitly reuse one scope across their independent
+  transactions, restoring the synchronous operation binding on exit; routed reads continue to validate
+  the prepared context on every access. Creation and import history reuse their pre-lock scopes.
   These mappers' crossing baseline entries are removed. Segment calls already inside campaign and
   workflow locks retain their transaction shape; #2159 (L-scope) owns the context-installed snapshot
   and fail-fast guard required before catalog routing can be enabled. The routing default

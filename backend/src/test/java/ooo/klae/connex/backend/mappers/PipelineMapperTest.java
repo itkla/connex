@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.mappers;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -25,7 +26,7 @@ class PipelineMapperTest extends AbstractMapperTest {
         Pipeline pipeline = newPipeline();
         assertNotEquals(0, pipeline.getId());
 
-        Pipeline found = pipelineMapper.getPipelineById(workspace.getId(), pipeline.getId());
+        Pipeline found = pipelineMapper.getPipelineById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), pipeline.getId());
 
         assertNotNull(found);
         assertEquals(workspace.getId(), found.getWorkspaceId());
@@ -39,7 +40,7 @@ class PipelineMapperTest extends AbstractMapperTest {
     void getAllPipelines_includesInsertedRow() {
         Pipeline pipeline = newPipeline();
 
-        List<Pipeline> all = pipelineMapper.getAllPipelines(workspace.getId());
+        List<Pipeline> all = pipelineMapper.getAllPipelines(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()));
 
         assertTrue(all.stream().anyMatch(x -> x.getId() == pipeline.getId()));
     }
@@ -54,7 +55,7 @@ class PipelineMapperTest extends AbstractMapperTest {
 
         pipelineMapper.updatePipeline(pipeline);
 
-        assertEquals("Renamed Pipeline", pipelineMapper.getPipelineById(workspace.getId(), pipeline.getId()).getName());
+        assertEquals("Renamed Pipeline", pipelineMapper.getPipelineById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), pipeline.getId()).getName());
     }
 
     /**
@@ -66,7 +67,7 @@ class PipelineMapperTest extends AbstractMapperTest {
 
         pipelineMapper.deletePipeline(workspace.getId(), pipeline.getId());
 
-        assertNull(pipelineMapper.getPipelineById(workspace.getId(), pipeline.getId()));
+        assertNull(pipelineMapper.getPipelineById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), pipeline.getId()));
     }
 
     /**
@@ -97,7 +98,7 @@ class PipelineMapperTest extends AbstractMapperTest {
         Stage stage0 = newStage(pipeline, 0);
         Stage stage1 = newStage(pipeline, 1);
 
-        List<Stage> stages = pipelineMapper.getStagesByPipelineId(workspace.getId(), pipeline.getId());
+        List<Stage> stages = pipelineMapper.getStagesByPipelineId(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), pipeline.getId());
 
         assertEquals(3, stages.size());
         assertEquals(stage0.getId(), stages.get(0).getId());
@@ -114,7 +115,7 @@ class PipelineMapperTest extends AbstractMapperTest {
         Stage first = newStage(firstPipeline, 1);
 
         List<Integer> createdIds = List.of(first.getId(), secondEarlier.getId(), secondLater.getId());
-        List<Stage> stages = pipelineMapper.getAllStages(workspace.getId()).stream()
+        List<Stage> stages = pipelineMapper.getAllStages(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId())).stream()
             .filter(stage -> createdIds.contains(stage.getId()))
             .toList();
 
@@ -197,18 +198,18 @@ class PipelineMapperTest extends AbstractMapperTest {
         Pipeline foreignPipeline = newPipelineIn(other);
         Stage foreignStage = newStageIn(other, foreignPipeline, 0);
 
-        assertNull(pipelineMapper.getPipelineById(workspace.getId(), foreignPipeline.getId()));
-        assertFalse(pipelineMapper.pipelineExists(workspace.getId(), foreignPipeline.getId()));
+        assertNull(pipelineMapper.getPipelineById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), foreignPipeline.getId()));
+        assertFalse(pipelineMapper.pipelineExists(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), foreignPipeline.getId()));
         assertNull(pipelineMapper.getStageById(workspace.getId(), foreignStage.getId()));
-        assertTrue(pipelineMapper.getAllStages(workspace.getId()).stream()
+        assertTrue(pipelineMapper.getAllStages(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId())).stream()
             .noneMatch(stage -> stage.getId() == foreignStage.getId()));
-        assertTrue(pipelineMapper.getStagesByPipelineId(workspace.getId(), foreignPipeline.getId()).isEmpty());
-        assertTrue(pipelineMapper.getAllPipelines(workspace.getId()).stream().noneMatch(p -> p.getId() == foreignPipeline.getId()));
-        assertTrue(pipelineMapper.getAllPipelines(workspace.getId()).stream().anyMatch(p -> p.getId() == mine.getId()));
+        assertTrue(pipelineMapper.getStagesByPipelineId(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), foreignPipeline.getId()).isEmpty());
+        assertTrue(pipelineMapper.getAllPipelines(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId())).stream().noneMatch(p -> p.getId() == foreignPipeline.getId()));
+        assertTrue(pipelineMapper.getAllPipelines(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId())).stream().anyMatch(p -> p.getId() == mine.getId()));
 
         // cross-workspace mutation affects zero rows; the foreign rows survive
         assertEquals(0, pipelineMapper.deletePipeline(workspace.getId(), foreignPipeline.getId()));
-        assertTrue(pipelineMapper.pipelineExists(other.getId(), foreignPipeline.getId()));
+        assertTrue(pipelineMapper.pipelineExists(other.getId(), orgWorkspaceIdsJson(workspaceMapper, other.getId()), foreignPipeline.getId()));
     }
 
     private Workspace newWorkspace() {

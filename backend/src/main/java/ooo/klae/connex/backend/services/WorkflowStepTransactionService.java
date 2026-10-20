@@ -31,6 +31,7 @@ public class WorkflowStepTransactionService {
     private final WorkflowExecutionPrincipalService principalService;
     private final WorkflowRecordGuard recordGuard;
     private final WorkflowNodeExecutor nodeExecutor;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.READ_COMMITTED)
     public StepResult execute(
@@ -75,6 +76,7 @@ public class WorkflowStepTransactionService {
                 "The pinned workflow version is unavailable.",
                 true);
         }
+        recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         WorkflowExecutionPrincipal principal = principalService.resolveLocked(workspaceId, version);
         WorkflowRun run = leaseOwner == null
             ? workflowRunMapper.getByIdForUpdate(workspaceId, runId)

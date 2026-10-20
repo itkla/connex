@@ -32,7 +32,7 @@ public final class LegacyRecordVisibilitySql {
             new Environment("pre-485-record-visibility", new JdbcTransactionFactory(), dataSource));
         configuration.setMapUnderscoreToCamelCase(true);
         configuration.getTypeAliasRegistry().registerAliases("ooo.klae.connex.backend.beans");
-        for (String xml : List.of(INTRODUCTION, DUPLICATE_REVIEW, NOTE, REPORT, SEGMENT)) {
+        for (String xml : List.of(INTRODUCTION, DUPLICATE_REVIEW, NOTE, REPORT, SEGMENT, PIPELINE)) {
             String resource = "pre-485-" + configuration.getMappedStatementNames().size();
             new XMLMapperBuilder(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)),
                 configuration, resource, configuration.getSqlFragments()).parse();
@@ -1302,6 +1302,166 @@ public final class LegacyRecordVisibilitySql {
                     <otherwise>AND 1 = 0</otherwise>
                 </choose>
             </select>
+        </mapper>
+        """;
+
+    private static final String PIPELINE = """
+        <?xml version="1.0" encoding="UTF-8" ?>
+        <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+                "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+        <mapper namespace="ooo.klae.connex.backend.mappers.PipelineMapper">
+
+          <resultMap id="StageResult" type="Stage">
+            <id property="id" column="id"/>
+            <result property="workspaceId" column="workspace_id"/>
+            <result property="name" column="name"/>
+            <result property="position" column="position"/>
+            <result property="success" column="is_success"/>
+            <result property="failure" column="is_failure"/>
+            <association property="pipeline" javaType="Pipeline">
+              <id property="id" column="pipeline_id"/>
+            </association>
+          </resultMap>
+
+          <resultMap id="PipelineFullResult" type="Pipeline">
+            <id property="id" column="id"/>
+            <result property="workspaceId" column="workspace_id"/>
+            <result property="name" column="name"/>
+            <result property="createdAt" column="created_at"/>
+            <result property="updatedAt" column="updated_at"/>
+            <collection property="stages" ofType="Stage"
+                        column="{workspaceId=workspace_id,pipelineId=id}"
+                        select="ooo.klae.connex.backend.mappers.PipelineMapper.getStagesByPipelineId"/>
+          </resultMap>
+
+          <!-- Owned-or-shared visibility: a pipeline is visible to its owning workspace and any workspace it
+               has been shared with (pipeline_share). The share branch carries the same-org ceiling the write
+               path enforces (owner and grantee workspaces must share an organization), so a share row that
+               spans an org boundary grants no read visibility. Writes stay owned-only. Requires
+               `FROM pipeline` unaliased. -->
+          <sql id="visible">
+            (pipeline.workspace_id = #{workspaceId}
+             OR EXISTS (SELECT 1 FROM pipeline_share ps
+                JOIN workspace vws ON vws.id = ps.workspace_id
+                JOIN workspace ows ON ows.id = pipeline.workspace_id AND ows.org_id = vws.org_id
+                WHERE ps.pipeline_id = pipeline.id AND ps.workspace_id = #{workspaceId}))
+          </sql>
+
+          <select id="getAllPipelines" resultType="Pipeline">
+            SELECT id, workspace_id, name, created_at, updated_at FROM pipeline WHERE <include refid="visible"/>
+          </select>
+
+          <select id="getPipelineById" resultMap="PipelineFullResult">
+            SELECT id, workspace_id, name, created_at, updated_at FROM pipeline
+            WHERE <include refid="visible"/> AND id = #{id}
+          </select>
+
+          <select id="getVisiblePipelineByIdForUpdate" resultType="Pipeline">
+            SELECT id, workspace_id, name, created_at, updated_at FROM pipeline
+            WHERE <include refid="visible"/> AND id = #{id}
+            FOR UPDATE
+          </select>
+
+          <select id="getOwnedPipelineById" resultMap="PipelineFullResult">
+            SELECT id, workspace_id, name, created_at, updated_at FROM pipeline
+            WHERE workspace_id = #{workspaceId} AND id = #{id}
+          </select>
+
+          <select id="search" resultType="Pipeline">
+            SELECT id, workspace_id, name, created_at, updated_at FROM pipeline
+            WHERE <include refid="visible"/> AND name LIKE #{query}
+            ORDER BY name
+            LIMIT 10
+          </select>
+
+          <select id="pipelineExists" resultType="boolean">
+            SELECT EXISTS(
+              SELECT 1 FROM pipeline WHERE <include refid="visible"/> AND id = #{id}
+            )
+          </select>
+
+          <insert id="insertPipeline" useGeneratedKeys="true" keyProperty="id">
+            INSERT INTO pipeline (workspace_id, name) VALUES (#{workspaceId}, #{name})
+          </insert>
+
+          <update id="updatePipeline">
+            UPDATE pipeline SET name = #{name} WHERE workspace_id = #{workspaceId} AND id = #{id}
+          </update>
+
+          <delete id="deletePipeline">DELETE FROM pipeline WHERE workspace_id = #{workspaceId} AND id = #{id}</delete>
+
+          <select id="getStageById" resultMap="StageResult">
+            SELECT stage.id, stage.workspace_id, stage.name, stage.pipeline_id, stage.position,
+                   stage.is_success, stage.is_failure
+            FROM stage
+            JOIN pipeline ON pipeline.id = stage.pipeline_id AND pipeline.workspace_id = stage.workspace_id
+            WHERE pipeline.workspace_id = #{workspaceId} AND stage.id = #{id}
+          </select>
+
+          <select id="getVisibleStageById" resultMap="StageResult">
+            SELECT stage.id, stage.workspace_id, stage.name, stage.pipeline_id, stage.position,
+                   stage.is_success, stage.is_failure
+            FROM stage
+            JOIN pipeline ON pipeline.id = stage.pipeline_id AND pipeline.workspace_id = stage.workspace_id
+            WHERE stage.id = #{id}
+              AND (pipeline.workspace_id = #{workspaceId}
+                   OR EXISTS (SELECT 1 FROM pipeline_share ps
+                      JOIN workspace vws ON vws.id = ps.workspace_id
+                      JOIN workspace ows ON ows.id = pipeline.workspace_id AND ows.org_id = vws.org_id
+                      WHERE ps.pipeline_id = pipeline.id AND ps.workspace_id = #{workspaceId}))
+          </select>
+
+          <select id="getVisibleStageByIdForUpdate" resultMap="StageResult">
+            SELECT stage.id, stage.workspace_id, stage.name, stage.pipeline_id, stage.position,
+                   stage.is_success, stage.is_failure
+            FROM stage
+            JOIN pipeline ON pipeline.id = stage.pipeline_id AND pipeline.workspace_id = stage.workspace_id
+            WHERE stage.id = #{id}
+              AND (pipeline.workspace_id = #{workspaceId}
+                   OR EXISTS (SELECT 1 FROM pipeline_share ps
+                      JOIN workspace vws ON vws.id = ps.workspace_id
+                      JOIN workspace ows ON ows.id = pipeline.workspace_id AND ows.org_id = vws.org_id
+                      WHERE ps.pipeline_id = pipeline.id AND ps.workspace_id = #{workspaceId}))
+            FOR UPDATE
+          </select>
+
+          <select id="getAllStages" resultMap="StageResult">
+            SELECT id, workspace_id, name, pipeline_id, position, is_success, is_failure FROM stage
+            WHERE stage.workspace_id = #{workspaceId}
+               OR EXISTS (SELECT 1 FROM pipeline_share ps
+                  JOIN workspace vws ON vws.id = ps.workspace_id
+                  JOIN workspace ows ON ows.id = stage.workspace_id AND ows.org_id = vws.org_id
+                  WHERE ps.pipeline_id = stage.pipeline_id AND ps.workspace_id = #{workspaceId})
+            ORDER BY pipeline_id, position
+          </select>
+
+          <select id="getStagesByPipelineId" resultMap="StageResult">
+            SELECT stage.id, stage.workspace_id, stage.name, stage.pipeline_id, stage.position,
+                   stage.is_success, stage.is_failure
+            FROM stage
+            JOIN pipeline ON pipeline.id = stage.pipeline_id AND pipeline.workspace_id = stage.workspace_id
+            WHERE pipeline.id = #{pipelineId}
+              AND (pipeline.workspace_id = #{workspaceId}
+                   OR EXISTS (SELECT 1 FROM pipeline_share ps
+                      JOIN workspace vws ON vws.id = ps.workspace_id
+                      JOIN workspace ows ON ows.id = pipeline.workspace_id AND ows.org_id = vws.org_id
+                      WHERE ps.pipeline_id = pipeline.id AND ps.workspace_id = #{workspaceId}))
+            ORDER BY stage.position
+          </select>
+
+          <insert id="insertStage" useGeneratedKeys="true" keyProperty="id">
+            INSERT INTO stage (workspace_id, name, pipeline_id, position, is_success, is_failure)
+            VALUES (#{workspaceId}, #{name}, #{pipeline.id}, #{position}, #{success}, #{failure})
+          </insert>
+
+          <update id="updateStage">
+            UPDATE stage
+            SET name = #{name}, pipeline_id = #{pipeline.id}, position = #{position},
+                is_success = #{success}, is_failure = #{failure}
+            WHERE workspace_id = #{workspaceId} AND id = #{id}
+          </update>
+
+          <delete id="deleteStage">DELETE FROM stage WHERE workspace_id = #{workspaceId} AND id = #{id}</delete>
         </mapper>
         """;
 }

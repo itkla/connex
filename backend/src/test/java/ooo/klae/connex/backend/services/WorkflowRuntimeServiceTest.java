@@ -49,6 +49,7 @@ class WorkflowRuntimeServiceTest {
     void setUp() {
         service = new WorkflowRuntimeService(
             properties,
+            ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered(),
             workflowMapper,
             workflowRunMapper,
             claimService,

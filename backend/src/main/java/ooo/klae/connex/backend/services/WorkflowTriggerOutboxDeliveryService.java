@@ -37,6 +37,7 @@ public class WorkflowTriggerOutboxDeliveryService {
     private final WorkflowRuntimeProperties properties;
     private final WorkflowTriggeredSendGate triggeredSendGate;
     private final AuditService auditService;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     @Transactional(
         propagation = Propagation.REQUIRES_NEW,
@@ -48,6 +49,7 @@ public class WorkflowTriggerOutboxDeliveryService {
         }
         Workflow discovered = workflowMapper.getById(
             workspaceId, discoveredOutbox.getWorkflowId());
+        recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         WorkflowExecutionPrincipal principal = lockDispatchPrincipal(discoveredOutbox);
         outboxMapper.ensureWorkspaceGate(workspaceId);
         WorkflowTriggerOutbox outbox = outboxMapper.getOwnedForUpdate(

@@ -71,6 +71,7 @@ import ooo.klae.connex.backend.services.MutationAdmission;
 import ooo.klae.connex.backend.services.TagService;
 import ooo.klae.connex.backend.services.TaskService;
 import ooo.klae.connex.backend.services.WorkspaceService;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
 import ooo.klae.connex.backend.services.WorkspaceService.LockedPermissionSnapshot;
 import ooo.klae.connex.backend.tenant.Permission;
 import tools.jackson.core.JacksonException;
@@ -110,6 +111,7 @@ public class AiAssistantWriteToolService {
     private final AiAssistantToolExecutor readToolExecutor;
     private final AiChatMapper chatMapper;
     private final WorkspaceService workspaceService;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
     private final TaskService taskService;
     private final PersonService personService;
     private final CompanyService companyService;
@@ -814,6 +816,7 @@ public class AiAssistantWriteToolService {
         for (Integer principalUserId : principalUserIds) {
             required.putIfAbsent(principalUserId, Set.of());
         }
+        recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         LockedPermissionSnapshot authority =
                 workspaceService.lockAndRequirePermissionsSnapshot(workspaceId, required);
         AiChatSession session = chatMapper.getSessionByIdForUpdate(workspaceId, userId, sessionId);

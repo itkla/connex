@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -60,8 +61,8 @@ class RecordCreationTemplateResolverTest {
         when(customFieldMapper.getByEntityType(7, "person")).thenReturn(List.of());
         when(customFieldMapper.getByEntityType(7, "company")).thenReturn(List.of());
         when(customFieldMapper.getByEntityType(7, "deal")).thenReturn(List.of());
-        when(pipelineMapper.getAllPipelines(7)).thenReturn(List.of());
-        when(pipelineMapper.getAllStages(7)).thenReturn(List.of());
+        when(pipelineMapper.getAllPipelines(7, "[7,8,9]")).thenReturn(List.of());
+        when(pipelineMapper.getAllStages(7, "[7,8,9]")).thenReturn(List.of());
         when(tagMapper.getAllTags(7)).thenReturn(List.of());
         resolver = new RecordCreationTemplateResolver(
             new RecordCreationFieldRegistry(),
@@ -70,7 +71,7 @@ class RecordCreationTemplateResolverTest {
             customFieldMapper,
             companyMapper,
             personMapper,
-            pipelineMapper,
+            pipelineMapper, unfiltered(),
             tagMapper,
             workspaceService,
             JsonMapper.builder().findAndAddModules().build());
@@ -133,8 +134,8 @@ class RecordCreationTemplateResolverTest {
         Tag tag = new Tag();
         tag.setId(4);
         tag.setName("Priority");
-        when(pipelineMapper.getAllPipelines(7)).thenReturn(List.of(later, first));
-        when(pipelineMapper.getAllStages(7)).thenReturn(List.of(secondStage, firstStage));
+        when(pipelineMapper.getAllPipelines(7, "[7,8,9]")).thenReturn(List.of(later, first));
+        when(pipelineMapper.getAllStages(7, "[7,8,9]")).thenReturn(List.of(secondStage, firstStage));
         when(tagMapper.getAllTags(7)).thenReturn(List.of(tag));
 
         var resolved = resolver.resolveSystem(RecordCreationRecordType.deal, null);
@@ -177,8 +178,8 @@ class RecordCreationTemplateResolverTest {
         Pipeline configured = pipeline(9, "Configured");
         Stage firstStage = stage(7, first, 0, "First stage");
         Stage configuredStage = stage(12, configured, 0, "Configured stage");
-        when(pipelineMapper.getAllPipelines(7)).thenReturn(List.of(first, configured));
-        when(pipelineMapper.getAllStages(7)).thenReturn(List.of(firstStage, configuredStage));
+        when(pipelineMapper.getAllPipelines(7, "[7,8,9]")).thenReturn(List.of(first, configured));
+        when(pipelineMapper.getAllStages(7, "[7,8,9]")).thenReturn(List.of(firstStage, configuredStage));
 
         var resolved = resolver.resolvePreview(
             "workspace:pipeline-only",
@@ -200,8 +201,8 @@ class RecordCreationTemplateResolverTest {
         Pipeline configured = pipeline(9, "Configured");
         Stage firstStage = stage(7, first, 0, "First stage");
         Stage configuredStage = stage(12, configured, 0, "Configured stage");
-        when(pipelineMapper.getAllPipelines(7)).thenReturn(List.of(first, configured));
-        when(pipelineMapper.getAllStages(7)).thenReturn(List.of(firstStage, configuredStage));
+        when(pipelineMapper.getAllPipelines(7, "[7,8,9]")).thenReturn(List.of(first, configured));
+        when(pipelineMapper.getAllStages(7, "[7,8,9]")).thenReturn(List.of(firstStage, configuredStage));
 
         var resolved = resolver.resolvePreview(
             "workspace:stage-only",
@@ -222,8 +223,8 @@ class RecordCreationTemplateResolverTest {
         Pipeline first = pipeline(3, "First");
         Pipeline other = pipeline(9, "Other");
         Stage stage = stage(12, other, 0, "Other stage");
-        when(pipelineMapper.getAllPipelines(7)).thenReturn(List.of(first, other));
-        when(pipelineMapper.getAllStages(7)).thenReturn(List.of(stage));
+        when(pipelineMapper.getAllPipelines(7, "[7,8,9]")).thenReturn(List.of(first, other));
+        when(pipelineMapper.getAllStages(7, "[7,8,9]")).thenReturn(List.of(stage));
 
         var mismatched = resolver.resolvePreview(
             "workspace:mismatch",
