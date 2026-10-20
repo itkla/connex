@@ -49,6 +49,10 @@ import ooo.klae.connex.backend.util.LikePattern;
  * {@link ScoringService}, and the deal-risk signals ({@code at_risk}, {@code risk_stalled}, …) apply
  * to deals via {@link DealRiskService}. Each computed signal is evaluated once per evaluation and
  * reused across sibling conditions. This shared model is the rule engine's {@code WHEN}.
+ *
+ * <p>Each evaluation resolves one unfiltered organization workspace ceiling through
+ * {@link RecordVisibilityScopeControlAccess} and reuses it across nested groups and candidate pages.
+ * Entity restrictions, the bounded upper watermark, and per-context signal caches remain separate.
  */
 @Service
 @RequiredArgsConstructor
@@ -63,6 +67,7 @@ public class SegmentService {
     private final PersonMapper personMapper;
     private final TagMapper tagMapper;
     private final SegmentCatalog catalog;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     private static final int STRONG_EDGE = 2;
 
@@ -105,6 +110,7 @@ public class SegmentService {
         if (upperId == null || upperId < 1) {
             return List.of();
         }
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         List<Integer> result = new ArrayList<>(limit);
         int afterId = 0;
         while (afterId < upperId && result.size() < limit) {
@@ -116,7 +122,7 @@ public class SegmentService {
             Set<Integer> matched = evaluateGroup(
                 definition,
                 new EvalContext(
-                    workspaceId, userId, type, false, new HashSet<>(candidates)),
+                    workspaceId, userId, type, false, new HashSet<>(candidates), orgWorkspaceIdsJson),
                 1);
             for (int candidate : candidates) {
                 if (matched.contains(candidate)) {
@@ -152,7 +158,8 @@ public class SegmentService {
         if (total > catalog.maxConditions()) {
             throw new BadRequestException("A rule may reference at most " + catalog.maxConditions() + " conditions");
         }
-        EvalContext ctx = new EvalContext(workspaceId, userId, type, includeRestrictedPeople, null);
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        EvalContext ctx = new EvalContext(workspaceId, userId, type, includeRestrictedPeople, null, orgWorkspaceIdsJson);
         Set<Integer> result = evaluateGroup(definition, ctx, 1);
         return new ArrayList<>(result);
     }
@@ -176,7 +183,8 @@ public class SegmentService {
         if (!segmentMapper.entityIdInWorkspace(workspaceId, type, entityId)) {
             return false;
         }
-        EvalContext ctx = new EvalContext(workspaceId, userId, type, false, Set.of(entityId));
+        String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        EvalContext ctx = new EvalContext(workspaceId, userId, type, false, Set.of(entityId), orgWorkspaceIdsJson);
         return matchesGroup(definition, ctx, entityId, 1);
     }
 
@@ -509,7 +517,7 @@ public class SegmentService {
             case "open_deal" -> new HashSet<>(segmentMapper.companyIdsWithOpenDeal(
                 workspaceId, ctx.candidateIds()));
             case "no_activity" -> new HashSet<>(segmentMapper.companyIdsNoActivitySince(
-                workspaceId, catalog.clampDays(condition.getDays()), ctx.candidateIds()));
+                workspaceId, ctx.orgWorkspaceIdsJson(), catalog.clampDays(condition.getDays()), ctx.candidateIds()));
             case "cooling" -> coolingCompanyIds(ctx);
             case "warm_intro_available" -> warmIntroCompanyIds(ctx);
             case "has_open_task", "overdue_task", "recent_meeting", "has_note", "has_attachment" ->
@@ -617,6 +625,7 @@ public class SegmentService {
         Map<String, Object> params = new HashMap<>();
         params.put("workspaceId", ctx.workspaceId());
         params.put("field", field);
+        params.put("orgWorkspaceIdsJson", ctx.orgWorkspaceIdsJson());
         params.put("op", op);
         params.put("includeRestrictedPeople", ctx.includeRestrictedPeople());
         params.put("candidateIds", ctx.candidateIds());
@@ -702,7 +711,7 @@ public class SegmentService {
         List<Integer> candidateIds = ctx.candidateIds();
         if (candidateIds != null) {
             return new HashSet<>(segmentMapper.companyIdsWithWarmIntro(
-                    workspaceId, ctx.userId(), candidateIds, STRONG_EDGE));
+                    workspaceId, ctx.orgWorkspaceIdsJson(), ctx.userId(), candidateIds, STRONG_EDGE));
         }
         Set<Integer> engaged = new HashSet<>(personMapper.getEngagedPersonIds(workspaceId));
         if (engaged.isEmpty()) {
@@ -724,7 +733,7 @@ public class SegmentService {
             return new HashSet<>();
         }
         return new HashSet<>(segmentMapper.companyIdsForPersonsWithoutUserActivity(
-            workspaceId, ctx.userId(), new ArrayList<>(warmlyConnected), null));
+            workspaceId, ctx.orgWorkspaceIdsJson(), ctx.userId(), new ArrayList<>(warmlyConnected), null));
     }
 
     private String requireSupported(String recordType) {
@@ -835,17 +844,19 @@ public class SegmentService {
         private final String recordType;
         private final boolean includeRestrictedPeople;
         private final Set<Integer> candidateIds;
+        private final String orgWorkspaceIdsJson;
         private Set<Integer> universe;
         private List<RelationshipTemperatureDto> temperatures;
         private List<DealRiskDto> dealRisks;
 
         private EvalContext(int workspaceId, int userId, String recordType, boolean includeRestrictedPeople,
-                Set<Integer> candidateIds) {
+                Set<Integer> candidateIds, String orgWorkspaceIdsJson) {
             this.workspaceId = workspaceId;
             this.userId = userId;
             this.recordType = recordType;
             this.includeRestrictedPeople = includeRestrictedPeople;
             this.candidateIds = candidateIds;
+            this.orgWorkspaceIdsJson = orgWorkspaceIdsJson;
         }
 
         private int workspaceId() {
@@ -854,6 +865,10 @@ public class SegmentService {
 
         private int userId() {
             return userId;
+        }
+
+        private String orgWorkspaceIdsJson() {
+            return orgWorkspaceIdsJson;
         }
 
         private String recordType() {

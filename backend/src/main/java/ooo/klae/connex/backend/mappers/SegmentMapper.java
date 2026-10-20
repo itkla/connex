@@ -49,26 +49,36 @@ public interface SegmentMapper {
             @Param("workspaceId") int workspaceId,
             @Param("candidateIds") List<Integer> candidateIds);
 
-    /** Ids of companies with no processable logged activity in the last {@code days} days. */
+    /**
+     * Ids of companies with no processable logged activity in the last {@code days} days.
+     * Shared evidence uses the trusted, unfiltered {@code orgWorkspaceIdsJson} ceiling.
+     */
     List<Integer> companyIdsNoActivitySince(
             @Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
             @Param("days") int days,
             @Param("candidateIds") List<Integer> candidateIds);
 
     /**
      * Ids of the companies owning any of {@code personIds}, excluding companies the given user has
      * already logged activity with. {@code personIds} must be non-empty.
+     * The unfiltered {@code orgWorkspaceIdsJson} ceiling applies to shared activity evidence;
+     * referenced company IDs retain their legacy behavior without a company-visibility join.
      */
     List<Integer> companyIdsForPersonsWithoutUserActivity(@Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
             @Param("userId") int userId, @Param("personIds") List<Integer> personIds,
             @Param("candidateIds") List<Integer> candidateIds);
 
     /**
      * Candidate-scoped warm-intro predicate for bounded automation evaluation.
      * {@code candidateIds} must be non-empty company ids from one evaluator page.
+     * Shared evidence uses the unfiltered {@code orgWorkspaceIdsJson} ceiling. Engaged people retain
+     * the legacy archived/suspended filters without a provision-ceased filter.
      */
     List<Integer> companyIdsWithWarmIntro(
             @Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
             @Param("userId") int userId,
             @Param("candidateIds") List<Integer> candidateIds,
             @Param("strongEdge") int strongEdge);
@@ -80,10 +90,16 @@ public interface SegmentMapper {
      */
     List<Integer> companyIdsMatching(Map<String, Object> params);
 
-    /** Ids of people matching one field condition; see {@link #companyIdsMatching}. */
+    /**
+     * Ids of people matching one field condition; see {@link #companyIdsMatching}.
+     * Company conditions also require the trusted, unfiltered {@code orgWorkspaceIdsJson} ceiling.
+     */
     List<Integer> personIdsMatching(Map<String, Object> params);
 
-    /** Ids of people matching one field condition, including processing-restricted contacts. */
+    /**
+     * Ids of people matching one field condition, including processing-restricted contacts.
+     * Company visibility retains the same {@code orgWorkspaceIdsJson} ceiling as ordinary matches.
+     */
     List<Integer> personIdsMatchingIncludingRestricted(Map<String, Object> params);
 
     /** Ids of deals matching one field condition; see {@link #companyIdsMatching}. */
