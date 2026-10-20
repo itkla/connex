@@ -37,8 +37,11 @@ registered by Boot on the JDBC transaction manager (also with a tenant-routed da
 commits in request attributes; nested savepoint releases and participating transactions do not mark
 a commit. Handler-phase bookkeeping, `REQUIRES_NEW` and independent audit commits conservatively mark
 the request, even if the outer transaction later rolls back. A marked request keeps the existing
-HTTP 500 path. Autocommit statements and work on other threads are not tracked; without a bound
-request the marker is a no-op. Responses use a generic conflict message without SQL or lock details;
+HTTP 500 path. Spring MVC binds request attributes around `Callable` and `StreamingResponseBody`
+workers, so their writable commits are tracked. Autocommit statements and commits on application
+executors without bound request attributes are not tracked; without a bound request the marker is a
+no-op. A handler that waits for writable work committed on such an executor must not rely on this
+409: none does today (`AiGenerationService` returns its handle without waiting). Responses use a generic conflict message without SQL or lock details;
 callers may retry with a fresh request and transaction within this tracking bound. There are no
 in-request retries. Unclassified transaction failures, including a cause-less
 `UnexpectedRollbackException`, retain their existing HTTP 500 response.

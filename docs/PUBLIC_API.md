@@ -202,8 +202,8 @@ Lock contention receives `409` with `conflict` only when no writable Spring tran
 during handler execution, so the caller can retry because no tracked transaction committed. Handler
 commits retain `500` with `internal_error`. Tracking starts after the pre-handler authentication and
 tenant bookkeeping and ignores read-only transactions. It covers the request thread's handler-phase
-Spring transactions, including independent audit commits; autocommit statements and work on other
-threads are outside this bound. See [the locking contract](backend/LOCKING.md#global-principles).
+Spring transactions, including independent audit commits and Spring MVC async workers; autocommit
+statements and application executors without bound request attributes are outside this bound. See [the locking contract](backend/LOCKING.md#global-principles).
 Replacing a partial, uncommitted response with an error envelope preserves the correlation id,
 allowed CORS and `Vary` metadata, rate-limit and `Retry-After` headers, and HSTS while discarding
 stale representation headers and bytes.
