@@ -588,7 +588,11 @@ public class AiAssistantWriteToolService {
         return principals;
     }
 
-    /** Executes one CONFIRM decision beneath an already ordered source-specific lock hierarchy. */
+    /**
+     * Executes one CONFIRM decision beneath an already ordered source-specific lock hierarchy.
+     * The record-visibility ceiling comes from the operation's prepared or pre-lock primed scope,
+     * so no control read is issued beneath the caller's locks on normal entries.
+     */
     @Transactional(propagation = Propagation.MANDATORY, isolation = Isolation.READ_COMMITTED)
     public AiAssistantToolCallDto approveLocked(LockedDecisionContext context) {
         Actor actor = currentActor();
@@ -596,7 +600,8 @@ public class AiAssistantWriteToolService {
         AiChatToolCall toolCall = context.toolCall();
         PreliminaryPrincipals principals = context.principals();
         AuthorizedToolCall authorized = new AuthorizedToolCall(toolCall, context.authority(),
-                context.privacyToken(), context.restrictionEpoch());
+                context.privacyToken(), context.restrictionEpoch(),
+                recordVisibilityScopeControlAccess.getForWorkspace(actor.workspaceId()).workspaceIdsJson());
         requireStatus(toolCall, PROPOSED);
         StoredWrite write = readStored(toolCall);
         if (write.tier() != ToolTier.CONFIRM) {

@@ -1304,7 +1304,7 @@ class AiAssistantToolCallReadServiceTest {
         call.setCreatedAt("2026-08-12 11:59:00.000000");
         Person target = person(31, "Ada Lovelace");
         target.setUpdatedAt("2026-08-12 11:30:00.000000");
-        when(personMapper.getByIds(WORKSPACE_ID, List.of(31))).thenReturn(List.of(target));
+        when(personMapper.getByIds(WORKSPACE_ID, "[7,8,9]", List.of(31))).thenReturn(List.of(target));
         Instant deadline = Instant.parse("2026-08-13T11:00:00Z");
 
         AiAssistantToolCallReadDto card = service.projectMission(accessibleSession, call, 61,
@@ -1351,7 +1351,7 @@ class AiAssistantToolCallReadServiceTest {
         call.setCreatedAt("2026-08-12 11:59:00.000000");
         Person target = person(31, "Ada Lovelace");
         target.setUpdatedAt("2026-08-08 11:00:00.000000");
-        when(personMapper.getByIds(WORKSPACE_ID, List.of(31))).thenReturn(List.of(target));
+        when(personMapper.getByIds(WORKSPACE_ID, "[7,8,9]", List.of(31))).thenReturn(List.of(target));
 
         AiAssistantToolCallReadDto card = service.projectMission(accessibleSession, call, 62,
                 "2026-08-09T11:00:00.000000", CLOCK.instant());
