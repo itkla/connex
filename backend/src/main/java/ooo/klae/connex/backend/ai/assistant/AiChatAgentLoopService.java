@@ -797,6 +797,8 @@ public class AiChatAgentLoopService {
                 return AiGenerationTaskResult.failed("restrictions_changed");
             }
             return AiGenerationTaskResult.failed("access_revoked");
+        } catch (ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException exception) {
+            throw exception;
         } catch (RuntimeException exception) {
             if (restrictionsChanged(turn)) {
                 return AiGenerationTaskResult.failed("restrictions_changed");
@@ -1442,6 +1444,13 @@ public class AiChatAgentLoopService {
                 return new StepCallOutcome.Close(exception.terminalReason());
             }
             return new StepCallOutcome.Fail(exception.terminalReason());
+        } catch (ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException exception) {
+            try {
+                failTool(turn, toolCallId, INTERNAL_ERROR);
+            } catch (RuntimeException settlementFailure) {
+                exception.addSuppressed(settlementFailure);
+            }
+            throw exception;
         } catch (RuntimeException exception) {
             String reason = toolFailureReason(exception);
             failTool(turn, toolCallId, reason);

@@ -35,6 +35,15 @@ class AttachmentReadBoundaryArchTest {
     }
 
     @Test
+    void onlyQueryReadServiceCallsPredicateSensitiveMapperReads() {
+        List<String> calls = List.of("attachmentMapper.search(", "attachmentMapper.getPage(",
+            "attachmentMapper.countPage(", "attachmentMapper.countOrphaned(", "attachmentMapper.getQueryUserIds(");
+        List<String> callers = sourceIndex.matching(source -> calls.stream().anyMatch(source::contains)).stream()
+            .map(path -> path.getFileName().toString()).sorted().toList();
+        assertEquals(List.of("AttachmentQueryReadService.java"), callers);
+    }
+
+    @Test
     void onlyApprovedInternalWritersInsertAttachmentRows() throws IOException {
         List<String> callers = sourceIndex.matching(source -> source.contains("attachmentMapper.insert(")).stream()
             .map(path -> path.getFileName().toString())

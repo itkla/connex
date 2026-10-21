@@ -22,11 +22,13 @@ import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -109,6 +111,26 @@ class AiGenerationServiceTest {
     @AfterEach
     void tearDown() {
         service.shutdown();
+    }
+
+    @Test
+    void snapshotRefusalSettlesGenerationAndKeepsTheOriginalException() throws Exception {
+        var refusal = new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException("attachment snapshot refused");
+        AtomicInteger terminals = new AtomicInteger();
+        var accepted = service.startAtRestrictionEpoch(AiFeature.ASSISTANT_CHAT, "snapshot-refusal",
+            Set.of(Permission.AI_USE), "unavailable", () -> { throw refusal; }, restrictionEpoch.get(),
+            (outcome, reason) -> {
+                assertEquals(AiGenerationTaskResult.Outcome.FAILED, outcome);
+                assertEquals("generation_failed", reason);
+                terminals.incrementAndGet();
+                return true;
+            });
+        var result = awaitStatus(accepted.handle(), "failed");
+        var failure = assertThrows(ExecutionException.class,
+            () -> generationFuture(accepted.handle()).get(2, TimeUnit.SECONDS));
+        org.junit.jupiter.api.Assertions.assertSame(refusal, failure.getCause());
+        assertEquals("generation_failed", result.reason());
+        assertEquals(1, terminals.get());
     }
 
     @Test
@@ -1083,6 +1105,19 @@ class AiGenerationServiceTest {
         Field field = AiGenerationService.class.getDeclaredField("workers");
         field.setAccessible(true);
         return ThreadPoolExecutor.class.cast(field.get(service));
+    }
+
+    private Future<?> generationFuture(String handle) throws ReflectiveOperationException {
+        Field lock = AiGenerationService.class.getDeclaredField("stateLock");
+        lock.setAccessible(true);
+        Field states = AiGenerationService.class.getDeclaredField("generations");
+        states.setAccessible(true);
+        synchronized (lock.get(service)) {
+            Object state = Map.class.cast(states.get(service)).get(handle);
+            Field future = state.getClass().getDeclaredField("future");
+            future.setAccessible(true);
+            return Future.class.cast(future.get(state));
+        }
     }
 
     private static void await(CountDownLatch latch) {

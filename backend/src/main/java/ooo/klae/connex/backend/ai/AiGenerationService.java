@@ -383,6 +383,13 @@ public class AiGenerationService {
             });
         } catch (CancellationException exception) {
             fail(state, "cancelled");
+        } catch (ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException exception) {
+            try {
+                fail(state, "generation_failed");
+            } catch (RuntimeException settlementFailure) {
+                exception.addSuppressed(settlementFailure);
+            }
+            throw exception;
         } catch (RuntimeException exception) {
             fail(state, Thread.currentThread().isInterrupted() ? "cancelled" : "generation_failed");
         }

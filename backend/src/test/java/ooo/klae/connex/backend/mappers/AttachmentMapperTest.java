@@ -200,42 +200,42 @@ class AttachmentMapperTest extends AbstractMapperTest {
             attachmentMapper.getAll(visibilityWorkspace.getId(), reader.getId())));
         assertEquals(authorIds, sortedIds(attachmentMapper.getPage(
             visibilityWorkspace.getId(), author.getId(), null, null,
-            null, null, null, null, 100, 0)));
+            null, null, null, null, 100, 0, queryUserFacts(visibilityWorkspace.getId(), author.getId(), null))));
         assertEquals(readerIds, sortedIds(attachmentMapper.getPage(
             visibilityWorkspace.getId(), reader.getId(), null, null,
-            null, null, null, null, 100, 0)));
+            null, null, null, null, 100, 0, queryUserFacts(visibilityWorkspace.getId(), reader.getId(), null))));
         assertEquals(3, attachmentMapper.countPage(
             visibilityWorkspace.getId(), author.getId(), null, null,
-            null, null, null));
+            null, null, null, queryUserFacts(visibilityWorkspace.getId(), author.getId(), null)));
         assertEquals(2, attachmentMapper.countPage(
             visibilityWorkspace.getId(), reader.getId(), null, null,
-            null, null, null));
+            null, null, null, queryUserFacts(visibilityWorkspace.getId(), reader.getId(), null)));
         assertEquals(List.of(privateAttachment.getId()), sortedIds(attachmentMapper.getPage(
             visibilityWorkspace.getId(), author.getId(), "%private-secret%", null,
-            null, null, null, null, 100, 0)));
+            null, null, null, null, 100, 0, queryUserFacts(visibilityWorkspace.getId(), author.getId(), "%private-secret%"))));
         assertEquals(List.of(), sortedIds(attachmentMapper.getPage(
             visibilityWorkspace.getId(), reader.getId(), "%private-secret%", null,
-            null, null, null, null, 100, 0)));
+            null, null, null, null, 100, 0, queryUserFacts(visibilityWorkspace.getId(), reader.getId(), "%private-secret%"))));
         assertEquals(1, attachmentMapper.countPage(
             visibilityWorkspace.getId(), author.getId(), "%private-secret%",
-            null, null, null, null));
+            null, null, null, null, queryUserFacts(visibilityWorkspace.getId(), author.getId(), "%private-secret%")));
         assertEquals(0, attachmentMapper.countPage(
             visibilityWorkspace.getId(), reader.getId(), "%private-secret%",
-            null, null, null, null));
+            null, null, null, null, queryUserFacts(visibilityWorkspace.getId(), reader.getId(), "%private-secret%")));
         assertEquals(sortedIds(privateAttachment, workspaceAttachment),
             sortedIds(attachmentMapper.getPage(
                 visibilityWorkspace.getId(), author.getId(), null, null,
-                null, null, null, true, 100, 0)));
+                null, null, null, true, 100, 0, queryUserFacts(visibilityWorkspace.getId(), author.getId(), null))));
         assertEquals(List.of(workspaceAttachment.getId()),
             sortedIds(attachmentMapper.getPage(
                 visibilityWorkspace.getId(), reader.getId(), null, null,
-                null, null, null, true, 100, 0)));
+                null, null, null, true, 100, 0, queryUserFacts(visibilityWorkspace.getId(), reader.getId(), null))));
         assertEquals(2, attachmentMapper.countPage(
             visibilityWorkspace.getId(), author.getId(), null,
-            null, null, null, true));
+            null, null, null, true, queryUserFacts(visibilityWorkspace.getId(), author.getId(), null)));
         assertEquals(1, attachmentMapper.countPage(
             visibilityWorkspace.getId(), reader.getId(), null,
-            null, null, null, true));
+            null, null, null, true, queryUserFacts(visibilityWorkspace.getId(), reader.getId(), null)));
         assertEquals(Map.of("note", 2L, "company", 1L), facetCounts(
             attachmentMapper.countsBySource(visibilityWorkspace.getId(), author.getId())));
         assertEquals(Map.of("note", 1L, "company", 1L), facetCounts(
@@ -251,9 +251,9 @@ class AttachmentMapperTest extends AbstractMapperTest {
         assertEquals(Map.of(String.valueOf(visibleTag.getId()), 2L), facetCounts(
             attachmentMapper.countsByTag(visibilityWorkspace.getId(), reader.getId())));
         assertEquals(2, attachmentMapper.countOrphaned(
-            visibilityWorkspace.getId(), author.getId()));
+            visibilityWorkspace.getId(), author.getId(), queryUserFacts(visibilityWorkspace.getId(), author.getId(), null)));
         assertEquals(1, attachmentMapper.countOrphaned(
-            visibilityWorkspace.getId(), reader.getId()));
+            visibilityWorkspace.getId(), reader.getId(), queryUserFacts(visibilityWorkspace.getId(), reader.getId(), null)));
         assertEquals(3, attachmentMapper.totalCount(
             visibilityWorkspace.getId(), author.getId()));
         assertEquals(2, attachmentMapper.totalCount(
@@ -263,9 +263,9 @@ class AttachmentMapperTest extends AbstractMapperTest {
         assertEquals(50, attachmentMapper.totalSize(
             visibilityWorkspace.getId(), reader.getId()));
         assertEquals(List.of(privateAttachment.getId()), sortedIds(attachmentMapper.search(
-            visibilityWorkspace.getId(), "%private-secret%", author.getId())));
+            visibilityWorkspace.getId(), "%private-secret%", author.getId(), queryUserFacts(visibilityWorkspace.getId(), author.getId(), "%private-secret%"))));
         assertEquals(List.of(), sortedIds(attachmentMapper.search(
-            visibilityWorkspace.getId(), "%private-secret%", reader.getId())));
+            visibilityWorkspace.getId(), "%private-secret%", reader.getId(), queryUserFacts(visibilityWorkspace.getId(), reader.getId(), "%private-secret%"))));
     }
 
     /**
@@ -371,4 +371,10 @@ class AttachmentMapperTest extends AbstractMapperTest {
     private static Map<String, Long> facetCounts(List<FacetCount> facets) {
         return facets.stream().collect(Collectors.toMap(FacetCount::getKey, FacetCount::getCount));
     }
+
+    private String queryUserFacts(int workspaceId, int currentUserId, String query) {
+        return ooo.klae.connex.backend.support.AttachmentQueryFacts.json(
+            attachmentMapper, userMapper, workspaceId, currentUserId, query);
+    }
+
 }

@@ -52,10 +52,14 @@ public interface AttachmentMapper {
     int countUrlInOtherWorkspaces(@Param("workspaceId") int workspaceId, @Param("url") String url);
     /** Locks every same-workspace attachment reference for an exact URL. */
     List<Integer> lockIdsByUrl(@Param("workspaceId") int workspaceId, @Param("url") String url);
+    /** Distinct identities referenced by eligible workspace attachments before name filtering. */
+    List<Integer> getQueryUserIds(@Param("workspaceId") int workspaceId,
+        @Param("currentUserId") int currentUserId, @Param("includeUploaders") boolean includeUploaders,
+        @Param("includeTargets") boolean includeTargets);
     List<Attachment> search(
         @Param("workspaceId") int workspaceId,
         @Param("query") String query,
-        @Param("currentUserId") int currentUserId);
+        @Param("currentUserId") int currentUserId, @Param("userFactsJson") String userFactsJson);
     int insert(Attachment attachment);
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
     int deleteByEntity(@Param("workspaceId") int workspaceId, @Param("entityType") String entityType, @Param("entityId") int entityId);
@@ -63,11 +67,11 @@ public interface AttachmentMapper {
         @Param("query") String query, @Param("sort") String sort,
         @Param("types") List<String> types, @Param("kinds") List<String> kinds,
         @Param("tagIds") List<Integer> tagIds, @Param("orphaned") Boolean orphaned,
-        @Param("limit") int limit, @Param("offset") int offset);
+        @Param("limit") int limit, @Param("offset") int offset, @Param("userFactsJson") String userFactsJson);
     long countPage(@Param("workspaceId") int workspaceId, @Param("currentUserId") int currentUserId,
         @Param("query") String query, @Param("types") List<String> types,
         @Param("kinds") List<String> kinds, @Param("tagIds") List<Integer> tagIds,
-        @Param("orphaned") Boolean orphaned);
+        @Param("orphaned") Boolean orphaned, @Param("userFactsJson") String userFactsJson);
     List<FacetCount> countsBySource(
         @Param("workspaceId") int workspaceId,
         @Param("currentUserId") int currentUserId);
@@ -79,7 +83,7 @@ public interface AttachmentMapper {
         @Param("currentUserId") int currentUserId);
     long countOrphaned(
         @Param("workspaceId") int workspaceId,
-        @Param("currentUserId") int currentUserId);
+        @Param("currentUserId") int currentUserId, @Param("userFactsJson") String userFactsJson);
     long totalCount(
         @Param("workspaceId") int workspaceId,
         @Param("currentUserId") int currentUserId);

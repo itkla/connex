@@ -16,6 +16,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.AttachmentFacets;
+import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.UserDisplayNameDto;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
@@ -31,6 +33,7 @@ public class AttachmentReadService {
     private final UserMapper userMapper;
     private final TenantWorkScope tenantWorkScope;
     private final AuthService authService;
+    private final AttachmentQueryReadService queryReadService;
 
     /** Returns attachments for one tenant-owned entity with user labels hydrated separately. */
     public List<Attachment> getByEntity(
@@ -52,6 +55,24 @@ public class AttachmentReadService {
     /** Returns the attachment an exact URL resolves to for one member, with user labels hydrated separately. */
     public Attachment getByUrl(int workspaceId, String url, int currentUserId) {
         return hydrate(workspaceId, attachmentMapper.getByUrl(workspaceId, url, currentUserId));
+    }
+
+    /** Searches library attachments through the dedicated snapshot read boundary. */
+    public List<Attachment> search(int workspaceId, String query, int currentUserId) {
+        return queryReadService.search(workspaceId, query, currentUserId);
+    }
+
+    /** Returns library rows and total from one operation snapshot. */
+    public PageResponse<Attachment> getPage(
+            int workspaceId, int currentUserId, String query, String sort, List<String> types,
+            List<String> kinds, List<Integer> tagIds, Boolean orphaned, int limit, int offset) {
+        return queryReadService.getPage(workspaceId, currentUserId, query, sort,
+            types, kinds, tagIds, orphaned, limit, offset);
+    }
+
+    /** Returns complete workspace facets through the same snapshot boundary. */
+    public AttachmentFacets facets(int workspaceId, int currentUserId) {
+        return queryReadService.facets(workspaceId, currentUserId);
     }
 
     Attachment hydrate(int workspaceId, Attachment attachment) {

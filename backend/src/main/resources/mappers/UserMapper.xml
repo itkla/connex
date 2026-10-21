@@ -22,6 +22,14 @@
     FROM app_user
   </select>
 
+  <select id="getAttachmentQueryFactsByIds" resultType="ooo.klae.connex.backend.dto.AttachmentQueryUserFact">
+    SELECT id, display_name, COALESCE(display_name LIKE #{query}, FALSE) AS name_matches
+    FROM app_user
+    WHERE id IN
+    <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
+    ORDER BY id
+  </select>
+
   <select id="getDisplayNamesByIds" resultType="ooo.klae.connex.backend.dto.UserDisplayNameDto">
     SELECT id, display_name
     FROM app_user

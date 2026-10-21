@@ -15,7 +15,6 @@ import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
-import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 
 import ooo.klae.connex.backend.beans.Activity;
@@ -88,7 +87,7 @@ public class SearchService {
     private final NoteMapper noteMapper;
     private final TaskMapper taskMapper;
     private final UserMapper userMapper;
-    private final AttachmentMapper attachmentMapper;
+    private final AttachmentReadService attachmentReadService;
     private final ProductMapper productMapper;
     private final CampaignMapper campaignMapper;
     private final ReportMapper reportMapper;
@@ -187,7 +186,7 @@ public class SearchService {
                 .stream().map(TaskDto::from).toList()),
             selected(types, "users", () -> userMapper.search(workspaceId, pattern)
                 .stream().map(UserDto::from).toList()),
-            selected(types, "attachments", () -> attachmentMapper.search(workspaceId, pattern, userId)
+            selected(types, "attachments", () -> attachmentReadService.search(workspaceId, pattern, userId)
                 .stream().map(AttachmentDto::from).toList()),
             selected(types, "products", () -> productMapper.search(workspaceId, pattern)),
             selected(types, "campaigns", () -> gated(permissions, Permission.CAMPAIGN_VIEW,

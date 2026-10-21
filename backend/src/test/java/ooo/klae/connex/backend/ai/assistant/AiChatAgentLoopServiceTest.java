@@ -3298,6 +3298,25 @@ class AiChatAgentLoopServiceTest {
     }
 
     @Test
+    void attachmentSnapshotRefusalSettlesTheProposedToolAndEscapesUnchanged() throws Exception {
+        AiAssistantStep toolStep = new AiAssistantStep(new AiAssistantStep.Tool(
+            "search_records", objectMapper.readTree("{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}")), null);
+        var parsedStep = parsed(toolStep);
+        when(invocationService.completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantStep.class),
+            any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class)))
+            .thenReturn(parsedStep);
+        var refusal = new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException("attachment snapshot refused");
+        when(toolExecutor.execute(any(), any(), any(), any(Boolean.class), any())).thenThrow(refusal);
+
+        assertSame(refusal, org.junit.jupiter.api.Assertions.assertThrows(
+            ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException.class, () -> service.run(TURN)));
+
+        verify(persistenceService).failTool(eq(TURN), anyInt(), contains("internal_error"));
+        verify(persistenceService, never()).resolve(eq(TURN), any(), any(), anyInt(), anyInt());
+        verify(runLeaseService).forgetLocalToken(LEASE);
+    }
+
+    @Test
     void toolServiceAndFinalPersistenceFailuresAreInternal() throws Exception {
         AiAssistantStep toolStep = new AiAssistantStep(
                 new AiAssistantStep.Tool(

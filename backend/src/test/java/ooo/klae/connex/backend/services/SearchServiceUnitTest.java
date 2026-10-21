@@ -31,7 +31,6 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.SearchResultsDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
-import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.CampaignMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealDocumentMapper;
@@ -60,7 +59,7 @@ class SearchServiceUnitTest {
     private final NoteMapper notes = mock(NoteMapper.class);
     private final TaskMapper tasks = mock(TaskMapper.class);
     private final UserMapper users = mock(UserMapper.class);
-    private final AttachmentMapper attachments = mock(AttachmentMapper.class);
+    private final AttachmentReadService attachments = mock(AttachmentReadService.class);
     private final ProductMapper products = mock(ProductMapper.class);
     private final CampaignMapper campaigns = mock(CampaignMapper.class);
     private final ReportMapper reports = mock(ReportMapper.class);

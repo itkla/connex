@@ -10,6 +10,7 @@ import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.AttachmentFacets;
+import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.UserDisplayNameDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
@@ -83,29 +84,16 @@ public class AttachmentService {
         return attachmentReadService.getAll(workspaceId, currentUserId);
     }
 
-    public List<Attachment> getPage(String query, String sort, List<String> types, List<String> kinds,
+    public PageResponse<Attachment> getPage(
+            String query, String sort, List<String> types, List<String> kinds,
             List<Integer> tagIds, Boolean orphaned, int limit, int offset) {
-        return attachmentMapper.getPage(workspaceService.getCurrentWorkspaceId(),
+        return attachmentReadService.getPage(workspaceService.getCurrentWorkspaceId(),
             workspaceService.getCurrentUserId(), query, sort, types, kinds, tagIds, orphaned, limit, offset);
     }
 
-    public long countPage(String query, List<String> types, List<String> kinds, List<Integer> tagIds,
-            Boolean orphaned) {
-        return attachmentMapper.countPage(workspaceService.getCurrentWorkspaceId(),
-            workspaceService.getCurrentUserId(), query, types, kinds, tagIds, orphaned);
-    }
-
     public AttachmentFacets facets() {
-        int workspaceId = workspaceService.getCurrentWorkspaceId();
-        int currentUserId = workspaceService.getCurrentUserId();
-        return new AttachmentFacets(
-            attachmentMapper.countsBySource(workspaceId, currentUserId),
-            attachmentMapper.countsByKind(workspaceId, currentUserId),
-            attachmentMapper.countsByTag(workspaceId, currentUserId),
-            attachmentMapper.countOrphaned(workspaceId, currentUserId),
-            attachmentMapper.totalCount(workspaceId, currentUserId),
-            attachmentMapper.totalSize(workspaceId, currentUserId)
-        );
+        return attachmentReadService.facets(workspaceService.getCurrentWorkspaceId(),
+            workspaceService.getCurrentUserId());
     }
 
     public List<Tag> getTags(int attachmentId) {

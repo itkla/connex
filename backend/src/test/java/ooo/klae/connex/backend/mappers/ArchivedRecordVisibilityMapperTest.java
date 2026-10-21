@@ -211,10 +211,10 @@ class ArchivedRecordVisibilityMapperTest extends AbstractMapperTest {
         assertNull(pagedLabel(contactFile, reader.getId()));
         assertNull(attachmentMapper.getByEntity(workspace.getId(), "company", owner.getId())
             .getFirst().getEntityLabel());
-        assertEquals(2, attachmentMapper.countOrphaned(workspace.getId(), reader.getId()));
+        assertEquals(2, attachmentMapper.countOrphaned(workspace.getId(), reader.getId(), queryUserFacts(workspace.getId(), reader.getId(), null)));
 
         assertEquals(2, attachmentMapper.getPage(workspace.getId(), reader.getId(), null, null, null, null, null,
-            null, 100, 0).size());
+            null, 100, 0, queryUserFacts(workspace.getId(), reader.getId(), null)).size());
         assertNotNull(attachmentMapper.getMetadataById(workspace.getId(), companyFile.getId()));
     }
 
@@ -383,7 +383,7 @@ class ArchivedRecordVisibilityMapperTest extends AbstractMapperTest {
     }
 
     private String pagedLabel(Attachment attachment, int currentUserId) {
-        return attachmentMapper.getPage(workspace.getId(), currentUserId, null, null, null, null, null, null, 100, 0)
+        return attachmentMapper.getPage(workspace.getId(), currentUserId, null, null, null, null, null, null, 100, 0, queryUserFacts(workspace.getId(), currentUserId, null))
             .stream().filter(row -> row.getId() == attachment.getId()).findFirst().orElseThrow()
             .getEntityLabel();
     }
@@ -527,4 +527,10 @@ class ArchivedRecordVisibilityMapperTest extends AbstractMapperTest {
         workspaceMapper.insert(created);
         return created;
     }
+
+    private String queryUserFacts(int workspaceId, int currentUserId, String query) {
+        return ooo.klae.connex.backend.support.AttachmentQueryFacts.json(
+            attachmentMapper, userMapper, workspaceId, currentUserId, query);
+    }
+
 }

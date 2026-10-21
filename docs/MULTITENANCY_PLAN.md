@@ -323,6 +323,23 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   remaining visibility/company joins; the isolated cache restriction/purge transaction has its own
   minimal tenant-catalog coverage. Routing remains disabled.
 
+- **Attachment library user-fact separation (#485 L8).** Search, paired page/count and facets
+  first discover the user IDs referenced by eligible workspace attachments, then load complete
+  global display-name/LIKE facts through `AttachmentQueryControlAccess` in batches of 1,000.
+  `AttachmentMapper` binds the resulting JSON instead of joining control tables. The total set
+  remains O(U), with no truncation or matching-user cap; lookup and serialization failures fail
+  the whole operation. Single-database operations run discovery, control reads and final tenant
+  statements in one read-only REPEATABLE READ transaction on the same default-catalog connection.
+  Page and count now share a read view. The dedicated `AttachmentQueryRead` callback separates GET
+  work from mutation Suppliers. Existing workspace/note visibility, parent-label archive rules,
+  orphan classification, database name matching, sorting and SQL limits are retained. Historical
+  uploader labels and unrestricted global user-target labels deliberately preserve legacy parity;
+  narrowing the latter is the separate security issue **#2199**. Direct attachment hydration still
+  requires active workspace membership for user targets. In routed mode, a library or fact read
+  inside a tenant transaction fails with a typed snapshot refusal before discovery, suspension or
+  another checkout. Nontransactional split-catalog statement execution is covered, but routed
+  atomic snapshot semantics remain the flag-enable prerequisite **#2200**. Routing stays disabled.
+
 - **Context-installed workspace scopes (#2159 / #2176 / #485 P5b).** In both modes, request
   resolution, public API authentication and workspace job entries prepare immutable unfiltered and
   active-only organization snapshots before tenant transactions. A short read-only control transaction

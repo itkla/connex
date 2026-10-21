@@ -34,14 +34,18 @@ class AttachmentMapperXmlTest {
     }
 
     @Test
-    void predicateSensitiveReadsRetainTheirExplicitLegacyCrossings() throws IOException {
+    void predicateSensitiveReadsConsumeOnlyTenantTablesAndBoundedUserFacts() throws IOException {
         String xml = mapperXml();
-
-        assertTrue(block(xml, "search").contains("attachmentColumnsWithUploader"));
+        assertFalse(xml.contains("app_user"));
+        assertTrue(block(xml, "search").contains("queryUserFacts"));
         assertTrue(block(xml, "getPage").contains("attachJoins"));
         assertTrue(block(xml, "countPage").contains("attachJoins"));
-        assertTrue(block(xml, "countOrphaned").contains("attachJoins"));
-        assertTrue(block(xml, "attachJoins").contains("app_user"));
+        assertTrue(block(xml, "countOrphaned").contains("userTargetJoin"));
+        assertTrue(block(xml, "attachJoins").contains("queryUserFacts"));
+        assertTrue(block(xml, "queryUserFacts").contains("JSON_TABLE(#{userFactsJson}"));
+        assertTrue(block(xml, "getQueryUserIds").contains("a.workspace_id = #{workspaceId}"));
+        assertTrue(block(xml, "getQueryUserIds").contains("noteVisibilityPredicate"));
+        assertFalse(block(xml, "getQueryUserIds").contains("LIMIT"));
     }
 
     @Test

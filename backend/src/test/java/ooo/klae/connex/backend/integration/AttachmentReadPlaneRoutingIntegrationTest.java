@@ -123,7 +123,8 @@ class AttachmentReadPlaneRoutingIntegrationTest {
             sqlSessionTemplate.getMapper(AttachmentMapper.class),
             sqlSessionTemplate.getMapper(UserMapper.class),
             tenantWorkScope,
-            mock(AuthService.class));
+            mock(AuthService.class),
+            mock(ooo.klae.connex.backend.services.AttachmentQueryReadService.class));
     }
 
     @AfterAll

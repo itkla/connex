@@ -50,7 +50,6 @@ class MapperPlaneArchTest {
      * mapper. Every entry is Phase 4 rewrite work (or a documented exception).
      */
     private static final Map<String, Set<String>> BASELINE_CROSSINGS = Map.ofEntries(
-        Map.entry("AttachmentMapper", Set.of("app_user")),
         Map.entry("AuditLogMapper", Set.of("app_user", "audit_log")),
         Map.entry("NotificationMapper", Set.of("app_user", "notification_recipient_state", "workspace", "workspace_member")),
         Map.entry("PersonMapper", Set.of("workspace")),

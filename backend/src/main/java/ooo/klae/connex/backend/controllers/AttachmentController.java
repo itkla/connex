@@ -81,9 +81,9 @@ public class AttachmentController {
         page = Math.max(page, 1);
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
         int offset = Math.max(0, (page - 1) * size);
-        List<AttachmentDto> items = attachmentService.getPage(query, sort, types, kinds, tagIds, orphaned, size, offset)
-            .stream().map(AttachmentDto::from).toList();
-        return new PageResponse<>(items, attachmentService.countPage(query, types, kinds, tagIds, orphaned));
+        PageResponse<Attachment> result = attachmentService.getPage(
+            query, sort, types, kinds, tagIds, orphaned, size, offset);
+        return new PageResponse<>(result.items().stream().map(AttachmentDto::from).toList(), result.total());
     }
 
     /**

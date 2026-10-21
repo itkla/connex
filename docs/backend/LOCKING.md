@@ -49,6 +49,18 @@ Read the relevant section before adding/changing `FOR UPDATE`, transaction isola
   A deferred record-visibility operation's first use checks the prepared payload before its
   transaction memo or lazy lookup; empty and skipped operations retain their no-read behavior.
 - Company visibility and relationship validation resolve the unfiltered `RecordVisibilityScopeControlAccess` ceiling before the first authorization lock, duplicate-decision mutex or `FOR UPDATE`. This includes reference-hydrating Note/Task/Activity/Introduction writes, record creation and attachment target locks, transcript/turn preparation and document lifecycle activity callbacks. `CompanyMapper.getVisibleCompanyByIdForUpdate` and share-grant locks still run on the original tenant transaction connection; an invisible Company yields no row and cannot become an accepted relationship target. Compound reads bind `withWorkspaceScopeRead` when visibility work is mandatory and `withDeferredWorkspaceScopeRead` when existing guards can skip it. Operations with independent failure handlers, including Radar bootstrap reconciliation, bind `withDeferredWorkspaceScope` so ordinary scope failures reach those handlers; snapshot-invariant refusals still escape. Loops of independently committed mutations bind an explicit operation scope, capture one snapshot when needed, restore it on exit and retain every existing transaction boundary. Lock-taking mutation roots remain eager before their first authorization lock or mutex. Destructive cache purges retain the separately documented `getFreshForWorkspace` exception.
+- Attachment library/search reads (#485 L8) use the dedicated `AttachmentQueryRead` boundary.
+  In single-database mode, tenant user-ID discovery, bounded control user-fact reads through
+  `unroutedRead`, and final tenant statements share one read-only REPEATABLE READ transaction
+  and default-catalog connection. A compatible existing caller transaction retains its connection
+  and read view; DEFAULT isolation is verified on its bound connection, and incompatible or
+  unverifiable isolation is refused without another checkout. Page and count now share
+  that snapshot. These read operations acquire no authorization or record locks, so the #2176
+  pre-lock read-view hazard does not apply. Routed transactional invocations refuse with
+  `TenantScopeSnapshotException` before tenant discovery, control reads, suspension or another
+  checkout; routed snapshot coordination is tracked in #2200. No coverage proof or retry is used.
+  Indirect assistant search preserves typed refusals: a proposed tool is failed before rethrow,
+  and the generation worker settles its terminal callback before propagating the same refusal.
 - Changes to lock order or transaction isolation are Tier 3/high-risk and receive focused concurrency/correctness review.
 
 Interactive and public API requests return HTTP 409 for Spring pessimistic lock failures and exact

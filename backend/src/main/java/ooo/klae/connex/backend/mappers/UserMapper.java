@@ -12,6 +12,7 @@ import ooo.klae.connex.backend.beans.UnenrolledPrivilegedAccount;
 import ooo.klae.connex.backend.beans.UnenrolledPrivilegedAccountCounts;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.AiChatRealtimeRecipientDto;
+import ooo.klae.connex.backend.dto.AttachmentQueryUserFact;
 import ooo.klae.connex.backend.dto.UserDisplayNameDto;
 import ooo.klae.connex.backend.dto.UserProfileHydrationRow;
 import ooo.klae.connex.backend.dto.UserReferenceDto;
@@ -27,6 +28,10 @@ public interface UserMapper {
     /** Bounded control-only discovery for workspace privacy metadata, independent of chat roots. */
     List<Integer> activeAiChatRecipientIdsAfter(@Param("workspaceId") int workspaceId,
             @Param("afterId") int afterId, @Param("limit") int limit);
+
+    /** Unfiltered name facts for a bounded nonempty tenant-derived attachment user batch. */
+    List<AttachmentQueryUserFact> getAttachmentQueryFactsByIds(
+        @Param("ids") List<Integer> ids, @Param("query") String query);
 
     List<User> getAllUsers();
     /** Existing control-plane identities only; callers supply a bounded, nonempty set. */

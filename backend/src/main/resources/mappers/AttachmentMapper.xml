@@ -188,16 +188,30 @@
     FOR UPDATE
   </select>
 
+  <select id="getQueryUserIds" resultType="int">
+    SELECT DISTINCT user_id FROM (
+      SELECT a.uploaded_by_id AS user_id FROM attachment a
+      WHERE #{includeUploaders} AND a.workspace_id = #{workspaceId}
+        AND a.entity_type != 'ai_chat_session'
+        <include refid="noteVisibilityPredicate"/>
+      UNION
+      SELECT a.entity_id AS user_id FROM attachment a
+      WHERE #{includeTargets} AND a.workspace_id = #{workspaceId} AND a.entity_type = 'user'
+    ) referenced_users
+    WHERE user_id IS NOT NULL
+    ORDER BY user_id
+  </select>
+
   <select id="search" resultMap="AttachmentResult">
     SELECT <include refid="attachmentColumnsWithUploader"/>
     FROM attachment a
-    LEFT JOIN app_user u ON u.id = a.uploaded_by_id
+    LEFT JOIN <include refid="queryUserFacts"/> u ON u.id = a.uploaded_by_id
     WHERE a.workspace_id = #{workspaceId}
       AND a.entity_type != 'ai_chat_session'
       <include refid="noteVisibilityPredicate"/>
       AND (a.file_name LIKE #{query}
       OR a.content_type LIKE #{query}
-      OR u.display_name LIKE #{query})
+      OR u.name_matches = 1)
     ORDER BY a.created_at DESC
     LIMIT 10
   </select>
@@ -236,10 +250,22 @@
     LEFT JOIN deal     d  ON a.entity_type = 'deal'    AND d.id  = a.entity_id AND d.workspace_id = a.workspace_id
   </sql>
 
+  <sql id="queryUserFacts">
+    JSON_TABLE(#{userFactsJson}, '$[*]' COLUMNS(
+      id INT PATH '$.id',
+      display_name VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin PATH '$.displayName',
+      name_matches INT PATH '$.nameMatches'
+    ))
+  </sql>
+
+  <sql id="userTargetJoin">
+    LEFT JOIN <include refid="queryUserFacts"/> eu ON a.entity_type = 'user' AND eu.id = a.entity_id
+  </sql>
+
   <sql id="attachJoins">
     <include refid="tenantAttachJoins"/>
-    LEFT JOIN app_user u  ON u.id  = a.uploaded_by_id
-    LEFT JOIN app_user eu ON a.entity_type = 'user'    AND eu.id = a.entity_id
+    LEFT JOIN <include refid="queryUserFacts"/> u ON u.id = a.uploaded_by_id
+    <include refid="userTargetJoin"/>
   </sql>
 
   <sql id="attachPageWhere">
@@ -249,8 +275,9 @@
       <include refid="noteVisibilityPredicate"/>
       <if test="query != null">
         AND (a.file_name LIKE #{query} OR a.content_type LIKE #{query}
-          OR COALESCE(c.name, p.name, d.name, eu.display_name) LIKE #{query}
-          OR u.display_name LIKE #{query})
+          OR COALESCE(c.name, p.name, d.name) LIKE #{query}
+          OR (a.entity_type = 'user' AND eu.name_matches = 1)
+          OR u.name_matches = 1)
       </if>
       <if test="types != null and types.size() > 0">
         AND a.entity_type IN <foreach item="ty" collection="types" open="(" separator="," close=")">#{ty}</foreach>
@@ -326,7 +353,8 @@
 
   <select id="countOrphaned" resultType="long">
     SELECT COUNT(*)
-    <include refid="attachJoins"/>
+    <include refid="tenantAttachJoins"/>
+    <include refid="userTargetJoin"/>
     WHERE a.workspace_id = #{workspaceId}
       AND a.entity_type != 'ai_chat_session'
       <include refid="noteVisibilityPredicate"/>

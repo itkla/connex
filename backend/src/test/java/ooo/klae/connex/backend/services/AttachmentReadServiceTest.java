@@ -43,7 +43,8 @@ class AttachmentReadServiceTest {
     @BeforeEach
     void setUp() {
         service = new AttachmentReadService(
-            attachmentMapper, userMapper, tenantWorkScope, authService);
+            attachmentMapper, userMapper, tenantWorkScope, authService,
+            org.mockito.Mockito.mock(AttachmentQueryReadService.class));
     }
 
     @AfterEach

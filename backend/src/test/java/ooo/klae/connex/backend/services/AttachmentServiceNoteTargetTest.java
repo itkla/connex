@@ -125,18 +125,11 @@ class AttachmentServiceNoteTargetTest {
     void aggregateReadsUseCurrentUserVisibility() {
         service.getAll();
         service.getPage(null, null, null, null, null, null, 24, 0);
-        service.countPage(null, null, null, null, null);
         service.facets();
 
         verify(attachmentReadService).getAll(5, 7);
-        verify(attachmentMapper).getPage(5, 7, null, null, null, null, null, null, 24, 0);
-        verify(attachmentMapper).countPage(5, 7, null, null, null, null, null);
-        verify(attachmentMapper).countsBySource(5, 7);
-        verify(attachmentMapper).countsByKind(5, 7);
-        verify(attachmentMapper).countsByTag(5, 7);
-        verify(attachmentMapper).countOrphaned(5, 7);
-        verify(attachmentMapper).totalCount(5, 7);
-        verify(attachmentMapper).totalSize(5, 7);
+        verify(attachmentReadService).getPage(5, 7, null, null, null, null, null, null, 24, 0);
+        verify(attachmentReadService).facets(5, 7);
     }
 
     @Test
