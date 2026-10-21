@@ -59,7 +59,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install lightweight image test dependencies
-        run: python -m pip install Pillow==12.3.0 numpy==2.3.5
+        run: python -m pip install Pillow==13.0.0 numpy==2.3.5
       - name: Install pinned OCR lock compiler
         # pip is pinned alongside pip-tools on purpose. This step exists to prove requirements.lock
         # is reproducible, so leaving the compiler's own dependency floating defeats it: pip 26.2
