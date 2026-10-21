@@ -2336,6 +2336,15 @@ Legacy account-deletion cleanup keeps the same root order and its separate
 the caller's exact active membership before deleting tenant-scoped capture rows and never acquires a
 provider-connection lock.
 
+Managed native exchanges claim under the owning `app_user` exclusive lock before the exact
+session. The claim stamps `updated_at` with database UTC; that timestamp is the exchange lease
+origin and ordinary cancellation or supersession never changes an exchanging row or its verifier.
+Completion keeps user → connection → session order and commits only while the lease is live.
+The scheduled native-session cleanup discovers all expired exchanges, then takes user shared →
+exact session and conditionally fails each still-expired exchange. Only the winning transition
+emits a terminal audit after its transaction commits. Grace deletion excludes exchanging rows and
+requires both pairing expiry and the last state change to be beyond the retention cutoff.
+
 ## Review checklist
 
 For any transaction/locking change:

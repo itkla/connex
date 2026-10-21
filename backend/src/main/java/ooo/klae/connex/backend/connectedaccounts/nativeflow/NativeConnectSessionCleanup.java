@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.NativeConnectSession;
+import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /** Periodically removes native authorization sessions beyond their recovery grace. */
@@ -26,8 +27,9 @@ public class NativeConnectSessionCleanup {
     private final NativeConnectSessionPersistence sessionPersistence;
     private final TenantWorkScope tenantWorkScope;
     private final Clock clock;
+    private final AuditService auditService;
 
-    /** Purges one bounded batch of expired sessions and their retained verifier secrets. */
+    /** Recovers a bounded batch of abandoned exchanges before purging sessions beyond the grace. */
     @Scheduled(
         fixedDelayString = "${connex.connected-accounts.native.cleanup-delay-ms:3600000}",
         initialDelayString = "${connex.connected-accounts.native.cleanup-initial-delay-ms:3600000}")
@@ -35,6 +37,20 @@ public class NativeConnectSessionCleanup {
         LocalDateTime cutoff = LocalDateTime.ofInstant(
             clock.instant().minus(RETENTION_GRACE), ZoneOffset.UTC);
         try {
+            List<NativeConnectSession> abandoned = tenantWorkScope.unroutedRead(
+                () -> sessionPersistence.findExpiredExchanges(DELETE_BATCH));
+            for (NativeConnectSession session : abandoned) {
+                boolean failed = tenantWorkScope.unrouted(
+                    () -> sessionPersistence.failExpiredExchange(session.getId(), session.getUserId()));
+                if (failed) {
+                    tenantWorkScope.unrouted(() -> {
+                        auditService.recordFailureScoped(
+                            "user.connection.connect_failed", "user", session.getUserId(), null, null,
+                            session.getProvider(), "Managed provider authorization failed", "exchange_expired");
+                        return null;
+                    });
+                }
+            }
             List<NativeConnectSession> sessions = tenantWorkScope.unrouted(
                 () -> sessionPersistence.findExpiredBefore(cutoff, DELETE_BATCH));
             int removed = 0;
