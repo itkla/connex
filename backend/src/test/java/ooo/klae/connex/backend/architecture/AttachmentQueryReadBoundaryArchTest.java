@@ -31,4 +31,16 @@ class AttachmentQueryReadBoundaryArchTest {
         assertFalse(boundary.contains("getUserById("));
         assertFalse(boundary.contains("getActiveWorkspaceMemberDisplayNamesByIds("));
     }
+
+    @Test
+    void routedAndWritableRefusalsPrecedeSnapshotTransactions() throws Exception {
+        String service = Files.readString(MAIN.resolve("services/AttachmentQueryReadService.java"));
+        assertTrue(service.contains("tenantWorkScope.isCatalogPerPlacement()"));
+        assertTrue(service.indexOf("tenantWorkScope.isCatalogPerPlacement()")
+            < service.indexOf("new TransactionTemplate("));
+        assertFalse(service.contains("return read.read();"));
+        assertTrue(service.contains("!TransactionSynchronizationManager.isCurrentTransactionReadOnly()"));
+        assertTrue(service.indexOf("!TransactionSynchronizationManager.isCurrentTransactionReadOnly()")
+            < service.indexOf("&& existingIsolation()"));
+    }
 }

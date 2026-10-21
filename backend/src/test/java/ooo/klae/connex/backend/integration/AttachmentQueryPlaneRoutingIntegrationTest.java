@@ -101,10 +101,20 @@ class AttachmentQueryPlaneRoutingIntegrationTest {
                     "ooo.klae.connex.backend.mappers.AttachmentMapper." + read.statement(), parameters);
                 assertEquals(expected.get(index), canonical(actual), read.toString());
             }
-            var page = fixture.reads.getPage(fixture.workspaceId, fixture.viewerId, "%file%", "oldest",
-                null, null, null, null, 2, 1);
-            assertEquals(2, page.items().size());
-            assertEquals(fixture.visibleTotal, page.total());
+            if (split) {
+                int checkouts = fixture.connections.checkouts.get();
+                int facts = fixture.factReads.get();
+                assertThrows(TenantScopeSnapshotException.class,
+                    () -> fixture.reads.getPage(fixture.workspaceId, fixture.viewerId, "%file%", "oldest",
+                        null, null, null, null, 2, 1));
+                assertEquals(checkouts, fixture.connections.checkouts.get());
+                assertEquals(facts, fixture.factReads.get());
+            } else {
+                var page = fixture.reads.getPage(fixture.workspaceId, fixture.viewerId, "%file%", "oldest",
+                    null, null, null, null, 2, 1);
+                assertEquals(2, page.items().size());
+                assertEquals(fixture.visibleTotal, page.total());
+            }
             assertEquals(split ? fixture.tenantCatalog : fixture.defaultCatalog, fixture.currentCatalog());
             if (split) {
                 assertThrows(IllegalStateException.class, () -> new LegacyAttachmentSql(

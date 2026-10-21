@@ -24,7 +24,9 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
  * READ transaction in single-database mode. The default-catalog control boundary uses that same
  * connection, so every SELECT observes one InnoDB read view. These GET reads take no locks; the
  * pre-lock read-view hazard in #2176 therefore does not apply. Page/count now share a snapshot.
- * Routed operations cannot prepare facts inside tenant transactions and refuse them until #2200.
+ * Routed operations always refuse before opening or joining a transaction until #2200 supplies
+ * cross-plane snapshot coordination. An existing single-database transaction must already be
+ * read-only at REPEATABLE READ; REQUIRED propagation cannot upgrade either property.
  */
 @Service
 @RequiredArgsConstructor
@@ -75,9 +77,13 @@ public class AttachmentQueryReadService {
     }
 
     private <T> T read(AttachmentQueryRead<T> read) {
-        tenantWorkScope.requireScopePreparationAllowed("attachment library operation");
         if (tenantWorkScope.isCatalogPerPlacement()) {
-            return read.read();
+            throw new TenantScopeSnapshotException("Routed attachment library snapshots are unavailable until #2200");
+        }
+        tenantWorkScope.requireScopePreparationAllowed("attachment library operation");
+        if (TransactionSynchronizationManager.isActualTransactionActive()
+                && !TransactionSynchronizationManager.isCurrentTransactionReadOnly()) {
+            throw new TenantScopeSnapshotException("Attachment library requires a read-only transaction");
         }
         if (TransactionSynchronizationManager.isActualTransactionActive()
                 && existingIsolation() != Connection.TRANSACTION_REPEATABLE_READ) {

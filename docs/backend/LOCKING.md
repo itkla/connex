@@ -52,13 +52,16 @@ Read the relevant section before adding/changing `FOR UPDATE`, transaction isola
 - Attachment library/search reads (#485 L8) use the dedicated `AttachmentQueryRead` boundary.
   In single-database mode, tenant user-ID discovery, bounded control user-fact reads through
   `unroutedRead`, and final tenant statements share one read-only REPEATABLE READ transaction
-  and default-catalog connection. A compatible existing caller transaction retains its connection
-  and read view; DEFAULT isolation is verified on its bound connection, and incompatible or
-  unverifiable isolation is refused without another checkout. Page and count now share
+  and default-catalog connection. Only an already read-only REPEATABLE READ caller transaction can
+  be reused; writable callers refuse before discovery or isolation inspection. DEFAULT isolation
+  is verified on its bound connection, and incompatible or unverifiable isolation refuses without
+  another checkout. REQUIRED propagation cannot upgrade the caller's read-only or isolation state.
+  Page and count now share
   that snapshot. These read operations acquire no authorization or record locks, so the #2176
-  pre-lock read-view hazard does not apply. Routed transactional invocations refuse with
-  `TenantScopeSnapshotException` before tenant discovery, control reads, suspension or another
-  checkout; routed snapshot coordination is tracked in #2200. No coverage proof or retry is used.
+  pre-lock read-view hazard does not apply. Every routed library invocation refuses with
+  `TenantScopeSnapshotException` before the operation opens or joins a transaction, tenant discovery,
+  control reads, suspension or any additional checkout, including calls without an outer transaction;
+  routed snapshot coordination is tracked in #2200. No coverage proof or retry is used.
   Indirect assistant search preserves typed refusals: a proposed tool is failed before rethrow,
   and the generation worker settles its terminal callback before propagating the same refusal.
 - Changes to lock order or transaction isolation are Tier 3/high-risk and receive focused concurrency/correctness review.

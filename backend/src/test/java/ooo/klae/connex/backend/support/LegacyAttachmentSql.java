@@ -85,23 +85,23 @@ public final class LegacyAttachmentSql {
               <result property="displayName" column="uploaded_by_name"/>
             </association>
           </resultMap>
-        
+
           <resultMap id="AttachmentWithTagsResult" type="Attachment" extends="AttachmentResult">
             <collection property="tags" ofType="Tag" column="{workspaceId=workspace_id,attachmentId=id}"
               select="ooo.klae.connex.backend.mappers.TagMapper.getTagsByAttachmentId"/>
           </resultMap>
-        
+
           <sql id="attachmentColumns">
             a.id, a.workspace_id, a.entity_type, a.entity_id, a.file_name, a.url, a.content_type, a.size,
             a.uploaded_by_id, a.created_at, a.updated_at, a.scan_state, a.scan_engine,
             a.scan_database_version, a.scan_signature, a.scanned_at, a.scan_expires_at, a.scan_attempts,
             a.scan_owner, a.scan_lease_until, a.scan_next_attempt_at
           </sql>
-        
+
           <sql id="attachmentColumnsWithUploader">
             <include refid="attachmentColumns"/>, u.display_name AS uploaded_by_name
           </sql>
-        
+
           <sql id="noteVisibilityPredicate">
             AND (a.entity_type != 'note' OR EXISTS (
               SELECT 1
@@ -111,7 +111,7 @@ public final class LegacyAttachmentSql {
                 AND (n.visibility = 'workspace' OR n.author_id = #{currentUserId})
             ))
           </sql>
-        
+
           <select id="search" resultMap="AttachmentResult">
             SELECT <include refid="attachmentColumnsWithUploader"/>
             FROM attachment a
@@ -125,7 +125,7 @@ public final class LegacyAttachmentSql {
             ORDER BY a.created_at DESC
             LIMIT 10
           </select>
-        
+
           <sql id="kindExpr">
             CASE
               WHEN a.content_type LIKE 'image/%'
@@ -150,7 +150,7 @@ public final class LegacyAttachmentSql {
               ELSE 'other'
             END
           </sql>
-        
+
           <sql id="tenantAttachJoins">
             FROM attachment a
             LEFT JOIN company  c  ON a.entity_type = 'company' AND c.id  = a.entity_id AND c.workspace_id = a.workspace_id
@@ -159,13 +159,13 @@ public final class LegacyAttachmentSql {
               AND p.archived_at IS NULL
             LEFT JOIN deal     d  ON a.entity_type = 'deal'    AND d.id  = a.entity_id AND d.workspace_id = a.workspace_id
           </sql>
-        
+
           <sql id="attachJoins">
             <include refid="tenantAttachJoins"/>
             LEFT JOIN app_user u  ON u.id  = a.uploaded_by_id
             LEFT JOIN app_user eu ON a.entity_type = 'user'    AND eu.id = a.entity_id
           </sql>
-        
+
           <sql id="attachPageWhere">
             <where>
               AND a.workspace_id = #{workspaceId}
@@ -194,7 +194,7 @@ public final class LegacyAttachmentSql {
               </if>
             </where>
           </sql>
-        
+
           <sql id="attachPageOrderBy">
             ORDER BY
             <choose>
@@ -204,7 +204,7 @@ public final class LegacyAttachmentSql {
               <otherwise>a.created_at DESC</otherwise>
             </choose>
           </sql>
-        
+
           <select id="getPage" resultMap="AttachmentWithTagsResult">
             SELECT <include refid="attachmentColumnsWithUploader"/>,
               COALESCE(c.name, p.name, d.name, eu.display_name) AS entity_label
@@ -213,13 +213,13 @@ public final class LegacyAttachmentSql {
             <include refid="attachPageOrderBy"/>
             LIMIT #{limit} OFFSET #{offset}
           </select>
-        
+
           <select id="countPage" resultType="long">
             SELECT COUNT(*)
             <include refid="attachJoins"/>
             <include refid="attachPageWhere"/>
           </select>
-        
+
           <select id="countOrphaned" resultType="long">
             SELECT COUNT(*)
             <include refid="attachJoins"/>

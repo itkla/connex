@@ -335,10 +335,12 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   orphan classification, database name matching, sorting and SQL limits are retained. Historical
   uploader labels and unrestricted global user-target labels deliberately preserve legacy parity;
   narrowing the latter is the separate security issue **#2199**. Direct attachment hydration still
-  requires active workspace membership for user targets. In routed mode, a library or fact read
-  inside a tenant transaction fails with a typed snapshot refusal before discovery, suspension or
-  another checkout. Nontransactional split-catalog statement execution is covered, but routed
-  atomic snapshot semantics remain the flag-enable prerequisite **#2200**. Routing stays disabled.
+  requires active workspace membership for user targets. Single-database reuse requires an already
+  read-only REPEATABLE READ caller; writable, incompatible or unverifiable callers refuse before
+  discovery. Every routed library operation fails with a typed snapshot refusal before opening or
+  joining its transaction or acquiring another connection, with or without an outer transaction.
+  Individual tenant-only statements retain split-catalog execution coverage; library operations
+  remain disabled until routed atomic snapshot coordination in **#2200**. Routing stays disabled.
 
 - **Context-installed workspace scopes (#2159 / #2176 / #485 P5b).** In both modes, request
   resolution, public API authentication and workspace job entries prepare immutable unfiltered and
