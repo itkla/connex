@@ -33,9 +33,10 @@ import zipfile
 root, releases = map(pathlib.Path, sys.argv[1:])
 floor = [line.strip() for line in (root / "deploy/staging/rollback-floor").read_text().splitlines()
          if line.strip() and not line.lstrip().startswith("#")]
-assert floor == ["tenant/V238__ai_agent_singleton_proposals.sql"]
+assert floor == ["control/V240__ai_standing_approval_control.sql"]
 for name, migrations in (
     ("compatible", ["tenant/V232__ai_agent_runs.sql", "tenant/V233__ai_assistant_proposal_set_storage.sql", "tenant/V234__deal_document_recency_index.sql", "tenant/V235__ai_agent_continuation.sql", "control/V236__ai_assistant_privacy_coordination.sql", "tenant/V237__ai_assistant_privacy_cutover.sql", floor[0]]),
+    ("singleton-v238", ["tenant/V238__ai_agent_singleton_proposals.sql"]),
     ("expiry-only", ["tenant/V231__ai_proposal_review_expiry_cutover.sql"]),
     ("privacy-control-v236", ["tenant/V235__ai_agent_continuation.sql", "control/V236__ai_assistant_privacy_coordination.sql"]),
     ("privacy-cutover-v237", ["tenant/V235__ai_agent_continuation.sql", "control/V236__ai_assistant_privacy_coordination.sql", "tenant/V237__ai_assistant_privacy_cutover.sql"]),
@@ -51,11 +52,11 @@ for name, migrations in (
             archive.writestr("BOOT-INF/classes/db/migration/" + migration, "SELECT 1;")
 PY
 
-for predecessor in expiry-only slice-one slice-one-v233 slice-one-v234 slice-two-v235 privacy-control-v236 privacy-cutover-v237; do
+for predecessor in expiry-only slice-one slice-one-v233 slice-one-v234 slice-two-v235 privacy-control-v236 privacy-cutover-v237 singleton-v238; do
     if rollback_floor_allows_release "$predecessor"; then
-        printf '%s\n' "FAIL: $predecessor binary passed the V238 rollback floor" >&2
+        printf '%s\n' "FAIL: $predecessor binary passed the V240 rollback floor" >&2
         exit 1
     fi
 done
 rollback_floor_allows_release compatible
-printf '%s\n' 'PASS: singletonProposalRollbackFloorRejectsOlderBinaries'
+printf '%s\n' 'PASS: standingApprovalControlRollbackFloorRejectsOlderBinaries'

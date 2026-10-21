@@ -70,7 +70,8 @@ class WorkspaceFreshMembershipRoutingTest {
     private final TenantWorkScope scope = new TenantWorkScope(context, catalogs, workspaces, lifecycle, preparation);
     private final FreshMembershipTransaction membership = new FreshMembershipTransaction(scope, new TransactionTemplate(transactions));
     private final WorkspaceService service = new WorkspaceService(
-        workspaces, mock(UserMapper.class), mock(OrganizationMapper.class), mock(AiAssistantPrivacyService.class),
+        workspaces, mock(UserMapper.class), mock(OrganizationMapper.class),
+        mock(ooo.klae.connex.backend.mappers.AiStandingApprovalPolicyMapper.class), mock(AiAssistantPrivacyService.class),
         mock(OrgMemberService.class),
         mock(OrgAllowedDomainService.class), mock(RoleMapper.class), mock(NotificationMapper.class),
         offboarding, mock(WorkspaceMembershipRemovalTransaction.class), membership, scope,

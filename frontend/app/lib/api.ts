@@ -6487,6 +6487,22 @@ export function getAiWorkspaceGovernance(workspaceId: number, init: RequestInit 
     );
 }
 
+/** Reads organization standing approval controls through the active workspace. */
+export function getAiStandingApprovalPolicy(workspaceId: number, init: RequestInit = {}) {
+    return getJson<Types.AiStandingApprovalPolicy>(
+        `/api/ai/standing-approval-policy?workspaceId=${workspaceId}`,
+        { cache: 'no-store', ...init },
+    );
+}
+
+/** Saves an exact policy version, including kills while authoring is disabled. */
+export function saveAiStandingApprovalPolicy(workspaceId: number,
+    policy: Types.AiStandingApprovalPolicyRequest, init: RequestInit = {}) {
+    return putJson<Types.AiStandingApprovalPolicy>(
+        `/api/ai/standing-approval-policy?workspaceId=${workspaceId}`, policy, init,
+    );
+}
+
 export function getAiOrganizationBudget(workspaceId: number, init: RequestInit = {}) {
     return getJson<Types.AiOrganizationBudget>(
         `/api/ai/budget?workspaceId=${workspaceId}`,

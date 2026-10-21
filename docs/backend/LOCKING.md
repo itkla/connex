@@ -2533,3 +2533,37 @@ encoded-frame provenance and concurrent-session delegate as ordinary assistant f
 socket write takes publication S, freshly checks control authority in a separate READ COMMITTED
 transaction and retains publication S through the write. Broker enqueue validation alone does not
 authorize a buffered frame after organization invalidation.
+
+
+## Standing approval control foundation (V240)
+
+Organization policy replacement uses actor account S → active workspace S → exact active workspace membership X
+→ active organization S → exact organization administrator membership X → exact
+policy X → strict audit append. It never enumerates tenant approvals. Future admission retains
+policy S on the transaction-bound control connection through the effect commit, after existing
+authority/content/domain roots and before audit. A missing row refuses admission. A committed
+kill response waits behind prior retained policy S locks; subsequent admissions see the advanced
+kill epoch. No record lock, provider call, lazy provisioning or tenant transaction is added by S1.
+
+Membership assignment, custom-role assignment and activation increment authorization_epoch in
+the same exact-row UPDATE under existing authority locks, including ownership transitions.
+Deletion/rejoin is fenced by membership_id. Custom-role permission replacement advances its
+parent permission_epoch under the retained role root before permission-child DML; cosmetic renames
+preserve it. Snapshots expose membership generation, epochs, role identity and built-in policy
+version from the original authorization acquisition, without a second differently ordered helper.
+Missing snapshot metadata refuses standing authority while existing explicit behavior is unchanged.
+Signed BIGINT overflow aborts the complete authority mutation; epochs never wrap or saturate.
+
+Account deletion reservation now discovers all membership workspace roots under the account X
+lock and retains them in the established ordered root pass before ownership checks. After a
+successful reservation it takes each exact membership NOWAIT in ascending workspace order and
+advances its epoch. A failed reservation, overflow or busy membership rolls back the transaction;
+release or lease expiry can restore availability but cannot restore historical approval authority.
+No new organization X lock is introduced.
+
+Provisioning retains organization S before insert-if-absent; concurrent provisioning preserves
+one disabled, empty row and never overwrites administrator choices. Reconciliation discovers at
+most 100 missing organization IDs outside mutation transactions and provisions each separately.
+GET uses only the dedicated read callback and does not join a write Supplier. Realtime frames
+contain only a change signal, target current organization administrators after commit and cause
+an authorized policy refetch. They carry no approval definition, epoch or CRM content.

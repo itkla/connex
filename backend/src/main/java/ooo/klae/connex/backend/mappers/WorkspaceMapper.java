@@ -148,6 +148,8 @@ public interface WorkspaceMapper {
         @Param("userId") int userId,
         @Param("role") String role
     );
+    /** Advances one retained membership after account-wide authority withdrawal. */
+    int advanceAuthorizationEpoch(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     int activateMember(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     List<WorkspaceMembershipDto> getPendingMemberships(int userId);
     /**

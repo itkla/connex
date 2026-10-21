@@ -37,6 +37,10 @@ public interface RoleMapper {
     List<String> lockPermissionsForShare(
         @Param("workspaceId") int workspaceId,
         @Param("roleId") int roleId);
+    /** Reads the epoch while retaining the same role root already used for permission locks. */
+    Long lockPermissionEpoch(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    /** Advances the retained parent before replacing any permission children; overflow fails closed. */
+    int advancePermissionEpoch(@Param("workspaceId") int workspaceId, @Param("id") int id);
     int updateRoleName(@Param("workspaceId") int workspaceId, @Param("id") int id, @Param("name") String name);
     int deleteRole(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<String> findPermissions(@Param("workspaceId") int workspaceId, @Param("roleId") int roleId);

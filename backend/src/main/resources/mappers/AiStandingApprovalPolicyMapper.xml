@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.AiStandingApprovalPolicyMapper">
+    <resultMap id="policy" type="ooo.klae.connex.backend.beans.AiStandingApprovalPolicy">
+        <id property="orgId" column="org_id"/>
+        <result property="enabled" column="enabled"/>
+        <result property="allowedToolMask" column="allowed_tool_mask"/>
+        <result property="maximumDailyCap" column="maximum_daily_cap"/>
+        <result property="maximumPerRunCap" column="maximum_per_run_cap"/>
+        <result property="stateVersion" column="state_version"/>
+        <result property="killEpoch" column="kill_epoch"/>
+    </resultMap>
+    <sql id="columns">
+        org_id, enabled, allowed_tool_mask, maximum_daily_cap, maximum_per_run_cap,
+        state_version, kill_epoch
+    </sql>
+    <select id="get" resultMap="policy" flushCache="true" useCache="false">
+        SELECT <include refid="columns"/> FROM organization_ai_standing_approval_policy
+        WHERE org_id = #{orgId}
+    </select>
+    <select id="lockForUpdate" resultMap="policy" flushCache="true" useCache="false">
+        SELECT <include refid="columns"/> FROM organization_ai_standing_approval_policy
+        WHERE org_id = #{orgId} FOR UPDATE
+    </select>
+    <select id="lockForShare" resultMap="policy" flushCache="true" useCache="false">
+        SELECT <include refid="columns"/> FROM organization_ai_standing_approval_policy
+        WHERE org_id = #{orgId} FOR SHARE
+    </select>
+    <insert id="provision">
+        INSERT INTO organization_ai_standing_approval_policy (org_id)
+        SELECT id FROM organization WHERE id = #{orgId} AND lifecycle_state = 'active'
+        ON DUPLICATE KEY UPDATE org_id = organization_ai_standing_approval_policy.org_id
+    </insert>
+    <select id="findMissing" resultType="int">
+        SELECT o.id FROM organization o
+        WHERE o.id &gt; #{afterOrgId} AND o.lifecycle_state = 'active'
+          AND NOT EXISTS (SELECT 1 FROM organization_ai_standing_approval_policy p WHERE p.org_id = o.id)
+        ORDER BY o.id LIMIT #{limit}
+    </select>
+    <select id="administratorIds" resultType="int">
+        SELECT om.user_id FROM org_member om
+        JOIN organization o ON o.id = om.org_id
+        JOIN app_user u ON u.id = om.user_id
+        WHERE om.org_id = #{orgId} AND om.org_role IN ('owner', 'admin')
+          AND o.lifecycle_state = 'active' AND (u.account_deletion_reservation_until IS NULL
+            OR u.account_deletion_reservation_until &lt;= UTC_TIMESTAMP(6))
+        ORDER BY om.user_id
+    </select>
+    <update id="replace">
+        UPDATE organization_ai_standing_approval_policy
+        SET enabled = #{enabled}, allowed_tool_mask = #{allowedToolMask},
+            maximum_daily_cap = #{maximumDailyCap}, maximum_per_run_cap = #{maximumPerRunCap},
+            state_version = #{stateVersion}, kill_epoch = #{killEpoch}
+        WHERE org_id = #{orgId} AND state_version = #{stateVersion} - 1
+    </update>
+</mapper>

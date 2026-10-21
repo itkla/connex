@@ -12,6 +12,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class WorkspaceRole {
     private int id;
+    private Long permissionEpoch;
     private int workspaceId;
     private String name;
     private List<String> permissions;
