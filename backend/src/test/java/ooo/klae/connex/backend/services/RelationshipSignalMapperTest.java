@@ -225,7 +225,9 @@ class RelationshipSignalMapperTest extends AbstractServiceTest {
                 workspace.getId(), java.util.Set.of(), java.util.Set.of(), java.util.Set.of()))
             .thenReturn(Map.of(subject.getId(), persistedSourceHash));
         when(scoringService.companySourceStateHashes(workspace.getId())).thenReturn(Map.of());
-        when(detectorPersonMapper.getByIds(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), List.of(subject.getId())))
+        var detectorScopes = ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
+        String personScopeJson = detectorScopes.getForWorkspace(workspace.getId()).workspaceIdsJson();
+        when(detectorPersonMapper.getByIds(workspace.getId(), personScopeJson, List.of(subject.getId())))
             .thenReturn(List.of(subject));
         RelationshipSignalDetectorService detector = new RelationshipSignalDetectorService(
             scoringService,
@@ -235,7 +237,7 @@ class RelationshipSignalMapperTest extends AbstractServiceTest {
             mock(CompanyMapper.class),
             mock(DealMapper.class),
             new ObjectMapper(),
-            Clock.fixed(firstAsOf, ZoneOffset.UTC), ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
+            Clock.fixed(firstAsOf, ZoneOffset.UTC), detectorScopes);
         RelationshipSignalWriteService writer = new RelationshipSignalWriteService(signalMapper);
 
         Detection first = detector.detectDecay(workspace.getId(), "first");

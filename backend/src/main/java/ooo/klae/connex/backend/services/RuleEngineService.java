@@ -156,7 +156,6 @@ public class RuleEngineService {
     private void runScheduleWithinScope(WorkflowTriggerDispatch.ScheduleTick dispatch) {
         int workspaceId = dispatch.workspaceId();
         String cadence = dispatch.cadence();
-        boolean scopeResolved = false;
         for (Rule rule : ruleMapper.getEnabledByTrigger(workspaceId, "schedule")) {
             try {
                 RuleTrigger trigger = read(rule.getTriggerConfig(), RuleTrigger.class);
@@ -166,10 +165,6 @@ public class RuleEngineService {
             } catch (Exception exception) {
                 logScheduleRuleFailure(rule, exception);
                 continue;
-            }
-            if (rule.getConditionJson() != null && !scopeResolved) {
-                recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
-                scopeResolved = true;
             }
             try {
                 List<Integer> matches = scheduleMatches(rule, workspaceId);
@@ -183,6 +178,10 @@ public class RuleEngineService {
             } catch (TenantScopeSnapshotException exception) {
                 throw exception;
             } catch (Exception exception) {
+                if (exception instanceof RuntimeException failure
+                        && recordVisibilityScopeControlAccess.isScopeResolutionFailure(workspaceId, failure)) {
+                    throw failure;
+                }
                 logScheduleRuleFailure(rule, exception);
             }
         }
@@ -467,6 +466,7 @@ public class RuleEngineService {
             finishExecution(execution, failures.isEmpty() ? "matched" : "partial", null,
                 failures.isEmpty() ? null : String.join("; ", failures));
         } catch (TenantScopeSnapshotException exception) {
+            finishExecution(execution, "failed", "execution_failed", "Rule execution failed.");
             throw exception;
         } catch (RuleActionRetryRequiredException retry) {
             throw retry;

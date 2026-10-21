@@ -206,12 +206,13 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
         CountDownLatch releaseRestriction = new CountDownLatch(1);
         CountDownLatch autoPersonLockAttempted = new CountDownLatch(1);
         PersonMapper realPersonMapper = sqlSessionTemplate.getMapper(PersonMapper.class);
+        String personScopeJson = orgWorkspaceIdsJson(workspaceMapper, workspace.getId());
         doAnswer(invocation -> {
             autoPersonLockAttempted.countDown();
             return realPersonMapper.getVisiblePersonByIdForUpdate(
-                    workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId());
+                    workspace.getId(), personScopeJson, person.getId());
         }).when(personMapperSpy).getVisiblePersonByIdForUpdate(
-                workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId());
+                workspace.getId(), personScopeJson, person.getId());
         ExecutorService executor = Executors.newFixedThreadPool(2);
 
         try {
@@ -234,7 +235,7 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
             executor.awaitTermination(10, TimeUnit.SECONDS);
         }
 
-        Person restricted = personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId());
+        Person restricted = personMapper.getPersonById(workspace.getId(), personScopeJson, person.getId());
         assertTrue(restricted.getSuspendedAt() != null);
     }
 

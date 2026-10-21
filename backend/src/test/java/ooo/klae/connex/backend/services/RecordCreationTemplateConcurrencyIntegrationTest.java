@@ -178,12 +178,13 @@ class RecordCreationTemplateConcurrencyIntegrationTest extends AbstractServiceTe
         CountDownLatch templateLockAttempted = new CountDownLatch(1);
         CountDownLatch releaseWriter = new CountDownLatch(1);
         PersonMapper realPersonMapper = sqlSessionTemplate.getMapper(PersonMapper.class);
+        String personScopeJson = orgWorkspaceIdsJson(workspaceMapper, isolatedWorkspace.getId());
         doAnswer(invocation -> {
             templateLockAttempted.countDown();
             return realPersonMapper.getVisiblePersonByIdForUpdate(
                 isolatedWorkspace.getId(), invocation.getArgument(1), person.getId());
         }).when(personMapperSpy).getVisiblePersonByIdForUpdate(
-            isolatedWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, isolatedWorkspace.getId()), person.getId());
+            isolatedWorkspace.getId(), personScopeJson, person.getId());
         ExecutorService executor = Executors.newFixedThreadPool(2);
 
         try {
@@ -443,6 +444,7 @@ class RecordCreationTemplateConcurrencyIntegrationTest extends AbstractServiceTe
         RecordCreationTemplateMapper realTemplateMapper =
             sqlSessionTemplate.getMapper(RecordCreationTemplateMapper.class);
         PersonMapper realPersonMapper = sqlSessionTemplate.getMapper(PersonMapper.class);
+        String personScopeJson = orgWorkspaceIdsJson(workspaceMapper, isolatedWorkspace.getId());
         doAnswer(invocation -> {
             if (setFenceCalls.incrementAndGet() == 2) {
                 importSetFenceAttempted.countDown();
@@ -458,7 +460,7 @@ class RecordCreationTemplateConcurrencyIntegrationTest extends AbstractServiceTe
             return realPersonMapper.getVisiblePersonByIdForUpdate(
                 isolatedWorkspace.getId(), invocation.getArgument(1), target.getId());
         }).when(personMapperSpy).getVisiblePersonByIdForUpdate(
-            isolatedWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, isolatedWorkspace.getId()), target.getId());
+            isolatedWorkspace.getId(), personScopeJson, target.getId());
         doAnswer(invocation -> {
             importPersonLockAttempted.countDown();
             return realPersonMapper.getOwnedPersonByIdForUpdate(

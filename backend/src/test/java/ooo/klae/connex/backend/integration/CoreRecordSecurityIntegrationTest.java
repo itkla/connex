@@ -800,22 +800,23 @@ class CoreRecordSecurityIntegrationTest {
         CountDownLatch writeAtPerson = new CountDownLatch(1);
         CountDownLatch releaseRevocation = new CountDownLatch(1);
         PersonMapper realMapper = sqlSessionTemplate.getMapper(PersonMapper.class);
+        String personScopeJson = orgWorkspaceIdsJson(workspaceMapper, workspace.getId());
         if ("activities:POST".equals(operation)) {
             doAnswer(invocation -> {
                 writeAtPerson.countDown();
                 return realMapper.getVisiblePersonByIdForUpdate(workspace.getId(), invocation.getArgument(1), person.getId());
-            }).when(personMapper).getVisiblePersonByIdForUpdate(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId());
+            }).when(personMapper).getVisiblePersonByIdForUpdate(workspace.getId(), personScopeJson, person.getId());
         } else {
             doAnswer(invocation -> {
                 writeAtPerson.countDown();
                 return realMapper.getVisiblePersonByIdForShare(workspace.getId(), invocation.getArgument(1), person.getId());
-            }).when(personMapper).getVisiblePersonByIdForShare(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId());
+            }).when(personMapper).getVisiblePersonByIdForShare(workspace.getId(), personScopeJson, person.getId());
         }
         doAnswer(invocation -> {
             boolean visible = realMapper.exists(workspace.getId(), invocation.getArgument(1), person.getId());
             writeAtPerson.countDown();
             return visible;
-        }).when(personMapper).exists(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId());
+        }).when(personMapper).exists(workspace.getId(), personScopeJson, person.getId());
         try (var executor = Executors.newFixedThreadPool(2)) {
             var revocation = executor.submit(() -> new TransactionTemplate(transactionManager).executeWithoutResult(tx -> {
                 assertNotNull(realMapper.getOwnedPersonByIdForUpdate(owner.getId(), person.getId()));

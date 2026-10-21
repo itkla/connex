@@ -208,6 +208,7 @@ class AiOutputCacheRestrictionConcurrencyIntegrationTest {
         CountDownLatch releaseRestriction = new CountDownLatch(1);
         CountDownLatch saveLockAttempted = new CountDownLatch(1);
         PersonMapper realPersonMapper = sqlSessionTemplate.getMapper(PersonMapper.class);
+        String personScopeJson = orgWorkspaceIdsJson(workspaceMapper, granteeWorkspace.getId());
         doAnswer(invocation -> {
             Person locked = realPersonMapper.getOwnedPersonByIdForUpdate(ownerWorkspaceId, personId);
             restrictionLocked.countDown();
@@ -217,9 +218,9 @@ class AiOutputCacheRestrictionConcurrencyIntegrationTest {
         doAnswer(invocation -> {
             saveLockAttempted.countDown();
             return realPersonMapper.getVisiblePersonByIdForUpdate(
-                    granteeWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, granteeWorkspace.getId()), personId);
+                    granteeWorkspace.getId(), personScopeJson, personId);
         }).when(personMapperSpy).getVisiblePersonByIdForUpdate(
-                granteeWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, granteeWorkspace.getId()), personId);
+                granteeWorkspace.getId(), personScopeJson, personId);
         ExecutorService executor = Executors.newFixedThreadPool(2);
 
         try {
@@ -251,12 +252,13 @@ class AiOutputCacheRestrictionConcurrencyIntegrationTest {
         CountDownLatch releaseSave = new CountDownLatch(1);
         CountDownLatch restrictionLockAttempted = new CountDownLatch(1);
         PersonMapper realPersonMapper = sqlSessionTemplate.getMapper(PersonMapper.class);
+        String personScopeJson = orgWorkspaceIdsJson(workspaceMapper, granteeWorkspaceId);
         doAnswer(invocation -> {
-            Person locked = realPersonMapper.getVisiblePersonByIdForUpdate(granteeWorkspaceId, orgWorkspaceIdsJson(workspaceMapper, granteeWorkspaceId), personId);
+            Person locked = realPersonMapper.getVisiblePersonByIdForUpdate(granteeWorkspaceId, personScopeJson, personId);
             saveLocked.countDown();
             assertTrue(releaseSave.await(30, TimeUnit.SECONDS));
             return locked;
-        }).when(personMapperSpy).getVisiblePersonByIdForUpdate(granteeWorkspaceId, orgWorkspaceIdsJson(workspaceMapper, granteeWorkspaceId), personId);
+        }).when(personMapperSpy).getVisiblePersonByIdForUpdate(granteeWorkspaceId, personScopeJson, personId);
         doAnswer(invocation -> {
             restrictionLockAttempted.countDown();
             return realPersonMapper.getOwnedPersonByIdForUpdate(ownerWorkspaceId, personId);
