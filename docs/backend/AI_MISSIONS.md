@@ -403,7 +403,7 @@ JVM, initialized workspace and organization authority, completed active-attempt 
 and the full compatible reader/writer rollout. Drain incompatible serving binaries, scheduled
 workers and in-flight writers before control V236 → tenant V237 → tenant V238. Upgrades crossing V232 must also retain that
 version's stopped-writer sequence-backfill procedure.
-V238 is the rollback floor, including with AI and missions disabled. Multi-instance activation requires the separately reviewed
+Control V240 is the rollback floor, including with AI and missions disabled. Multi-instance activation requires the separately reviewed
 #941 distributed fencing contract.
 
 Focused continuation selectors are `AiAgentContinuationCodecTest`, `AiAgentPlanServiceTest`,
@@ -585,3 +585,14 @@ action provenance; all-chat invalidation cancels affected exports at actual publ
 V238 raises the rollback floor; see [UPGRADING](../UPGRADING.md#mission-singleton-proposals-tenant-v238)
 and the [lock matrix](LOCKING.md#mission-singleton-proposals-v238). Activation still requires a
 single serving JVM and approved live staging evidence; this slice does not authorize a live run.
+
+
+## Standing approval control foundation (V240)
+
+#2149 S1 adds only control-plane ceilings, kill fencing and authority epoch snapshots. It does not
+change mission catalogs, persistence, runtimes, proposals, execution or continuation behavior.
+Missions slice 4 owns V239 and runtime 4 (questions and review/preparation controls only). Stored
+runtime 4 never gains AUTO or standing approval authority. Mission effects remain #2101 slice 5,
+and later grant selection is #2149 S9. Future consumers must bind original membership/role epochs
+and retain the preprovisioned organization policy through commit as documented in LOCKING.md.
+All grant/privacy/DSR/export enrollment stays in S2; S1 creates no tenant assistant holdings.

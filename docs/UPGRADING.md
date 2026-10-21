@@ -7,9 +7,9 @@ migration-discipline part of #87 §9 / #102).
 > The specific support window below is a **proposed** policy; confirm it before it is published to
 > customers.
 
-The active rollback floor for this release is tenant V238, including with AI and missions disabled.
+The active rollback floor for this release is control V240, including with AI and missions disabled.
 Earlier floors in version-specific sections below describe historical component contracts and do not
-permit rollback after V238. Apply control V236 → tenant V237 → tenant V238 in that order. Follow
+permit rollback after V240. Apply control V236 → tenant V237 → tenant V238 → tenant V239 (missions slice 4) → control V240 in that order. Follow
 [the retained-chat cutover](#v236v237-retained-ask-connex-privacy-cutover) and
 [the singleton-proposal cutover](#mission-singleton-proposals-tenant-v238).
 
@@ -1127,7 +1127,7 @@ Column additions and the default change require `ALGORITHM=INSTANT, LOCK=DEFAULT
 
 DDL auto-commits. If migration fails, keep writers disabled, inspect the applied statements and Flyway failure record, and recover through the normal migration procedure. Do not bypass the algorithm guards.
 
-V235 established the continuation compatibility minimum; V238 is now the overall rollback floor, including when AI and missions are disabled. Earlier binaries cannot safely clean up runtime-2 holdings. Returning below the floor requires an explicit reviewed drain, settlement, privacy-purge, and residual-verification procedure.
+V235 established the continuation compatibility minimum; V240 is now the overall rollback floor, including when AI and missions are disabled. Earlier binaries cannot safely clean up runtime-2 holdings. Returning below the floor requires an explicit reviewed drain, settlement, privacy-purge, and residual-verification procedure.
 
 ## V236/V237: retained Ask Connex privacy cutover
 
@@ -1142,7 +1142,7 @@ applying `control/V236__ai_assistant_privacy_coordination.sql` and
 serving JVM. Proposal-set production remains disabled.
 
 V237 established the all-chat privacy compatibility minimum: earlier binaries can disclose or
-republish invalidated content despite accepting the additive schema. V238 is the active rollback
+republish invalidated content despite accepting the additive schema. V240 is the active rollback
 floor for this release, including when AI and missions are disabled. Recovery below the active
 floor requires a separately reviewed procedure; normal recovery is a forward fix.
 
@@ -1202,3 +1202,27 @@ complete enrolled privacy purge and unconditional residual verification.
 Review expires at the earlier of earliest authoritative preparation plus 72 hours and the
 fixed hard deadline. Publication, retries and restart never refresh preparation age. Waiting
 review is independent of the execution deadline.
+
+
+## Standing approval control foundation (control V240)
+
+V240 is reserved for #2149 S1; missions slice 4 owns tenant V239 and merges first.
+Apply V239 before control V240. The isolated S1 branch intentionally has a V239 lineage gap.
+V240 adds membership authorization epochs, custom-role permission epochs and organization-owned
+standing approval ceilings. Existing-table additions require explicit INSTANT support; no
+retained-content update or table-copy fallback is permitted. Existing organizations receive
+disabled, empty policies through bounded reconciliation; new organization provisioning creates
+its policy in the founding transaction. Missing policies refuse future admissions and GET never
+creates them. Reconciliation runs with AI and provider switches off.
+
+The serving-binary rollback floor is `control/V240__ai_standing_approval_control.sql`, even with
+all AI features disabled. Earlier binaries would silently omit epoch increments and could allow
+revoke-then-restore histories to revive future approvals. Flag rollback stops new authoring; it
+cannot make an earlier binary compatible. Drain older JVMs before serving V240. Recovery below
+this floor requires a separately reviewed authority drain and cannot rely on additive DDL alone.
+
+`connex.ai.standing-approvals.enabled` defaults to false. S1 ships no grant, preview, execution,
+inbox or mission authority. The admin GET/PUT and organization kill remain available independently.
+Daily and per-run maxima constrain each approval; they are not aggregate organization quotas.
+Organization kill advances a monotonic epoch; enabling afterward preserves that epoch and never
+revives earlier authority. Overflow refuses the mutation and rolls back its transaction.

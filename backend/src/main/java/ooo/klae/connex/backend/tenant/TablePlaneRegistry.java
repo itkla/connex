@@ -45,6 +45,7 @@ public final class TablePlaneRegistry {
         "ai_assistant_privacy_operation_workspace",
         "api_credential",
         "api_credential_scope",
+        "organization_ai_standing_approval_policy",
         "organization_ai_budget",
         "organization_ai_budget_reservation",
         "organization_ai_budget_usage",

@@ -48,6 +48,7 @@ const ORG_PLANE_AUDIT_ACTIONS = [
     "org.ai_provider.revoke",
     "org.ai_provider.save",
     "org.ai_provider.zdr_attest",
+    "org.ai_standing_approval_policy.save",
     "org.allowed_domain.add",
     "org.allowed_domain.remove",
     "org.create",

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import OrgStandingApprovalPolicy from "./OrgStandingApprovalPolicy";
 import { useTranslations } from "next-intl";
 
 import type {
@@ -457,6 +458,9 @@ export default function OrgAiProviderPanel({
                             {savingBudget ? t("saving") : t("saveBudget")}
                         </Button>
                     </div>
+
+                    {activeWorkspaceId != null && <OrgStandingApprovalPolicy
+                        key={activeWorkspaceId} workspaceId={activeWorkspaceId} />}
 
                     <div className="space-y-5 rounded-2xl border border-border bg-card p-4">
                     <div className="flex items-center gap-4">

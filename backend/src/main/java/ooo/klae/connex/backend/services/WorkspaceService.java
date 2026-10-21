@@ -64,6 +64,14 @@ import ooo.klae.connex.backend.tenant.TenantWorkspaceScopeSnapshot;
 @Service
 @RequiredArgsConstructor
 public class WorkspaceService {
+    /** Changes whenever a built-in permission bundle changes its standing approval semantics. */
+    public static final int BUILT_IN_PERMISSION_POLICY_VERSION = 1;
+
+    /** Immutable authority history captured by the assistant's original authorization locks. */
+    public record AuthorityEpochs(long membershipId, long authorizationEpoch, String builtInRole,
+            Integer roleId, Long permissionEpoch, int builtInPermissionPolicyVersion) {
+    }
+
     private static final int MYSQL_NOWAIT_ERROR = 3572;
     private static final String MYSQL_GENERAL_ERROR_STATE = "HY000";
     private static final String RECOVERY_OWNER_REQUIRED =
@@ -73,6 +81,7 @@ public class WorkspaceService {
     private final WorkspaceMapper workspaceMapper;
     private final UserMapper userMapper;
     private final OrganizationMapper organizationMapper;
+    private final ooo.klae.connex.backend.mappers.AiStandingApprovalPolicyMapper standingApprovalPolicies;
     private final ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService assistantPrivacyService;
     private final OrgMemberService orgMemberService;
     private final OrgAllowedDomainService orgAllowedDomainService;
@@ -434,6 +443,7 @@ public class WorkspaceService {
         organization.setSlug(generateSlug(name));
         organizationMapper.insert(organization);
         assistantPrivacyService.provision(organization.getId());
+        standingApprovalPolicies.provision(organization.getId());
         int foundingPasskeys = orgMemberService.addFoundingOwner(organization.getId(), ownerUserId);
         auditService.record("org.create", "organization", organization.getId(), organization.getName(),
                 "Organization created", Map.of("ownerUserId", ownerUserId));
@@ -519,16 +529,14 @@ public class WorkspaceService {
     public LockedPermissionSnapshot lockAndRequirePermissionsSnapshot(
             int workspaceId,
             Map<Integer, Set<Permission>> requiredByUser) {
-        return new LockedPermissionSnapshot(
-            lockAndRequirePermissions(workspaceId, requiredByUser, false), requiredByUser);
+        return permissionSnapshot(workspaceId, requiredByUser, false, false);
     }
 
     /** Returns authority retained by shared membership locks through the surrounding transaction. */
     public LockedPermissionSnapshot lockAndRequirePermissionsSnapshotForShare(
             int workspaceId,
             Map<Integer, Set<Permission>> requiredByUser) {
-        return new LockedPermissionSnapshot(
-            lockAndRequirePermissions(workspaceId, requiredByUser, false, true), requiredByUser);
+        return permissionSnapshot(workspaceId, requiredByUser, false, true);
     }
 
     /**
@@ -541,19 +549,28 @@ public class WorkspaceService {
     public LockedPermissionSnapshot lockAndRequirePermissionsWithWorkspaceMutex(
             int workspaceId,
             Map<Integer, Set<Permission>> requiredByUser) {
-        Map<Integer, Set<Permission>> effectiveByUser =
-            lockAndRequirePermissions(workspaceId, requiredByUser, true);
-        return new LockedPermissionSnapshot(effectiveByUser, requiredByUser);
+        return permissionSnapshot(workspaceId, requiredByUser, true, false);
     }
 
     private Map<Integer, Set<Permission>> lockAndRequirePermissions(
             int workspaceId,
             Map<Integer, Set<Permission>> requiredByUser,
             boolean exclusiveWorkspace) {
-        return lockAndRequirePermissions(workspaceId, requiredByUser, exclusiveWorkspace, false);
+        return lockAndRequirePermissions(workspaceId, requiredByUser, exclusiveWorkspace, false).permissions();
     }
 
-    private Map<Integer, Set<Permission>> lockAndRequirePermissions(
+    private record LockedAuthorization(
+            Map<Integer, Set<Permission>> permissions, Map<Integer, AuthorityEpochs> epochs) {
+    }
+
+    private LockedPermissionSnapshot permissionSnapshot(int workspaceId,
+            Map<Integer, Set<Permission>> requiredByUser, boolean exclusiveWorkspace, boolean sharedMemberships) {
+        LockedAuthorization authorization = lockAndRequirePermissions(
+                workspaceId, requiredByUser, exclusiveWorkspace, sharedMemberships);
+        return new LockedPermissionSnapshot(authorization.permissions(), requiredByUser, authorization.epochs());
+    }
+
+    private LockedAuthorization lockAndRequirePermissions(
             int workspaceId,
             Map<Integer, Set<Permission>> requiredByUser,
             boolean exclusiveWorkspace,
@@ -595,6 +612,7 @@ public class WorkspaceService {
             }
         }
         Map<Integer, Set<Permission>> rolePermissions = new LinkedHashMap<>();
+        Map<Integer, Long> roleEpochs = new LinkedHashMap<>();
         for (int roleId : roleIds) {
             if (roleMapper.lockRole(workspaceId, roleId) == null) {
                 int affectedUserId = userIds.stream()
@@ -616,8 +634,13 @@ public class WorkspaceService {
                     affectedUserId, requiredByUser.get(affectedUserId));
             }
             rolePermissions.put(roleId, parsePermissions(locked));
+            Long permissionEpoch = roleMapper.lockPermissionEpoch(workspaceId, roleId);
+            if (permissionEpoch != null) {
+                roleEpochs.put(roleId, permissionEpoch);
+            }
         }
         Map<Integer, Set<Permission>> effectiveByUser = new LinkedHashMap<>();
+        Map<Integer, AuthorityEpochs> epochsByUser = new LinkedHashMap<>();
         for (int userId : userIds) {
             WorkspaceMember membership = memberships.get(userId);
             Set<Permission> effective;
@@ -636,12 +659,22 @@ public class WorkspaceService {
                 }
             }
             effectiveByUser.put(userId, Set.copyOf(effective));
+            if (!requiredByUser.get(userId).isEmpty() && membership.getMembershipId() != null
+                    && membership.getMembershipId() > 0 && membership.getAuthorizationEpoch() != null
+                    && membership.getAuthorizationEpoch() > 0) {
+                Long roleEpoch = membership.getRoleId() == null ? null : roleEpochs.get(membership.getRoleId());
+                if (membership.getRoleId() == null || (roleEpoch != null && roleEpoch > 0)) {
+                    epochsByUser.put(userId, new AuthorityEpochs(membership.getMembershipId(),
+                            membership.getAuthorizationEpoch(), membership.getRole(), membership.getRoleId(),
+                            roleEpoch, BUILT_IN_PERMISSION_POLICY_VERSION));
+                }
+            }
         }
         if (confinementActor != null) {
             requireLockedMfa(confinementActor, workspaceId, memberships.get(confinementActor),
                 effectiveByUser.get(confinementActor));
         }
-        return Map.copyOf(effectiveByUser);
+        return new LockedAuthorization(Map.copyOf(effectiveByUser), Map.copyOf(epochsByUser));
     }
 
     /**
@@ -651,12 +684,29 @@ public class WorkspaceService {
     public static class LockedPermissionSnapshot {
         private final Map<Integer, Set<Permission>> effectiveByUser;
         private final Map<Integer, Set<Permission>> requiredByUser;
+        private final Map<Integer, AuthorityEpochs> epochsByUser;
 
         LockedPermissionSnapshot(
                 Map<Integer, Set<Permission>> effectiveByUser,
                 Map<Integer, Set<Permission>> requiredByUser) {
+            this(effectiveByUser, requiredByUser, Map.of());
+        }
+
+        LockedPermissionSnapshot(Map<Integer, Set<Permission>> effectiveByUser,
+                Map<Integer, Set<Permission>> requiredByUser, Map<Integer, AuthorityEpochs> epochsByUser) {
             this.effectiveByUser = immutablePermissionMap(effectiveByUser);
             this.requiredByUser = immutablePermissionMap(requiredByUser);
+            this.epochsByUser = Map.copyOf(epochsByUser);
+        }
+
+        /** Returns the immutable binding captured during existing locks, refusing missing metadata. */
+        public AuthorityEpochs authorityFor(int userId) {
+            effectiveFor(userId);
+            AuthorityEpochs epochs = epochsByUser.get(userId);
+            if (epochs == null) {
+                throw new ForbiddenException("Standing approval authority metadata is unavailable");
+            }
+            return epochs;
         }
 
         /** Revalidates the original permission requirements from the already-locked row snapshot. */
@@ -1152,6 +1202,17 @@ public class WorkspaceService {
 
     List<Integer> discoverOwnedWorkspaceIds(int userId) {
         return List.copyOf(workspaceMapper.workspaceIdsOwnedBy(userId));
+    }
+
+    /** Invalidates historical authority under account and pre-retained workspace roots. */
+    void advanceAccountAuthorizationEpochs(int userId, List<Integer> workspaceIds) {
+        for (int workspaceId : workspaceIds.stream().distinct().sorted().toList()) {
+            WorkspaceMember membership = lockWithoutWaiting(() ->
+                    workspaceMapper.lockAccountMembershipWithoutWaiting(workspaceId, userId));
+            if (membership != null && workspaceMapper.advanceAuthorizationEpoch(workspaceId, userId) != 1) {
+                throw new ConflictException("Account memberships changed; retry account deletion");
+            }
+        }
     }
 
     List<Integer> discoverAccountMembershipWorkspaceIds(int userId) {

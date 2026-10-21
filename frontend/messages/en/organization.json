@@ -287,6 +287,9 @@
                 "support_bundle": {
                     "completed": "Support bundle prepared",
                     "download": "Support bundle downloaded"
+                },
+                "ai_standing_approval_policy": {
+                    "save": "Standing approval settings saved"
                 }
             },
             "secret_store": {
@@ -438,5 +441,29 @@
             "stale": "This data-subject request changed. Close this dialog and review the updated request before trying again.",
             "failed": "Couldn't retrieve the erasure status"
         }
+    },
+    "OrgStandingApproval": {
+        "title": "Standing approvals",
+        "description": "Choose which bounded changes members may approve in advance across your organization. Each member must give their own approval.",
+        "unavailable": "Creating standing approvals is not available yet. These controls set the limits for future approvals.",
+        "provisioning": "These settings are being prepared. Refresh shortly.",
+        "changed": "These settings may have changed. Refresh before saving.",
+        "allow": "Allow standing approvals",
+        "allowedChanges": "Allowed changes",
+        "fields": "Update record fields",
+        "tags": "Remove tags",
+        "responseDue": "Set response due dates",
+        "dealStage": "Change deal stages",
+        "daily": "Maximum changes per approval per day",
+        "perRun": "Maximum changes per approval per answer or mission",
+        "capsHint": "Limits apply to each approval, not the organization total. Use a number from 1 to 10,000; the per-answer or mission limit cannot exceed the daily limit.",
+        "save": "Save changes",
+        "stop": "Stop all standing approvals",
+        "stopHint": "Stopping waits for changes already in progress. Existing approvals will require fresh approval even if you allow them again.",
+        "stopped": "Standing approvals stopped",
+        "saved": "Standing approval settings saved",
+        "saveFailed": "Couldn't save standing approval settings",
+        "loadFailed": "Couldn't load standing approval settings",
+        "refresh": "Refresh"
     }
 }

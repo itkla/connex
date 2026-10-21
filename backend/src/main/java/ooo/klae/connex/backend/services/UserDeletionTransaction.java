@@ -52,10 +52,11 @@ public class UserDeletionTransaction {
     /** Guards the account and installs a durable reservation before provider fan-out. */
     @Transactional
     public void reserve(int id, String owner) {
-        guard(id, false);
+        AccountDeletionGuard guarded = guard(id, false);
         if (userMapper.reserveAccountDeletion(id, owner) != 1) {
             throw new ConflictException("Account deletion is already in progress");
         }
+        workspaceService.advanceAccountAuthorizationEpochs(id, guarded.membershipWorkspaceIds());
     }
 
     /** Extends the deletion lease while workspace roots fence recovery checks through commit. */
@@ -173,8 +174,7 @@ public class UserDeletionTransaction {
             throw new ResourceNotFoundException("User not found with id: " + id);
         }
         List<Integer> ownedWorkspaceIds = workspaceService.discoverOwnedWorkspaceIds(id);
-        List<Integer> membershipWorkspaceIds = includeCredentialReferences
-            ? workspaceService.discoverAccountMembershipWorkspaceIds(id) : List.of();
+        List<Integer> membershipWorkspaceIds = workspaceService.discoverAccountMembershipWorkspaceIds(id);
         List<Integer> membershipOrgIds = includeCredentialReferences
             ? orgMemberService.discoverAccountMembershipOrgIds(id) : List.of();
         List<ApiCredentialReferenceRoot> credentialReferenceRoots = includeCredentialReferences
@@ -222,10 +222,12 @@ public class UserDeletionTransaction {
         if (before == null) {
             throw new ResourceNotFoundException("User not found with id: " + id);
         }
-        return new AccountDeletionGuard(before, List.copyOf(credentialReferenceRoots), List.copyOf(offerReferences));
+        return new AccountDeletionGuard(before, List.copyOf(credentialReferenceRoots), List.copyOf(offerReferences),
+                membershipWorkspaceIds);
     }
 
     private record AccountDeletionGuard(
-            User user, List<ApiCredentialReferenceRoot> credentialReferenceRoots, List<OwnershipOffer> offerReferences) {
+            User user, List<ApiCredentialReferenceRoot> credentialReferenceRoots, List<OwnershipOffer> offerReferences,
+            List<Integer> membershipWorkspaceIds) {
     }
 }

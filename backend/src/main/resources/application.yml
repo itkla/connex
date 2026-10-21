@@ -367,6 +367,8 @@ connex:
         # disclosures and counsel approval. An operator must explicitly set CONNEX_AI_ENABLED=true,
         # and the feature gate still requires an enabled, attested BYOP provider plus AI_USE.
         enabled: ${CONNEX_AI_ENABLED:false}
+        standing-approvals:
+            enabled: ${CONNEX_AI_STANDING_APPROVALS_ENABLED:false}
         features:
             deal-brief: ${CONNEX_AI_FEATURES_DEAL_BRIEF:true}
             deal-risk-rationale: ${CONNEX_AI_FEATURES_DEAL_RISK_RATIONALE:true}

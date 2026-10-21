@@ -41,7 +41,8 @@ public class WebSocketSecurityConfig {
         messages
                 .nullDestMatcher().authenticated()
                 .simpSubscribeDestMatchers(
-                        "/user/queue/notifications", "/user/queue/ai-chat").authenticated()
+                        "/user/queue/notifications", "/user/queue/ai-chat",
+                        "/user/queue/ai-standing-approval-policy").authenticated()
                 .anyMessage().denyAll();
         return messages.build();
     }

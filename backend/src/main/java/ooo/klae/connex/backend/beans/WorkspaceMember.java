@@ -9,6 +9,8 @@ import lombok.NoArgsConstructor;
 @Data
 @NoArgsConstructor
 public class WorkspaceMember {
+    private Long membershipId;
+    private Long authorizationEpoch;
     private int workspaceId;
     private int userId;
     private String role;

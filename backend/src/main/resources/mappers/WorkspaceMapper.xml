@@ -110,29 +110,29 @@
     FOR UPDATE
   </select>
 
-  <select id="lockAuthorizationMembership" resultType="WorkspaceMember">
-    SELECT workspace_id, user_id, role, role_id, status, created_at
+  <select id="lockAuthorizationMembership" resultType="WorkspaceMember" flushCache="true" useCache="false">
+    SELECT membership_id, authorization_epoch, workspace_id, user_id, role, role_id, status, created_at
     FROM workspace_member
     WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
     FOR UPDATE
   </select>
 
-  <select id="lockAuthorizationMembershipWithoutWaiting" resultType="WorkspaceMember">
-    SELECT workspace_id, user_id, role, role_id, status, created_at
+  <select id="lockAuthorizationMembershipWithoutWaiting" resultType="WorkspaceMember" flushCache="true" useCache="false">
+    SELECT membership_id, authorization_epoch, workspace_id, user_id, role, role_id, status, created_at
     FROM workspace_member
     WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
     FOR UPDATE NOWAIT
   </select>
 
-  <select id="lockAuthorizationMembershipForShare" resultType="WorkspaceMember">
-    SELECT workspace_id, user_id, role, role_id, status, created_at
+  <select id="lockAuthorizationMembershipForShare" resultType="WorkspaceMember" flushCache="true" useCache="false">
+    SELECT membership_id, authorization_epoch, workspace_id, user_id, role, role_id, status, created_at
     FROM workspace_member
     WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
     FOR SHARE
   </select>
 
   <select id="getAuthorizationMembership" resultType="WorkspaceMember">
-    SELECT wm.workspace_id, wm.user_id, wm.role, wm.role_id, wm.status, wm.created_at
+    SELECT wm.membership_id, wm.authorization_epoch, wm.workspace_id, wm.user_id, wm.role, wm.role_id, wm.status, wm.created_at
     FROM workspace_member wm
     JOIN workspace w ON w.id = wm.workspace_id
     JOIN organization o ON o.id = w.org_id
@@ -216,22 +216,22 @@
   </select>
 
   <update id="setMemberCustomRole">
-    UPDATE workspace_member SET role_id = #{roleId}
+    UPDATE workspace_member SET role_id = #{roleId}, authorization_epoch = authorization_epoch + 1
     WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
   </update>
 
   <!-- NOWAIT: the caller already holds the workspace root, while departure cleanup can hold a
        membership row before requesting that root. Waiting here would close the cycle. -->
-  <select id="lockActiveOwnerMembers" resultType="WorkspaceMember">
-    SELECT workspace_id, user_id, role, role_id, status, created_at
+  <select id="lockActiveOwnerMembers" resultType="WorkspaceMember" flushCache="true" useCache="false">
+    SELECT membership_id, authorization_epoch, workspace_id, user_id, role, role_id, status, created_at
     FROM workspace_member FORCE INDEX (idx_workspace_member_role_status)
     WHERE workspace_id = #{workspaceId} AND role = 'owner' AND status = 'active'
     ORDER BY user_id
     FOR UPDATE NOWAIT
   </select>
 
-  <select id="lockRoleAssignees" resultType="WorkspaceMember">
-    SELECT workspace_id, user_id, role, role_id, status, created_at
+  <select id="lockRoleAssignees" resultType="WorkspaceMember" flushCache="true" useCache="false">
+    SELECT membership_id, authorization_epoch, workspace_id, user_id, role, role_id, status, created_at
     FROM workspace_member FORCE INDEX (fk_workspace_member_role)
     WHERE role_id = #{roleId} AND workspace_id = #{workspaceId}
     ORDER BY user_id
@@ -243,14 +243,14 @@
   </select>
 
   <select id="lockAccountMembershipForUpdate" resultType="WorkspaceMember" flushCache="true" useCache="false">
-    SELECT workspace_id, user_id, role, role_id, status, created_at
+    SELECT membership_id, authorization_epoch, workspace_id, user_id, role, role_id, status, created_at
     FROM workspace_member FORCE INDEX (idx_workspace_member_user)
     WHERE user_id = #{userId} AND workspace_id = #{workspaceId}
     FOR UPDATE
   </select>
 
   <select id="lockAccountMembershipWithoutWaiting" resultType="WorkspaceMember" flushCache="true" useCache="false">
-    SELECT workspace_id, user_id, role, role_id, status, created_at
+    SELECT membership_id, authorization_epoch, workspace_id, user_id, role, role_id, status, created_at
     FROM workspace_member FORCE INDEX (idx_workspace_member_user)
     WHERE user_id = #{userId} AND workspace_id = #{workspaceId}
     FOR UPDATE NOWAIT
@@ -453,7 +453,8 @@
 
   <update id="updateMemberRole">
     UPDATE workspace_member
-    SET role = #{role}, role_id = NULL, grant_authorization_version = 1
+    SET role = #{role}, role_id = NULL, grant_authorization_version = 1,
+        authorization_epoch = authorization_epoch + 1
     WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
   </update>
 
@@ -464,8 +465,13 @@
     VALUES (#{workspaceId}, #{userId}, #{role}, 'pending', 1)
   </insert>
 
+  <update id="advanceAuthorizationEpoch">
+    UPDATE workspace_member SET authorization_epoch = authorization_epoch + 1
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
+  </update>
+
   <update id="activateMember">
-    UPDATE workspace_member SET status = 'active'
+    UPDATE workspace_member SET status = 'active', authorization_epoch = authorization_epoch + 1
     WHERE workspace_id = #{workspaceId} AND user_id = #{userId} AND status = 'pending'
       AND grant_authorization_version &gt;= 1
   </update>

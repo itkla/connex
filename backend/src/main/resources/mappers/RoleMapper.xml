@@ -6,6 +6,7 @@
   <resultMap id="RoleResult" type="WorkspaceRole">
     <id property="id" column="id"/>
     <result property="workspaceId" column="workspace_id"/>
+    <result property="permissionEpoch" column="permission_epoch"/>
     <result property="name" column="name"/>
     <result property="createdAt" column="created_at"/>
     <result property="updatedAt" column="updated_at"/>
@@ -15,13 +16,14 @@
   <resultMap id="AuthorityRoleResult" type="WorkspaceRole">
     <id property="id" column="id"/>
     <result property="workspaceId" column="workspace_id"/>
+    <result property="permissionEpoch" column="permission_epoch"/>
     <collection property="permissions" ofType="string" notNullColumn="permission">
       <result column="permission"/>
     </collection>
   </resultMap>
 
   <select id="findAuthorityRolesByWorkspace" resultMap="AuthorityRoleResult">
-    SELECT wr.id, wr.workspace_id, wrp.permission
+    SELECT wr.id, wr.workspace_id, wr.permission_epoch, wrp.permission
     FROM workspace_role wr
     LEFT JOIN workspace_role_permission wrp ON wrp.workspace_role_id = wr.id
     WHERE wr.workspace_id = #{workspaceId}
@@ -34,14 +36,14 @@
   </insert>
 
   <select id="findRolesByWorkspace" resultMap="RoleResult">
-    SELECT id, workspace_id, name, created_at, updated_at
+    SELECT id, workspace_id, permission_epoch, name, created_at, updated_at
     FROM workspace_role
     WHERE workspace_id = #{workspaceId}
     ORDER BY name, id
   </select>
 
   <select id="findRole" resultMap="RoleResult">
-    SELECT id, workspace_id, name, created_at, updated_at
+    SELECT id, workspace_id, permission_epoch, name, created_at, updated_at
     FROM workspace_role
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </select>
@@ -71,6 +73,17 @@
     ORDER BY wrp.permission
     FOR SHARE
   </select>
+
+  <select id="lockPermissionEpoch" resultType="java.lang.Long" flushCache="true" useCache="false">
+    SELECT permission_epoch FROM workspace_role
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+    FOR UPDATE
+  </select>
+
+  <update id="advancePermissionEpoch">
+    UPDATE workspace_role SET permission_epoch = permission_epoch + 1
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
 
   <update id="updateRoleName">
     UPDATE workspace_role SET name = #{name}

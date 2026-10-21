@@ -115,6 +115,13 @@ public class RoleService {
     }
 
     private void applyPermissions(int workspaceId, int roleId, List<String> validPermissions) {
+        Set<String> current = Set.copyOf(roleMapper.lockPermissions(workspaceId, roleId));
+        if (current.equals(Set.copyOf(validPermissions))) {
+            return;
+        }
+        if (roleMapper.advancePermissionEpoch(workspaceId, roleId) != 1) {
+            throw new IllegalStateException("Role permission epoch could not advance");
+        }
         roleMapper.clearPermissions(workspaceId, roleId);
         if (!validPermissions.isEmpty()) {
             roleMapper.insertPermissions(workspaceId, roleId, validPermissions);

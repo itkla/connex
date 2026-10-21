@@ -3544,6 +3544,23 @@ export type AiUsageBreakdown = {
 };
 
 /** Organization daily token budget and explicit exhaustion state. */
+/** Organization configuration only; versions remain lossless across HTTP. */
+export type AiStandingApprovalPolicy = {
+    provisioned: boolean;
+    authoringEnabled: boolean;
+    enabled: boolean;
+    allowedTools: string[];
+    maximumDailyCap: number;
+    maximumPerRunCap: number;
+    stateVersion: string | null;
+    killEpoch: string | null;
+};
+
+export type AiStandingApprovalPolicyRequest = Pick<AiStandingApprovalPolicy,
+    'enabled' | 'allowedTools' | 'maximumDailyCap' | 'maximumPerRunCap'> & {
+    expectedStateVersion: string;
+};
+
 export type AiOrganizationBudget = {
     orgId: number;
     usageDay: string;

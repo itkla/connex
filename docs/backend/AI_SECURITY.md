@@ -956,7 +956,7 @@ turn/message association under the session mutex, insert parent and members in o
 and require complete membership before commit. Storage provenance guards and privacy cleanup are
 active at V237. Production set creation, effective-tier decisions and whole-call publication/decision
 routes remain disabled until their own slices. V233 itself retained its then-V232 floor; the current
-V237 privacy compatibility minimum applies independently of future producer activation; V238 is
+V237 privacy compatibility minimum applies independently of future producer activation; control V240 is
 the active release rollback floor.
 
 ### Adding an assistant write tool
@@ -1282,3 +1282,32 @@ Mission frames carry mainline organization authority through the outbound queue 
 concurrent-session buffer. The final WebSocket delegate freshly revalidates authority under the
 publication read fence retained through the socket write, including frames flushed on another
 thread; revoked, superseded and invalidated sources produce no content.
+
+
+## Standing approval control foundation (V240, #2149 S1)
+
+The organization-admin GET/PUT `/api/ai/standing-approval-policy` resolves organization identity
+from the authenticated active workspace. Payloads cannot select an organization. It requires
+organization administration, without requiring CRM visibility or AI_USE. PUT retains current
+account, workspace, organization and administrator authority before replacing the exact positive
+decimal-string state version; CSRF protection remains the application chain's responsibility.
+The kill switch is available with all feature/provider switches disabled. Re-enabling preserves
+the kill epoch. The closed control ceiling admits only update_record_fields, remove_tag,
+set_response_due and change_deal_stage; every other key fails closed. This configuration grants
+no execution authority. Initial daily/per-run maxima are 100/10, bounded to 1..10000 and each
+per-run maximum cannot exceed its daily maximum. They constrain each future approval separately.
+
+`organization_ai_standing_approval_policy` is organization-owned control configuration with no
+member identity, text, arguments, selected records or receipts. It is registered as control state,
+excluded from workspace-content exports and assistant/DSR erasure, and removed by the organization
+FK cascade. Workspace teardown, member departure and account erasure do not remove organization
+policy. Epoch columns remain existing control authority state. No person-reading tenant mapper,
+assistant holding, privacy discriminator, object obligation or new DSR scope is produced by S1;
+those require the complete S2 enrollment before any grant producer can ship. Existing privacy
+and unconditional residual checks retain their meanings. No tenant lifecycle registry is extended
+for organization settings. Tests pin this classification and the owning cascade.
+
+The locked assistant snapshot exposes immutable membership and role history for later bindings.
+Membership removal/rejoin, role down/up, role permission down/up, ownership transitions and account
+deletion reservation cannot restore an older binding. Built-in policy version 1 must advance when
+its reviewed permission semantics change. See LOCKING.md and the V240 rollback floor in UPGRADING.md.

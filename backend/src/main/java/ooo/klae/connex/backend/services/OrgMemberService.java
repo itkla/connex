@@ -160,6 +160,13 @@ public class OrgMemberService {
         }
     }
 
+    /** Requires an exact administrator row after the caller retains the active organization shared. */
+    public void requireOrgAdminWithOrganizationRetained(int orgId, int userId) {
+        if (OrgRole.of(orgMemberMapper.lockExactRole(orgId, userId)) == null) {
+            throw new ForbiddenException("Requires an organization administrator role");
+        }
+    }
+
     /** Requires the user to hold org {@code owner} in the organization. */
     public void requireOrgOwner(int orgId, int userId) {
         if (!isOrgOwner(orgId, userId)) {
