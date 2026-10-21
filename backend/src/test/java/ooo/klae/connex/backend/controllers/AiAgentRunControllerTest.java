@@ -123,7 +123,7 @@ class AiAgentRunControllerTest {
                 mock(ooo.klae.connex.backend.ai.assistant.AiAssistantSessionReadAudit.class),
                 mock(org.springframework.transaction.PlatformTransactionManager.class),
                 runs, null, persistence, gate, null, null, null,
-                new AiRestrictionEpoch(), workspaces, new ObjectMapper(), Clock.systemUTC());
+                new AiRestrictionEpoch(), workspaces, new ObjectMapper(), Clock.systemUTC(), ooo.klae.connex.backend.support.TenantWorkScopes.passThrough());
         var boundary = MockMvcBuilders.standaloneSetup(new AiAgentRunController(realService, mock(ooo.klae.connex.backend.ai.mission.AiAgentProposalReadService.class),
                 mock(ooo.klae.connex.backend.ai.mission.AiAgentProposalDecisionService.class)))
                 .setControllerAdvice(new GlobalExceptionHandler(errors, new TenantContext())).build();

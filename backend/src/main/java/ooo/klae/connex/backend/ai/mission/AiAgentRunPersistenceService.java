@@ -9,12 +9,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Supplier;
 
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.AiPrivacyMode;
@@ -47,6 +51,7 @@ import ooo.klae.connex.backend.mappers.AiAgentRunMapper;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 import tools.jackson.databind.ObjectMapper;
 
 /** Ordered mission transactions; every lease acquisition and release is the final database operation. */
@@ -62,6 +67,8 @@ public class AiAgentRunPersistenceService {
     private final ObjectMapper json;
     private final Clock clock;
     private final ObjectProvider<AiAgentRunPersistenceService> transactionalSelf;
+    private final TenantWorkScope tenantWorkScope;
+    private final PlatformTransactionManager transactionManager;
     private final AiAgentContinuationCodec codec = new AiAgentContinuationCodec();
     private final AiAgentBudgetService budget = new AiAgentBudgetService();
     @org.springframework.beans.factory.annotation.Autowired
@@ -509,9 +516,13 @@ public class AiAgentRunPersistenceService {
         return changed;
     }
 
-    /** Publishes an admitted singleton under the exact current attempt and original provenance. */
-    @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
+    /** Prepares workspace scopes before atomically publishing an admitted singleton and its provenance. */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public AiChatToolCall publishPrepared(AiAgentExecutionPolicy policy, AiAgentProposalService.Prepared prepared) {
+        return proposalTransaction(policy, () -> publishPreparedInWorkspace(policy, prepared));
+    }
+
+    private AiChatToolCall publishPreparedInWorkspace(AiAgentExecutionPolicy policy, AiAgentProposalService.Prepared prepared) {
         AiAgentRun run = lockExecution(policy);
         proposals.lockInventory(run);
         lockAttempt(policy);
@@ -521,9 +532,13 @@ public class AiAgentRunPersistenceService {
         return call;
     }
 
-    /** Publishes the one screened report, accounting, terminal state and lease release atomically. */
-    @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
+    /** Prepares workspace scopes before atomically publishing the report, accounting and lease release. */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public boolean resolve(AiAgentExecutionPolicy policy, String text, String metadata) {
+        return proposalTransaction(policy, () -> resolveInWorkspace(policy, text, metadata));
+    }
+
+    private boolean resolveInWorkspace(AiAgentExecutionPolicy policy, String text, String metadata) {
         if (text == null || text.isBlank() || text.length() > 16000 || SpecialCareTextScreen.screen(text).excluded()) {
             throw new AiAssistantLoopException("malformed_output", "malformed_output");
         }
@@ -552,6 +567,15 @@ public class AiAgentRunPersistenceService {
         fence(policy.turn().privacyToken(), policy.turn().restrictionEpoch());
         leases.releaseHeldInCurrentTransaction(policy.lease().key());
         return true;
+    }
+
+    private <T> T proposalTransaction(AiAgentExecutionPolicy policy, Supplier<T> operation) {
+        return tenantWorkScope.inWorkspace(policy.turn().workspaceId(), () -> {
+            var transaction = new TransactionTemplate(transactionManager);
+            transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+            transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+            return transaction.execute(status -> operation.get());
+        });
     }
 
     /** Owner controls retain original caps/deadlines and need no provider readiness to stop. */

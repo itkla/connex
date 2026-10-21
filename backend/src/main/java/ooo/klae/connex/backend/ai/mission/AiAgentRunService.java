@@ -12,7 +12,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.function.Supplier;
 
 import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Service;
@@ -46,6 +45,8 @@ import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
+import ooo.klae.connex.backend.tenant.WorkspaceRead;
 import tools.jackson.databind.ObjectMapper;
 
 /** Owner-only mission API orchestration; immutable scope and privacy are independent access checks. */
@@ -67,6 +68,7 @@ public class AiAgentRunService {
     private final WorkspaceService workspaces;
     private final ObjectMapper json;
     private final Clock clock;
+    private final TenantWorkScope tenantWorkScope;
     @org.springframework.beans.factory.annotation.Autowired
     private AiAgentProposalReadService proposalReads;
     @org.springframework.beans.factory.annotation.Autowired
@@ -250,7 +252,7 @@ public class AiAgentRunService {
     /** Revalidates the one selected record through existing processability and RBAC reads. */
     public void requireScope(AiAgentRunCreateRequest.Scope scope) {
         AiChatResourceRegistry registry = new AiChatResourceRegistry();
-        new AiAgentScopePolicy(scope).evaluate(() -> tools.pageContext(
+        new AiAgentScopePolicy(scope).evaluateRead(() -> tools.pageContext(
                 List.of(new AiChatPageContextDto(scope.recordKind(), scope.recordId())), registry));
         if (registry.handleFor(scope.recordKind(), scope.recordId()).isEmpty()) {
             throw new ResourceNotFoundException("Mission scope inaccessible");
@@ -270,14 +272,15 @@ public class AiAgentRunService {
         return run;
     }
 
-    private <T> T readTransaction(Supplier<T> projection) {
+    private <T> T readTransaction(WorkspaceRead<T> projection) {
         TransactionTemplate transaction = new TransactionTemplate(transactionManager);
         transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
         transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
-        return transaction.execute(status -> projection.get());
+        return tenantWorkScope.inWorkspaceRead(workspaces.getCurrentWorkspaceId(),
+                () -> transaction.execute(status -> projection.read()));
     }
 
-    private <T> T readProjection(Supplier<T> projection) {
+    private <T> T readProjection(WorkspaceRead<T> projection) {
         return readTransaction(() -> {
             int workspaceId = workspaces.getCurrentWorkspaceId();
             int userId = workspaces.getCurrentUserId();
@@ -285,7 +288,7 @@ public class AiAgentRunService {
             readAudit.retainTranscriptAuditParents(workspaceId, userId);
             privacyGuard.retainCurrentOrganization(workspaceId);
             requireBarrier(workspaceId);
-            return projection.get();
+            return projection.read();
         });
     }
 

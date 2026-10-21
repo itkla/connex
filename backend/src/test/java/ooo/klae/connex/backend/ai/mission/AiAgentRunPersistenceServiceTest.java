@@ -104,7 +104,8 @@ class AiAgentRunPersistenceServiceTest {
         factory.addBean("missionPersistence", proxy);
         service = new AiAgentRunPersistenceService(runs, privacyGuard, chat, workspaces, restriction, leases,
                 JsonMapper.builder().build(), Clock.fixed(NOW, ZoneOffset.UTC),
-                factory.getBeanProvider(AiAgentRunPersistenceService.class));
+                factory.getBeanProvider(AiAgentRunPersistenceService.class),
+                ooo.klae.connex.backend.support.TenantWorkScopes.passThrough(), new ooo.klae.connex.backend.support.TestTransactionManager());
         org.springframework.test.util.ReflectionTestUtils.setField(service, "proposals", mock(AiAgentProposalSetPort.class));
         when(workspaces.getCurrentWorkspaceId()).thenReturn(WORKSPACE);
         when(workspaces.getCurrentUserId()).thenReturn(OWNER);
@@ -569,6 +570,67 @@ class AiAgentRunPersistenceServiceTest {
         service.control(run, 3, "pause");
         assertEquals(3, run.getStateVersion());
         verifyNoInteractions(leases);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void publicationAndFreezePrepareScopesBeforeTransactionsAndRetainThemThroughSourceRevalidation(boolean routed) {
+        var context = new ooo.klae.connex.backend.tenant.TenantContext();
+        var control = mock(ooo.klae.connex.backend.mappers.WorkspaceMapper.class);
+        var resolver = mock(ooo.klae.connex.backend.tenant.TenantCatalogResolver.class);
+        var transactions = new ooo.klae.connex.backend.support.TestTransactionManager();
+        var tenantScopes = new ooo.klae.connex.backend.tenant.TenantWorkScope(context, resolver, control,
+                mock(ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper.class),
+                new ooo.klae.connex.backend.services.TenantWorkspaceScopeControlOperations(control, resolver));
+        var boundary = new AiAgentRunPersistenceService(runs, privacyGuard, chat, workspaces, restriction,
+                leases, JsonMapper.builder().build(), Clock.fixed(NOW, ZoneOffset.UTC),
+                new StaticListableBeanFactory().getBeanProvider(AiAgentRunPersistenceService.class), tenantScopes, transactions);
+        var proposals = mock(AiAgentProposalSetPort.class);
+        var preparation = mock(AiAgentProposalService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(boundary, "proposals", proposals);
+        org.springframework.test.util.ReflectionTestUtils.setField(boundary, "proposalService", preparation);
+        var visibility = new ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess(
+                new ooo.klae.connex.backend.services.ShareWorkspaceControlAccess(control, tenantScopes, context, transactions), context);
+        var anchor = new ooo.klae.connex.backend.beans.Workspace();
+        anchor.setId(WORKSPACE);
+        anchor.setOrgId(1);
+        anchor.setName("Anchor");
+        when(resolver.isCatalogPerPlacement()).thenReturn(routed);
+        when(control.findOrganizationWorkspacesForShare(WORKSPACE)).thenAnswer(invocation -> {
+            assertFalse(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
+            return List.of(anchor);
+        });
+        when(control.findByOrgId(1)).thenReturn(List.of(anchor));
+        var refused = new ConflictException("source_changed");
+        doAnswer(invocation -> {
+            assertTrue(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
+            assertEquals(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED,
+                    org.springframework.transaction.support.TransactionSynchronizationManager.getCurrentTransactionIsolationLevel());
+            var scope = visibility.getForWorkspace(WORKSPACE);
+            assertEquals("[7]", visibility.withWorkspaceScopeRead(WORKSPACE, scope, scope::workspaceIdsJson));
+            throw refused;
+        }).when(preparation).revalidate(any(), any());
+        run.setMissionType("record_preparation_v1");
+        run.setRuntimeContractVersion(3);
+        run.setScopeFingerprint(AiAgentCapabilityGate.hash(SCOPE));
+        new AiAgentContinuationCodec().initialize(run);
+        context.set(WORKSPACE, 1, OWNER, "member", routed ? "cnx_foreign" : null);
+        try {
+            var prepared = new AiAgentProposalService.Prepared(new ooo.klae.connex.backend.beans.AiAgentAction(), null, null);
+            assertSame(refused, assertThrows(ConflictException.class, () -> boundary.publishPrepared(policy(), prepared)));
+            assertNull(context.getWorkspaceScopes());
+            assertSame(refused, assertThrows(ConflictException.class, () -> boundary.resolve(policy(), "Grounded report", "{}")));
+            assertNull(context.getWorkspaceScopes());
+            assertEquals(routed ? "cnx_foreign" : null, context.getCatalog());
+            assertEquals(2, transactions.beginCount());
+            verify(control, org.mockito.Mockito.times(2)).findOrganizationWorkspacesForShare(WORKSPACE);
+            verify(preparation, org.mockito.Mockito.times(2)).revalidate(any(), any());
+            verify(proposals, never()).publishPrepared(any(), any(), any(), any());
+            verify(proposals, never()).freeze(any(), any(), any());
+            verifyNoInteractions(leases);
+        } finally {
+            context.clear();
+        }
     }
 
     private AiAgentExecutionPolicy policy() {

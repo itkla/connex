@@ -2495,6 +2495,13 @@ mutation or admitted no-op. No trailing privacy fence follows audited delegate e
 The audit-integrity head still precedes lease release and follows restriction/privacy fences.
 Mission participants are proxied MANDATORY helpers; never enter reactive REQUIRES_NEW
 publication under mission roots. Approval/discard batches have no enclosing transaction.
+Direct mission tool execution, proposal preparation and decision coordination enter the workspace
+route before tenant work. Singleton publication and report freeze prepare the route before their
+independent REQUIRES_NEW, READ_COMMITTED transactions, so source revalidation under content locks
+uses the installed snapshot. Proposal output, item and version reads, plus each mission metadata
+transaction, prepare and install the workspace snapshot before opening their READ_COMMITTED
+transaction in both modes. Read-only route and selected-record callbacks remain separate from
+mutation callbacks; enclosing placement and scope state are restored on every exit.
 Explicit source-reading content requests and approvals resolve record visibility before A;
 already-authorized metadata participants resolve it before privacy/content projection. Approval batches
 share a deferred operation scope across their independent item transactions. Discard prevalidation

@@ -393,7 +393,7 @@ public class AiAssistantToolCallReadService {
         }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         RecordVisibilityScope visibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
-        var result = recordVisibilityScopeControlAccess.withWorkspaceScope(workspaceId, visibilityScope,
+        var result = recordVisibilityScopeControlAccess.withWorkspaceScopeRead(workspaceId, visibilityScope,
                 () -> project(currentViewer(), session, List.of(stored), true, clock.instant(), visibilityScope));
         if (result.size() != 1) {
             throw inaccessible();

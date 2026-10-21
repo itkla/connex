@@ -66,7 +66,7 @@ class AiAgentProposalDecisionServiceTest {
     };
     private final AiAgentProposalDecisionService service = new AiAgentProposalDecisionService(privacyGuard, reads, proposals,
             writes, actions, runs, chat, workspaces, new AiRestrictionEpoch(), realtime, gate,
-            Clock.fixed(Instant.parse("2026-10-19T00:00:00Z"), ZoneOffset.UTC), JsonMapper.builder().build(), self, recordScopes);
+            Clock.fixed(Instant.parse("2026-10-19T00:00:00Z"), ZoneOffset.UTC), JsonMapper.builder().build(), self, recordScopes, ooo.klae.connex.backend.support.TenantWorkScopes.passThrough());
     private final AiAgentProposalDecisionRequest.Item first = item("approve");
     private final AiAgentProposalDecisionRequest.Item second = item("approve");
 

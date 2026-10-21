@@ -25,6 +25,7 @@ import ooo.klae.connex.backend.beans.AiAgentAction;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
@@ -40,6 +41,7 @@ public class AiAgentProposalService {
     private final AiChatMapper chat;
     private final ObjectMapper json;
     private final Clock clock;
+    private final TenantWorkScope tenantWorkScope;
 
     /** Candidate remains transient until the caller screens and admits its complete provider result. */
     public record Prepared(AiAgentAction action, AiAssistantPreparedWrite write, AiAssistantToolResult result) {
@@ -47,6 +49,12 @@ public class AiAgentProposalService {
 
     /** Resolves semantic identity first and preserves every original pin and preparation anchor on replay. */
     public Prepared prepare(AiAgentExecutionPolicy policy, String tool, JsonNode arguments,
+            AiChatResourceRegistry resources, Map<String, List<String>> parsedMembers) {
+        return tenantWorkScope.inWorkspace(policy.turn().workspaceId(),
+                () -> prepareInWorkspace(policy, tool, arguments, resources, parsedMembers));
+    }
+
+    private Prepared prepareInWorkspace(AiAgentExecutionPolicy policy, String tool, JsonNode arguments,
             AiChatResourceRegistry resources, Map<String, List<String>> parsedMembers) {
         if (!policy.proposalCapable() || !AiAgentMissionCatalog.confirmTools(policy.scope().kind()).contains(tool)) {
             throw new AiAssistantLoopException("mission_tool_refused", "mission_tool_refused");

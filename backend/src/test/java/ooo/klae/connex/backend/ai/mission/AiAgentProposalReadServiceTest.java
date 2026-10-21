@@ -24,6 +24,8 @@ import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCallReadService;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService;
@@ -57,7 +59,7 @@ class AiAgentProposalReadServiceTest {
             ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
     private final AiAgentProposalReadService service = spy(new AiAgentProposalReadService(privacyGuard, workspaces, chat, runs,
             actions, proposals, cards, mock(AiChatCitationProjector.class), tools,
-            JsonMapper.builder().build(), Clock.fixed(NOW, ZoneOffset.UTC), recordScopes));
+            JsonMapper.builder().build(), Clock.fixed(NOW, ZoneOffset.UTC), recordScopes, ooo.klae.connex.backend.support.TenantWorkScopes.passThrough(), new ooo.klae.connex.backend.support.TestTransactionManager()));
     private final AiAgentRun run = new AiAgentRun();
     private final AiChatSession session = new AiChatSession();
     private final AiAgentAction action = new AiAgentAction();
@@ -199,6 +201,61 @@ class AiAgentProposalReadServiceTest {
         var ordered = inOrder(organizationPrivacy, chat);
         ordered.verify(organizationPrivacy).retain(19, 1);
         ordered.verify(chat).lockPrivacyBarrierForShare(7);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void directReadsPrepareScopesBeforeOpeningTheirTenantTransactionsAndRestoreAfterFailure(boolean routed) {
+        var context = new ooo.klae.connex.backend.tenant.TenantContext();
+        var control = mock(ooo.klae.connex.backend.mappers.WorkspaceMapper.class);
+        var resolver = mock(ooo.klae.connex.backend.tenant.TenantCatalogResolver.class);
+        var transactions = new ooo.klae.connex.backend.support.TestTransactionManager();
+        var tenantScopes = new ooo.klae.connex.backend.tenant.TenantWorkScope(context, resolver, control,
+                mock(ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper.class),
+                new ooo.klae.connex.backend.services.TenantWorkspaceScopeControlOperations(control, resolver));
+        var visibility = new ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess(
+                new ooo.klae.connex.backend.services.ShareWorkspaceControlAccess(control, tenantScopes, context, transactions), context);
+        var boundary = new AiAgentProposalReadService(privacyGuard, workspaces, chat, runs, actions,
+                proposals, cards, mock(AiChatCitationProjector.class), tools, JsonMapper.builder().build(),
+                Clock.fixed(NOW, ZoneOffset.UTC), visibility, tenantScopes, transactions);
+        var anchor = new ooo.klae.connex.backend.beans.Workspace();
+        anchor.setId(7);
+        anchor.setOrgId(19);
+        anchor.setName("Anchor");
+        when(resolver.isCatalogPerPlacement()).thenReturn(routed);
+        when(control.findOrganizationWorkspacesForShare(7)).thenAnswer(invocation -> {
+            org.junit.jupiter.api.Assertions.assertFalse(
+                    org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
+            return List.of(anchor);
+        });
+        when(control.findByOrgId(19)).thenReturn(List.of(anchor));
+        org.mockito.Mockito.doAnswer(invocation -> {
+            org.junit.jupiter.api.Assertions.assertTrue(
+                    org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
+            org.junit.jupiter.api.Assertions.assertNotNull(context.getWorkspaceScopes());
+            org.junit.jupiter.api.Assertions.assertEquals(routed ? "cnx_foreign" : null, context.getCatalog());
+            org.junit.jupiter.api.Assertions.assertEquals("[7]", visibility.getForWorkspace(7).workspaceIdsJson());
+            return null;
+        }).when(workspaces).lockAndRequirePermissionsSnapshot(anyInt(), any());
+        when(tools.pageContext(anyList(), any())).thenAnswer(invocation -> {
+            invocation.<ooo.klae.connex.backend.ai.assistant.AiChatResourceRegistry>getArgument(1)
+                    .register("company", 41);
+            return null;
+        });
+        context.set(7, 19, 11, "member", routed ? "cnx_foreign" : null);
+        try {
+            org.junit.jupiter.api.Assertions.assertEquals("0", boundary.currentVersion(31));
+            assertThrows(ooo.klae.connex.backend.exceptions.ConflictException.class, () -> boundary.output(31));
+            when(proposals.readFrozen(run)).thenReturn(List.of(action));
+            assertThrows(ooo.klae.connex.backend.exceptions.ConflictException.class,
+                    () -> boundary.item(31, action.getActionSlot()));
+            org.junit.jupiter.api.Assertions.assertEquals(3, transactions.beginCount());
+            org.junit.jupiter.api.Assertions.assertNull(context.getWorkspaceScopes());
+            org.junit.jupiter.api.Assertions.assertEquals(routed ? "cnx_foreign" : null, context.getCatalog());
+            verify(control, org.mockito.Mockito.times(3)).findOrganizationWorkspacesForShare(7);
+        } finally {
+            context.clear();
+        }
     }
 
     private AiAgentProposalDecisionRequest request() {

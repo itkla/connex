@@ -41,6 +41,7 @@ import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 import tools.jackson.databind.ObjectMapper;
 
 /** Nontransactional selected-item coordinator with truthful partial and uncertain-commit outcomes. */
@@ -62,13 +63,16 @@ public class AiAgentProposalDecisionService {
     private final ObjectMapper json;
     private final ObjectProvider<AiAgentProposalDecisionService> self;
     private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+    private final TenantWorkScope tenantWorkScope;
 
     /** Every immutable selection is validated before the first independently committed effect. */
     @RequirePermission(Permission.AI_USE)
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public AiAgentProposalDecisionResponse decide(int id, AiAgentProposalDecisionRequest request) {
-        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(workspaces.getCurrentWorkspaceId(),
-                () -> decideWithinVisibilityScope(id, request));
+        int workspaceId = workspaces.getCurrentWorkspaceId();
+        return tenantWorkScope.inWorkspace(workspaceId,
+                () -> recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(workspaceId,
+                    () -> decideWithinVisibilityScope(id, request)));
     }
 
     private AiAgentProposalDecisionResponse decideWithinVisibilityScope(int id, AiAgentProposalDecisionRequest request) {

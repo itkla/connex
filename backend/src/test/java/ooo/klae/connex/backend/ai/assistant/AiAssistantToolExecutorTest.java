@@ -140,13 +140,61 @@ class AiAssistantToolExecutorTest {
     }
 
     private AiAssistantToolExecutor executor(List<AiAssistantWriteTool> writeTools) {
+        return executor(writeTools, ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered(),
+                ooo.klae.connex.backend.support.TenantWorkScopes.passThrough());
+    }
+
+    private AiAssistantToolExecutor executor(List<AiAssistantWriteTool> writeTools,
+            ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess recordScopes,
+            ooo.klae.connex.backend.tenant.TenantWorkScope tenantScopes) {
         AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
         return new AiAssistantToolExecutor(
                 catalog, new AiAssistantWriteToolRegistry(catalog, writeTools),
                 searchService, personService, companyService,
                 dealService, activityService, taskService, historyService, scoringService, workspaceService,
                 personMapper, companyMapper, dealMapper, dateResolver,
-                mock(AiAssistantScopeReadService.class), ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
+                mock(AiAssistantScopeReadService.class), recordScopes, tenantScopes);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void directRecordReadPreparesAndRestoresWorkspaceScopes(boolean routed) {
+        var context = new ooo.klae.connex.backend.tenant.TenantContext();
+        var control = mock(ooo.klae.connex.backend.mappers.WorkspaceMapper.class);
+        var resolver = mock(ooo.klae.connex.backend.tenant.TenantCatalogResolver.class);
+        var transactions = new ooo.klae.connex.backend.support.TestTransactionManager();
+        var tenantScopes = new ooo.klae.connex.backend.tenant.TenantWorkScope(context, resolver, control,
+                mock(ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper.class),
+                new ooo.klae.connex.backend.services.TenantWorkspaceScopeControlOperations(control, resolver));
+        var visibility = new ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess(
+                new ooo.klae.connex.backend.services.ShareWorkspaceControlAccess(control, tenantScopes, context, transactions), context);
+        var anchor = new ooo.klae.connex.backend.beans.Workspace();
+        anchor.setId(7);
+        anchor.setOrgId(19);
+        anchor.setName("Anchor");
+        when(resolver.isCatalogPerPlacement()).thenReturn(routed);
+        when(control.findOrganizationWorkspacesForShare(7)).thenReturn(List.of(anchor));
+        when(control.findByOrgId(19)).thenReturn(List.of(anchor));
+        when(companyService.getCompanyById(41)).thenAnswer(invocation -> {
+            org.junit.jupiter.api.Assertions.assertNotNull(context.getWorkspaceScopes());
+            var scope = visibility.getForWorkspace(7);
+            assertEquals("[7]", visibility.withWorkspaceScopeRead(7, scope, scope::workspaceIdsJson));
+            throw new ooo.klae.connex.backend.exceptions.ResourceNotFoundException("Company not found");
+        });
+        context.set(7, 19, 11, "member", routed ? "cnx_foreign" : null);
+        try {
+            var resources = new AiChatResourceRegistry();
+            String handle = resources.register("company", 41);
+            var failure = assertThrows(AiAssistantLoopException.class,
+                    () -> executor(AiAssistantDeclaredWriteTools.tools(), visibility, tenantScopes).execute(
+                        "get_record", objectMapper.createObjectNode().put("handle", handle), resources, false));
+            assertEquals("inaccessible_resource", failure.detailReason());
+            verify(companyService).getCompanyById(41);
+            org.junit.jupiter.api.Assertions.assertNull(context.getWorkspaceScopes());
+            assertEquals(routed ? "cnx_foreign" : null, context.getCatalog());
+        } finally {
+            context.clear();
+        }
     }
 
     /**

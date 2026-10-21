@@ -66,7 +66,7 @@ class AiAgentRunServiceTest {
     private final AiAgentRunService service = new AiAgentRunService(privacyGuard,
             mock(ooo.klae.connex.backend.ai.assistant.AiAssistantSessionReadAudit.class), transactions, runs, chat, persistence, gate, publisher,
             mock(AiAssistantToolExecutor.class), citations, new AiRestrictionEpoch(), workspaces,
-            JsonMapper.builder().build(), Clock.fixed(NOW, ZoneOffset.UTC));
+            JsonMapper.builder().build(), Clock.fixed(NOW, ZoneOffset.UTC), ooo.klae.connex.backend.support.TenantWorkScopes.passThrough());
 
     @BeforeEach
     void setUp() {

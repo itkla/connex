@@ -268,7 +268,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 mock(CompanyMapper.class),
                 mock(DealMapper.class),
                 dateResolver,
-                mock(AiAssistantScopeReadService.class), ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
+                mock(AiAssistantScopeReadService.class), ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered(), ooo.klae.connex.backend.support.TenantWorkScopes.passThrough());
         service = new AiAssistantWriteToolService(
                 catalog,
                 registry,

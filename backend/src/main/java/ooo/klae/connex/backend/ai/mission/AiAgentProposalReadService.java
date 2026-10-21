@@ -13,6 +13,9 @@ import java.util.Set;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCallReadService;
@@ -35,6 +38,8 @@ import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
+import ooo.klae.connex.backend.tenant.WorkspaceRead;
 import tools.jackson.databind.ObjectMapper;
 
 /** Requester-only content projections retain ordered authorization, session, run and privacy roots. */
@@ -53,6 +58,8 @@ public class AiAgentProposalReadService {
     private final ObjectMapper json;
     private final Clock clock;
     private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+    private final TenantWorkScope tenantWorkScope;
+    private final PlatformTransactionManager transactionManager;
 
     /** Exact content authorization deliberately leaves metadata and safe-stop authorization separate. */
     public record Authorized(AiAgentRun run, AiChatSession session) {}
@@ -141,7 +148,7 @@ public class AiAgentProposalReadService {
         if (requireSource) {
             var scope = json.readValue(run.getScopeJson(), ooo.klae.connex.backend.dto.AiAgentRunCreateRequest.Scope.class);
             var resources = new ooo.klae.connex.backend.ai.assistant.AiChatResourceRegistry();
-            new AiAgentScopePolicy(scope).evaluate(() -> tools.pageContext(List.of(
+            new AiAgentScopePolicy(scope).evaluateRead(() -> tools.pageContext(List.of(
                     new ooo.klae.connex.backend.dto.AiChatPageContextDto(scope.recordKind(), scope.recordId())), resources));
             if (resources.handleFor(scope.recordKind(), scope.recordId()).isEmpty()) {
                 throw inaccessible();
@@ -151,16 +158,16 @@ public class AiAgentProposalReadService {
 
     /** Rechecks current disclosure authority without depending on content/card projection infrastructure. */
     @RequirePermission(Permission.AI_USE)
-    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public String currentVersion(int id) {
-        return Long.toString(authorize(id, true).run().getStateVersion());
+        return readTransaction(() -> Long.toString(authorize(id, true).run().getStateVersion()));
     }
 
     /** Reads exact output independently of every transcript and tool-history bound. */
     @RequirePermission(Permission.AI_USE)
-    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public AiAgentOutputDto output(int id) {
-        return output(authorize(id));
+        return readTransaction(() -> output(authorize(id)));
     }
 
     private AiAgentOutputDto output(Authorized authorized) {
@@ -198,9 +205,13 @@ public class AiAgentProposalReadService {
 
     /** Returns one member only when it belongs to the frozen requester-owned output. */
     @RequirePermission(Permission.AI_USE)
-    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public AiAgentOutputDto.ProposalItem item(int id, String slot) {
         requireUuid(slot);
+        return readTransaction(() -> itemInWorkspace(id, slot));
+    }
+
+    private AiAgentOutputDto.ProposalItem itemInWorkspace(int id, String slot) {
         Authorized authorized = authorize(id);
         AiAgentAction action = actions.getBySlot(authorized.run().getWorkspaceId(), id, slot);
         requireFrozen(authorized.run(), action);
@@ -208,6 +219,14 @@ public class AiAgentProposalReadService {
             throw new ConflictException("mission_membership_conflict");
         }
         return project(authorized, action);
+    }
+
+    private <T> T readTransaction(WorkspaceRead<T> read) {
+        return tenantWorkScope.inWorkspaceRead(workspaces.getCurrentWorkspaceId(), () -> {
+            TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+            transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+            return transaction.execute(status -> read.read());
+        });
     }
 
     /** Prevalidates the complete immutable submitted contract before any item may commit. */

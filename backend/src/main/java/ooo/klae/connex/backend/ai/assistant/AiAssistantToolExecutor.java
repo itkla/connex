@@ -44,6 +44,7 @@ import ooo.klae.connex.backend.services.ScoringService;
 import ooo.klae.connex.backend.services.SearchService;
 import ooo.klae.connex.backend.services.TaskService;
 import ooo.klae.connex.backend.services.WorkspaceService;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 import tools.jackson.databind.JsonNode;
 
 /** Dispatches validated read tools exclusively through existing tenant- and visibility-scoped services. */
@@ -80,6 +81,7 @@ public class AiAssistantToolExecutor {
     private final AiAssistantScopeReadService scopeReadService;
 
     private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+    private final TenantWorkScope tenantWorkScope;
 
     /** Executes one validated, enabled tool call outside any declared query scope. */
     public AiAssistantToolResult execute(
@@ -121,8 +123,10 @@ public class AiAssistantToolExecutor {
         if ("set_todos".equals(name)) {
             return executeWithinVisibilityScope(name, args, resources, includePrivateNotes, scope);
         }
-        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
-            workspaceService.getCurrentWorkspaceId(), () -> executeWithinVisibilityScope(name, args, resources, includePrivateNotes, scope));
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        return tenantWorkScope.inWorkspace(workspaceId,
+            () -> recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(workspaceId,
+                () -> executeWithinVisibilityScope(name, args, resources, includePrivateNotes, scope)));
     }
 
     private AiAssistantToolResult executeWithinVisibilityScope(
@@ -216,8 +220,10 @@ public class AiAssistantToolExecutor {
                 && RECORD_KINDS.contains(record.kind()) && record.id() > 0)) {
             return result(Map.of("records", List.of()), List.of());
         }
-        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
-            workspaceService.getCurrentWorkspaceId(), () -> pageContextWithinVisibilityScope(pageContext, resources));
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        return tenantWorkScope.inWorkspaceRead(workspaceId,
+            () -> recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(workspaceId,
+                () -> pageContextWithinVisibilityScope(pageContext, resources)));
     }
 
     private AiAssistantToolResult pageContextWithinVisibilityScope(
