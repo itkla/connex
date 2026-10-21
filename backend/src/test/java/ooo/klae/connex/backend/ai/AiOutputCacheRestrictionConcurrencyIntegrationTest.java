@@ -53,6 +53,7 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.PersonService;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
 import ooo.klae.connex.backend.support.TestEntityFixtures;
 import ooo.klae.connex.backend.tenant.TenantContext;
 
@@ -79,6 +80,7 @@ class AiOutputCacheRestrictionConcurrencyIntegrationTest {
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private TenantContext tenantContext;
     @Autowired private SqlSessionTemplate sqlSessionTemplate;
+    @Autowired private RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
     @Autowired private JdbcTemplate jdbcTemplate;
     @MockitoSpyBean private PersonMapper personMapperSpy;
     @MockitoBean private AuditService auditService;
@@ -208,7 +210,7 @@ class AiOutputCacheRestrictionConcurrencyIntegrationTest {
         CountDownLatch releaseRestriction = new CountDownLatch(1);
         CountDownLatch saveLockAttempted = new CountDownLatch(1);
         PersonMapper realPersonMapper = sqlSessionTemplate.getMapper(PersonMapper.class);
-        String personScopeJson = orgWorkspaceIdsJson(workspaceMapper, granteeWorkspace.getId());
+        String personScopeJson = recordVisibilityScopeControlAccess.getForWorkspace(granteeWorkspace.getId()).workspaceIdsJson();
         doAnswer(invocation -> {
             Person locked = realPersonMapper.getOwnedPersonByIdForUpdate(ownerWorkspaceId, personId);
             restrictionLocked.countDown();
@@ -252,7 +254,7 @@ class AiOutputCacheRestrictionConcurrencyIntegrationTest {
         CountDownLatch releaseSave = new CountDownLatch(1);
         CountDownLatch restrictionLockAttempted = new CountDownLatch(1);
         PersonMapper realPersonMapper = sqlSessionTemplate.getMapper(PersonMapper.class);
-        String personScopeJson = orgWorkspaceIdsJson(workspaceMapper, granteeWorkspaceId);
+        String personScopeJson = recordVisibilityScopeControlAccess.getForWorkspace(granteeWorkspaceId).workspaceIdsJson();
         doAnswer(invocation -> {
             Person locked = realPersonMapper.getVisiblePersonByIdForUpdate(granteeWorkspaceId, personScopeJson, personId);
             saveLocked.countDown();

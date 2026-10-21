@@ -89,6 +89,7 @@ class RecordCreationTemplateConcurrencyIntegrationTest extends AbstractServiceTe
     @Autowired private RoleMapper roleMapper;
     @Autowired private PlatformTransactionManager transactionManager;
     @Autowired private SqlSessionTemplate sqlSessionTemplate;
+    @Autowired private RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private GlobalExceptionHandler exceptionHandler;
     @MockitoSpyBean private WorkspaceMapper workspaceMapperSpy;
@@ -178,7 +179,7 @@ class RecordCreationTemplateConcurrencyIntegrationTest extends AbstractServiceTe
         CountDownLatch templateLockAttempted = new CountDownLatch(1);
         CountDownLatch releaseWriter = new CountDownLatch(1);
         PersonMapper realPersonMapper = sqlSessionTemplate.getMapper(PersonMapper.class);
-        String personScopeJson = orgWorkspaceIdsJson(workspaceMapper, isolatedWorkspace.getId());
+        String personScopeJson = recordVisibilityScopeControlAccess.getForWorkspace(isolatedWorkspace.getId()).workspaceIdsJson();
         doAnswer(invocation -> {
             templateLockAttempted.countDown();
             return realPersonMapper.getVisiblePersonByIdForUpdate(
@@ -444,7 +445,7 @@ class RecordCreationTemplateConcurrencyIntegrationTest extends AbstractServiceTe
         RecordCreationTemplateMapper realTemplateMapper =
             sqlSessionTemplate.getMapper(RecordCreationTemplateMapper.class);
         PersonMapper realPersonMapper = sqlSessionTemplate.getMapper(PersonMapper.class);
-        String personScopeJson = orgWorkspaceIdsJson(workspaceMapper, isolatedWorkspace.getId());
+        String personScopeJson = recordVisibilityScopeControlAccess.getForWorkspace(isolatedWorkspace.getId()).workspaceIdsJson();
         doAnswer(invocation -> {
             if (setFenceCalls.incrementAndGet() == 2) {
                 importSetFenceAttempted.countDown();
