@@ -132,7 +132,7 @@ public class AiChatMemoryService {
         var mission = ooo.klae.connex.backend.ai.mission.AiAgentExecutionPolicy.forTurn(turn);
         if (mission != null) {
             persistenceService.requirePrivacyCurrent(turn);
-            AiAssistantToolResult missionContext = mission.runtimeContractVersion() == 2
+            AiAssistantToolResult missionContext = ooo.klae.connex.backend.ai.mission.AiAgentMissionCatalog.continuation(mission.runtimeContractVersion())
                     ? missionContextBuilder.build(mission, context, resources) : null;
             if (mission.goal().getContent().getBytes(java.nio.charset.StandardCharsets.UTF_8).length
                     > budget.historyBytes()) {

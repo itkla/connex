@@ -185,7 +185,8 @@ class AiAgentPrivacySessionRoutingTest {
             default -> List.of();
         });
         var privacy = new AiAgentPrivacyService(sessions.getMapper(AiAgentPrivacyMapper.class),
-                sessions.getMapper(AiAgentRunMapper.class), mock(AiChatMapper.class), mock(AiRestrictionEpoch.class),
+                sessions.getMapper(AiAgentRunMapper.class),
+                mock(ooo.klae.connex.backend.mappers.AiAgentActionMapper.class), mock(AiChatMapper.class), mock(AiRestrictionEpoch.class),
                 mock(AiRunLeaseService.class), transactions, sessions.getMapper(WorkspaceMapper.class), lifecycle,
                 mock(UserMapper.class), scope, catalogs, context, Clock.systemUTC(),
                 mock(ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService.class), mock(ooo.klae.connex.backend.mappers.AiAssistantPrivacyControlMapper.class), mock(ooo.klae.connex.backend.mappers.AttachmentMapper.class), mock(ooo.klae.connex.backend.mappers.AiAgentPrivacyObjectMapper.class), mock(ooo.klae.connex.backend.mappers.ObjectDeletionQueueMapper.class), mock(ooo.klae.connex.backend.storage.ManagedObjectService.class));

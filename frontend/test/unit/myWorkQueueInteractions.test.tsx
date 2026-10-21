@@ -284,6 +284,18 @@ function tabbableControls(rootNode: ParentNode): HTMLElement[] {
 }
 
 describe("My Work queue interactions", () => {
+    it("opens the exact mission review without any bulk approval action", async () => {
+        mediaQuery.wide = true;
+        await mount([{ ...workItem(12, "Record preparation"), id: "ai_mission:12", source: "ai_mission",
+            reason: { code: "mission_review_pending" }, permittedActions: ["open_context"],
+            context: { type: "ai_mission", id: 12, label: "Record preparation", href: "/ask-connex/7?mission=12" } }]);
+        const links = [...container.querySelectorAll("a")].filter((link) => link.getAttribute("href") === "/ask-connex/7?mission=12");
+        expect(links.length).toBeGreaterThan(0);
+        expect(container.textContent).not.toContain("queueApprove");
+        expect(container.textContent).not.toContain("queueReject");
+        expect(api.decideMyWorkApproval).not.toHaveBeenCalled();
+    });
+
     it("steps through the loaded page in server order without fetching", async () => {
         await mount([
             workItem(1, "Task one"),

@@ -15,6 +15,51 @@
       , CAST(t0.arguments_json AS BINARY) AS utf8_arguments_json
       , CAST(t0.result_json AS BINARY) AS utf8_result_json
     </if>
+    <if test="declaration.table == 'ai_agent_action'">
+      , CAST(t0.source_versions_json AS BINARY) AS utf8_source_versions_json
+      , (SELECT r.runtime_contract_version FROM ai_agent_run r
+          WHERE r.workspace_id = t0.workspace_id AND r.id = t0.root_run_id) AS mission_export_runtime
+      , (SELECT r.definition_version FROM ai_agent_run r
+          WHERE r.workspace_id = t0.workspace_id AND r.id = t0.root_run_id) AS mission_export_definition
+      , (SELECT r.mission_type FROM ai_agent_run r
+          WHERE r.workspace_id = t0.workspace_id AND r.id = t0.root_run_id) AS mission_export_type
+      , (SELECT r.privacy_generation FROM ai_agent_run r
+          WHERE r.workspace_id = t0.workspace_id AND r.id = t0.root_run_id) AS mission_export_privacy
+      , (SELECT CAST(r.scope_json AS BINARY) FROM ai_agent_run r
+          WHERE r.workspace_id = t0.workspace_id AND r.id = t0.root_run_id) AS mission_export_scope
+      , (SELECT CAST(r.plan_json AS BINARY) FROM ai_agent_run r
+          WHERE r.workspace_id = t0.workspace_id AND r.id = t0.root_run_id) AS mission_export_plan
+      , (SELECT CAST(r.checkpoint_json AS BINARY) FROM ai_agent_run r
+          WHERE r.workspace_id = t0.workspace_id AND r.id = t0.root_run_id) AS mission_export_checkpoint
+      , (SELECT COUNT(*) FROM ai_agent_action a
+          WHERE a.workspace_id = t0.workspace_id AND a.root_run_id = t0.root_run_id) AS mission_export_slot_count
+      , (SELECT r.plan_revision FROM ai_agent_run r
+          WHERE r.workspace_id = t0.workspace_id AND r.id = t0.root_run_id) AS mission_export_plan_revision
+      , (SELECT r.proposal_frozen_at FROM ai_agent_run r
+          WHERE r.workspace_id = t0.workspace_id AND r.id = t0.root_run_id) AS mission_export_frozen
+      , (SELECT g.execution_generation FROM ai_agent_segment g
+          WHERE g.workspace_id = t0.workspace_id AND g.run_id = t0.producer_run_id
+            AND g.id = t0.origin_segment_id) AS mission_export_origin_generation
+      , (SELECT g.privacy_generation FROM ai_agent_segment g
+          WHERE g.workspace_id = t0.workspace_id AND g.run_id = t0.producer_run_id
+            AND g.id = t0.origin_segment_id) AS mission_export_origin_privacy
+      , (SELECT COUNT(*) FROM ai_chat_tool_call tc
+          WHERE tc.workspace_id = t0.workspace_id AND tc.mission_run_id = t0.root_run_id
+            AND tc.mission_action_id = t0.id AND tc.proposal_origin = 'mission'
+            AND tc.artifact_origin = 'mission' AND tc.server_proposal = TRUE
+            AND tc.organization_privacy_generation = #{organizationPrivacyGeneration}
+            AND tc.privacy_generation = t0.privacy_generation AND tc.tool_name = t0.tool_name
+            AND tc.proposal_key IS NULL AND tc.proposal_ordinal IS NULL
+            AND tc.proposal_prepared_at IS NULL) AS mission_export_canonical_count
+      , (SELECT COUNT(*) FROM ai_agent_action a
+          WHERE a.workspace_id = t0.workspace_id AND a.root_run_id = t0.root_run_id
+            AND a.preparation_id IS NOT NULL) AS mission_export_bound_count
+      , (SELECT COUNT(*) FROM ai_agent_action a
+          WHERE a.workspace_id = t0.workspace_id AND a.root_run_id = t0.root_run_id
+            AND a.output_ordinal IS NOT NULL) AS mission_export_output_count
+      , (SELECT COALESCE(MAX(a.output_ordinal), 0) FROM ai_agent_action a
+          WHERE a.workspace_id = t0.workspace_id AND a.root_run_id = t0.root_run_id) AS mission_export_max_ordinal
+    </if>
     FROM ${declaration.route.fromClause}
     WHERE ${declaration.route.workspacePredicate} = #{workspaceId}
 
@@ -40,6 +85,14 @@
         AND (t0.purged_at IS NOT NULL OR (t0.withheld_at IS NULL AND EXISTS (
           SELECT 1 FROM ai_agent_privacy_barrier b WHERE b.workspace_id = t0.workspace_id
             AND b.blocked = FALSE AND b.generation = t0.privacy_generation)))
+      </when>
+      <when test="declaration.table == 'ai_agent_action'">
+        AND EXISTS (SELECT 1 FROM ai_agent_privacy_barrier b
+          JOIN ai_agent_run r ON r.workspace_id = b.workspace_id AND r.id = t0.root_run_id
+          WHERE b.workspace_id = t0.workspace_id AND b.blocked = FALSE
+            AND b.generation = t0.privacy_generation AND r.privacy_generation = t0.privacy_generation
+            AND r.withheld_at IS NULL AND r.purged_at IS NULL
+            AND r.organization_privacy_generation = #{organizationPrivacyGeneration})
       </when>
       <when test="declaration.table == 'ai_agent_segment'">
         AND EXISTS (SELECT 1 FROM ai_agent_privacy_barrier b

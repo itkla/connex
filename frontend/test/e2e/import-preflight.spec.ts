@@ -77,8 +77,14 @@ test.describe("manual duplicate review", () => {
         await page.goto("/dashboard");
         await page.getByRole("button", { name: "New", exact: true }).click();
         await page.getByRole("option", { name: "New contact" }).click();
-        await page.getByLabel("Name", { exact: true }).fill(contact.name);
-        await page.getByLabel("Email", { exact: true }).fill(email);
+        const nameField = page.getByLabel("Name", { exact: true });
+        const emailField = page.getByLabel("Email", { exact: true });
+        await expect(nameField).toBeEnabled();
+        await expect(nameField).toBeFocused();
+        await nameField.fill(contact.name);
+        await emailField.fill(email);
+        await expect(nameField).toHaveValue(contact.name);
+        await expect(emailField).toHaveValue(email);
 
         await expect(page.getByRole("region", { name: "Possible duplicates" })).toBeVisible();
         await expect(page.getByText("Exact identity")).toBeVisible();

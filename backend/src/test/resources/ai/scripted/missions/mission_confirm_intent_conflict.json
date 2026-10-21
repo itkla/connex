@@ -1,0 +1,47 @@
+{
+  "id": "mission_confirm_intent_conflict",
+  "selector": "connex_script_mission_confirm_intent_conflict",
+  "capabilityClass": "scripted-json",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "json",
+      "closing": false,
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "get_record",
+        "arguments": "{\"handle\":\"r1\"}"
+      }
+    },
+    {
+      "afterToolCalls": 1,
+      "protocol": "json",
+      "closing": false,
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "find_tools",
+        "arguments": "{\"toolset\":\"write_pipeline\"}"
+      }
+    },
+    {
+      "afterToolCalls": 2,
+      "protocol": "json",
+      "closing": false,
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "assign_owner",
+        "arguments": "{\"handle\":\"r1\",\"owner\":\"unassigned\"}"
+      }
+    },
+    {
+      "afterToolCalls": 3,
+      "protocol": "json",
+      "closing": true,
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "checkpoint_segment",
+        "arguments": "{\"expectedPlanRevision\":\"1\",\"expectedCheckpointRevision\":\"1\",\"nextPlanItemKey\":\"p0001\",\"memory\":{\"summary\":\"A change is prepared for the selected record.\",\"citations\":[\"r1\"]},\"phase\":\"reading\"}"
+      }
+    }
+  ]
+}

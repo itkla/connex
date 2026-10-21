@@ -54,8 +54,15 @@ public record AiAgentExecutionPolicy(int runId, int segmentId, long executionGen
         return policy;
     }
 
+    /** Proposal authority is derived only from the exact server-selected runtime. */
+    public boolean proposalCapable() {
+        return runtimeContractVersion == 3;
+    }
+
     /** Filters mission declarations while leaving ordinary prompt envelopes unchanged. */
     public static boolean permits(String tool) {
-        return CURRENT.get() == null || AiAgentMissionCatalog.tools(CURRENT.get().runtimeContractVersion()).contains(tool);
+        return CURRENT.get() == null || (CURRENT.get().proposalCapable()
+                ? AiAgentMissionCatalog.preparationTools(CURRENT.get().scope().kind())
+                : AiAgentMissionCatalog.tools(CURRENT.get().runtimeContractVersion())).contains(tool);
     }
 }

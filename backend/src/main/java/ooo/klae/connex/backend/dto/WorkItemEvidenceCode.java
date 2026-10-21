@@ -5,5 +5,6 @@ public enum WorkItemEvidenceCode {
     task_due,
     task_open,
     deal_close_date,
-    approval_requested
+    approval_requested,
+    mission_output_prepared
 }

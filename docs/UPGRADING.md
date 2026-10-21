@@ -7,9 +7,11 @@ migration-discipline part of #87 §9 / #102).
 > The specific support window below is a **proposed** policy; confirm it before it is published to
 > customers.
 
-The active rollback floor for this release is tenant V237, including with AI and missions disabled.
+The active rollback floor for this release is tenant V238, including with AI and missions disabled.
 Earlier floors in version-specific sections below describe historical component contracts and do not
-permit rollback after V237. Follow [the retained-chat cutover](#v236v237-retained-ask-connex-privacy-cutover).
+permit rollback after V238. Apply control V236 → tenant V237 → tenant V238 in that order. Follow
+[the retained-chat cutover](#v236v237-retained-ask-connex-privacy-cutover) and
+[the singleton-proposal cutover](#mission-singleton-proposals-tenant-v238).
 
 ## Dormant assistant proposal-set storage (tenant V233)
 
@@ -1125,7 +1127,7 @@ Column additions and the default change require `ALGORITHM=INSTANT, LOCK=DEFAULT
 
 DDL auto-commits. If migration fails, keep writers disabled, inspect the applied statements and Flyway failure record, and recover through the normal migration procedure. Do not bypass the algorithm guards.
 
-V235 established the continuation compatibility minimum; V237 is now the overall rollback floor, including when AI and missions are disabled. Earlier binaries cannot safely clean up runtime-2 holdings. Returning below the floor requires an explicit reviewed drain, settlement, privacy-purge, and residual-verification procedure.
+V235 established the continuation compatibility minimum; V238 is now the overall rollback floor, including when AI and missions are disabled. Earlier binaries cannot safely clean up runtime-2 holdings. Returning below the floor requires an explicit reviewed drain, settlement, privacy-purge, and residual-verification procedure.
 
 ## V236/V237: retained Ask Connex privacy cutover
 
@@ -1139,8 +1141,9 @@ applying `control/V236__ai_assistant_privacy_coordination.sql` and
 `tenant/V237__ai_assistant_privacy_cutover.sql`. Start only the compatible release, with one
 serving JVM. Proposal-set production remains disabled.
 
-The rollback floor is tenant V237, including when AI and missions are disabled. Earlier binaries can
-disclose or republish invalidated content despite accepting the additive schema. Recovery below this
+V237 established the all-chat privacy compatibility minimum: earlier binaries can disclose or
+republish invalidated content despite accepting the additive schema. V238 is the active rollback
+floor for this release, including when AI and missions are disabled. Recovery below the active
 floor requires a separately reviewed procedure; normal recovery is a forward fix.
 
 Inaccessible placements and incomplete managed-object deletion keep cleanup pending. Restore
@@ -1157,11 +1160,45 @@ progress and final C2 accept its durable verified control receipt only while its
 Active/restored workspaces retain routed residual verification. Missing verification evidence continues
 to refuse completion. Ask Connex refreshes session metadata and transcript on the first successful
 socket subscription as well as reconnects, covering cutoffs missed during connection establishment.
-Notification reads scope authority hydration to candidate workspaces and refuse results when a
-cutoff races their query rather than returning stale assistant-derived content.
+Notification reads scope authority hydration to candidate workspaces. Brief notifications carry
+content-free pointers only; a cutoff racing a read can expose only that a brief existed, while
+opening the session still requires current organization authority.
 
 Reconciliation preserves an exact verified receipt while its workspace is terminally
 `tearing_down`, even after the tenant sweep removes local work. Teardown retries skip that
 operation's tenant batch and still run full local lifecycle cleanup and residual verification.
 V2 C2 refuses a surviving terminal workspace root; only root deletion enables receipt-only
 completion. Active workspace restoration still reopens stale local evidence.
+
+## Mission singleton proposals (tenant V238)
+
+V238 adds mission-owned singleton action slots, immutable preparation/source provenance,
+canonical proposal-origin linkage, and frozen review metadata. `record_preparation_v1`
+explicitly creates runtime-contract-3 runs. Existing runtime-1/2 runs and the runtime-2
+database default remain unchanged. There is no content backfill; V233 proposal-set storage
+stays dormant. Apply control V236 organization coordination, then tenant V237 all-chat cutover,
+then tenant V238; no migration is renumbered.
+
+Drain serving binaries and mission workers before the cutover. Keep missions disabled until
+compatible publication, decisions, expiry, privacy cleanup, export and runtime guards are
+deployed. V238 actions, frozen membership, mission-origin tool calls and proposal outputs retain
+the original session organization generation and participate in the V236/V237 all-chat engine,
+including bootstrap, acknowledged v2 DSR, restriction and lifecycle cleanup. The single-serving-JVM activation requirement remains.
+
+Hot column additions use `ALGORITHM=INSTANT, LOCK=DEFAULT`; hot indexes and the nullable
+source FK use `ALGORITHM=INPLACE, LOCK=NONE`. Triggers preserve source and frozen-review
+invariants without retained-table CHECK rebuilds. New action binding predicates that involve
+FK columns also use triggers. FK validation is suspended only on the migration connection
+while adding the previously unused nullable link, then restored. Do not remove algorithm
+guards or permit COPY fallback. Online algorithms still require metadata-lock acquisition.
+
+DDL auto-commits. If migration fails, retain the drain, inspect applied statements and Flyway
+history, and recover forward. The rollback floor is
+`tenant/V238__ai_agent_singleton_proposals.sql`, including when missions are disabled. Earlier
+binaries cannot safely purge/export source-linked proposals or preserve frozen-review
+invariants. Returning below the floor requires a separately reviewed drain, settlement,
+complete enrolled privacy purge and unconditional residual verification.
+
+Review expires at the earlier of earliest authoritative preparation plus 72 hours and the
+fixed hard deadline. Publication, retries and restart never refresh preparation age. Waiting
+review is independent of the execution deadline.

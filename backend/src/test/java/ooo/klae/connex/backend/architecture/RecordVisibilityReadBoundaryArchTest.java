@@ -36,9 +36,11 @@ class RecordVisibilityReadBoundaryArchTest {
         if (!Files.exists(root.resolve("backend"))) {
             root = root.getParent();
         }
-        String source = Files.readString(root.resolve(
-            "backend/src/main/java/ooo/klae/connex/backend/services/RecordVisibilityScopeControlAccess.java"));
-        assertEquals(List.of(), violations(source));
+        for (String source : List.of("services/RecordVisibilityScopeControlAccess.java",
+                "tenant/TenantWorkScope.java", "ai/mission/AiAgentScopePolicy.java")) {
+            assertEquals(List.of(), violations(Files.readString(root.resolve(
+                "backend/src/main/java/ooo/klae/connex/backend/" + source))), source);
+        }
     }
 
     @Test
@@ -48,7 +50,9 @@ class RecordVisibilityReadBoundaryArchTest {
                 "Object read(RecordVisibilityRead read) { return write(read::read); }",
                 "Object write(Supplier work) { return read(() -> work.get()); }",
                 "Object read(RecordVisibilityRead read) { return Scope.helper(read::read); }",
-                "Object read(RecordVisibilityRead read) { java.util.function.Supplier work = read::read; return work.get(); }")) {
+                "Object read(RecordVisibilityRead read) { java.util.function.Supplier work = read::read; return work.get(); }",
+                "Object read(WorkspaceRead read) { return write(read::read); }",
+                "Object read(WorkspaceRead read) { return Scope.helper(() -> read.read()); }")) {
             String source = "class Scope { "
                 + "Object read(RecordVisibilityRead read) { return read.read(); } "
                 + "Object write(Supplier work) { return helper(work); } "
@@ -83,7 +87,7 @@ class RecordVisibilityReadBoundaryArchTest {
                             @Override
                             public Void visitIdentifier(IdentifierTree identifier, Void ignored) {
                                 String type = identifier.getName().toString();
-                                if (Set.of("Supplier", "RecordVisibilityRead").contains(type)) {
+                                if (Set.of("Supplier", "RecordVisibilityRead", "WorkspaceRead").contains(type)) {
                                     methodTypes.add(type);
                                 }
                                 return super.visitIdentifier(identifier, ignored);
@@ -92,7 +96,7 @@ class RecordVisibilityReadBoundaryArchTest {
                             @Override
                             public Void visitMemberSelect(MemberSelectTree member, Void ignored) {
                                 String type = member.getIdentifier().toString();
-                                if (Set.of("Supplier", "RecordVisibilityRead").contains(type)) {
+                                if (Set.of("Supplier", "RecordVisibilityRead", "WorkspaceRead").contains(type)) {
                                     methodTypes.add(type);
                                 }
                                 return super.visitMemberSelect(member, ignored);

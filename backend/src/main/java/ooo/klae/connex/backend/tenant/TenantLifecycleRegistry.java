@@ -322,6 +322,7 @@ public final class TenantLifecycleRegistry {
         raw.add(direct("ai_chat_tool_call", 452));
         raw.add(direct("ai_chat_message", 453));
         raw.add(direct("ai_chat_turn", 454));
+        raw.add(direct("ai_agent_action", 451));
         raw.add(direct("ai_agent_segment", 455, nullify("turn_id")));
         raw.add(direct("ai_agent_run", 456, nullify("report_message_id"), nullify("active_segment_id")));
         raw.add(direct("ai_agent_privacy_object", 457));

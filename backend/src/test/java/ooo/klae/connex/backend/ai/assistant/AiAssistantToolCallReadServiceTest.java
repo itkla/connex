@@ -1295,6 +1295,73 @@ class AiAssistantToolCallReadServiceTest {
     }
 
     @Test
+    void missionCardUsesOriginalPreparationRatherThanLaterInsertionForFreshnessAndExpiry() {
+        AiChatToolCall call = ownerProposal(93, 31, "Ada Owner");
+        call.setProposalOrigin("mission");
+        call.setArtifactOrigin("mission");
+        call.setMissionRunId(71);
+        call.setMissionActionId(81);
+        call.setCreatedAt("2026-08-12 11:59:00.000000");
+        Person target = person(31, "Ada Lovelace");
+        target.setUpdatedAt("2026-08-12 11:30:00.000000");
+        when(personMapper.getByIds(WORKSPACE_ID, List.of(31))).thenReturn(List.of(target));
+        Instant deadline = Instant.parse("2026-08-13T11:00:00Z");
+
+        AiAssistantToolCallReadDto card = service.projectMission(accessibleSession, call, 61,
+                "2026-08-12T11:00:00.000000", deadline);
+
+        assertEquals("recordChanged", card.change().state());
+        assertEquals(deadline.toString(), card.reviewExpiresAt());
+        assertEquals("open", card.reviewState());
+        assertEquals(61, card.turnId());
+        assertEquals(call.getCreatedAt(), card.createdAt());
+    }
+
+    @Test
+    void missionCompanyCardUsesScopedVisibilityAndWithholdsLostTargets() {
+        AiChatToolCall call = toolCall(95, USER_ID, "assign_owner", "confirm", "proposed", "company", 52, 63, null);
+        call.setProposalOrigin("mission");
+        call.setArtifactOrigin("mission");
+        call.setMissionRunId(71);
+        call.setMissionActionId(83);
+        stubVisibleCompany();
+
+        AiAssistantToolCallReadDto visible = service.projectMission(accessibleSession, call, 63,
+                "2026-08-12T11:00:00", CLOCK.instant().plusSeconds(3600));
+
+        assertEquals("Acme company", visible.target().label());
+        when(companyMapper.getByIds(WORKSPACE_ID, "[7,8,9]", List.of(52))).thenReturn(List.of());
+
+        AiAssistantToolCallReadDto withheld = service.projectMission(accessibleSession, call, 63,
+                "2026-08-12T11:00:00", CLOCK.instant().plusSeconds(3600));
+
+        assertNull(withheld.target().id());
+        assertNull(withheld.target().label());
+        assertNull(withheld.change());
+        verify(companyMapper, times(2)).getByIds(WORKSPACE_ID, "[7,8,9]", List.of(52));
+    }
+
+    @Test
+    void missionCardUsesExplicitReviewDeadlineEvenWhenInsertionWouldRemainFresh() {
+        AiChatToolCall call = ownerProposal(94, 31, "Ada Owner");
+        call.setProposalOrigin("mission");
+        call.setArtifactOrigin("mission");
+        call.setMissionRunId(71);
+        call.setMissionActionId(82);
+        call.setCreatedAt("2026-08-12 11:59:00.000000");
+        Person target = person(31, "Ada Lovelace");
+        target.setUpdatedAt("2026-08-08 11:00:00.000000");
+        when(personMapper.getByIds(WORKSPACE_ID, List.of(31))).thenReturn(List.of(target));
+
+        AiAssistantToolCallReadDto card = service.projectMission(accessibleSession, call, 62,
+                "2026-08-09T11:00:00.000000", CLOCK.instant());
+
+        assertEquals("expired", card.reviewState());
+        assertEquals(CLOCK.instant().toString(), card.reviewExpiresAt());
+        assertEquals(62, card.turnId());
+    }
+
+    @Test
     void aViewerWhoLostTheUpdatePermissionSeesTheChangeAsUnapplicable() {
         when(workspaceService.permissionsFor(WORKSPACE_ID, USER_ID)).thenReturn(Set.of());
         when(workspaceService.getMembers(WORKSPACE_ID)).thenReturn(List.of(

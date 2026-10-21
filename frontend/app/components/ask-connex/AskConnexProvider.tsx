@@ -14,7 +14,7 @@ import {
     type ReactNode,
 } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import { useParams, usePathname, useRouter } from 'next/navigation';
+import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { ArrowsPointingOutIcon, SparklesIcon } from '@heroicons/react/24/outline';
 
 import AskConnexDrawer, {
@@ -183,7 +183,7 @@ import { LEAD_SOURCES } from '@/app/lib/contactProvenance';
 import { proposalReviewNow } from '@/app/lib/proposalReviewClock';
 import { createAiChatSocket } from '@/app/lib/realtime';
 import { workspaceUnavailableDescription } from '@/app/lib/errorMessages';
-import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
+import { renderedWorkspaceId, renderedWorkspaceNavigationVersion, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { formatDate, formatRelativeTime, formatUtcDateTime } from '@/app/lib/utils';
 import type {
@@ -450,6 +450,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const now = useLiveNow();
     const router = useRouter();
     const pathname = usePathname() ?? '';
+    const searchParams = useSearchParams();
+    const missionOutputId = parseStoredAskConnexSession(searchParams?.get('mission') ?? null);
+    const openedMissionRef = useRef<string | null>(null);
     const params = useParams<{ sessionId?: string | string[] }>();
     const workspaceMode = pathname === '/ask-connex' || pathname.startsWith('/ask-connex/');
     const workspaceSessionId = workspaceMode ? routeSessionId(params.sessionId) : null;
@@ -614,6 +617,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const durableFollowerRef = useRef<number | null>(null);
     const workspaceReturnRef = useRef(false);
     const workspaceSessionIdRef = useRef(workspaceSessionId);
+    const workspaceRouteNavigationRef = useRef<number | null>(null);
+    if (workspaceRouteNavigationRef.current === null) {
+        workspaceRouteNavigationRef.current = renderedWorkspaceNavigationVersion();
+    }
 
     /** Cleanup-returning refs receive no null callback; React's ref type still requires nullability. */
     const registerDesktopRoot = useCallback((node: HTMLElement | null) => {
@@ -853,7 +860,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
 
     useEffect(() => {
         workspaceSessionIdRef.current = workspaceSessionId;
-    }, [workspaceSessionId]);
+        workspaceRouteNavigationRef.current = renderedWorkspaceNavigationVersion();
+    }, [pathname, workspaceSessionId]);
 
     const turnActive = turn.phase === 'accepted' || turn.phase === 'running';
     const activeTurn = useMemo(
@@ -1689,7 +1697,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         sessionControllerRef.current?.abort();
         sessionControllerRef.current = null;
         const storedSessionId = parseStoredAskConnexSession(safeStorageGet(sessionKey));
-        const selectedSessionId = workspaceSessionIdRef.current ?? storedSessionId;
+        const selectedSessionId = workspaceRouteNavigationRef.current === renderedWorkspaceNavigationVersion()
+            ? workspaceSessionIdRef.current ?? storedSessionId : storedSessionId;
         const storedTurn = parseStoredAskConnexTurn(safeStorageGet(turnKey));
 
         const initialize = async () => {
@@ -1846,6 +1855,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
 
     useEffect(() => {
         if (!workspaceMode || stateIdentity !== identity || switching) return;
+        if (workspaceRouteNavigationRef.current !== renderedWorkspaceNavigationVersion()) return;
+        const navigationVersion = renderedWorkspaceNavigationVersion();
         if (activeTurn !== null) {
             const activeSessionId = activeSessionRef.current?.id ?? null;
             if (activeSessionId !== null && workspaceSessionId !== activeSessionId) {
@@ -1878,9 +1889,11 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         const load = async () => {
             try {
                 const detail = await refreshTranscript(workspaceSessionId, signal, false);
+                if (signal.aborted || navigationVersion !== renderedWorkspaceNavigationVersion()) return;
                 if (detail?.activeTurn) void followDurableTurn(detail.activeTurn, signal);
             } catch (error) {
                 if (signal.aborted) return;
+                if (navigationVersion !== renderedWorkspaceNavigationVersion()) return;
                 if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
                     clearActiveSession();
                     setPrivacyUnavailable(true);
@@ -3223,6 +3236,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             recordLink: (target: string) => t('toolCards.recordLink', { target }),
             rejectedDetail: t('toolCards.states.rejectedDetail'),
             rejectedStatus: t('toolCards.states.rejected'),
+            withdrawnStatus: t('missions.review.withdrawn'),
+            withdrawnDetail: t('missions.review.withdrawn'),
             restrictedTarget: t('toolCards.restrictedTarget'),
             undo: t('toolCards.actions.undo'),
             undoAria: (target: string) => t('toolCards.actions.undoAria', { target }),
@@ -3340,6 +3355,19 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         onChanged: missionChanged,
         onContentInvalidated: invalidateSessionContent,
     });
+    useEffect(() => {
+        if (!workspaceMode || missionOutputId === null) {
+            openedMissionRef.current = null;
+            return;
+        }
+        if (missions.pendingId !== null || missions.loading) return;
+        const targetKey = `${identity}:${activeSession?.id}:${missionOutputId}`;
+        if (openedMissionRef.current === targetKey) return;
+        const run = missions.runs.find((item) => item.id === missionOutputId);
+        if (!run || !run.outputAvailable || run.contentWithheld) return;
+        openedMissionRef.current = targetKey;
+        void missions.viewOutput(run);
+    }, [activeSession?.id, identity, missionOutputId, missions, workspaceMode]);
     const missionRecord = contextResult.pageContext.length === 1 ? contextResult.pageContext[0] : undefined;
     const missionRecordLabel = missionRecord
         ? contextResult.attachments.find((item) => item.kind === missionRecord.kind && item.id === missionRecord.id)?.label
@@ -3377,14 +3405,19 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                         problem={missions.problem} pendingId={missions.pendingId} output={missions.output}
                         hasMore={missions.hasMore} onControl={(run, action) => void missions.control(run, action)}
                         onOutput={(run) => void missions.viewOutput(run)} onCloseOutput={missions.closeOutput}
-                        onRetry={missions.retry} onMore={() => void missions.loadMore()} />
+                        onRetry={missions.retry} onMore={() => void missions.loadMore()}
+                        proposalGroup={missions.proposalGroup} decisionResult={missions.decisionResult}
+                        reviewLabels={labels.proposalReview} cardLabels={labels.toolCard}
+                        onToggleInclusion={missions.toggleInclusion}
+                        onProposalAction={(id, action) => { if (action !== 'undo') void missions.decide([id], action === 'approve' ? 'approve' : 'discard'); }}
+                        onApplySelected={(ids) => missions.decide(ids, 'approve')} />
                 ) : null}
                 missionComposerAction={scoped && missionRecord && missionRecordLabel !== null
                     && fileAttachments.length === 0 && selectionContext === null ? (
                     <AskConnexMissionCreate key={`${identity}:${missionRecord.kind}:${missionRecord.id}`}
                         recordLabel={missionRecordLabel} initialGoal={askConnexMessageContent(composer)}
                         disabled={working || loadState !== 'ready' || unavailable !== null || missions.pendingId !== null}
-                        problem={missions.problem} onCreate={async (goal) => {
+                        problem={missions.problem} onCreate={async (goal, missionType) => {
                             const signal = identityControllerRef.current?.signal;
                             if (!signal || signal.aborted) return false;
                             const origin = workspacePinnedRequest(renderedWorkspaceId(), { signal });
@@ -3393,7 +3426,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                                 if (signal.aborted) return false;
                                 return await missions.create(session.id, goal, {
                                     kind: 'record', recordKind: missionRecord.kind, recordId: missionRecord.id,
-                                }, signal);
+                                }, signal, missionType);
                             } catch (error) {
                                 if (!signal.aborted) showApiError(error, 'missions.problems.failed');
                                 return false;

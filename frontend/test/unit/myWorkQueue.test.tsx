@@ -81,6 +81,7 @@ const REASON_CODES = [
     "deal_close_overdue",
     "deal_closing_soon",
     "document_approval_pending",
+    "mission_review_pending",
 ] as const;
 
 const EVIDENCE_CODES = [
@@ -88,6 +89,7 @@ const EVIDENCE_CODES = [
     "task_open",
     "deal_close_date",
     "approval_requested",
+    "mission_output_prepared",
 ] as const;
 
 function item(overrides: Partial<WorkItem> = {}): WorkItem {
@@ -149,6 +151,21 @@ const ok = (data: WorkItemPage): CookieResult<WorkItemPage> => ({ ok: true, data
 const failedResult: CookieResult<WorkItemPage> = { ok: false };
 
 describe("My Work queue rendered states", () => {
+    it("shows one mission root with its exact review link and no approval control", () => {
+        const mission = item({ id: "ai_mission:12", source: "ai_mission", sourceId: 12,
+            title: "Record preparation", reason: { code: "mission_review_pending" }, urgency: "normal",
+            evidence: [{ code: "mission_output_prepared", sourceType: "ai_mission", sourceId: 12,
+                occurredAt: "2026-08-31T00:00:00Z" }],
+            context: { type: "ai_mission", id: 12, label: "Record preparation", href: "/ask-connex/7?mission=12" },
+            permittedActions: ["open_context"] });
+        const html = render(ok(pageOf({ items: [mission], knownMatchingTotal: 1, knownOverallTotal: 1 })));
+        expect(html).toContain("queueSource_ai_mission");
+        expect(html).toContain("queueReason_mission_review_pending");
+        expect(html).toContain('href="/ask-connex/7?mission=12"');
+        expect(html).not.toContain("queueApprove");
+        expect(html).not.toContain("queueReject");
+    });
+
     it("renders a failed initial projection as unavailable, never as empty", () => {
         const html = render(failedResult);
         expect(html).toContain("queueUnavailableTitle");

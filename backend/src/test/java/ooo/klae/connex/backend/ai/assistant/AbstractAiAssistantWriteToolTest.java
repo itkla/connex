@@ -15,6 +15,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -271,8 +272,8 @@ abstract class AbstractAiAssistantWriteToolTest {
                 mock(CompanyMapper.class),
                 mock(DealMapper.class),
                 dateResolver,
-                mock(AiAssistantScopeReadService.class), ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
-        return new AiAssistantWriteToolService(
+                mock(AiAssistantScopeReadService.class), ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered(), ooo.klae.connex.backend.support.TenantWorkScopes.passThrough());
+        AiAssistantWriteToolService service = new AiAssistantWriteToolService(
                 catalog,
                 registry,
                 readExecutor,
@@ -290,6 +291,9 @@ abstract class AbstractAiAssistantWriteToolTest {
                 objectMapper,
                 VALIDATORS.getValidator(),
                 CLOCK, tagService);
+        service.setTransactionProvider(new org.springframework.beans.factory.support.StaticListableBeanFactory(
+                Map.of("service", service)).getBeanProvider(AiAssistantWriteToolService.class));
+        return service;
     }
 
     AiAssistantDraftDocumentWriteTool draftDocumentTool() {

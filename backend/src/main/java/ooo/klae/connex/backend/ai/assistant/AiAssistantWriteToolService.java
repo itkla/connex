@@ -15,6 +15,7 @@ import java.util.function.Consumer;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -125,6 +126,15 @@ public class AiAssistantWriteToolService {
     private final Validator validator;
     private final Clock clock;
     private final TagService tagService;
+    private org.springframework.beans.factory.ObjectProvider<AiAssistantWriteToolService> transactionalSelf;
+    @org.springframework.beans.factory.annotation.Autowired
+    private org.springframework.beans.factory.ObjectProvider<ooo.klae.connex.backend.ai.mission.AiAgentProposalDecisionService> missionDecisions;
+
+    /** Supplies the transactional reactive entry point without nesting mission source locks. */
+    @org.springframework.beans.factory.annotation.Autowired
+    void setTransactionProvider(org.springframework.beans.factory.ObjectProvider<AiAssistantWriteToolService> provider) {
+        transactionalSelf = provider;
+    }
 
     /** Converts one provider tool call into a typed and server-resolved durable proposal. */
     public AiAssistantPreparedWrite prepare(
@@ -551,6 +561,7 @@ public class AiAssistantWriteToolService {
     public AiAssistantToolCallDto approve(int sessionId, int toolCallId) {
         Actor actor = currentActor();
         requireMutationAllowed(actor.workspaceId(), actor.userId());
+        requireReactiveOrigin(actor, sessionId, toolCallId);
         PreliminaryPrincipals principals = preliminaryPrincipals(actor, sessionId, toolCallId);
         AuthorizedToolCall authorized = lockAuthorizedToolCall(
                 actor.workspaceId(), actor.userId(), sessionId, toolCallId,
@@ -560,6 +571,32 @@ public class AiAssistantWriteToolService {
             retainPrivacy(authorized);
             return dto(toolCall);
         }
+        return approveLocked(new LockedDecisionContext(toolCall, authorized.authority(), authorized.privacyToken(),
+                authorized.restrictionEpoch(), toolCall.getCreatedAt(),
+                AiAssistantProposalExpiry.reviewExpiresAt(toolCall.getCreatedAt()), principals));
+    }
+
+    /** Discover named principals before the mission coordinator acquires authorization roots. */
+    public PreliminaryPrincipals missionPrincipals(AiChatToolCall toolCall) {
+        if (!PROPOSED.equals(toolCall.getStatus())) {
+            return PreliminaryPrincipals.NONE;
+        }
+        StoredWrite write = readStored(toolCall);
+        var principals = new PreliminaryPrincipals(write.tool().principals(write.typedRequest(),
+                memberDirectory(workspaceService.getCurrentWorkspaceId())));
+        requirePinnedPrincipals(write, principals);
+        return principals;
+    }
+
+    /** Executes one CONFIRM decision beneath an already ordered source-specific lock hierarchy. */
+    @Transactional(propagation = Propagation.MANDATORY, isolation = Isolation.READ_COMMITTED)
+    public AiAssistantToolCallDto approveLocked(LockedDecisionContext context) {
+        Actor actor = currentActor();
+        requireMutationAllowed(actor.workspaceId(), actor.userId());
+        AiChatToolCall toolCall = context.toolCall();
+        PreliminaryPrincipals principals = context.principals();
+        AuthorizedToolCall authorized = new AuthorizedToolCall(toolCall, context.authority(),
+                context.privacyToken(), context.restrictionEpoch());
         requireStatus(toolCall, PROPOSED);
         StoredWrite write = readStored(toolCall);
         if (write.tier() != ToolTier.CONFIRM) {
@@ -571,14 +608,14 @@ public class AiAssistantWriteToolService {
         if (restrictionEpoch.current(actor.workspaceId()) != write.restrictionEpoch()) {
             throw new ConflictException("Assistant proposal restrictions changed");
         }
-        requireTargetUnchangedSinceProposal(write, toolCall, mutation);
+        requireTargetUnchangedSinceProposal(write, context.preparedAt(), mutation);
         requirePermissions(authorized.authority(), actor.userId(), write);
         ExecutionOutcome outcome = execute(
                 write,
                 new Authority(
                         actor.workspaceId(), actor.userId(), toolCall.getId(), clock.instant()),
                 principals,
-                mutation, new ProposalAdmission(toolCall, clock, () -> {
+                mutation, new ProposalAdmission(toolCall, clock, context.reviewDeadline(), () -> {
                     if (!restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
                             actor.workspaceId(), write.restrictionEpoch())) {
                         throw new ConflictException("Assistant proposal restrictions changed");
@@ -597,6 +634,39 @@ public class AiAssistantWriteToolService {
         toolCall.setStatus(EXECUTED);
         toolCall.setResultJson(resultJson);
         return dto(toolCall);
+    }
+
+    /** Discards one locked canonical proposal without requiring domain edit authority. */
+    @Transactional(propagation = Propagation.MANDATORY, isolation = Isolation.READ_COMMITTED)
+    public AiAssistantToolCallDto discardLocked(LockedDecisionContext context) {
+        AiChatToolCall call = context.toolCall();
+        requireStatus(call, PROPOSED);
+        StoredWrite write = readStored(call);
+        if (write.tier() != ToolTier.CONFIRM) {
+            throw new ConflictException("Assistant tool does not require approval");
+        }
+        new ProposalAdmission(call, clock, context.reviewDeadline(), () -> {
+            if (!restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
+                    context.privacyToken().workspaceId(), context.restrictionEpoch())) {
+                throw new ConflictException("Assistant proposal restrictions changed");
+            }
+            privacyGuard.retain(chatMapper, context.privacyToken());
+        }).beforeMutation();
+        String result = serialize(Map.of("tier", "confirm", "approval",
+                Map.of("status", REJECTED, "at", clock.instant().toString())));
+        if (chatMapper.updateToolCall(context.privacyToken().workspaceId(), call.getMessageId(), call.getId(),
+                REJECTED, result, workspaceService.getCurrentUserId()) != 1) {
+            throw new ConflictException("Assistant tool was already decided");
+        }
+        call.setStatus(REJECTED);
+        call.setResultJson(result);
+        return dto(call);
+    }
+
+    /** Complete authority retained by a source coordinator before entering the shared write core. */
+    public record LockedDecisionContext(AiChatToolCall toolCall, LockedPermissionSnapshot authority,
+            AiChatPrivacyToken privacyToken, long restrictionEpoch, String preparedAt,
+            Instant reviewDeadline, PreliminaryPrincipals principals) {
     }
 
     /** Explicitly rejects one pending confirm-tier proposal without executing its domain action. */
@@ -635,9 +705,19 @@ public class AiAssistantWriteToolService {
         return dto(toolCall);
     }
 
-    /** Applies a bounded inverse only while the auto-created record still matches its fingerprint. */
-    @Transactional(isolation = Isolation.READ_COMMITTED)
+    /** Discovers source before entering either reactive or mission inverse transactions. */
     public AiAssistantToolCallDto undo(int sessionId, int toolCallId) {
+        Actor actor = currentActor();
+        String origin = chatMapper.getToolArtifactOrigin(actor.workspaceId(), sessionId, toolCallId);
+        if ("mission".equals(origin)) {
+            return missionDecisions.getObject().undo(sessionId, toolCallId);
+        }
+        return transactionalSelf.getObject().undoReactive(sessionId, toolCallId);
+    }
+
+    /** Applies a bounded inverse only while the reactive auto-created record still matches its fingerprint. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public AiAssistantToolCallDto undoReactive(int sessionId, int toolCallId) {
         Actor actor = currentActor();
         requireActiveMembership(actor.workspaceId(), actor.userId());
         AuthorizedToolCall authorized = lockAuthorizedToolCall(
@@ -793,6 +873,13 @@ public class AiAssistantWriteToolService {
         }
     }
 
+    private void requireReactiveOrigin(Actor actor, int sessionId, int toolCallId) {
+        String origin = chatMapper.getToolArtifactOrigin(actor.workspaceId(), sessionId, toolCallId);
+        if (origin != null && !"reactive".equals(origin)) {
+            throw new ConflictException("mission_control_required");
+        }
+    }
+
     /**
      * Locks the authorization rows this decision rests on, then the session and tool-call rows.
      *
@@ -848,7 +935,8 @@ public class AiAssistantWriteToolService {
         if (toolCall == null || !Objects.equals(toolCall.getRequestedByUserId(), userId)) {
             throw inaccessible();
         }
-        if (toolCall.getMissionRunId() != null || !"reactive".equals(toolCall.getArtifactOrigin())) {
+        if (toolCall.getMissionRunId() != null || !"reactive".equals(toolCall.getArtifactOrigin())
+                || !"legacy".equals(toolCall.getProposalOrigin())) {
             throw new ConflictException("mission_control_required");
         }
         AiChatPrivacyToken captured = privacyGuard.capture(chatMapper, session);
@@ -1065,7 +1153,7 @@ public class AiAssistantWriteToolService {
      * member never saw.
      */
     private static void requireTargetUnchangedSinceProposal(
-            StoredWrite write, AiChatToolCall toolCall, PreparedMutation mutation) {
+            StoredWrite write, String preparedAt, PreparedMutation mutation) {
         if (write.tool().freshness() == AiAssistantWriteTool.Freshness.NONE) {
             return;
         }
@@ -1077,7 +1165,7 @@ public class AiAssistantWriteToolService {
             return;
         }
         if (AiAssistantProposalFreshness.changedSince(
-                mutation.targetUpdatedAt(), toolCall.getCreatedAt())) {
+                mutation.targetUpdatedAt(), preparedAt)) {
             throw new ConflictException(PROPOSAL_CHANGED);
         }
     }
@@ -1425,10 +1513,14 @@ public class AiAssistantWriteToolService {
         }
 
         ProposalAdmission(AiChatToolCall toolCall, Clock clock, Runnable privacyFence) {
+            this(toolCall, clock, AiAssistantProposalExpiry.reviewExpiresAt(toolCall.getCreatedAt()), privacyFence);
+        }
+
+        ProposalAdmission(AiChatToolCall toolCall, Clock clock, Instant deadline, Runnable privacyFence) {
             this.toolCallId = toolCall.getId();
             this.clock = Objects.requireNonNull(clock);
             this.privacyFence = Objects.requireNonNull(privacyFence);
-            this.deadline = AiAssistantProposalExpiry.reviewExpiresAt(toolCall.getCreatedAt());
+            this.deadline = deadline;
             this.origin = Thread.currentThread();
             if (!TransactionSynchronizationManager.isActualTransactionActive()
                     || !TransactionSynchronizationManager.isSynchronizationActive()) {
@@ -1545,10 +1637,10 @@ public class AiAssistantWriteToolService {
      *
      * @param principals a declared tool's principals, locked and handed to its write unchanged
      */
-    private record PreliminaryPrincipals(List<PrincipalRequest> principals) {
+    public record PreliminaryPrincipals(List<PrincipalRequest> principals) {
         private static final PreliminaryPrincipals NONE = new PreliminaryPrincipals(List.of());
 
-        private List<Integer> userIds() {
+        public List<Integer> userIds() {
             return principals.stream().map(PrincipalRequest::userId).toList();
         }
     }

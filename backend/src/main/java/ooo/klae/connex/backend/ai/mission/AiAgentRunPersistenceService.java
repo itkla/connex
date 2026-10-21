@@ -9,12 +9,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Supplier;
 
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.AiPrivacyMode;
@@ -47,6 +51,7 @@ import ooo.klae.connex.backend.mappers.AiAgentRunMapper;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 import tools.jackson.databind.ObjectMapper;
 
 /** Ordered mission transactions; every lease acquisition and release is the final database operation. */
@@ -62,8 +67,14 @@ public class AiAgentRunPersistenceService {
     private final ObjectMapper json;
     private final Clock clock;
     private final ObjectProvider<AiAgentRunPersistenceService> transactionalSelf;
+    private final TenantWorkScope tenantWorkScope;
+    private final PlatformTransactionManager transactionManager;
     private final AiAgentContinuationCodec codec = new AiAgentContinuationCodec();
     private final AiAgentBudgetService budget = new AiAgentBudgetService();
+    @org.springframework.beans.factory.annotation.Autowired
+    private AiAgentProposalSetPort proposals;
+    @org.springframework.beans.factory.annotation.Autowired
+    private AiAgentProposalService proposalService;
 
     /** Creates the request, goal and first immutable taint boundary in one session transaction. */
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -112,7 +123,7 @@ public class AiAgentRunPersistenceService {
         run.setRequestHash(requestHash);
         run.setMissionType(request.missionType());
         run.setDefinitionVersion(1);
-        run.setRuntimeContractVersion(2);
+        run.setRuntimeContractVersion("record_preparation_v1".equals(request.missionType()) ? 3 : 2);
         run.setLocale(locale);
         run.setGoal(request.goal());
         run.setScopeJson(scopeJson);
@@ -125,7 +136,8 @@ public class AiAgentRunPersistenceService {
         run.setMaxTokens(request.limits().maxTokens());
         run.setNextAttemptAt(now());
         run.setExecutionDeadlineAt(now().plusSeconds(request.limits().executionLifetimeSeconds()));
-        run.setHardDeadlineAt(run.getExecutionDeadlineAt());
+        run.setHardDeadlineAt(AiAgentMissionCatalog.proposals(run)
+                ? run.getExecutionDeadlineAt().plusHours(72) : run.getExecutionDeadlineAt());
         runs.insertRun(run);
         codec.initialize(run);
         if (runs.updateContinuation(run, run.getStateVersion(), run.getExecutionGeneration(), null, 0, 0) != 1) {
@@ -165,6 +177,23 @@ public class AiAgentRunPersistenceService {
         Snapshot snapshot = codec.decode(run);
         if (snapshot != null) {
             codec.validateExecutable(run, snapshot);
+        }
+        if (AiAgentMissionCatalog.proposals(run)) {
+            proposals.validateInventory(run, snapshot);
+            var scope = new AiAgentScopePolicy(json.readValue(run.getScopeJson(), AiAgentRunCreateRequest.Scope.class));
+            var inventory = proposals.allocateSlots(run, scope);
+            var before = snapshot.checkpoint();
+            var checkpoint = new AiAgentCheckpoint(before.schemaVersion(), before.definitionVersion(), before.workspaceId(),
+                    before.runId(), before.scopeFingerprint(), before.privacyGeneration(), before.revision(), before.planRevision(),
+                    before.completedPlanItemKeys(), before.nextPlanItemKey(), before.lastCommittedSegmentNo(), before.completedFacts(),
+                    inventory.stream().map(action -> new AiAgentCheckpoint.ActionSlotReference(action.getActionSlot(), action.getPlanItemKey())).toList(),
+                    before.evidenceReferences(), before.coverage(), before.continuation(), before.sourceObservations());
+            snapshot = new Snapshot(snapshot.plan(), checkpoint, snapshot.memory());
+            codec.apply(run, snapshot);
+            if (runs.updateContinuation(run, run.getStateVersion(), run.getExecutionGeneration(), null,
+                    run.getPlanRevision(), run.getCheckpointRevision()) != 1) {
+                throw new ConflictException("mission_revision_conflict");
+            }
         }
         int logicalSegment = run.getRuntimeContractVersion() == 1 ? 1 : run.getLastCommittedSegmentNo() + 1;
         int attempts = attemptsForNextSegment(run);
@@ -210,7 +239,7 @@ public class AiAgentRunPersistenceService {
         run.setReservedSteps(segment.getReservedSteps());
         run.setReservedTokens(segment.getReservedTokens());
         update(run, previousVersion, previousGeneration);
-        AiChatMessage goal = run.getRuntimeContractVersion() == 2
+        AiChatMessage goal = AiAgentMissionCatalog.continuation(run.getRuntimeContractVersion())
                 ? runs.goalMessageIdentity(workspaceId, run.getId())
                 : chat.getMissionMessage(workspaceId, run.getId(), "goal");
         if (goal == null) {
@@ -322,6 +351,9 @@ public class AiAgentRunPersistenceService {
         requireIdentity(run, policy);
         Snapshot snapshot = codec.decode(run);
         codec.validateExecutable(run, snapshot);
+        if (policy.proposalCapable()) {
+            proposals.validateInventory(run, snapshot);
+        }
         return snapshot;
     }
 
@@ -356,7 +388,7 @@ public class AiAgentRunPersistenceService {
 
     private String commitBookkeeping(AiAgentExecutionPolicy policy, int step, int ordinal, String name,
             String arguments, String result, Snapshot prepared, boolean checkpoint) {
-        if (policy.runtimeContractVersion() != 2 || prepared == null || arguments == null || result == null
+        if (!AiAgentMissionCatalog.continuation(policy.runtimeContractVersion()) || prepared == null || arguments == null || result == null
                 || arguments.getBytes(StandardCharsets.UTF_8).length > 65536
                 || result.getBytes(StandardCharsets.UTF_8).length > 65536) {
             throw new AiAssistantLoopException("mission_content_refused", "mission_content_refused");
@@ -484,13 +516,34 @@ public class AiAgentRunPersistenceService {
         return changed;
     }
 
-    /** Publishes the one screened report, accounting, terminal state and lease release atomically. */
-    @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
+    /** Prepares workspace scopes before atomically publishing an admitted singleton and its provenance. */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public AiChatToolCall publishPrepared(AiAgentExecutionPolicy policy, AiAgentProposalService.Prepared prepared) {
+        return proposalTransaction(policy, () -> publishPreparedInWorkspace(policy, prepared));
+    }
+
+    private AiChatToolCall publishPreparedInWorkspace(AiAgentExecutionPolicy policy, AiAgentProposalService.Prepared prepared) {
+        AiAgentRun run = lockExecution(policy);
+        proposals.lockInventory(run);
+        lockAttempt(policy);
+        proposalService.revalidate(policy, List.of(prepared.action()));
+        AiChatToolCall call = proposals.publishPrepared(run, policy, prepared.action(), prepared.write());
+        fence(policy.turn().privacyToken(), policy.turn().restrictionEpoch());
+        return call;
+    }
+
+    /** Prepares workspace scopes before atomically publishing the report, accounting and lease release. */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public boolean resolve(AiAgentExecutionPolicy policy, String text, String metadata) {
+        return proposalTransaction(policy, () -> resolveInWorkspace(policy, text, metadata));
+    }
+
+    private boolean resolveInWorkspace(AiAgentExecutionPolicy policy, String text, String metadata) {
         if (text == null || text.isBlank() || text.length() > 16000 || SpecialCareTextScreen.screen(text).excluded()) {
             throw new AiAssistantLoopException("malformed_output", "malformed_output");
         }
         AiAgentRun run = lockExecution(policy);
+        var inventory = AiAgentMissionCatalog.proposals(run) ? proposals.lockInventory(run) : List.<ooo.klae.connex.backend.beans.AiAgentAction>of();
         AiAgentSegment segment = lockAttempt(policy);
         if (segment.isUsageUncertain() || run.getReportMessageId() != null) {
             throw new ConflictException("mission_state_conflict");
@@ -505,11 +558,24 @@ public class AiAgentRunPersistenceService {
                 "assistant", "report", text, json.writeValueAsString(object));
         chat.insertMessage(report);
         run.setReportMessageId(report.getId());
-        settle(run, segment, "done", null, false);
+        if (AiAgentMissionCatalog.proposals(run)) {
+            proposalService.revalidate(policy, inventory);
+            proposals.freeze(run, inventory, clock.instant());
+        }
+        settle(run, segment, run.getReviewExpiresAt() == null ? "done" : "waiting_approval", null, false);
         chat.updateLastMessageAt(run.getWorkspaceId(), policy.turn().sessionId());
         fence(policy.turn().privacyToken(), policy.turn().restrictionEpoch());
         leases.releaseHeldInCurrentTransaction(policy.lease().key());
         return true;
+    }
+
+    private <T> T proposalTransaction(AiAgentExecutionPolicy policy, Supplier<T> operation) {
+        return tenantWorkScope.inWorkspace(policy.turn().workspaceId(), () -> {
+            var transaction = new TransactionTemplate(transactionManager);
+            transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+            transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+            return transaction.execute(status -> operation.get());
+        });
     }
 
     /** Owner controls retain original caps/deadlines and need no provider readiness to stop. */
@@ -528,6 +594,9 @@ public class AiAgentRunPersistenceService {
             if ("cancel".equals(action) && "cancelled".equals(run.getStatus())) {
                 return run;
             }
+            throw new ConflictException("mission_state_conflict");
+        }
+        if ("waiting_approval".equals(run.getStatus()) && !"cancel".equals(action)) {
             throw new ConflictException("mission_state_conflict");
         }
         if ("resume".equals(action)) {
@@ -553,6 +622,12 @@ public class AiAgentRunPersistenceService {
             return run;
         }
         String state = "pause".equals(action) ? "paused" : "cancelled";
+        if (proposals.hasInventory(run)) {
+            proposals.lockInventory(run);
+            if ("cancelled".equals(state)) {
+                proposals.withdrawPending(run, "cancelled");
+            }
+        }
         AiAgentSegment segment = activeSegment(run);
         settle(run, segment, state, "pause".equals(action) ? "member" : "cancelled", true);
         if (segment != null) {
@@ -606,11 +681,18 @@ public class AiAgentRunPersistenceService {
         chat.getSessionByIdForMaintenanceUpdate(discovered.getWorkspaceId(), discovered.getSessionId());
         AiAgentRun run = requireRun(discovered.getWorkspaceId(), discovered.getId(), discovered.getSessionId());
         if (Set.of("done", "failed", "cancelled").contains(run.getStatus())
-                || now().isBefore(run.getExecutionDeadlineAt())) {
+                || ("waiting_approval".equals(run.getStatus())
+                        ? run.getReviewExpiresAt() == null || now().isBefore(run.getReviewExpiresAt())
+                        : now().isBefore(run.getExecutionDeadlineAt()))) {
             return false;
         }
+        boolean review = "waiting_approval".equals(run.getStatus());
+        if (proposals.hasInventory(run)) {
+            proposals.lockInventory(run);
+            proposals.withdrawPending(run, review ? "review_expired" : "execution_expired");
+        }
         AiAgentSegment segment = activeSegment(run);
-        settle(run, segment, "failed", "expired", true);
+        settle(run, segment, "failed", review ? "review_expired" : "expired", true);
         if (segment != null) {
             leases.releaseHeldInCurrentTransaction(new AiRunLeaseKey(run.getWorkspaceId(), AiRunLeaseSubject.AGENT_RUN, run.getId()));
         }
@@ -629,6 +711,10 @@ public class AiAgentRunPersistenceService {
                 || run.getExecutionGeneration() != discovered.getExecutionGeneration()
                 || Set.of("done", "failed", "cancelled").contains(run.getStatus())) {
             return;
+        }
+        if (proposals.hasInventory(run)) {
+            proposals.lockInventory(run);
+            proposals.withdrawPending(run, "owner_departed");
         }
         AiAgentSegment segment = activeSegment(run);
         settle(run, segment, "cancelled", "owner_departed", true);
@@ -649,7 +735,8 @@ public class AiAgentRunPersistenceService {
             return;
         }
         AiAgentSegment segment = activeSegment(run);
-        settle(run, segment, "paused", reason, true);
+        settle(run, segment, AiAgentMissionCatalog.proposals(run)
+                && !AiAgentMissionCatalog.automaticRetryReason(reason) ? "failed" : "paused", reason, true);
         leases.releaseHeldInCurrentTransaction(new AiRunLeaseKey(run.getWorkspaceId(), AiRunLeaseSubject.AGENT_RUN, run.getId()));
     }
 
@@ -683,7 +770,7 @@ public class AiAgentRunPersistenceService {
         AiAgentRun run = requireRun(discovered.getWorkspaceId(), discovered.getId(), discovered.getSessionId());
         if (run.getStateVersion() != discovered.getStateVersion()
                 || run.getExecutionGeneration() != discovered.getExecutionGeneration()
-                || run.getRuntimeContractVersion() != 2 || !"paused".equals(run.getStatus())
+                || !AiAgentMissionCatalog.continuation(run.getRuntimeContractVersion()) || !"paused".equals(run.getStatus())
                 || !AiAgentMissionCatalog.automaticRetryReason(run.getReasonCode())
                 || (run.getNextAttemptAt() != null && run.getNextAttemptAt().isAfter(now()))) {
             return false;
@@ -725,6 +812,10 @@ public class AiAgentRunPersistenceService {
         lockSession(turn.workspaceId(), turn.userId(), turn.sessionId());
         AiAgentRun run = requireRun(turn.workspaceId(), policy.runId(), turn.sessionId());
         requireIdentity(run, policy);
+        if (policy.proposalCapable()) {
+            proposals.lockInventory(run);
+            proposals.validateInventory(run, codec.decode(run));
+        }
         if (requireOpenDeadline && !clock.instant().isBefore(policy.deadline())) {
             throw new AiAssistantLoopException("mission_expired", "mission_expired");
         }
@@ -748,6 +839,9 @@ public class AiAgentRunPersistenceService {
     }
 
     private AiAgentSegment activeSegment(AiAgentRun run) {
+        if (proposals.hasInventory(run)) {
+            proposals.lockInventory(run);
+        }
         if (run.getActiveSegmentId() == null) {
             return null;
         }
@@ -762,6 +856,9 @@ public class AiAgentRunPersistenceService {
     private void settle(AiAgentRun run, AiAgentSegment segment, String state, String reason, boolean interrupted) {
         long version = run.getStateVersion();
         long generation = run.getExecutionGeneration();
+        if (Set.of("failed", "cancelled").contains(state) && proposals.hasInventory(run)) {
+            proposals.withdrawPending(run, "cancelled".equals(state) ? "cancelled" : "mission_failed");
+        }
         if (segment != null) {
             var charge = budget.settle(segment);
             run.setConsumedSteps(Math.addExact(run.getConsumedSteps(), charge.steps()));

@@ -1322,7 +1322,9 @@
       "phases": {
         "queued": "Waiting to begin.",
         "reading": "Reading the record and its evidence.",
-        "writing_report": "Writing the summary."
+        "writing_report": "Writing the summary.",
+        "preparing_changes": "Preparing changes for your review.",
+        "waiting_review": "The summary and changes are ready for your review."
       },
       "controls": {
         "pause": "Pause",
@@ -1344,7 +1346,31 @@
         "withheld": "This review’s content is no longer available.",
         "unavailable": "Record reviews are unavailable right now. Try again later.",
         "forbidden": "You don’t have permission to view or control this review.",
-        "failed": "Couldn't load the review"
+        "failed": "Couldn't load the review",
+        "preparationConflict": "This change needs a new preparation. Start again to continue."
+      },
+      "mode": "Work to prepare",
+      "preparation": {
+        "title": "Record preparation",
+        "create": "Prepare changes",
+        "createTitle": "Prepare changes for this record",
+        "defaultGoal": "Review this record and prepare useful changes for me to review.",
+        "bounds": "Connex can prepare changes while you are away, for up to 15 minutes. Changes wait for you to apply them.",
+        "start": "Start preparation",
+        "outputTitle": "Summary and proposed changes",
+        "viewOutput": "Review changes"
+      },
+      "review": {
+        "pending": "{count, plural, one {# change awaiting review} other {# changes awaiting review}}",
+        "deadline": "Review these changes by {date}.",
+        "windowHelp": "The review period starts when changes are prepared. Reopening does not extend it.",
+        "independent": "Each selected change is applied separately. Some may need a fresh proposal.",
+        "complete": "Review complete",
+        "expired": "These changes have expired. Prepare new changes to continue.",
+        "withdrawn": "This change is no longer available.",
+        "empty": "No changes were proposed.",
+        "indeterminate": "Connex couldn't confirm whether this change was saved. Reload before trying again, and check your records.",
+        "reload": "Reload changes"
       }
     },
     "privacyUnavailable": "This chat is no longer available following a privacy request. Start a new chat to continue.",

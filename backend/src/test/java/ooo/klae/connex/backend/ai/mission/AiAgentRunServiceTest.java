@@ -66,10 +66,17 @@ class AiAgentRunServiceTest {
     private final AiAgentRunService service = new AiAgentRunService(privacyGuard,
             mock(ooo.klae.connex.backend.ai.assistant.AiAssistantSessionReadAudit.class), transactions, runs, chat, persistence, gate, publisher,
             mock(AiAssistantToolExecutor.class), citations, new AiRestrictionEpoch(), workspaces,
-            JsonMapper.builder().build(), Clock.fixed(NOW, ZoneOffset.UTC));
+            JsonMapper.builder().build(), Clock.fixed(NOW, ZoneOffset.UTC), ooo.klae.connex.backend.support.TenantWorkScopes.passThrough());
 
     @BeforeEach
     void setUp() {
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "self",
+                new org.springframework.beans.factory.ObjectProvider<AiAgentRunService>() {
+                    @Override
+                    public AiAgentRunService getObject() {
+                        return service;
+                    }
+                });
         when(organizationAuthority.organizationId(org.mockito.ArgumentMatchers.anyInt())).thenReturn(1);
         when(organizationAuthority.current(1)).thenReturn(1L);
         when(organizationAuthority.freshCurrent(1)).thenReturn(1L);
@@ -97,17 +104,55 @@ class AiAgentRunServiceTest {
         barrier.setWorkspaceId(7);
         barrier.setGeneration(4);
         when(runs.getRun(7, 31)).thenReturn(run);
+        when(runs.lockRunForShare(7, 31)).thenReturn(run);
         session.setId(13);
         session.setWorkspaceId(7);
         session.setOrganizationPrivacyGeneration(1L);
         session.setCreatedByUserId(11);
         session.setVisibility("private");
         session.setStatus("active");
+        when(chat.getMissionSessionForShare(7, 11, 13)).thenReturn(session);
+        when(chat.lockPrivacyBarrierForShare(7)).thenReturn(barrier);
         when(chat.getAccessibleSessionById(7, 11, 13, 1L)).thenReturn(session);
         when(chat.getPrivacyBarrier(7)).thenReturn(barrier);
         when(chat.lockPrivacyBarrierForShare(7)).thenReturn(barrier);
         when(transactions.getTransaction(org.mockito.ArgumentMatchers.any()))
                 .thenReturn(new org.springframework.transaction.support.SimpleTransactionStatus());
+    }
+
+    @Test
+    void waitingCannotPauseOrResume() {
+        run.setStatus("waiting_approval");
+        var request = new AiAgentRunControlRequest(Long.toString(run.getStateVersion()));
+        assertEquals("mission_state_conflict", assertThrows(ConflictException.class,
+                () -> service.control(31, request, "pause")).getMessage());
+        assertEquals("mission_state_conflict", assertThrows(ConflictException.class,
+                () -> service.control(31, request, "resume")).getMessage());
+        verifyNoInteractions(gate, persistence);
+    }
+
+    @Test
+    void blockedGenerationRetainsSafeMetadataAndCancellation() {
+        barrier.setBlocked(true);
+        var result = service.get(31);
+        assertTrue(result.contentWithheld());
+        assertEquals("queued", result.state());
+        assertEquals(List.of("cancel"), result.availableActions());
+        assertNull(result.proposalCounts());
+        assertNull(result.proposalMembershipRevision());
+        assertThrows(AiAgentGoneException.class, () -> service.output(31));
+    }
+
+    @Test
+    void unsupportedSchemaRetainsSafeMetadataAndCancellation() {
+        run.setMissionType("record_preparation_v1");
+        run.setRuntimeContractVersion(3);
+        run.setCheckpointSchemaVersion(99);
+        var result = service.get(31);
+        assertTrue(result.contentWithheld());
+        assertEquals(List.of("cancel"), result.availableActions());
+        assertNull(result.proposalCounts());
+        assertThrows(AiAgentGoneException.class, () -> service.output(31));
     }
 
     @Test
@@ -241,6 +286,76 @@ class AiAgentRunServiceTest {
 
         verify(persistence).control(run, run.getStateVersion(), "cancel");
         verifyNoInteractions(gate);
+    }
+
+    @Test
+    void missionPageLocksContentBeforeOrganizationAndWorkspaceAuthority() {
+        when(runs.listRuns(7, 11, null, null, null, 21, 1L)).thenReturn(List.of(run));
+
+        var page = service.list(20, null, null, null);
+
+        assertEquals(1, page.items().size());
+        assertEquals(Long.toString(run.getStateVersion()), page.items().getFirst().stateVersion());
+        var ordered = org.mockito.Mockito.inOrder(chat, runs, organizationAuthority);
+        ordered.verify(chat).getMissionSessionForShare(7, 11, 13);
+        ordered.verify(runs).lockRunForShare(7, 31);
+        ordered.verify(organizationAuthority).retain(1, 1L);
+        ordered.verify(chat).lockPrivacyBarrierForShare(7);
+    }
+
+    @Test
+    void missionPageReleasesEachProjectionBeforeLockingTheNextSession() {
+        AiAgentRun second = new AiAgentRun();
+        org.springframework.beans.BeanUtils.copyProperties(run, second);
+        second.setId(32);
+        second.setSessionId(14);
+        AiChatSession secondSession = new AiChatSession();
+        org.springframework.beans.BeanUtils.copyProperties(session, secondSession);
+        secondSession.setId(14);
+        when(runs.listRuns(7, 11, null, null, null, 21, 1L)).thenReturn(List.of(second, run));
+        when(runs.getRun(7, 32)).thenReturn(second);
+        when(runs.lockRunForShare(7, 32)).thenReturn(second);
+        when(chat.getAccessibleSessionById(7, 11, 14, 1L)).thenReturn(secondSession);
+        when(chat.getMissionSessionForShare(7, 11, 14)).thenReturn(secondSession);
+        when(transactions.getTransaction(any())).thenAnswer(invocation -> {
+            org.springframework.transaction.TransactionDefinition definition = invocation.getArgument(0);
+            assertEquals(org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW,
+                    definition.getPropagationBehavior());
+            assertEquals(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED,
+                    definition.getIsolationLevel());
+            return new org.springframework.transaction.support.SimpleTransactionStatus();
+        });
+
+        assertEquals(List.of(32, 31), service.list(20, null, null, null).items().stream()
+                .map(ooo.klae.connex.backend.dto.AiAgentRunDto::id).toList());
+
+        var ordered = org.mockito.Mockito.inOrder(chat, runs, organizationAuthority, transactions);
+        ordered.verify(chat).getMissionSessionForShare(7, 11, 14);
+        ordered.verify(runs).lockRunForShare(7, 32);
+        ordered.verify(organizationAuthority).retain(1, 1L);
+        ordered.verify(chat).lockPrivacyBarrierForShare(7);
+        ordered.verify(transactions).commit(any());
+        ordered.verify(chat).getMissionSessionForShare(7, 11, 13);
+        ordered.verify(runs).lockRunForShare(7, 31);
+        ordered.verify(organizationAuthority).retain(1, 1L);
+        ordered.verify(chat).lockPrivacyBarrierForShare(7);
+        ordered.verify(transactions).commit(any());
+    }
+
+    @Test
+    void missionPageOmitsADeletedCandidateWithoutFailingThePage() {
+        when(runs.listRuns(7, 11, null, null, null, 21, 1L)).thenReturn(List.of(run));
+        when(runs.getRun(7, 31)).thenReturn(null);
+
+        assertTrue(service.list(20, null, null, null).items().isEmpty());
+    }
+
+    @Test
+    void missionPageRechecksTheStateFilterAfterDiscovery() {
+        when(runs.listRuns(7, 11, null, "queued", null, 21, 1L)).thenReturn(List.of(run));
+        run.setStatus("cancelled");
+
+        assertTrue(service.list(20, null, "queued", null).items().isEmpty());
     }
 
     private AiChatMessage report() {

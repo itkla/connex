@@ -96,6 +96,7 @@ import ooo.klae.connex.backend.ai.provider.AiToolCallingMode;
 import ooo.klae.connex.backend.ai.provider.AiToolDefinition;
 import ooo.klae.connex.backend.ai.provider.AiToolExchange;
 import ooo.klae.connex.backend.ai.provider.ResolvedAiProvider;
+import ooo.klae.connex.backend.ai.provider.scripted.ScriptedAiScriptLoader;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiAgentSegment;
 import ooo.klae.connex.backend.beans.AiAgentRun;
@@ -1955,6 +1956,24 @@ class AiInvocationServiceTest {
         verify(aiProvider).complete(request.capture());
         assertEquals(AiReasoningMode.TAGGED, request.getValue().reasoningMode());
         assertTrue(request.getValue().systemPrompt().contains("<thinking>"));
+    }
+
+    @Test
+    void missionUnsafeOutputFixtureFailsAdmissionWithoutRepair() throws Exception {
+        var directory = java.nio.file.Path.of(java.util.Objects.requireNonNull(
+                getClass().getResource("/ai/scripted/missions")).toURI());
+        var loader = new ScriptedAiScriptLoader(directory.toString(), new ObjectMapper());
+        var script = loader.bySelector("connex_script_mission_confirm_unsafe_output");
+        providerReturns(new AiCompletionResult(script.steps().getLast().emit().text(), 1, 1, "end_turn"));
+        var catalog = new AiAssistantToolCatalog();
+        var attempt = service.completeStructuredRepairable(
+                invocation("Review the selected record"), AiAssistantStep.class,
+                new AiAssistantStepGuard(catalog).forStep(AiAssistantToolCatalog.ALL, Set.of("{{P1}}")),
+                new AiAssistantStepSchema(new ObjectMapper(), catalog).missionClosingResponseSchema());
+
+        var outcome = assertInstanceOf(AiStructuredOutcome.Malformed.class, attempt.outcome());
+        assertEquals(AiStructuredOutcome.REASON_INVENTED_PLACEHOLDER, outcome.reason());
+        assertTrue(attempt.repair().isEmpty());
     }
 
     @Test

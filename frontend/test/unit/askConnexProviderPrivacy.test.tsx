@@ -10,6 +10,7 @@ import type { AskConnexScopeDraft } from '@/app/lib/askConnexScope';
 import type { AiChatSocketHandlers } from '@/app/lib/realtime';
 import type { AiAgentRun, AiAgentRunPage, AiChatSession, AiChatSessionDetail, AiChatTurn } from '@/app/lib/types';
 import { installInteractiveDocument } from '@/test/unit/helpers/interactiveDocument';
+import { navigateAfterWorkspaceSelection } from '@/app/lib/renderedWorkspace';
 
 const harness = vi.hoisted(() => ({
     drawer: vi.fn<(props: ComponentProps<typeof AskConnexDrawer>) => null>(() => null),
@@ -25,20 +26,22 @@ const harness = vi.hoisted(() => ({
     toast: vi.fn(),
     router: { push: vi.fn(), replace: vi.fn(), back: vi.fn() },
     context: { user: { id: 1, displayName: 'Member' }, record: null, selection: null },
+    workspace: { activeWorkspaceId: 1, switching: false },
+    sessionId: '7',
 }));
 
 vi.mock('@/app/components/ask-connex/AskConnexDrawer', () => ({ default: harness.drawer }));
 vi.mock('@/app/components/ask-connex/AskConnexMissionCreate', () => ({ default: () => null }));
 vi.mock('@/app/components/ask-connex/AskConnexMissionProgress', () => ({ default: () => null }));
 vi.mock('next-intl', () => ({ useLocale: () => 'en', useTranslations: () => harness.translate }));
-vi.mock('next/navigation', () => ({ useParams: () => ({ sessionId: '7' }), usePathname: () => '/ask-connex/7', useRouter: () => harness.router }));
+vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams(), useParams: () => ({ sessionId: harness.sessionId }), usePathname: () => `/ask-connex/${harness.sessionId}`, useRouter: () => harness.router }));
 vi.mock('@/app/hooks/useActions', () => ({ useActions: () => ({ context: harness.context }), useRegisterActions: () => {} }));
-vi.mock('@/app/hooks/useWorkspace', () => ({ useWorkspace: () => ({ activeWorkspaceId: 1, switching: false }) }));
+vi.mock('@/app/hooks/useWorkspace', () => ({ useWorkspace: () => harness.workspace }));
 vi.mock('@/app/hooks/usePermissions', () => ({ usePermissionCheck: () => 'granted' }));
 vi.mock('@/app/hooks/useAskConnexSkills', () => ({ useAskConnexSkills: () => [] }));
 vi.mock('@/app/hooks/useApiErrorToast', () => ({ useApiErrorToast: () => harness.toast }));
 vi.mock('@/app/hooks/useIsMobile', () => ({ useIsMobile: () => false }));
-vi.mock('@/app/hooks/useNow', () => ({ useLiveNow: () => 0 }));
+vi.mock('@/app/hooks/useNow', () => ({ useLiveNow: () => 0, useNow: () => 0 }));
 vi.mock('@/app/hooks/useAccountStorageGeneration', () => ({ useAccountStorageGeneration: () => harness.persist }));
 vi.mock('@/app/lib/realtime', () => ({ createAiChatSocket: harness.socket }));
 vi.mock('@/app/lib/api', async (importOriginal) => ({
@@ -73,7 +76,8 @@ function mission(overrides: Partial<AiAgentRun> = {}): AiAgentRun {
         scope: { kind: 'record', recordKind: 'person', recordId: 4 },
         createdAt: '2026-10-15T10:00:00Z', executionDeadlineAt: '2026-10-15T10:15:00Z',
         hardDeadlineAt: '2026-10-15T10:15:00Z', startedAt: null, finishedAt: null,
-        outputAvailable: true, contentWithheld: false, availableActions: ['view_output'], progress: null,
+        outputAvailable: true, outputRevision: '1', proposalMembershipRevision: null, proposalFrozenAt: null,
+        proposalFirstPreparedAt: null, reviewExpiresAt: null, proposalCounts: null, contentWithheld: false, availableActions: ['view_output'], progress: null,
         ...overrides,
     };
 }
@@ -133,10 +137,45 @@ describe('Ask Connex provider privacy withdrawal', () => {
     beforeEach(() => {
         vi.useFakeTimers();
         vi.clearAllMocks();
+        harness.workspace = { activeWorkspaceId: 1, switching: false };
+        harness.sessionId = '7';
         harness.getSessions.mockResolvedValue({ items: [] });
         harness.getMissions.mockResolvedValue({ items: [], nextCursor: null });
     });
     afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+    it('does not resolve the previous workspace session while its dashboard navigation is pending', async () => {
+        const mounted = await mount(false);
+        harness.getSession.mockClear();
+        harness.getSession.mockRejectedValue(new ApiError('Unavailable', 404));
+        await act(async () => {
+            navigateAfterWorkspaceSelection(() => harness.router.replace('/dashboard'));
+            harness.workspace = { activeWorkspaceId: 2, switching: false };
+        });
+        await mounted.render();
+        expect(harness.getSession).not.toHaveBeenCalled();
+        expect(harness.router.replace).toHaveBeenCalledExactlyOnceWith('/dashboard');
+        await mounted.unmount();
+    });
+
+    it('does not follow a route-loaded turn after workspace navigation supersedes the route', async () => {
+        const mounted = await mount(false);
+        let resolveDetail: (value: AiChatSessionDetail) => void = () => { throw new Error('Request not initialized'); };
+        harness.getSession.mockReturnValue(new Promise<AiChatSessionDetail>((resolve) => { resolveDetail = resolve; }));
+        harness.getSession.mockClear();
+        harness.sessionId = '8';
+        await mounted.render();
+        expect(harness.getSession).toHaveBeenCalledOnce();
+        await act(async () => {
+            navigateAfterWorkspaceSelection(() => harness.router.replace('/dashboard'));
+            resolveDetail({ ...detail({ turnId: 10, sessionId: 8, status: 'running', terminalReason: null, progress: [] }),
+                session: { ...session, id: 8 } });
+        });
+        expect(props().turn.turnId).toBeNull();
+        expect(props().working).toBe(false);
+        expect(harness.router.replace).toHaveBeenCalledExactlyOnceWith('/dashboard');
+        await mounted.unmount();
+    });
 
     it.each(['mission_created', 'mission_state', 'mission_output'] as const)(
         'keeps an idle session quiet through provider rerenders and resumes discovery on %s', async (kind) => {

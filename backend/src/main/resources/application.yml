@@ -188,6 +188,7 @@ connex:
         same-site: ${CONNEX_WORKSPACE_COOKIE_SAME_SITE:Lax}
         secure: ${CONNEX_WORKSPACE_COOKIE_SECURE:true}
     request-limits:
+        mission-decision-max-body-bytes: ${CONNEX_MISSION_DECISION_MAX_BODY_BYTES:16384}
         max-body-bytes: ${CONNEX_API_MAX_BODY_BYTES:10485760}
         import-max-body-bytes: ${CONNEX_IMPORT_MAX_BODY_BYTES:67108864}
         upload-max-body-bytes: ${CONNEX_UPLOAD_MAX_BODY_BYTES:28311552}

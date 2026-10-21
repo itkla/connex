@@ -244,6 +244,21 @@ public class TenantWorkScope {
     }
 
     /**
+     * Prepares and installs an active workspace's placement before a read opens its transaction.
+     * The callback never joins the functional invocation used by mutating workspace work.
+     *
+     * @param <T> the read's result type
+     * @param workspaceId the workspace whose placement governs the read
+     * @param read the read, which must not call a Supplier/Runnable-based workspace entry
+     * @return the read's result
+     */
+    public <T> T inWorkspaceRead(int workspaceId, WorkspaceRead<T> read) {
+        try (var scope = enterWorkspaceRoute(workspaceId, false)) {
+            return read.read();
+        }
+    }
+
+    /**
      * Runs work under the workspace's immutable operation placement and passes
      * the matching organization and catalog to an identity-scope installer.
      * Same-workspace nested calls receive the original pair without another

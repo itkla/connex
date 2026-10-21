@@ -27,8 +27,8 @@ import ooo.klae.connex.backend.tenant.TenantJournalClientDriven;
 
 /**
  * Keeps support-journal attribution on the reviewed current-tenant controller surface.
- * Mission mutations retain attribution; owner-only mission reads participate in reconnect and
- * progress polling, so their automatic retries follow the existing assistant-read omission policy.
+ * Mission mutations and direct item reads retain failures; reconnect and progress polling reads
+ * follow the existing assistant-read failure omission policy.
  */
 class TenantJournalAttributionArchTest {
     private static final String BACKEND_PACKAGE = "ooo.klae.connex.backend";
@@ -59,6 +59,7 @@ class TenantJournalAttributionArchTest {
         "ooo.klae.connex.backend.controllers.AiAgentRunController#get",
         "ooo.klae.connex.backend.controllers.AiAgentRunController#list",
         "ooo.klae.connex.backend.controllers.AiAgentRunController#output",
+        "ooo.klae.connex.backend.controllers.AiAgentRunController#proposal",
         "ooo.klae.connex.backend.controllers.AiAssistantController#get",
         "ooo.klae.connex.backend.controllers.AiAssistantController#getToolCall",
         "ooo.klae.connex.backend.controllers.AiAssistantController#getTurn",

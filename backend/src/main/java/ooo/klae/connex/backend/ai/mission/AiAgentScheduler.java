@@ -68,11 +68,12 @@ public class AiAgentScheduler {
                     JobRunDetail detail = JobRunDetail.startedUtc();
                     JobRunStatus outcome = JobRunStatus.SUCCEEDED;
                     try {
-                        for (var expired : runs.expiredRuns(workspaceId, 25)) {
+                        for (var expired : java.util.stream.Stream.concat(runs.expiredRuns(workspaceId, 25).stream(),
+                                runs.reviewExpiredRuns(workspaceId, 25).stream()).toList()) {
                             if (persistence.expire(expired)) {
                                 var current = runs.getRun(workspaceId, expired.getId());
                                 if (current != null) {
-                                    publisher.publish(current, "mission_state");
+                                    publisher.publish(current, current.getReportMessageId() == null ? "mission_state" : "mission_output");
                                 }
                             }
                         }

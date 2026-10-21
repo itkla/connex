@@ -57,7 +57,8 @@ class AiAgentRunControllerTest {
 
     @BeforeEach
     void setup() {
-        mvc = MockMvcBuilders.standaloneSetup(new AiAgentRunController(service))
+        mvc = MockMvcBuilders.standaloneSetup(new AiAgentRunController(service, mock(ooo.klae.connex.backend.ai.mission.AiAgentProposalReadService.class),
+                mock(ooo.klae.connex.backend.ai.mission.AiAgentProposalDecisionService.class)))
                 .setControllerAdvice(new GlobalExceptionHandler(errors, new TenantContext()))
                 .addFilter(new ApiRequestBodySizeFilter(new RequestBodySizeProperties()))
                 .build();
@@ -76,7 +77,7 @@ class AiAgentRunControllerTest {
     void rejectsUnknownFieldsAndOutOfBoundsRequests() throws Exception {
         for (String body : new String[] {
                 BODY.replace("\"goal\":", "\"ownerUserId\":4,\"goal\":"),
-                BODY.replace("record_review_v1", "record_preparation_v1"),
+                BODY.replace("record_review_v1", "unsupported_mission_v1"),
                 BODY.replace("\"recordId\":123", "\"recordId\":0"),
                 BODY.replace("Review this record", " "),
                 BODY.replace("\"goal\":", "\"limits\":{\"maxSteps\":9},\"goal\":")}) {
@@ -122,8 +123,9 @@ class AiAgentRunControllerTest {
                 mock(ooo.klae.connex.backend.ai.assistant.AiAssistantSessionReadAudit.class),
                 mock(org.springframework.transaction.PlatformTransactionManager.class),
                 runs, null, persistence, gate, null, null, null,
-                new AiRestrictionEpoch(), workspaces, new ObjectMapper(), Clock.systemUTC());
-        var boundary = MockMvcBuilders.standaloneSetup(new AiAgentRunController(realService))
+                new AiRestrictionEpoch(), workspaces, new ObjectMapper(), Clock.systemUTC(), ooo.klae.connex.backend.support.TenantWorkScopes.passThrough());
+        var boundary = MockMvcBuilders.standaloneSetup(new AiAgentRunController(realService, mock(ooo.klae.connex.backend.ai.mission.AiAgentProposalReadService.class),
+                mock(ooo.klae.connex.backend.ai.mission.AiAgentProposalDecisionService.class)))
                 .setControllerAdvice(new GlobalExceptionHandler(errors, new TenantContext())).build();
         boundary.perform(post(CREATE).contentType(MediaType.APPLICATION_JSON)
                 .content(BODY.replace("Review this record", "日".repeat(16000))

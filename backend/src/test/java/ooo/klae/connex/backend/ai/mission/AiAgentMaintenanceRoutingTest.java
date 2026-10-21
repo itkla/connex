@@ -76,7 +76,7 @@ class AiAgentMaintenanceRoutingTest {
         when(privacy.lockBarrier(WORKSPACE)).thenReturn(barrier);
         when(privacy.watermarks(WORKSPACE)).thenReturn(new AiAgentPrivacyWatermarks());
         when(privacy.advanceBarrier(eq(WORKSPACE), eq(1L), any())).thenReturn(1);
-        var service = new AiAgentPrivacyService(privacy, mock(AiAgentRunMapper.class), mock(AiChatMapper.class),
+        var service = new AiAgentPrivacyService(privacy, mock(AiAgentRunMapper.class), mock(ooo.klae.connex.backend.mappers.AiAgentActionMapper.class), mock(AiChatMapper.class),
                 mock(AiRestrictionEpoch.class), mock(AiRunLeaseService.class), mock(PlatformTransactionManager.class),
                 workspaces, lifecycle, mock(UserMapper.class), scope, catalogs, context, Clock.systemUTC(),
                 mock(ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService.class), mock(ooo.klae.connex.backend.mappers.AiAssistantPrivacyControlMapper.class), mock(ooo.klae.connex.backend.mappers.AttachmentMapper.class), mock(ooo.klae.connex.backend.mappers.AiAgentPrivacyObjectMapper.class), mock(ooo.klae.connex.backend.mappers.ObjectDeletionQueueMapper.class), mock(ooo.klae.connex.backend.storage.ManagedObjectService.class));

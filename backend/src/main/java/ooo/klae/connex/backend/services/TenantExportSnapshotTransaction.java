@@ -6,6 +6,9 @@ import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -20,6 +23,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.mission.AiAgentContinuationCodec;
+import ooo.klae.connex.backend.ai.mission.AiAgentMissionCatalog;
+import ooo.klae.connex.backend.ai.mission.AiAgentSourceObservationsCodec;
 import ooo.klae.connex.backend.beans.AiAgentRun;
 import ooo.klae.connex.backend.dto.ActiveObjectReference;
 import ooo.klae.connex.backend.dto.ClientErrorSupportRowDto;
@@ -155,6 +160,8 @@ public class TenantExportSnapshotTransaction {
                 restoreUtf8Payloads(row);
                 if ("ai_agent_run".equals(registered.table())) {
                     validateMission(row);
+                } else if ("ai_agent_action".equals(registered.table())) {
+                    validateMissionAction(row);
                 }
                 zip.write(objectMapper.writeValueAsBytes(row));
                 zip.write('\n');
@@ -174,7 +181,7 @@ public class TenantExportSnapshotTransaction {
     }
 
     private void restoreUtf8Payloads(Map<String, Object> row) throws IOException {
-        for (String column : List.of("plan_json", "checkpoint_json", "memory_json", "arguments_json", "result_json")) {
+        for (String column : List.of("plan_json", "checkpoint_json", "memory_json", "arguments_json", "result_json", "source_versions_json")) {
             String transportColumn = "utf8_" + column;
             if (row.containsKey(transportColumn)) {
                 Object bytes = row.remove(transportColumn);
@@ -194,12 +201,14 @@ public class TenantExportSnapshotTransaction {
         if (row.get("purged_at") != null) {
             for (String column : List.of("session_id", "goal", "scope_json", "request_hash", "scope_fingerprint",
                     "report_message_id", "active_segment_id", "plan_schema_version", "plan_json",
-                    "checkpoint_schema_version", "checkpoint_json", "memory_schema_version", "memory_json")) {
+                    "checkpoint_schema_version", "checkpoint_json", "memory_schema_version", "memory_json",
+                    "proposal_frozen_at", "proposal_first_prepared_at", "review_expires_at")) {
                 if (row.get(column) != null) {
                     throw new IllegalStateException("Mission tombstone contains residual content");
                 }
             }
-            for (String column : List.of("plan_revision", "checkpoint_revision", "last_committed_segment_no")) {
+            for (String column : List.of("plan_revision", "checkpoint_revision", "last_committed_segment_no",
+                    "proposal_membership_revision")) {
                 if (missionNumber(row, column) != 0) {
                     throw new IllegalStateException("Mission tombstone contains residual metadata");
                 }
@@ -226,11 +235,162 @@ public class TenantExportSnapshotTransaction {
         run.setMemorySchemaVersion(missionSchema(row, "memory_schema_version"));
         run.setMemoryJson(missionText(row, "memory_json"));
         run.setLastCommittedSegmentNo(Math.toIntExact(missionNumber(row, "last_committed_segment_no")));
+        validateMissionReview(row, run.getRuntimeContractVersion());
         var codec = new AiAgentContinuationCodec();
         var snapshot = codec.decode(run);
         if (snapshot != null) {
             codec.validateExecutable(run, snapshot);
         }
+    }
+
+    private void validateMissionReview(Map<String, Object> row, int runtime) {
+        long revision = missionNumber(row, "proposal_membership_revision");
+        Instant frozen = missionInstant(row, "proposal_frozen_at");
+        Instant first = missionInstant(row, "proposal_first_prepared_at");
+        Instant expiry = missionInstant(row, "review_expires_at");
+        if (revision < 0 || (runtime < 3 && (revision != 0 || frozen != null || first != null || expiry != null))
+                || (frozen == null && expiry != null)
+                || (frozen != null && (revision == 0 || ((first == null) != (expiry == null))))) {
+            throw new IllegalStateException("Invalid mission review export metadata");
+        }
+        if (expiry != null) {
+            Instant hard = missionInstant(row, "hard_deadline_at");
+            Instant allowance = java.util.Objects.requireNonNull(first).plusSeconds(72 * 3600);
+            Instant expected = hard != null && hard.isBefore(allowance) ? hard : allowance;
+            if (!expected.equals(expiry)) {
+                throw new IllegalStateException("Invalid mission review export deadline");
+            }
+        }
+    }
+
+    private void validateMissionAction(Map<String, Object> row) {
+        validateMissionActionRoot(row);
+        long root = missionNumber(row, "root_run_id");
+        if (root <= 0 || missionNumber(row, "producer_run_id") != root
+                || missionNumber(row, "privacy_generation") <= 0
+                || !canonicalUuid(missionText(row, "action_slot"))
+                || missionNumber(row, "plan_revision") <= 0
+                || !java.util.Set.of("person", "company", "deal").contains(missionText(row, "target_kind"))
+                || missionNumber(row, "target_id") <= 0
+                || !java.util.Objects.equals(missionText(row, "semantic_slot_key"),
+                    missionText(row, "target_kind") + ":" + missionNumber(row, "target_id") + ":" + missionText(row, "tool_name"))
+                || missionText(row, "plan_item_key") == null
+                || !missionText(row, "plan_item_key").matches("p[0-9]{4}")) {
+            throw new IllegalStateException("Invalid mission action export identity");
+        }
+        String preparation = missionText(row, "preparation_id");
+        if (preparation == null) {
+            for (String column : List.of("intent_fingerprint", "prepared_at", "source_observed_at", "source_versions_json",
+                    "origin_segment_id", "origin_execution_generation", "output_ordinal")) {
+                if (row.get(column) != null) {
+                    throw new IllegalStateException("Unbound mission action contains preparation");
+                }
+            }
+            if (missionNumber(row, "mission_export_canonical_count") != 0) {
+                throw new IllegalStateException("Unbound mission action contains a canonical proposal");
+            }
+            removeMissionExportProjection(row);
+            return;
+        }
+        Instant prepared = missionInstant(row, "prepared_at");
+        if (!canonicalUuid(preparation) || !(row.get("intent_fingerprint") instanceof byte[] fingerprint)
+                || fingerprint.length != 32 || prepared == null
+                || missionNumber(row, "origin_segment_id") <= 0
+                || missionNumber(row, "origin_execution_generation") <= 0
+                || missionNumber(row, "origin_execution_generation") != missionNumber(row, "mission_export_origin_generation")
+                || missionNumber(row, "mission_export_origin_privacy") != missionNumber(row, "privacy_generation")
+                || missionNumber(row, "mission_export_canonical_count") != 1
+                || (row.get("output_ordinal") != null && (missionNumber(row, "output_ordinal") < 1
+                    || missionNumber(row, "output_ordinal") > 50))) {
+            throw new IllegalStateException("Invalid mission action export binding");
+        }
+        var observations = new AiAgentSourceObservationsCodec().decode(missionText(row, "source_versions_json"));
+        observations.requireComplete(missionText(row, "target_kind"), Math.toIntExact(missionNumber(row, "target_id")), prepared);
+        if (!observations.firstObservedAt().equals(missionInstant(row, "source_observed_at"))) {
+            throw new IllegalStateException("Invalid mission action export anchor");
+        }
+        removeMissionExportProjection(row);
+    }
+
+    private void validateMissionActionRoot(Map<String, Object> row) {
+        if (!AiAgentMissionCatalog.supports(missionText(row, "mission_export_type"),
+                Math.toIntExact(missionNumber(row, "mission_export_definition")),
+                Math.toIntExact(missionNumber(row, "mission_export_runtime")))
+                || missionNumber(row, "mission_export_runtime") != 3
+                || missionNumber(row, "mission_export_privacy") != missionNumber(row, "privacy_generation")
+                || missionNumber(row, "plan_revision") > missionNumber(row, "mission_export_plan_revision")) {
+            throw new IllegalStateException("Invalid mission action export runtime");
+        }
+        var scope = objectMapper.readTree(missionExportText(row, "mission_export_scope"));
+        String kind = missionText(row, "target_kind");
+        if (!"record".equals(scope.path("kind").asString()) || !java.util.Objects.equals(kind, scope.path("recordKind").asString())
+                || scope.path("recordId").asInt() != missionNumber(row, "target_id")
+                || !AiAgentMissionCatalog.confirmTools(kind).contains(missionText(row, "tool_name"))) {
+            throw new IllegalStateException("Invalid mission action export target");
+        }
+        var plan = objectMapper.readTree(missionExportText(row, "mission_export_plan"));
+        boolean retained = false;
+        for (var item : plan.path("items")) {
+            retained |= java.util.Objects.equals(missionText(row, "plan_item_key"), item.path("key").asString());
+        }
+        if (!retained || missionNumber(row, "mission_export_bound_count") > 50) {
+            throw new IllegalStateException("Invalid mission action export plan association");
+        }
+        var checkpoint = objectMapper.readTree(missionExportText(row, "mission_export_checkpoint"));
+        var references = checkpoint.path("actionSlotReferences");
+        boolean associated = false;
+        for (var reference : references) {
+            associated |= java.util.Objects.equals(missionText(row, "action_slot"), reference.path("slotKey").asString())
+                    && java.util.Objects.equals(missionText(row, "plan_item_key"), reference.path("planItemKey").asString());
+        }
+        if (!references.isArray() || !associated || references.size() != missionNumber(row, "mission_export_slot_count")
+                || references.size() > 50) {
+            throw new IllegalStateException("Invalid mission action export inventory");
+        }
+        boolean frozen = row.get("mission_export_frozen") != null;
+        long outputCount = missionNumber(row, "mission_export_output_count");
+        if ((!frozen && outputCount != 0) || (frozen && (outputCount != missionNumber(row, "mission_export_bound_count")
+                || outputCount != missionNumber(row, "mission_export_max_ordinal")
+                || (row.get("preparation_id") != null && row.get("output_ordinal") == null)))) {
+            throw new IllegalStateException("Invalid mission action export membership");
+        }
+    }
+
+    private String missionExportText(Map<String, Object> row, String column) {
+        Object value = row.get(column);
+        if (!(value instanceof byte[] bytes)) {
+            throw new IllegalStateException("Invalid mission action export transport");
+        }
+        try {
+            return ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler.decode(bytes);
+        } catch (java.sql.SQLException exception) {
+            throw new IllegalStateException("Invalid mission action export encoding", exception);
+        }
+    }
+
+    private void removeMissionExportProjection(Map<String, Object> row) {
+        row.keySet().removeIf(column -> column.startsWith("mission_export_"));
+    }
+
+    private boolean canonicalUuid(String value) {
+        return value != null && value.matches("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
+    }
+
+    private Instant missionInstant(Map<String, Object> row, String column) {
+        Object value = row.get(column);
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof java.sql.Timestamp timestamp) {
+            return timestamp.toLocalDateTime().toInstant(ZoneOffset.UTC);
+        }
+        if (value instanceof LocalDateTime time) {
+            return time.toInstant(ZoneOffset.UTC);
+        }
+        if (value instanceof Instant instant) {
+            return instant;
+        }
+        throw new IllegalStateException("Mission export timestamp has an invalid type");
     }
 
     private Integer missionSchema(Map<String, Object> row, String column) {

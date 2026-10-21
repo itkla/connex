@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -89,11 +90,197 @@ class AiAgentScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
     @Autowired private AiAssistantToolExecutor tools;
     @Autowired private AiInvocationService invocations;
     @Autowired private JdbcTemplate jdbc;
+    @Autowired private ooo.klae.connex.backend.mappers.AiAgentActionMapper actions;
+    @Autowired private AiAgentProposalDecisionService decisions;
+    @MockitoSpyBean private ooo.klae.connex.backend.ai.provider.scripted.ScriptedAiScriptLoader scriptedScripts;
 
     @BeforeEach
     void prepareMissionBudget() {
         jdbc.update("INSERT INTO organization_ai_budget (org_id, daily_token_limit) VALUES (?, ?)",
                 organizationId(), 1_000_000L);
+    }
+
+    @Test
+    void preparesConfirmSingletonWithoutMutation() {
+        Person selected = preparationPerson();
+        AiAgentRun run = createRuntimeThree(selected, "mission_confirm_collection");
+        execute(run);
+        assertAttempts(4, 4);
+        AiAgentRun waiting = runs.getRun(workspaceId(), run.getId());
+        assertEquals("waiting_approval", waiting.getStatus());
+        assertEquals(1, boundActions(run).size());
+        assertEquals(member().getId(), jdbc.queryForObject("SELECT owner_id FROM person WHERE workspace_id=? AND id=?",
+                Integer.class, workspaceId(), selected.getId()));
+        authenticate();
+        try {
+            assertEquals(1, service.output(run.getId()).proposalSet().derivedCounts().pending());
+        } finally {
+            clearAuthentication();
+        }
+        assertSafeContinuationOutbound();
+        assertNoEffects(run);
+    }
+
+    @Test
+    void freezesIndependentProposalsAcrossFreshSegments() {
+        Person selected = preparationPerson();
+        AiAgentRun run = createRuntimeThree(selected, "mission_confirm_two_segments");
+        execute(run);
+        assertEquals("queued", runs.getRun(workspaceId(), run.getId()).getStatus());
+        var first = boundActions(run).getFirst();
+        useFollowup("mission_confirm_two_segments", "mission_confirm_fields_followup");
+        execute(runs.getRun(workspaceId(), run.getId()));
+        assertAttempts(7, 7);
+        assertEquals("waiting_approval", runs.getRun(workspaceId(), run.getId()).getStatus());
+        assertEquals(2, boundActions(run).size());
+        assertEquals(first.getPreparedAt(), actions.getById(workspaceId(), run.getId(), first.getId()).getPreparedAt());
+        assertEquals(first.getSourceObservedAt(), actions.getById(workspaceId(), run.getId(), first.getId()).getSourceObservedAt());
+        assertEquals(2, runs.listSegments(workspaceId(), run.getId()).size());
+        assertSafeContinuationOutbound();
+        assertNoEffects(run);
+    }
+
+    @Test
+    void replaysBoundSlotAcrossAttemptWithoutRestamping() {
+        AiAgentRun run = createRuntimeThree(preparationPerson(), "mission_confirm_replay");
+        execute(run);
+        assertEquals("queued", runs.getRun(workspaceId(), run.getId()).getStatus());
+        var original = boundActions(run).getFirst();
+        useFollowup("mission_confirm_replay", "mission_confirm_followup_replay");
+        execute(runs.getRun(workspaceId(), run.getId()));
+        assertAttempts(7, 7);
+        var replayed = boundActions(run).getFirst();
+        assertEquals(original.getPreparationId(), replayed.getPreparationId());
+        assertEquals(original.getPreparedAt(), replayed.getPreparedAt());
+        assertEquals(original.getSourceVersionsJson(), replayed.getSourceVersionsJson());
+        assertEquals(1, count("SELECT COUNT(*) FROM ai_chat_tool_call WHERE workspace_id=? AND mission_run_id=? AND proposal_origin='mission'", workspaceId(), run.getId()));
+    }
+
+    @Test
+    void changedIntentCannotReplaceBoundSlot() {
+        AiAgentRun run = createRuntimeThree(preparationPerson(), "mission_confirm_intent_conflict");
+        execute(run);
+        assertEquals("queued", runs.getRun(workspaceId(), run.getId()).getStatus());
+        var original = boundActions(run).getFirst();
+        useFollowup("mission_confirm_intent_conflict", "mission_confirm_conflict_followup");
+        execute(runs.getRun(workspaceId(), run.getId()));
+        assertAttempts(6, 6);
+        assertEquals("failed", runs.getRun(workspaceId(), run.getId()).getStatus());
+        assertEquals(original.getPreparationId(), boundActions(run).getFirst().getPreparationId());
+        assertEquals("failed", chat.getMissionToolCallForMaintenance(workspaceId(), run.getId(), original.getId()).getStatus());
+        assertEquals(1, count("SELECT COUNT(*) FROM ai_chat_tool_call WHERE workspace_id=? AND mission_run_id=? AND proposal_origin='mission'", workspaceId(), run.getId()));
+    }
+
+    @Test
+    void changedSourcePreventsFreezeWithoutActionableResidue() {
+        Person selected = preparationPerson();
+        AiAgentRun run = createRuntimeThree(selected, "mission_confirm_source_changed");
+        execute(run);
+        assertEquals("queued", runs.getRun(workspaceId(), run.getId()).getStatus());
+        jdbc.update("UPDATE person SET title='Changed before continuation' WHERE workspace_id=? AND id=?", workspaceId(), selected.getId());
+        execute(runs.getRun(workspaceId(), run.getId()));
+        assertAttempts(4, 4);
+        assertEquals("failed", runs.getRun(workspaceId(), run.getId()).getStatus());
+        assertEquals(0, reports(run));
+        assertEquals(0, count("SELECT COUNT(*) FROM ai_chat_tool_call WHERE workspace_id=? AND mission_run_id=? AND proposal_origin='mission' AND status='proposed'", workspaceId(), run.getId()));
+    }
+
+    @Test
+    void approvalReportsIndependentPartialOutcomes() {
+        AiAgentRun run = createRuntimeThree(preparationPerson(), "mission_confirm_partial");
+        execute(run);
+        assertEquals("queued", runs.getRun(workspaceId(), run.getId()).getStatus());
+        useFollowup("mission_confirm_partial", "mission_confirm_fields_followup");
+        execute(runs.getRun(workspaceId(), run.getId()));
+        assertAttempts(7, 7);
+        authenticate();
+        try {
+            var waiting = runs.getRun(workspaceId(), run.getId());
+            var selected = boundActions(run);
+            var response = decisions.decide(run.getId(), new ooo.klae.connex.backend.dto.AiAgentProposalDecisionRequest(
+                    Long.toString(waiting.getProposalMembershipRevision()), selected.stream().map(action ->
+                            new ooo.klae.connex.backend.dto.AiAgentProposalDecisionRequest.Item(action.getActionSlot(), action.getPreparationId(), "approve")).toList()));
+            assertEquals(List.of("executed", "refused"), response.items().stream().map(item -> item.outcome()).toList());
+            var sibling = selected.getLast();
+            decisions.decide(run.getId(), new ooo.klae.connex.backend.dto.AiAgentProposalDecisionRequest(
+                    Long.toString(waiting.getProposalMembershipRevision()), List.of(
+                            new ooo.klae.connex.backend.dto.AiAgentProposalDecisionRequest.Item(sibling.getActionSlot(), sibling.getPreparationId(), "discard"))));
+            assertEquals("done", runs.getRun(workspaceId(), run.getId()).getStatus());
+        } finally {
+            clearAuthentication();
+        }
+        assertAttempts(7, 7);
+    }
+
+    @Test
+    void cancellationWithdrawsStagedAndFrozenMembers() {
+        AiAgentRun staged = createRuntimeThree(preparationPerson(), "mission_confirm_cancel");
+        java.util.concurrent.atomic.AtomicBoolean stopped = new java.util.concurrent.atomic.AtomicBoolean();
+        onScriptedStep((script, completed) -> {
+            if (completed == 3 && stopped.compareAndSet(false, true)) {
+                var active = runs.getRun(workspaceId(), staged.getId());
+                persistence.control(active, active.getStateVersion(), "cancel");
+            }
+        });
+        execute(staged);
+        assertAttempts(4, 3);
+        assertTrue(stopped.get(), "the cancellation hook must run before the final dispatch");
+        assertEquals("cancelled", runs.getRun(workspaceId(), staged.getId()).getStatus());
+        assertEquals(0, count("SELECT COUNT(*) FROM ai_chat_tool_call WHERE workspace_id=? AND mission_run_id=? AND proposal_origin='mission' AND status='proposed'", workspaceId(), staged.getId()));
+        AiAgentRun frozen = createRuntimeThree(preparationPerson(), "mission_confirm_cancel");
+        execute(frozen);
+        authenticate();
+        try {
+            var waiting = runs.getRun(workspaceId(), frozen.getId());
+            assertEquals("waiting_approval", waiting.getStatus());
+            persistence.control(waiting, waiting.getStateVersion(), "cancel");
+        } finally {
+            clearAuthentication();
+        }
+        assertAttempts(8, 7);
+        assertEquals(0, count("SELECT COUNT(*) FROM ai_chat_tool_call WHERE workspace_id=? AND mission_run_id=? AND proposal_origin='mission' AND status='proposed'", workspaceId(), frozen.getId()));
+    }
+
+    @Test
+    void resultAdmissionFailureWithdrawsEveryPendingMember() {
+        AiAgentRun run = createRuntimeThree(preparationPerson(), "mission_confirm_unsafe_output");
+        execute(run);
+        assertAttempts(4, 4);
+        assertEquals("failed", runs.getRun(workspaceId(), run.getId()).getStatus());
+        assertEquals("malformed_output", runs.getRun(workspaceId(), run.getId()).getReasonCode());
+        assertEquals(0, reports(run));
+        assertEquals(0, count("SELECT COUNT(*) FROM ai_chat_tool_call WHERE workspace_id=? AND mission_run_id=? AND proposal_origin='mission' AND status='proposed'", workspaceId(), run.getId()));
+        assertLeaseReleased(run);
+        assertNoEffects(run);
+    }
+
+    private Person preparationPerson() {
+        Person selected = person("Myrtle Ashford", "myrtle.ashford@example.invalid", null);
+        jdbc.update("UPDATE person SET owner_id=?,updated_at=DATE_SUB(CURRENT_TIMESTAMP,INTERVAL 1 DAY) WHERE workspace_id=? AND id=?", member().getId(), workspaceId(), selected.getId());
+        return selected;
+    }
+
+    private AiAgentRun createRuntimeThree(Person selected, String fixture) {
+        useCapabilityClass("scripted-json");
+        authenticate();
+        try {
+            var created = service.create(session(), new AiAgentRunCreateRequest(UUID.randomUUID().toString(),
+                    "record_preparation_v1", "connex_script_" + fixture + " Prepare changes for the selected record.",
+                    new AiAgentRunCreateRequest.Scope("record", "person", selected.getId()), null));
+            return Objects.requireNonNull(runs.getRun(workspaceId(), created.id()));
+        } finally {
+            clearAuthentication();
+        }
+    }
+
+    private List<ooo.klae.connex.backend.beans.AiAgentAction> boundActions(AiAgentRun run) {
+        return actions.listByRoot(workspaceId(), run.getId()).stream().filter(action -> action.getPreparationId() != null).toList();
+    }
+
+    private void useFollowup(String selector, String followup) {
+        var fixture = scriptedScripts.bySelector("connex_script_" + followup);
+        assertNotNull(fixture);
+        doReturn(fixture).when(scriptedScripts).bySelector("connex_script_" + selector);
     }
 
     @Test
@@ -657,8 +844,8 @@ class AiAgentScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
 
     private void assertAttempts(int recorded, int dispatched) {
         assertTrue(recorded < 64, "the bounded journal must retain every request in this isolated trajectory");
-        assertEquals(recorded, journal().recorded().size());
-        assertEquals(dispatched, journal().dispatched().size());
+        assertEquals(recorded, journal().recorded().size(), "recorded provider requests");
+        assertEquals(dispatched, journal().dispatched().size(), "dispatched provider requests");
     }
 
     private void assertNoEffects(AiAgentRun run) {

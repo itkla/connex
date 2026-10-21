@@ -1301,3 +1301,30 @@ dismissal, CSRF policy change or audit removal accompanies this split. Unit test
 entries, and a source-scan architecture guard rejects cross-interface adapters, including adapters
 through helpers. CodeQL clearance and the resulting sink sets require the next CI Security scan;
 local compilation and unit tests cannot establish that result.
+
+### `java/csrf-unprotected-request-type` — mission proposals and My Work (#2158, round 13)
+
+CI run `39520519761` reports alerts #267/#268 at the mission output/item GET handlers and
+#227/#228 at the My Work page/summary GET handlers. The paths enter mission card projection
+and merge at `RecordVisibilityScopeControlAccess.runWithinScope` with unrelated mutation
+callbacks, including `AttachmentWriteOperations`. This repeats the shared `Supplier` mechanism
+described in #2003 and #2175 above.
+
+Mission card projection and page-context reads now use the existing `RecordVisibilityRead`
+interface. Its private `runWithinScopeRead` invokes the read directly; read and mutation entries
+share only callback-free scope installation/restoration. `TenantWorkScope.inWorkspaceRead`
+prepares the active workspace placement before proposal output, item, version and mission metadata
+transactions begin. `AiAgentScopePolicy.evaluateRead` also separates selected-record validation
+from execution callbacks, so the read chain cannot rejoin the mutation interface through that
+helper. My Work reaches the same mission output/card read path. Administrative retained reads
+keep their existing audit writes and mutation callbacks.
+
+Direct tool execution, proposal preparation and decision coordination establish workspace scopes
+before their tenant work. Singleton publication and report freeze also prepare scopes before
+opening their independent REQUIRES_NEW, READ_COMMITTED transactions and revalidating sources.
+The read transactions retain READ_COMMITTED isolation and existing
+authorization/privacy locks; the decision coordinator retains independent item commits. Scoped
+entries restore their enclosing context on failure. No read callback, including test callbacks,
+may adapt into a Supplier/Runnable-based mutating scope entry. No suppression, dismissal, CSRF
+policy change or audit removal is included. Local tests cover preparation before tenant transactions
+in both modes and scope restoration. Alert clearance requires a subsequent CodeQL Security scan.

@@ -22,6 +22,8 @@ import {
     toggleAskConnexProposalExclusion,
     type AskConnexToolCardState,
 } from "@/app/lib/askConnex";
+import { askConnexMissionProposalGroup } from '@/app/lib/askConnexMissions';
+import { missionPartialDecision, missionProposalOutput } from '@/test/unit/helpers/askConnexMissions';
 import type { AiAssistantToolCallChangeState } from "@/app/lib/types";
 import enCommon from "@/messages/en/common.json";
 import jaCommon from "@/messages/ja/common.json";
@@ -77,6 +79,42 @@ function renderCard(
 }
 
 describe("assistant proposal review", () => {
+    it('adapts exact mission membership without requiring three cards or one originating answer', () => {
+        const output = missionProposalOutput();
+        output.proposalSet.items[1].card.turnId = 900;
+        const group = askConnexMissionProposalGroup(output, new Set([31]), new Map(), null, Date.parse('2026-10-19T12:00:00Z'));
+        expect(group.cards).toHaveLength(2);
+        expect(group.selected).toBe(1);
+        expect(group.cards.map((item) => item.status)).toEqual(['proposed', 'proposed']);
+        expect(group.cards.every((item) => item.reviewExpiresAt === output.proposalSet.reviewExpiresAt)).toBe(true);
+    });
+
+    it.each(['refused', 'indeterminate'] as const)('keeps a committed outcome while disarming a %s sibling until canonical reload', (outcome) => {
+        const output = missionProposalOutput();
+        output.proposalSet.items[0].card.status = 'executed';
+        output.proposalSet.items[0].card.reviewState = 'applied';
+        const now = Date.parse('2026-10-19T12:00:00Z');
+        const group = askConnexMissionProposalGroup(output, new Set(), new Map(), missionPartialDecision(outcome), now);
+        expect(group.applied).toBe(1);
+        expect(group.failed).toBe(1);
+        expect(group.selected).toBe(0);
+        expect(askConnexToolCardAffordances(group.cards[1], now)).not.toContain('approve');
+        if (outcome === 'indeterminate') expect(askConnexToolCardAffordances(group.cards[1], now)).toEqual([]);
+        const reloaded = askConnexMissionProposalGroup(output, new Set(), new Map(), null, now);
+        expect(reloaded.selected).toBe(1);
+    });
+
+    it('uses the shared deadline for apply and discard and preserves withdrawn history', () => {
+        const output = missionProposalOutput();
+        output.proposalSet.items[0].card.status = 'withdrawn';
+        output.proposalSet.items[0].card.reviewState = 'unavailable';
+        const now = Date.parse('2026-10-22T09:00:00Z');
+        const group = askConnexMissionProposalGroup(output, new Set(), new Map(), null, now);
+        expect(group.selected).toBe(0);
+        expect(askConnexToolCardAffordances(group.cards[1], now)).toEqual([]);
+        expect(group.cards[0].status).toBe('withdrawn');
+    });
+
     it.each([
         { locale: "en", messages: enCommon, reports: enReports },
         { locale: "ja", messages: jaCommon, reports: jaReports },

@@ -76,20 +76,24 @@ public class RecordVisibilityScopeControlAccess {
     }
 
     private <T> T runWithinScope(int workspaceId, RecordVisibilityScope scope, Supplier<T> operation) {
+        try (var ignored = enterScope(workspaceId, scope)) {
+            return operation.get();
+        }
+    }
+
+    private <T> T runWithinScopeRead(int workspaceId, RecordVisibilityScope scope, RecordVisibilityRead<T> read) {
+        try (var ignored = enterScope(workspaceId, scope)) {
+            return read.read();
+        }
+    }
+
+    private OperationScopeBinding enterScope(int workspaceId, RecordVisibilityScope scope) {
         if (scope != null) {
             requireScopeIdentity(workspaceId, scope);
         }
         OperationScope previous = operationScope.get();
         operationScope.set(new OperationScope(workspaceId, tenantContext.getCatalog(), tenantContext.isResolved(), tenantContext.getOrgId(), scope));
-        try {
-            return operation.get();
-        } finally {
-            if (previous == null) {
-                operationScope.remove();
-            } else {
-                operationScope.set(previous);
-            }
-        }
+        return new OperationScopeBinding(previous);
     }
 
     /**
@@ -103,19 +107,7 @@ public class RecordVisibilityScopeControlAccess {
      * @return the read's result
      */
     public <T> T withWorkspaceScopeRead(int workspaceId, RecordVisibilityRead<T> read) {
-        RecordVisibilityScope scope = getForWorkspace(workspaceId);
-        requireScopeIdentity(workspaceId, scope);
-        OperationScope previous = operationScope.get();
-        operationScope.set(new OperationScope(workspaceId, tenantContext.getCatalog(), tenantContext.isResolved(), tenantContext.getOrgId(), scope));
-        try {
-            return read.read();
-        } finally {
-            if (previous == null) {
-                operationScope.remove();
-            } else {
-                operationScope.set(previous);
-            }
-        }
+        return runWithinScopeRead(workspaceId, getForWorkspace(workspaceId), read);
     }
 
     /**
@@ -136,17 +128,7 @@ public class RecordVisibilityScopeControlAccess {
                 && !scope.equals(getFreshForWorkspace(workspaceId))) {
             throw new TenantScopeSnapshotException("Operation scope does not match the prepared tenant context");
         }
-        OperationScope previous = operationScope.get();
-        operationScope.set(new OperationScope(workspaceId, tenantContext.getCatalog(), tenantContext.isResolved(), tenantContext.getOrgId(), scope));
-        try {
-            return read.read();
-        } finally {
-            if (previous == null) {
-                operationScope.remove();
-            } else {
-                operationScope.set(previous);
-            }
-        }
+        return runWithinScopeRead(workspaceId, scope, read);
     }
 
     /**
@@ -165,10 +147,19 @@ public class RecordVisibilityScopeControlAccess {
         if (previous != null && previous.workspaceId == workspaceId) {
             return read.read();
         }
-        operationScope.set(new OperationScope(workspaceId, tenantContext.getCatalog(), tenantContext.isResolved(), tenantContext.getOrgId(), null));
-        try {
-            return read.read();
-        } finally {
+        return runWithinScopeRead(workspaceId, null, read);
+    }
+
+    /** Restores the enclosing operation without carrying either callback interface. */
+    private final class OperationScopeBinding implements AutoCloseable {
+        private final OperationScope previous;
+
+        private OperationScopeBinding(OperationScope previous) {
+            this.previous = previous;
+        }
+
+        @Override
+        public void close() {
             if (previous == null) {
                 operationScope.remove();
             } else {

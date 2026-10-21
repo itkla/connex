@@ -33,6 +33,44 @@ function backend(respond: (url: string, attempt: number) => Response = () => jso
 describe('Ask Connex mission API contracts', () => {
     afterEach(() => { vi.resetModules(); vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
+    it('sends only immutable membership and decisions, with typed partial outcomes', async () => {
+        const response = { complete: false, stopReason: 'infrastructure_failure', contentWithheld: false,
+            stateVersion: '9007199254740994', outputRevision: '9007199254740994', items: [
+                { actionSlot: '6e922baf-d2bc-49cf-8bf0-b2d086dd0a38', outcome: 'indeterminate', code: null },
+            ] } satisfies import('@/app/lib/types').AiAgentProposalDecisionResult;
+        const requests = backend(() => json(response));
+        const { decideAiAgentProposals, getAiAgentProposal } = await import('@/app/lib/api');
+        const payload = { expectedProposalRevision: '9007199254740993', items: [{
+            actionSlot: '6e922baf-d2bc-49cf-8bf0-b2d086dd0a38',
+            expectedPreparationId: 'a4d9f701-b418-4208-8a0a-e727fd4dc946', decision: 'approve',
+        }] } satisfies import('@/app/lib/types').AiAgentProposalDecisionRequest;
+        const result = await decideAiAgentProposals(12, payload);
+        await getAiAgentProposal(12, payload.items[0].actionSlot);
+        expect(result).toEqual(response);
+        expect(requests.find((item) => item.method === 'POST')).toEqual({
+            url: '/api/ai/assistant/missions/12/proposal-decisions', method: 'POST', body: payload, csrf: 'csrf', workspace: '5',
+        });
+        expect(requests.at(-1)?.url).toBe('/api/ai/assistant/missions/12/proposals/6e922baf-d2bc-49cf-8bf0-b2d086dd0a38');
+    });
+
+    it('captures the mission decision workspace before CSRF identity work can switch it', async () => {
+        const requests = backend();
+        const { decideAiAgentProposals } = await import('@/app/lib/api');
+        const { bindRenderedWorkspace, releaseRenderedWorkspace } = await import('@/app/lib/renderedWorkspace');
+        const shell = {};
+        bindRenderedWorkspace(shell, 9);
+        try {
+            const submitting = decideAiAgentProposals(12, { expectedProposalRevision: '3', items: [{
+                actionSlot: '6e922baf-d2bc-49cf-8bf0-b2d086dd0a38', expectedPreparationId: 'a4d9f701-b418-4208-8a0a-e727fd4dc946', decision: 'discard',
+            }] });
+            bindRenderedWorkspace(shell, 10);
+            const outcome: unknown = await submitting.catch((error: unknown) => error);
+            const mutations = requests.filter((item) => item.method === 'POST');
+            if (mutations.length === 0) expect(outcome).toBeInstanceOf(Error);
+            else expect(mutations).toEqual([expect.objectContaining({ workspace: '9' })]);
+        } finally { releaseRenderedWorkspace(shell); }
+    });
+
     it('preserves creation identity and decimal control versions through CSRF-protected requests', async () => {
         const requests = backend();
         const { createAiAgentRun, controlAiAgentRun } = await import('@/app/lib/api');
