@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -75,24 +76,49 @@ class SearchServiceUnitTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"activities", "tasks", "deals"})
-    void emptyCandidateGroupsSkipTheScopeEvenWhenControlReadsFail(String type) {
+    void emptyCandidateGroupsKeepGuardsAndRequireTheDealScope(String type) {
         authorize(EnumSet.allOf(Permission.class));
         try (var fixture = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(7)) {
-            when(fixture.control.findOrganizationWorkspacesForShare(7))
-                .thenThrow(new org.springframework.dao.DataAccessResourceFailureException("control unavailable"));
+            var failure = new org.springframework.dao.DataAccessResourceFailureException("control unavailable");
+            when(fixture.control.findOrganizationWorkspacesForShare(7)).thenThrow(failure);
             SearchService reader = new SearchService(
                 companies, people, deals, pipelines, tags, activities, notes, tasks, users, attachments,
                 products, campaigns, reports, templates, documents, workflows, workspace, references, fixture.scopes);
 
+            if (type.equals("deals")) {
+                assertSame(failure, assertThrows(org.springframework.dao.DataAccessResourceFailureException.class,
+                    () -> reader.search("needle", Set.of(type))));
+                verify(fixture.control).findOrganizationWorkspacesForShare(7);
+                verifyNoMoreInteractions(fixture.control);
+                verifyNoInteractions(deals, companies, references);
+                return;
+            }
             SearchResultsDto result = reader.search("needle", Set.of(type));
 
             assertTrue(result.getActivities().isEmpty());
             assertTrue(result.getTasks().isEmpty());
             assertTrue(result.getDeals().isEmpty());
             verifyNoInteractions(fixture.control, companies);
-            if (!type.equals("deals")) {
-                verifyNoInteractions(references);
-            }
+            verifyNoInteractions(references);
+        }
+    }
+
+    @Test
+    void emptyDealSearchBindsOneScopeBeforeTheTenantQuery() {
+        authorize(EnumSet.allOf(Permission.class));
+        try (var fixture = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(7)) {
+            SearchService reader = new SearchService(
+                companies, people, deals, pipelines, tags, activities, notes, tasks, users, attachments,
+                products, campaigns, reports, templates, documents, workflows, workspace, references, fixture.scopes);
+
+            assertTrue(reader.search("needle", Set.of("deals")).getDeals().isEmpty());
+
+            var order = org.mockito.Mockito.inOrder(fixture.control, deals);
+            order.verify(fixture.control).findOrganizationWorkspacesForShare(7);
+            order.verify(deals).search(7, "[7,17]", "%needle%");
+            verifyNoMoreInteractions(fixture.control, deals);
+            verify(references).hydrateDeals(7, List.of());
+            verifyNoInteractions(companies, people, pipelines, notes);
         }
     }
 
@@ -128,7 +154,7 @@ class SearchServiceUnitTest {
         verifyNoMoreInteractions(scopes);
         verify(companies).search(7, "[7,8]", "%needle%");
         verify(people).search(7, "%needle%");
-        verify(deals).search(7, "%needle%");
+        verify(deals).search(7, "[7,8]", "%needle%");
         verify(pipelines).search(7, "[7,8]", "%needle%");
         verify(tags).search(7, "%needle%");
         verify(activities).search(7, "%needle%", 25, 0);
@@ -176,8 +202,9 @@ class SearchServiceUnitTest {
         switch (type) {
             case "deals" -> {
                 service.search("needle", Set.of(type));
-                verify(deals).search(7, "%needle%");
+                verify(deals).search(7, "[7,8]", "%needle%");
                 verify(references).hydrateDeals(7, List.of());
+                verify(scopes).getForWorkspace(7);
             }
             case "activities" -> {
                 Activity activity = new Activity();

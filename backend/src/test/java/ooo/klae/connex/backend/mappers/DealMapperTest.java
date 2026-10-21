@@ -152,8 +152,7 @@ class DealMapperTest extends AbstractMapperTest {
         Stage foreignStage = newStage(foreignPipeline, 0);
         Deal foreign = newDeal(foreignPipeline, foreignStage, newCompany());
 
-        List<Deal> page = dealMapper.getDealsPage(
-            pageWorkspace.getId(), null, null, null, null, null, null, null, null, 3, 0);
+        List<Deal> page = dealMapper.getDealsPageFiltered(pageWorkspace.getId(), dealScope(pageWorkspace.getId()), null, null, null, null, null, null, null, null, null, false, null, null, null, 3, 0);
 
         assertEquals(3, page.size());
         assertEquals(4, dealMapper.countDeals(
@@ -209,12 +208,12 @@ class DealMapperTest extends AbstractMapperTest {
         jdbcTemplate.update("UPDATE deal SET company_id = ? WHERE id = ?", foreignCompany.getId(), targetDeal.getId());
 
         List<Deal> matches = dealMapper.getDealsPageFiltered(
-            target.getId(), null, "%" + foreignCompany.getName() + "%", null, null, null,
+            target.getId(), dealScope(target.getId()), null, "%" + foreignCompany.getName() + "%", null, null, null,
             null, null, null, null, false, null, null, allTeamScope(), 25, 0);
 
         assertTrue(matches.isEmpty());
         assertEquals(0, dealMapper.countDealsFiltered(
-            target.getId(), null, "%" + foreignCompany.getName() + "%", null,
+            target.getId(), dealScope(target.getId()), null, "%" + foreignCompany.getName() + "%", null,
             null, null, null, null, false, null, null, allTeamScope()));
     }
 
@@ -257,19 +256,19 @@ class DealMapperTest extends AbstractMapperTest {
         MemberScope scope = allTeamScope();
 
         List<Deal> page = dealMapper.getDealsPageFiltered(
-            target.getId(), segmentIdsJson, null, null, null, null,
+            target.getId(), dealScope(target.getId()), segmentIdsJson, null, null, null, null,
             null, null, null, null, false, null, null, scope, 25, 0);
         long count = dealMapper.countDealsFiltered(
-            target.getId(), segmentIdsJson, null, null, null,
+            target.getId(), dealScope(target.getId()), segmentIdsJson, null, null, null,
             null, null, null, false, null, null, scope);
         List<Deal> export = dealMapper.getDealsFiltered(
-            target.getId(), segmentIdsJson, null, null,
+            target.getId(), dealScope(target.getId()), segmentIdsJson, null, null,
             null, null, null, null, false, null, null, scope);
         List<DealCurrencyMetricsDto> metrics = dealMapper.dealMetricsFiltered(
-            target.getId(), segmentIdsJson, null, null,
+            target.getId(), dealScope(target.getId()), segmentIdsJson, null, null,
             null, null, null, null, false, null, null, scope);
         List<Integer> ids = dealMapper.getFilteredDealIds(
-            target.getId(), segmentIdsJson, null, null,
+            target.getId(), dealScope(target.getId()), segmentIdsJson, null, null,
             null, null, null, null, false, null, null, scope, 1001);
 
         assertEquals(List.of(included.getId()), page.stream().map(Deal::getId).toList());
@@ -289,7 +288,7 @@ class DealMapperTest extends AbstractMapperTest {
         Deal included = newDealIn(target, pipeline, stage);
         newDealIn(target, pipeline, stage);
         Person localPerson = newPersonIn(target, "Local Contact");
-        dealMapper.addPerson(target.getId(), included.getId(), localPerson.getId(), "champion");
+        dealMapper.addPerson(target.getId(), dealScope(target.getId()), included.getId(), localPerson.getId(), "champion");
         Workspace foreignWorkspace = newWorkspace();
         Person foreignPerson = newPersonIn(foreignWorkspace, "Foreign Contact");
         jdbcTemplate.update(
@@ -298,22 +297,22 @@ class DealMapperTest extends AbstractMapperTest {
         MemberScope scope = allTeamScope();
 
         List<Deal> page = dealMapper.getDealsPageFiltered(
-            target.getId(), null, null, null, null, null,
+            target.getId(), dealScope(target.getId()), null, null, null, null, null,
             null, null, null, List.of(localPerson.getId()), false, null, null, scope, 25, 0);
         long count = dealMapper.countDealsFiltered(
-            target.getId(), null, null, null,
+            target.getId(), dealScope(target.getId()), null, null, null,
             null, null, null, List.of(localPerson.getId()), false, null, null, scope);
         List<Deal> export = dealMapper.getDealsFiltered(
-            target.getId(), null, null, null,
+            target.getId(), dealScope(target.getId()), null, null, null,
             null, null, null, List.of(localPerson.getId()), false, null, null, scope);
         List<DealCurrencyMetricsDto> metrics = dealMapper.dealMetricsFiltered(
-            target.getId(), null, null, null,
+            target.getId(), dealScope(target.getId()), null, null, null,
             null, null, null, List.of(localPerson.getId()), false, null, null, scope);
         List<Integer> ids = dealMapper.getFilteredDealIds(
-            target.getId(), null, null, null,
+            target.getId(), dealScope(target.getId()), null, null, null,
             null, null, null, List.of(localPerson.getId()), false, null, null, scope, 1001);
         List<Integer> foreignIds = dealMapper.getFilteredDealIds(
-            target.getId(), null, null, null,
+            target.getId(), dealScope(target.getId()), null, null, null,
             null, null, null, List.of(foreignPerson.getId()), false, null, null, scope, 1001);
 
         assertEquals(List.of(included.getId()), page.stream().map(Deal::getId).toList());
@@ -324,12 +323,12 @@ class DealMapperTest extends AbstractMapperTest {
         assertTrue(foreignIds.isEmpty());
         assertEquals(
             Map.of(Integer.toString(localPerson.getId()), 1L),
-            facetCounts(dealMapper.countsByPerson(target.getId())));
+            facetCounts(dealMapper.countsByPerson(target.getId(), dealScope(target.getId()))));
     }
 
     private List<Integer> filteredDealIds(Workspace ws, MemberScope scope) {
         return dealMapper.getDealsFiltered(
-            ws.getId(), null, null, null, null, null, null, null, false, null, null, scope)
+            ws.getId(), dealScope(ws.getId()), null, null, null, null, null, null, null, false, null, null, scope)
             .stream().map(Deal::getId).toList();
     }
 
@@ -343,12 +342,12 @@ class DealMapperTest extends AbstractMapperTest {
         newDealIn(target, foreignPipeline, mismatchedStage);
 
         List<Deal> matches = dealMapper.getDealsPageFiltered(
-            target.getId(), null, "%" + stageName + "%", null, null, null,
+            target.getId(), dealScope(target.getId()), null, "%" + stageName + "%", null, null, null,
             null, null, null, null, false, null, null, allTeamScope(), 25, 0);
 
         assertTrue(matches.isEmpty());
         assertEquals(0, dealMapper.countDealsFiltered(
-            target.getId(), null, "%" + stageName + "%", null,
+            target.getId(), dealScope(target.getId()), null, "%" + stageName + "%", null,
             null, null, null, null, false, null, null, allTeamScope()));
     }
 
@@ -422,7 +421,7 @@ class DealMapperTest extends AbstractMapperTest {
         assertEquals(List.of(corrupt.getId(), local.getId()), dealPageIds(pageWorkspace, "company", "asc"));
         assertEquals(List.of(corrupt.getId(), local.getId()), dealPageIds(pageWorkspace, "pipeline", "asc"));
         assertEquals(List.of(corrupt.getId(), local.getId()), dealPageIds(pageWorkspace, "stage", "asc"));
-        assertTrue(dealMapper.search(pageWorkspace.getId(), "%Zulu Foreign%").isEmpty());
+        assertTrue(dealMapper.search(pageWorkspace.getId(), dealScope(pageWorkspace.getId()), "%Zulu Foreign%").isEmpty());
     }
 
     @Test
@@ -935,7 +934,7 @@ class DealMapperTest extends AbstractMapperTest {
         assertEquals(Map.of(Integer.toString(pipeline.getId()), 4L),
             facetCounts(dealMapper.countsByPipeline(workspace.getId())));
         assertEquals(Map.of(Integer.toString(company.getId()), 3L, "__empty__", 1L),
-            facetCounts(dealMapper.countsByCompany(workspace.getId())));
+            facetCounts(dealMapper.countsByCompany(workspace.getId(), dealScope(workspace.getId()))));
         assertEquals(Map.of("__empty__", 4L),
             facetCounts(dealMapper.countsByOwner(workspace.getId())));
         assertEquals(Map.of("JPY", 3L, "USD", 1L),
@@ -963,9 +962,7 @@ class DealMapperTest extends AbstractMapperTest {
             "Target Other Pipeline", 250.0, 200.0, "JPY", true);
         updateDeal(newDeal(pipeline, stage, company), "Different Name", 225.0, 190.0, "JPY", true);
 
-        List<Deal> page = dealMapper.getDealsPage(
-            workspace.getId(), "%Target%", "value", "desc", "JPY", pipeline.getId(),
-            stage.getId(), company.getId(), "closed", 10, 0);
+        List<Deal> page = dealMapper.getDealsPageFiltered(workspace.getId(), dealScope(workspace.getId()), null, "%Target%", "value", "desc", "JPY", List.of(pipeline.getId()), List.of(stage.getId()), List.of(company.getId()), null, false, List.of("won", "lost"), null, null, 10, 0);
         long count = dealMapper.countDeals(
             workspace.getId(), "%Target%", "JPY", pipeline.getId(), stage.getId(), company.getId(), "closed");
 
@@ -1221,9 +1218,9 @@ class DealMapperTest extends AbstractMapperTest {
         Deal deal = newDeal(pipeline, stage, company);
         Person person = newPerson(company);
 
-        dealMapper.addPerson(workspace.getId(), deal.getId(), person.getId(), null);
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), deal.getId(), person.getId(), null);
 
-        List<Deal> matched = dealMapper.getDealsByPersonId(workspace.getId(), person.getId());
+        List<Deal> matched = dealMapper.getDealsByPersonId(workspace.getId(), dealScope(workspace.getId()), person.getId());
         assertTrue(matched.stream().anyMatch(x -> x.getId() == deal.getId()));
     }
 
@@ -1237,10 +1234,10 @@ class DealMapperTest extends AbstractMapperTest {
         Deal deal = newDeal(pipeline, stage, newCompany());
         Person person = newPerson(newCompany());
 
-        dealMapper.addPerson(workspace.getId(), deal.getId(), person.getId(), "stakeholder");
-        dealMapper.addPerson(workspace.getId(), deal.getId(), person.getId(), "decision_maker");
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), deal.getId(), person.getId(), "stakeholder");
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), deal.getId(), person.getId(), "decision_maker");
 
-        List<DealPerson> people = dealMapper.getDealPeopleByDealId(workspace.getId(), deal.getId());
+        List<DealPerson> people = dealMapper.getDealPeopleByDealId(workspace.getId(), dealScope(workspace.getId()), deal.getId());
         assertEquals(1, people.size());
         assertEquals("decision_maker", people.get(0).getRole());
     }
@@ -1252,10 +1249,10 @@ class DealMapperTest extends AbstractMapperTest {
         Deal deal = newDeal(pipeline, stage, newCompany());
         Person person = newPerson(newCompany());
 
-        dealMapper.addPerson(workspace.getId(), deal.getId(), person.getId(), null);
-        dealMapper.addPerson(workspace.getId(), deal.getId(), person.getId(), null);
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), deal.getId(), person.getId(), null);
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), deal.getId(), person.getId(), null);
 
-        long matching = dealMapper.getDealsByPersonId(workspace.getId(), person.getId()).stream()
+        long matching = dealMapper.getDealsByPersonId(workspace.getId(), dealScope(workspace.getId()), person.getId()).stream()
                 .filter(x -> x.getId() == deal.getId()).count();
         assertEquals(1, matching);
     }
@@ -1269,11 +1266,11 @@ class DealMapperTest extends AbstractMapperTest {
         Stage stage = newStage(pipeline, 0);
         Deal deal = newDeal(pipeline, stage, newCompany());
         Person person = newPerson(newCompany());
-        dealMapper.addPerson(workspace.getId(), deal.getId(), person.getId(), null);
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), deal.getId(), person.getId(), null);
 
         dealMapper.removePerson(workspace.getId(), deal.getId(), person.getId());
 
-        assertTrue(dealMapper.getDealsByPersonId(workspace.getId(), person.getId()).stream()
+        assertTrue(dealMapper.getDealsByPersonId(workspace.getId(), dealScope(workspace.getId()), person.getId()).stream()
                 .noneMatch(x -> x.getId() == deal.getId()));
     }
 
@@ -1438,8 +1435,7 @@ class DealMapperTest extends AbstractMapperTest {
     }
 
     private List<Integer> dealPageIds(Workspace ws, String sort, String dir) {
-        return dealMapper.getDealsPage(
-            ws.getId(), null, sort, dir, null, null, null, null, null, 100, 0)
+        return dealMapper.getDealsPageFiltered(ws.getId(), dealScope(ws.getId()), null, null, sort, dir, null, null, null, null, null, false, null, null, null, 100, 0)
             .stream().map(Deal::getId).toList();
     }
 

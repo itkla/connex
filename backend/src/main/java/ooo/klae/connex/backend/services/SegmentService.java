@@ -76,6 +76,11 @@ public class SegmentService {
      * and user.
      */
     public List<Integer> evaluate(String recordType, SegmentDefinition definition) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceService.getCurrentWorkspaceId(), () -> evaluateWithinDealVisibility(recordType, definition));
+    }
+
+    private List<Integer> evaluateWithinDealVisibility(String recordType, SegmentDefinition definition) {
         return evaluate(workspaceService.getCurrentWorkspaceId(), authService.getCurrentUser().getId(), recordType, definition);
     }
 
@@ -84,11 +89,26 @@ public class SegmentService {
      * user are supplied explicitly rather than resolved from the security/tenant context.
      */
     public List<Integer> evaluate(int workspaceId, int userId, String recordType, SegmentDefinition definition) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceId, () -> evaluateWithinDealVisibility(workspaceId, userId, recordType, definition));
+    }
+
+    private List<Integer> evaluateWithinDealVisibility(int workspaceId, int userId, String recordType, SegmentDefinition definition) {
         return evaluate(workspaceId, userId, recordType, definition, false);
     }
 
     /** Returns at most {@code limit} deterministic matches for a bounded automation enrollment. */
     public List<Integer> evaluate(
+            int workspaceId,
+            int userId,
+            String recordType,
+            SegmentDefinition definition,
+            int limit) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceId, () -> evaluateWithinDealVisibility(workspaceId, userId, recordType, definition, limit));
+    }
+
+    private List<Integer> evaluateWithinDealVisibility(
             int workspaceId,
             int userId,
             String recordType,
@@ -144,6 +164,12 @@ public class SegmentService {
      */
     public List<Integer> evaluateIncludingRestrictedPeople(
             int workspaceId, int userId, String recordType, SegmentDefinition definition) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceId, () -> evaluateIncludingRestrictedPeopleWithinDealVisibility(workspaceId, userId, recordType, definition));
+    }
+
+    private List<Integer> evaluateIncludingRestrictedPeopleWithinDealVisibility(
+            int workspaceId, int userId, String recordType, SegmentDefinition definition) {
         return evaluate(workspaceId, userId, recordType, definition, true);
     }
 
@@ -174,6 +200,12 @@ public class SegmentService {
      * every event.
      */
     public boolean matchesEntity(
+            int workspaceId, int userId, String recordType, SegmentDefinition definition, int entityId) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceId, () -> matchesEntityWithinDealVisibility(workspaceId, userId, recordType, definition, entityId));
+    }
+
+    private boolean matchesEntityWithinDealVisibility(
             int workspaceId, int userId, String recordType, SegmentDefinition definition, int entityId) {
         String type = requireSupported(recordType);
         if (definition == null) {

@@ -221,8 +221,8 @@ class PersonMapperTest extends AbstractMapperTest {
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
         Deal deal = newDeal(pipeline, stage, company);
-        dealMapper.addPerson(workspace.getId(), deal.getId(), suspended.getId(), "suspended");
-        dealMapper.addPerson(workspace.getId(), deal.getId(), provisionCeased.getId(), "ceased");
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), deal.getId(), suspended.getId(), "suspended");
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), deal.getId(), provisionCeased.getId(), "ceased");
         personMapper.updateProcessingRestrictions(workspace.getId(), suspended.getId(), true, false);
         personMapper.updateProcessingRestrictions(workspace.getId(), provisionCeased.getId(), false, true);
 
@@ -254,9 +254,9 @@ class PersonMapperTest extends AbstractMapperTest {
             .anyMatch(person -> person.getId() == suspended.getId()));
         assertTrue(personMapper.getPersonsByDealId(workspace.getId(), deal.getId()).stream()
             .anyMatch(person -> person.getId() == suspended.getId()));
-        assertFalse(dealMapper.getDealPeopleByDealId(workspace.getId(), deal.getId()).stream()
+        assertFalse(dealMapper.getDealPeopleByDealId(workspace.getId(), dealScope(workspace.getId()), deal.getId()).stream()
             .anyMatch(dealPerson -> dealPerson.getPerson().getId() == suspended.getId()));
-        assertFalse(dealMapper.getDealPeopleByDealId(workspace.getId(), deal.getId()).stream()
+        assertFalse(dealMapper.getDealPeopleByDealId(workspace.getId(), dealScope(workspace.getId()), deal.getId()).stream()
             .anyMatch(dealPerson -> dealPerson.getPerson().getId() == provisionCeased.getId()));
     }
 
@@ -515,13 +515,13 @@ class PersonMapperTest extends AbstractMapperTest {
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
         Deal deal = newDeal(pipeline, stage, company);
-        dealMapper.addPerson(workspace.getId(), deal.getId(), person.getId(), null);
+        dealMapper.addPerson(workspace.getId(), dealScope(workspace.getId()), deal.getId(), person.getId(), null);
 
         List<Person> matched = personMapper.getPersonsByDealId(workspace.getId(), deal.getId());
 
         assertTrue(matched.stream().anyMatch(x -> x.getId() == person.getId()));
         assertEquals(owner.getId(), dealMapper.getDealPeopleByDealId(
-            workspace.getId(), deal.getId()).getFirst().getPerson().getOwnerId());
+            workspace.getId(), dealScope(workspace.getId()), deal.getId()).getFirst().getPerson().getOwnerId());
     }
 
     /**

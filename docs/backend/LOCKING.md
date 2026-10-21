@@ -1825,6 +1825,17 @@ their outer authorization locks so nested Pipeline reads reuse the transaction m
 prepared routed snapshot. No authorization or `FOR UPDATE` lock moves off its original connection,
 and no transaction boundary or isolation level changes.
 
+Deal outcome lookups and person-junction statements consume their operation's captured unfiltered
+scope; no authorization or record lock changes connection or order. Compound GET projections use
+`RecordVisibilityRead` boundaries, while mutation roots retain the supplied-scope `Supplier`
+boundary. Segment and risk reads defer acquisition past null/empty/ineligible paths, retaining one
+snapshot across nested groups and warmth batches. Lifecycle conversion resolves only in its existing
+transitioning-to-CONVERTED branch after the required person lock; transaction-first fallback reads
+therefore remain after that lock. Notification reconciliation preloads before its existing
+REQUIRES_NEW transaction when either introductions or Deal risk need the ceiling; an ordinary
+preload failure leaves those passes unmanaged without disabling other reminder passes, and typed
+snapshot invariant refusals propagate. Historical projections reuse their caller's pre-lock scope.
+
 Bulk stage changes carry one unfiltered scope into every independently committed Deal mutation and
 its stage-history write. Ordinary creation, reviewed/guided creation, update, reopen and move also
 pass their pre-lock scope to history instead of loading it again after mutation. Deal imports pass

@@ -34,7 +34,7 @@ class DealRiskProjectionServiceTest {
         List<Integer> candidates = IntStream.rangeClosed(1, 1_001).boxed().toList();
         when(dealMapper.getRiskCandidateIds(7, MemberScope.allTeam(), 1_001)).thenReturn(candidates);
         DealRiskService service = new DealRiskService(
-            dealMapper,
+            dealMapper, ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered(),
             activityMapper,
             noteMapper,
             taskMapper,
@@ -59,7 +59,7 @@ class DealRiskProjectionServiceTest {
             eq(7), argThat(ids -> ids.size() == 1_000 && ids.getFirst() == 1 && ids.getLast() == 1_000)))
             .thenReturn(List.of());
         DealRiskService service = new DealRiskService(
-            dealMapper,
+            dealMapper, ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered(),
             mock(ActivityMapper.class),
             mock(NoteMapper.class),
             mock(TaskMapper.class),
@@ -84,7 +84,7 @@ class DealRiskProjectionServiceTest {
             eq(7), argThat(ids -> ids.size() == 1_000 && ids.getFirst() == 1 && ids.getLast() == 1_000)))
             .thenReturn(List.of());
         DealRiskService service = new DealRiskService(
-            dealMapper,
+            dealMapper, ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered(),
             mock(ActivityMapper.class),
             mock(NoteMapper.class),
             mock(TaskMapper.class),

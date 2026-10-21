@@ -13,6 +13,11 @@ usernames, and emails are deterministic and globally unique. Rerunning the same 
 already-seeded schema therefore fails on those unique values by design. Drop and recreate the
 disposable schema, or select a new schema name, before another run.
 
+Each workspace creates a fresh organization, whose existing workspace set is therefore empty before
+its BATCH transaction starts. The writer appends the generated workspace ID and binds that exact
+unfiltered scope to every Deal-person junction insert. It performs no scope-boundary read and never
+introduces a SIMPLE executor into the BATCH session.
+
 Each workspace commits in its own transaction. Its workspace-provisioned event initializes
 durable AI privacy authority afterward through the same placement-aware path as self-service
 provisioning; this is one workspace lifecycle event, not per-row automation traffic. If a multi-workspace run fails after an earlier

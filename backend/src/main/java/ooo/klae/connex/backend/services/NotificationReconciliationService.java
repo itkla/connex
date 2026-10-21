@@ -49,7 +49,7 @@ import ooo.klae.connex.backend.notifications.NotificationDelivery;
 import ooo.klae.connex.backend.notifications.NotificationProperties;
 import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
 import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
-import ooo.klae.connex.backend.exceptions.TenantScopeSnapshotMissingException;
+import ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -118,13 +118,21 @@ public class NotificationReconciliationService {
      */
     public void reconcileWorkspace(int workspaceId, boolean includeRelationshipNudges) {
         RecordVisibilityScope recordVisibilityScope = includeRelationshipNudges
-                && properties.isIntroOpportunitiesEnabled()
+                && (properties.isIntroOpportunitiesEnabled() || properties.isDealRiskEnabled())
             ? preloadRecordVisibilityScope(workspaceId)
             : null;
         TransactionTemplate transaction = new TransactionTemplate(transactionManager);
         transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
-        transaction.executeWithoutResult(status ->
-            reconcileWorkspace(workspaceId, includeRelationshipNudges, recordVisibilityScope));
+        if (recordVisibilityScope == null) {
+            transaction.executeWithoutResult(status ->
+                reconcileWorkspace(workspaceId, includeRelationshipNudges, null));
+        } else {
+            recordVisibilityScopeControlAccess.withWorkspaceScope(workspaceId, recordVisibilityScope, () -> {
+                transaction.executeWithoutResult(status ->
+                    reconcileWorkspace(workspaceId, includeRelationshipNudges, recordVisibilityScope));
+                return null;
+            });
+        }
     }
 
     /** Opens the reminder snapshot only after the organization mutex has been acquired. */
@@ -182,7 +190,7 @@ public class NotificationReconciliationService {
             Map<ReminderKey, String> stagedDealRiskSourceStates =
                 new LinkedHashMap<>();
             runManagedPass(workspaceId, expected, managedTypes, DEAL_RISK_TYPE,
-                properties.isDealRiskEnabled(), scored, "Deal-risk",
+                properties.isDealRiskEnabled(), scored && recordVisibilityScope != null, "Deal-risk",
                 staged -> addDealRiskNotifications(
                     workspaceId,
                     staged,
@@ -190,7 +198,7 @@ public class NotificationReconciliationService {
                     triggeredAt,
                     temperatures,
                     contactSourceStateHashes,
-                    stagedDealRiskSourceStates));
+                    stagedDealRiskSourceStates, recordVisibilityScope));
             if (managedTypes.contains(DEAL_RISK_TYPE)
                     && properties.isDealRiskEnabled()
                     && scored) {
@@ -306,7 +314,7 @@ public class NotificationReconciliationService {
                 triggeredAt,
                 temperatures,
                 contactSourceStateHashes,
-                dealRiskSourceStates);
+                dealRiskSourceStates, recordVisibilityScope);
             Map<HistoricalExpectationKey, String> historicalSourceStates =
                 historicalSourceStates(workspaceId, dealRiskSourceStates);
             Map<HistoricalExpectationKey, HistoricalExpectation> snapshot =
@@ -541,6 +549,8 @@ public class NotificationReconciliationService {
             pass.accept(staged);
             expected.putAll(staged);
             managedTypes.add(type);
+        } catch (TenantScopeSnapshotException exception) {
+            throw exception;
         } catch (RuntimeException exception) {
             log.warn("{} reconciliation failed for workspace={}", label, workspaceId, exception);
         }
@@ -678,14 +688,15 @@ public class NotificationReconciliationService {
         String triggeredAt,
         Map<Integer, RelationshipTemperatureDto> temperatures,
         Map<Integer, String> contactSourceStateHashes,
-        Map<ReminderKey, String> sourceStates
+        Map<ReminderKey, String> sourceStates,
+        RecordVisibilityScope scope
     ) {
         Map<Integer, DealRiskService.NotificationRiskState> byDeal = new HashMap<>();
         for (DealRiskService.NotificationRiskState state
                 : dealRiskService.assessWorkspaceNotificationStates(
                     workspaceId,
                     temperatures,
-                    contactSourceStateHashes)) {
+                    contactSourceStateHashes, scope)) {
             byDeal.put(state.assessment().getDealId(), state);
         }
         if (byDeal.isEmpty()) {
@@ -764,7 +775,7 @@ public class NotificationReconciliationService {
     private RecordVisibilityScope preloadRecordVisibilityScope(int workspaceId) {
         try {
             return recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
-        } catch (TenantScopeSnapshotMissingException exception) {
+        } catch (TenantScopeSnapshotException exception) {
             throw exception;
         } catch (RuntimeException exception) {
             log.warn("Intro-opportunity reconciliation failed for workspace={}", workspaceId, exception);
@@ -1010,6 +1021,8 @@ public class NotificationReconciliationService {
                     Set.of(),
                     Set.of(),
                     Set.of()));
+        } catch (TenantScopeSnapshotException exception) {
+            throw exception;
         } catch (RuntimeException exception) {
             log.warn("Warmth scoring failed for workspace={}; skipping relationship passes this cycle",
                 workspaceId, exception);

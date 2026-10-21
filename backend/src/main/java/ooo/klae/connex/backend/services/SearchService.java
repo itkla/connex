@@ -165,7 +165,7 @@ public class SearchService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = workspaceService.getCurrentUserId();
         Set<Permission> permissions = workspaceService.permissionsFor(workspaceId, userId);
-        String orgWorkspaceIdsJson = types.contains("companies") || types.contains("pipelines") || types.contains("notes")
+        String orgWorkspaceIdsJson = types.contains("companies") || types.contains("pipelines") || types.contains("notes") || types.contains("deals")
             ? recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson() : null;
         return new SearchResultsDto(
             selected(types, "companies", () -> companyMapper.search(workspaceId, orgWorkspaceIdsJson, pattern)
@@ -173,7 +173,7 @@ public class SearchService {
             selected(types, "people", () -> personMapper.search(workspaceId, pattern)
                 .stream().map(PersonDto::from).toList()),
             selected(types, "deals", () -> referenceService.hydrateDeals(
-                workspaceId, dealMapper.search(workspaceId, pattern))
+                workspaceId, dealMapper.search(workspaceId, orgWorkspaceIdsJson, pattern))
                 .stream().map(DealDto::from).toList()),
             selected(types, "pipelines", () -> pipelineMapper.search(workspaceId, orgWorkspaceIdsJson, pattern)
                 .stream().map(PipelineDto::from).toList()),

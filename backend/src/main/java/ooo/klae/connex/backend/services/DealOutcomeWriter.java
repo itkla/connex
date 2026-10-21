@@ -15,6 +15,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.util.RecordInsertBatches;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 
 /**
  * The only writer of a deal row. Every route that creates a deal or changes its outcome persists
@@ -46,10 +47,11 @@ public class DealOutcomeWriter {
      * deals against the same stages memoize this themselves and pass the result in.
      * @param workspaceId tenant scope
      * @param stageId the stage the deal sits on, or null
+     * @param scope the caller's captured unfiltered organization ceiling
      * @return {@code won}, {@code lost} or {@code normal}
      */
-    public String stageOutcome(int workspaceId, Integer stageId) {
-        return stageId == null ? NORMAL : dealMapper.getStageOutcome(workspaceId, stageId);
+    public String stageOutcome(int workspaceId, Integer stageId, RecordVisibilityScope scope) {
+        return stageId == null ? NORMAL : dealMapper.getStageOutcome(workspaceId, scope.workspaceIdsJson(), stageId);
     }
 
     /**
@@ -58,12 +60,13 @@ public class DealOutcomeWriter {
      * @param deal the deal to write, carrying its stored realized value
      * @param previousOutcome the won flag before this transition
      * @param requestedActualValue a submitted realized value, or null when the route carries none
+     * @param scope the caller's captured unfiltered organization ceiling
      */
     @Transactional(propagation = Propagation.MANDATORY)
     public void write(
-            int workspaceId, Deal deal, Boolean previousOutcome, BigDecimal requestedActualValue) {
+            int workspaceId, Deal deal, Boolean previousOutcome, BigDecimal requestedActualValue, RecordVisibilityScope scope) {
         write(workspaceId, deal, previousOutcome, requestedActualValue,
-            stageOutcome(workspaceId, deal.getStageId()));
+            stageOutcome(workspaceId, deal.getStageId(), scope));
     }
 
     /**
@@ -93,11 +96,12 @@ public class DealOutcomeWriter {
      * @param workspaceId tenant scope
      * @param deal the locked deal to write, carrying its stored realized value
      * @param previousOutcome the won flag before this transition
+     * @param scope the caller's captured unfiltered organization ceiling
      */
     @Transactional(propagation = Propagation.MANDATORY)
-    public void writeOutcome(int workspaceId, Deal deal, Boolean previousOutcome) {
+    public void writeOutcome(int workspaceId, Deal deal, Boolean previousOutcome, RecordVisibilityScope scope) {
         dealValueService.requireConsistentLineCurrency(workspaceId, deal);
-        applyCloseState(deal, stageOutcome(workspaceId, deal.getStageId()));
+        applyCloseState(deal, stageOutcome(workspaceId, deal.getStageId(), scope));
         dealMapper.updateOutcome(deal);
         dealValueService.reconcileRealizedValue(workspaceId, deal, previousOutcome, null);
     }

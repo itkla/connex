@@ -272,7 +272,8 @@ public class PersonService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Person person = personMapper.getPersonById(workspaceId, id);
         if (person == null) throw new ResourceNotFoundException("Contact not found");
-        Person hydrated = hydrateScopedRelationships(person, workspaceId);
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        Person hydrated = hydrateScopedRelationships(person, workspaceId, scope);
         referenceService.hydrateTasks(workspaceId, List.of(hydrated.getTasks()));
         if (hydrated.getActivities() != null && hydrated.getActivities().length > 0) {
             referenceService.hydrateActivities(workspaceId, List.of(hydrated.getActivities()));
@@ -1081,10 +1082,15 @@ public class PersonService {
      * Retrieves the deals associated with a person in the active workspace.
      */
     public List<Deal> getDealsByPersonId(int personId) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceService.getCurrentWorkspaceId(), () -> getDealsByPersonIdWithinDealVisibility(personId));
+    }
+
+    private List<Deal> getDealsByPersonIdWithinDealVisibility(int personId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requirePerson(workspaceId, personId);
         return referenceService.hydrateDeals(
-            workspaceId, dealMapper.getDealsByPersonId(workspaceId, personId));
+            workspaceId, dealMapper.getDealsByPersonId(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), personId));
     }
 
     /**
@@ -1176,9 +1182,9 @@ public class PersonService {
         return requirePerson(workspaceId, personId);
     }
 
-    private Person hydrateScopedRelationships(Person person, int workspaceId) {
+    private Person hydrateScopedRelationships(Person person, int workspaceId, RecordVisibilityScope scope) {
         person.setDeals(referenceService.hydrateDeals(
-            workspaceId, dealMapper.getDealsByPersonId(workspaceId, person.getId())).toArray(Deal[]::new));
+            workspaceId, dealMapper.getDealsByPersonId(workspaceId, scope.workspaceIdsJson(), person.getId())).toArray(Deal[]::new));
         person.setTags(tagMapper.getTagsByPersonId(workspaceId, person.getId()).toArray(Tag[]::new));
         person.setActivities(activityMapper.getActivitiesByPersonId(workspaceId, person.getId()).toArray(Activity[]::new));
         person.setTasks(taskMapper.getTasksByPersonId(workspaceId, person.getId()).toArray(Task[]::new));

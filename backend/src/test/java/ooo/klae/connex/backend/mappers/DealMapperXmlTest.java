@@ -115,7 +115,9 @@ class DealMapperXmlTest {
             String unsegmented = sql(configuration, statement, MemberScope.allTeam());
             String segmented = sql(configuration, statement, MemberScope.allTeam(), "[17,23]");
 
-            assertFalse(unsegmented.contains("JSON_TABLE"));
+            assertFalse(unsegmented.contains("segment_ids.id = d.id"));
+            assertTrue(unsegmented.contains("org_workspace.id ="));
+            assertTrue(segmented.contains("org_workspace.id ="));
             assertTrue(segmented.contains(
                 "JOIN JSON_TABLE(?, '$[*]' COLUMNS(id INT PATH '$')) segment_ids ON segment_ids.id = d.id"));
             assertTrue(segmented.indexOf("segment_ids.id = d.id") < segmented.indexOf("d.workspace_id = ?"));
@@ -270,6 +272,7 @@ class DealMapperXmlTest {
             new BoardPositionUpdate(29, 1)
         ));
         parameters.put("memberScope", scope);
+        parameters.put("orgWorkspaceIdsJson", "[7,8,9]");
         parameters.put("currency", null);
         parameters.put("startUtc", LocalDateTime.of(2026, 1, 1, 0, 0));
         parameters.put("endUtc", LocalDateTime.of(2026, 1, 2, 0, 0));

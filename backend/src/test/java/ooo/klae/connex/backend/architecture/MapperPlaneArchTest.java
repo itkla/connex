@@ -52,7 +52,6 @@ class MapperPlaneArchTest {
     private static final Map<String, Set<String>> BASELINE_CROSSINGS = Map.ofEntries(
         Map.entry("AttachmentMapper", Set.of("app_user")),
         Map.entry("AuditLogMapper", Set.of("app_user", "audit_log")),
-        Map.entry("DealMapper", Set.of("workspace")),
         Map.entry("NotificationMapper", Set.of("app_user", "notification_recipient_state", "workspace", "workspace_member")),
         Map.entry("PersonMapper", Set.of("workspace")),
         Map.entry("RoleMapper", Set.of("workspace_role", "workspace_role_permission")));

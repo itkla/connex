@@ -21,6 +21,12 @@ import ooo.klae.connex.backend.support.TestEntityFixtures;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @Transactional
 abstract class AbstractMapperTest {
+    /** Supplies the unfiltered organization ceiling to direct Deal mapper fixture calls. */
+    protected String dealScope(int workspaceId) {
+        return workspaceMapper.findOrganizationWorkspacesForShare(workspaceId).stream()
+            .map(ooo.klae.connex.backend.beans.Workspace::getId).toList().toString();
+    }
+
 
     @Autowired protected UserMapper userMapper;
     @Autowired protected CompanyMapper companyMapper;

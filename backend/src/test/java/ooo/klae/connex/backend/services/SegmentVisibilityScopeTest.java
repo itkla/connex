@@ -1,9 +1,12 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anySet;
@@ -11,6 +14,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
@@ -40,7 +44,7 @@ class SegmentVisibilityScopeTest {
     private final PersonMapper people = mock(PersonMapper.class);
     private final PersonEdgeReadService edges = mock(PersonEdgeReadService.class);
     private final ScoringService scoring = mock(ScoringService.class);
-    private final RecordVisibilityScopeControlAccess scopes = mock(RecordVisibilityScopeControlAccess.class);
+    private final RecordVisibilityScopeControlAccess scopes = unfiltered();
     private final SegmentService service = new SegmentService(
         mock(WorkspaceService.class), mock(AuthService.class), scoring, mock(DealRiskService.class),
         segments, edges, people, mock(TagMapper.class), new SegmentCatalog(), scopes);
@@ -78,6 +82,7 @@ class SegmentVisibilityScopeTest {
             verify(segments).companyIdsWithWarmIntro(7, "[7,8,9]", 17, candidates(after), 2);
         }
         verify(segments, never()).companyIdsInWorkspace(7);
+        verify(scopes).withDeferredWorkspaceScopeRead(eq(7), any());
         verifyNoMoreInteractions(scopes);
         verifyNoInteractions(people, edges);
     }
@@ -117,6 +122,7 @@ class SegmentVisibilityScopeTest {
         assertEquals(41, calls.getFirst().get("id"));
         assertEquals(List.of(41, 42), calls.getLast().get("ids"));
         verify(scopes).getForWorkspace(7);
+        verify(scopes).withDeferredWorkspaceScopeRead(eq(7), any());
         verifyNoMoreInteractions(scopes);
         if (restricted) {
             verify(segments, never()).personIdsMatching(anyMap());
@@ -138,6 +144,7 @@ class SegmentVisibilityScopeTest {
         assertTrue(service.matchesEntity(7, 17, "company", definition, 31));
 
         verify(scopes).getForWorkspace(7);
+        verify(scopes).withDeferredWorkspaceScopeRead(eq(7), any());
         verifyNoMoreInteractions(scopes);
         verify(segments).companyIdsNoActivitySince(7, "[7,8,9]", 30, List.of(31));
         verify(segments).companyIdsWithWarmIntro(7, "[7,8,9]", 17, List.of(31), 2);
@@ -166,6 +173,7 @@ class SegmentVisibilityScopeTest {
         order.verify(people).getEngagedPersonIds(7);
         order.verify(edges).getAllEdges(7);
         order.verify(segments).companyIdsForPersonsWithoutUserActivity(7, "[7,8,9]", 17, List.of(22), null);
+        verify(scopes).withDeferredWorkspaceScopeRead(eq(7), any());
         verifyNoMoreInteractions(scopes);
     }
 
@@ -183,6 +191,7 @@ class SegmentVisibilityScopeTest {
         }
         verifyNoMoreInteractions(scoring);
         verify(scopes).getForWorkspace(7);
+        verify(scopes).withDeferredWorkspaceScopeRead(eq(7), any());
         verifyNoMoreInteractions(scopes);
     }
 
@@ -193,7 +202,9 @@ class SegmentVisibilityScopeTest {
         assertEquals(List.of(), service.evaluate(7, 17, "person", null, 2));
         assertFalse(service.matchesEntity(7, 17, "person", null, 31));
         assertFalse(service.matchesEntity(7, 17, "person", definition("all", company("is", "41")), 31));
-        verifyNoInteractions(scopes);
+        verify(scopes, times(5)).withDeferredWorkspaceScopeRead(eq(7), any());
+        verify(scopes, never()).getForWorkspace(anyInt());
+        verifyNoMoreInteractions(scopes);
     }
 
     private void pages() {

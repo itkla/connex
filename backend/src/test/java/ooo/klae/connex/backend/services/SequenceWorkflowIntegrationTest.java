@@ -704,7 +704,7 @@ class SequenceWorkflowIntegrationTest {
             deal.setStageId(stage.getId());
             deal.setCompanyId(companyId);
             dealMapper.insert(deal);
-            dealMapper.addPerson(targetWorkspace.getId(), deal.getId(), personId, null);
+            dealMapper.addPerson(targetWorkspace.getId(), "[7,8,9]", deal.getId(), personId, null);
             return deal;
         });
     }

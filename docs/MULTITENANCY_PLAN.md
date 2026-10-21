@@ -248,7 +248,7 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   tightening requires a separate explicit decision. It deliberately differs from the active-only
   `OrganizationWorkspaceScopeControlAccess` used by Identity, PersonEdge and assistant ceilings.
   `IntroductionMapper`, `DuplicateReviewMapper`, `NoteMapper`, `ReportMapper`, `SegmentMapper`,
-  `PipelineMapper` and `CompanyMapper` now bind this set through `JSON_TABLE` and read tenant tables only;
+  `PipelineMapper`, `CompanyMapper` and `DealMapper` now bind this set through `JSON_TABLE` and read tenant tables only;
   duplicate counts omit the optional employer-label joins.
   Note pages and their counts reuse one scope and author-ID snapshot, and global note search reuses
   one scope across both bounded candidate streams. Company evidence resolves its scope before the
@@ -264,6 +264,12 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   `workspaceId` remains the parent's owning workspace. Empty pipelines retain an empty array and
   `getAllPipelines` stays lightweight. Import and export keep their per-pipeline stage queries with
   one scope for the operation; filtering, ordering and search limits remain in tenant SQL.
+  Deal's related-company, person, pipeline and stage ceilings retain their exact owner anchors,
+  archival/processing restrictions and tenant-side share checks. Filtered page/count, metrics,
+  selection, export and risk inputs reuse one operation scope. Empty segments and ineligible risk
+  cohorts retain deferred no-read paths; junction insert/upsert/role-update authorization remains
+  inside tenant SQL. Seeder scopes begin empty for a fresh organization before BATCH work, then
+  append its generated workspace ID without consulting a SIMPLE executor.
   Bulk stage changes pass the same scope into each independently committed mutation and stage-history
   write. Workflow traversal and workspace batches explicitly reuse one scope across their independent
   transactions, restoring the synchronous operation binding on exit; routed reads continue to validate

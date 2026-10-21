@@ -227,17 +227,17 @@ class ArchivedRecordVisibilityMapperTest extends AbstractMapperTest {
         Deal onAccount = newDeal(pipeline, stage, account);
         Deal unassigned = newDealWithoutCompany(pipeline, stage);
 
-        Map<String, Long> before = facetCounts(dealMapper.countsByCompany(workspace.getId()));
+        Map<String, Long> before = facetCounts(dealMapper.countsByCompany(workspace.getId(), dealScope(workspace.getId())));
         assertEquals(1L, before.get(String.valueOf(account.getId())));
         assertEquals(1L, before.get("__empty__"));
 
         assertEquals(1, companyMapper.archive(workspace.getId(), account.getId()));
 
-        Map<String, Long> after = facetCounts(dealMapper.countsByCompany(workspace.getId()));
+        Map<String, Long> after = facetCounts(dealMapper.countsByCompany(workspace.getId(), dealScope(workspace.getId())));
         assertNull(after.get(String.valueOf(account.getId())));
         assertEquals(2L, after.get("__empty__"));
         assertEquals(2L, after.values().stream().mapToLong(Long::longValue).sum());
-        List<Integer> unassignedIds = dealMapper.getFilteredDealIds(workspace.getId(), null, null,
+        List<Integer> unassignedIds = dealMapper.getFilteredDealIds(workspace.getId(), dealScope(workspace.getId()), null, null,
             null, null, null, null, null, true, null, null, allTeamScope(), 100);
         assertTrue(unassignedIds.contains(onAccount.getId()));
         assertTrue(unassignedIds.contains(unassigned.getId()));

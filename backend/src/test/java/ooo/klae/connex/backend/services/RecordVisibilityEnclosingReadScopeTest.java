@@ -4,7 +4,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
@@ -97,13 +101,42 @@ class RecordVisibilityEnclosingReadScopeTest {
     }
 
     @Test
-    void personDetailWithEmptyRelationshipsSkipsTheScope() {
+    void personDetailWithEmptyRelationshipsResolvesOnceForTheDealQuery() {
         Person person = new Person();
         person.setId(41);
         when(personMapper.getPersonById(7, 41)).thenReturn(person);
+        try (var detailFixture = new RecordVisibilityOperationFixture(7)) {
+            ReflectionTestUtils.setField(people, "recordVisibilityScopeControlAccess", detailFixture.scopes);
+            when(referenceService.hydrateDeals(7, List.of())).thenAnswer(invocation -> {
+                assertEquals("[7,17]", detailFixture.scopes.getForWorkspace(7).workspaceIdsJson());
+                return List.of();
+            });
 
-        assertSame(person, people.getPersonById(41));
-        verifyNoInteractions(fixture.control, companyMapper);
+            assertSame(person, people.getPersonById(41));
+            assertEquals(0, person.getDeals().length);
+
+            var order = inOrder(personMapper, detailFixture.control, dealMapper);
+            order.verify(personMapper).getPersonById(7, 41);
+            order.verify(detailFixture.control).findOrganizationWorkspacesForShare(7);
+            order.verify(dealMapper).getDealsByPersonId(7, "[7,17]", 41);
+            verifyNoMoreInteractions(detailFixture.control, dealMapper);
+            verifyNoInteractions(fixture.control, companyMapper);
+        }
+    }
+
+    @Test
+    void personDetailScopeFailureEscapesBeforeTheDealQuery() {
+        Person person = new Person();
+        person.setId(41);
+        when(personMapper.getPersonById(7, 41)).thenReturn(person);
+        var failure = new DataAccessResourceFailureException("control unavailable");
+        doThrow(failure).when(fixture.control).findOrganizationWorkspacesForShare(7);
+
+        assertSame(failure, assertThrows(DataAccessResourceFailureException.class, () -> people.getPersonById(41)));
+
+        verify(fixture.control).findOrganizationWorkspacesForShare(7);
+        verifyNoMoreInteractions(fixture.control);
+        verifyNoInteractions(dealMapper, companyMapper, referenceService);
     }
 
     @Test

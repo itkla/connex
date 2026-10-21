@@ -1150,7 +1150,7 @@ public class ImportService {
                 bean.setStageId(row.resolvedStageId);
                 bean.setCompanyId(companyId(row, companyByName));
                 newDeals.add(new DealOutcomeWriter.NewDeal(bean, bean.getValue(),
-                    outcomeFor(workspaceId, bean.getStageId(), stageOutcome)));
+                    outcomeFor(workspaceId, bean.getStageId(), stageOutcome, scope)));
                 beans.add(bean);
                 toCreate.add(row);
             }
@@ -1165,7 +1165,7 @@ public class ImportService {
                             workspaceId, bean.getId(), bean.getStageId(), bean.getWon(), scope);
                     }
                     attachDealTags(workspaceId, bean.getId(), row.tagNames, tagByName);
-                    linkDealPeople(workspaceId, bean.getId(), row.peopleEmails, personByEmail);
+                    linkDealPeople(workspaceId, bean.getId(), row.peopleEmails, personByEmail, scope);
                     applyCustomValues(
                         "deal",
                         bean.getId(),
@@ -1359,7 +1359,7 @@ public class ImportService {
             existing.setPipelineId(row.resolvedPipelineId);
             existing.setStageId(row.resolvedStageId);
         }
-        String outcome = outcomeFor(workspaceId, existing.getStageId(), stageOutcome);
+        String outcome = outcomeFor(workspaceId, existing.getStageId(), stageOutcome, scope);
         dealOutcomeWriter.applyOutcome(existing, outcome);
         Integer afterStageId = existing.getStageId();
         boolean parentChanged =
@@ -1384,7 +1384,7 @@ public class ImportService {
         boolean tagsChanged = attachDealTags(
             workspaceId, existing.getId(), row.tagNames, tagByName);
         boolean peopleChanged = linkDealPeople(
-            workspaceId, existing.getId(), row.peopleEmails, personByEmail);
+            workspaceId, existing.getId(), row.peopleEmails, personByEmail, scope);
         boolean customChanged = applyCustomValues(
             "deal",
             existing.getId(),
@@ -1463,10 +1463,10 @@ public class ImportService {
         }
     }
 
-    private String outcomeFor(int workspaceId, Integer stageId, Map<Integer, String> stageOutcome) {
+    private String outcomeFor(int workspaceId, Integer stageId, Map<Integer, String> stageOutcome, RecordVisibilityScope scope) {
         return stageId == null ? "normal"
             : stageOutcome.computeIfAbsent(
-                stageId, sid -> dealOutcomeWriter.stageOutcome(workspaceId, sid));
+                stageId, sid -> dealOutcomeWriter.stageOutcome(workspaceId, sid, scope));
     }
 
     private Map<String, Integer> resolveDealPeople(int workspaceId, List<PlanRow> plan, String action) {
@@ -1487,7 +1487,7 @@ public class ImportService {
         return byEmail;
     }
 
-    private boolean linkDealPeople(int workspaceId, int dealId, List<String> emails, Map<String, Integer> personByEmail) {
+    private boolean linkDealPeople(int workspaceId, int dealId, List<String> emails, Map<String, Integer> personByEmail, RecordVisibilityScope scope) {
         Set<Integer> linked = new LinkedHashSet<>();
         for (String email : emails) {
             Integer personId = personByEmail.get(email);
@@ -1499,7 +1499,7 @@ public class ImportService {
         boolean changed = false;
         for (Integer personId : linked) {
             changed |= dealMapper.addPersonIfAbsent(
-                workspaceId, dealId, personId) > 0;
+                workspaceId, scope.workspaceIdsJson(), dealId, personId) > 0;
         }
         return changed;
     }

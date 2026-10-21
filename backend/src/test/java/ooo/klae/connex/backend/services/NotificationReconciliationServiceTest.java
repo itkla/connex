@@ -68,6 +68,80 @@ class NotificationReconciliationServiceTest {
     }
 
     @Test
+    void dealRiskWithoutIntroductionsReceivesOneScopeBeforeTheTransactionAndMutex() {
+        ReconciliationFixture fixture = ReconciliationFixture.withDispatcher();
+        fixture.properties.setIntroOpportunitiesEnabled(false);
+        fixture.properties.setDealRiskEnabled(true);
+
+        fixture.service().reconcileWorkspace(7, true);
+
+        var order = Mockito.inOrder(fixture.recordVisibilityScopeControlAccess, fixture.transactionManager,
+            fixture.duplicateDecisionLockService, fixture.dealRiskService);
+        order.verify(fixture.recordVisibilityScopeControlAccess).getForWorkspace(7);
+        order.verify(fixture.transactionManager).getTransaction(any());
+        order.verify(fixture.duplicateDecisionLockService).lockBackgroundOrganization(7);
+        order.verify(fixture.dealRiskService).assessWorkspaceNotificationStates(eq(7), any(), any(), eq(RECORD_SCOPE));
+        Mockito.verify(fixture.recordVisibilityScopeControlAccess, Mockito.times(1)).getForWorkspace(7);
+    }
+
+    @Test
+    void ordinaryPreloadFailureLeavesDealRiskUnmanagedAndPreservesOtherReminderPasses() {
+        ReconciliationFixture fixture = ReconciliationFixture.withDispatcher();
+        fixture.properties.setIntroOpportunitiesEnabled(false);
+        fixture.properties.setDealRiskEnabled(true);
+        when(fixture.recordVisibilityScopeControlAccess.getForWorkspace(7))
+            .thenThrow(new IllegalStateException("Control read failed"));
+        when(fixture.notificationMapper.findWorkspaceReminderNotifications(7))
+            .thenReturn(List.of(reminderNotification(202, NotificationReconciliationService.DEAL_RISK_TYPE, "deal.risk:101")));
+
+        fixture.service().reconcileWorkspace(7, true);
+
+        verify(fixture.notificationMapper).findTaskReminderCandidates(7);
+        verify(fixture.notificationMapper).findDealReminderCandidates(7);
+        Mockito.verifyNoInteractions(fixture.dealRiskService);
+        verify(fixture.notificationMapper, never()).resolveReminder(anyInt(), anyInt(), anyInt(), anyString());
+    }
+
+    @Test
+    void mismatchedSnapshotCannotDegradeIntoASkippedDealRiskPass() {
+        ReconciliationFixture fixture = ReconciliationFixture.withDispatcher();
+        fixture.properties.setIntroOpportunitiesEnabled(false);
+        fixture.properties.setDealRiskEnabled(true);
+        var mismatch = new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException("Mismatched scope");
+        when(fixture.recordVisibilityScopeControlAccess.getForWorkspace(7)).thenThrow(mismatch);
+
+        assertSame(mismatch, assertThrows(ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException.class,
+            () -> fixture.service().reconcileWorkspace(7, true)));
+        Mockito.verifyNoInteractions(fixture.transactionManager, fixture.notificationMapper, fixture.dispatcher);
+    }
+
+    @Test
+    void snapshotRefusalWithinARiskPassEscapesItsOrdinaryFailureIsolation() {
+        ReconciliationFixture fixture = ReconciliationFixture.withDispatcher();
+        fixture.properties.setIntroOpportunitiesEnabled(false);
+        fixture.properties.setDealRiskEnabled(true);
+        var refusal = new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException("Scope changed");
+        when(fixture.dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any(), eq(RECORD_SCOPE)))
+            .thenThrow(refusal);
+
+        assertSame(refusal, assertThrows(ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException.class,
+            () -> fixture.service().reconcileWorkspace(7, true)));
+        verify(fixture.transactionManager).rollback(any());
+        Mockito.verifyNoInteractions(fixture.dispatcher);
+    }
+
+    @Test
+    void snapshotRefusalFromWarmthCannotBecomeAnUnmanagedRelationshipPass() {
+        ReconciliationFixture fixture = ReconciliationFixture.withDispatcher();
+        var refusal = new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException("Scope changed");
+        when(fixture.scoringService.scoreContacts(eq(7), any(Instant.class))).thenThrow(refusal);
+
+        assertSame(refusal, assertThrows(ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException.class,
+            () -> fixture.service().reconcileWorkspace(7, true)));
+        verify(fixture.transactionManager).rollback(any());
+    }
+
+    @Test
     void classifiesWarningCriticalAndInitialBackfillBoundaries() {
         LocalDate today = LocalDate.of(2026, 6, 24);
 
@@ -367,7 +441,7 @@ class NotificationReconciliationServiceTest {
         private final IntroductionService introductionService = Mockito.mock(IntroductionService.class);
         private final DuplicateDecisionLockService duplicateDecisionLockService = Mockito.mock(DuplicateDecisionLockService.class);
         private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess =
-            Mockito.mock(RecordVisibilityScopeControlAccess.class);
+            ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
         private final PlatformTransactionManager transactionManager = Mockito.mock(PlatformTransactionManager.class);
         private final DealRiskService dealRiskService = noRiskService();
         private final NotificationProperties properties = new NotificationProperties();
@@ -445,7 +519,7 @@ class NotificationReconciliationServiceTest {
     /** A deal-risk service that flags nothing, so the deal-risk pass is a no-op in unrelated tests. */
     private static DealRiskService noRiskService() {
         DealRiskService mock = Mockito.mock(DealRiskService.class);
-        when(mock.assessWorkspaceNotificationStates(anyInt(), any(), any()))
+        when(mock.assessWorkspaceNotificationStates(anyInt(), any(), any(), any()))
             .thenReturn(List.of());
         return mock;
     }
@@ -490,7 +564,7 @@ class NotificationReconciliationServiceTest {
         DealRiskDto low = new DealRiskDto(102, BigDecimal.ZERO, null, "low", 10,
             List.of(new DealRiskFactor("no_stakeholders", "low", Map.of())),
             "2026-06-23 15:30:00");
-        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any()))
+        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any(), eq(RECORD_SCOPE)))
             .thenReturn(List.of(riskState(high), riskState(low)));
         when(notificationMapper.findOpenDealRecipients(7)).thenReturn(List.of(
             recipient(101, "Acme renewal", 42),
@@ -522,7 +596,7 @@ class NotificationReconciliationServiceTest {
 
         verify(dealRiskService, never()).assessWorkspace(anyInt());
         verify(dealRiskService, never())
-            .assessWorkspaceNotificationStates(anyInt(), any(), any());
+            .assessWorkspaceNotificationStates(anyInt(), any(), any(), any());
     }
 
     @Test
@@ -535,7 +609,7 @@ class NotificationReconciliationServiceTest {
         DealRiskDto medium = new DealRiskDto(101, BigDecimal.ZERO, null, "medium", 25,
             List.of(new DealRiskFactor("stalled", "medium", Map.of("daysSinceTouch", 40))),
             "2026-06-23 15:30:00");
-        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any()))
+        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any(), eq(RECORD_SCOPE)))
             .thenReturn(List.of(riskState(medium)));
         when(notificationMapper.findOpenDealRecipients(7)).thenReturn(List.of(
             recipient(101, "Acme renewal", 42),
@@ -567,7 +641,7 @@ class NotificationReconciliationServiceTest {
         optOut.setEnabled(false);
 
         when(preferenceMapper.findByWorkspaceAndChannel(7, "in_app")).thenReturn(List.of(optOut));
-        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any()))
+        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any(), eq(RECORD_SCOPE)))
             .thenReturn(List.of(riskState(new DealRiskDto(
                 101,
                 BigDecimal.ZERO,
@@ -598,7 +672,7 @@ class NotificationReconciliationServiceTest {
             202, NotificationReconciliationService.DEAL_RISK_TYPE, "deal.risk:101");
 
         when(notificationMapper.findWorkspaceReminderNotifications(7)).thenReturn(List.of(existing));
-        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any()))
+        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any(), eq(RECORD_SCOPE)))
             .thenReturn(List.of());
         when(notificationMapper.resolveReminder(
             7, 42, 202, "2026-06-23 15:30:00")).thenReturn(1);
@@ -765,7 +839,7 @@ class NotificationReconciliationServiceTest {
         verify(introductionService, never()).computeSuggestions(anyInt(), anyInt(), any(), any());
         verify(introductionService, never()).computeSuggestions(anyInt(), anyInt(), any());
         verify(dealRiskService, never())
-            .assessWorkspaceNotificationStates(anyInt(), any(), any());
+            .assessWorkspaceNotificationStates(anyInt(), any(), any(), any());
         verify(notificationMapper, never()).resolveReminder(anyInt(), anyInt(), anyInt(), any());
     }
 
@@ -779,7 +853,7 @@ class NotificationReconciliationServiceTest {
         Notification existing = reminderNotification(
             202, NotificationReconciliationService.DEAL_RISK_TYPE, "deal.risk:101");
         when(notificationMapper.findWorkspaceReminderNotifications(7)).thenReturn(List.of(existing));
-        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any()))
+        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any(), eq(RECORD_SCOPE)))
             .thenThrow(new IllegalStateException("risk engine down"));
 
         NotificationReconciliationService service = fixture.service();
@@ -809,7 +883,7 @@ class NotificationReconciliationServiceTest {
         service.reconcileWorkspace(7, true);
 
         verify(dealRiskService, never())
-            .assessWorkspaceNotificationStates(anyInt(), any(), any());
+            .assessWorkspaceNotificationStates(anyInt(), any(), any(), any());
         verify(notificationMapper).resolveReminder(7, 42, 55, "2026-06-23 15:30:00");
         verify(notificationMapper).resolveReminder(7, 42, 202, "2026-06-23 15:30:00");
     }
@@ -832,7 +906,7 @@ class NotificationReconciliationServiceTest {
             202, NotificationReconciliationService.DEAL_RISK_TYPE, "deal.risk:101");
         when(notificationMapper.findTaskReminderCandidates(7)).thenReturn(List.of(task));
         when(notificationMapper.findWorkspaceReminderNotifications(7)).thenReturn(List.of(existing));
-        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any()))
+        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any(), eq(RECORD_SCOPE)))
             .thenReturn(List.of(riskState(new DealRiskDto(
                 101,
                 BigDecimal.ZERO,
@@ -1047,7 +1121,7 @@ class NotificationReconciliationServiceTest {
                 "medium",
                 Map.of("daysSinceTouch", 30))),
             "2026-06-24 15:30:00");
-        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any()))
+        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any(), eq(RECORD_SCOPE)))
             .thenReturn(
                 List.of(riskState(high, sourceStateHash)),
                 List.of(riskState(medium, sourceStateHash)));
@@ -1368,7 +1442,7 @@ class NotificationReconciliationServiceTest {
             0,
             List.of(),
             "2026-06-23 15:30:00");
-        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any()))
+        when(dealRiskService.assessWorkspaceNotificationStates(eq(7), any(), any(), eq(RECORD_SCOPE)))
             .thenReturn(
                 List.of(riskState(none, warmedSourceState)),
                 List.of(riskState(none, "c".repeat(64))));
