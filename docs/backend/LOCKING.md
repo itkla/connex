@@ -78,6 +78,11 @@ They have no production call sites until the whole-mapper conversion: existing
 `NotificationMapper` SQL, membership lock calls, transaction isolation and notification behavior
 remain authoritative. Catalog-per-placement calls refuse with 503 until the cross-catalog inbox
 contract (#2200) exists; a shared placement with no catalog name is still routed mode.
+Every public entry validates routing before transaction creation or connection checkout. The facade
+has no automatic transaction advice: after argument validation the read entry uses an explicit
+read-only transaction template, while lock entries validate and reuse the caller's existing
+writable transaction. A proxied routed call therefore retains its typed 503 refusal even when
+there is no enclosing transaction and connection checkout would itself fail.
 
 The read-only entry uses a dedicated `NotificationRecipientRead`, never a mutation `Supplier`.
 It joins or opens one read-only REPEATABLE READ transaction and performs at most two control queries on that same

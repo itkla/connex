@@ -20,8 +20,11 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.aop.support.AopUtils;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -64,7 +67,7 @@ class NotificationControlAccessTest {
         TenantWorkScope workScope = new TenantWorkScope(tenantContext, resolver, workspaceMapper,
             mock(ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper.class),
             new TenantWorkspaceScopeControlOperations(workspaceMapper, resolver));
-        access = new NotificationControlAccess(mapper, workScope, tenantContext, objectMapper);
+        access = new NotificationControlAccess(mapper, workScope, tenantContext, objectMapper, transactions);
     }
 
     @AfterEach
@@ -275,6 +278,58 @@ class NotificationControlAccessTest {
         verifyNoInteractions(mapper, workspaceMapper);
     }
 
+    @ParameterizedTest
+    @EnumSource(Entry.class)
+    void proxiedRoutedEntriesRefuseBeforeAnyConnectionCheckout(Entry entry) {
+        when(resolver.isCatalogPerPlacement()).thenReturn(true);
+        fixture.rejectCheckouts();
+
+        try (AnnotationConfigApplicationContext context = proxiedContext()) {
+            NotificationControlAccess proxied = context.getBean(NotificationControlAccess.class);
+            assertTrue(AopUtils.isAopProxy(proxied));
+            assertThrows(ServiceUnavailableException.class, () -> invoke(proxied, entry));
+            assertEquals(0, fixture.checkoutAttempts());
+        }
+        verifyNoInteractions(mapper, workspaceMapper);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = Entry.class, names = {"MEMBERSHIP_SHARE", "MEMBERSHIP_UPDATE", "ACTOR_SHARE"})
+    void proxiedLocksRefuseMissingTransactionWithoutCheckout(Entry entry) {
+        fixture.rejectCheckouts();
+
+        try (AnnotationConfigApplicationContext context = proxiedContext()) {
+            NotificationControlAccess proxied = context.getBean(NotificationControlAccess.class);
+            assertTrue(AopUtils.isAopProxy(proxied));
+            assertThrows(IllegalStateException.class, () -> invoke(proxied, entry));
+            assertEquals(0, fixture.checkoutAttempts());
+        }
+        verifyNoInteractions(mapper, workspaceMapper);
+    }
+
+    @Test
+    void proxiedReadRefusesInvalidArgumentsBeforeCheckout() {
+        fixture.rejectCheckouts();
+
+        try (AnnotationConfigApplicationContext context = proxiedContext()) {
+            NotificationControlAccess proxied = context.getBean(NotificationControlAccess.class);
+            assertTrue(AopUtils.isAopProxy(proxied));
+            assertThrows(IllegalArgumentException.class, () -> proxied.withRecipientRead(0, scope -> scope));
+            assertThrows(NullPointerException.class, () -> proxied.withRecipientRead(42, null));
+            assertEquals(0, fixture.checkoutAttempts());
+        }
+        verifyNoInteractions(mapper, workspaceMapper);
+    }
+
+    private static Object invoke(NotificationControlAccess access, Entry entry) {
+        return switch (entry) {
+            case READ -> access.withRecipientRead(42, scope -> scope);
+            case MEMBERSHIP_SHARE -> access.lockMembershipForShare(7, 42);
+            case MEMBERSHIP_UPDATE -> access.lockMembershipForUpdate(7, 42);
+            case ACTOR_SHARE -> access.lockActorForShare(81);
+        };
+    }
+
     private NotificationRecipientScope readScope() {
         TransactionTemplate transaction = new TransactionTemplate(transactions);
         transaction.setReadOnly(true);
@@ -285,7 +340,7 @@ class NotificationControlAccessTest {
         AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext();
         context.register(TransactionConfiguration.class);
         context.registerBean("transactionManager", PlatformTransactionManager.class, () -> transactions);
-        context.registerBean(NotificationControlAccess.class, () -> access);
+        context.registerBean(NotificationControlAccess.class, () -> fixture.proxied(access));
         context.refresh();
         return context;
     }
@@ -305,6 +360,8 @@ class NotificationControlAccessTest {
     }
 
     @Configuration(proxyBeanMethods = false)
-    @EnableTransactionManagement
+    @EnableTransactionManagement(proxyTargetClass = true)
     static class TransactionConfiguration { }
+
+    enum Entry { READ, MEMBERSHIP_SHARE, MEMBERSHIP_UPDATE, ACTOR_SHARE }
 }

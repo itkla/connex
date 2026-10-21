@@ -7,11 +7,10 @@ import java.util.Objects;
 import java.util.TreeMap;
 
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
-import org.springframework.transaction.annotation.Isolation;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.NotificationMembership;
@@ -45,6 +44,7 @@ import tools.jackson.databind.ObjectMapper;
  * Reconciliation must retain its workspace/organization mutex prefix before membership fences
  * and its first consistent read; it must not hoist audiences into scheduler discovery. Account
  * and workspace roots required by other producers still precede memberships. See LOCKING.md.
+ * Public entries validate routing before any transaction creation or connection checkout.
  * Routed mode refuses these contracts until cross-catalog inbox semantics exist (#2200).
  */
 @Component
@@ -54,27 +54,29 @@ public class NotificationControlAccess {
     private final TenantWorkScope tenantWorkScope;
     private final TenantContext tenantContext;
     private final ObjectMapper objectMapper;
+    private final PlatformTransactionManager transactionManager;
 
     /**
      * Resolves once after the caller's early returns and shares the snapshot across a pure read.
      * The dedicated callback never enters a shared mutation Supplier invocation. A new read-only
-     * transaction is opened only when none exists; an existing read transaction is joined.
+     * transaction is opened only after routing and arguments have been validated; an existing
+     * read transaction is validated before it is joined. The facade must not acquire automatic
+     * transaction advice, which would borrow a connection before its typed routing refusal.
      */
-    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public <T> T withRecipientRead(int recipientId, NotificationRecipientRead<T> read) {
         requireSingleDatabase();
         requirePositive(recipientId);
         Objects.requireNonNull(read, "read");
-        if (!TransactionSynchronizationManager.isActualTransactionActive()
-                || !TransactionSynchronizationManager.isCurrentTransactionReadOnly()) {
-            throw new IllegalStateException("Notification snapshots require a read-only transaction");
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            requireReadTransaction();
         }
-        Integer isolation = TransactionSynchronizationManager.getCurrentTransactionIsolationLevel();
-        if (isolation != null && isolation != TransactionDefinition.ISOLATION_REPEATABLE_READ) {
-            throw new IllegalStateException("Notification snapshots require REPEATABLE READ");
-        }
-        NotificationRecipientScope scope = tenantWorkScope.unroutedRead(() -> snapshot(recipientId));
-        return read.read(scope);
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        transaction.setReadOnly(true);
+        transaction.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+        return transaction.execute(status -> {
+            NotificationRecipientScope scope = tenantWorkScope.unroutedRead(() -> snapshot(recipientId));
+            return read.read(scope);
+        });
     }
 
     /**
@@ -82,14 +84,12 @@ public class NotificationControlAccess {
      * transaction. Reserved for conversion; caller root locks must already be in contract order.
      * Absence is returned as null, never replaced by an earlier snapshot or lifecycle-filtered row.
      */
-    @Transactional(propagation = Propagation.MANDATORY)
     public NotificationMembershipAuthority lockMembershipForShare(int workspaceId, int recipientId) {
         requireMutation(workspaceId, recipientId);
         return controlMapper.lockMembershipForShare(workspaceId, recipientId);
     }
 
     /** Retains the exact membership exclusively without expanding to the recipient's other workspaces. */
-    @Transactional(propagation = Propagation.MANDATORY)
     public NotificationMembershipAuthority lockMembershipForUpdate(int workspaceId, int recipientId) {
         requireMutation(workspaceId, recipientId);
         return controlMapper.lockMembershipForUpdate(workspaceId, recipientId);
@@ -101,7 +101,6 @@ public class NotificationControlAccess {
      * reuse already-held account roots, and preserve each producer's existing actor-lock position
      * and account-before-domain root order rather than adding unrelated broader roots here.
      */
-    @Transactional(propagation = Propagation.MANDATORY)
     public Integer lockActorForShare(Integer actorId) {
         requireSingleDatabase();
         requireWritableTransaction();
@@ -169,6 +168,16 @@ public class NotificationControlAccess {
         if (!TransactionSynchronizationManager.isActualTransactionActive()
                 || TransactionSynchronizationManager.isCurrentTransactionReadOnly()) {
             throw new IllegalStateException("Notification authority requires a writable transaction");
+        }
+    }
+
+    private static void requireReadTransaction() {
+        if (!TransactionSynchronizationManager.isCurrentTransactionReadOnly()) {
+            throw new IllegalStateException("Notification snapshots require a read-only transaction");
+        }
+        Integer isolation = TransactionSynchronizationManager.getCurrentTransactionIsolationLevel();
+        if (isolation != null && isolation != TransactionDefinition.ISOLATION_REPEATABLE_READ) {
+            throw new IllegalStateException("Notification snapshots require REPEATABLE READ");
         }
     }
 
