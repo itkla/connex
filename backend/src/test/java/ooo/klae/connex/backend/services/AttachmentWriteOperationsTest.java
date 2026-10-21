@@ -91,15 +91,15 @@ class AttachmentWriteOperationsTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    void plainAttachmentCreationSkipsCompanyScopeForPersonTargets(boolean managed) {
+    void plainAttachmentCreationSkipsVisibilityScopeForNoteTargets(boolean managed) {
         try (var fixture = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(5)) {
             org.mockito.Mockito.lenient().when(fixture.control.findOrganizationWorkspacesForShare(5))
                 .thenThrow(new org.springframework.dao.DataAccessResourceFailureException("control unavailable"));
             org.springframework.test.util.ReflectionTestUtils.setField(
                 operations, "recordVisibilityScopeControlAccess", fixture.scopes);
-            Attachment attachment = attachment("person", 41, "https://example.com/file.pdf");
+            Attachment attachment = attachment("note", 41, "https://example.com/file.pdf");
             attachment.setId(77);
-            when(personMapper.exists(5, 41)).thenReturn(true);
+            when(noteMapper.exists(5, 41)).thenReturn(true);
             when(attachmentMapper.getCreatedById(5, 77)).thenReturn(attachment);
 
             assertEquals(attachment, managed
@@ -108,6 +108,29 @@ class AttachmentWriteOperationsTest {
 
             org.mockito.Mockito.verifyNoInteractions(fixture.control, companyMapper);
             verify(attachmentMapper).insert(attachment);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void personAttachmentResolvesOneScopeBeforeValidationAndInsert(boolean managed) {
+        try (var fixture = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(5)) {
+            org.springframework.test.util.ReflectionTestUtils.setField(
+                operations, "recordVisibilityScopeControlAccess", fixture.scopes);
+            Attachment attachment = attachment("person", 41, "https://example.com/file.pdf");
+            attachment.setId(77);
+            when(personMapper.exists(5, "[5,15]", 41)).thenReturn(true);
+            when(attachmentMapper.getCreatedById(5, 77)).thenReturn(attachment);
+
+            assertEquals(attachment, managed
+                ? operations.createManaged(5, attachment) : operations.createExternal(5, attachment));
+
+            var order = org.mockito.Mockito.inOrder(fixture.control, personMapper, attachmentMapper);
+            order.verify(fixture.control).findOrganizationWorkspacesForShare(5);
+            order.verify(personMapper).exists(5, "[5,15]", 41);
+            order.verify(attachmentMapper).insert(attachment);
+            verify(fixture.control).findOrganizationWorkspacesForShare(5);
+            org.mockito.Mockito.verifyNoInteractions(companyMapper);
         }
     }
 
@@ -129,7 +152,7 @@ class AttachmentWriteOperationsTest {
     @Test
     void createExternalRejectsMissingTargetsBeforeInsert() {
         Attachment missing = attachment("person", 42, "https://example.com/missing.pdf");
-        when(personMapper.exists(5, 42)).thenReturn(false);
+        when(personMapper.exists(5, "[7,8,9]", 42)).thenReturn(false);
 
         assertThrows(ResourceNotFoundException.class,
             () -> operations.createExternal(5, missing));
@@ -280,7 +303,7 @@ class AttachmentWriteOperationsTest {
         stubLockedAuthority(Map.of(7, Set.of(Permission.ATTACHMENT_CREATE)));
         switch (type) {
             case "company" -> when(companyMapper.exists(5, "[7,8,9]", 43)).thenReturn(true);
-            case "person" -> when(personMapper.exists(5, 43)).thenReturn(true);
+            case "person" -> when(personMapper.exists(5, "[7,8,9]", 43)).thenReturn(true);
             case "deal" -> when(dealMapper.exists(5, 43)).thenReturn(true);
             default -> throw new IllegalArgumentException(type);
         }
@@ -305,8 +328,8 @@ class AttachmentWriteOperationsTest {
         } else {
             Person shared = new Person();
             shared.setWorkspaceId(6);
-            when(personMapper.exists(5, 43)).thenReturn(true);
-            when(personMapper.getVisiblePersonByIdForUpdate(5, 43)).thenReturn(shared);
+            when(personMapper.exists(5, "[7,8,9]", 43)).thenReturn(true);
+            when(personMapper.getVisiblePersonByIdForUpdate(5, "[7,8,9]", 43)).thenReturn(shared);
         }
         ScannedUpload scanned = mock(ScannedUpload.class);
         stubAdmittedStorage(scanned);
@@ -321,7 +344,7 @@ class AttachmentWriteOperationsTest {
         } else {
             var order = inOrder(managedObjectService, personMapper, shareMapper);
             order.verify(managedObjectService).storeInspectedAttachment(eq(5), eq(scanned), any(Runnable.class));
-            order.verify(personMapper).getVisiblePersonByIdForUpdate(5, 43);
+            order.verify(personMapper).getVisiblePersonByIdForUpdate(5, "[7,8,9]", 43);
             order.verify(shareMapper).lockPersonShareForWorkspace(43, 5);
         }
         verify(attachmentMapper, never()).insert(any(Attachment.class));

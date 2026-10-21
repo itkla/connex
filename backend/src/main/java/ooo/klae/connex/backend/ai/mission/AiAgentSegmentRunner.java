@@ -5,6 +5,7 @@ import java.util.Locale;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException;
 import ooo.klae.connex.backend.ai.AiGenerationContextRunner;
 import ooo.klae.connex.backend.ai.AiGenerationTaskResult;
 import ooo.klae.connex.backend.ai.AiProperties;
@@ -80,6 +81,9 @@ public class AiAgentSegmentRunner {
                 if (current != null && current.getExecutionGeneration() == policy.executionGeneration()) {
                     persistence.interrupt(current, exception instanceof AiAssistantLoopException refusal
                             ? refusal.terminalReason() : Thread.currentThread().isInterrupted() ? "interrupted" : "provider_failed");
+                }
+                if (exception instanceof TenantScopeSnapshotException refusal) {
+                    throw refusal;
                 }
             }
             AiAgentRun current = runs.getRun(candidate.getWorkspaceId(), candidate.getId());

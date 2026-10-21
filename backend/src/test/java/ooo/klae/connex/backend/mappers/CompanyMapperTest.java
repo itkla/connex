@@ -643,7 +643,7 @@ class CompanyMapperTest extends AbstractMapperTest {
 
         RelationshipScoreAggregateDto personScore = personMapper
             .getRelationshipScoreAggregates(
-                workspace.getId(), reference, RelationshipWarmthModel.current().sqlParameters()).stream()
+                workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), reference, RelationshipWarmthModel.current().sqlParameters()).stream()
             .filter(score -> score.id() == person.getId())
             .findFirst().orElseThrow();
         RelationshipScoreAggregateDto companyScore = companyMapper
@@ -663,7 +663,7 @@ class CompanyMapperTest extends AbstractMapperTest {
 
         personMapper.updateProcessingRestrictions(workspace.getId(), person.getId(), true, false);
         assertFalse(personMapper.getRelationshipScoreAggregates(
-                workspace.getId(), reference, RelationshipWarmthModel.current().sqlParameters()).stream()
+                workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), reference, RelationshipWarmthModel.current().sqlParameters()).stream()
             .anyMatch(score -> score.id() == person.getId()));
         RelationshipScoreAggregateDto restrictedCompanyScore = companyMapper
             .getRelationshipScoreAggregates(

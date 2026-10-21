@@ -1146,7 +1146,7 @@ class AiChatMemoryServiceTest {
     @Test
     void historyThatNeedsNoCompactionNeverTouchesTheScopeBoundary() {
         Instant now = Instant.parse("2026-08-12T00:00:00Z");
-        var scopes = mock(ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.class);
+        var scopes = ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
         MemoryFixture fixture = memoryFixture(1_024, Clock.fixed(now, ZoneOffset.UTC), scopes, emptyToolExecutor());
         AiChatQueuedTurn turn = new AiChatQueuedTurn(
             3, 12, 5, 7, 101, 1, 9L, false, List.of(), List.of(), AiPrivacyMode.MASKED, false,

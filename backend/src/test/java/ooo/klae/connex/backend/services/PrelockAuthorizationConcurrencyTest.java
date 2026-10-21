@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -213,7 +214,7 @@ class PrelockAuthorizationConcurrencyTest {
     void restrictionClearRejectsPermissionRevokedWhileWaitingOnWorkspace() throws Exception {
         int id = newRecord("person");
         personMapper.updateProcessingRestrictions(workspace.getId(), id, true, true);
-        Person before = personMapper.getPersonById(workspace.getId(), id);
+        Person before = personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), id);
         assertNotNull(before);
         assertNotNull(before.getSuspendedAt());
         assertNotNull(before.getProvisionCeasedAt());
@@ -221,7 +222,7 @@ class PrelockAuthorizationConcurrencyTest {
         revokeWhileWaiting(put("/api/persons/" + id + "/restrictions")
             .content("{\"suspended\":false,\"provisionCeased\":false}"));
 
-        Person after = personMapper.getPersonById(workspace.getId(), id);
+        Person after = personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), id);
         assertNotNull(after);
         assertEquals(before.getSuspendedAt(), after.getSuspendedAt());
         assertEquals(before.getProvisionCeasedAt(), after.getProvisionCeasedAt());
@@ -231,12 +232,12 @@ class PrelockAuthorizationConcurrencyTest {
     @Test
     void personUpdateRejectsPermissionRevokedWhileWaitingOnWorkspace() throws Exception {
         int id = newRecord("person");
-        Person before = personMapper.getPersonById(workspace.getId(), id);
+        Person before = personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), id);
         assertNotNull(before);
 
         revokeWhileWaiting(put("/api/persons/" + id).content("{\"name\":\"Unauthorized replacement\"}"));
 
-        Person after = personMapper.getPersonById(workspace.getId(), id);
+        Person after = personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), id);
         assertNotNull(after);
         assertEquals(before.getName(), after.getName());
         assertEquals(before.getUpdatedAt(), after.getUpdatedAt());

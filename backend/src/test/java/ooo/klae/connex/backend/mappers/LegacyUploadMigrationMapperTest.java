@@ -120,7 +120,7 @@ class LegacyUploadMigrationMapperTest extends AbstractMapperTest {
         assertEquals(1, controlMigrationMapper.updateUserImage(
             user.getId(), userUrl, managedUser));
         assertEquals(managedPerson,
-            personMapper.getPersonById(workspace.getId(), person.getId()).getImageUrl());
+            personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId()).getImageUrl());
         assertEquals(managedCompany,
             companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), company.getId()).getLogoUrl());
         assertEquals(managedUser, userMapper.getUserById(user.getId()).getProfilePictureUrl());

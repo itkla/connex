@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.ai;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -37,6 +38,7 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.mappers.AiOutputCacheMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.services.WorkspaceService;
+import ooo.klae.connex.backend.support.RecordVisibilityOperationFixture;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
@@ -58,7 +60,7 @@ class AiOutputCacheStoreTest {
     @BeforeEach
     void setUp() {
         restrictionEpoch = new AiRestrictionEpoch();
-        store = new AiOutputCacheStore(
+        store = new AiOutputCacheStore(ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered(),
                 aiOutputCacheMapper, personMapper, restrictionEpoch, JsonMapper.builder().build(),
                 workspaceService);
     }
@@ -197,7 +199,7 @@ class AiOutputCacheStoreTest {
     void save_withSerializationFailureRefusesPersistence() {
         ObjectMapper objectMapper = mock(ObjectMapper.class);
         when(objectMapper.writeValueAsString(any())).thenThrow(new SerializationFailure());
-        AiOutputCacheStore failingStore = new AiOutputCacheStore(
+        AiOutputCacheStore failingStore = new AiOutputCacheStore(ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered(),
                 aiOutputCacheMapper, personMapper, restrictionEpoch, objectMapper, workspaceService);
 
         assertFalse(failingStore.save(
@@ -208,25 +210,35 @@ class AiOutputCacheStoreTest {
 
     @Test
     void saveForPersons_locksDistinctContributorRowsInAscendingOrderBeforeUpsert() {
-        when(personMapper.getVisiblePersonByIdForUpdate(7, 3)).thenReturn(person(3));
-        when(personMapper.getVisiblePersonByIdForUpdate(7, 9)).thenReturn(person(9));
+        try (var fixture = new RecordVisibilityOperationFixture(7)) {
+            var workspaces = fixture.control.findOrganizationWorkspacesForShare(7);
+            when(fixture.control.findOrganizationWorkspacesForShare(7))
+                .thenReturn(List.of(workspaces.get(1), workspaces.get(0)));
+            assertEquals("[17,7]", orgWorkspaceIdsJson(fixture.control, 7));
+            String personScopeJson = fixture.scopes.getForWorkspace(7).workspaceIdsJson();
+            assertEquals("[7,17]", personScopeJson);
+            store = new AiOutputCacheStore(fixture.scopes, aiOutputCacheMapper, personMapper,
+                restrictionEpoch, JsonMapper.builder().build(), workspaceService);
+            when(personMapper.getVisiblePersonByIdForUpdate(7, personScopeJson, 3)).thenReturn(person(3));
+            when(personMapper.getVisiblePersonByIdForUpdate(7, personScopeJson, 9)).thenReturn(person(9));
 
-        boolean safeToServe = store.saveForPersons(
-                7, "deal.brief", 29, 0, "hash-1", List.of("content"), 0,
-                "2026-07-09T18:30:00Z", List.of(9, 3, 9));
+            boolean safeToServe = store.saveForPersons(
+                    7, "deal.brief", 29, 0, "hash-1", List.of("content"), 0,
+                    "2026-07-09T18:30:00Z", List.of(9, 3, 9));
 
-        assertTrue(safeToServe);
-        InOrder ordered = inOrder(personMapper, aiOutputCacheMapper);
-        ordered.verify(personMapper).getVisiblePersonByIdForUpdate(7, 3);
-        ordered.verify(personMapper).getVisiblePersonByIdForUpdate(7, 9);
-        ordered.verify(aiOutputCacheMapper).upsert(any(AiOutputCache.class));
+            assertTrue(safeToServe);
+            InOrder ordered = inOrder(personMapper, aiOutputCacheMapper);
+            ordered.verify(personMapper).getVisiblePersonByIdForUpdate(7, personScopeJson, 3);
+            ordered.verify(personMapper).getVisiblePersonByIdForUpdate(7, personScopeJson, 9);
+            ordered.verify(aiOutputCacheMapper).upsert(any(AiOutputCache.class));
+        }
     }
 
     @Test
     void saveForPersons_rejectsSuspendedContributor() {
         Person person = person(3);
         person.setSuspendedAt(LocalDateTime.parse("2026-07-21T10:00:00"));
-        when(personMapper.getVisiblePersonByIdForUpdate(7, 3)).thenReturn(person);
+        when(personMapper.getVisiblePersonByIdForUpdate(7, "[7,8,9]", 3)).thenReturn(person);
 
         assertFalse(store.saveForPersons(
                 7, "deal.brief", 29, 0, "hash-1", List.of("content"), 0,
@@ -238,7 +250,7 @@ class AiOutputCacheStoreTest {
     void saveForPersons_rejectsProvisionCeasedContributor() {
         Person person = person(3);
         person.setProvisionCeasedAt(LocalDateTime.parse("2026-07-21T10:00:00"));
-        when(personMapper.getVisiblePersonByIdForUpdate(7, 3)).thenReturn(person);
+        when(personMapper.getVisiblePersonByIdForUpdate(7, "[7,8,9]", 3)).thenReturn(person);
 
         assertFalse(store.saveForPersons(
                 7, "deal.brief", 29, 0, "hash-1", List.of("content"), 0,
@@ -248,7 +260,7 @@ class AiOutputCacheStoreTest {
 
     @Test
     void saveForPersons_rejectsMissingOrInvisibleContributor() {
-        when(personMapper.getVisiblePersonByIdForUpdate(7, 3)).thenReturn(null);
+        when(personMapper.getVisiblePersonByIdForUpdate(7, "[7,8,9]", 3)).thenReturn(null);
 
         assertFalse(store.saveForPersons(
                 7, "deal.brief", 29, 0, "hash-1", List.of("content"), 0,
@@ -260,7 +272,7 @@ class AiOutputCacheStoreTest {
     void saveForPersons_refusesSerializationFailureWithoutContributorAdmission() {
         ObjectMapper objectMapper = mock(ObjectMapper.class);
         when(objectMapper.writeValueAsString(any())).thenThrow(new SerializationFailure());
-        AiOutputCacheStore failingStore = new AiOutputCacheStore(
+        AiOutputCacheStore failingStore = new AiOutputCacheStore(ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered(),
                 aiOutputCacheMapper, personMapper, restrictionEpoch, objectMapper, workspaceService);
 
         assertFalse(failingStore.saveForPersons(
@@ -295,7 +307,7 @@ class AiOutputCacheStoreTest {
 
     @Test
     void saveForPersons_propagatesDatabaseFailure() {
-        when(personMapper.getVisiblePersonByIdForUpdate(7, 3))
+        when(personMapper.getVisiblePersonByIdForUpdate(7, "[7,8,9]", 3))
                 .thenThrow(new IllegalStateException("database unavailable"));
 
         assertThrows(IllegalStateException.class, () -> store.saveForPersons(

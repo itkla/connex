@@ -18,7 +18,7 @@ import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.Recor
 class WarmPathCompanyScopeTest {
     private final IntroductionMapper mapper = mock(IntroductionMapper.class);
     private final WorkspaceService workspaceService = mock(WorkspaceService.class);
-    private final RecordVisibilityScopeControlAccess scopes = mock(RecordVisibilityScopeControlAccess.class);
+    private final RecordVisibilityScopeControlAccess scopes = ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
     private final WarmPathService service = new WarmPathService(mapper, mock(PersonEdgeReadService.class),
         mock(PersonMapper.class), mock(ScoringService.class), workspaceService, mock(AuthService.class),
         mock(TaskService.class), Clock.systemUTC(), scopes);

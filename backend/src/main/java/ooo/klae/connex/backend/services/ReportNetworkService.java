@@ -74,7 +74,7 @@ public class ReportNetworkService {
             ReportAggregateQuery query, boolean includeReverseIntros, RecordVisibilityScope scope) {
         int workspaceId = query.workspaceId();
         String orgWorkspaceIdsJson = scope.workspaceIdsJson();
-        List<Person> people = personMapper.getPersonsForNetworkReport(workspaceId, MAX_VISIBLE_PEOPLE + 1);
+        List<Person> people = personMapper.getPersonsForNetworkReport(workspaceId, scope.workspaceIdsJson(), MAX_VISIBLE_PEOPLE + 1);
         List<PersonEdge> edges = personEdgeReader.getEdgesForNetworkReport(
                 workspaceId, MAX_VISIBLE_EDGES + 1);
         List<Introduction> existingPairs = introductionMapper.findExistingPairsForReport(

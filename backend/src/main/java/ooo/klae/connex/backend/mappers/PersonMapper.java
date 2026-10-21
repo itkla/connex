@@ -26,24 +26,32 @@ import ooo.klae.connex.backend.warmth.RelationshipWarmthModel.SqlParameters;
  */
 
 public interface PersonMapper {
-    List<Person> getAllPersons(int workspaceId);
-    List<Person> getProcessablePersons(int workspaceId);
+    List<Person> getAllPersons(
+            @Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson);
+    List<Person> getProcessablePersons(
+            @Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson);
     List<Integer> getAssistantProcessablePersonIds(int workspaceId);
     List<Person> getPersonsForNetworkReport(
             @Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
             @Param("limit") int limit);
     List<RelationshipScoreAggregateDto> getRelationshipScoreAggregates(
             @Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
             @Param("reference") LocalDateTime reference,
             @Param("model") SqlParameters model);
     /** Returns full-corpus aggregates scoped to the requested visible records. */
     List<RelationshipScoreAggregateDto> getRelationshipScoreAggregatesByIds(
             @Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
             @Param("reference") LocalDateTime reference,
             @Param("model") SqlParameters model,
             @Param("ids") List<Integer> ids);
     List<RelationshipScoreAggregateDto> getRelationshipScoreAggregatesExcludingHistoryImports(
             @Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
             @Param("reference") LocalDateTime reference,
             @Param("model") SqlParameters model,
             @Param("excludedActivityIds") List<Integer> excludedActivityIds,
@@ -51,26 +59,37 @@ public interface PersonMapper {
             @Param("excludedTaskIds") List<Integer> excludedTaskIds);
     RelationshipEvidenceTotalsDto getRelationshipEvidenceTotals(
             @Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
             @Param("personId") int personId,
             @Param("reference") LocalDateTime reference,
             @Param("model") SqlParameters model,
             @Param("sourceLimit") int sourceLimit);
     List<RelationshipEvidenceRowDto> getRelationshipEvidenceContributors(
             @Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
             @Param("personId") int personId,
             @Param("reference") LocalDateTime reference,
             @Param("model") SqlParameters model,
             @Param("sourceLimit") int sourceLimit,
             @Param("limit") int limit);
     List<Person> getPersonsByCompanyId(@Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
             @Param("companyId") int companyId, @Param("limit") Integer limit);
     List<CompanyEngagementPersonDto> getCompanyEngagementPeople(@Param("workspaceId") int workspaceId,
             @Param("companyId") int companyId, @Param("limit") int limit);
-    List<Person> getPersonsByTagId(@Param("workspaceId") int workspaceId, @Param("tagId") int tagId);
-    List<Person> getPersonsByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
-    Person getPersonById(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    List<Person> getPersonsByTagId(
+            @Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson, @Param("tagId") int tagId);
+    List<Person> getPersonsByDealId(
+            @Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson, @Param("dealId") int dealId);
+    Person getPersonById(
+            @Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson, @Param("id") int id);
     /** Reads one processable primary record without retrieving its linked company. */
-    Person getAssistantPrimaryPersonById(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    Person getAssistantPrimaryPersonById(
+            @Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson, @Param("id") int id);
     /**
      * Returns one active, processable, workspace-owned contact inside the supplied member scope.
      * Shared-in, unassigned, archived, suspended, and provision-ceased contacts are excluded, and
@@ -80,19 +99,31 @@ public interface PersonMapper {
             @Param("workspaceId") int workspaceId,
             @Param("id") int id,
             @Param("memberScope") MemberScope memberScope);
-    Person getVisiblePersonByIdForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
-    Person getVisiblePersonByIdForShare(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    Person getVisiblePersonByIdForUpdate(
+            @Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson, @Param("id") int id);
+    Person getVisiblePersonByIdForShare(
+            @Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson, @Param("id") int id);
     Person getOwnedPersonByIdForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
     /** Locks an owned, unarchived contact for linked writes that do not mutate the contact. */
     Person getOwnedPersonByIdForShare(@Param("workspaceId") int workspaceId, @Param("id") int id);
     /** The owned contact only when it is archived; the restore path's pre-image read. */
-    Person getOwnedArchivedPersonById(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    Person getOwnedArchivedPersonById(
+            @Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson, @Param("id") int id);
     List<Integer> getProcessablePersonIds(@Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
             @Param("ids") List<Integer> ids);
-    List<Person> getByIds(@Param("workspaceId") int workspaceId, @Param("ids") List<Integer> ids);
-    boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    List<Person> getByIds(
+            @Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson, @Param("ids") List<Integer> ids);
+    boolean exists(
+            @Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson, @Param("id") int id);
     List<Integer> getVisibleIdsIn(
         @Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
         @Param("ids") List<Integer> ids
     );
     /**
@@ -103,11 +134,14 @@ public interface PersonMapper {
     /** True only when the workspace owns the contact AND it is archived; for restore write scoping. */
     boolean existsOwnedArchived(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Integer lockById(@Param("workspaceId") int workspaceId, @Param("id") int id);
-    List<Person> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
+    List<Person> search(
+            @Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson, @Param("query") String query);
     /** Existing contacts in the workspace whose email matches one of the given (normalized) emails; for import dedup. */
     List<Person> findByEmails(@Param("workspaceId") int workspaceId, @Param("emails") List<String> emails);
     /** One page of the browser list; {@code archived} selects the archived set instead of the active one. */
-    List<Person> getPersonsPage(@Param("workspaceId") int workspaceId, @Param("query") String query,
+    List<Person> getPersonsPage(@Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson, @Param("query") String query,
             @Param("sort") String sort, @Param("dir") String dir,
             @Param("companies") List<String> companies, @Param("titles") List<String> titles,
             @Param("noCompany") boolean noCompany, @Param("memberScope") MemberScope memberScope,
@@ -119,7 +153,8 @@ public interface PersonMapper {
             @Param("noFirstResponse") boolean noFirstResponse,
             @Param("archived") boolean archived, @Param("warmth") WarmthFilter warmth,
             @Param("limit") int limit, @Param("offset") int offset);
-    long countPersons(@Param("workspaceId") int workspaceId, @Param("query") String query,
+    long countPersons(@Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson, @Param("query") String query,
             @Param("companies") List<String> companies,
             @Param("titles") List<String> titles, @Param("noCompany") boolean noCompany,
             @Param("memberScope") MemberScope memberScope,
@@ -134,7 +169,8 @@ public interface PersonMapper {
      * CSV export using the browser filters and member scope, excluding suspended contacts.
      * Callers pass {@code archived = false}: an export is defined as the active working set.
      */
-    List<Person> getPersonsFiltered(@Param("workspaceId") int workspaceId, @Param("query") String query,
+    List<Person> getPersonsFiltered(@Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson, @Param("query") String query,
             @Param("companies") List<String> companies, @Param("titles") List<String> titles,
             @Param("noCompany") boolean noCompany, @Param("memberScope") MemberScope memberScope,
             @Param("lifecycleStages") List<PersonLifecycleStage> lifecycleStages,
@@ -145,7 +181,8 @@ public interface PersonMapper {
             @Param("noFirstResponse") boolean noFirstResponse,
             @Param("archived") boolean archived, @Param("warmth") WarmthFilter warmth);
     /** Ids using the browser's filters and member scope; backs "select all matching". */
-    List<Integer> getPersonIdsFiltered(@Param("workspaceId") int workspaceId, @Param("query") String query,
+    List<Integer> getPersonIdsFiltered(@Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson, @Param("query") String query,
             @Param("companies") List<String> companies, @Param("titles") List<String> titles,
             @Param("noCompany") boolean noCompany, @Param("memberScope") MemberScope memberScope,
             @Param("lifecycleStages") List<PersonLifecycleStage> lifecycleStages,
@@ -156,9 +193,13 @@ public interface PersonMapper {
             @Param("noFirstResponse") boolean noFirstResponse,
             @Param("archived") boolean archived, @Param("warmth") WarmthFilter warmth,
             @Param("limit") int limit);
-    List<String> distinctCompanies(int workspaceId);
+    List<String> distinctCompanies(
+            @Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson);
     List<String> distinctTitles(int workspaceId);
-    boolean hasPersonWithoutCompany(int workspaceId);
+    boolean hasPersonWithoutCompany(
+            @Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson);
     List<FacetCount> countsByOwner(@Param("workspaceId") int workspaceId);
     /**
      * How many active contacts sit in each lead-lifecycle stage, matching the page filter's
@@ -194,7 +235,8 @@ public interface PersonMapper {
      * @return one bucket per band, plus {@code __none__}
      */
     List<FacetCount> countsByWarmthBand(
-            @Param("workspaceId") int workspaceId, @Param("warmth") WarmthFilter warmth);
+            @Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson, @Param("warmth") WarmthFilter warmth);
     /**
      * How many active contacts sit in each first-response SLA state, matching the page filter's
      * population. Contacts that have never been put under an SLA are counted under the
@@ -207,7 +249,9 @@ public interface PersonMapper {
     /** How many contacts the workspace currently holds archived; drives the browser's archived toggle. */
     long countArchivedPersons(@Param("workspaceId") int workspaceId);
     /** Ids of contacts the team has engaged (has any activity, note, or task), used as warm-intro entry points. */
-    List<Integer> getEngagedPersonIds(int workspaceId);
+    List<Integer> getEngagedPersonIds(
+            @Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson);
     int insert(Person person);
     /** Bulk-insert contacts in one statement (CSV import); generated ids are written back to each bean. */
     int insertBatch(List<Person> persons);

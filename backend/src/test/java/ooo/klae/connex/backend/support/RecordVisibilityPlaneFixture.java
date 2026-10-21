@@ -69,6 +69,8 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
     public final DealMapper dealMapper;
     public final SqlSessionTemplate dealStatements;
     public final CompanyMapper companyMapper;
+    public final ooo.klae.connex.backend.mappers.PersonMapper personMapper;
+    public final SqlSessionTemplate personStatements;
     public final SqlSessionTemplate companyStatements;
     public final RecordVisibilityScopeControlAccess scopeAccess;
     public final LegacyRecordVisibilitySql legacy;
@@ -100,7 +102,7 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
 
     /** Selects one mapper's minimal tenant-table fixture without changing the pilot fixtures. */
     public enum Records {
-        INTRODUCTIONS, DUPLICATE_REVIEW, NOTES, REPORTS, SEGMENTS, PIPELINES, COMPANIES, DEALS
+        INTRODUCTIONS, DUPLICATE_REVIEW, NOTES, REPORTS, SEGMENTS, PIPELINES, COMPANIES, DEALS, PERSONS
     }
 
     /** Migrates the default schema and clones only the selected statements' tenant tables. */
@@ -132,6 +134,8 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
         tenantCatalog = split ? "cnx_record_plane_" + UUID.randomUUID().toString().replace("-", "")
             : defaultCatalog;
         tables = switch (records) {
+            case PERSONS -> List.of("company", "person", "company_share", "person_share", "deal", "tag",
+                "activity", "note", "task", "person_tag", "deal_person");
             case DEALS -> List.of("company", "person", "company_share", "person_share",
                 "pipeline", "pipeline_share", "stage", "deal", "deal_person");
             case COMPANIES -> List.of("company", "person", "company_share", "person_share", "deal", "tag",
@@ -166,7 +170,7 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
         configuration.getTypeAliasRegistry().registerAliases("ooo.klae.connex.backend.beans");
         for (String resource : List.of("mappers/IntroductionMapper.xml", "mappers/DuplicateReviewMapper.xml",
                 "mappers/WorkspaceMapper.xml", "mappers/NoteMapper.xml", "mappers/ReportMapper.xml",
-                "mappers/SegmentMapper.xml", "mappers/PipelineMapper.xml", "mappers/CompanyMapper.xml", "mappers/PersonMapper.xml", "mappers/DealMapper.xml")) {
+                "mappers/SegmentMapper.xml", "mappers/PipelineMapper.xml", "mappers/CompanyMapper.xml", "mappers/PersonMapper.xml", "mappers/DealMapper.xml", "mappers/TagMapper.xml")) {
             try (InputStream input = getClass().getClassLoader().getResourceAsStream(resource)) {
                 if (input == null) {
                     throw new IllegalStateException("Missing mapper resource " + resource);
@@ -183,6 +187,8 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
         segmentMapper = sessions.getMapper(SegmentMapper.class);
         pipelineMapper = sessions.getMapper(PipelineMapper.class);
         companyMapper = sessions.getMapper(CompanyMapper.class);
+        personMapper = sessions.getMapper(ooo.klae.connex.backend.mappers.PersonMapper.class);
+        personStatements = sessions;
         companyStatements = sessions;
         dealStatements = sessions;
         dealMapper = sessions.getMapper(DealMapper.class);
@@ -193,7 +199,9 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
         legacy = new LegacyRecordVisibilitySql(pool, defaultCatalog);
         try {
             seedControl();
-            if (records == Records.DEALS) {
+            if (records == Records.PERSONS) {
+                seedPersons();
+            } else if (records == Records.DEALS) {
                 seedDeals();
             } else if (records == Records.COMPANIES) {
                 seedCompanies();
@@ -360,6 +368,23 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
             + "VALUES (?, ?, ?, ?, 'UTC')", unique(), "Visibility Member", unique() + "@example.com", "test-hash");
         controlJdbc.update("INSERT INTO workspace_member (workspace_id, user_id, role) VALUES (?, ?, 'member')",
             workspaceId, userId);
+    }
+
+    private void seedPersons() throws SQLException {
+        seedNotes();
+        reportTagId = insert("INSERT INTO tag (workspace_id, name) VALUES (?, 'Person Matrix Tag')", workspaceId);
+        for (int index = 0; index < personIds.size(); index++) {
+            int person = personIds.get(index);
+            controlJdbc.update("UPDATE person SET owner_id = ?, title = 'Director', lifecycle_stage = 'NEW', "
+                + "lead_source = 'EVENT', qualification_notes = 'Owner assessment', "
+                + "created_at = '2026-08-01', updated_at = '2026-08-01' WHERE id = ?", userId, person);
+            controlJdbc.update("INSERT INTO person_tag (person_id, tag_id) VALUES (?, ?)", person, reportTagId);
+            controlJdbc.update("INSERT INTO deal_person (deal_id, person_id, role) VALUES (?, ?, 'Contact')",
+                dealIds.getFirst(), person);
+            addActivity(workspaceId, userId, person, null, "2026-09-15 12:00:00");
+            controlJdbc.update("INSERT INTO task (workspace_id, person_id, description, created_at) "
+                + "VALUES (?, ?, 'Person Matrix Task', '2026-09-16')", workspaceId, person);
+        }
     }
 
     private void seedDeals() throws SQLException {
@@ -679,6 +704,7 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
 
     private String fixtureRows(String table) {
         return switch (table) {
+            case "person_tag" -> "person_id IN (SELECT id FROM person WHERE workspace_id IN (" + workspaceIdsSql() + "))";
             case "company_tag" -> "company_id IN (SELECT id FROM company WHERE workspace_id IN (" + workspaceIdsSql() + "))";
             case "deal_person", "deal_tag" -> "deal_id IN (SELECT id FROM deal WHERE workspace_id IN (" + workspaceIdsSql() + "))";
             default -> "workspace_id IN (" + workspaceIdsSql() + ")";

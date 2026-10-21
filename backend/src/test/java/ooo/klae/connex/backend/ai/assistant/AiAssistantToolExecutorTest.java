@@ -361,7 +361,7 @@ class AiAssistantToolExecutorTest {
                 List.of(), List.of(), List.of(), List.of(), List.of(),
                 List.of(), List.of(), List.of(), List.of(), List.of(), List.of()));
         when(personService.getPersonById(17)).thenReturn(restricted);
-        when(personMapper.getPersonById(7, 17)).thenReturn(restricted);
+        when(personMapper.getPersonById(7, "[7,8,9]", 17)).thenReturn(restricted);
         AiChatResourceRegistry resources = new AiChatResourceRegistry();
         resources.register("person", 17);
 
@@ -399,7 +399,7 @@ class AiAssistantToolExecutorTest {
         deal.setId(8);
         Company company = new Company();
         company.setId(5);
-        when(personMapper.getPersonById(7, 17)).thenReturn(person);
+        when(personMapper.getPersonById(7, "[7,8,9]", 17)).thenReturn(person);
         when(dealService.getDealById(8)).thenReturn(deal);
         when(companyService.getCompanyById(5)).thenReturn(company);
         when(historyService.activitiesForPerson(17, null, null, 3)).thenReturn(List.of());
@@ -613,6 +613,51 @@ class AiAssistantToolExecutorTest {
         verifyNoInteractions(companyMapper, companyService);
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void dealOnlyPageContextSkipsVisibilityScopeUntilACompanyExists(boolean dealExists) {
+        try (var fixture = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(7)) {
+            org.springframework.test.util.ReflectionTestUtils.setField(
+                    executor, "recordVisibilityScopeControlAccess", fixture.scopes);
+            org.mockito.Mockito.doThrow(new org.springframework.dao.DataAccessResourceFailureException("control unavailable"))
+                    .when(fixture.control).findOrganizationWorkspacesForShare(7);
+            Deal deal = new Deal();
+            deal.setId(41);
+            deal.setName("Unlinked deal");
+            when(dealMapper.getByIds(7, List.of(41))).thenReturn(dealExists ? List.of(deal) : List.of());
+
+            var result = executor.pageContext(
+                    List.of(new AiChatPageContextDto("deal", 41)), new AiChatResourceRegistry());
+
+            assertEquals(dealExists ? 1 : 0, ((List<?>) result.data().get("records")).size());
+            verify(dealMapper).getByIds(7, List.of(41));
+            verifyNoInteractions(fixture.control, personMapper, companyMapper);
+        }
+    }
+
+    @Test
+    void dealOnlyPageContextResolvesOneScopeAfterDiscoveringCompanyLinks() {
+        try (var fixture = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(7)) {
+            org.springframework.test.util.ReflectionTestUtils.setField(
+                    executor, "recordVisibilityScopeControlAccess", fixture.scopes);
+            Deal deal = new Deal();
+            deal.setId(41);
+            deal.setName("Linked deal");
+            deal.setCompanyId(55);
+            when(dealMapper.getByIds(7, List.of(41))).thenReturn(List.of(deal));
+
+            var result = executor.pageContext(
+                    List.of(new AiChatPageContextDto("deal", 41)), new AiChatResourceRegistry());
+
+            assertEquals(1, ((List<?>) result.data().get("records")).size());
+            var order = org.mockito.Mockito.inOrder(dealMapper, fixture.control, companyMapper);
+            order.verify(dealMapper).getByIds(7, List.of(41));
+            order.verify(fixture.control).findOrganizationWorkspacesForShare(7);
+            order.verify(companyMapper).getByIds(7, "[7,17]", List.of(55));
+            verify(fixture.control).findOrganizationWorkspacesForShare(7);
+        }
+    }
+
     @Test
     void replayContextUsesOneBoundedBatchInsteadOfHydratingEachPerson() {
         List<Integer> ids = IntStream.rangeClosed(1, 50).boxed().toList();
@@ -620,13 +665,13 @@ class AiAssistantToolExecutorTest {
                 .map(id -> new AiChatPageContextDto("person", id))
                 .toList();
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
-        when(personMapper.getByIds(7, ids)).thenReturn(List.of());
+        when(personMapper.getByIds(7, "[7,8,9]", ids)).thenReturn(List.of());
 
         AiAssistantToolResult result = executor.pageContext(
                 context, new AiChatResourceRegistry());
 
         assertEquals(List.of(), result.data().get("records"));
-        verify(personMapper).getByIds(7, ids);
+        verify(personMapper).getByIds(7, "[7,8,9]", ids);
         verifyNoInteractions(personService, companyService, dealService);
     }
 
@@ -636,7 +681,7 @@ class AiAssistantToolExecutorTest {
         Person restricted = new Person();
         restricted.setId(17);
         restricted.setSuspendedAt(LocalDateTime.parse("2026-08-01T00:00:00"));
-        when(personMapper.getByIds(7, List.of(17))).thenReturn(List.of(restricted));
+        when(personMapper.getByIds(7, "[7,8,9]", List.of(17))).thenReturn(List.of(restricted));
         Activity activity = new Activity();
         activity.setPerson(restricted);
         EntityReference restrictedReference = new EntityReference();
@@ -858,7 +903,7 @@ class AiAssistantToolExecutorTest {
         when(historyService.notesForPerson(eq(person.getId()), eq(10), org.mockito.ArgumentMatchers.anyBoolean())).thenReturn(List.of(note));
         when(personService.getPersonById(17)).thenReturn(person);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
-        when(personMapper.getByIds(7, List.of(18))).thenReturn(List.of(linkedPerson));
+        when(personMapper.getByIds(7, "[7,8,9]", List.of(18))).thenReturn(List.of(linkedPerson));
         AiChatResourceRegistry resources = new AiChatResourceRegistry(new MaskingContext());
         resources.register("person", 17);
 
@@ -882,7 +927,7 @@ class AiAssistantToolExecutorTest {
         Person person = new Person();
         person.setId(17);
         person.setName("Ada Lovelace");
-        when(personMapper.getPersonById(7, 17)).thenReturn(person);
+        when(personMapper.getPersonById(7, "[7,8,9]", 17)).thenReturn(person);
         Activity activity = new Activity();
         activity.setSubject("x".repeat(500) + " Ada Lovelace " + "tail".repeat(20));
         when(activityService.getActivitiesByPersonIdInWindow(
@@ -918,7 +963,7 @@ class AiAssistantToolExecutorTest {
     void scheduleConflictResultsBoundCountAndTextBeforePromptSerialization() {
         Person person = new Person();
         person.setId(17);
-        when(personMapper.getPersonById(7, 17)).thenReturn(person);
+        when(personMapper.getPersonById(7, "[7,8,9]", 17)).thenReturn(person);
         List<Activity> activities = IntStream.range(0, 25)
                 .mapToObj(index -> {
                     Activity activity = new Activity();
@@ -1006,7 +1051,7 @@ class AiAssistantToolExecutorTest {
         when(workspaceService.getCurrentAnalyticsTimezone()).thenReturn("America/Los_Angeles");
         Person person = new Person();
         person.setId(17);
-        when(personMapper.getPersonById(7, 17)).thenReturn(person);
+        when(personMapper.getPersonById(7, "[7,8,9]", 17)).thenReturn(person);
         when(historyService.activitiesForPerson(
                 eq(17), any(LocalDateTime.class), any(LocalDateTime.class), eq(5)))
                 .thenReturn(List.of());
@@ -1085,7 +1130,7 @@ class AiAssistantToolExecutorTest {
 
     @Test
     void emptyContextAndTenantFreeTodosNeverTouchTheScopeBoundary() throws Exception {
-        var scopes = mock(ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.class);
+        var scopes = ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
         org.springframework.test.util.ReflectionTestUtils.setField(executor, "recordVisibilityScopeControlAccess", scopes);
         assertEquals(List.of(), executor.pageContext(List.of(), new AiChatResourceRegistry()).data().get("records"));
         assertEquals(List.of(), executor.pageContext(

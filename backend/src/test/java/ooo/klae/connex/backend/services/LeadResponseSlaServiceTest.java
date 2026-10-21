@@ -58,14 +58,14 @@ class LeadResponseSlaServiceTest extends AbstractServiceTest {
         Person person = newPerson(newCompany());
 
         assertTrue(slaService.startFirstResponseClock(person.getId(), 4));
-        Person under = personMapper.getPersonById(workspace.getId(), person.getId());
+        Person under = personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId());
         assertNotNull(under.getFirstResponseDueAt());
         assertNull(under.getFirstRespondedAt());
         assertNull(under.getFirstResponseBreachedAt());
 
         assertFalse(slaService.startFirstResponseClock(person.getId(), 100));
         assertEquals(under.getFirstResponseDueAt(),
-            personMapper.getPersonById(workspace.getId(), person.getId()).getFirstResponseDueAt());
+            personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId()).getFirstResponseDueAt());
     }
 
     @Test
@@ -79,7 +79,7 @@ class LeadResponseSlaServiceTest extends AbstractServiceTest {
         assertThrows(BadRequestException.class,
             () -> slaService.startFirstResponseClock(person.getId(), 24 * 365 + 1));
 
-        assertNull(personMapper.getPersonById(workspace.getId(), person.getId())
+        assertNull(personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId())
             .getFirstResponseDueAt());
     }
 
@@ -89,12 +89,12 @@ class LeadResponseSlaServiceTest extends AbstractServiceTest {
         slaService.startFirstResponseClock(person.getId(), 4);
 
         logActivity(person, "Called back");
-        Person answered = personMapper.getPersonById(workspace.getId(), person.getId());
+        Person answered = personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId());
         assertNotNull(answered.getFirstRespondedAt());
 
         logActivity(person, "Called again");
         assertEquals(answered.getFirstRespondedAt(),
-            personMapper.getPersonById(workspace.getId(), person.getId()).getFirstRespondedAt());
+            personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId()).getFirstRespondedAt());
     }
 
     @Test
@@ -103,7 +103,7 @@ class LeadResponseSlaServiceTest extends AbstractServiceTest {
 
         logActivity(person, "Coffee");
 
-        Person after = personMapper.getPersonById(workspace.getId(), person.getId());
+        Person after = personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId());
         assertNull(after.getFirstResponseDueAt());
         assertNull(after.getFirstRespondedAt());
     }
@@ -117,7 +117,7 @@ class LeadResponseSlaServiceTest extends AbstractServiceTest {
         assertEquals(List.of(person.getId()), breachingIds(workspace.getId()));
         assertTrue(slaService.recordBreach(workspace.getId(), breachRow(person)));
 
-        assertNotNull(personMapper.getPersonById(workspace.getId(), person.getId())
+        assertNotNull(personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId())
             .getFirstResponseBreachedAt());
         verify(ruleTriggers).publish(
             workspace.getId(), "person", person.getId(), "person.first_response_overdue");
@@ -138,7 +138,7 @@ class LeadResponseSlaServiceTest extends AbstractServiceTest {
         assertTrue(breachingIds(workspace.getId()).isEmpty());
         assertFalse(slaService.recordBreach(workspace.getId(), breachRow(person)));
 
-        assertNull(personMapper.getPersonById(workspace.getId(), person.getId())
+        assertNull(personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId())
             .getFirstResponseBreachedAt());
         verify(ruleTriggers, never()).publish(
             workspace.getId(), "person", person.getId(), "person.first_response_overdue");
@@ -153,7 +153,7 @@ class LeadResponseSlaServiceTest extends AbstractServiceTest {
 
         logActivity(person, "Finally called");
 
-        Person late = personMapper.getPersonById(workspace.getId(), person.getId());
+        Person late = personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId());
         assertNotNull(late.getFirstRespondedAt());
         assertNotNull(late.getFirstResponseBreachedAt());
         assertEquals(List.of(person.getId()), filteredIds(PersonFirstResponseState.RESPONDED, false));
@@ -175,11 +175,11 @@ class LeadResponseSlaServiceTest extends AbstractServiceTest {
 
         assertEquals(2, result.attemptedCount());
         assertEquals(0, result.failedCount());
-        assertNotNull(personMapper.getPersonById(workspace.getId(), first.getId())
+        assertNotNull(personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), first.getId())
             .getFirstResponseBreachedAt());
-        assertNotNull(personMapper.getPersonById(workspace.getId(), second.getId())
+        assertNotNull(personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), second.getId())
             .getFirstResponseBreachedAt());
-        assertNull(personMapper.getPersonById(workspace.getId(), answered.getId())
+        assertNull(personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), answered.getId())
             .getFirstResponseBreachedAt());
 
         assertEquals(0, slaScheduler.sweepBatches(workspace.getId()).attemptedCount());
@@ -194,7 +194,7 @@ class LeadResponseSlaServiceTest extends AbstractServiceTest {
 
         lifecycleService.withdrawFromLifecycle(withdrawn.getId(), "not a prospect after all");
 
-        Person cleared = personMapper.getPersonById(workspace.getId(), withdrawn.getId());
+        Person cleared = personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), withdrawn.getId());
         assertNull(cleared.getFirstResponseDueAt());
         assertNull(cleared.getFirstRespondedAt());
         assertNull(cleared.getFirstResponseBreachedAt());
@@ -207,7 +207,7 @@ class LeadResponseSlaServiceTest extends AbstractServiceTest {
         lifecycleService.updateLifecycle(person.getId(), request(PersonLifecycleStage.DISQUALIFIED));
         lifecycleService.updateLifecycle(person.getId(), request(PersonLifecycleStage.RECYCLED));
 
-        assertNull(personMapper.getPersonById(workspace.getId(), person.getId())
+        assertNull(personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId())
             .getFirstResponseDueAt());
         assertTrue(slaService.startFirstResponseClock(person.getId(), 8));
     }
@@ -227,7 +227,7 @@ class LeadResponseSlaServiceTest extends AbstractServiceTest {
         workspaceMapper.addMember(grantee.getId(), outsider.getId(), "owner");
         authenticateAs(outsider, grantee.getId());
 
-        Person shared = personMapper.getPersonById(grantee.getId(), person.getId());
+        Person shared = personMapper.getPersonById(grantee.getId(), orgWorkspaceIdsJson(workspaceMapper, grantee.getId()), person.getId());
         assertNotNull(shared, "the share itself must still be visible");
         assertNull(shared.getFirstResponseDueAt());
         assertNull(shared.getFirstRespondedAt());
@@ -290,9 +290,9 @@ class LeadResponseSlaServiceTest extends AbstractServiceTest {
         assertFalse(slaService.recordBreach(workspace.getId(), breachRow(suspended)));
         assertFalse(slaService.recordBreach(workspace.getId(), breachRow(ceased)));
 
-        assertNull(personMapper.getPersonById(workspace.getId(), suspended.getId())
+        assertNull(personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), suspended.getId())
             .getFirstResponseBreachedAt());
-        assertNull(personMapper.getPersonById(workspace.getId(), ceased.getId())
+        assertNull(personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), ceased.getId())
             .getFirstResponseBreachedAt());
         verify(ruleTriggers, never()).publish(
             workspace.getId(), "person", suspended.getId(), "person.first_response_overdue");
@@ -334,7 +334,7 @@ class LeadResponseSlaServiceTest extends AbstractServiceTest {
 
         lifecycleService.withdrawFromLifecycle(person.getId(), "not a prospect after all");
 
-        Person cleared = personMapper.getPersonById(workspace.getId(), person.getId());
+        Person cleared = personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId());
         assertNull(cleared.getFirstRespondedAt(), "the contact's live clock is cleared as designed");
 
         Map<String, Object> pass = jdbcTemplate.queryForMap(

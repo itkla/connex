@@ -43,7 +43,7 @@ class PersonRestrictionEpochTest {
             mock(DuplicateDecisionLockService.class);
     private final ProviderCaptureMapper providerCaptureMapper = mock(ProviderCaptureMapper.class);
     private final AiAgentPrivacyService restrictionEpoch = mock(AiAgentPrivacyService.class);
-    private final RecordVisibilityScopeControlAccess scopeAccess = mock(RecordVisibilityScopeControlAccess.class);
+    private final RecordVisibilityScopeControlAccess scopeAccess = ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
     private final PersonService personService = new PersonService(
             personMapper,
             mock(ShareMapper.class),
@@ -74,6 +74,8 @@ class PersonRestrictionEpochTest {
 
     @BeforeEach
     void setUp() {
+        when(scopeAccess.getForWorkspace(WORKSPACE_ID)).thenReturn(
+            new RecordVisibilityScopeControlAccess.RecordVisibilityScope(ORG_ID, List.of(7, 8, 9)));
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(WORKSPACE_ID);
         when(scopeAccess.getFreshForWorkspace(WORKSPACE_ID)).thenReturn(
             new RecordVisibilityScopeControlAccess.RecordVisibilityScope(ORG_ID,
@@ -93,7 +95,7 @@ class PersonRestrictionEpochTest {
         Person after = person(LocalDateTime.parse("2026-08-01T12:00:00"));
         when(personMapper.getOwnedPersonByIdForUpdate(WORKSPACE_ID, PERSON_ID)).thenReturn(before);
         when(personMapper.existsOwned(WORKSPACE_ID, PERSON_ID)).thenReturn(true);
-        when(personMapper.getPersonById(WORKSPACE_ID, PERSON_ID)).thenReturn(after);
+        when(personMapper.getPersonById(WORKSPACE_ID, "[7,8,9]", PERSON_ID)).thenReturn(after);
         when(aiOutputCacheMapper.deleteForPerson(WORKSPACE_ID, "[7,11]", PERSON_ID)).thenReturn(4);
 
         Person result = personService.updateProcessingRestrictions(PERSON_ID, true, false);

@@ -167,7 +167,7 @@ class RecordCreationAugmentationServiceTest {
         when(tagMapper.getTagByIdForUpdate(7, 4)).thenReturn(tag);
         Person referrer = new Person();
         referrer.setId(50);
-        when(personMapper.getVisiblePersonByIdForUpdate(7, 50)).thenReturn(referrer);
+        when(personMapper.getVisiblePersonByIdForUpdate(7, "[7,8,9]", 50)).thenReturn(referrer);
         Company submittedCompany = new Company();
         submittedCompany.setId(55);
         Company contextCompany = new Company();
@@ -177,7 +177,7 @@ class RecordCreationAugmentationServiceTest {
         when(personMapper.insertTags(7, 101, List.of(4))).thenReturn(1);
 
         RecordCreationAugmentationService.PreparedAugmentation prepared =
-            service.preparePerson(55, 50, augmentation);
+            service.preparePerson(55, 50, augmentation, new ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope(90, List.of(7, 8, 9)));
         Map<String, Object> metadata = service.applyPerson(101, prepared);
 
         assertEquals("system:person:standard", metadata.get("creationTemplateId"));
@@ -189,7 +189,7 @@ class RecordCreationAugmentationServiceTest {
         order.verify(templateMapper).getSetForUpdate(7, "person");
         order.verify(customFieldMapper).getByIdForUpdate(7, 9);
         order.verify(tagMapper).getTagByIdForUpdate(7, 4);
-        order.verify(personMapper).getVisiblePersonByIdForUpdate(7, 50);
+        order.verify(personMapper).getVisiblePersonByIdForUpdate(7, "[7,8,9]", 50);
         order.verify(shareMapper).lockPersonShareForWorkspace(50, 7);
         order.verify(companyMapper).getVisibleCompanyByIdForUpdate(7, "[7,8,9]", 55);
         order.verify(companyMapper).getVisibleCompanyByIdForUpdate(7, "[7,8,9]", 60);

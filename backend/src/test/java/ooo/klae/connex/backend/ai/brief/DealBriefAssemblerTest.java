@@ -81,8 +81,8 @@ class DealBriefAssemblerTest {
     void setUp() {
         assembler = new DealBriefAssembler(
             dealService, scoringService, dealRiskService, aiRelationshipContext, personMapper, ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
-        lenient().when(personMapper.getByIds(eq(WORKSPACE_ID), anyList())).thenAnswer(invocation -> {
-            List<?> ids = invocation.getArgument(1);
+        lenient().when(personMapper.getByIds(eq(WORKSPACE_ID), org.mockito.ArgumentMatchers.anyString(), anyList())).thenAnswer(invocation -> {
+            List<?> ids = invocation.getArgument(2);
             List<Person> people = new ArrayList<>();
             for (Object value : ids) {
                 if (value instanceof Integer id) {
@@ -289,7 +289,7 @@ class DealBriefAssemblerTest {
         when(dealService.getTasksByDealId(DEAL_ID)).thenAnswer(interruptingWith(List.of()));
 
         assertAssemblyCancelled();
-        verify(personMapper, never()).getByIds(anyInt(), anyList());
+        verify(personMapper, never()).getByIds(anyInt(), org.mockito.ArgumentMatchers.anyString(), anyList());
     }
 
     @Test
@@ -300,17 +300,17 @@ class DealBriefAssemblerTest {
         }
         when(dealService.getDealById(DEAL_ID)).thenReturn(deal());
         when(dealService.getPeopleByDealId(DEAL_ID)).thenReturn(people);
-        when(personMapper.getByIds(eq(WORKSPACE_ID), anyList())).thenAnswer(interruptingWith(List.of()));
+        when(personMapper.getByIds(eq(WORKSPACE_ID), org.mockito.ArgumentMatchers.anyString(), anyList())).thenAnswer(interruptingWith(List.of()));
 
         assertAssemblyCancelled();
-        verify(personMapper, times(1)).getByIds(anyInt(), anyList());
+        verify(personMapper, times(1)).getByIds(anyInt(), org.mockito.ArgumentMatchers.anyString(), anyList());
     }
 
     @Test
     void interruptDuringTheLastPersonLookupStopsAssemblyBeforeWarmthIsScored() {
         when(dealService.getDealById(DEAL_ID)).thenReturn(deal());
         when(dealService.getPeopleByDealId(DEAL_ID)).thenReturn(List.of(new DealPerson(person(), null)));
-        when(personMapper.getByIds(eq(WORKSPACE_ID), anyList())).thenAnswer(interruptingWith(List.of(person())));
+        when(personMapper.getByIds(eq(WORKSPACE_ID), org.mockito.ArgumentMatchers.anyString(), anyList())).thenAnswer(interruptingWith(List.of(person())));
 
         assertAssemblyCancelled();
         verify(scoringService, never()).scoreContacts(anyInt(), anySet());
@@ -618,7 +618,7 @@ class DealBriefAssemblerTest {
         when(dealService.getActivitiesByDealId(DEAL_ID)).thenReturn(List.of(activity));
         when(dealService.getNotesByDealId(DEAL_ID)).thenReturn(List.of(note));
         when(dealService.getTasksByDealId(DEAL_ID)).thenReturn(List.of(task));
-        when(personMapper.getByIds(WORKSPACE_ID, List.of(74))).thenReturn(List.of(ceased));
+        when(personMapper.getByIds(WORKSPACE_ID, "[7,8,9]", List.of(74))).thenReturn(List.of(ceased));
 
         BriefAssembly assembly = assembler.assemble(WORKSPACE_ID, DEAL_ID);
         String serialized = serialized(assembly.prompt());
@@ -696,8 +696,8 @@ class DealBriefAssemblerTest {
         when(dealService.getActivitiesByDealId(DEAL_ID)).thenReturn(activities);
         when(dealService.getNotesByDealId(DEAL_ID)).thenReturn(notes);
         when(dealService.getTasksByDealId(DEAL_ID)).thenReturn(tasks);
-        when(personMapper.getByIds(eq(WORKSPACE_ID), anyList())).thenAnswer(invocation -> {
-            List<?> ids = invocation.getArgument(1);
+        when(personMapper.getByIds(eq(WORKSPACE_ID), org.mockito.ArgumentMatchers.anyString(), anyList())).thenAnswer(invocation -> {
+            List<?> ids = invocation.getArgument(2);
             List<Person> visible = new ArrayList<>();
             for (Object value : ids) {
                 if (value instanceof Integer id) {

@@ -188,7 +188,7 @@ class WarmthReconciliationIntegrationTest {
         Map<Integer, RelationshipTemperatureDto> aggregatePeople = byId(
             scoringService.temperatures(
                 personMapper.getRelationshipScoreAggregates(
-                    workspace.getId(),
+                    workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()),
                     LocalDateTime.ofInstant(REPORT_AS_OF, ZoneOffset.UTC),
                     MODEL.sqlParameters()),
                 REPORT_AS_OF),
@@ -261,7 +261,7 @@ class WarmthReconciliationIntegrationTest {
             List.of(cutoffBoundary.getId())).get(cutoffBoundary.getId());
         RelationshipTemperatureDto aggregateInclusive = scoringService.temperatures(
             personMapper.getRelationshipScoreAggregates(
-                workspace.getId(), REPORT_END, MODEL.sqlParameters()),
+                workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), REPORT_END, MODEL.sqlParameters()),
             inclusiveBoundary).stream()
             .filter(score -> score.getId() == cutoffBoundary.getId())
             .findFirst()

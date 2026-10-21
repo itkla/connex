@@ -53,6 +53,7 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.PersonService;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
 import ooo.klae.connex.backend.support.TestEntityFixtures;
 import ooo.klae.connex.backend.tenant.TenantContext;
 
@@ -79,6 +80,7 @@ class AiOutputCacheRestrictionConcurrencyIntegrationTest {
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private TenantContext tenantContext;
     @Autowired private SqlSessionTemplate sqlSessionTemplate;
+    @Autowired private RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
     @Autowired private JdbcTemplate jdbcTemplate;
     @MockitoSpyBean private PersonMapper personMapperSpy;
     @MockitoBean private AuditService auditService;
@@ -208,6 +210,7 @@ class AiOutputCacheRestrictionConcurrencyIntegrationTest {
         CountDownLatch releaseRestriction = new CountDownLatch(1);
         CountDownLatch saveLockAttempted = new CountDownLatch(1);
         PersonMapper realPersonMapper = sqlSessionTemplate.getMapper(PersonMapper.class);
+        String personScopeJson = recordVisibilityScopeControlAccess.getForWorkspace(granteeWorkspace.getId()).workspaceIdsJson();
         doAnswer(invocation -> {
             Person locked = realPersonMapper.getOwnedPersonByIdForUpdate(ownerWorkspaceId, personId);
             restrictionLocked.countDown();
@@ -217,9 +220,9 @@ class AiOutputCacheRestrictionConcurrencyIntegrationTest {
         doAnswer(invocation -> {
             saveLockAttempted.countDown();
             return realPersonMapper.getVisiblePersonByIdForUpdate(
-                    granteeWorkspace.getId(), personId);
+                    granteeWorkspace.getId(), personScopeJson, personId);
         }).when(personMapperSpy).getVisiblePersonByIdForUpdate(
-                granteeWorkspace.getId(), personId);
+                granteeWorkspace.getId(), personScopeJson, personId);
         ExecutorService executor = Executors.newFixedThreadPool(2);
 
         try {
@@ -251,12 +254,13 @@ class AiOutputCacheRestrictionConcurrencyIntegrationTest {
         CountDownLatch releaseSave = new CountDownLatch(1);
         CountDownLatch restrictionLockAttempted = new CountDownLatch(1);
         PersonMapper realPersonMapper = sqlSessionTemplate.getMapper(PersonMapper.class);
+        String personScopeJson = recordVisibilityScopeControlAccess.getForWorkspace(granteeWorkspaceId).workspaceIdsJson();
         doAnswer(invocation -> {
-            Person locked = realPersonMapper.getVisiblePersonByIdForUpdate(granteeWorkspaceId, personId);
+            Person locked = realPersonMapper.getVisiblePersonByIdForUpdate(granteeWorkspaceId, personScopeJson, personId);
             saveLocked.countDown();
             assertTrue(releaseSave.await(30, TimeUnit.SECONDS));
             return locked;
-        }).when(personMapperSpy).getVisiblePersonByIdForUpdate(granteeWorkspaceId, personId);
+        }).when(personMapperSpy).getVisiblePersonByIdForUpdate(granteeWorkspaceId, personScopeJson, personId);
         doAnswer(invocation -> {
             restrictionLockAttempted.countDown();
             return realPersonMapper.getOwnedPersonByIdForUpdate(ownerWorkspaceId, personId);

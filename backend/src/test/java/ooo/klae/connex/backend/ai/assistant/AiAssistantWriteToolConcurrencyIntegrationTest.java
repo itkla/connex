@@ -76,6 +76,7 @@ import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.DealService;
 import ooo.klae.connex.backend.services.PersonService;
 import ooo.klae.connex.backend.services.RuleTriggerPublisher;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
 import ooo.klae.connex.backend.services.TaskService;
 import ooo.klae.connex.backend.support.MySqlLockWaitProbe;
 import ooo.klae.connex.backend.support.TestEntityFixtures;
@@ -100,6 +101,7 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private TenantContext tenantContext;
     @Autowired private SqlSessionTemplate sqlSessionTemplate;
+    @Autowired private RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
     @Autowired private PlatformTransactionManager transactionManager;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private ObjectMapper objectMapper;
@@ -206,12 +208,13 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
         CountDownLatch releaseRestriction = new CountDownLatch(1);
         CountDownLatch autoPersonLockAttempted = new CountDownLatch(1);
         PersonMapper realPersonMapper = sqlSessionTemplate.getMapper(PersonMapper.class);
+        String personScopeJson = recordVisibilityScopeControlAccess.getForWorkspace(workspace.getId()).workspaceIdsJson();
         doAnswer(invocation -> {
             autoPersonLockAttempted.countDown();
             return realPersonMapper.getVisiblePersonByIdForUpdate(
-                    workspace.getId(), person.getId());
+                    workspace.getId(), personScopeJson, person.getId());
         }).when(personMapperSpy).getVisiblePersonByIdForUpdate(
-                workspace.getId(), person.getId());
+                workspace.getId(), personScopeJson, person.getId());
         ExecutorService executor = Executors.newFixedThreadPool(2);
 
         try {
@@ -234,7 +237,7 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
             executor.awaitTermination(10, TimeUnit.SECONDS);
         }
 
-        Person restricted = personMapper.getPersonById(workspace.getId(), person.getId());
+        Person restricted = personMapper.getPersonById(workspace.getId(), personScopeJson, person.getId());
         assertTrue(restricted.getSuspendedAt() != null);
     }
 

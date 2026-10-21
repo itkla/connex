@@ -179,7 +179,7 @@ class AiReportNarrativeServiceTest {
         Clock fixedClock = Clock.fixed(now, ZoneOffset.UTC);
         AiRestrictionEpoch epoch = new AiRestrictionEpoch();
         AiOutputCacheMapper mapper = mock(AiOutputCacheMapper.class);
-        AiOutputCacheStore guardedStore = new AiOutputCacheStore(
+        AiOutputCacheStore guardedStore = new AiOutputCacheStore(ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered(),
                 mapper, mock(PersonMapper.class), epoch, JsonMapper.builder().build(), workspaceService);
         Admission admission = mock(Admission.class);
         AiReportNarrativeService guardedService = new AiReportNarrativeService(

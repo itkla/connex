@@ -272,7 +272,7 @@ class ReportServiceScopeTest {
         verify(network).reverseIntroSuggestions(WORKSPACE, SCOPE);
         verify(introductions).findCandidatePersonsForReport(WORKSPACE, JSON, 501);
         verify(reports, never()).getNetworkAccountValues(any(), anyString(), anyInt());
-        verify(people, never()).getPersonsForNetworkReport(anyInt(), anyInt());
+        verify(people, never()).getPersonsForNetworkReport(anyInt(), org.mockito.ArgumentMatchers.anyString(), anyInt());
     }
 
     private void verifyOneScope() {

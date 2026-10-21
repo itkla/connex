@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DuplicateKeyException;
@@ -16,6 +17,7 @@ import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 import tools.jackson.databind.ObjectMapper;
 
+import ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Rule;
 import ooo.klae.connex.backend.beans.RuleExecution;
@@ -29,6 +31,7 @@ import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 
 /**
  * Legacy compatibility executor for workflows whose persisted {@code runtime_owner} is
@@ -77,7 +80,7 @@ public class RuleEngineService {
 
     /** Runs legacy-owned entity-change rules for one replay-stable dispatch. */
     public void onEntityChange(WorkflowTriggerDispatch.EntityChange dispatch) {
-        recordVisibilityScopeControlAccess.withWorkspaceScope(dispatch.workspaceId(), () -> {
+        recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(dispatch.workspaceId(), () -> {
             onEntityChangeWithinScope(dispatch);
             return null;
         });
@@ -87,15 +90,35 @@ public class RuleEngineService {
         int workspaceId = dispatch.workspaceId();
         String recordType = dispatch.recordType();
         int entityId = dispatch.recordId();
+        RecordVisibilityScope scope = null;
         for (Rule rule : ruleMapper.getEnabledByTrigger(workspaceId, "entity_change")) {
+            RuleTrigger trigger;
             try {
-                processEntityRule(rule, dispatch);
-            } catch (Exception e) {
-                log.warn(
-                    "Rule dispatch failed ruleId={} recordType={} recordId={} exceptionClass={}",
-                    rule.getId(), recordType, entityId, e.getClass().getSimpleName());
+                trigger = matchingEntityTrigger(rule, dispatch);
+            } catch (Exception exception) {
+                logEntityRuleFailure(rule, recordType, entityId, exception);
+                continue;
+            }
+            if (trigger == null) {
+                continue;
+            }
+            if (scope == null) {
+                scope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+            }
+            try {
+                processMatchedEntityRule(rule, trigger, dispatch, null, scope);
+            } catch (TenantScopeSnapshotException exception) {
+                throw exception;
+            } catch (Exception exception) {
+                logEntityRuleFailure(rule, recordType, entityId, exception);
             }
         }
+    }
+
+    private void logEntityRuleFailure(Rule rule, String recordType, int entityId, Exception exception) {
+        log.warn(
+            "Rule dispatch failed ruleId={} recordType={} recordId={} exceptionClass={}",
+            rule.getId(), recordType, entityId, exception.getClass().getSimpleName());
     }
 
     /** Runs the legacy side of one generation-pinned durable entity target. */
@@ -124,7 +147,7 @@ public class RuleEngineService {
 
     /** Runs legacy-owned schedule rules for one deterministic cadence bucket. */
     public void runSchedule(WorkflowTriggerDispatch.ScheduleTick dispatch) {
-        recordVisibilityScopeControlAccess.withWorkspaceScope(dispatch.workspaceId(), () -> {
+        recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(dispatch.workspaceId(), () -> {
             runScheduleWithinScope(dispatch);
             return null;
         });
@@ -139,6 +162,11 @@ public class RuleEngineService {
                 if (trigger.getCadence() == null || !cadence.equalsIgnoreCase(trigger.getCadence().trim())) {
                     continue;
                 }
+            } catch (Exception exception) {
+                logScheduleRuleFailure(rule, exception);
+                continue;
+            }
+            try {
                 List<Integer> matches = scheduleMatches(rule, workspaceId);
                 if (hasTriggeredSend(rule) && matches.size() > triggeredSendGate.recipientLimit()) {
                     recordRecipientLimit(rule, dispatch);
@@ -147,12 +175,21 @@ public class RuleEngineService {
                 for (int entityId : matches) {
                     fireSchedule(rule, dispatch, entityId);
                 }
-            } catch (Exception e) {
-                log.warn(
-                    "Schedule rule failed ruleId={} exceptionClass={}",
-                    rule.getId(), e.getClass().getSimpleName());
+            } catch (TenantScopeSnapshotException exception) {
+                throw exception;
+            } catch (Exception exception) {
+                if (exception instanceof RuntimeException failure
+                        && recordVisibilityScopeControlAccess.isScopeResolutionFailure(workspaceId, failure)) {
+                    throw failure;
+                }
+                logScheduleRuleFailure(rule, exception);
             }
         }
+    }
+
+    private void logScheduleRuleFailure(Rule rule, Exception exception) {
+        log.warn("Schedule rule failed ruleId={} exceptionClass={}",
+            rule.getId(), exception.getClass().getSimpleName());
     }
 
     /** Runs the legacy side of one already-matched durable schedule enrollment. */
@@ -179,32 +216,53 @@ public class RuleEngineService {
                 || !dispatch.cadence().equalsIgnoreCase(trigger.getCadence().trim())) {
             return;
         }
-        fireSchedule(rule, dispatch, recordId, lockedPrincipal);
-    }
-
-    private void processEntityRule(
-            Rule rule, WorkflowTriggerDispatch.EntityChange dispatch) {
-        processEntityRule(rule, dispatch, null);
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(dispatch.workspaceId());
+        recordVisibilityScopeControlAccess.withWorkspaceScope(dispatch.workspaceId(), scope, () -> {
+            fireSchedule(rule, dispatch, recordId, lockedPrincipal);
+            return null;
+        });
     }
 
     private void processEntityRule(
             Rule rule,
             WorkflowTriggerDispatch.EntityChange dispatch,
             WorkflowExecutionPrincipal lockedPrincipal) {
-        if (!dispatch.recordType().equals(rule.getRecordType())) {
+        RuleTrigger trigger = matchingEntityTrigger(rule, dispatch);
+        if (trigger == null) {
             return;
+        }
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(dispatch.workspaceId());
+        recordVisibilityScopeControlAccess.withWorkspaceScope(dispatch.workspaceId(), scope, () -> {
+            processMatchedEntityRule(rule, trigger, dispatch, lockedPrincipal, scope);
+            return null;
+        });
+    }
+
+    private @Nullable RuleTrigger matchingEntityTrigger(
+            Rule rule, WorkflowTriggerDispatch.EntityChange dispatch) {
+        if (!dispatch.recordType().equals(rule.getRecordType())) {
+            return null;
         }
         RuleTrigger trigger = read(rule.getTriggerConfig(), RuleTrigger.class);
         if (trigger.getEvents() == null || !trigger.getEvents().contains(dispatch.event())) {
-            return;
+            return null;
         }
         if (!stageMatches(
                 trigger,
                 dispatch.workspaceId(),
                 dispatch.recordType(),
                 dispatch.recordId())) {
-            return;
+            return null;
         }
+        return trigger;
+    }
+
+    private void processMatchedEntityRule(
+            Rule rule,
+            RuleTrigger trigger,
+            WorkflowTriggerDispatch.EntityChange dispatch,
+            WorkflowExecutionPrincipal lockedPrincipal,
+            RecordVisibilityScope scope) {
         WorkflowRuntimeClaimService.LegacyClaim claim =
             workflowRuntimeClaimService.claimLegacyEntity(rule, trigger, dispatch);
         if (!claim.started() || claim.execution() == null) {
@@ -212,7 +270,7 @@ public class RuleEngineService {
         }
         if ("person".equals(dispatch.recordType())
                 && personMapper.getProcessablePersonIds(
-                    dispatch.workspaceId(), List.of(dispatch.recordId())).isEmpty()) {
+                    dispatch.workspaceId(), scope.workspaceIdsJson(), List.of(dispatch.recordId())).isEmpty()) {
             finishExecution(
                 claim.execution(),
                 "failed",
@@ -387,6 +445,8 @@ public class RuleEngineService {
                 for (RuleAction action : actions) {
                     try {
                         actionIsolation.run(() -> actionExecutor.execute(action, ctx));
+                    } catch (TenantScopeSnapshotException exception) {
+                        throw exception;
                     } catch (RuleActionRetryRequiredException retry) {
                         log.warn(
                             "Rule action failed transiently; retrying the delivery ruleId={} actionType={}"
@@ -405,6 +465,9 @@ public class RuleEngineService {
             });
             finishExecution(execution, failures.isEmpty() ? "matched" : "partial", null,
                 failures.isEmpty() ? null : String.join("; ", failures));
+        } catch (TenantScopeSnapshotException exception) {
+            finishExecution(execution, "failed", "execution_failed", "Rule execution failed.");
+            throw exception;
         } catch (RuleActionRetryRequiredException retry) {
             throw retry;
         } catch (Exception e) {

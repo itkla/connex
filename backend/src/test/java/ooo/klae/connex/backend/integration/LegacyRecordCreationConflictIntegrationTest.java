@@ -222,7 +222,7 @@ class LegacyRecordCreationConflictIntegrationTest {
 
     private int count(String table) {
         return switch (table) {
-            case "person" -> personMapper.getAllPersons(workspace.getId()).size();
+            case "person" -> personMapper.getAllPersons(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId())).size();
             case "company" -> companyMapper.getAllCompanies(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId())).size();
             default -> throw new IllegalArgumentException("Unexpected table");
         };

@@ -170,14 +170,10 @@ public class PersonController {
         MemberScope memberScope = resolveMemberScope(scope, memberIds);
         WarmthFilter warmth = warmthFilterResolver.resolve(
             warmthBands, noWarmth, goesColdWithinDays, sortKey);
-        List<PersonDto> items = personService.getPersonsPage(query, sortKey, dir, companies, titles, noCompany,
+        var result = personService.queryPersonsPage(query, sortKey, dir, companies, titles, noCompany,
             memberScope, lifecycleStages, noLifecycle, leadSources, noLeadSource,
-            firstResponseStates, noFirstResponse, archived, warmth,
-            bounds.size(), bounds.offset())
-            .stream().map(PersonDto::from).toList();
-        return new PageResponse<>(items, personService.countPersons(
-            query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle,
-            leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived, warmth));
+            firstResponseStates, noFirstResponse, archived, warmth, bounds.size(), bounds.offset());
+        return new PageResponse<>(result.items().stream().map(PersonDto::from).toList(), result.total());
     }
 
     /**
@@ -242,17 +238,7 @@ public class PersonController {
     public PersonFacets getPersonFacets(
         @RequestParam(defaultValue = "false") boolean warmth
     ) {
-        return new PersonFacets(
-            personService.distinctCompanies(),
-            personService.distinctTitles(),
-            personService.hasPersonWithoutCompany(),
-            personService.countsByOwner(),
-            personService.countArchivedPersons(),
-            personService.countsByLifecycleStage(),
-            personService.countsByLeadSource(),
-            personService.countsByFirstResponseState(),
-            warmth ? personService.countsByWarmthBand(warmthFilterResolver.forFacets()) : null
-        );
+        return personService.getPersonFacets(warmth ? warmthFilterResolver.forFacets() : null);
     }
 
     /**

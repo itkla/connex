@@ -29,6 +29,7 @@ import ooo.klae.connex.backend.dto.DealRationaleDto;
 import ooo.klae.connex.backend.dto.DealRiskDto;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.services.DealRiskService;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
 import ooo.klae.connex.backend.services.WorkspaceService;
 
 /**
@@ -38,6 +39,8 @@ import ooo.klae.connex.backend.services.WorkspaceService;
 @Service
 @RequiredArgsConstructor
 public class DealRiskRationaleService {
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     static final int MAX_TOKENS = 4096;
     static final int MAX_ACTIONS = 3;
     static final int MAX_NARRATIVE_CHARS = 1200;
@@ -80,6 +83,11 @@ public class DealRiskRationaleService {
      */
     public DealRationaleDto generate(int dealId, boolean refresh) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(workspaceId,
+            () -> generateWithinPersonScope(workspaceId, dealId, refresh));
+    }
+
+    private DealRationaleDto generateWithinPersonScope(int workspaceId, int dealId, boolean refresh) {
         Optional<AiGenerationProfile> profile = aiFeatureGate.generationProfileIfUsable(
                 AiFeature.DEAL_RISK_RATIONALE, MAX_TOKENS, TEMPERATURE);
         if (profile.isEmpty()) {

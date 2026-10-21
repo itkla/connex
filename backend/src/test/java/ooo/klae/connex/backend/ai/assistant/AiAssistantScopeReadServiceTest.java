@@ -72,7 +72,7 @@ class AiAssistantScopeReadServiceTest {
         person.setId(1);
         person.setName("Routine Contact");
         when(personMapper.getAssistantProcessablePersonIds(WORKSPACE_ID)).thenReturn(List.of(1));
-        when(personMapper.getByIds(eq(WORKSPACE_ID), anyList())).thenReturn(List.of(person));
+        when(personMapper.getByIds(eq(WORKSPACE_ID), org.mockito.ArgumentMatchers.anyString(), anyList())).thenReturn(List.of(person));
         when(activityMapper.countAiAssistantScopeActivities(
                 anyInt(), anyList(), anyString(), anyList(), any(), any(), anyList(), anyBoolean())).thenReturn(2L);
         when(activityMapper.getAiAssistantScopeActivities(
@@ -192,7 +192,7 @@ class AiAssistantScopeReadServiceTest {
         later.setId(2);
         later.setName(laterName);
         when(personMapper.getAssistantProcessablePersonIds(WORKSPACE_ID)).thenReturn(List.of(1, 2));
-        when(personMapper.getByIds(eq(WORKSPACE_ID), anyList())).thenReturn(List.of(first, later));
+        when(personMapper.getByIds(eq(WORKSPACE_ID), org.mockito.ArgumentMatchers.anyString(), anyList())).thenReturn(List.of(first, later));
         when(activityMapper.countAiAssistantScopeActivities(
                 anyInt(), anyList(), anyString(), anyList(), any(), any(), anyList(), anyBoolean()))
                 .thenReturn(2L);

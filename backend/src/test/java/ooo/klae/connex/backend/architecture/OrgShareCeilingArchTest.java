@@ -89,6 +89,7 @@ class OrgShareCeilingArchTest {
                     || entry.getKey().equals("mappers/DealMapper.xml")
                     || entry.getKey().equals("mappers/PipelineMapper.xml")
                     || entry.getKey().equals("mappers/CompanyMapper.xml")
+                    || entry.getKey().equals("mappers/PersonMapper.xml")
                 ? CONTROL_DERIVED_READ_CEILING
                 : READ_CEILING;
             int ceilings = count(ceiling, xml);
@@ -101,6 +102,26 @@ class OrgShareCeilingArchTest {
         }
         assertTrue(violations.isEmpty(),
             "Read-path share visibility is missing the same-organization ceiling: " + violations);
+    }
+
+    @Test
+    void personVisibilityEmployerAndExistenceCeilingsKeepTheirExactOwners() throws Exception {
+        Document document = loadMapper("mappers/PersonMapper.xml");
+        for (var fragment : Map.of("visibleAny", "p", "companyJoin", "c", "exists", "person").entrySet()) {
+            NodeList nodes = document.getElementsByTagName(fragment.getKey().equals("exists") ? "select" : "sql");
+            Element found = null;
+            for (int index = 0; index < nodes.getLength(); index++) {
+                Element node = (Element) nodes.item(index);
+                if (fragment.getKey().equals(node.getAttribute("id"))) found = node;
+            }
+            assertNotNull(found, fragment.getKey());
+            String sql = found.getTextContent().replaceAll("\\s+", " ").trim();
+            assertEquals(1, count(CONTROL_DERIVED_READ_CEILING, sql), fragment.getKey());
+            assertTrue(sql.contains("ON org_workspace.id = " + fragment.getValue() + ".workspace_id"));
+            assertTrue(sql.contains("workspace_id = #{workspaceId}"));
+            assertEquals(0, count(Pattern.compile("lifecycle_state|provision_ceased_at"), sql));
+        }
+        assertEquals(0, count(CONTROL_PLANE_WORKSPACE_TABLE, loadMapperText("mappers/PersonMapper.xml")));
     }
 
     @Test

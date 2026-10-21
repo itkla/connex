@@ -149,8 +149,8 @@ public class RadarService {
             ? signalMapper.findActiveForActor(workspaceId, userId)
             : signalMapper.findActiveForActorBySubject(
                 workspaceId, userId, scopedSubjectType, subjectId);
-        Set<Integer> processablePersonIds = processablePersonIds(workspaceId, activeSignals);
-        Map<Integer, String> personLabels = personLabels(workspaceId, processablePersonIds);
+        Set<Integer> processablePersonIds = processablePersonIds(workspaceId, activeSignals, operationVisibilityScope);
+        Map<Integer, String> personLabels = personLabels(workspaceId, processablePersonIds, operationVisibilityScope);
         Set<Integer> visibleEdgeIds = visibleEdgeIds(workspaceId, activeSignals);
         List<RadarResponseDto.Signal> items = new ArrayList<>();
         int position = 0;
@@ -275,7 +275,7 @@ public class RadarService {
         Task created;
         boolean warmPath = RelationshipSignalDetectorService.WARM_PATH.equals(signal.getFamily());
         if (warmPath) {
-            int bridgePersonId = resolveBridge(workspaceId, signal, request);
+            int bridgePersonId = resolveBridge(workspaceId, signal, request, operationVisibilityScope.workspaceIdsJson());
             if (request.dueDate() != null
                     || (request.assignedToId() != null
                         && request.assignedToId() != userId)) {
@@ -286,7 +286,7 @@ public class RadarService {
             created = warmPathService.acceptPath(
                 signal.getSubjectId(), bridgePersonId, request.description());
         } else {
-            Task task = task(request, signal, userId, workspaceId);
+            Task task = task(request, signal, userId, workspaceId, operationVisibilityScope.workspaceIdsJson());
             created = taskService.create(task);
         }
         if (signalMapper.attachTask(
@@ -421,10 +421,10 @@ public class RadarService {
             RadarTaskRequestDto request,
             RelationshipSignal signal,
             int currentUserId,
-            int workspaceId) {
+            int workspaceId, String personWorkspaceIdsJson) {
         validateRequestedLinks(request, signal);
         if (request.bridgePersonId() != null) {
-            validateBridge(workspaceId, signal, request.bridgePersonId());
+            validateBridge(workspaceId, signal, request.bridgePersonId(), personWorkspaceIdsJson);
         }
         Task task = new Task();
         task.setDescription(request.description().trim());
@@ -449,17 +449,17 @@ public class RadarService {
     private int resolveBridge(
             int workspaceId,
             RelationshipSignal signal,
-            RadarTaskRequestDto request) {
+            RadarTaskRequestDto request, String personWorkspaceIdsJson) {
         Integer requestedBridge = request.bridgePersonId();
         if (requestedBridge != null) {
-            validateBridge(workspaceId, signal, requestedBridge);
+            validateBridge(workspaceId, signal, requestedBridge, personWorkspaceIdsJson);
             return requestedBridge;
         }
         for (RadarResponseDto.Evidence evidence : parseEvidence(signal.getEvidenceJson())) {
             Object value = evidence.parameters().get("bridgePersonId");
             if (value instanceof Number number) {
                 int bridgePersonId = number.intValue();
-                validateBridge(workspaceId, signal, bridgePersonId);
+                validateBridge(workspaceId, signal, bridgePersonId, personWorkspaceIdsJson);
                 return bridgePersonId;
             }
         }
@@ -484,10 +484,10 @@ public class RadarService {
     }
 
     private void validateBridge(
-            int workspaceId, RelationshipSignal signal, int bridgePersonId) {
+            int workspaceId, RelationshipSignal signal, int bridgePersonId, String personWorkspaceIdsJson) {
         if (!RelationshipSignalDetectorService.WARM_PATH.equals(signal.getFamily())
                 || bridgePersonId == signal.getSubjectId()
-                || !isProcessablePerson(workspaceId, bridgePersonId)
+                || !isProcessablePerson(workspaceId, bridgePersonId, personWorkspaceIdsJson)
                 || !evidenceContainsBridge(signal, bridgePersonId)) {
             throw new BadRequestException("Warm-path bridge is not current for this signal");
         }
@@ -600,7 +600,7 @@ public class RadarService {
                 ? reference.withLabel(personLabels.get(reference.id()))
                 : null;
             case "company" -> {
-                Company company = companyMapper.getCompanyById(workspaceId, companyScopeJson(workspaceId, operationVisibilityScope), reference.id());
+                Company company = companyMapper.getCompanyById(workspaceId, recordScopeJson(workspaceId, operationVisibilityScope), reference.id());
                 yield company == null
                     ? null
                     : reference.withLabel(label(company.getName(), company.getId()));
@@ -614,7 +614,7 @@ public class RadarService {
         };
     }
 
-    private String companyScopeJson(int workspaceId, @Nullable RecordVisibilityScope operationVisibilityScope) {
+    private String recordScopeJson(int workspaceId, @Nullable RecordVisibilityScope operationVisibilityScope) {
         return (operationVisibilityScope == null
             ? recordVisibilityScopeControlAccess.getForWorkspace(workspaceId)
             : operationVisibilityScope).workspaceIdsJson();
@@ -626,15 +626,16 @@ public class RadarService {
      * already-authorized processable ids, so its key set is the person visibility set that decides
      * whether a person reference is disclosed at all.
      */
-    private Map<Integer, String> personLabels(int workspaceId, Set<Integer> processablePersonIds) {
+    private Map<Integer, String> personLabels(int workspaceId, Set<Integer> processablePersonIds, @Nullable RecordVisibilityScope operationVisibilityScope) {
         if (processablePersonIds.isEmpty()) {
             return Map.of();
         }
+        String personWorkspaceIdsJson = recordScopeJson(workspaceId, operationVisibilityScope);
         List<Integer> ordered = processablePersonIds.stream().sorted().toList();
         Map<Integer, String> labels = new LinkedHashMap<>();
         for (int offset = 0; offset < ordered.size(); offset += PERSON_READ_BATCH) {
             for (Person person : personMapper.getByIds(
-                    workspaceId,
+                    workspaceId, personWorkspaceIdsJson,
                     ordered.subList(offset, Math.min(offset + PERSON_READ_BATCH, ordered.size())))) {
                 labels.put(person.getId(), label(person.getName(), person.getId()));
             }
@@ -643,7 +644,7 @@ public class RadarService {
     }
 
     private Set<Integer> processablePersonIds(
-            int workspaceId, List<RelationshipSignal> signals) {
+            int workspaceId, List<RelationshipSignal> signals, @Nullable RecordVisibilityScope operationVisibilityScope) {
         Set<Integer> requested = new LinkedHashSet<>();
         for (RelationshipSignal signal : signals) {
             if ("person".equals(signal.getSubjectType())) {
@@ -663,11 +664,12 @@ public class RadarService {
         if (requested.isEmpty()) {
             return Set.of();
         }
+        String personWorkspaceIdsJson = recordScopeJson(workspaceId, operationVisibilityScope);
         List<Integer> ordered = requested.stream().sorted().toList();
         Set<Integer> processable = new LinkedHashSet<>();
         for (int offset = 0; offset < ordered.size(); offset += PERSON_READ_BATCH) {
             processable.addAll(personMapper.getProcessablePersonIds(
-                workspaceId,
+                workspaceId, personWorkspaceIdsJson,
                 ordered.subList(
                     offset, Math.min(offset + PERSON_READ_BATCH, ordered.size()))));
         }
@@ -691,8 +693,8 @@ public class RadarService {
                 workspaceId, requested.stream().sorted().toList());
     }
 
-    private boolean isProcessablePerson(int workspaceId, int personId) {
-        return personMapper.getProcessablePersonIds(workspaceId, List.of(personId))
+    private boolean isProcessablePerson(int workspaceId, int personId, String personWorkspaceIdsJson) {
+        return personMapper.getProcessablePersonIds(workspaceId, personWorkspaceIdsJson, List.of(personId))
             .contains(personId);
     }
 
@@ -705,7 +707,7 @@ public class RadarService {
         CurrentSubject subject = currentSubject(
             workspaceId,
             signal,
-            processablePersonIds(workspaceId, List.of(signal)), operationVisibilityScope);
+            processablePersonIds(workspaceId, List.of(signal), operationVisibilityScope), operationVisibilityScope);
         if (subject == null) {
             throw new ResourceNotFoundException("Radar signal not found");
         }
@@ -718,14 +720,14 @@ public class RadarService {
             Set<Integer> processablePersonIds, @Nullable RecordVisibilityScope operationVisibilityScope) {
         return switch (signal.getSubjectType()) {
             case "person" -> {
-                Person person = personMapper.getPersonById(workspaceId, signal.getSubjectId());
+                Person person = personMapper.getPersonById(workspaceId, recordScopeJson(workspaceId, operationVisibilityScope), signal.getSubjectId());
                 yield person == null || !processablePersonIds.contains(person.getId())
                     ? null
                     : new CurrentSubject(
                         "person", person.getId(), label(person.getName(), person.getId()));
             }
             case "company" -> {
-                Company company = companyMapper.getCompanyById(workspaceId, companyScopeJson(workspaceId, operationVisibilityScope), signal.getSubjectId());
+                Company company = companyMapper.getCompanyById(workspaceId, recordScopeJson(workspaceId, operationVisibilityScope), signal.getSubjectId());
                 yield company == null ? null : new CurrentSubject(
                     "company", company.getId(), label(company.getName(), company.getId()));
             }

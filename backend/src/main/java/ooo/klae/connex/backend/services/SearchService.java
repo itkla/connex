@@ -151,7 +151,7 @@ public class SearchService {
         if (query.trim().length() > MAX_QUERY_LENGTH) {
             throw new BadRequestException("Search query is too long (max " + MAX_QUERY_LENGTH + " characters)");
         }
-        if (types.stream().noneMatch(Set.of("companies", "pipelines", "deals", "notes", "tasks", "activities")::contains)) {
+        if (types.stream().noneMatch(Set.of("people", "companies", "pipelines", "deals", "notes", "tasks", "activities")::contains)) {
             return searchWithinVisibilityScope(query, types);
         }
         return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
@@ -165,12 +165,12 @@ public class SearchService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = workspaceService.getCurrentUserId();
         Set<Permission> permissions = workspaceService.permissionsFor(workspaceId, userId);
-        String orgWorkspaceIdsJson = types.contains("companies") || types.contains("pipelines") || types.contains("notes") || types.contains("deals")
+        String orgWorkspaceIdsJson = types.contains("people") || types.contains("companies") || types.contains("pipelines") || types.contains("notes") || types.contains("deals")
             ? recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson() : null;
         return new SearchResultsDto(
             selected(types, "companies", () -> companyMapper.search(workspaceId, orgWorkspaceIdsJson, pattern)
                 .stream().map(CompanyDto::from).toList()),
-            selected(types, "people", () -> personMapper.search(workspaceId, pattern)
+            selected(types, "people", () -> personMapper.search(workspaceId, orgWorkspaceIdsJson, pattern)
                 .stream().map(PersonDto::from).toList()),
             selected(types, "deals", () -> referenceService.hydrateDeals(
                 workspaceId, dealMapper.search(workspaceId, orgWorkspaceIdsJson, pattern))

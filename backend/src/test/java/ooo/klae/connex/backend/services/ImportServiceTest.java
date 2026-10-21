@@ -543,7 +543,7 @@ class ImportServiceTest extends AbstractServiceTest {
 
         Person matched = personMapper.findByEmails(
             workspace.getId(), List.of("owned.import@x.test")).getFirst();
-        Person person = personMapper.getPersonById(workspace.getId(), matched.getId());
+        Person person = personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), matched.getId());
         Company company = companyMapper.getAllCompanies(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId())).stream()
             .filter(candidate -> candidate.getName().equals("Owned Import Company"))
             .findFirst().orElseThrow();
@@ -565,7 +565,7 @@ class ImportServiceTest extends AbstractServiceTest {
 
         List<Person> matches = personMapper.findByEmails(workspace.getId(), List.of("carol@x.test"));
         assertEquals(1, matches.size());
-        Person carol = personMapper.getPersonById(workspace.getId(), matches.get(0).getId());
+        Person carol = personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), matches.get(0).getId());
         assertEquals("CTO", carol.getTitle());
     }
 
@@ -591,7 +591,7 @@ class ImportServiceTest extends AbstractServiceTest {
         assertEquals(
             incomingEmail,
             personMapper.getPersonById(
-                workspace.getId(), createdTarget.getId()).getEmail());
+                workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), createdTarget.getId()).getEmail());
     }
 
     @Test
@@ -662,7 +662,7 @@ class ImportServiceTest extends AbstractServiceTest {
         assertNotNull(def);
         assertEquals("number", def.getFieldType());
 
-        Person dave = personMapper.getPersonById(workspace.getId(),
+        Person dave = personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()),
             personMapper.findByEmails(workspace.getId(), List.of("dave@x.test")).get(0).getId());
         Map<Integer, Object> values = customFieldValueService.getForEntities("person", List.of(dave.getId()))
             .getOrDefault(dave.getId(), Map.of());
@@ -914,7 +914,7 @@ class ImportServiceTest extends AbstractServiceTest {
             workspace.getId(), List.of(email));
         assertEquals(1, matches.size());
         Person imported = personMapper.getPersonById(
-            workspace.getId(), matches.getFirst().getId());
+            workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), matches.getFirst().getId());
         assertEquals("Canonical person", imported.getName());
         assertEquals("Director", imported.getTitle());
         assertEquals("+1 202 555 0104", imported.getPhone());
@@ -1005,7 +1005,7 @@ class ImportServiceTest extends AbstractServiceTest {
             org.mockito.ArgumentMatchers.argThat(
                 person -> person.getId() == created.getId()));
         Person filled = personMapper.getPersonById(
-            workspace.getId(), created.getId());
+            workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), created.getId());
         assertEquals("Canonical target", filled.getName());
         assertEquals("First title", filled.getTitle());
         assertEquals(firstCompany.getId(), filled.getCompany().getId());
@@ -1041,7 +1041,7 @@ class ImportServiceTest extends AbstractServiceTest {
             org.mockito.ArgumentMatchers.argThat(
                 person -> person.getId() == created.getId()));
         Person overwritten = personMapper.getPersonById(
-            workspace.getId(), created.getId());
+            workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), created.getId());
         assertEquals("Second source", overwritten.getName());
         assertEquals("Second title", overwritten.getTitle());
         assertEquals(secondCompany.getId(), overwritten.getCompany().getId());
@@ -1094,7 +1094,7 @@ class ImportServiceTest extends AbstractServiceTest {
 
         ImportResult first = reviewAndCommitPersons(request);
         Person imported = personMapper.getPersonById(
-            workspace.getId(),
+            workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()),
             personMapper.findByEmails(
                 workspace.getId(), List.of(email)).getFirst().getId());
         Map<String, Object> recordAfterFirst =
@@ -1238,7 +1238,7 @@ class ImportServiceTest extends AbstractServiceTest {
         assertEquals(
             target.getEmail(),
             personMapper.getPersonById(
-                workspace.getId(), selected.getId()).getEmail());
+                workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), selected.getId()).getEmail());
     }
 
     @Test
@@ -1517,7 +1517,7 @@ class ImportServiceTest extends AbstractServiceTest {
         assertEquals(1, personResult.getUpdated());
         assertEquals(1, companyPreview.getToUpdate());
         assertEquals(1, companyResult.getUpdated());
-        Person updatedPerson = personMapper.getPersonById(workspace.getId(), person.getId());
+        Person updatedPerson = personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId());
         Company updatedCompany = companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), company.getId());
         assertEquals(personName, updatedPerson.getName());
         assertEquals(personEmail, updatedPerson.getEmail());
@@ -1631,9 +1631,9 @@ class ImportServiceTest extends AbstractServiceTest {
         assertEquals(0, result.getUpdated());
         assertEquals(2, result.getFailed().size());
         assertFalse(personMapper.getPersonById(
-            workspace.getId(), suspended.getId()).getName().equals("Suspended update"));
+            workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), suspended.getId()).getName().equals("Suspended update"));
         assertFalse(personMapper.getPersonById(
-            workspace.getId(), provisionCeased.getId()).getName().equals("Provision-ceased update"));
+            workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), provisionCeased.getId()).getName().equals("Provision-ceased update"));
     }
 
     @Test
@@ -1667,7 +1667,7 @@ class ImportServiceTest extends AbstractServiceTest {
         target.setName("Restricted automatic target");
         target.setEmail("restricted-target-" + unique() + "@example.test");
         Person created = personService.create(target);
-        Person restricted = personMapper.getPersonById(workspace.getId(), created.getId());
+        Person restricted = personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), created.getId());
         restricted.setSuspendedAt(LocalDateTime.now());
         doReturn(restricted).when(personMapperSpy)
             .getOwnedPersonByIdForUpdate(workspace.getId(), created.getId());
@@ -1740,7 +1740,7 @@ class ImportServiceTest extends AbstractServiceTest {
         assertEquals(1, result.getFailed().size());
         assertEquals(
             "Retained update",
-            personMapper.getPersonById(workspace.getId(), retained.getId()).getName());
+            personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), retained.getId()).getName());
     }
 
     @Test
@@ -2428,7 +2428,7 @@ class ImportServiceTest extends AbstractServiceTest {
         assertEquals(0, second.getUpdated());
 
         CustomFieldDefinition def = customFieldDefinitionMapper.getByKey(workspace.getId(), "person", "budget");
-        Person erin = personMapper.getPersonById(workspace.getId(),
+        Person erin = personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()),
             personMapper.findByEmails(workspace.getId(), List.of("erin@x.test")).get(0).getId());
         Object value = customFieldValueService.getForEntities("person", List.of(erin.getId()))
             .getOrDefault(erin.getId(), Map.of()).get(def.getId());
@@ -2448,7 +2448,7 @@ class ImportServiceTest extends AbstractServiceTest {
             List.of(Map.of("Name", "Gwen", "Email", "gwen@x.test", "Company", b.getName())), "overwrite"));
         assertEquals(1, result.getUpdated());
 
-        Person gwen = personMapper.getPersonById(workspace.getId(),
+        Person gwen = personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()),
             personMapper.findByEmails(workspace.getId(), List.of("gwen@x.test")).get(0).getId());
         assertNotNull(gwen.getCompany());
         assertEquals(b.getId(), gwen.getCompany().getId());

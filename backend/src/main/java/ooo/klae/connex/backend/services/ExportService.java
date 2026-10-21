@@ -73,8 +73,9 @@ public class ExportService {
             WarmthFilter warmth) {
         requireExportStepUp();
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         List<Person> people = personMapper.getPersonsFiltered(
-            workspaceId, query, companies, titles, noCompany, memberScope,
+            workspaceId, personWorkspaceIdsJson, query, companies, titles, noCompany, memberScope,
             lifecycleStages, noLifecycle, leadSources, noLeadSource,
             firstResponseStates, noFirstResponse, false, warmth);
         List<CustomFieldDefinition> defs = activeDefinitions(workspaceId, "person");

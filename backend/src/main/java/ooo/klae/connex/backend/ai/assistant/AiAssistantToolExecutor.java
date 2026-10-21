@@ -244,14 +244,16 @@ public class AiAssistantToolExecutor {
         List<Integer> personIds = idsForKind(pageContext, "person");
         List<Integer> companyIds = idsForKind(pageContext, "company");
         List<Integer> dealIds = idsForKind(pageContext, "deal");
+        String personWorkspaceIdsJson = personIds.isEmpty() && companyIds.isEmpty()
+                ? null : recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         Map<Integer, Person> people = personIds.isEmpty()
                 ? Map.of()
-                : personMapper.getByIds(workspaceId, personIds).stream()
+                : personMapper.getByIds(workspaceId, personWorkspaceIdsJson, personIds).stream()
                         .filter(AiAssistantToolExecutor::isProcessable)
                         .collect(java.util.stream.Collectors.toMap(Person::getId, person -> person));
         Map<Integer, Company> companies = companyIds.isEmpty()
                 ? Map.of()
-                : companyMapper.getByIds(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), companyIds).stream()
+                : companyMapper.getByIds(workspaceId, personWorkspaceIdsJson, companyIds).stream()
                         .collect(java.util.stream.Collectors.toMap(Company::getId, company -> company));
         Map<Integer, Deal> deals = dealIds.isEmpty()
                 ? Map.of()
@@ -262,9 +264,12 @@ public class AiAssistantToolExecutor {
                 .filter(java.util.Objects::nonNull)
                 .distinct()
                 .toList();
+        if (personWorkspaceIdsJson == null && !dealCompanyIds.isEmpty()) {
+            personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        }
         Map<Integer, Company> dealCompanies = dealCompanyIds.isEmpty()
                 ? Map.of()
-                : companyMapper.getByIds(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), dealCompanyIds)
+                : companyMapper.getByIds(workspaceId, personWorkspaceIdsJson, dealCompanyIds)
                         .stream()
                         .collect(java.util.stream.Collectors.toMap(Company::getId, company -> company));
         List<Map<String, Object>> records = new ArrayList<>();
@@ -861,7 +866,8 @@ public class AiAssistantToolExecutor {
         var mission = ooo.klae.connex.backend.ai.mission.AiAgentScopePolicy.current();
         List<Person> candidates;
         if (mission == null) {
-            candidates = personMapper.getByIds(workspaceId, List.copyOf(personIds));
+            String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+            candidates = personMapper.getByIds(workspaceId, personWorkspaceIdsJson, List.copyOf(personIds));
         } else {
             personIds.forEach(id -> mission.requireRecord("person", id));
             candidates = List.of(personService.getAssistantPrimaryPersonById(mission.id()));
@@ -996,7 +1002,8 @@ public class AiAssistantToolExecutor {
             mission.requireRecord("person", personId);
         }
         Person person = mission == null
-                ? personMapper.getPersonById(workspaceService.getCurrentWorkspaceId(), personId)
+                ? personMapper.getPersonById(workspaceService.getCurrentWorkspaceId(),
+                    recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId()).workspaceIdsJson(), personId)
                 : personService.getAssistantPrimaryPersonById(personId);
         requireProcessable(person);
         return person;

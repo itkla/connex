@@ -60,7 +60,7 @@ class ImportDealVisibilityScopeTest {
         ImportService service = mock(ImportService.class, org.mockito.Answers.CALLS_REAL_METHODS);
         DealMapper mapper = mock(DealMapper.class);
         DealOutcomeWriter outcomes = mock(DealOutcomeWriter.class);
-        RecordVisibilityScopeControlAccess scopes = mock(RecordVisibilityScopeControlAccess.class);
+        RecordVisibilityScopeControlAccess scopes = ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
         RecordVisibilityScope scope = new RecordVisibilityScope(90, List.of(7, 8, 9));
         ReflectionTestUtils.setField(service, "dealMapper", mapper);
         ReflectionTestUtils.setField(service, "dealOutcomeWriter", outcomes);

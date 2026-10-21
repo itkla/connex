@@ -562,7 +562,7 @@ class SequenceWorkflowIntegrationTest {
                     created.id(), 1, new SequencePreviewRequest(refused.getId()))));
             assertEquals(404, failure.status().value());
         }
-        verify(personMapper, never()).getPersonById(anyInt(), anyInt());
+        verify(personMapper, never()).getPersonById(anyInt(), org.mockito.ArgumentMatchers.anyString(), anyInt());
     }
 
     @Test

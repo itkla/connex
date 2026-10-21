@@ -47,7 +47,7 @@ class ProviderCaptureHistoricalProjectionTest {
                 mock(DuplicateDecisionLockService.class),
                 mock(WorkspaceService.class),
                 baselineService,
-                mock(RecordVisibilityScopeControlAccess.class));
+                ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
         ProviderCapturedInteraction interaction =
             new ProviderCapturedInteraction();
         interaction.setId(101);

@@ -67,7 +67,7 @@ public class RelationshipDashboardService {
             workspaceId, warmth, DASHBOARD_LIMIT);
         List<DealRiskDto> risks = riskResult.items();
 
-        Map<Integer, Person> people = peopleById(workspaceId, coolingContacts);
+        Map<Integer, Person> people = peopleById(workspaceId, coolingContacts, operationVisibilityScope.workspaceIdsJson());
         Map<Integer, Deal> deals = dealsById(workspaceId, risks);
         Set<Integer> companyIds = new LinkedHashSet<>();
         for (RelationshipTemperatureDto score : coolingCompanies) companyIds.add(score.getId());
@@ -124,11 +124,11 @@ public class RelationshipDashboardService {
     }
 
     private Map<Integer, Person> peopleById(
-            int workspaceId, List<RelationshipTemperatureDto> temperatures) {
+            int workspaceId, List<RelationshipTemperatureDto> temperatures, String personWorkspaceIdsJson) {
         List<Integer> ids = temperatures.stream().map(RelationshipTemperatureDto::getId).toList();
         if (ids.isEmpty()) return Map.of();
         Map<Integer, Person> result = new HashMap<>();
-        for (Person person : personMapper.getByIds(workspaceId, ids)) result.put(person.getId(), person);
+        for (Person person : personMapper.getByIds(workspaceId, personWorkspaceIdsJson, ids)) result.put(person.getId(), person);
         return result;
     }
 

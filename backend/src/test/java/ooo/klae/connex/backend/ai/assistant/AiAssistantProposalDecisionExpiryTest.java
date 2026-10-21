@@ -76,7 +76,7 @@ class AiAssistantProposalDecisionExpiryTest extends AbstractAiAssistantWriteTool
                 () -> service.reject(TURN.sessionId(), TOOL_CALL_ID));
         assertEquals("proposed", storedToolCall.getStatus());
         verify(chatMapper, never()).updateToolCall(anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
-        verify(personService, never()).lockProcessablePersonForUpdate(anyInt());
+        verify(personService, never()).lockProcessablePersonForUpdate(anyInt(), org.mockito.ArgumentMatchers.anyString());
     }
 
     @Test
@@ -86,7 +86,7 @@ class AiAssistantProposalDecisionExpiryTest extends AbstractAiAssistantWriteTool
         when(authority.effectiveFor(TURN.userId())).thenReturn(Set.of(Permission.AI_USE));
         when(personService.getPersonById(31)).thenThrow(new AssertionError("Discard must not resolve its target"));
         assertEquals("discarded", service.reject(TURN.sessionId(), TOOL_CALL_ID).reviewState());
-        verify(personService, never()).lockProcessablePersonForUpdate(anyInt());
+        verify(personService, never()).lockProcessablePersonForUpdate(anyInt(), org.mockito.ArgumentMatchers.anyString());
         verify(chatMapper).updateToolCall(eq(TURN.workspaceId()), eq(TURN.userMessageId()),
                 eq(TOOL_CALL_ID), eq("rejected"), any(), eq(TURN.userId()));
     }

@@ -50,7 +50,8 @@ class ProviderCapturePagePersistenceTest {
     @Mock private DuplicateDecisionLockService duplicateDecisionLockService;
     @Mock private WorkspaceService workspaceService;
     @Mock private ProviderCaptureHistoricalBaselineService historicalBaselineService;
-    @Mock private RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess =
+        ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
 
     private ProviderCapturePagePersistence persistence;
     private ProviderCaptureSyncState state;

@@ -101,10 +101,10 @@ class RecordVisibilityEnclosingReadScopeTest {
     }
 
     @Test
-    void personDetailWithEmptyRelationshipsResolvesOnceForTheDealQuery() {
+    void personDetailSharesOneScopeAcrossPersonAndDealQueries() {
         Person person = new Person();
         person.setId(41);
-        when(personMapper.getPersonById(7, 41)).thenReturn(person);
+        when(personMapper.getPersonById(7, "[7,17]", 41)).thenReturn(person);
         try (var detailFixture = new RecordVisibilityOperationFixture(7)) {
             ReflectionTestUtils.setField(people, "recordVisibilityScopeControlAccess", detailFixture.scopes);
             when(referenceService.hydrateDeals(7, List.of())).thenAnswer(invocation -> {
@@ -116,8 +116,8 @@ class RecordVisibilityEnclosingReadScopeTest {
             assertEquals(0, person.getDeals().length);
 
             var order = inOrder(personMapper, detailFixture.control, dealMapper);
-            order.verify(personMapper).getPersonById(7, 41);
             order.verify(detailFixture.control).findOrganizationWorkspacesForShare(7);
+            order.verify(personMapper).getPersonById(7, "[7,17]", 41);
             order.verify(dealMapper).getDealsByPersonId(7, "[7,17]", 41);
             verifyNoMoreInteractions(detailFixture.control, dealMapper);
             verifyNoInteractions(fixture.control, companyMapper);
@@ -126,9 +126,6 @@ class RecordVisibilityEnclosingReadScopeTest {
 
     @Test
     void personDetailScopeFailureEscapesBeforeTheDealQuery() {
-        Person person = new Person();
-        person.setId(41);
-        when(personMapper.getPersonById(7, 41)).thenReturn(person);
         var failure = new DataAccessResourceFailureException("control unavailable");
         doThrow(failure).when(fixture.control).findOrganizationWorkspacesForShare(7);
 
@@ -136,13 +133,17 @@ class RecordVisibilityEnclosingReadScopeTest {
 
         verify(fixture.control).findOrganizationWorkspacesForShare(7);
         verifyNoMoreInteractions(fixture.control);
-        verifyNoInteractions(dealMapper, companyMapper, referenceService);
+        verifyNoInteractions(personMapper, dealMapper, companyMapper, referenceService);
     }
 
     @Test
-    void missingPersonRefusesBeforeOptionalRelationshipScope() {
-        assertThrows(ResourceNotFoundException.class, () -> people.getPersonById(41));
-        verifyNoInteractions(fixture.control, companyMapper);
+    void missingPersonRefusesBeforeOptionalRelationshipQueries() {
+        try (var detailFixture = new RecordVisibilityOperationFixture(7)) {
+            ReflectionTestUtils.setField(people, "recordVisibilityScopeControlAccess", detailFixture.scopes);
+            assertThrows(ResourceNotFoundException.class, () -> people.getPersonById(41));
+            verify(detailFixture.control).findOrganizationWorkspacesForShare(7);
+            verifyNoInteractions(dealMapper, companyMapper, referenceService);
+        }
     }
 
     @Test
@@ -161,13 +162,25 @@ class RecordVisibilityEnclosingReadScopeTest {
     }
 
     @Test
-    void personCommentReadsSkipTheCompanyScope() {
-        when(personMapper.exists(7, 41)).thenReturn(true);
+    void personCommentReadsShareTheirRequiredScopeAndSkipCompanyQueries() {
+        try (var commentFixture = new RecordVisibilityOperationFixture(7)) {
+            ReflectionTestUtils.setField(comments, "recordVisibilityScopeControlAccess", commentFixture.scopes);
+            when(personMapper.exists(7, "[7,17]", 41)).thenReturn(true);
+            assertEquals(List.of(), comments.listThreads("person", 41, "all", 25, 0));
+            assertEquals(0, comments.countThreads("person", 41, "all"));
+            assertEquals(List.of(), comments.getIndicators("person", List.of(41)));
+            verify(commentFixture.control, org.mockito.Mockito.times(3)).findOrganizationWorkspacesForShare(7);
+            verifyNoInteractions(fixture.control, companyMapper);
+        }
+    }
 
-        assertEquals(List.of(), comments.listThreads("person", 41, "all", 25, 0));
-        assertEquals(0, comments.countThreads("person", 41, "all"));
-        assertEquals(List.of(), comments.getIndicators("person", List.of(41)));
-        verifyNoInteractions(fixture.control, companyMapper);
+    @Test
+    void dealCommentReadsWithEmptyProjectionsSkipTheScope() {
+        when(dealMapper.exists(7, 41)).thenReturn(true);
+        assertEquals(List.of(), comments.listThreads("deal", 41, "all", 25, 0));
+        assertEquals(0, comments.countThreads("deal", 41, "all"));
+        assertEquals(List.of(), comments.getIndicators("deal", List.of(41)));
+        verifyNoInteractions(fixture.control, personMapper, companyMapper);
     }
 
     @Test

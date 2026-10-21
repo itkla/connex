@@ -87,7 +87,7 @@ class TaskMutationInvariantTest {
         person.setWorkspaceId(23);
         task.setPerson(person);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(workspaceId);
-        when(personMapper.getVisiblePersonByIdForShare(workspaceId, person.getId())).thenReturn(person);
+        when(personMapper.getVisiblePersonByIdForShare(workspaceId, "[7,8,9]", person.getId())).thenReturn(person);
         when(shareMapper.lockPersonShareForWorkspace(person.getId(), workspaceId)).thenReturn(null);
 
         assertThrows(ResourceNotFoundException.class, () -> taskService.create(task));
@@ -95,7 +95,7 @@ class TaskMutationInvariantTest {
         InOrder order = inOrder(workspaceService, taskMapper, personMapper, shareMapper);
         order.verify(workspaceService).lockAndRequireMember(workspaceId, 41);
         order.verify(taskMapper).lockTaskBoard(workspaceId);
-        order.verify(personMapper).getVisiblePersonByIdForShare(workspaceId, person.getId());
+        order.verify(personMapper).getVisiblePersonByIdForShare(workspaceId, "[7,8,9]", person.getId());
         order.verify(shareMapper).lockPersonShareForWorkspace(person.getId(), workspaceId);
         verify(taskMapper, never()).insert(task);
         verifyNoInteractions(referenceService, auditService, notificationChanges, ruleTriggers);

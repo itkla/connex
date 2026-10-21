@@ -72,7 +72,7 @@ class AiChatCitationProjectorTest {
         Person visible = person(11);
         Person restricted = person(12);
         restricted.setSuspendedAt(LocalDateTime.now());
-        when(personMapper.getByIds(3, List.of(11, 12)))
+        when(personMapper.getByIds(3, "[7,8,9]", List.of(11, 12)))
                 .thenReturn(List.of(visible, restricted));
 
         AiChatCitationProjector.Projection projection = projector.project(3, List.of(message));
@@ -227,7 +227,7 @@ class AiChatCitationProjectorTest {
         Stage stage = new Stage();
         stage.setId(5);
         stage.setName("Negotiation");
-        when(personMapper.getByIds(3, List.of(11))).thenReturn(List.of(person));
+        when(personMapper.getByIds(3, "[7,8,9]", List.of(11))).thenReturn(List.of(person));
         when(companyMapper.getByIds(3, "[7,8,9]", List.of(21))).thenReturn(List.of(employer));
         when(dealMapper.getByIds(3, List.of(31))).thenReturn(List.of(deal));
         when(pipelineMapper.getAllStages(3, "[7,8,9]")).thenReturn(List.of(stage));
@@ -290,7 +290,7 @@ class AiChatCitationProjectorTest {
                 """);
         Person restricted = person(11);
         restricted.setSuspendedAt(LocalDateTime.now());
-        when(personMapper.getByIds(3, List.of(11))).thenReturn(List.of(restricted));
+        when(personMapper.getByIds(3, "[7,8,9]", List.of(11))).thenReturn(List.of(restricted));
 
         AiChatCitationProjector.Projection projection = projector.project(3, List.of(message));
 
@@ -352,7 +352,7 @@ class AiChatCitationProjectorTest {
         person.setCompany(employer);
         Person restricted = person(12);
         restricted.setSuspendedAt(LocalDateTime.now());
-        when(personMapper.getByIds(3, List.of(11, 12)))
+        when(personMapper.getByIds(3, "[7,8,9]", List.of(11, 12)))
                 .thenReturn(List.of(person, restricted));
 
         Map<String, AiChatRecordObservation> observed = projector.observe(
@@ -398,7 +398,7 @@ class AiChatCitationProjectorTest {
     }
     @Test
     void projectionsWithoutRecordTargetsNeverReadControlScopes() {
-        var scopes = mock(ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.class);
+        var scopes = ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
         org.springframework.test.util.ReflectionTestUtils.setField(projector, "recordVisibilityScopeControlAccess", scopes);
         assertEquals(Map.of(), projector.project(3, List.of()).citationsByMessage());
         AiChatMessage prose = new AiChatMessage();

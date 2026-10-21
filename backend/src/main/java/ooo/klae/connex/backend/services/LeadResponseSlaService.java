@@ -208,16 +208,6 @@ public class LeadResponseSlaService {
         return person;
     }
 
-    private Person requireOwnedPerson(int workspaceId, int personId) {
-        Person person = personMapper.getPersonById(workspaceId, personId);
-        if (person == null || person.getWorkspaceId() != workspaceId
-                || person.getArchivedAt() != null
-                || person.getSuspendedAt() != null
-                || person.getProvisionCeasedAt() != null) {
-            throw new ResourceNotFoundException("Contact not found");
-        }
-        return person;
-    }
 
     private LocalDateTime now() {
         return LocalDateTime.ofInstant(Instant.now(clock), ZoneOffset.UTC);

@@ -11,6 +11,7 @@ import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
 import jakarta.annotation.PreDestroy;
+import ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException;
 import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.mappers.AiAgentRunMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
@@ -81,6 +82,9 @@ public class AiAgentScheduler {
                                 try {
                                     runner.recoverInterrupted(interrupted);
                                 } catch (RuntimeException refusal) {
+                                    if (refusal instanceof TenantScopeSnapshotException snapshot) {
+                                        throw snapshot;
+                                    }
                                     persistence.deferInterrupted(interrupted);
                                 }
                             }
@@ -88,18 +92,27 @@ public class AiAgentScheduler {
                                 try {
                                     runner.run(candidate);
                                 } catch (RuntimeException refusal) {
+                                    if (refusal instanceof TenantScopeSnapshotException snapshot) {
+                                        throw snapshot;
+                                    }
                                     persistence.defer(candidate);
                                 }
                             }
                         }
                     } catch (RuntimeException failure) {
                         outcome = JobRunStatus.FAILED;
+                        if (failure instanceof TenantScopeSnapshotException snapshot) {
+                            throw snapshot;
+                        }
                     } finally {
                         jobs.record(JobRunRecorder.AI_AGENT_SCHEDULER, workspaceId, outcome, detail);
                     }
                     return null;
                 });
             } catch (RuntimeException unavailablePlacement) {
+                if (unavailablePlacement instanceof TenantScopeSnapshotException snapshot) {
+                    throw snapshot;
+                }
                 workspaceCursor = workspaceId;
                 continue;
             }

@@ -188,30 +188,27 @@ public class NoteService {
     @Transactional
     @RequirePermission(Permission.NOTE_CREATE)
     public Note create(Note note) {
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceService.getCurrentWorkspaceId(), () -> createWithinVisibilityScope(note));
+        return create(note, MutationAdmission.UNRESTRICTED);
     }
 
-    private Note createWithinVisibilityScope(Note note) {
-        return createWithinVisibilityScope(note, MutationAdmission.UNRESTRICTED);
-    }
 
     /** Performs the canonical action after its final under-lock mutation admission. */
     @Transactional
     @RequirePermission(Permission.NOTE_CREATE)
     public Note create(Note note, MutationAdmission admission) {
+        var personVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceService.getCurrentWorkspaceId(), () -> createWithinVisibilityScope(note, admission));
+            workspaceService.getCurrentWorkspaceId(), personVisibilityScope, () -> createWithinVisibilityScope(note, admission, personVisibilityScope.workspaceIdsJson()));
     }
 
-    private Note createWithinVisibilityScope(Note note, MutationAdmission admission) {
+    private Note createWithinVisibilityScope(Note note, MutationAdmission admission, String personWorkspaceIdsJson) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         User actor = authService.getCurrentUser();
         note.setWorkspaceId(workspaceId);
         note.setAuthor(actor);
         note.setVisibility(normalizeVisibility(note.getVisibility(),
             note.getPerson() == null && note.getDeal() == null ? PRIVATE : "workspace"));
-        requireLinkedRecordsVisible(workspaceId, note);
+        requireLinkedRecordsVisible(workspaceId, note, personWorkspaceIdsJson);
         note.setCreatedAt(null);
         admission.beforeMutation();
         noteMapper.insert(note);
@@ -228,11 +225,12 @@ public class NoteService {
     @Transactional
     @RequirePermission(Permission.NOTE_UPDATE)
     public Note update(int id, Note note) {
+        var personVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
         return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceService.getCurrentWorkspaceId(), () -> updateWithinVisibilityScope(id, note));
+            workspaceService.getCurrentWorkspaceId(), personVisibilityScope, () -> updateWithinVisibilityScope(id, note, personVisibilityScope.workspaceIdsJson()));
     }
 
-    private Note updateWithinVisibilityScope(int id, Note note) {
+    private Note updateWithinVisibilityScope(int id, Note note, String personWorkspaceIdsJson) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         User actor = authService.getCurrentUser();
         WorkspaceService.LockedPermissionSnapshot authority = workspaceService.lockAndRequirePermissionsSnapshot(
@@ -244,7 +242,7 @@ public class NoteService {
         note.setWorkspaceId(workspaceId);
         note.setAuthor(before.getAuthor());
         note.setVisibility(normalizeVisibility(note.getVisibility(), before.getVisibility()));
-        requireLinkedRecordsVisible(workspaceId, note);
+        requireLinkedRecordsVisible(workspaceId, note, personWorkspaceIdsJson);
         if (noteMapper.update(note) != 1) {
             throw new ResourceNotFoundException("Note not found with id: " + id);
         }
@@ -384,9 +382,9 @@ public class NoteService {
         return PRIVATE.equals(note.getVisibility()) ? "" : note.getContent();
     }
 
-    private void requireLinkedRecordsVisible(int workspaceId, Note note) {
+    private void requireLinkedRecordsVisible(int workspaceId, Note note, String personWorkspaceIdsJson) {
         if (note.getPerson() != null && note.getPerson().getId() > 0
-                && !personMapper.exists(workspaceId, note.getPerson().getId())) {
+                && !personMapper.exists(workspaceId, personWorkspaceIdsJson, note.getPerson().getId())) {
             throw new ResourceNotFoundException("Contact not found");
         }
         if (note.getDeal() != null && note.getDeal().getId() > 0

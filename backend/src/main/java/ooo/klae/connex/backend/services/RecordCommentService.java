@@ -816,7 +816,7 @@ public class RecordCommentService {
         return comment;
     }
 
-    private String companyScopeJson(int workspaceId, @Nullable RecordVisibilityScope operationVisibilityScope) {
+    private String recordScopeJson(int workspaceId, @Nullable RecordVisibilityScope operationVisibilityScope) {
         return (operationVisibilityScope == null
             ? recordVisibilityScopeControlAccess.getForWorkspace(workspaceId)
             : operationVisibilityScope).workspaceIdsJson();
@@ -824,8 +824,8 @@ public class RecordCommentService {
 
     private boolean isTargetVisible(int workspaceId, TargetType targetType, int targetId, @Nullable RecordVisibilityScope operationVisibilityScope) {
         return switch (targetType) {
-            case PERSON -> personMapper.exists(workspaceId, targetId);
-            case COMPANY -> companyMapper.exists(workspaceId, companyScopeJson(workspaceId, operationVisibilityScope), targetId);
+            case PERSON -> personMapper.exists(workspaceId, recordScopeJson(workspaceId, operationVisibilityScope), targetId);
+            case COMPANY -> companyMapper.exists(workspaceId, recordScopeJson(workspaceId, operationVisibilityScope), targetId);
             case DEAL -> dealMapper.exists(workspaceId, targetId);
         };
     }
@@ -835,10 +835,10 @@ public class RecordCommentService {
             TargetType targetType,
             List<Integer> targetIds, @Nullable RecordVisibilityScope operationVisibilityScope) {
         return switch (targetType) {
-            case PERSON -> personMapper.getByIds(workspaceId, targetIds).stream()
+            case PERSON -> personMapper.getByIds(workspaceId, recordScopeJson(workspaceId, operationVisibilityScope), targetIds).stream()
                 .map(Person::getId)
                 .toList();
-            case COMPANY -> companyMapper.getByIds(workspaceId, companyScopeJson(workspaceId, operationVisibilityScope), targetIds).stream()
+            case COMPANY -> companyMapper.getByIds(workspaceId, recordScopeJson(workspaceId, operationVisibilityScope), targetIds).stream()
                 .map(Company::getId)
                 .toList();
             case DEAL -> dealMapper.getByIds(workspaceId, targetIds).stream()

@@ -109,8 +109,7 @@ public class AiAssistantToolCallReadService {
     @Transactional
     public List<AiAssistantToolCallReadDto> list(int sessionId, boolean pendingOnly) {
         RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> listWithinVisibilityScope(sessionId, pendingOnly, resolvedVisibilityScope));
+        return listWithinVisibilityScope(sessionId, pendingOnly, resolvedVisibilityScope);
     }
 
     private List<AiAssistantToolCallReadDto> listWithinVisibilityScope(int sessionId, boolean pendingOnly, RecordVisibilityScope operationVisibilityScope) {
@@ -143,8 +142,7 @@ public class AiAssistantToolCallReadService {
     @Transactional
     public AiAssistantToolCallReadDto get(int sessionId, int toolCallId) {
         RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId());
-        return recordVisibilityScopeControlAccess.withWorkspaceScope(
-            workspaceService.getCurrentWorkspaceId(), resolvedVisibilityScope, () -> getWithinVisibilityScope(sessionId, toolCallId, resolvedVisibilityScope));
+        return getWithinVisibilityScope(sessionId, toolCallId, resolvedVisibilityScope);
     }
 
     private AiAssistantToolCallReadDto getWithinVisibilityScope(int sessionId, int toolCallId, RecordVisibilityScope operationVisibilityScope) {
@@ -171,7 +169,6 @@ public class AiAssistantToolCallReadService {
     }
 
 
-
     private List<AiAssistantToolCallReadDto> listWithinVisibilityScope(
             Viewer viewer,
             AiChatSession session,
@@ -194,7 +191,6 @@ public class AiAssistantToolCallReadService {
                 .toList();
         return project(viewer, session, stored, mutationsAvailable, now, operationVisibilityScope);
     }
-
 
 
     private AiAssistantToolCallReadDto getWithinVisibilityScope(
@@ -483,7 +479,7 @@ public class AiAssistantToolCallReadService {
         List<Integer> companyIds = ids(requested, "company");
         List<Integer> dealIds = ids(requested, "deal");
         if (!personIds.isEmpty()) {
-            for (Person person : personMapper.getByIds(workspaceId, personIds)) {
+            for (Person person : personMapper.getByIds(workspaceId, operationVisibilityScope.workspaceIdsJson(), personIds)) {
                 if (isProcessable(person)) {
                     putVisible(visible, "person", person.getId(), new RecordSnapshot(
                             person.getName(), null, person.getOwnerId(), null,
@@ -1071,7 +1067,7 @@ public class AiAssistantToolCallReadService {
         List<Integer> personIds = createdIds(candidates, "person");
         List<Integer> dealIds = createdIds(candidates, "deal");
         if (!personIds.isEmpty()) {
-            for (Person person : personMapper.getByIds(viewer.workspaceId(), personIds)) {
+            for (Person person : personMapper.getByIds(viewer.workspaceId(), operationVisibilityScope.workspaceIdsJson(), personIds)) {
                 if (isProcessable(person)) {
                     live.add(new RecordKey("person", person.getId()));
                 }

@@ -70,8 +70,8 @@ class ShareMapperTest extends AbstractMapperTest {
             "INSERT INTO person_share (person_id, workspace_id, granted_by, can_edit) VALUES (?, ?, ?, ?)",
             person.getId(), foreign.getId(), grantedBy, false);
 
-        Person owned = personMapper.getVisiblePersonByIdForUpdate(workspace.getId(), person.getId());
-        Person shared = personMapper.getVisiblePersonByIdForUpdate(sibling.getId(), person.getId());
+        Person owned = personMapper.getVisiblePersonByIdForUpdate(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), person.getId());
+        Person shared = personMapper.getVisiblePersonByIdForUpdate(sibling.getId(), orgWorkspaceIdsJson(workspaceMapper, sibling.getId()), person.getId());
 
         assertNotNull(owned);
         assertNotNull(owned.getSuspendedAt());
@@ -79,9 +79,9 @@ class ShareMapperTest extends AbstractMapperTest {
         assertNotNull(shared);
         assertNotNull(shared.getSuspendedAt());
         assertNotNull(shared.getProvisionCeasedAt());
-        assertNull(personMapper.getVisiblePersonByIdForUpdate(workspace.getId(), unshared.getId()));
-        assertNull(personMapper.getVisiblePersonByIdForUpdate(foreign.getId(), person.getId()));
-        assertNull(personMapper.getVisiblePersonByIdForUpdate(workspace.getId(), Integer.MAX_VALUE));
+        assertNull(personMapper.getVisiblePersonByIdForUpdate(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), unshared.getId()));
+        assertNull(personMapper.getVisiblePersonByIdForUpdate(foreign.getId(), orgWorkspaceIdsJson(workspaceMapper, foreign.getId()), person.getId()));
+        assertNull(personMapper.getVisiblePersonByIdForUpdate(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), Integer.MAX_VALUE));
     }
 
     @Test
@@ -122,7 +122,7 @@ class ShareMapperTest extends AbstractMapperTest {
                 orgWorkspaceIdsJson(workspaceMapper, workspace.getId()));
 
         assertEquals(0, affected);
-        assertFalse(personMapper.exists(foreign.getId(), person.getId()));
+        assertFalse(personMapper.exists(foreign.getId(), orgWorkspaceIdsJson(workspaceMapper, foreign.getId()), person.getId()));
     }
 
     @Test
@@ -223,7 +223,7 @@ class ShareMapperTest extends AbstractMapperTest {
             foreign.getId(), newUser().getId(), false, forged));
         assertEquals(0, shareMapper.sharePipeline(pipeline.getId(), workspace.getId(),
             foreign.getId(), newUser().getId(), false, forged));
-        assertFalse(personMapper.exists(foreign.getId(), person.getId()));
+        assertFalse(personMapper.exists(foreign.getId(), orgWorkspaceIdsJson(workspaceMapper, foreign.getId()), person.getId()));
         assertFalse(pipelineMapper.pipelineExists(foreign.getId(), orgWorkspaceIdsJson(workspaceMapper, foreign.getId()), pipeline.getId()));
     }
 

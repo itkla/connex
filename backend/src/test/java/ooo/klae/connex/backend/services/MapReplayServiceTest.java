@@ -82,7 +82,7 @@ class MapReplayServiceTest {
         TaskMapper taskMapper = mock(TaskMapper.class);
         PersonEmploymentMapper employmentMapper = mock(PersonEmploymentMapper.class);
 
-        when(personMapper.getProcessablePersons(WS))
+        when(personMapper.getProcessablePersons(WS, "[7,8,9]"))
             .thenReturn(List.of(person(CONTACT, "2025-06-01 00:00:00", COMPANY_B)));
         when(companyMapper.getAllCompanies(WS, "[7,8,9]")).thenReturn(List.of(
             company(COMPANY_A, "2025-01-01 00:00:00"), company(COMPANY_B, "2025-01-01 00:00:00")));

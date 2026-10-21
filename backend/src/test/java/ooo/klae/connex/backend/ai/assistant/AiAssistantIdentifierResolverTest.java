@@ -246,7 +246,7 @@ class AiAssistantIdentifierResolverTest {
         var members = mock(WorkspaceMapper.class);
         when(members.getMemberIdsIncludingPending(eq(7), anyList())).thenReturn(List.of(42, 43));
         var people = mock(PersonMapper.class);
-        when(people.getVisibleIdsIn(7, List.of(1))).thenReturn(List.of(1));
+        when(people.getVisibleIdsIn(7, "[7,8,9]", List.of(1))).thenReturn(List.of(1));
         var references = new ReferenceService(mock(EntityReferenceMapper.class), workspace, people,
                 mock(DealMapper.class), mock(CompanyMapper.class), mock(NoteMapper.class),
                 mock(AttachmentMapper.class), mock(TaskMapper.class), mock(ActivityMapper.class), members, ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());

@@ -52,7 +52,8 @@ public class AiWatchSubjectReader {
     }
 
     private Optional<String> person(int workspaceId, int subjectId) {
-        Person person = personMapper.getPersonById(workspaceId, subjectId);
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        Person person = personMapper.getPersonById(workspaceId, personWorkspaceIdsJson, subjectId);
         if (person == null || person.getSuspendedAt() != null
                 || person.getProvisionCeasedAt() != null || person.getArchivedAt() != null
                 || person.getName() == null || person.getName().isBlank()) {

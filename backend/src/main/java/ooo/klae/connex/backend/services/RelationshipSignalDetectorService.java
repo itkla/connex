@@ -109,7 +109,7 @@ public class RelationshipSignalDetectorService {
             .map(candidate -> candidate.temperature().getId())
             .toList();
         if (!personIds.isEmpty()) {
-            personMapper.getByIds(workspaceId, personIds)
+            personMapper.getByIds(workspaceId, operationVisibilityScope.workspaceIdsJson(), personIds)
                 .forEach(person -> people.put(person.getId(), person));
         }
         Map<Integer, Company> companies = new LinkedHashMap<>();

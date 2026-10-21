@@ -519,7 +519,7 @@ public class AiAssistantWriteToolService {
         requirePermissions(authorized.authority(), turn.userId(), write);
         PreparedMutation mutation;
         try {
-            mutation = lockMutationTarget(write);
+            mutation = lockMutationTarget(write, authorized.orgWorkspaceIdsJson());
         } catch (ResourceNotFoundException exception) {
             if (restrictionEpoch.current(turn.workspaceId()) != turn.restrictionEpoch()) {
                 throw new AiAssistantLoopException(
@@ -588,7 +588,11 @@ public class AiAssistantWriteToolService {
         return principals;
     }
 
-    /** Executes one CONFIRM decision beneath an already ordered source-specific lock hierarchy. */
+    /**
+     * Executes one CONFIRM decision beneath an already ordered source-specific lock hierarchy.
+     * The record-visibility ceiling comes from the operation's prepared or pre-lock primed scope,
+     * so no control read is issued beneath the caller's locks on normal entries.
+     */
     @Transactional(propagation = Propagation.MANDATORY, isolation = Isolation.READ_COMMITTED)
     public AiAssistantToolCallDto approveLocked(LockedDecisionContext context) {
         Actor actor = currentActor();
@@ -596,7 +600,8 @@ public class AiAssistantWriteToolService {
         AiChatToolCall toolCall = context.toolCall();
         PreliminaryPrincipals principals = context.principals();
         AuthorizedToolCall authorized = new AuthorizedToolCall(toolCall, context.authority(),
-                context.privacyToken(), context.restrictionEpoch());
+                context.privacyToken(), context.restrictionEpoch(),
+                recordVisibilityScopeControlAccess.getForWorkspace(actor.workspaceId()).workspaceIdsJson());
         requireStatus(toolCall, PROPOSED);
         StoredWrite write = readStored(toolCall);
         if (write.tier() != ToolTier.CONFIRM) {
@@ -604,7 +609,7 @@ public class AiAssistantWriteToolService {
         }
         requirePinnedPrincipals(write, principals);
         requirePermissions(authorized.authority(), actor.userId(), write);
-        PreparedMutation mutation = lockMutationTarget(write);
+        PreparedMutation mutation = lockMutationTarget(write, authorized.orgWorkspaceIdsJson());
         if (restrictionEpoch.current(actor.workspaceId()) != write.restrictionEpoch()) {
             throw new ConflictException("Assistant proposal restrictions changed");
         }
@@ -918,7 +923,7 @@ public class AiAssistantWriteToolService {
         for (Integer principalUserId : principalUserIds) {
             required.putIfAbsent(principalUserId, Set.of());
         }
-        recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        var recordVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         LockedPermissionSnapshot authority =
                 workspaceService.lockAndRequirePermissionsSnapshot(workspaceId, required);
         AiChatSession session = chatMapper.getSessionByIdForUpdate(workspaceId, userId, sessionId);
@@ -946,7 +951,7 @@ public class AiAssistantWriteToolService {
                 artifactGeneration == null ? captured.privacyGeneration() : artifactGeneration,
                 captured.taintSeqAtAdmission(), privacyGuard.organizationId(workspaceId), toolCall.getOrganizationPrivacyGeneration());
         privacyGuard.requireCurrent(chatMapper, token);
-        return new AuthorizedToolCall(toolCall, authority, token, restrictionEpoch.current(workspaceId));
+        return new AuthorizedToolCall(toolCall, authority, token, restrictionEpoch.current(workspaceId), recordVisibilityScope.workspaceIdsJson());
     }
 
     private void retainPrivacy(AuthorizedToolCall authorized) {
@@ -1059,7 +1064,7 @@ public class AiAssistantWriteToolService {
      * task-board lock order requires — and then the target row. A tool never takes a lock of its
      * own.
      */
-    private PreparedMutation lockMutationTarget(StoredWrite write) {
+    private PreparedMutation lockMutationTarget(StoredWrite write, String orgWorkspaceIdsJson) {
         Lock lock = write.tool().lock(write.targetKind());
         Resolution resolution = write.tool().resolve(
                 new Target(write.targetKind(), write.targetId()), write.typedRequest());
@@ -1091,14 +1096,14 @@ public class AiAssistantWriteToolService {
                 yield new PreparedMutation(
                         null,
                         resolution,
-                        updatedAt(personService.lockProcessablePersonForShare(write.targetId())));
+                        updatedAt(personService.lockProcessablePersonForShare(write.targetId(), orgWorkspaceIdsJson)));
             }
             case TASK_ROW -> new PreparedMutation(null, resolution, null,
                     TaskService.assistantStateVersion(taskService.lockTaskForUpdate(write.targetId())));
-            case RECORD_UPDATE -> new PreparedMutation(null, resolution, lockTargetForUpdate(write));
+            case RECORD_UPDATE -> new PreparedMutation(null, resolution, lockTargetForUpdate(write, orgWorkspaceIdsJson));
             case DUPLICATE_DECISION_RECORD_UPDATE -> {
                 duplicateDecisionLockService.lockCurrentOrganization();
-                yield new PreparedMutation(null, resolution, lockTargetForUpdate(write));
+                yield new PreparedMutation(null, resolution, lockTargetForUpdate(write, orgWorkspaceIdsJson));
             }
             case DEAL_STAGE_CHANGE -> {
                 if (resolution == null) {
@@ -1118,10 +1123,10 @@ public class AiAssistantWriteToolService {
         return mutation;
     }
 
-    private String lockTargetForUpdate(StoredWrite write) {
+    private String lockTargetForUpdate(StoredWrite write, String orgWorkspaceIdsJson) {
         return switch (write.targetKind()) {
             case "person" -> updatedAt(personService.lockProcessablePersonForUpdate(
-                    write.targetId()));
+                    write.targetId(), orgWorkspaceIdsJson));
             case "company" -> updatedAt(companyService.lockOwnedCompanyForUpdate(
                     write.targetId()));
             case "deal" -> updatedAt(dealService.lockDealForUpdate(write.targetId()));
@@ -1598,7 +1603,8 @@ public class AiAssistantWriteToolService {
             AiChatToolCall toolCall,
             LockedPermissionSnapshot authority,
             AiChatPrivacyToken privacyToken,
-            long restrictionEpoch) {
+            long restrictionEpoch,
+            String orgWorkspaceIdsJson) {
     }
 
     private record StoredWrite(

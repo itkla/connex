@@ -88,7 +88,7 @@ class DealRiskRationaleServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new DealRiskRationaleService(
+        service = new DealRiskRationaleService(ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered(),
                 dealRiskRationaleAssembler,
                 aiInvocationService,
                 aiInvocationAdmissionService,

@@ -71,7 +71,8 @@ class DuplicateReviewServiceTest {
     @Mock private DuplicateDecisionLockService duplicateDecisionLockService;
     @Mock private WorkspaceService workspaceService;
 
-    @Mock private RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess =
+        ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
 
     private final TestTransactionManager transactionManager = spy(new TestTransactionManager());
     private DuplicateReviewService service;

@@ -63,7 +63,7 @@ class SharedPersonProjectionMapperTest extends AbstractMapperTest {
         assertEquals(Set.of(owned.getId(), shared.getId()), personIdsForDeal(deal));
         assertTrue(dealMapper.getDealsByPersonId(workspace.getId(), dealScope(workspace.getId()), shared.getId()).stream()
             .anyMatch(candidate -> candidate.getId() == deal.getId()));
-        assertTrue(personMapper.getEngagedPersonIds(workspace.getId()).contains(shared.getId()));
+        assertTrue(personMapper.getEngagedPersonIds(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId())).contains(shared.getId()));
         assertEquals(shared.getId(), primaryContact(deal).personId());
         assertNull(sharedDealPerson(deal, shared).getPerson().getCompany());
         assertNull(sharedPersonForDeal(deal, shared).getCompany());
@@ -88,7 +88,7 @@ class SharedPersonProjectionMapperTest extends AbstractMapperTest {
         assertEquals(Set.of(owned.getId()), stakeholderIds(deal));
         assertEquals(Set.of(owned.getId()), personIdsForDeal(deal));
         assertTrue(dealMapper.getDealsByPersonId(workspace.getId(), dealScope(workspace.getId()), shared.getId()).isEmpty());
-        assertFalse(personMapper.getEngagedPersonIds(workspace.getId()).contains(shared.getId()));
+        assertFalse(personMapper.getEngagedPersonIds(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId())).contains(shared.getId()));
         assertEquals(owned.getId(), primaryContact(deal).personId());
         assertNull(taskCandidate(task).getPersonId());
         assertNull(taskCandidate(task).getPersonLabel());
@@ -126,7 +126,7 @@ class SharedPersonProjectionMapperTest extends AbstractMapperTest {
         assertEquals(Set.of(owned.getId()), personIdsForDeal(deal));
         assertEquals(owned.getId(), primaryContact(deal).personId());
         assertTrue(dealMapper.getDealsByPersonId(workspace.getId(), dealScope(workspace.getId()), forged.getId()).isEmpty());
-        assertFalse(personMapper.getEngagedPersonIds(workspace.getId()).contains(forged.getId()));
+        assertFalse(personMapper.getEngagedPersonIds(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId())).contains(forged.getId()));
         assertNull(taskCandidate(task).getPersonId());
         assertNull(taskCandidate(task).getPersonLabel());
         assertTrue(nudgeCandidates(deal).stream()
@@ -157,7 +157,7 @@ class SharedPersonProjectionMapperTest extends AbstractMapperTest {
     }
 
     private Set<Integer> personIdsForDeal(Deal deal) {
-        return personMapper.getPersonsByDealId(workspace.getId(), deal.getId()).stream()
+        return personMapper.getPersonsByDealId(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), deal.getId()).stream()
             .map(Person::getId)
             .collect(Collectors.toSet());
     }
@@ -175,7 +175,7 @@ class SharedPersonProjectionMapperTest extends AbstractMapperTest {
     }
 
     private Person sharedPersonForDeal(Deal deal, Person person) {
-        return personMapper.getPersonsByDealId(workspace.getId(), deal.getId()).stream()
+        return personMapper.getPersonsByDealId(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), deal.getId()).stream()
             .filter(candidate -> candidate.getId() == person.getId())
             .findFirst()
             .orElseThrow();

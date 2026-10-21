@@ -324,7 +324,7 @@ class CompanyOperationScopeTest {
         List<ooo.klae.connex.backend.beans.Person> personRows = empty ? List.of() : List.of(second, first);
         List<Company> companyRows = empty ? List.of() : List.of(company(), company());
         List<ooo.klae.connex.backend.beans.Deal> dealRows = empty ? List.of() : List.of(deal);
-        when(people.getPersonsByTagId(7, 23)).thenReturn(personRows);
+        when(people.getPersonsByTagId(7, "[7,11]", 23)).thenReturn(personRows);
         when(companies.getCompaniesByTagId(7, "[7,11]", 23)).thenReturn(companyRows);
         when(deals.getDealsByTagId(7, 23)).thenReturn(dealRows);
         TagService service = new TagService(
@@ -342,8 +342,8 @@ class CompanyOperationScopeTest {
         assertArrayEquals(dealRows.toArray(), tag.getDeals());
         var order = inOrder(control, tags, people, companies, deals);
         order.verify(tags).getTagById(7, 23);
-        order.verify(people).getPersonsByTagId(7, 23);
         order.verify(control).findOrganizationWorkspacesForShare(7);
+        order.verify(people).getPersonsByTagId(7, "[7,11]", 23);
         order.verify(companies).getCompaniesByTagId(7, "[7,11]", 23);
         order.verify(deals).getDealsByTagId(7, 23);
     }

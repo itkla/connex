@@ -32,7 +32,7 @@ public final class LegacyRecordVisibilitySql {
             new Environment("pre-485-record-visibility", new JdbcTransactionFactory(), dataSource));
         configuration.setMapUnderscoreToCamelCase(true);
         configuration.getTypeAliasRegistry().registerAliases("ooo.klae.connex.backend.beans");
-        for (String xml : List.of(INTRODUCTION, DUPLICATE_REVIEW, NOTE, REPORT, SEGMENT, PIPELINE, COMPANY, DEAL)) {
+        for (String xml : List.of(INTRODUCTION, DUPLICATE_REVIEW, NOTE, REPORT, SEGMENT, PIPELINE, COMPANY, DEAL, PERSON, PERSON_TAGS)) {
             String resource = "pre-485-" + configuration.getMappedStatementNames().size();
             new XMLMapperBuilder(new ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)),
                 configuration, resource, configuration.getSqlFragments()).parse();
@@ -3026,6 +3026,830 @@ public final class LegacyRecordVisibilitySql {
               AND dp.deal_id = #{dealId}
               AND dp.person_id = #{personId}
           </update>
+        </mapper>
+        """;
+    private static final String PERSON = """
+        <?xml version="1.0" encoding="UTF-8" ?>
+        <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+                "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+        <mapper namespace="ooo.klae.connex.backend.mappers.PersonMapper">
+
+          <resultMap id="PersonResult" type="Person">
+            <id     property="id"        column="id"/>
+            <result property="workspaceId" column="workspace_id"/>
+            <result property="ownerId" column="owner_id"/>
+            <result property="name"      column="name"/>
+            <result property="email"     column="email"/>
+            <result property="phone"     column="phone"/>
+            <result property="title"     column="title"/>
+            <result property="createdAt" column="created_at"/>
+            <result property="updatedAt" column="updated_at"/>
+            <result property="imageUrl" column="image_url"/>
+            <result property="riskExcluded" column="risk_excluded"/>
+            <result property="introExcluded" column="intro_excluded"/>
+            <result property="suspendedAt" column="suspended_at"/>
+            <result property="provisionCeasedAt" column="provision_ceased_at"/>
+            <result property="archivedAt" column="archived_at"/>
+            <result property="lifecycleStage" column="lifecycle_stage"/>
+            <result property="lifecycleChangedAt" column="lifecycle_changed_at"/>
+            <result property="disqualifiedReason" column="disqualified_reason" javaType="java.lang.String"/>
+            <result property="qualificationNotes" column="qualification_notes"/>
+            <result property="leadSource" column="lead_source"/>
+            <result property="leadSourceDetail" column="lead_source_detail"/>
+            <result property="referrerPersonId" column="referrer_person_id"/>
+            <result property="firstResponseDueAt" column="first_response_due_at"/>
+            <result property="firstRespondedAt" column="first_responded_at"/>
+            <result property="firstResponseBreachedAt" column="first_response_breached_at"/>
+            <association property="company" javaType="Company" notNullColumn="company_id">
+              <id property="id" column="company_id"/>
+              <result property="name" column="company_name"/>
+              <result property="logoUrl" column="company_logo_url"/>
+            </association>
+          </resultMap>
+
+          <resultMap id="PersonWithTagsResult" type="Person" extends="PersonResult">
+            <collection property="tags" ofType="Tag" column="{workspaceId=workspace_id,personId=id}"
+              select="ooo.klae.connex.backend.mappers.TagMapper.getTagsByPersonId"/>
+          </resultMap>
+
+          <sql id="personColumns">
+            p.id, p.workspace_id, p.owner_id, p.name, p.email, p.phone, p.title, p.created_at, p.updated_at, p.image_url,
+            p.risk_excluded, p.intro_excluded, p.suspended_at, p.provision_ceased_at, p.archived_at,
+            <include refid="lifecycleColumns"/>
+          </sql>
+
+          <sql id="lifecycleColumns">
+            CASE WHEN p.workspace_id = #{workspaceId} THEN p.lifecycle_stage END AS lifecycle_stage,
+            CASE WHEN p.workspace_id = #{workspaceId} THEN p.lifecycle_changed_at END AS lifecycle_changed_at,
+            CASE WHEN p.workspace_id = #{workspaceId} THEN p.disqualified_reason END AS disqualified_reason,
+            CASE WHEN p.workspace_id = #{workspaceId} THEN p.qualification_notes END AS qualification_notes,
+            CASE WHEN p.workspace_id = #{workspaceId} THEN p.lead_source END AS lead_source,
+            CASE WHEN p.workspace_id = #{workspaceId} THEN p.lead_source_detail END AS lead_source_detail,
+            CASE WHEN p.workspace_id = #{workspaceId} THEN p.referrer_person_id END AS referrer_person_id,
+            CASE WHEN p.workspace_id = #{workspaceId} THEN p.first_response_due_at END AS first_response_due_at,
+            CASE WHEN p.workspace_id = #{workspaceId} THEN p.first_responded_at END AS first_responded_at,
+            CASE WHEN p.workspace_id = #{workspaceId} THEN p.first_response_breached_at END
+              AS first_response_breached_at
+          </sql>
+
+          <sql id="companyJoinColumns">
+            c.id AS company_id, c.name AS company_name, c.logo_url AS company_logo_url
+          </sql>
+
+          <sql id="companyJoin">
+            LEFT JOIN company c ON c.id = p.company_id
+              AND (c.workspace_id = #{workspaceId}
+                OR EXISTS (SELECT 1 FROM company_share cs
+                  JOIN workspace vws ON vws.id = cs.workspace_id
+                  JOIN workspace ows ON ows.id = c.workspace_id AND ows.org_id = vws.org_id
+                  WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
+              AND c.archived_at IS NULL
+          </sql>
+
+          <sql id="visibleAny">
+            (p.workspace_id = #{workspaceId}
+             OR EXISTS (SELECT 1 FROM person_share ps
+                JOIN workspace vws ON vws.id = ps.workspace_id
+                JOIN workspace ows ON ows.id = p.workspace_id AND ows.org_id = vws.org_id
+                WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId}))
+          </sql>
+
+          <sql id="visible">
+            <include refid="visibleAny"/> AND p.archived_at IS NULL
+          </sql>
+
+          <select id="getAllPersons" resultMap="PersonResult">
+            SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
+            FROM person p
+            <include refid="companyJoin"/>
+            WHERE <include refid="visible"/>
+            ORDER BY p.name
+          </select>
+
+          <select id="getProcessablePersons" resultMap="PersonResult">
+            SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
+            FROM person p
+            <include refid="companyJoin"/>
+            WHERE <include refid="visible"/>
+              AND p.suspended_at IS NULL
+            ORDER BY p.name
+          </select>
+
+          <sql id="activityInteractionType">
+            CASE LOWER(a.type)
+              WHEN 'meeting' THEN 'meeting'
+              WHEN 'call' THEN 'call'
+              WHEN 'email' THEN 'email'
+              ELSE 'other'
+            END
+          </sql>
+
+          <sql id="activityBaseWeight">
+            CASE LOWER(a.type)
+              WHEN 'meeting' THEN #{model.meetingWeight}
+              WHEN 'call' THEN #{model.callWeight}
+              WHEN 'email' THEN #{model.emailWeight}
+              ELSE #{model.otherActivityWeight}
+            END
+          </sql>
+
+          <sql id="relationshipTouchSources">
+            SELECT a.person_id AS entity_id,
+                   'activity' AS source_type,
+                   a.id AS source_id,
+                   <include refid="activityInteractionType"/> AS interaction_type,
+                   a.timestamp AS touched_at,
+                   <include refid="activityBaseWeight"/> AS weight
+            FROM activity a
+            WHERE a.workspace_id = #{workspaceId} AND a.person_id IS NOT NULL
+            UNION ALL
+            SELECT n.person_id AS entity_id,
+                   'note' AS source_type,
+                   n.id AS source_id,
+                   'workspace-note' AS interaction_type,
+                   n.created_at AS touched_at,
+                   #{model.noteWeight} AS weight
+            FROM note n
+            WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace'
+              AND n.person_id IS NOT NULL
+            UNION ALL
+            SELECT t.person_id AS entity_id,
+                   'task' AS source_type,
+                   t.id AS source_id,
+                   'task' AS interaction_type,
+                   t.created_at AS touched_at,
+                   #{model.taskWeight} AS weight
+            FROM task t
+            WHERE t.workspace_id = #{workspaceId} AND t.person_id IS NOT NULL
+          </sql>
+
+          <sql id="relationshipTouchSourcesExcludingHistoryImports">
+            SELECT a.person_id AS entity_id,
+                   'activity' AS source_type,
+                   a.id AS source_id,
+                   <include refid="activityInteractionType"/> AS interaction_type,
+                   a.timestamp AS touched_at,
+                   <include refid="activityBaseWeight"/> AS weight
+            FROM activity a
+            WHERE a.workspace_id = #{workspaceId} AND a.person_id IS NOT NULL
+            <if test="!excludedActivityIds.isEmpty()">
+              AND a.id NOT IN
+              <foreach collection="excludedActivityIds" item="id" open="(" separator="," close=")">
+                #{id}
+              </foreach>
+            </if>
+            UNION ALL
+            SELECT n.person_id AS entity_id,
+                   'note' AS source_type,
+                   n.id AS source_id,
+                   'workspace-note' AS interaction_type,
+                   n.created_at AS touched_at,
+                   #{model.noteWeight} AS weight
+            FROM note n
+            WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace'
+              AND n.person_id IS NOT NULL
+            <if test="!excludedNoteIds.isEmpty()">
+              AND n.id NOT IN
+              <foreach collection="excludedNoteIds" item="id" open="(" separator="," close=")">
+                #{id}
+              </foreach>
+            </if>
+            UNION ALL
+            SELECT t.person_id AS entity_id,
+                   'task' AS source_type,
+                   t.id AS source_id,
+                   'task' AS interaction_type,
+                   t.created_at AS touched_at,
+                   #{model.taskWeight} AS weight
+            FROM task t
+            WHERE t.workspace_id = #{workspaceId} AND t.person_id IS NOT NULL
+            <if test="!excludedTaskIds.isEmpty()">
+              AND t.id NOT IN
+              <foreach collection="excludedTaskIds" item="id" open="(" separator="," close=")">
+                #{id}
+              </foreach>
+            </if>
+          </sql>
+
+          <sql id="personEvidenceSources">
+            SELECT 'activity' AS source_type,
+                   a.id AS source_id,
+                   <include refid="activityInteractionType"/> AS interaction_type,
+                   a.timestamp AS touched_at,
+                   <include refid="activityBaseWeight"/> AS weight
+            FROM activity a
+            WHERE a.workspace_id = #{workspaceId} AND a.person_id = #{personId}
+              AND a.timestamp IS NOT NULL AND a.timestamp &lt;= #{reference}
+            UNION ALL
+            SELECT 'note' AS source_type,
+                   n.id AS source_id,
+                   'workspace-note' AS interaction_type,
+                   n.created_at AS touched_at,
+                   #{model.noteWeight} AS weight
+            FROM note n
+            WHERE n.workspace_id = #{workspaceId} AND n.visibility = 'workspace'
+              AND n.person_id = #{personId}
+              AND n.created_at IS NOT NULL AND n.created_at &lt;= #{reference}
+            UNION ALL
+            SELECT 'task' AS source_type,
+                   t.id AS source_id,
+                   'task' AS interaction_type,
+                   t.created_at AS touched_at,
+                   #{model.taskWeight} AS weight
+            FROM task t
+            WHERE t.workspace_id = #{workspaceId} AND t.person_id = #{personId}
+              AND t.created_at IS NOT NULL AND t.created_at &lt;= #{reference}
+          </sql>
+
+          <sql id="personEvidenceScope">
+            FROM (
+              <include refid="personEvidenceSources"/>
+              LIMIT #{sourceLimit}
+            ) source
+            WHERE EXISTS (
+              SELECT 1
+              FROM person p
+              WHERE p.id = #{personId}
+                AND <include refid="visible"/>
+                AND p.suspended_at IS NULL
+            )
+          </sql>
+
+          <select id="getPersonsForNetworkReport" resultMap="PersonResult">
+            SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
+            FROM person p
+            <include refid="companyJoin"/>
+            WHERE <include refid="visible"/>
+              AND p.suspended_at IS NULL
+            ORDER BY p.name, p.id
+            LIMIT #{limit}
+          </select>
+
+          <select id="getRelationshipScoreAggregates"
+                  resultType="ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto">
+            SELECT p.id,
+                   COALESCE(SUM(touch.weight
+                     * POW(#{model.decayBase}, -touch.age_days / #{model.halfLifeDays})), 0.0) AS raw_weight,
+                   COALESCE(SUM(CASE WHEN touch.age_days &lt;= #{model.recentWindowDays}
+                                     THEN touch.weight ELSE 0.0 END), 0.0)
+                     AS recent_weight,
+                   COALESCE(SUM(CASE WHEN touch.age_days &gt; #{model.recentWindowDays}
+                                       AND touch.age_days &lt;= #{model.priorWindowDays}
+                                     THEN touch.weight ELSE 0.0 END), 0.0) AS prior_weight,
+                   DATE_FORMAT(MAX(touch.touched_at), '%Y-%m-%d %H:%i:%s') AS last_touch_at,
+                   SUM(CASE WHEN touch.age_days &lt;= #{model.recentWindowDays}
+                            THEN 1 ELSE 0 END) AS recent_touch_count
+            FROM person p
+            LEFT JOIN (
+              SELECT source.entity_id, source.touched_at, source.weight,
+                     GREATEST(0.0,
+                       TIMESTAMPDIFF(MICROSECOND, source.touched_at, #{reference})
+                         / #{model.microsecondsPerDay}) AS age_days
+              FROM (
+                <include refid="relationshipTouchSources"/>
+              ) source
+              WHERE source.touched_at IS NOT NULL AND source.touched_at &lt;= #{reference}
+            ) touch ON touch.entity_id = p.id
+            WHERE <include refid="visible"/>
+              AND p.suspended_at IS NULL
+            GROUP BY p.id
+            ORDER BY p.id
+          </select>
+
+          <select id="getRelationshipScoreAggregatesByIds"
+                  resultType="ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto">
+            SELECT p.id,
+                   COALESCE(SUM(touch.weight
+                     * POW(#{model.decayBase}, -touch.age_days / #{model.halfLifeDays})), 0.0) AS raw_weight,
+                   COALESCE(SUM(CASE WHEN touch.age_days &lt;= #{model.recentWindowDays}
+                                     THEN touch.weight ELSE 0.0 END), 0.0)
+                     AS recent_weight,
+                   COALESCE(SUM(CASE WHEN touch.age_days &gt; #{model.recentWindowDays}
+                                       AND touch.age_days &lt;= #{model.priorWindowDays}
+                                     THEN touch.weight ELSE 0.0 END), 0.0) AS prior_weight,
+                   DATE_FORMAT(MAX(touch.touched_at), '%Y-%m-%d %H:%i:%s') AS last_touch_at,
+                   SUM(CASE WHEN touch.age_days &lt;= #{model.recentWindowDays}
+                            THEN 1 ELSE 0 END) AS recent_touch_count
+            FROM person p
+            LEFT JOIN (
+              SELECT source.entity_id, source.touched_at, source.weight,
+                     GREATEST(0.0,
+                       TIMESTAMPDIFF(MICROSECOND, source.touched_at, #{reference})
+                         / #{model.microsecondsPerDay}) AS age_days
+              FROM (
+                <include refid="relationshipTouchSources"/>
+              ) source
+              WHERE source.touched_at IS NOT NULL AND source.touched_at &lt;= #{reference}
+                AND source.entity_id IN
+                <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
+            ) touch ON touch.entity_id = p.id
+            WHERE <include refid="visible"/>
+              AND p.suspended_at IS NULL
+              AND p.id IN
+              <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
+            GROUP BY p.id
+            ORDER BY p.id
+          </select>
+
+          <select id="getRelationshipScoreAggregatesExcludingHistoryImports"
+                  resultType="ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto">
+            SELECT p.id,
+                   COALESCE(SUM(touch.weight
+                     * POW(#{model.decayBase}, -touch.age_days / #{model.halfLifeDays})), 0.0) AS raw_weight,
+                   COALESCE(SUM(CASE WHEN touch.age_days &lt;= #{model.recentWindowDays}
+                                     THEN touch.weight ELSE 0.0 END), 0.0)
+                     AS recent_weight,
+                   COALESCE(SUM(CASE WHEN touch.age_days &gt; #{model.recentWindowDays}
+                                       AND touch.age_days &lt;= #{model.priorWindowDays}
+                                     THEN touch.weight ELSE 0.0 END), 0.0) AS prior_weight,
+                   DATE_FORMAT(MAX(touch.touched_at), '%Y-%m-%d %H:%i:%s') AS last_touch_at,
+                   SUM(CASE WHEN touch.age_days &lt;= #{model.recentWindowDays}
+                            THEN 1 ELSE 0 END) AS recent_touch_count
+            FROM person p
+            LEFT JOIN (
+              SELECT source.entity_id, source.touched_at, source.weight,
+                     GREATEST(0.0,
+                       TIMESTAMPDIFF(MICROSECOND, source.touched_at, #{reference})
+                         / #{model.microsecondsPerDay}) AS age_days
+              FROM (
+                <include refid="relationshipTouchSourcesExcludingHistoryImports"/>
+              ) source
+              WHERE source.touched_at IS NOT NULL AND source.touched_at &lt;= #{reference}
+            ) touch ON touch.entity_id = p.id
+            WHERE <include refid="visible"/>
+              AND p.suspended_at IS NULL
+            GROUP BY p.id
+            ORDER BY p.id
+          </select>
+
+          <select id="getRelationshipEvidenceTotals" timeout="10"
+                  resultType="ooo.klae.connex.backend.dto.RelationshipEvidenceTotalsDto">
+            SELECT COUNT(*) AS contributor_count,
+                   COALESCE(SUM(capped.base_weight
+                     * POW(#{model.decayBase}, -capped.age_days / #{model.halfLifeDays})), 0.0)
+                     AS total_decayed_contribution,
+                   COALESCE(SUM(CASE WHEN capped.source_type = 'activity' THEN 1 ELSE 0 END), 0)
+                     AS activity_count,
+                   COALESCE(SUM(CASE WHEN capped.source_type = 'note' THEN 1 ELSE 0 END), 0)
+                     AS note_count,
+                   COALESCE(SUM(CASE WHEN capped.source_type = 'task' THEN 1 ELSE 0 END), 0)
+                     AS task_count,
+                   COALESCE(SUM(CASE WHEN capped.age_days &lt;= #{model.recentWindowDays}
+                                     THEN capped.base_weight ELSE 0.0 END), 0.0) AS recent_weight,
+                   COALESCE(SUM(CASE WHEN capped.age_days &gt; #{model.recentWindowDays}
+                                       AND capped.age_days &lt;= #{model.priorWindowDays}
+                                     THEN capped.base_weight ELSE 0.0 END), 0.0) AS prior_weight,
+                   DATE_FORMAT(MAX(capped.touched_at), '%Y-%m-%d %H:%i:%s') AS last_touch_at,
+                   COALESCE(SUM(CASE WHEN capped.age_days &lt;= #{model.recentWindowDays}
+                                     THEN 1 ELSE 0 END), 0) AS recent_touch_count
+            FROM (
+              SELECT source.source_type,
+                     source.touched_at,
+                     source.weight AS base_weight,
+                     GREATEST(0.0,
+                       TIMESTAMPDIFF(MICROSECOND, source.touched_at, #{reference})
+                         / #{model.microsecondsPerDay}) AS age_days
+              <include refid="personEvidenceScope"/>
+            ) capped
+          </select>
+
+          <select id="getRelationshipEvidenceContributors" timeout="10"
+                  resultType="ooo.klae.connex.backend.dto.RelationshipEvidenceRowDto">
+            SELECT aged.source_type,
+                   aged.source_id,
+                   aged.interaction_type,
+                   DATE_FORMAT(aged.touched_at, '%Y-%m-%d %H:%i:%s') AS occurred_at,
+                   aged.base_weight,
+                   aged.base_weight
+                     * POW(#{model.decayBase}, -aged.age_days / #{model.halfLifeDays})
+                     AS decayed_contribution,
+                   provider_activity.provider_name,
+                   provider_activity.provider_stream,
+                   provider_activity.provider_source_id,
+                   DATE_FORMAT(provider_activity.provider_captured_at, '%Y-%m-%d %H:%i:%s')
+                     AS provider_captured_at,
+                   CASE WHEN provider_activity.provider_owned
+                     THEN DATE_FORMAT(#{reference}, '%Y-%m-%d %H:%i:%s') END AS capture_as_of,
+                   provider_activity.provider_visibility,
+                   provider_activity.provider_admitted_fields_json,
+                   provider_activity.provider_material_exclusions_json
+            FROM (
+              SELECT source.source_type,
+                     source.source_id,
+                     source.interaction_type,
+                     source.touched_at,
+                     source.weight AS base_weight,
+                     GREATEST(0.0,
+                       TIMESTAMPDIFF(MICROSECOND, source.touched_at, #{reference})
+                         / #{model.microsecondsPerDay}) AS age_days
+              <include refid="personEvidenceScope"/>
+            ) aged
+            LEFT JOIN activity provider_activity
+              ON aged.source_type = 'activity'
+              AND provider_activity.workspace_id = #{workspaceId}
+              AND provider_activity.id = aged.source_id
+            ORDER BY decayed_contribution DESC,
+                     aged.touched_at DESC,
+                     aged.source_type,
+                     aged.source_id
+            LIMIT #{limit}
+          </select>
+
+          <select id="getPersonsByCompanyId" resultMap="PersonWithTagsResult">
+            SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
+            FROM (
+              SELECT person.*
+              FROM person
+              WHERE workspace_id = #{workspaceId} AND company_id = #{companyId}
+                AND person.archived_at IS NULL
+              ORDER BY name, id
+              <if test="limit != null">LIMIT #{limit}</if>
+            ) p
+            <include refid="companyJoin"/>
+            ORDER BY p.name, p.id
+          </select>
+
+          <select id="getPersonsByTagId" resultMap="PersonResult">
+            SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
+            FROM person p
+            <include refid="companyJoin"/>
+            JOIN person_tag pt ON pt.person_id = p.id
+            WHERE p.workspace_id = #{workspaceId} AND pt.tag_id = #{tagId}
+              AND p.archived_at IS NULL
+            ORDER BY p.name
+          </select>
+
+          <select id="getPersonsByDealId" resultMap="PersonResult">
+            SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
+            FROM person p
+            <include refid="companyJoin"/>
+            JOIN deal_person dp ON dp.person_id = p.id
+            JOIN deal d ON d.id = dp.deal_id AND d.workspace_id = #{workspaceId}
+            WHERE <include refid="visible"/> AND dp.deal_id = #{dealId}
+            ORDER BY p.name
+          </select>
+
+          <select id="getPersonById" resultMap="PersonResult">
+            SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
+            FROM person p
+            <include refid="companyJoin"/>
+            WHERE <include refid="visible"/> AND p.id = #{id}
+          </select>
+
+          <select id="getAssistantPrimaryPersonById" resultMap="PersonResult">
+            SELECT <include refid="personColumns"/>,
+              NULL AS company_id, NULL AS company_name, NULL AS company_logo_url
+            FROM person p
+            WHERE <include refid="visible"/> AND p.id = #{id}
+              AND p.suspended_at IS NULL AND p.provision_ceased_at IS NULL
+          </select>
+
+          <select id="getVisiblePersonByIdForUpdate" resultMap="PersonResult" flushCache="true">
+            SELECT <include refid="personColumns"/>, p.company_id
+            FROM person p
+            WHERE <include refid="visible"/> AND p.id = #{id}
+            FOR UPDATE
+          </select>
+
+          <select id="getVisiblePersonByIdForShare" resultMap="PersonResult" flushCache="true">
+            SELECT <include refid="personColumns"/>, p.company_id
+            FROM person p
+            WHERE <include refid="visible"/> AND p.id = #{id}
+            FOR SHARE
+          </select>
+
+          <select id="getOwnedArchivedPersonById" resultMap="PersonResult">
+            SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
+            FROM person p
+            <include refid="companyJoin"/>
+            WHERE p.workspace_id = #{workspaceId} AND p.id = #{id}
+              AND p.archived_at IS NOT NULL
+          </select>
+
+          <select id="getProcessablePersonIds" resultType="int">
+            SELECT p.id FROM person p
+            WHERE <include refid="visible"/>
+              AND p.suspended_at IS NULL
+              AND p.id IN
+              <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
+          </select>
+
+          <select id="getByIds" resultMap="PersonResult">
+            SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
+            FROM person p
+            <include refid="companyJoin"/>
+            WHERE <include refid="visible"/>
+              AND p.id IN
+              <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
+            ORDER BY p.name, p.id
+          </select>
+
+          <select id="exists" resultType="boolean">
+            SELECT EXISTS(
+              SELECT 1 FROM person
+              WHERE (person.workspace_id = #{workspaceId}
+                     OR EXISTS (SELECT 1 FROM person_share ps
+                        JOIN workspace vws ON vws.id = ps.workspace_id
+                        JOIN workspace ows ON ows.id = person.workspace_id AND ows.org_id = vws.org_id
+                        WHERE ps.person_id = person.id AND ps.workspace_id = #{workspaceId}))
+                AND id = #{id}
+                AND person.archived_at IS NULL
+            )
+          </select>
+
+          <select id="getVisibleIdsIn" resultType="int">
+            SELECT p.id
+            FROM person p
+            WHERE <include refid="visible"/>
+              AND p.id IN
+              <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+            ORDER BY p.id
+          </select>
+
+          <sql id="warmthAggregate">
+              <bind name="model" value="warmth.model"/>
+              <bind name="reference" value="warmth.reference"/>
+              LEFT JOIN (
+                SELECT touch.entity_id,
+                       SUM(touch.weight
+                         * POW(#{model.decayBase}, -touch.age_days / #{model.halfLifeDays})) AS raw_weight,
+                       MAX(touch.touched_at) AS last_touch_at
+                FROM (
+                  SELECT source.entity_id, source.touched_at, source.weight,
+                         GREATEST(0.0,
+                           TIMESTAMPDIFF(MICROSECOND, source.touched_at, #{reference})
+                             / #{model.microsecondsPerDay}) AS age_days
+                  FROM (
+                    <include refid="relationshipTouchSources"/>
+                  ) source
+                  WHERE source.touched_at IS NOT NULL AND source.touched_at &lt;= #{reference}
+                ) touch
+                GROUP BY touch.entity_id
+              ) w ON w.entity_id = p.id
+          </sql>
+
+          <sql id="warmthJoin">
+            <if test="warmth != null">
+              <include refid="warmthAggregate"/>
+            </if>
+          </sql>
+
+          <sql id="warmthFilterJoin">
+            <if test="warmth != null and warmth.restrictsRows()">
+              <include refid="warmthAggregate"/>
+            </if>
+          </sql>
+
+          <sql id="warmthBandKey">
+            CASE
+              WHEN w.last_touch_at IS NULL THEN '__none__'
+              WHEN w.raw_weight &gt;= #{model.hotMinimumRawWeight} THEN 'hot'
+              WHEN w.raw_weight &gt;= #{model.warmMinimumRawWeight} THEN 'warm'
+              WHEN w.raw_weight &gt;= #{model.coolMinimumRawWeight} THEN 'cool'
+              ELSE 'cold'
+            END
+          </sql>
+
+          <sql id="warmthWhere">
+            <if test="warmth != null">
+              <if test="warmth.bands.size() > 0 or warmth.noWarmth">
+                AND (
+                  <trim prefixOverrides="OR ">
+                    <if test="warmth.bands.size() > 0">
+                      <include refid="warmthBandKey"/> IN
+                      <foreach item="band" collection="warmth.bands" open="(" separator="," close=")">#{band}</foreach>
+                    </if>
+                    <if test="warmth.noWarmth">OR w.last_touch_at IS NULL</if>
+                  </trim>
+                )
+              </if>
+              <if test="warmth.goesColdWithinDays != null">
+                AND w.raw_weight &gt; #{model.coldRawWeight}
+                AND ROUND(#{model.halfLifeDays}
+                  * LOG(#{model.decayBase}, w.raw_weight / #{model.coldRawWeight}))
+                  &lt;= #{warmth.goesColdWithinDays}
+              </if>
+            </if>
+          </sql>
+
+          <sql id="pageWhere">
+            <where>
+              <choose>
+                <when test="archived">AND p.workspace_id = #{workspaceId} AND p.archived_at IS NOT NULL</when>
+                <otherwise>AND <include refid="visible"/></otherwise>
+              </choose>
+              <include refid="warmthWhere"/>
+              <if test="query != null">
+                AND (p.name LIKE #{query} OR p.email LIKE #{query} OR p.phone LIKE #{query}
+                  OR p.title LIKE #{query} OR c.name LIKE #{query})
+              </if>
+              <if test="(companies != null and companies.size() > 0) or noCompany">
+                AND (
+                  <trim prefixOverrides="OR ">
+                    <if test="companies != null and companies.size() > 0">
+                      c.name IN <foreach item="cn" collection="companies" open="(" separator="," close=")">#{cn}</foreach>
+                    </if>
+                    <if test="noCompany">OR c.id IS NULL</if>
+                  </trim>
+                )
+              </if>
+              <if test="titles != null and titles.size() > 0">
+                AND p.title IN <foreach item="ti" collection="titles" open="(" separator="," close=")">#{ti}</foreach>
+              </if>
+              <if test="(lifecycleStages != null and lifecycleStages.size() > 0) or noLifecycle">
+                AND p.workspace_id = #{workspaceId}
+                AND (
+                  <trim prefixOverrides="OR ">
+                    <if test="lifecycleStages != null and lifecycleStages.size() > 0">
+                      p.lifecycle_stage IN
+                      <foreach item="ls" collection="lifecycleStages" open="(" separator="," close=")">#{ls}</foreach>
+                    </if>
+                    <if test="noLifecycle">OR p.lifecycle_stage IS NULL</if>
+                  </trim>
+                )
+              </if>
+              <if test="(leadSources != null and leadSources.size() > 0) or noLeadSource">
+                AND p.workspace_id = #{workspaceId}
+                AND (
+                  <trim prefixOverrides="OR ">
+                    <if test="leadSources != null and leadSources.size() > 0">
+                      p.lead_source IN
+                      <foreach item="src" collection="leadSources" open="(" separator="," close=")">#{src}</foreach>
+                    </if>
+                    <if test="noLeadSource">OR p.lead_source IS NULL</if>
+                  </trim>
+                )
+              </if>
+              <if test="(firstResponseStates != null and firstResponseStates.size() > 0) or noFirstResponse">
+                AND p.workspace_id = #{workspaceId}
+                AND (
+                  <trim prefixOverrides="OR ">
+                    <if test="firstResponseStates != null">
+                      <foreach item="frs" collection="firstResponseStates">
+                        <choose>
+                          <when test="frs.name() == 'RESPONDED'">OR p.first_responded_at IS NOT NULL</when>
+                          <when test="frs.name() == 'OVERDUE'">
+                            OR (p.first_response_breached_at IS NOT NULL AND p.first_responded_at IS NULL)
+                          </when>
+                          <otherwise>
+                            OR (p.first_response_due_at IS NOT NULL
+                              AND p.first_responded_at IS NULL
+                              AND p.first_response_breached_at IS NULL)
+                          </otherwise>
+                        </choose>
+                      </foreach>
+                    </if>
+                    <if test="noFirstResponse">OR p.first_response_due_at IS NULL</if>
+                  </trim>
+                )
+              </if>
+            </where>
+          </sql>
+
+          <sql id="firstResponseStateKey">
+            CASE
+              WHEN p.first_response_due_at IS NULL THEN '__none__'
+              WHEN p.first_responded_at IS NOT NULL THEN 'RESPONDED'
+              WHEN p.first_response_breached_at IS NOT NULL THEN 'OVERDUE'
+              ELSE 'PENDING'
+            END
+          </sql>
+
+          <sql id="memberScopePredicate">
+            <choose>
+              <when test="memberScope.mode.name() == 'ME'">
+                AND p.owner_id = #{memberScope.userId}
+              </when>
+              <when test="memberScope.mode.name() == 'MEMBERS'">
+                AND p.owner_id IN
+                <foreach item="id" collection="memberScope.memberIds" open="(" separator="," close=")">#{id}</foreach>
+              </when>
+              <when test="memberScope.mode.name() == 'UNASSIGNED'">
+                AND p.owner_id IS NULL
+              </when>
+            </choose>
+          </sql>
+
+          <sql id="pageOrderBy">
+            ORDER BY
+            <choose>
+              <when test="sort == 'email'">p.email</when>
+              <when test="sort == 'phone'">p.phone</when>
+              <when test="sort == 'title'">p.title</when>
+              <when test="sort == 'company'">c.name</when>
+              <when test="sort == 'createdAt'">p.created_at</when>
+              <when test="sort == 'updatedAt'">p.updated_at</when>
+              <when test="sort == 'warmth'">COALESCE(w.raw_weight, 0.0)</when>
+              <otherwise>p.name</otherwise>
+            </choose>
+            <choose><when test="dir == 'desc'">DESC</when><otherwise>ASC</otherwise></choose>
+            , p.id ASC
+          </sql>
+
+          <select id="getPersonsPage" resultMap="PersonResult">
+            SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
+            FROM person p
+            <include refid="companyJoin"/>
+            <include refid="warmthJoin"/>
+            <include refid="pageWhere"/>
+            <include refid="memberScopePredicate"/>
+            <include refid="pageOrderBy"/>
+            LIMIT #{limit} OFFSET #{offset}
+          </select>
+
+          <select id="getPersonIdsFiltered" resultType="int">
+            SELECT p.id
+            FROM person p
+            <include refid="companyJoin"/>
+            <include refid="warmthFilterJoin"/>
+            <include refid="pageWhere"/>
+            <include refid="memberScopePredicate"/>
+            ORDER BY p.id
+            LIMIT #{limit}
+          </select>
+
+          <select id="countPersons" resultType="long">
+            SELECT COUNT(*)
+            FROM person p
+            <include refid="companyJoin"/>
+            <include refid="warmthFilterJoin"/>
+            <include refid="pageWhere"/>
+            <include refid="memberScopePredicate"/>
+          </select>
+
+          <select id="getPersonsFiltered" resultMap="PersonResult">
+            SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
+            FROM person p
+            <include refid="companyJoin"/>
+            <include refid="warmthFilterJoin"/>
+            <include refid="pageWhere"/>
+            <include refid="memberScopePredicate"/>
+            AND p.suspended_at IS NULL
+            ORDER BY p.name
+          </select>
+
+          <select id="countsByWarmthBand" timeout="10"
+                  resultType="ooo.klae.connex.backend.dto.FacetCount">
+            SELECT <include refid="warmthBandKey"/> AS `key`,
+                   COUNT(*) AS count, NULL AS label
+            FROM person p
+            <include refid="warmthJoin"/>
+            WHERE <include refid="visible"/>
+            GROUP BY `key`
+          </select>
+
+          <select id="distinctCompanies" resultType="string">
+            SELECT DISTINCT c.name
+            FROM person p
+            <include refid="companyJoin"/>
+            WHERE p.workspace_id = #{workspaceId} AND c.name IS NOT NULL AND c.name &lt;&gt; ''
+              AND p.archived_at IS NULL
+            ORDER BY c.name
+          </select>
+
+          <select id="hasPersonWithoutCompany" resultType="boolean">
+            SELECT EXISTS(
+              SELECT 1
+              FROM person p
+              <include refid="companyJoin"/>
+              WHERE p.workspace_id = #{workspaceId} AND p.archived_at IS NULL AND c.id IS NULL)
+          </select>
+
+          <select id="getEngagedPersonIds" resultType="int">
+            SELECT DISTINCT engaged.person_id FROM (
+              SELECT person_id FROM activity WHERE workspace_id = #{workspaceId} AND person_id IS NOT NULL
+              UNION SELECT person_id FROM note
+                WHERE workspace_id = #{workspaceId} AND visibility = 'workspace' AND person_id IS NOT NULL
+              UNION SELECT person_id FROM task WHERE workspace_id = #{workspaceId} AND person_id IS NOT NULL
+            ) engaged
+            JOIN person p ON p.id = engaged.person_id
+            WHERE <include refid="visible"/>
+              AND p.suspended_at IS NULL
+          </select>
+
+          <select id="search" resultMap="PersonResult">
+            SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
+            FROM person p
+            <include refid="companyJoin"/>
+            WHERE <include refid="visible"/>
+              AND (p.name LIKE #{query} OR p.email LIKE #{query} OR p.phone LIKE #{query} OR p.title LIKE #{query}
+              OR c.name LIKE #{query} OR c.website LIKE #{query} OR c.industry LIKE #{query} OR c.phone LIKE #{query} OR c.address LIKE #{query})
+            ORDER BY p.name
+            LIMIT 10
+          </select>
+        </mapper>
+        """;
+    private static final String PERSON_TAGS = """
+        <?xml version="1.0" encoding="UTF-8" ?>
+        <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+        <mapper namespace="ooo.klae.connex.backend.mappers.TagMapper">
+          <select id="getTagsByPersonId" resultType="Tag">
+            SELECT t.id, t.workspace_id, t.name, t.color
+            FROM tag t
+            JOIN person_tag pt ON pt.tag_id = t.id
+            WHERE t.workspace_id = #{workspaceId} AND pt.person_id = #{personId}
+            ORDER BY t.name
+          </select>
         </mapper>
         """;
 }

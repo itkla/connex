@@ -125,8 +125,9 @@ public class ScoringService {
      */
     public List<RelationshipTemperatureDto> scoreContacts(int workspaceId) {
         Instant reference = scoringInstant(Instant.now(clock));
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         return temperatures(personMapper.getRelationshipScoreAggregates(
-            workspaceId, LocalDateTime.ofInstant(reference, ZoneOffset.UTC), WARMTH_MODEL.sqlParameters()), reference);
+            workspaceId, personWorkspaceIdsJson, LocalDateTime.ofInstant(reference, ZoneOffset.UTC), WARMTH_MODEL.sqlParameters()), reference);
     }
 
     /** Scores all contacts and companies from compact aggregates computed by the database. */
@@ -141,7 +142,7 @@ public class ScoringService {
         LocalDateTime reference = LocalDateTime.ofInstant(now, ZoneOffset.UTC);
         return new WorkspaceScores(
             temperatures(personMapper.getRelationshipScoreAggregates(
-                workspaceId, reference, WARMTH_MODEL.sqlParameters()), now),
+                workspaceId, operationVisibilityScope.workspaceIdsJson(), reference, WARMTH_MODEL.sqlParameters()), now),
             temperatures(companyMapper.getRelationshipScoreAggregates(
                 workspaceId, operationVisibilityScope.workspaceIdsJson(), reference, WARMTH_MODEL.sqlParameters()), now)
         );
@@ -165,8 +166,9 @@ public class ScoringService {
      */
     public List<RelationshipTemperatureDto> scoreContacts(int workspaceId, Instant asOf) {
         Instant reference = scoringInstant(asOf);
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         return temperatures(personMapper.getRelationshipScoreAggregates(
-            workspaceId, LocalDateTime.ofInstant(reference, ZoneOffset.UTC), WARMTH_MODEL.sqlParameters()), reference);
+            workspaceId, personWorkspaceIdsJson, LocalDateTime.ofInstant(reference, ZoneOffset.UTC), WARMTH_MODEL.sqlParameters()), reference);
     }
 
     List<RelationshipTemperatureDto> scoreContactsExcludingHistoryImports(
@@ -178,9 +180,10 @@ public class ScoringService {
         Instant reference = scoringInstant(asOf);
         LocalDateTime referenceDateTime =
             LocalDateTime.ofInstant(reference, ZoneOffset.UTC);
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         return temperatures(
             personMapper.getRelationshipScoreAggregatesExcludingHistoryImports(
-                workspaceId,
+                workspaceId, personWorkspaceIdsJson,
                 referenceDateTime,
                 WARMTH_MODEL.sqlParameters(),
                 List.copyOf(excludedActivityIds),
@@ -244,7 +247,8 @@ public class ScoringService {
 
     /** Returns clock-independent fingerprints of persisted touches attributed to each company. */
     Map<Integer, String> companySourceStateHashes(int workspaceId) {
-        List<Person> persons = personMapper.getProcessablePersons(workspaceId);
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        List<Person> persons = personMapper.getProcessablePersons(workspaceId, personWorkspaceIdsJson);
         Map<Integer, Integer> personCompany = personCompanyMap(persons);
         Set<Integer> processablePersonIds = personIds(persons);
         Map<Integer, Integer> dealCompany = dealCompanyMap(dealMapper.getAllDeals(workspaceId));
@@ -378,15 +382,15 @@ public class ScoringService {
      */
     @Transactional(readOnly = true)
     public RelationshipEvidenceDto contactEvidence(int workspaceId, int personId, int currentUserId) {
-        if (!personMapper.getProcessablePersonIds(workspaceId, List.of(personId)).contains(personId)) {
-            throw new ResourceNotFoundException("Contact not found");
-        }
         String orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId)
             .workspaceIdsJson();
+        if (!personMapper.getProcessablePersonIds(workspaceId, orgWorkspaceIdsJson, List.of(personId)).contains(personId)) {
+            throw new ResourceNotFoundException("Contact not found");
+        }
         Instant asOf = scoringInstant(Instant.now(clock));
         LocalDateTime reference = LocalDateTime.ofInstant(asOf, ZoneOffset.UTC);
         RelationshipEvidenceTotalsDto totals = boundedTotals(personMapper.getRelationshipEvidenceTotals(
-            workspaceId,
+            workspaceId, orgWorkspaceIdsJson,
             personId,
             reference,
             WARMTH_MODEL.sqlParameters(),
@@ -395,7 +399,7 @@ public class ScoringService {
         List<RelationshipEvidenceRowDto> rows = totals.contributorCount() == 0
             ? List.of()
             : personMapper.getRelationshipEvidenceContributors(
-                workspaceId,
+                workspaceId, orgWorkspaceIdsJson,
                 personId,
                 reference,
                 WARMTH_MODEL.sqlParameters(),
@@ -437,8 +441,9 @@ public class ScoringService {
         }
         Instant reference = scoringInstant(Instant.now(clock));
         Map<Integer, RelationshipTemperatureDto> scores = new HashMap<>();
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         for (RelationshipTemperatureDto score : temperatures(personMapper.getRelationshipScoreAggregatesByIds(
-                workspaceId, LocalDateTime.ofInstant(reference, ZoneOffset.UTC),
+                workspaceId, personWorkspaceIdsJson, LocalDateTime.ofInstant(reference, ZoneOffset.UTC),
                 WARMTH_MODEL.sqlParameters(), requested), reference)) {
             scores.put(score.getId(), score);
         }

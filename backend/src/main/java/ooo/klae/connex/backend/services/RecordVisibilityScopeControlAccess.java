@@ -221,6 +221,12 @@ public class RecordVisibilityScopeControlAccess {
         return preparedOrTransactionScope(workspaceId);
     }
 
+    /** Identifies this deferred operation's original lookup failure without performing another read. */
+    boolean isScopeResolutionFailure(int workspaceId, RuntimeException failure) {
+        OperationScope operation = operationScope.get();
+        return operation != null && operation.workspaceId == workspaceId && operation.failure == failure;
+    }
+
     private RecordVisibilityScope preparedOrTransactionScope(int workspaceId) {
         var prepared = tenantContext.getWorkspaceScopes();
         if (prepared != null && prepared.workspaceId() == workspaceId) {

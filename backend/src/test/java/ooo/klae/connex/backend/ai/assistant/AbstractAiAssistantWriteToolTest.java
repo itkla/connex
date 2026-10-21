@@ -388,7 +388,7 @@ abstract class AbstractAiAssistantWriteToolTest {
         Person person = new Person();
         person.setId(31);
         person.setName("Ada Lovelace");
-        when(executorPersonMapper.getPersonById(TURN.workspaceId(), 31)).thenReturn(person);
+        when(executorPersonMapper.getPersonById(TURN.workspaceId(), "[7,8,9]", 31)).thenReturn(person);
     }
 
     /**

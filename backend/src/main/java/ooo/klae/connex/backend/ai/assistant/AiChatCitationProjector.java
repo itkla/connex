@@ -343,7 +343,8 @@ public class AiChatCitationProjector {
         String orgWorkspaceIdsJson = null;
         Map<RecordKey, VisibleRecord> visible = new LinkedHashMap<>();
         if (!personIds.isEmpty()) {
-            personMapper.getByIds(workspaceId, personIds).stream()
+            orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+            personMapper.getByIds(workspaceId, orgWorkspaceIdsJson, personIds).stream()
                     .filter(AiChatCitationProjector::isProcessable)
                     .forEach(person -> visible.put(
                             new RecordKey("person", person.getId()),
@@ -355,7 +356,9 @@ public class AiChatCitationProjector {
                                             : person.getCompany().getName()))));
         }
         if (!companyIds.isEmpty()) {
-            orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+            if (orgWorkspaceIdsJson == null) {
+                orgWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+            }
             companyMapper.getByIds(workspaceId, orgWorkspaceIdsJson, companyIds)
                     .forEach(company -> visible.put(
                             new RecordKey("company", company.getId()),

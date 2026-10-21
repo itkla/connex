@@ -141,7 +141,7 @@ class AudienceExportServiceTest {
                 campaignMapper, exportMapper, personMapper,
                 audienceEligibilityService, connectorConfigService, deliveryProviderRouter,
                 deliveryProperties, capabilityRegistry, workspaceService, tenantContext, auditService,
-                transactionManager, objectMapper, validator, meterRegistry, nanoTimeSource);
+                transactionManager, objectMapper, validator, meterRegistry, nanoTimeSource, ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
     }
 
     private CampaignAudienceExportRequest request() {
@@ -216,7 +216,7 @@ class AudienceExportServiceTest {
                         classification(List.of(1, 2)),
                         new AudienceClassification(
                                 Set.of(), Set.of(), Set.of(), Set.of(2), List.of(1)));
-        when(personMapper.getByIds(WORKSPACE, List.of(1)))
+        when(personMapper.getByIds(WORKSPACE, "[7,8,9]", List.of(1)))
                 .thenReturn(List.of(person(1, "Ada Lovelace", "a@dest.test")));
         ArgumentCaptor<AudiencePush> pushCaptor = ArgumentCaptor.forClass(AudiencePush.class);
         when(connector.pushAudience(eq(target()), pushCaptor.capture()))
@@ -255,12 +255,63 @@ class AudienceExportServiceTest {
     }
 
     @Test
+    void exportReusesOneRealScopeAcrossItsIndependentTransactions() {
+        primeCreateExport();
+        try (var fixture = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(WORKSPACE)) {
+            var transactionIdentities = java.util.Collections.newSetFromMap(
+                    new java.util.IdentityHashMap<Object, Boolean>());
+            when(audienceEligibilityService.classify(
+                    eq(WORKSPACE), anyList(), eq("email"), eq("product_update")))
+                    .thenAnswer(invocation -> {
+                        assertNotNull(fixture.transactions.currentTransaction());
+                        transactionIdentities.add(fixture.transactions.currentTransaction());
+                        assertEquals("[7,17]", fixture.scopes.getForWorkspace(WORKSPACE).workspaceIdsJson());
+                        return classification(List.of(1, 2));
+                    });
+            when(personMapper.getByIds(WORKSPACE, "[7,17]", List.of(1, 2)))
+                    .thenReturn(List.of(person(1, "Ada Lovelace", "a@dest.test"),
+                            person(2, "Grace Hopper", "g@dest.test")));
+            when(connector.pushAudience(eq(target()), any()))
+                    .thenAnswer(invocation -> {
+                        assertNull(fixture.transactions.currentTransaction());
+                        return new AudiencePushResult(2, 0, "accepted");
+                    });
+            when(exportMapper.updateOutcome(any(CampaignAudienceExport.class))).thenAnswer(invocation -> {
+                assertNotNull(fixture.transactions.currentTransaction());
+                transactionIdentities.add(fixture.transactions.currentTransaction());
+                assertEquals("[7,17]", fixture.scopes.getForWorkspace(WORKSPACE).workspaceIdsJson());
+                return 1;
+            });
+            AudienceExportService scoped = new AudienceExportService(sessionSecurityService,
+                    campaignMapper, exportMapper, personMapper,
+                    audienceEligibilityService, connectorConfigService, deliveryProviderRouter,
+                    deliveryProperties, capabilityRegistry, workspaceService, tenantContext, auditService,
+                    fixture.transactions, objectMapper, validator, meterRegistry, System::nanoTime, fixture.scopes);
+
+            var result = scoped.createExport(CAMPAIGN, request());
+
+            assertEquals("completed", result.status());
+            assertEquals(2, storedExport.getPushedCount());
+            assertEquals(3, transactionIdentities.size());
+            assertEquals(3, fixture.transactions.beginCount());
+            assertNull(fixture.transactions.currentTransaction());
+            var order = inOrder(fixture.control, campaignMapper);
+            order.verify(fixture.control).findOrganizationWorkspacesForShare(WORKSPACE);
+            order.verify(campaignMapper).getCampaignForUpdate(WORKSPACE, CAMPAIGN);
+            verify(fixture.control).findOrganizationWorkspacesForShare(WORKSPACE);
+            verify(audienceEligibilityService, times(2)).classify(
+                    WORKSPACE, List.of(1, 2), "email", "product_update");
+            verify(personMapper).getByIds(WORKSPACE, "[7,17]", List.of(1, 2));
+        }
+    }
+
+    @Test
     void providerBudgetAnchorPrecedesTheLeaseWriteAndCannotBeReanchoredAfterThePause() {
         primeCreateExport();
         when(audienceEligibilityService.classify(
                 eq(WORKSPACE), anyList(), eq("email"), eq("product_update")))
                 .thenReturn(classification(List.of(1)));
-        when(personMapper.getByIds(WORKSPACE, List.of(1)))
+        when(personMapper.getByIds(WORKSPACE, "[7,8,9]", List.of(1)))
                 .thenReturn(List.of(person(1, "Ada Lovelace", "a@dest.test")));
         AtomicLong nanoTime = new AtomicLong(1_000_000L);
         AtomicReference<Long> capturedAnchor = new AtomicReference<>();
@@ -308,7 +359,7 @@ class AudienceExportServiceTest {
         when(audienceEligibilityService.classify(
                 eq(WORKSPACE), anyList(), eq("email"), eq("product_update")))
                 .thenReturn(classification(List.of(1)));
-        when(personMapper.getByIds(WORKSPACE, List.of(1)))
+        when(personMapper.getByIds(WORKSPACE, "[7,8,9]", List.of(1)))
                 .thenReturn(List.of(person(1, "Ada Lovelace", "a@dest.test")));
         LocalDateTime applicationWallClock = LocalDateTime.of(2030, 1, 2, 3, 4, 5);
         AtomicReference<LocalDateTime> databaseNow = new AtomicReference<>(
@@ -360,7 +411,7 @@ class AudienceExportServiceTest {
         when(audienceEligibilityService.classify(
                 eq(WORKSPACE), anyList(), eq("email"), eq("product_update")))
                 .thenReturn(classification(List.of(1, 2)));
-        when(personMapper.getByIds(WORKSPACE, List.of(1, 2))).thenReturn(List.of(
+        when(personMapper.getByIds(WORKSPACE, "[7,8,9]", List.of(1, 2))).thenReturn(List.of(
                 person(1, "Ada Lovelace", "a@dest.test"),
                 person(2, "Bo Ng", "b@dest.test")));
         when(connector.pushAudience(any(), any()))
@@ -384,7 +435,7 @@ class AudienceExportServiceTest {
         when(audienceEligibilityService.classify(
                 eq(WORKSPACE), anyList(), eq("email"), eq("product_update")))
                 .thenReturn(classification(List.of(1, 2)));
-        when(personMapper.getByIds(WORKSPACE, List.of(1, 2))).thenReturn(List.of(
+        when(personMapper.getByIds(WORKSPACE, "[7,8,9]", List.of(1, 2))).thenReturn(List.of(
                 person(1, "Ada Lovelace", "a@dest.test"),
                 person(2, "Bo Ng", "b@dest.test")));
         when(connector.pushAudience(any(), any())).thenReturn(
@@ -404,7 +455,7 @@ class AudienceExportServiceTest {
         when(audienceEligibilityService.classify(
                 eq(WORKSPACE), anyList(), eq("email"), eq("product_update")))
                 .thenReturn(classification(List.of(1)));
-        when(personMapper.getByIds(WORKSPACE, List.of(1)))
+        when(personMapper.getByIds(WORKSPACE, "[7,8,9]", List.of(1)))
                 .thenReturn(List.of(person(1, "Ada Lovelace", "private-address@example.test")));
         when(connector.pushAudience(any(), any())).thenReturn(
                 AudiencePushResult.definiteNoSideEffect(
@@ -438,7 +489,7 @@ class AudienceExportServiceTest {
         when(audienceEligibilityService.classify(
                 eq(WORKSPACE), anyList(), eq("email"), eq("product_update")))
                 .thenReturn(classification(List.of(1, 2)));
-        when(personMapper.getByIds(WORKSPACE, List.of(1, 2))).thenReturn(List.of(
+        when(personMapper.getByIds(WORKSPACE, "[7,8,9]", List.of(1, 2))).thenReturn(List.of(
                 person(1, "Ada Lovelace", "a@dest.test"),
                 person(2, "Bo Ng", "b@dest.test")));
         when(connector.pushAudience(any(), any()))
@@ -458,7 +509,7 @@ class AudienceExportServiceTest {
         when(audienceEligibilityService.classify(
                 eq(WORKSPACE), anyList(), eq("email"), eq("product_update")))
                 .thenReturn(classification(List.of(1)));
-        when(personMapper.getByIds(WORKSPACE, List.of(1)))
+        when(personMapper.getByIds(WORKSPACE, "[7,8,9]", List.of(1)))
                 .thenReturn(List.of(person(1, "Ada Lovelace", "private-address@example.test")));
         when(connector.pushAudience(any(), any()))
                 .thenThrow(new RuntimeException("private-address@example.test credential=secret-fragment"));
@@ -494,7 +545,7 @@ class AudienceExportServiceTest {
         when(audienceEligibilityService.classify(
                 eq(WORKSPACE), anyList(), eq("email"), eq("product_update")))
                 .thenReturn(classification(List.of(1, 2)));
-        when(personMapper.getByIds(WORKSPACE, List.of(1, 2))).thenReturn(List.of(
+        when(personMapper.getByIds(WORKSPACE, "[7,8,9]", List.of(1, 2))).thenReturn(List.of(
                 person(1, "Ada Lovelace", "a@dest.test"),
                 person(2, "Bo Ng", "b@dest.test")));
         when(connector.pushAudience(any(), any())).thenReturn(

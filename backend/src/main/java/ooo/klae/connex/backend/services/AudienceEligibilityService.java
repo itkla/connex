@@ -33,6 +33,8 @@ import ooo.klae.connex.backend.mappers.PersonMapper;
 @Service
 @RequiredArgsConstructor
 public class AudienceEligibilityService {
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
 
     /**
      * The consent policy every caller inherits. Fixed for this slice, mirroring the dispatch policy
@@ -84,8 +86,9 @@ public class AudienceEligibilityService {
             return Set.of();
         }
         DeliveryChannel deliveryChannel = DeliveryChannel.fromToken(channel);
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         return suppressedIds(
-                workspaceId, personIds, channel, resolveAddresses(workspaceId, personIds, deliveryChannel));
+                workspaceId, personIds, channel, resolveAddresses(workspaceId, personIds, deliveryChannel, personWorkspaceIdsJson));
     }
 
     private Set<Integer> suppressedIds(
@@ -227,8 +230,10 @@ public class AudienceEligibilityService {
         LinkedHashSet<Integer> remaining = new LinkedHashSet<>(candidateIds);
         Set<Integer> restricted = restrictedIds(workspaceId, new ArrayList<>(remaining));
         remaining.removeAll(restricted);
+        String personWorkspaceIdsJson = remaining.isEmpty() ? null
+            : recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         Map<Integer, String> addresses = resolveAddresses(
-                workspaceId, new ArrayList<>(remaining), deliveryChannel);
+                workspaceId, new ArrayList<>(remaining), deliveryChannel, personWorkspaceIdsJson);
         Set<Integer> noAddress = new LinkedHashSet<>(remaining);
         noAddress.removeAll(addresses.keySet());
         remaining.removeAll(noAddress);
@@ -250,10 +255,10 @@ public class AudienceEligibilityService {
     }
 
     private Map<Integer, String> resolveAddresses(
-            int workspaceId, List<Integer> personIds, DeliveryChannel channel) {
+            int workspaceId, List<Integer> personIds, DeliveryChannel channel, String personWorkspaceIdsJson) {
         Map<Integer, String> addresses = new LinkedHashMap<>();
         forEachBatch(personIds, batch -> {
-            for (Person person : personMapper.getByIds(workspaceId, batch)) {
+            for (Person person : personMapper.getByIds(workspaceId, personWorkspaceIdsJson, batch)) {
                 String address = ChannelAddressNormalizer.addressFor(channel, person);
                 if (address != null) {
                     addresses.put(person.getId(), address);

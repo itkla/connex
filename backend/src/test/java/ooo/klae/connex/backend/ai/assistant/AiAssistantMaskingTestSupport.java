@@ -90,7 +90,7 @@ final class AiAssistantMaskingTestSupport {
         ScopeHarness harness = scopeHarness.orElseThrow();
         reset(harness.people(), harness.activities());
         when(harness.people().getAssistantProcessablePersonIds(workspaceId)).thenReturn(List.of(person.getId()));
-        when(harness.people().getByIds(eq(workspaceId), anyList())).thenReturn(List.of(person));
+        when(harness.people().getByIds(eq(workspaceId), anyString(), anyList())).thenReturn(List.of(person));
         when(harness.activities().countAiAssistantScopeActivities(
                 anyInt(), anyList(), anyString(), anyList(), any(), any(), anyList(), anyBoolean())).thenReturn(1L);
         when(harness.activities().getAiAssistantScopeActivities(

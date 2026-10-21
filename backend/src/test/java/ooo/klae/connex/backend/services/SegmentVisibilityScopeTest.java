@@ -158,7 +158,7 @@ class SegmentVisibilityScopeTest {
         edge.setSourcePersonId(21);
         edge.setTargetPersonId(22);
         edge.setStrength(2);
-        when(people.getEngagedPersonIds(7)).thenReturn(List.of(21));
+        when(people.getEngagedPersonIds(7, "[7,8,9]")).thenReturn(List.of(21));
         when(edges.getAllEdges(7)).thenReturn(List.of(edge));
         when(segments.companyIdsForPersonsWithoutUserActivity(7, "[7,8,9]", 17, List.of(22), null))
             .thenReturn(List.of(31));
@@ -170,7 +170,7 @@ class SegmentVisibilityScopeTest {
         var order = inOrder(scopes, people, edges, segments);
         order.verify(scopes).getForWorkspace(7);
         order.verify(segments).companyIdsNoActivitySince(7, "[7,8,9]", 30, null);
-        order.verify(people).getEngagedPersonIds(7);
+        order.verify(people).getEngagedPersonIds(7, "[7,8,9]");
         order.verify(edges).getAllEdges(7);
         order.verify(segments).companyIdsForPersonsWithoutUserActivity(7, "[7,8,9]", 17, List.of(22), null);
         verify(scopes).withDeferredWorkspaceScopeRead(eq(7), any());

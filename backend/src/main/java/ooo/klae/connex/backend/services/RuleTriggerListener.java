@@ -9,6 +9,7 @@ import org.springframework.transaction.event.TransactionalEventListener;
 
 import lombok.RequiredArgsConstructor;
 
+import ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /**
@@ -41,6 +42,8 @@ public class RuleTriggerListener {
                     event.event(),
                     event.triggerKey(),
                     event.occurredAt())));
+        } catch (TenantScopeSnapshotException refusal) {
+            throw refusal;
         } catch (RuntimeException failure) {
             log.warn(
                 "Legacy workflow trigger failed recordType={} recordId={} event={} "

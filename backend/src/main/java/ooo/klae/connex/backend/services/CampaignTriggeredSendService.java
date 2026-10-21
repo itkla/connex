@@ -42,6 +42,8 @@ import ooo.klae.connex.backend.tenant.TenantContext;
 @Service
 @RequiredArgsConstructor
 public class CampaignTriggeredSendService {
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
 
     private static final String PURPOSE = "marketing";
     private static final String ROLLBACK_SNAPSHOT_LABEL = "Triggered (system)";
@@ -82,8 +84,9 @@ public class CampaignTriggeredSendService {
         CampaignSend discovered = campaignSendMapper.getTriggeredSend(
                 workspaceId, request.messageId(), request.messageVersion());
         int actorId = workspaceService.getCurrentUserId();
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         Set<Permission> permissions = workspaceService.lockedPermissionsFor(workspaceId, actorId);
-        return enrollLocked(workspaceId, actorId, permissions, request, discovered);
+        return enrollLocked(workspaceId, actorId, permissions, request, discovered, personWorkspaceIdsJson);
     }
 
     /**
@@ -181,9 +184,10 @@ public class CampaignTriggeredSendService {
             Set<Permission> lockedPermissions) {
         Request request = requireRequest(personId, messageIdValue, messageVersionValue);
         int workspaceId = requireResolvedWorkspaceId();
+        String personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         CampaignSend discovered = campaignSendMapper.getTriggeredSend(
                 workspaceId, request.messageId(), request.messageVersion());
-        return enrollLocked(workspaceId, actorId, lockedPermissions, request, discovered);
+        return enrollLocked(workspaceId, actorId, lockedPermissions, request, discovered, personWorkspaceIdsJson);
     }
 
     private EnrollmentResult enrollLocked(
@@ -191,7 +195,7 @@ public class CampaignTriggeredSendService {
             int actorId,
             Set<Permission> permissions,
             Request request,
-            CampaignSend discoveredSend) {
+            CampaignSend discoveredSend, String personWorkspaceIdsJson) {
         if (!triggeredSendGate.enabled()) {
             throw new ForbiddenException("Triggered campaign delivery is not enabled on this instance");
         }
@@ -231,7 +235,7 @@ public class CampaignTriggeredSendService {
             auditExclusion(campaign, request, exclusionReason);
             return EnrollmentResult.excluded(exclusionReason);
         }
-        Person person = personMapper.getPersonById(workspaceId, request.personId());
+        Person person = personMapper.getPersonById(workspaceId, personWorkspaceIdsJson, request.personId());
         if (person == null) {
             throw new ResourceNotFoundException(
                     "Contact not found with id: " + request.personId());

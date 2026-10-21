@@ -82,9 +82,9 @@ class GuidedRecordCreationServiceTest {
             field("company", null, false, node(44)),
             field("custom:9", 9, true, node("default")),
             field("tags", null, true, array(6, 4)));
-        when(augmentationService.resolvePreliminary(RecordCreationRecordType.person, use))
+        when(augmentationService.resolvePreliminary(RecordCreationRecordType.person, use, SCOPE))
             .thenReturn(resolved);
-        when(personService.createReviewed(any(), eq("proof"), any(), eq(MutationAdmission.UNRESTRICTED)))
+        when(personService.createReviewed(any(), eq("proof"), any(), eq(MutationAdmission.UNRESTRICTED), org.mockito.ArgumentMatchers.any(ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope.class)))
             .thenAnswer(invocation -> invocation.getArgument(0));
         GuidedPersonCreateRequestDto request = new GuidedPersonCreateRequestDto(
             new GuidedPersonRecordDto(
@@ -99,14 +99,14 @@ class GuidedRecordCreationServiceTest {
         ArgumentCaptor<RecordCreationAugmentation> augmentation =
             ArgumentCaptor.forClass(RecordCreationAugmentation.class);
         verify(personService).createReviewed(
-            any(), eq("proof"), augmentation.capture(), eq(MutationAdmission.UNRESTRICTED));
+            any(), eq("proof"), augmentation.capture(), eq(MutationAdmission.UNRESTRICTED), eq(SCOPE));
         assertEquals("default", augmentation.getValue().customFields().get(9).textValue());
         assertEquals(List.of(6, 4), augmentation.getValue().tagIds());
         var order = org.mockito.Mockito.inOrder(scopes, workspaceService, augmentationService);
         order.verify(scopes).getForWorkspace(7);
         order.verify(workspaceService).lockAndRequirePermissions(
             7, Map.of(11, Set.of(Permission.PERSON_CREATE)));
-        order.verify(augmentationService).resolvePreliminary(RecordCreationRecordType.person, use);
+        order.verify(augmentationService).resolvePreliminary(RecordCreationRecordType.person, use, SCOPE);
         verify(scopes, org.mockito.Mockito.times(1)).getForWorkspace(7);
     }
 
@@ -149,7 +149,7 @@ class GuidedRecordCreationServiceTest {
     @Test
     void missingTemplateRequiredValueStopsBeforeCanonicalCreation() {
         RecordCreationTemplateUseDto use = use(RecordCreationRecordType.person);
-        when(augmentationService.resolvePreliminary(RecordCreationRecordType.person, use))
+        when(augmentationService.resolvePreliminary(RecordCreationRecordType.person, use, SCOPE))
             .thenReturn(resolved(
                 RecordCreationRecordType.person,
                 field("name", null, true, null),
@@ -163,7 +163,7 @@ class GuidedRecordCreationServiceTest {
             () -> service.createPerson(request));
 
         assertEquals("TEMPLATE_FIELD_NOT_SUBMITTED", exception.error().code());
-        verify(personService, never()).createReviewed(any(), any(), any(), any());
+        verify(personService, never()).createReviewed(any(), any(), any(), any(), any());
     }
 
     @Test

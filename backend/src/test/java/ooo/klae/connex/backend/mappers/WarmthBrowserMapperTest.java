@@ -57,7 +57,7 @@ class WarmthBrowserMapperTest extends AbstractMapperTest {
         Person none = newPersonIn(ws);
 
         Map<String, Long> facets = facetCounts(
-            personMapper.countsByWarmthBand(ws.getId(), scoringFilter(reference)));
+            personMapper.countsByWarmthBand(ws.getId(), orgWorkspaceIdsJson(workspaceMapper, ws.getId()), scoringFilter(reference)));
 
         assertEquals(Map.of("hot", 1L, "warm", 1L, "cool", 1L, "cold", 1L, "__none__", 1L), facets);
         assertEquals(List.of(hot.getId()), contactIdsInBands(ws, reference, List.of("hot"), false));
@@ -77,14 +77,14 @@ class WarmthBrowserMapperTest extends AbstractMapperTest {
         contactWithTouch(ws, "other", reference, 200);
         newPersonIn(ws);
 
-        for (FacetCount facet : personMapper.countsByWarmthBand(ws.getId(), scoringFilter(reference))) {
+        for (FacetCount facet : personMapper.countsByWarmthBand(ws.getId(), orgWorkspaceIdsJson(workspaceMapper, ws.getId()), scoringFilter(reference))) {
             boolean noWarmth = WarmthFilter.NO_WARMTH_KEY.equals(facet.getKey());
             List<Integer> matching = contactIdsInBands(
                 ws, reference, noWarmth ? List.of() : List.of(facet.getKey()), noWarmth);
             assertEquals(facet.getCount(), matching.size(), "facet " + facet.getKey());
             assertEquals(
                 facet.getCount(),
-                personMapper.countPersons(ws.getId(), null, null, null, false, MemberScope.allTeam(),
+                personMapper.countPersons(ws.getId(), orgWorkspaceIdsJson(workspaceMapper, ws.getId()), null, null, null, false, MemberScope.allTeam(),
                     null, false, null, false, null, false, false,
                     filter(reference, noWarmth ? List.of() : List.of(facet.getKey()), noWarmth, null)),
                 "count for facet " + facet.getKey());
@@ -188,7 +188,7 @@ class WarmthBrowserMapperTest extends AbstractMapperTest {
             List.of(foreignHot.getId()), contactIdsInBands(other, reference, List.of("hot"), false));
         assertEquals(
             Map.of("hot", 1L),
-            facetCounts(personMapper.countsByWarmthBand(mine.getId(), scoringFilter(reference))));
+            facetCounts(personMapper.countsByWarmthBand(mine.getId(), orgWorkspaceIdsJson(workspaceMapper, mine.getId()), scoringFilter(reference))));
         assertFalse(sortedContactIds(mine, reference, "desc").contains(foreignHot.getId()));
     }
 
@@ -371,11 +371,11 @@ class WarmthBrowserMapperTest extends AbstractMapperTest {
         WarmthFilter warmth = filter(reference, List.of("hot"), false, null);
 
         List<Integer> exported = personMapper.getPersonsFiltered(
-                ws.getId(), null, null, null, false, MemberScope.allTeam(), null, false, null, false,
+                ws.getId(), orgWorkspaceIdsJson(workspaceMapper, ws.getId()), null, null, null, false, MemberScope.allTeam(), null, false, null, false,
                 null, false, false, warmth)
             .stream().map(Person::getId).toList();
         List<Integer> selected = personMapper.getPersonIdsFiltered(
-            ws.getId(), null, null, null, false, MemberScope.allTeam(), null, false, null, false,
+            ws.getId(), orgWorkspaceIdsJson(workspaceMapper, ws.getId()), null, null, null, false, MemberScope.allTeam(), null, false, null, false,
             null, false, false, warmth, 100);
 
         assertEquals(List.of(hot.getId()), exported);
@@ -449,14 +449,14 @@ class WarmthBrowserMapperTest extends AbstractMapperTest {
         WarmthFilter warmth = filter(reference, List.of(), false, 30);
 
         List<Integer> exported = personMapper.getPersonsFiltered(
-                ws.getId(), null, null, null, false, MemberScope.allTeam(), null, false, null, false,
+                ws.getId(), orgWorkspaceIdsJson(workspaceMapper, ws.getId()), null, null, null, false, MemberScope.allTeam(), null, false, null, false,
                 null, false, false, warmth)
             .stream().map(Person::getId).toList();
         List<Integer> selected = personMapper.getPersonIdsFiltered(
-            ws.getId(), null, null, null, false, MemberScope.allTeam(), null, false, null, false,
+            ws.getId(), orgWorkspaceIdsJson(workspaceMapper, ws.getId()), null, null, null, false, MemberScope.allTeam(), null, false, null, false,
             null, false, false, warmth, 100);
         long counted = personMapper.countPersons(
-            ws.getId(), null, null, null, false, MemberScope.allTeam(), null, false, null, false,
+            ws.getId(), orgWorkspaceIdsJson(workspaceMapper, ws.getId()), null, null, null, false, MemberScope.allTeam(), null, false, null, false,
             null, false, false, warmth);
 
         assertEquals(List.of(cool.getId()), exported);
@@ -497,13 +497,13 @@ class WarmthBrowserMapperTest extends AbstractMapperTest {
     private List<Integer> contactIdsInBands(
             Workspace ws, Instant reference, List<String> bands, boolean noWarmth) {
         return personMapper.getPersonIdsFiltered(
-            ws.getId(), null, null, null, false, MemberScope.allTeam(), null, false, null, false,
+            ws.getId(), orgWorkspaceIdsJson(workspaceMapper, ws.getId()), null, null, null, false, MemberScope.allTeam(), null, false, null, false,
             null, false, false, filter(reference, bands, noWarmth, null), 100);
     }
 
     private List<Integer> horizonContactIds(Workspace ws, Instant reference, int days) {
         return personMapper.getPersonIdsFiltered(
-            ws.getId(), null, null, null, false, MemberScope.allTeam(), null, false, null, false,
+            ws.getId(), orgWorkspaceIdsJson(workspaceMapper, ws.getId()), null, null, null, false, MemberScope.allTeam(), null, false, null, false,
             null, false, false, filter(reference, List.of(), false, days), 100);
     }
 
@@ -516,7 +516,7 @@ class WarmthBrowserMapperTest extends AbstractMapperTest {
 
     private List<Integer> sortedContactIds(Workspace ws, Instant reference, String dir) {
         return personMapper.getPersonsPage(
-                ws.getId(), null, "warmth", dir, null, null, false, MemberScope.allTeam(), null,
+                ws.getId(), orgWorkspaceIdsJson(workspaceMapper, ws.getId()), null, "warmth", dir, null, null, false, MemberScope.allTeam(), null,
                 false, null, false, null, false, false, scoringFilter(reference), 100, 0)
             .stream().map(Person::getId).toList();
     }

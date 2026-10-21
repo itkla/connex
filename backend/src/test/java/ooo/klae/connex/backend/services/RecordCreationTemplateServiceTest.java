@@ -551,7 +551,7 @@ class RecordCreationTemplateServiceTest {
         order.verify(pipelineMapper).getVisibleStageByIdForUpdate(7, "[7,8,9]", 6);
         order.verify(pipelineMapper).getVisiblePipelineByIdForUpdate(7, "[7,8,9]", 7);
         order.verify(shareMapper).lockPipelineShareForWorkspace(7, 7);
-        order.verify(personMapper).getVisiblePersonByIdForUpdate(7, 2);
+        order.verify(personMapper).getVisiblePersonByIdForUpdate(7, "[7,8,9]", 2);
         order.verify(shareMapper).lockPersonShareForWorkspace(2, 7);
         order.verify(companyMapper).getVisibleCompanyByIdForUpdate(7, "[7,8,9]", 5);
         order.verify(shareMapper).lockCompanyShareForWorkspace(5, 7);

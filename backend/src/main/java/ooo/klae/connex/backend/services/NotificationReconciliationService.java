@@ -118,7 +118,6 @@ public class NotificationReconciliationService {
      */
     public void reconcileWorkspace(int workspaceId, boolean includeRelationshipNudges) {
         RecordVisibilityScope recordVisibilityScope = includeRelationshipNudges
-                && (properties.isIntroOpportunitiesEnabled() || properties.isDealRiskEnabled())
             ? preloadRecordVisibilityScope(workspaceId)
             : null;
         TransactionTemplate transaction = new TransactionTemplate(transactionManager);
@@ -159,7 +158,7 @@ public class NotificationReconciliationService {
                 workspaceId, existing, staged, preferences, triggeredAt, evaluationInstant));
 
         RelationshipSourceSnapshot relationshipSources =
-            includeRelationshipNudges
+            includeRelationshipNudges && recordVisibilityScope != null
                 ? relationshipSourceSnapshot(workspaceId, evaluationInstant)
                 : null;
         Map<Integer, RelationshipTemperatureDto> temperatures =

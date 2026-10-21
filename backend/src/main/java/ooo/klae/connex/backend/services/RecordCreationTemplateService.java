@@ -797,7 +797,7 @@ public class RecordCreationTemplateService {
         dependencies.pipelines().stream().sorted()
             .forEach(id -> shareMapper.lockPipelineShareForWorkspace(id, workspaceId));
         dependencies.persons().stream().sorted()
-            .forEach(id -> personMapper.getVisiblePersonByIdForUpdate(workspaceId, id));
+            .forEach(id -> personMapper.getVisiblePersonByIdForUpdate(workspaceId, orgWorkspaceIdsJson, id));
         dependencies.persons().stream().sorted()
             .forEach(id -> shareMapper.lockPersonShareForWorkspace(id, workspaceId));
         dependencies.companies().stream().sorted()

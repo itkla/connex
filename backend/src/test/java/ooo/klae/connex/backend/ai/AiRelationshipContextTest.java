@@ -60,6 +60,25 @@ class AiRelationshipContextTest {
                 Clock.fixed(Instant.parse("2026-07-11T00:00:00Z"), ZoneOffset.UTC));
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+        "employment,snapshot", "employment,missing", "connections,snapshot", "connections,missing"
+    })
+    void stakeholderBackgroundNeverDegradesSnapshotRefusals(String source, String kind) {
+        var refusal = kind.equals("missing")
+                ? new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotMissingException("missing payload")
+                : new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException("scope mismatch");
+        if (source.equals("employment")) {
+            when(personService.getEmploymentHistory(PERSON_ID)).thenThrow(refusal);
+        } else {
+            when(connectionService.getTopConnections(PERSON_ID, AiRelationshipContext.MAX_CONNECTIONS)).thenThrow(refusal);
+        }
+
+        assertSame(refusal, assertThrows(ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException.class,
+                () -> context.appendStakeholderBackground(new StringBuilder(), PERSON_ID,
+                        "person-token", new MaskingContext())));
+    }
+
     @Test
     void appendAccountHistory_masksReasonsExcludesCurrentDealAndTagsOutcomes() {
         when(dealService.getAccountHistoryDeals(

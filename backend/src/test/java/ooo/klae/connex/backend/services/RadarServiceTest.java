@@ -85,18 +85,18 @@ class RadarServiceTest {
         when(userMapper.lockByIdForShare(USER_ID)).thenReturn(USER_ID);
         when(userMapper.isAccountDeletionReserved(USER_ID)).thenReturn(false);
         memberLock();
-        when(personMapper.getProcessablePersonIds(eq(WORKSPACE_ID), anyList()))
+        when(personMapper.getProcessablePersonIds(eq(WORKSPACE_ID), org.mockito.ArgumentMatchers.anyString(), anyList()))
             .thenAnswer(invocation -> {
-                List<Integer> requested = invocation.getArgument(1);
+                List<Integer> requested = invocation.getArgument(2);
                 return requested.stream()
-                    .filter(id -> personMapper.getPersonById(WORKSPACE_ID, id) != null)
+                    .filter(id -> personMapper.getPersonById(WORKSPACE_ID, "[7,8,9]", id) != null)
                     .toList();
             });
-        when(personMapper.getByIds(eq(WORKSPACE_ID), anyList()))
+        when(personMapper.getByIds(eq(WORKSPACE_ID), org.mockito.ArgumentMatchers.anyString(), anyList()))
             .thenAnswer(invocation -> {
-                List<Integer> requested = invocation.getArgument(1);
+                List<Integer> requested = invocation.getArgument(2);
                 return requested.stream()
-                    .map(id -> personMapper.getPersonById(WORKSPACE_ID, id))
+                    .map(id -> personMapper.getPersonById(WORKSPACE_ID, "[7,8,9]", id))
                     .filter(Objects::nonNull)
                     .toList();
             });
@@ -506,7 +506,7 @@ class RadarServiceTest {
         RelationshipSignal signal = signal("relationship_decay", evidenceForSubject());
         currentPerson(signal.getSubjectId(), "Suspended");
         doAnswer(invocation -> List.<Integer>of()).when(personMapper)
-            .getProcessablePersonIds(WORKSPACE_ID, List.of(signal.getSubjectId()));
+            .getProcessablePersonIds(WORKSPACE_ID, "[7,8,9]", List.of(signal.getSubjectId()));
         when(signalMapper.findActiveForActor(WORKSPACE_ID, USER_ID)).thenReturn(List.of(signal));
         when(signalMapper.getActiveForActorForUpdate(
             WORKSPACE_ID, signal.getId(), USER_ID)).thenReturn(signal);
@@ -704,7 +704,7 @@ class RadarServiceTest {
         Person person = new Person();
         person.setId(id);
         person.setName(name);
-        when(personMapper.getPersonById(WORKSPACE_ID, id)).thenReturn(person);
+        when(personMapper.getPersonById(WORKSPACE_ID, "[7,8,9]", id)).thenReturn(person);
     }
 
     private void currentDeal(int id, String name) {

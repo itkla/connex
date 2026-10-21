@@ -53,9 +53,9 @@ public class GuidedRecordCreationService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_CREATE)
     public Person createPerson(GuidedPersonCreateRequestDto request, MutationAdmission admission) {
-        lockPermission(Permission.PERSON_CREATE);
+        RecordVisibilityScope scope = lockPermission(Permission.PERSON_CREATE);
         ResolvedCreationTemplateDto resolved = augmentationService.resolvePreliminary(
-            RecordCreationRecordType.person, request.templateUse());
+            RecordCreationRecordType.person, request.templateUse(), scope);
         Map<Integer, JsonNode> customFields = submittedCustomFields(request.customFields());
         List<Integer> tagIds = submittedTagIds(request.tagIds());
         var record = request.record();
@@ -65,11 +65,11 @@ public class GuidedRecordCreationService {
         validateRequiredPerson(person, customFields, tagIds, resolved);
         augmentationService.validatePersonReferences(
             person.getCompany() == null ? null : person.getCompany().getId(),
-            person.getReferrerPersonId());
+            person.getReferrerPersonId(), scope);
         return personService.createReviewed(
             person,
             duplicateReviewToken,
-            augmentation(request.templateUse(), customFields, tagIds), admission);
+            augmentation(request.templateUse(), customFields, tagIds), admission, scope);
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
