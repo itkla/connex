@@ -71,6 +71,71 @@ callers may retry with a fresh request and transaction within this tracking boun
 in-request retries. Unclassified transaction failures, including a cause-less
 `UnexpectedRollbackException`, retain their existing HTTP 500 response.
 
+## Notification membership authority (#485 L9a)
+
+`NotificationControlAccess` and `NotificationControlMapper` are prerequisite contracts for L9b.
+They have no production call sites until the whole-mapper conversion: existing
+`NotificationMapper` SQL, membership lock calls, transaction isolation and notification behavior
+remain authoritative. Catalog-per-placement calls refuse with 503 until the cross-catalog inbox
+contract (#2200) exists; a shared placement with no catalog name is still routed mode.
+
+The read-only entry uses a dedicated `NotificationRecipientRead`, never a mutation `Supplier`.
+It joins or opens one read-only REPEATABLE READ transaction and performs at most two control queries on that same
+connection through `unroutedRead`: the recipient's complete memberships and a batched unfiltered
+organization-workspace inventory. The tenant callback runs after the control override is restored,
+in the same transaction. No suspension, new connection or independent read view is introduced.
+Explicit READ COMMITTED entry refuses before control SQL: a frozen membership snapshot cannot
+preserve that isolation's later activation/departure observations. An inherited default isolation
+retains the repository's MySQL REPEATABLE READ default; a deployment changing that default must
+make its read entry explicitly REPEATABLE READ before consuming this contract.
+Snapshot statuses, membership generations, source-workspace names and explicit-filter lifecycle
+facts are immutable for that operation. Each notification source keeps its own unfiltered
+`RecordVisibilityScope`; a union of the recipient's organizations is not a valid share ceiling.
+Assistant privacy authority remains a separate fresh read per statement.
+
+Mutation authority is a current, cache-bypassing locking read on the transaction-bound connection,
+routed by the existing physical-control namespace registry. Exact membership reads constrain both
+workspace and user; the shared fence does not scan the user's other workspaces. The exclusive
+variant does not replace or move `NotificationMapper.lockRecipientMemberships`. Actor existence
+uses `FOR SHARE` through commit; a deleted actor still becomes null. These methods require a
+writable transaction and never invoke `unrouted`, suspend, or start an independent transaction.
+
+L9b callers must preserve these per-path prefixes:
+
+- Inbox reads retain one read transaction for membership, source ceilings, page/count/facets and
+  version composition. Its plain-read entry rejects writable transactions.
+- Ordinary read-all retains its ordered global recipient-membership locks before current status
+  projection and the cutoff/update/count statements. Offer notices retain their separate complete
+  account/workspace/membership/organization/offer transactions; discovery cannot authorize them.
+- Approval restore and ownership-notice mutations retain their existing account, workspace,
+  membership and approval/offer roots before the notification lock. Exact current status and
+  generation decide after a wait; pre-lock membership snapshots do not authorize the mutation.
+- Reconciliation retains workspace S → organization S / duplicate-decision mutex → exact workspace
+  membership fences → first consistent read → tenant notification writes → recipient-state rows.
+  Audience discovery stays in reconciliation, never in an earlier scheduler transaction. The exact
+  fences need deterministic key ordering and a dedicated concurrency review when L9b installs them.
+  Do not expand them into global recipient scans: O S → foreign M can close the documented cycle
+  with a membership-first writer's late audit O S behind queued O X. Conversely, moving departure M
+  before its organization S closes the other documented M → O cycle. This contract moves neither.
+  Exact selection does not remove the residual same-workspace #1582 cycle: reconciliation can
+  hold O S and wait for M held by a membership-first writer, whose late O S queues behind O X
+  already waiting on reconciliation. L9a installs no fence in production and does not claim this
+  availability hazard is solved. L9b must characterize that queued-writer case and retain rollback
+  and fresh-transaction recovery; it must not treat exact workspace keys as a deadlock proof.
+
+In REPEATABLE READ mutation transactions, no plain control read may precede the first required
+locking read (#2176). These locking primitives establish no consistent-read view; later metadata
+reads must retain each caller's original first-consistent-read position. In particular, do not
+load reconciliation's recipient inventory before its organization mutex. A membership removed
+before the current lock produces no authority; pending-to-active returns the locked current status;
+departure/rejoin is distinguished by `membership_id`. Recompute stale preliminary eligibility from
+current authority rather than intersecting old statuses or accepting an old generation.
+
+The concurrency characterization tests retain legacy SQL and explicitly clear the MyBatis local
+cache between observations, so REPEATABLE READ versus READ COMMITTED behavior is measured at the
+database read-view boundary rather than hidden by a cached mapper answer. They are CI DB tests;
+unit tests prove the callback/connection and read-versus-lock contracts without a database.
+
 ## Workflow lifecycle and account offboarding
 
 Workflow lifecycle writes and permanent account offboarding share a hierarchy:
