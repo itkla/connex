@@ -147,17 +147,20 @@ class PersonOperationScopeTest {
     }
 
     @Test
-    void independentlyHandledRulesRetainOneFailedScopeLookupBeforeAnyClaim() {
+    void rulesRefuseOneFailedScopeLookupBeforeAnyClaim() {
         var rules = mock(ooo.klae.connex.backend.mappers.RuleMapper.class);
         var claims = mock(WorkflowRuntimeClaimService.class);
         var scope = org.mockito.Mockito.spy(fixture.scopes);
         var engine = ruleEngine(rules, claims, scope);
         when(rules.getEnabledByTrigger(7, "entity_change")).thenReturn(List.of(rule(1), rule(2)));
-        when(fixture.control.findOrganizationWorkspacesForShare(7)).thenThrow(new IllegalStateException("Control unavailable"));
+        var failure = new IllegalStateException("Control unavailable");
+        when(fixture.control.findOrganizationWorkspacesForShare(7)).thenThrow(failure);
 
-        engine.onEntityChange(7, "person", 41, "person.updated");
+        org.junit.jupiter.api.Assertions.assertSame(failure,
+            org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
+                () -> engine.onEntityChange(7, "person", 41, "person.updated")));
 
-        verify(scope, times(2)).getForWorkspace(7);
+        verify(scope, times(1)).getForWorkspace(7);
         verify(fixture.control, times(1)).findOrganizationWorkspacesForShare(7);
         verifyNoInteractions(claims, personMapper);
     }

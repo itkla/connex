@@ -262,6 +262,8 @@ public class AiRelationshipContext {
                 }
             }
             return FetchResult.available(lines);
+        } catch (TenantScopeSnapshotException exception) {
+            throw exception;
         } catch (RuntimeException exception) {
             return FetchResult.failure();
         }
@@ -300,6 +302,8 @@ public class AiRelationshipContext {
                 }
             }
             return FetchResult.available(lines);
+        } catch (TenantScopeSnapshotException exception) {
+            throw exception;
         } catch (RuntimeException exception) {
             return FetchResult.failure();
         }

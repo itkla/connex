@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -4507,6 +4508,64 @@ class AiChatAgentLoopServiceTest {
      * Releasing the lease here instead would leave the turn running and unleased, which is the
      * window the lease exists to close.
      */
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({
+        "prepare,snapshot", "prepare,missing", "read,snapshot", "read,missing",
+        "native,snapshot", "native,missing", "batch,snapshot", "batch,missing",
+        "write,snapshot", "write,missing"
+    })
+    void snapshotRefusalsEscapePreparationReadsAndWritesWithLeaseCleanup(String path, String kind) throws Exception {
+        var refusal = kind.equals("missing")
+                ? new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotMissingException("missing payload")
+                : new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException("scope mismatch");
+        if (path.equals("prepare")) {
+            when(memoryService.prepare(eq(TURN), any(), any(Instant.class), any())).thenThrow(refusal);
+        } else if (path.equals("write")) {
+            JsonNode args = objectMapper.readTree("{\"handle\":\"r1\",\"content\":\"Follow up\"}");
+            var write = new AiAssistantPreparedWrite("create_note", AiAssistantToolCatalog.ToolTier.AUTO,
+                    "person", 41, "{\"resolved\":true}");
+            when(invocationService.completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantStep.class),
+                    any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class)))
+                    .thenReturn(parsed(loadStep("write_content")), parsed(new AiAssistantStep(
+                            new AiAssistantStep.Tool("create_note", args), null)));
+            when(writeToolService.prepare(eq("create_note"), eq(args), any(), eq(TURN.restrictionEpoch())))
+                    .thenReturn(write);
+            when(persistenceService.proposeWriteTool(TURN, 2, write))
+                    .thenReturn(new AiAssistantToolProposal(29, "proposed", null, true));
+            when(writeToolService.executeAuto(eq(TURN), eq(29), any())).thenThrow(refusal);
+        } else {
+            when(toolExecutor.execute(any(), any(), any(), eq(true), any())).thenThrow(refusal);
+            String args = "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}";
+            if (path.equals("read")) {
+                when(invocationService.completeStructuredRepairable(any(AiInvocation.class), eq(AiAssistantStep.class),
+                        any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class)))
+                        .thenReturn(parsed(new AiAssistantStep(new AiAssistantStep.Tool(
+                                "search_records", objectMapper.readTree(args)), null)));
+            } else {
+                useNativeMemory(new AiAssistantPromptBudget(64, 64_000, 16_000, 16_000, 16_000, 112_000), 2);
+                var calls = path.equals("batch")
+                        ? List.of(new AiToolCall("call_1", "search_records", args),
+                                new AiToolCall("call_2", "search_records", args.replace("pipeline", "people")))
+                        : List.of(new AiToolCall("call_1", "search_records", args));
+                when(invocationService.completeNativeToolsRepairable(any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                        any(AiRawOutputGuard.class), any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                        any(AiNativeToolRequest.class), eq(directAdmission), any(Runnable.class)))
+                        .thenReturn(nativeToolBatch(calls, 0));
+            }
+        }
+
+        assertSame(refusal, assertThrows(ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException.class,
+                () -> service.run(TURN)));
+
+        assertEquals(1, heartbeatStops.get());
+        verify(runLeaseService).forgetLocalToken(LEASE);
+        verify(runLeaseService, never()).releaseHeldInCurrentTransaction(any());
+        verify(persistenceService, never()).resolve(eq(TURN), any(), any(), anyInt(), anyInt());
+        if (!path.equals("prepare")) {
+            verify(persistenceService).failTool(eq(TURN), eq(29), anyString());
+        }
+    }
+
     @Test
     void aTurnThatEndsExceptionallyDropsItsTokenWithoutReleasingItsLease() {
         when(memoryService.prepare(eq(TURN), any(), any(Instant.class), any()))

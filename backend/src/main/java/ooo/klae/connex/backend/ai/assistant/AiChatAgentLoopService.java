@@ -19,6 +19,7 @@ import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException;
 import ooo.klae.connex.backend.ai.mission.AiAgentExecutionPolicy;
 import lombok.extern.slf4j.Slf4j;
 import ooo.klae.connex.backend.ai.AiFeature;
@@ -797,6 +798,8 @@ public class AiChatAgentLoopService {
                 return AiGenerationTaskResult.failed("restrictions_changed");
             }
             return AiGenerationTaskResult.failed("access_revoked");
+        } catch (TenantScopeSnapshotException exception) {
+            throw exception;
         } catch (RuntimeException exception) {
             if (restrictionsChanged(turn)) {
                 return AiGenerationTaskResult.failed("restrictions_changed");
@@ -1333,6 +1336,9 @@ public class AiChatAgentLoopService {
                         turn.workspaceId(), turn.sessionId(), turn.turnId(),
                         stepNumber, "step", toolName,
                         "failed", reason, toolCallId));
+                if (exception instanceof TenantScopeSnapshotException refusal) {
+                    throw refusal;
+                }
                 return new StepCallOutcome.Fail(reason);
             }
             return CONTINUE;
@@ -1449,6 +1455,9 @@ public class AiChatAgentLoopService {
                     turn.workspaceId(), turn.sessionId(), turn.turnId(),
                     stepNumber, "step", toolName,
                     "failed", reason));
+            if (exception instanceof TenantScopeSnapshotException refusal) {
+                throw refusal;
+            }
             return new StepCallOutcome.Fail(reason);
         }
         return CONTINUE;

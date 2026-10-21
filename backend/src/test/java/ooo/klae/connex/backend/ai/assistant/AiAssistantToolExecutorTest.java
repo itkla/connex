@@ -565,6 +565,51 @@ class AiAssistantToolExecutorTest {
         verifyNoInteractions(companyMapper, companyService);
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void dealOnlyPageContextSkipsVisibilityScopeUntilACompanyExists(boolean dealExists) {
+        try (var fixture = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(7)) {
+            org.springframework.test.util.ReflectionTestUtils.setField(
+                    executor, "recordVisibilityScopeControlAccess", fixture.scopes);
+            org.mockito.Mockito.doThrow(new org.springframework.dao.DataAccessResourceFailureException("control unavailable"))
+                    .when(fixture.control).findOrganizationWorkspacesForShare(7);
+            Deal deal = new Deal();
+            deal.setId(41);
+            deal.setName("Unlinked deal");
+            when(dealMapper.getByIds(7, List.of(41))).thenReturn(dealExists ? List.of(deal) : List.of());
+
+            var result = executor.pageContext(
+                    List.of(new AiChatPageContextDto("deal", 41)), new AiChatResourceRegistry());
+
+            assertEquals(dealExists ? 1 : 0, ((List<?>) result.data().get("records")).size());
+            verify(dealMapper).getByIds(7, List.of(41));
+            verifyNoInteractions(fixture.control, personMapper, companyMapper);
+        }
+    }
+
+    @Test
+    void dealOnlyPageContextResolvesOneScopeAfterDiscoveringCompanyLinks() {
+        try (var fixture = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(7)) {
+            org.springframework.test.util.ReflectionTestUtils.setField(
+                    executor, "recordVisibilityScopeControlAccess", fixture.scopes);
+            Deal deal = new Deal();
+            deal.setId(41);
+            deal.setName("Linked deal");
+            deal.setCompanyId(55);
+            when(dealMapper.getByIds(7, List.of(41))).thenReturn(List.of(deal));
+
+            var result = executor.pageContext(
+                    List.of(new AiChatPageContextDto("deal", 41)), new AiChatResourceRegistry());
+
+            assertEquals(1, ((List<?>) result.data().get("records")).size());
+            var order = org.mockito.Mockito.inOrder(dealMapper, fixture.control, companyMapper);
+            order.verify(dealMapper).getByIds(7, List.of(41));
+            order.verify(fixture.control).findOrganizationWorkspacesForShare(7);
+            order.verify(companyMapper).getByIds(7, "[7,17]", List.of(55));
+            verify(fixture.control).findOrganizationWorkspacesForShare(7);
+        }
+    }
+
     @Test
     void replayContextUsesOneBoundedBatchInsteadOfHydratingEachPerson() {
         List<Integer> ids = IntStream.rangeClosed(1, 50).boxed().toList();

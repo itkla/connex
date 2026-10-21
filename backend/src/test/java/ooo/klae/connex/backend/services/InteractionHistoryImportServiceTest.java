@@ -213,6 +213,55 @@ class InteractionHistoryImportServiceTest {
     }
 
     @Test
+    void historyScoringAndCounterfactualExecuteWithOneUnderlyingScopeRead() {
+        try (var fixture = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(WORKSPACE_ID)) {
+            Clock clock = Clock.fixed(EVALUATION_INSTANT, ZoneOffset.UTC);
+            ScoringService scoring = new ScoringService(personMapper,
+                    mock(ooo.klae.connex.backend.mappers.CompanyMapper.class),
+                    mock(ooo.klae.connex.backend.mappers.DealMapper.class),
+                    activityMapper, noteMapper, taskMapper, clock, fixture.scopes);
+            var notifications = org.mockito.Mockito.spy(new NotificationReconciliationService(
+                    mock(ooo.klae.connex.backend.mappers.NotificationMapper.class),
+                    duplicateDecisionLockService,
+                    mock(ooo.klae.connex.backend.mappers.PreferenceMapper.class),
+                    mock(ooo.klae.connex.backend.notifications.NotificationDelivery.class),
+                    mock(ooo.klae.connex.backend.notifications.NotificationStateVersionService.class),
+                    new ooo.klae.connex.backend.notifications.NotificationProperties(),
+                    scoring, mock(IntroductionService.class), mock(DealRiskService.class), clock,
+                    new tools.jackson.databind.ObjectMapper(), fixture.scopes, fixture.transactions));
+            service = new InteractionHistoryImportService(workspaceService, authService,
+                    duplicatePreflightService, duplicateDecisionLockService, matchingService,
+                    personMapper, activityMapper, noteMapper, taskMapper, notifications,
+                    auditService, clock, fixture.scopes);
+            var transaction = new org.springframework.transaction.support.TransactionTemplate(fixture.transactions);
+            transaction.setIsolationLevel(Connection.TRANSACTION_READ_COMMITTED);
+            HistoryImportRequest request = activityRequest(
+                    "real-history-scope", "Historical touch", "2026-01-02T03:04:05Z");
+
+            var result = transaction.execute(status -> previewAndCommitActivity(request, strongResponse(PERSON_ID)));
+
+            assertEquals(1, result.created());
+            verify(fixture.control).findOrganizationWorkspacesForShare(WORKSPACE_ID);
+            String json = "[7,17]";
+            verify(personMapper, org.mockito.Mockito.times(2)).getRelationshipScoreAggregatesExcludingHistoryImports(
+                    eq(WORKSPACE_ID), eq(json), any(), any(), eq(List.of()), eq(List.of()), eq(List.of()));
+            verify(personMapper).getRelationshipScoreAggregatesExcludingHistoryImports(
+                    eq(WORKSPACE_ID), eq(json), any(), any(), eq(List.of(81)), eq(List.of()), eq(List.of()));
+            verify(activityMapper, org.mockito.Mockito.times(3)).getAllActivities(WORKSPACE_ID);
+            verify(notifications, org.mockito.Mockito.times(2)).historicalExpectationSnapshot(
+                    eq(WORKSPACE_ID), eq(EVALUATION_INSTANT), any(RecordVisibilityScope.class));
+            verify(notifications).historicalExpectationSnapshot(
+                    eq(WORKSPACE_ID), eq(EVALUATION_INSTANT),
+                    org.mockito.ArgumentMatchers.argThat(exclusion -> exclusion.activityIds().equals(Set.of(81))),
+                    any(RecordVisibilityScope.class));
+            var order = org.mockito.Mockito.inOrder(fixture.control, duplicateDecisionLockService, personMapper);
+            order.verify(fixture.control).findOrganizationWorkspacesForShare(WORKSPACE_ID);
+            order.verify(duplicateDecisionLockService).lockCurrentOrganization();
+            order.verify(personMapper).getOwnedPersonByIdForShare(WORKSPACE_ID, PERSON_ID);
+        }
+    }
+
+    @Test
     void importsAllThreeKindsWithCanonicalHistoricalWritesAndTaskPositions() {
         HistoryImportRequest activity = activityRequest(
             "activity-source", "Followed up", "2026-01-02 03:04:05.123456");

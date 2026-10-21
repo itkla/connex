@@ -237,7 +237,7 @@ public class AiAssistantToolExecutor {
         List<Integer> personIds = idsForKind(pageContext, "person");
         List<Integer> companyIds = idsForKind(pageContext, "company");
         List<Integer> dealIds = idsForKind(pageContext, "deal");
-        String personWorkspaceIdsJson = personIds.isEmpty() && companyIds.isEmpty() && dealIds.isEmpty()
+        String personWorkspaceIdsJson = personIds.isEmpty() && companyIds.isEmpty()
                 ? null : recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
         Map<Integer, Person> people = personIds.isEmpty()
                 ? Map.of()
@@ -257,6 +257,9 @@ public class AiAssistantToolExecutor {
                 .filter(java.util.Objects::nonNull)
                 .distinct()
                 .toList();
+        if (personWorkspaceIdsJson == null && !dealCompanyIds.isEmpty()) {
+            personWorkspaceIdsJson = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson();
+        }
         Map<Integer, Company> dealCompanies = dealCompanyIds.isEmpty()
                 ? Map.of()
                 : companyMapper.getByIds(workspaceId, personWorkspaceIdsJson, dealCompanyIds)
