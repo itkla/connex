@@ -27,10 +27,12 @@ import ooo.klae.connex.backend.exceptions.AiAgentGoneException;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException;
 import ooo.klae.connex.backend.mappers.AiAgentActionMapper;
 import ooo.klae.connex.backend.mappers.AiAgentRunMapper;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.services.WorkspaceService;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 import tools.jackson.databind.ObjectMapper;
@@ -50,6 +52,7 @@ public class AiAgentProposalReadService {
     private final ooo.klae.connex.backend.ai.assistant.AiAssistantToolExecutor tools;
     private final ObjectMapper json;
     private final Clock clock;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     /** Exact content authorization deliberately leaves metadata and safe-stop authorization separate. */
     public record Authorized(AiAgentRun run, AiChatSession session) {}
@@ -61,6 +64,7 @@ public class AiAgentProposalReadService {
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
     public Metadata metadata(AiAgentRun run) {
         try {
+            recordVisibilityScopeControlAccess.getForWorkspace(run.getWorkspaceId());
             requireContent(run, true);
             if (run.getReportMessageId() == null) {
                 return new Metadata(false, null);
@@ -70,6 +74,8 @@ public class AiAgentProposalReadService {
                 throw inaccessible();
             }
             return new Metadata(false, output(new Authorized(run, session)).proposalSet().derivedCounts());
+        } catch (TenantScopeSnapshotException invariant) {
+            throw invariant;
         } catch (AiAgentGoneException | ConflictException | ResourceNotFoundException
                 | ooo.klae.connex.backend.exceptions.ForbiddenException
                 | ooo.klae.connex.backend.ai.assistant.AiAssistantLoopException
@@ -89,6 +95,9 @@ public class AiAgentProposalReadService {
         AiAgentRun discovered = runs.getRun(workspaceId, id);
         if (discovered == null || !Objects.equals(discovered.getOwnerUserId(), owner) || discovered.getSessionId() == null) {
             throw inaccessible();
+        }
+        if (requireSource) {
+            recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
         }
         workspaces.lockAndRequirePermissionsSnapshot(workspaceId, Map.of(owner, Set.of(Permission.AI_USE)));
         AiChatSession session = chat.getMissionSessionForShare(workspaceId, owner, discovered.getSessionId());

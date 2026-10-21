@@ -20,6 +20,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
+import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -93,9 +94,18 @@ public class WorkflowManualRunService {
     private final SystemActor systemActor;
     private final ObjectMapper objectMapper;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     @Transactional
     @RequirePermission(Permission.RULE_MANAGE)
     public WorkflowManualPreparationDto prepare(
+            int workflowId,
+            WorkflowManualPrepareRequest request) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> prepareWithinVisibilityScope(workflowId, request));
+    }
+
+    private WorkflowManualPreparationDto prepareWithinVisibilityScope(
             int workflowId,
             WorkflowManualPrepareRequest request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
@@ -392,11 +402,16 @@ public class WorkflowManualRunService {
         JsonNode segments = config == null ? null : config.get("segments");
         boolean segmentConfigured = segments != null && !segments.isNull();
         if (segmentConfigured) {
+            SegmentDefinition definition;
             try {
-                SegmentDefinition definition = objectMapper.treeToValue(
+                definition = objectMapper.treeToValue(
                     segments, SegmentDefinition.class);
+            } catch (JacksonException exception) {
+                throw new BadRequestException("Saved view scope is malformed");
+            }
+            try {
                 matches.addAll(segmentService.evaluate(view.getRecordType(), definition));
-            } catch (Exception exception) {
+            } catch (BadRequestException | IllegalArgumentException invalidDefinition) {
                 throw new BadRequestException("Saved view scope is malformed");
             }
         }

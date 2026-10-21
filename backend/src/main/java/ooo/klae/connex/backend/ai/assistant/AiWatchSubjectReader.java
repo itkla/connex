@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
+
 import java.util.Optional;
 
 import org.springframework.stereotype.Service;
@@ -30,6 +32,8 @@ public class AiWatchSubjectReader {
     private final DealMapper dealMapper;
     private final WorkspaceService workspaceService;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     /**
      * Returns the readable display name of one watched record.
      *
@@ -58,7 +62,7 @@ public class AiWatchSubjectReader {
     }
 
     private Optional<String> company(int workspaceId, int subjectId) {
-        Company company = companyMapper.getCompanyById(workspaceId, subjectId);
+        Company company = companyMapper.getCompanyById(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), subjectId);
         if (company == null || company.getArchivedAt() != null
                 || company.getName() == null || company.getName().isBlank()) {
             return Optional.empty();

@@ -186,7 +186,7 @@ class AiChatCitationProjectorTest {
         employer.setId(21);
         employer.setName("Atlas Manufacturing");
         employer.setIndustry("x".repeat(119) + "𩸽");
-        when(companyMapper.getByIds(3, List.of(21))).thenReturn(List.of(employer));
+        when(companyMapper.getByIds(3, "[7,8,9]", List.of(21))).thenReturn(List.of(employer));
 
         String detail = projector.project(3, List.of(message))
                 .citationsByMessage().get(23).getFirst().detail();
@@ -228,7 +228,7 @@ class AiChatCitationProjectorTest {
         stage.setId(5);
         stage.setName("Negotiation");
         when(personMapper.getByIds(3, List.of(11))).thenReturn(List.of(person));
-        when(companyMapper.getByIds(3, List.of(21))).thenReturn(List.of(employer));
+        when(companyMapper.getByIds(3, "[7,8,9]", List.of(21))).thenReturn(List.of(employer));
         when(dealMapper.getByIds(3, List.of(31))).thenReturn(List.of(deal));
         when(pipelineMapper.getAllStages(3, "[7,8,9]")).thenReturn(List.of(stage));
 
@@ -309,7 +309,7 @@ class AiChatCitationProjectorTest {
                 "observed":{"asOf":"the day of the review","detail":"Manufacturing"}}],
                 "resources":[{"handle":"r1","kind":"company","id":21}]}
                 """);
-        when(companyMapper.getByIds(3, List.of(21))).thenReturn(List.of(company()));
+        when(companyMapper.getByIds(3, "[7,8,9]", List.of(21))).thenReturn(List.of(company()));
 
         AiChatCitationDto citation = projector.project(3, List.of(message))
                 .citationsByMessage().get(23).getFirst();
@@ -330,7 +330,7 @@ class AiChatCitationProjectorTest {
                 "observed":{"asOf":null,"detail":null}}],
                 "resources":[{"handle":"r1","kind":"company","id":21}]}
                 """);
-        when(companyMapper.getByIds(3, List.of(21))).thenReturn(List.of(company()));
+        when(companyMapper.getByIds(3, "[7,8,9]", List.of(21))).thenReturn(List.of(company()));
 
         AiChatCitationDto citation = projector.project(3, List.of(message))
                 .citationsByMessage().get(23).getFirst();
@@ -396,4 +396,20 @@ class AiChatCitationProjectorTest {
         person.setId(id);
         return person;
     }
+    @Test
+    void projectionsWithoutRecordTargetsNeverReadControlScopes() {
+        var scopes = mock(ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(projector, "recordVisibilityScopeControlAccess", scopes);
+        assertEquals(Map.of(), projector.project(3, List.of()).citationsByMessage());
+        AiChatMessage prose = new AiChatMessage();
+        prose.setId(23);
+        prose.setAuthorKind("assistant");
+        prose.setContent("No record citations");
+        assertEquals(List.of(), projector.project(3, List.of(prose)).citationsByMessage().get(23));
+        assertEquals(Map.of(), projector.observe(3, List.of(), Map.of()));
+        assertEquals(Map.of(), projector.observe(3, List.of("r1"), Map.of()));
+        assertEquals(Map.of(), projector.suggestions(3, 5, 11, List.of()));
+        org.mockito.Mockito.verifyNoInteractions(scopes);
+    }
+
 }

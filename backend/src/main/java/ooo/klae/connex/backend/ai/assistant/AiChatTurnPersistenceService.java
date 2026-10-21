@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
+
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -81,6 +83,8 @@ public class AiChatTurnPersistenceService {
     private final ObjectMapper objectMapper;
     private final AiRunLeaseService runLeaseService;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     /** Commits the user message and queued turn under the session sequence mutex. */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.AI_USE)
@@ -130,6 +134,9 @@ public class AiChatTurnPersistenceService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = workspaceService.getCurrentUserId();
         requireActiveAiAccess(workspaceId, userId);
+        if (!request.pageContext().isEmpty()) {
+            recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        }
         sessionReadAudit.retainTranscriptAuditParents(workspaceId, userId);
         workspaceService.lockAndRequireMember(workspaceId, userId);
         workspaceService.requirePermission(workspaceId, userId, Permission.AI_USE);

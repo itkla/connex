@@ -160,7 +160,7 @@ class AiAssistantIdentifierCostIntegrationTest extends AbstractMapperTest {
         var queue = new AiChatTurnPersistenceService(privacyGuard, timedChat, attachments, currentWorkspace,
                 new AiRestrictionEpoch(), governance, timedResolver, mock(AiAssistantToolExecutor.class),
                 mock(AiAssistantSessionReadAudit.class), Clock.systemUTC(), mock(AiChatRealtimeDispatcher.class),
-                JsonMapper.builder().build(), mock(AiRunLeaseService.class));
+                JsonMapper.builder().build(), mock(AiRunLeaseService.class), ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
         var transaction = new TransactionTemplate(transactionManager);
         transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
         long[] nanos = new long[8];

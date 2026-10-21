@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai.mission;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -231,7 +233,7 @@ class AiAgentProposalHttpIntegrationTest extends AbstractAiAgentProposalIntegrat
         assertEquals("refused", refused.path("items").get(0).path("outcome").asString());
         authenticateAs(currentUser, workspace.getId());
         assertPending(fixture);
-        assertEquals(primary.getOwnerId(), companyMapper.getCompanyById(workspace.getId(), primary.getId()).getOwnerId());
+        assertEquals(primary.getOwnerId(), companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), primary.getId()).getOwnerId());
         JsonNode discarded = body(send(browser, "POST", path(fixture), json.writeValueAsString(request(fixture, "discard", fixture.selected().getFirst())), workspace.getId()), 200);
         assertEquals("rejected", discarded.path("items").get(0).path("outcome").asString());
     }
@@ -260,8 +262,8 @@ class AiAgentProposalHttpIntegrationTest extends AbstractAiAgentProposalIntegrat
         authenticateAs(currentUser, workspace.getId());
         assertPending(first);
         assertPending(second);
-        assertEquals(original.getOwnerId(), companyMapper.getCompanyById(workspace.getId(), original.getId()).getOwnerId());
-        assertEquals(other.getOwnerId(), companyMapper.getCompanyById(workspace.getId(), other.getId()).getOwnerId());
+        assertEquals(original.getOwnerId(), companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), original.getId()).getOwnerId());
+        assertEquals(other.getOwnerId(), companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), other.getId()).getOwnerId());
     }
 
     @Test
@@ -344,7 +346,7 @@ class AiAgentProposalHttpIntegrationTest extends AbstractAiAgentProposalIntegrat
         assertEquals("executed", response.path("items").get(0).path("outcome").asString());
         assertEquals("refused", response.path("items").get(1).path("outcome").asString());
         authenticateAs(currentUser, workspace.getId());
-        assertEquals("Prepared industry", companyMapper.getCompanyById(workspace.getId(), primary.getId()).getIndustry());
+        assertEquals("Prepared industry", companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), primary.getId()).getIndustry());
         assertEquals("proposed", chatMapper.getMissionToolCallForMaintenance(workspace.getId(), fixture.runId(), fixture.selected().getLast().getId()).getStatus());
     }
 

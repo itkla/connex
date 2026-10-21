@@ -146,7 +146,7 @@ class AiAssistantToolExecutorTest {
                 searchService, personService, companyService,
                 dealService, activityService, taskService, historyService, scoringService, workspaceService,
                 personMapper, companyMapper, dealMapper, dateResolver,
-                mock(AiAssistantScopeReadService.class));
+                mock(AiAssistantScopeReadService.class), ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
     }
 
     /**
@@ -1033,6 +1033,22 @@ class AiAssistantToolExecutorTest {
         assertFalse(data.has("id"));
         assertFalse(data.has("assignedToId"));
         assertEquals(73, registry.resolve("t1").id());
+    }
+
+    @Test
+    void emptyContextAndTenantFreeTodosNeverTouchTheScopeBoundary() throws Exception {
+        var scopes = mock(ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(executor, "recordVisibilityScopeControlAccess", scopes);
+        assertEquals(List.of(), executor.pageContext(List.of(), new AiChatResourceRegistry()).data().get("records"));
+        assertEquals(List.of(), executor.pageContext(
+            java.util.Arrays.asList(null,
+                new ooo.klae.connex.backend.dto.AiChatPageContextDto(null, 41),
+                new ooo.klae.connex.backend.dto.AiChatPageContextDto("unknown", 41),
+                new ooo.klae.connex.backend.dto.AiChatPageContextDto("company", 0)),
+            new AiChatResourceRegistry()).data().get("records"));
+        executor.execute("set_todos", objectMapper.readTree("{\"items\":[\"Review the summary\"]}"),
+            new AiChatResourceRegistry(), false);
+        org.mockito.Mockito.verifyNoInteractions(scopes);
     }
 
 }

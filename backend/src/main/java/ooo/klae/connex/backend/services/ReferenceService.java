@@ -64,6 +64,8 @@ public class ReferenceService {
     private final ActivityMapper activityMapper;
     private final WorkspaceMapper workspaceMapper;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     public static final String SOURCE_NOTE = "note";
     public static final String SOURCE_TASK = "task";
     public static final String SOURCE_ACTIVITY = "activity";
@@ -124,6 +126,11 @@ public class ReferenceService {
      */
     @Transactional
     public List<Integer> syncReferences(int workspaceId, String sourceType, int sourceId, String content) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
+            workspaceId, () -> syncReferencesWithinVisibilityScope(workspaceId, sourceType, sourceId, content));
+    }
+
+    private List<Integer> syncReferencesWithinVisibilityScope(int workspaceId, String sourceType, int sourceId, String content) {
         List<EntityReference> previous = entityReferenceMapper.findBySource(workspaceId, sourceType, sourceId);
         Set<Integer> before = mentionedMemberIds(previous);
         int currentUserId = workspaceService.getCurrentUserId();
@@ -152,6 +159,11 @@ public class ReferenceService {
      */
     @Transactional
     public List<Integer> syncReferences(int workspaceId, int noteId, String content) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
+            workspaceId, () -> syncReferencesWithinVisibilityScope(workspaceId, noteId, content));
+    }
+
+    private List<Integer> syncReferencesWithinVisibilityScope(int workspaceId, int noteId, String content) {
         return syncReferences(workspaceId, SOURCE_NOTE, noteId, content);
     }
 
@@ -214,6 +226,11 @@ public class ReferenceService {
         if (notes == null || notes.isEmpty()) {
             return notes;
         }
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceId, () -> hydrateWithinVisibilityScope(workspaceId, notes));
+    }
+
+    private List<Note> hydrateWithinVisibilityScope(int workspaceId, List<Note> notes) {
         Map<Integer, List<EntityReference>> bySource =
             referencesBySource(workspaceId, SOURCE_NOTE, notes.stream().map(Note::getId).toList());
         for (Note note : notes) {
@@ -225,6 +242,14 @@ public class ReferenceService {
 
     /** Hydrates a SQL-bounded note page and truncates content only after reader-specific redaction. */
     public List<Note> hydrateNotePreviews(int workspaceId, List<Note> notes) {
+        if (notes == null || notes.isEmpty()) {
+            return notes == null ? List.of() : notes;
+        }
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceId, () -> hydrateNotePreviewsWithinVisibilityScope(workspaceId, notes));
+    }
+
+    private List<Note> hydrateNotePreviewsWithinVisibilityScope(int workspaceId, List<Note> notes) {
         List<Note> hydrated = hydrate(workspaceId, notes);
         if (hydrated == null) {
             return List.of();
@@ -250,6 +275,11 @@ public class ReferenceService {
         if (tasks == null || tasks.isEmpty()) {
             return tasks;
         }
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceId, () -> hydrateTasksWithinVisibilityScope(workspaceId, tasks));
+    }
+
+    private List<Task> hydrateTasksWithinVisibilityScope(int workspaceId, List<Task> tasks) {
         Map<Integer, List<EntityReference>> bySource =
             referencesBySource(workspaceId, SOURCE_TASK, tasks.stream().map(Task::getId).toList());
         for (Task task : tasks) {
@@ -271,6 +301,11 @@ public class ReferenceService {
         if (deals == null || deals.isEmpty()) {
             return deals;
         }
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceId, () -> hydrateDealsWithinVisibilityScope(workspaceId, deals));
+    }
+
+    private List<Deal> hydrateDealsWithinVisibilityScope(int workspaceId, List<Deal> deals) {
         Map<Integer, List<EntityReference>> bySource = referencesBySource(
             workspaceId, SOURCE_DEAL, deals.stream().map(Deal::getId).toList());
         List<ReaderVisibleContent> visible = redactInvisibleTargets(
@@ -301,6 +336,11 @@ public class ReferenceService {
         if (activities == null || activities.isEmpty()) {
             return activities;
         }
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceId, () -> hydrateActivitiesWithinVisibilityScope(workspaceId, activities));
+    }
+
+    private List<Activity> hydrateActivitiesWithinVisibilityScope(int workspaceId, List<Activity> activities) {
         Map<Integer, List<EntityReference>> bySource =
             referencesBySource(workspaceId, SOURCE_ACTIVITY, activities.stream().map(Activity::getId).toList());
         for (Activity activity : activities) {
@@ -367,6 +407,13 @@ public class ReferenceService {
         if (!containsTarget) {
             return List.copyOf(items);
         }
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(workspaceId,
+            () -> redactInvisibleTargetsWithinVisibilityScope(workspaceId, items, targets, readings));
+    }
+
+    private List<ReaderVisibleContent> redactInvisibleTargetsWithinVisibilityScope(
+            int workspaceId, List<ReaderVisibleContent> items, Set<ReferenceTarget> targets,
+            List<ReferenceContentReader.Reading> readings) {
         int currentUserId = workspaceService.getCurrentUserId();
         Set<ReferenceTarget> visible = visibleTargets(workspaceId, targets, currentUserId);
         List<ReaderVisibleContent> redacted = new ArrayList<>();
@@ -414,7 +461,7 @@ public class ReferenceService {
             case TYPE_USER -> workspaceService.isMemberIncludingPending(workspaceId, refId);
             case TYPE_PERSON -> personMapper.exists(workspaceId, refId);
             case TYPE_DEAL -> dealMapper.exists(workspaceId, refId);
-            case TYPE_COMPANY -> companyMapper.exists(workspaceId, refId);
+            case TYPE_COMPANY -> companyMapper.exists(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), refId);
             case TYPE_NOTE -> noteMapper.getVisibleNoteById(workspaceId, refId, currentUserId) != null;
             case TYPE_FILE -> !attachmentMapper.getVisibleIdsIn(
                 workspaceId, List.of(refId), currentUserId).isEmpty();
@@ -451,6 +498,11 @@ public class ReferenceService {
         if (canonicalType == null || refId <= 0) {
             throw new ResourceNotFoundException("Reference target not found");
         }
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceId, () -> requireVisibleTargetWithinVisibilityScope(workspaceId, canonicalType, refId, currentUserId));
+    }
+
+    private String requireVisibleTargetWithinVisibilityScope(int workspaceId, String canonicalType, int refId, int currentUserId) {
         ReferenceTarget target = new ReferenceTarget(canonicalType, refId);
         if (!visibleTargets(workspaceId, Set.of(target), currentUserId).contains(target)) {
             throw new ResourceNotFoundException("Reference target not found");
@@ -605,7 +657,7 @@ public class ReferenceService {
             case TYPE_USER -> workspaceMapper.getMemberIdsIncludingPending(workspaceId, ids);
             case TYPE_PERSON -> personMapper.getVisibleIdsIn(workspaceId, ids);
             case TYPE_DEAL -> dealMapper.getVisibleIdsIn(workspaceId, ids);
-            case TYPE_COMPANY -> companyMapper.getVisibleIdsIn(workspaceId, ids);
+            case TYPE_COMPANY -> companyMapper.getVisibleIdsIn(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), ids);
             case TYPE_NOTE -> noteMapper.getVisibleNoteIdsIn(workspaceId, ids, currentUserId);
             case TYPE_FILE -> attachmentMapper.getVisibleIdsIn(workspaceId, ids, currentUserId);
             case TYPE_TASK -> taskMapper.getVisibleIdsIn(workspaceId, ids);

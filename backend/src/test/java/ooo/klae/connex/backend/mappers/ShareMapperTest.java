@@ -94,7 +94,7 @@ class ShareMapperTest extends AbstractMapperTest {
                 orgWorkspaceIdsJson(workspaceMapper, workspace.getId()));
 
         assertEquals(1, affected);
-        assertTrue(companyMapper.exists(sibling.getId(), company.getId()),
+        assertTrue(companyMapper.exists(sibling.getId(), orgWorkspaceIdsJson(workspaceMapper, sibling.getId()), company.getId()),
             "a same-org grant makes the record visible in the target workspace");
     }
 
@@ -108,7 +108,7 @@ class ShareMapperTest extends AbstractMapperTest {
                 orgWorkspaceIdsJson(workspaceMapper, workspace.getId()));
 
         assertEquals(0, affected, "the SQL org ceiling must refuse a cross-org grant");
-        assertFalse(companyMapper.exists(foreign.getId(), company.getId()),
+        assertFalse(companyMapper.exists(foreign.getId(), orgWorkspaceIdsJson(workspaceMapper, foreign.getId()), company.getId()),
             "a refused grant must leave the record invisible in the foreign workspace");
     }
 
@@ -185,7 +185,7 @@ class ShareMapperTest extends AbstractMapperTest {
 
         assertEquals(0, affected,
             "a target absent from the organization allowlist must be refused");
-        assertFalse(companyMapper.exists(sibling.getId(), company.getId()));
+        assertFalse(companyMapper.exists(sibling.getId(), orgWorkspaceIdsJson(workspaceMapper, sibling.getId()), company.getId()));
         assertEquals(1, shareMapper.shareCompany(company.getId(), workspace.getId(),
             sibling.getId(), newUser().getId(), false,
                 orgWorkspaceIdsJson(workspaceMapper, workspace.getId())),
@@ -208,7 +208,7 @@ class ShareMapperTest extends AbstractMapperTest {
 
         assertEquals(0, affected,
             "the owning workspace must appear in the allowlist the grant is judged against");
-        assertFalse(companyMapper.exists(foreign.getId(), company.getId()));
+        assertFalse(companyMapper.exists(foreign.getId(), orgWorkspaceIdsJson(workspaceMapper, foreign.getId()), company.getId()));
     }
 
     /** The same owner-side refusal for contacts and pipelines. */
@@ -266,7 +266,7 @@ class ShareMapperTest extends AbstractMapperTest {
             "residual: an allowlist no snapshot could produce is not refused by SQL alone");
         assertEquals(1, shareRowCount(company.getId(), foreign.getId()),
             "the forged grant really does write a cross-organization share row");
-        assertFalse(companyMapper.exists(foreign.getId(), company.getId()),
+        assertFalse(companyMapper.exists(foreign.getId(), orgWorkspaceIdsJson(workspaceMapper, foreign.getId()), company.getId()),
             "the forged row is inert: the read-path organization ceiling refuses it independently, "
                 + "so the residual is an unwanted row rather than cross-organization visibility");
     }
@@ -288,7 +288,7 @@ class ShareMapperTest extends AbstractMapperTest {
             sibling.getId(), newUser().getId(), false, workspaceIdsJson()));
         assertEquals(0, shareMapper.shareCompany(company.getId(), workspace.getId(),
             sibling.getId(), newUser().getId(), false, null));
-        assertFalse(companyMapper.exists(sibling.getId(), company.getId()));
+        assertFalse(companyMapper.exists(sibling.getId(), orgWorkspaceIdsJson(workspaceMapper, sibling.getId()), company.getId()));
     }
 
     @Test
@@ -301,7 +301,7 @@ class ShareMapperTest extends AbstractMapperTest {
             another.getId(), newUser().getId(), false, orgWorkspaceIdsJson(workspaceMapper, sibling.getId()));
 
         assertEquals(0, affected, "only the owning workspace can grant a share");
-        assertFalse(companyMapper.exists(another.getId(), company.getId()));
+        assertFalse(companyMapper.exists(another.getId(), orgWorkspaceIdsJson(workspaceMapper, another.getId()), company.getId()));
     }
 
     @Test
@@ -319,7 +319,7 @@ class ShareMapperTest extends AbstractMapperTest {
             "under the driver's found-rows semantics an unchanged re-grant still reports the matched "
                 + "row; ShareService additionally probes existence so the refusal contract survives "
                 + "an affected-rows driver setting");
-        assertTrue(companyMapper.exists(sibling.getId(), company.getId()),
+        assertTrue(companyMapper.exists(sibling.getId(), orgWorkspaceIdsJson(workspaceMapper, sibling.getId()), company.getId()),
             "the grant survives the idempotent re-grant");
     }
 
@@ -333,7 +333,7 @@ class ShareMapperTest extends AbstractMapperTest {
         int affected = shareMapper.unshareCompany(company.getId(), sibling.getId(), sibling.getId());
 
         assertEquals(0, affected, "revocation must anchor on the owning workspace");
-        assertTrue(companyMapper.exists(sibling.getId(), company.getId()),
+        assertTrue(companyMapper.exists(sibling.getId(), orgWorkspaceIdsJson(workspaceMapper, sibling.getId()), company.getId()),
             "the grant survives a revocation attempted through a non-owning workspace");
         assertEquals(1, shareMapper.unshareCompany(company.getId(), workspace.getId(), sibling.getId()));
     }

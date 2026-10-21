@@ -121,7 +121,7 @@ class AiAssistantScopeReadServiceTest {
                 activityMapper, segmentService, segmentMapper, savedViewService,
                 scoringService, dealRiskService, personMapper, companyMapper, dealMapper,
                 workspaceService, workspaceScopeControlAccess, objectMapper,
-                Clock.fixed(NOW, ZoneOffset.UTC), referenceService);
+                Clock.fixed(NOW, ZoneOffset.UTC), referenceService, ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
     }
 
     @Test
@@ -811,9 +811,9 @@ class AiAssistantScopeReadServiceTest {
         List<Integer> ids = IntStream.rangeClosed(1, size).boxed().toList();
         when(segmentService.evaluate(eq("company"), any(SegmentDefinition.class)))
                 .thenReturn(ids);
-        when(companyMapper.getByIds(eq(WORKSPACE_ID), anyList()))
+        when(companyMapper.getByIds(eq(WORKSPACE_ID), org.mockito.ArgumentMatchers.anyString(), anyList()))
                 .thenAnswer(invocation -> {
-                    List<Integer> requested = invocation.getArgument(1);
+                    List<Integer> requested = invocation.getArgument(2);
                     List<Company> companies = new ArrayList<>();
                     for (Integer id : requested) {
                         Company company = new Company();
@@ -860,4 +860,18 @@ class AiAssistantScopeReadServiceTest {
     private static List<String> exclusions(AiAssistantToolResult result) {
         return (List<String>) result.data().get("exclusions");
     }
+    @Test
+    void emptyBareCohortsKeepTheirPreviousResultWithoutAControlRead() {
+        try (var operation = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(WORKSPACE_ID)) {
+            org.springframework.test.util.ReflectionTestUtils.setField(service, "recordVisibilityScopeControlAccess", operation.scopes);
+            assertEquals(List.of(), service.cohort("company", AiChatQueryScope.none(), List.of()).ids());
+            assertEquals(List.of(), service.previewCohort(AiChatQueryScope.none(), "company", false).ids());
+            var result = service.scopeActivities(AiChatQueryScope.none(), "company", null,
+                List.of(), 30, 25, 5, new AiChatResourceRegistry());
+            assertEquals(0, result.data().get("readRecords"));
+            assertEquals(List.of(), result.data().get("activities"));
+            org.mockito.Mockito.verifyNoInteractions(operation.control);
+        }
+    }
+
 }

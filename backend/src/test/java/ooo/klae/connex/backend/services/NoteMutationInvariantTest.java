@@ -43,6 +43,11 @@ class NoteMutationInvariantTest {
     @Mock private WorkspaceService.LockedPermissionSnapshot authority;
     @InjectMocks private NoteService noteService;
 
+    @org.junit.jupiter.api.BeforeEach
+    void installRecordScope() {
+        ooo.klae.connex.backend.support.RecordVisibilityScopes.install(noteService);
+    }
+
     @Test
     void updateChecksAffectedRowsBeforeReferencesAndAudit() {
         User actor = new User();

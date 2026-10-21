@@ -63,7 +63,7 @@ class OrgShareCeilingArchTest {
      */
     private static final java.util.Map<String, Pattern> SHARE_READERS = java.util.Map.of(
         "mappers/AiAssistantIdentifierMapper.xml", Pattern.compile("FROM (?:person|company)_share"),
-        "mappers/CompanyMapper.xml", Pattern.compile("FROM company_share"),
+        "mappers/CompanyMapper.xml", Pattern.compile("FROM (?:person|company)_share"),
         "mappers/DealMapper.xml", Pattern.compile("FROM (?:company|person|pipeline)_share"),
         "mappers/DuplicateReviewMapper.xml", Pattern.compile("FROM company_share"),
         "mappers/IdentityMapper.xml", Pattern.compile("FROM (?:person|company)_share"),
@@ -87,6 +87,7 @@ class OrgShareCeilingArchTest {
                     || entry.getKey().equals("mappers/DuplicateReviewMapper.xml")
                     || entry.getKey().equals("mappers/SegmentMapper.xml")
                     || entry.getKey().equals("mappers/PipelineMapper.xml")
+                    || entry.getKey().equals("mappers/CompanyMapper.xml")
                 ? CONTROL_DERIVED_READ_CEILING
                 : READ_CEILING;
             int ceilings = count(ceiling, xml);
@@ -99,6 +100,28 @@ class OrgShareCeilingArchTest {
         }
         assertTrue(violations.isEmpty(),
             "Read-path share visibility is missing the same-organization ceiling: " + violations);
+    }
+
+    @Test
+    void companyAndPersonEvidenceCeilingsBindTheirOwnOwnerWithoutLifecycleTightening() throws Exception {
+        Document document = loadMapper("mappers/CompanyMapper.xml");
+        for (var fragment : Map.of("visibleAny", "c", "visiblePerson", "p").entrySet()) {
+            NodeList nodes = document.getElementsByTagName("sql");
+            Element found = null;
+            for (int index = 0; index < nodes.getLength(); index++) {
+                Element node = (Element) nodes.item(index);
+                if (fragment.getKey().equals(node.getAttribute("id"))) {
+                    found = node;
+                }
+            }
+            assertNotNull(found, fragment.getKey());
+            String sql = found.getTextContent().replaceAll("\\s+", " ").trim();
+            assertEquals(1, count(CONTROL_DERIVED_READ_CEILING, sql));
+            assertTrue(sql.contains("ON org_workspace.id = " + fragment.getValue() + ".workspace_id"));
+            assertTrue(sql.contains("workspace_id = #{workspaceId}"));
+            assertEquals(0, count(Pattern.compile("lifecycle_state|provision_ceased_at"), sql));
+        }
+        assertEquals(0, count(CONTROL_PLANE_WORKSPACE_TABLE, loadMapperText("mappers/CompanyMapper.xml")));
     }
 
     @Test

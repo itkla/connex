@@ -22,6 +22,7 @@ import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.PersonEmployment;
 import ooo.klae.connex.backend.dto.PersonConnectionDto;
+import ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException;
 import ooo.klae.connex.backend.services.CompanyService;
 import ooo.klae.connex.backend.services.ConnectionService;
 import ooo.klae.connex.backend.services.DealService;
@@ -72,6 +73,8 @@ public class AiRelationshipContext {
                 prompt.append("Industry: none\n");
             }
             return false;
+        } catch (TenantScopeSnapshotException exception) {
+            throw exception;
         } catch (RuntimeException exception) {
             prompt.append("Industry: unavailable\n");
             return true;

@@ -114,7 +114,7 @@ class AiChatTurnPersistenceServiceTest {
                 Clock.fixed(NOW, ZoneOffset.UTC),
                 realtimeDispatcher,
                 JsonMapper.builder().build(),
-                runLeaseService);
+                runLeaseService, ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
         AiChatSession session = new AiChatSession();
         auditedSession = session;
         session.setId(TURN.sessionId());
@@ -532,7 +532,7 @@ class AiChatTurnPersistenceServiceTest {
                 Clock.systemUTC(),
                 dispatcher,
                 JsonMapper.builder().build(),
-                mock(AiRunLeaseService.class));
+                mock(AiRunLeaseService.class), ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
         User owner = new User();
         owner.setId(TURN.userId());
         AiChatSession session = new AiChatSession();

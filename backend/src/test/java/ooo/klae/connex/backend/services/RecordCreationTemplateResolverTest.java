@@ -115,7 +115,7 @@ class RecordCreationTemplateResolverTest {
 
     @Test
     void verifiedRelatedCompanyOverridesTheVisibleCompanyDefault() {
-        when(companyMapper.exists(7, 55)).thenReturn(true);
+        when(companyMapper.exists(7, "[7,8,9]", 55)).thenReturn(true);
 
         var resolved = resolver.resolveSystem(
             RecordCreationRecordType.person,

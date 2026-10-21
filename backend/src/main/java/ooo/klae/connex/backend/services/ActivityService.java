@@ -67,6 +67,8 @@ public class ActivityService {
     private final LeadResponseSlaService leadResponseSlaService;
     private final ObjectMapper objectMapper;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     private static final Set<String> AUDIT_FIELDS =
         Set.of("type", "subject", "notes", "timestamp");
     private static final DateTimeFormatter TIMESTAMP_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
@@ -201,13 +203,23 @@ public class ActivityService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.ACTIVITY_CREATE)
     public Activity create(Activity activity) {
-        return create(activity, MutationAdmission.UNRESTRICTED);
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> createWithinVisibilityScope(activity));
+    }
+
+    private Activity createWithinVisibilityScope(Activity activity) {
+        return createWithinVisibilityScope(activity, MutationAdmission.UNRESTRICTED);
     }
 
     /** Performs the canonical action after its final under-lock mutation admission. */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.ACTIVITY_CREATE)
     public Activity create(Activity activity, MutationAdmission admission) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> createWithinVisibilityScope(activity, admission));
+    }
+
+    private Activity createWithinVisibilityScope(Activity activity, MutationAdmission admission) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         User actor = authService.getCurrentUser();
         try {
@@ -242,6 +254,11 @@ public class ActivityService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.ACTIVITY_UPDATE)
     public Activity update(int id, Activity activity) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> updateWithinVisibilityScope(id, activity));
+    }
+
+    private Activity updateWithinVisibilityScope(int id, Activity activity) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Activity before = activityMapper.getActivityById(workspaceId, id);
         if (before == null) {

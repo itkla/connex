@@ -239,19 +239,16 @@ class RecordListControllerTest {
         MemberScope memberScope = MemberScope.fromRequest(null, null, 7);
         when(workspaceService.getCurrentUserId()).thenReturn(7);
         when(memberScopeResolver.resolve(null, null, 7)).thenReturn(memberScope);
-        when(companyService.getCompaniesPage(
+        when(companyService.queryCompaniesPage(
             null, null, null, null, false, null, memberScope, false, null, 100, 0))
-            .thenReturn(List.of());
-        when(companyService.countCompanies(null, null, false, null, memberScope, false, null))
-            .thenReturn(0L);
+            .thenReturn(new PageResponse<>(List.of(), 0L));
 
         var response = controller.getCompaniesPage(
             0, 500, null, null, null, null, false, null, null, null, null, false, null, false);
 
         assertEquals(0, response.total());
-        verify(companyService).getCompaniesPage(
+        verify(companyService).queryCompaniesPage(
             null, null, null, null, false, null, memberScope, false, null, 100, 0);
-        verify(companyService).countCompanies(null, null, false, null, memberScope, false, null);
     }
 
     @Test
@@ -303,20 +300,17 @@ class RecordListControllerTest {
         MemberScope memberScope = MemberScope.fromRequest("members", List.of(3, 5), 7);
         when(workspaceService.getCurrentUserId()).thenReturn(7);
         when(memberScopeResolver.resolve("members", List.of(3, 5), 7)).thenReturn(memberScope);
-        when(companyService.getCompaniesPage(
+        when(companyService.queryCompaniesPage(
             query, "industry", "desc", industries, true, ids, memberScope, false, null, 25, 25))
-            .thenReturn(List.of());
-        when(companyService.countCompanies(query, industries, true, ids, memberScope, false, null))
-            .thenReturn(7L);
+            .thenReturn(new PageResponse<>(List.of(), 7L));
 
         var response = controller.getCompaniesPage(
             2, 25, "50%_Company", "industry", "desc", industries, true, ids,
             "members", List.of(3, 5), null, false, null, false);
 
         assertEquals(7, response.total());
-        verify(companyService).getCompaniesPage(
+        verify(companyService).queryCompaniesPage(
             query, "industry", "desc", industries, true, ids, memberScope, false, null, 25, 25);
-        verify(companyService).countCompanies(query, industries, true, ids, memberScope, false, null);
     }
 
     @Test
@@ -488,9 +482,8 @@ class RecordListControllerTest {
         CompanyController controller = companyController();
         List<String> industries = List.of("Finance", "Technology");
         List<FacetCount> owners = List.of(new FacetCount("7", 3, null));
-        when(companyService.distinctIndustries()).thenReturn(industries);
-        when(companyService.hasCompanyWithoutIndustry()).thenReturn(true);
-        when(companyService.countsByOwner()).thenReturn(owners);
+        when(companyService.getCompanyFacets(null)).thenReturn(
+            new ooo.klae.connex.backend.dto.CompanyFacets(industries, true, owners, 0L, null));
 
         var facets = controller.getCompanyFacets(false);
 

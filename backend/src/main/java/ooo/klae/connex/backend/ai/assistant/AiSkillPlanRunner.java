@@ -1,5 +1,9 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException;
+
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
+
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -48,6 +52,8 @@ public class AiSkillPlanRunner {
     private final AiChatRealtimeDispatcher realtimeDispatcher;
     private final WorkspaceService workspaceService;
     private final ObjectMapper objectMapper;
+
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     /**
      * The outcome of one server-owned plan.
@@ -111,6 +117,31 @@ public class AiSkillPlanRunner {
         if (skill.needsSubject() && subjectHandle == null) {
             return Execution.none();
         }
+        String resolvedSubjectHandle = subjectHandle;
+        java.util.function.Supplier<Execution> plan = () -> runSteps(
+            turn, routing, scope, resources, evidenceByteBudget, guard, skill, resolvedSubjectHandle);
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(turn.workspaceId(), () -> {
+            try {
+                recordVisibilityScopeControlAccess.getForWorkspace(turn.workspaceId());
+            } catch (TenantScopeSnapshotException exception) {
+                throw exception;
+            } catch (RuntimeException exception) {
+                return plan.get();
+            }
+            return plan.get();
+        });
+    }
+
+    /** Preload failures are replayed by the operation memo inside each step's existing handler. */
+    private Execution runSteps(
+            AiChatQueuedTurn turn,
+            AiSkillRouter.Routing routing,
+            AiChatQueryScope scope,
+            AiChatResourceRegistry resources,
+            int evidenceByteBudget,
+            Runnable guard,
+            SkillSpec skill,
+            String subjectHandle) {
         List<Map<String, Object>> evidence = new ArrayList<>();
         boolean degraded = false;
         int stepNumber = 0;
@@ -137,6 +168,8 @@ public class AiSkillPlanRunner {
                 evidence.add(entry);
                 result.identifiers().forEach(
                         identifier -> identifier.seed(resources.maskingContext()));
+            } catch (TenantScopeSnapshotException exception) {
+                throw exception;
             } catch (RuntimeException exception) {
                 String reason = failureReason(exception);
                 persistenceService.failTool(

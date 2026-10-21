@@ -31,7 +31,7 @@ class PipelineVisibilityScopeTest {
     private final DealMapper deals = mock(DealMapper.class);
     private final WorkspaceService workspace = mock(WorkspaceService.class);
     private final ReferenceService references = mock(ReferenceService.class);
-    private final RecordVisibilityScopeControlAccess scopes = mock(RecordVisibilityScopeControlAccess.class);
+    private final RecordVisibilityScopeControlAccess scopes = ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
     private final PipelineService service = new PipelineService(pipelines, scopes, deals, mock(AuditService.class), workspace, references);
     private final Pipeline pipeline = new Pipeline();
 
@@ -52,6 +52,7 @@ class PipelineVisibilityScopeTest {
         assertEquals(1, service.getStagesByPipelineId(12).size());
         var order = inOrder(scopes, pipelines);
         order.verify(scopes).getForWorkspace(7);
+        order.verify(scopes).withWorkspaceScopeRead(eq(7), org.mockito.ArgumentMatchers.any(RecordVisibilityScopeControlAccess.RecordVisibilityScope.class), any());
         order.verify(pipelines).getPipelineById(7, "[7,8,9]", 12);
         order.verify(pipelines).getStagesByPipelineId(7, "[7,8,9]", 12);
         verifyNoMoreInteractions(scopes);

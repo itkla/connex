@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai.brief;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
+
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -62,6 +64,8 @@ public class DealBriefAssembler {
     private final AiRelationshipContext aiRelationshipContext;
     private final PersonMapper personMapper;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     /**
      * Builds a masked brief prompt from the active workspace's view of a deal. An interrupted
      * worker stops immediately after the CRM load, person lookup batch, or stakeholder enrichment
@@ -73,6 +77,11 @@ public class DealBriefAssembler {
      * @throws java.util.concurrent.CancellationException when the current thread is interrupted
      */
     public BriefAssembly assemble(int workspaceId, int dealId) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
+            workspaceId, () -> assembleWithinVisibilityScope(workspaceId, dealId));
+    }
+
+    private BriefAssembly assembleWithinVisibilityScope(int workspaceId, int dealId) {
         Deal deal = dealService.getDealById(dealId);
         AiCancellation.throwIfInterrupted();
         if (deal == null) {
@@ -113,7 +122,7 @@ public class DealBriefAssembler {
         List<Note> promptNotes = first(allowedNotes(notes, allowedPersonIds), MAX_NOTES);
         List<Task> promptTasks = promptTasks(allowedTasks(tasks, allowedPersonIds));
         DealBriefSourceRegistry sourceRegistry = new DealBriefSourceRegistry();
-        PromptResult promptResult = userPrompt(deal, summary, stageHistory, stakeholders, warmth, risk,
+        PromptResult promptResult = userPrompt(workspaceId, deal, summary, stageHistory, stakeholders, warmth, risk,
                 promptActivities, promptNotes, promptTasks,
                 companyToken, context, sourceRegistry);
         MaskedPrompt prompt = PromptAssembly.builder(context)
@@ -130,6 +139,7 @@ public class DealBriefAssembler {
     }
 
     private PromptResult userPrompt(
+            int workspaceId,
             Deal deal,
             DealSummaryDto summary,
             List<DealStageHistory> stageHistory,
@@ -163,6 +173,9 @@ public class DealBriefAssembler {
         appendValue(prompt, "Stage", stage);
         appendValue(prompt, "Expected close", expectedClose);
         appendValue(prompt, "Value", value);
+        if (companyId > 0) {
+            recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        }
         boolean degraded = aiRelationshipContext.appendCompanyProfile(prompt, companyId, context);
         AiCancellation.throwIfInterrupted();
 

@@ -44,6 +44,8 @@ class AiSkillPlanRunnerTest {
     private AiAssistantScopeReadService scopeReadService;
     private WorkspaceService workspaceService;
     private AiSkillPlanRunner runner;
+    private final ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess recordScopes =
+            ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
 
     @BeforeEach
     void setUp() {
@@ -62,7 +64,7 @@ class AiSkillPlanRunnerTest {
                 new AiAssistantPromptAssembler(objectMapper, new AiAssistantToolCatalog()),
                 mock(AiChatRealtimeDispatcher.class),
                 workspaceService,
-                objectMapper);
+                objectMapper, recordScopes);
     }
 
     /**
@@ -185,7 +187,7 @@ class AiSkillPlanRunnerTest {
                 persistenceService, toolExecutor, scopeReadService,
                 mock(AiAssistantWorkBriefReadService.class),
                 new AiAssistantPromptAssembler(objectMapper, new AiAssistantToolCatalog()),
-                mock(AiChatRealtimeDispatcher.class), workspaceService, objectMapper);
+                mock(AiChatRealtimeDispatcher.class), workspaceService, objectMapper, recordScopes);
         AiChatResourceRegistry resources = new AiChatResourceRegistry();
         resources.register("person", 12);
         AiChatQueryScope declared = new AiChatQueryScope(
@@ -206,6 +208,89 @@ class AiSkillPlanRunnerTest {
 
         verify(toolExecutor).execute(
                 eq("list_activities"), any(), any(), anyBoolean(), eq(declared));
+    }
+
+    @Test
+    void fourRetrievalStepsKeepOneScopeAcrossIndependentTransactions() {
+        try (var operation = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(7)) {
+            AiAssistantToolExecutor executor = mock(AiAssistantToolExecutor.class);
+            java.util.function.Supplier<AiAssistantToolResult> read = () ->
+                new org.springframework.transaction.support.TransactionTemplate(operation.transactions).execute(status -> {
+                    assertEquals(List.of(7, 17), operation.scopes.getForWorkspace(7).workspaceIds());
+                    return new AiAssistantToolResult(java.util.Map.of("handle", "r1"), List.of());
+                });
+            when(executor.execute(anyString(), any(), any(), anyBoolean(), any())).thenAnswer(call -> read.get());
+            when(scopeReadService.relationshipMetrics(anyString(), anyInt(), anyString())).thenAnswer(call -> read.get());
+            AiSkillPlanRunner scoped = new AiSkillPlanRunner(persistenceService, executor, scopeReadService,
+                mock(AiAssistantWorkBriefReadService.class),
+                new AiAssistantPromptAssembler(objectMapper, new AiAssistantToolCatalog()),
+                mock(AiChatRealtimeDispatcher.class), workspaceService, objectMapper, operation.scopes);
+            AiChatResourceRegistry resources = new AiChatResourceRegistry();
+            resources.register("company", 41);
+            var result = scoped.run(TURN, new AiSkillRouter.Routing(
+                skillCatalog.find("relationship_brief_v1").orElseThrow(), AiSkillRouter.MATCHED,
+                new AiSkillRouter.Subject("company", 41), false), AiChatQueryScope.none(), resources, 16_384, () -> { });
+            assertEquals(4, result.lastStepNumber());
+            assertEquals(4, operation.transactions.beginCount());
+            verify(operation.control).findOrganizationWorkspacesForShare(7);
+        }
+    }
+
+    @Test
+    void anUnmatchedSkillDoesNotResolveAScope() {
+        assertEquals(AiSkillPlanRunner.Execution.none(), runner.run(TURN,
+                new AiSkillRouter.Routing(null, "unmatched", null, false), AiChatQueryScope.none(),
+                new AiChatResourceRegistry(), 16_384, () -> { }));
+        org.mockito.Mockito.verifyNoInteractions(recordScopes, persistenceService, scopeReadService);
+    }
+
+    @Test
+    void aSkillWithoutItsRequiredSubjectDoesNotResolveAScope() {
+        assertEquals(AiSkillPlanRunner.Execution.none(), runner.run(TURN,
+                routing("relationship_brief_v1"), AiChatQueryScope.none(),
+                new AiChatResourceRegistry(), 16_384, () -> { }));
+        org.mockito.Mockito.verifyNoInteractions(recordScopes, persistenceService, scopeReadService);
+    }
+
+    @Test
+    void anOrdinaryPreloadFailureStillClosesTheRequiredDurableStep() {
+        try (var operation = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(7)) {
+            when(operation.control.findOrganizationWorkspacesForShare(7))
+                .thenThrow(new org.springframework.dao.DataAccessResourceFailureException("control unavailable"));
+            when(scopeReadService.scopeActivities(any(), any(), any(), anyList(), any(), anyInt(), anyInt(), any()))
+                .thenAnswer(call -> {
+                    operation.scopes.getForWorkspace(7);
+                    throw new AssertionError("failed scope must prevent the read");
+                });
+            AiSkillPlanRunner scoped = new AiSkillPlanRunner(persistenceService, mock(AiAssistantToolExecutor.class),
+                scopeReadService, mock(AiAssistantWorkBriefReadService.class),
+                new AiAssistantPromptAssembler(objectMapper, new AiAssistantToolCatalog()),
+                mock(AiChatRealtimeDispatcher.class), workspaceService, objectMapper, operation.scopes);
+            var result = scoped.run(TURN, routing("activity_digest_v1"), AiChatQueryScope.none(),
+                new AiChatResourceRegistry(), 16_384, () -> verify(operation.control).findOrganizationWorkspacesForShare(7));
+            assertTrue(result.degraded());
+            assertEquals(1, result.lastStepNumber());
+            verify(persistenceService).failTool(eq(TURN), eq(88), anyString());
+            verify(operation.control).findOrganizationWorkspacesForShare(7);
+        }
+    }
+
+    @Test
+    void aSnapshotRefusalStopsTheSkillBeforeItsFirstGuardOrProposal() {
+        try (var operation = new ooo.klae.connex.backend.support.RecordVisibilityOperationFixture(7)) {
+            var refusal = new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotMissingException("workspace 7");
+            when(operation.control.findOrganizationWorkspacesForShare(7)).thenThrow(refusal);
+            AiSkillPlanRunner scoped = new AiSkillPlanRunner(persistenceService, mock(AiAssistantToolExecutor.class),
+                scopeReadService, mock(AiAssistantWorkBriefReadService.class),
+                new AiAssistantPromptAssembler(objectMapper, new AiAssistantToolCatalog()),
+                mock(AiChatRealtimeDispatcher.class), workspaceService, objectMapper, operation.scopes);
+            Runnable guard = mock(Runnable.class);
+            org.junit.jupiter.api.Assertions.assertSame(refusal,
+                assertThrows(ooo.klae.connex.backend.exceptions.TenantScopeSnapshotMissingException.class,
+                    () -> scoped.run(TURN, routing("activity_digest_v1"), AiChatQueryScope.none(),
+                        new AiChatResourceRegistry(), 16_384, guard)));
+            org.mockito.Mockito.verifyNoInteractions(guard, persistenceService, scopeReadService);
+        }
     }
 
     private AiSkillRouter.Routing routing(String key) {

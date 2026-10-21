@@ -53,9 +53,11 @@ class AiAgentProposalReadServiceTest {
     private final AiAgentProposalSetPort proposals = mock(AiAgentProposalSetPort.class);
     private final AiAssistantToolCallReadService cards = mock(AiAssistantToolCallReadService.class);
     private final AiAssistantToolExecutor tools = mock(AiAssistantToolExecutor.class);
+    private final ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess recordScopes =
+            ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
     private final AiAgentProposalReadService service = spy(new AiAgentProposalReadService(privacyGuard, workspaces, chat, runs,
             actions, proposals, cards, mock(AiChatCitationProjector.class), tools,
-            JsonMapper.builder().build(), Clock.fixed(NOW, ZoneOffset.UTC)));
+            JsonMapper.builder().build(), Clock.fixed(NOW, ZoneOffset.UTC), recordScopes));
     private final AiAgentRun run = new AiAgentRun();
     private final AiChatSession session = new AiChatSession();
     private final AiAgentAction action = new AiAgentAction();
@@ -110,6 +112,29 @@ class AiAgentProposalReadServiceTest {
         var metadata = assertDoesNotThrow(() -> service.metadata(run));
         org.junit.jupiter.api.Assertions.assertTrue(metadata.contentWithheld());
         org.junit.jupiter.api.Assertions.assertNull(metadata.counts());
+    }
+
+    @Test
+    void missingVisibilitySnapshotRefusesContentBeforeAuthorizationLocks() {
+        doThrow(new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotMissingException("record visibility"))
+                .when(recordScopes).getForWorkspace(7);
+
+        assertThrows(ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException.class,
+                () -> service.currentVersion(31));
+
+        verify(workspaces, never()).lockAndRequirePermissionsSnapshot(anyInt(), any());
+        verify(chat, never()).getMissionSessionForShare(anyInt(), anyInt(), anyInt());
+    }
+
+    @Test
+    void metadataDoesNotDegradeVisibilitySnapshotInvariantFailure() {
+        doThrow(new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotMissingException("record visibility"))
+                .when(recordScopes).getForWorkspace(7);
+
+        assertThrows(ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException.class,
+                () -> service.metadata(run));
+
+        verify(organizationPrivacy, never()).retain(anyInt(), org.mockito.ArgumentMatchers.anyLong());
     }
 
     @Test

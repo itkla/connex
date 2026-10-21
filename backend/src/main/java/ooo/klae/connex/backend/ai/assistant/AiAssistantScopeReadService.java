@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
+
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -81,6 +83,8 @@ public class AiAssistantScopeReadService {
     private final Clock clock;
     private final ReferenceService referenceService;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     /**
      * One resolved cohort and the honesty counters its resolution produced.
      *
@@ -121,6 +125,19 @@ public class AiAssistantScopeReadService {
      * @return bounded activity rows plus the exact interpreted scope and coverage metadata
      */
     public AiAssistantToolResult scopeActivities(
+            AiChatQueryScope scope,
+            String requestedKind,
+            String contextKind,
+            List<String> requestedBands,
+            Integer requestedDays,
+            int limit,
+            int perRecordLimit,
+            AiChatResourceRegistry resources) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> scopeActivitiesWithinVisibilityScope(scope, requestedKind, contextKind, requestedBands, requestedDays, limit, perRecordLimit, resources));
+    }
+
+    private AiAssistantToolResult scopeActivitiesWithinVisibilityScope(
             AiChatQueryScope scope,
             String requestedKind,
             String contextKind,
@@ -253,6 +270,11 @@ public class AiAssistantScopeReadService {
      * @return warmth score, band, trend, recency, and decay prediction
      */
     public AiAssistantToolResult relationshipMetrics(String kind, int recordId, String handle) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> relationshipMetricsWithinVisibilityScope(kind, recordId, handle));
+    }
+
+    private AiAssistantToolResult relationshipMetricsWithinVisibilityScope(String kind, int recordId, String handle) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         List<RelationshipTemperatureDto> scores = "company".equals(kind)
                 ? scoringService.scoreCompanies(workspaceId, Set.of(recordId))
@@ -299,6 +321,12 @@ public class AiAssistantScopeReadService {
      * @return risk-ordered deals with their stable factor codes and the counters behind the bound
      */
     public AiAssistantToolResult dealAttention(
+            AiChatQueryScope scope, int limit, AiChatResourceRegistry resources) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> dealAttentionWithinVisibilityScope(scope, limit, resources));
+    }
+
+    private AiAssistantToolResult dealAttentionWithinVisibilityScope(
             AiChatQueryScope scope, int limit, AiChatResourceRegistry resources) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int bound = clamp(limit, 1, AiChatScopeBounds.MAX_ATTENTION_DEALS,
@@ -381,6 +409,12 @@ public class AiAssistantScopeReadService {
      */
     public Cohort previewCohort(
             AiChatQueryScope scope, String contextKind, boolean dealAttentionPlan) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> previewCohortWithinVisibilityScope(scope, contextKind, dealAttentionPlan));
+    }
+
+    private Cohort previewCohortWithinVisibilityScope(
+            AiChatQueryScope scope, String contextKind, boolean dealAttentionPlan) {
         if (dealAttentionPlan) {
             return cohort("deal", attentionScope(scope), List.of());
         }
@@ -398,6 +432,11 @@ public class AiAssistantScopeReadService {
      * @return capped cohort ids plus the true match count and whether the cap was reached
      */
     public Cohort cohort(String kind, AiChatQueryScope scope, List<String> bands) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> cohortWithinVisibilityScope(kind, scope, bands));
+    }
+
+    private Cohort cohortWithinVisibilityScope(String kind, AiChatQueryScope scope, List<String> bands) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         SegmentDefinition definition = cohortDefinition(kind, scope, bands);
         List<Integer> evaluated = definition == null
@@ -577,7 +616,7 @@ public class AiAssistantScopeReadService {
             case "deal" -> dealMapper.getByIds(workspaceId, ids).stream()
                     .filter(deal -> deal.getName() != null && !deal.getName().isBlank())
                     .forEach(deal -> labels.put(deal.getId(), new RecordLabel(deal.getName())));
-            default -> companyMapper.getByIds(workspaceId, ids).stream()
+            default -> companyMapper.getByIds(workspaceId, recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(), ids).stream()
                     .filter(company -> company.getArchivedAt() == null)
                     .filter(company -> company.getName() != null && !company.getName().isBlank())
                     .forEach(company -> labels.put(

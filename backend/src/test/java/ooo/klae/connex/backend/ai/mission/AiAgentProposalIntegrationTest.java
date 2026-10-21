@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai.mission;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -34,7 +36,7 @@ class AiAgentProposalIntegrationTest extends AbstractAiAgentProposalIntegrationT
         assertThrows(ConflictException.class, () -> legacyWrites.approve(fixture.sessionId(), call.getId()));
         assertThrows(ConflictException.class, () -> legacyWrites.reject(fixture.sessionId(), call.getId()));
         assertPending(fixture);
-        assertNull(companyMapper.getCompanyById(workspace.getId(), primary.getId()).getOwnerId());
+        assertNull(companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), primary.getId()).getOwnerId());
     }
 
     @Test
@@ -95,7 +97,7 @@ class AiAgentProposalIntegrationTest extends AbstractAiAgentProposalIntegrationT
         var preparedAt = sibling.getPreparedAt();
         var response = decisions.decide(fixture.runId(), request(fixture, "approve", first, sibling));
         assertEquals(List.of("executed", "refused"), response.items().stream().map(item -> item.outcome()).toList());
-        assertEquals("Prepared industry", companyMapper.getCompanyById(workspace.getId(), primary.getId()).getIndustry());
+        assertEquals("Prepared industry", companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), primary.getId()).getIndustry());
         assertEquals(preparedAt, actions.getById(workspace.getId(), fixture.runId(), sibling.getId()).getPreparedAt());
         assertEquals("proposed", chatMapper.getMissionToolCallForMaintenance(workspace.getId(), fixture.runId(), sibling.getId()).getStatus());
         decisions.decide(fixture.runId(), request(fixture, "discard", sibling));

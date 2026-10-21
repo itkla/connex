@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.ai;
 import java.math.BigDecimal;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -287,6 +288,21 @@ class AiRelationshipContextTest {
             Thread.interrupted();
         }
         verify(connectionService, never()).getTopConnections(anyInt(), anyInt());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"snapshot", "missing"})
+    void companyProfileNeverDegradesSnapshotInvariantRefusals(String kind) {
+        var refusal = kind.equals("missing")
+            ? new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotMissingException("missing payload")
+            : new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException("scope mismatch");
+        when(companyService.getCompanyById(COMPANY_ID)).thenThrow(refusal);
+        StringBuilder prompt = new StringBuilder();
+
+        assertSame(refusal, assertThrows(ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException.class,
+            () -> context.appendCompanyProfile(prompt, COMPANY_ID, new MaskingContext())));
+
+        assertEquals("", prompt.toString());
     }
 
     @Test

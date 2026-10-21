@@ -331,7 +331,7 @@ class ImportServiceTest extends AbstractServiceTest {
 
         Person imported = personMapper.findByEmails(
             workspace.getId(), List.of("identity-import@example.com")).getFirst();
-        Company importedCompany = companyMapper.getAllCompanies(workspace.getId()).stream()
+        Company importedCompany = companyMapper.getAllCompanies(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId())).stream()
             .filter(candidate -> "Identity import company".equals(candidate.getName()))
             .findFirst()
             .orElseThrow();
@@ -544,7 +544,7 @@ class ImportServiceTest extends AbstractServiceTest {
         Person matched = personMapper.findByEmails(
             workspace.getId(), List.of("owned.import@x.test")).getFirst();
         Person person = personMapper.getPersonById(workspace.getId(), matched.getId());
-        Company company = companyMapper.getAllCompanies(workspace.getId()).stream()
+        Company company = companyMapper.getAllCompanies(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId())).stream()
             .filter(candidate -> candidate.getName().equals("Owned Import Company"))
             .findFirst().orElseThrow();
         assertEquals(currentUser.getId(), person.getOwnerId());
@@ -730,7 +730,7 @@ class ImportServiceTest extends AbstractServiceTest {
         ImportPreviewResult preview = importService.previewCompanies(request);
         request.setDuplicateReviewProof(preview.getDuplicateReviewProof());
         ImportResult first = importService.commitCompanies(request);
-        Company imported = companyMapper.getAllCompanies(workspace.getId())
+        Company imported = companyMapper.getAllCompanies(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()))
             .stream()
             .filter(company -> website.equals(company.getWebsite()))
             .findFirst()
@@ -1272,7 +1272,7 @@ class ImportServiceTest extends AbstractServiceTest {
         assertFalse(
             owner.getWebsite().equals(
                 companyMapper.getCompanyById(
-                    workspace.getId(), selected.getId()).getWebsite()));
+                    workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), selected.getId()).getWebsite()));
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -1518,7 +1518,7 @@ class ImportServiceTest extends AbstractServiceTest {
         assertEquals(1, companyPreview.getToUpdate());
         assertEquals(1, companyResult.getUpdated());
         Person updatedPerson = personMapper.getPersonById(workspace.getId(), person.getId());
-        Company updatedCompany = companyMapper.getCompanyById(workspace.getId(), company.getId());
+        Company updatedCompany = companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), company.getId());
         assertEquals(personName, updatedPerson.getName());
         assertEquals(personEmail, updatedPerson.getEmail());
         assertEquals(companyName, updatedCompany.getName());

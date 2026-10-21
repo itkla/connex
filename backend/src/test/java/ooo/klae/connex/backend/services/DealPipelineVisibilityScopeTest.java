@@ -34,11 +34,13 @@ class DealPipelineVisibilityScopeTest {
     @Mock private PipelineMapper pipelineMapper;
     @Mock private WorkspaceService workspaceService;
     @Mock private DuplicateDecisionLockService duplicateDecisionLockService;
-    @Mock private RecordVisibilityScopeControlAccess scopes;
+    private final RecordVisibilityScopeControlAccess scopes =
+        ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
     @InjectMocks private DealService service;
 
     @BeforeEach
     void setUp() {
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "recordVisibilityScopeControlAccess", scopes);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(scopes.getForWorkspace(7)).thenReturn(new RecordVisibilityScope(90, List.of(7, 8, 9)));
     }

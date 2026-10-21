@@ -75,6 +75,8 @@ public class TaskService {
     private final RuleTriggerPublisher ruleTriggers;
     private final ObjectMapper objectMapper;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     private static final String STATUS_TODO = "todo";
     private static final String STATUS_IN_PROGRESS = "in_progress";
     private static final String STATUS_DONE = "done";
@@ -176,13 +178,23 @@ public class TaskService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.TASK_CREATE)
     public Task create(Task task) {
-        return create(task, MutationAdmission.UNRESTRICTED);
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> createWithinVisibilityScope(task));
+    }
+
+    private Task createWithinVisibilityScope(Task task) {
+        return createWithinVisibilityScope(task, MutationAdmission.UNRESTRICTED);
     }
 
     /** Performs the canonical action after its final under-lock mutation admission. */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.TASK_CREATE)
     public Task create(Task task, MutationAdmission admission) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> createWithinVisibilityScope(task, admission));
+    }
+
+    private Task createWithinVisibilityScope(Task task, MutationAdmission admission) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         User actor = currentActorOrNull();
         task.setWorkspaceId(workspaceId);
@@ -211,6 +223,11 @@ public class TaskService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.TASK_UPDATE)
     public Task update(int id, Task task) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> updateWithinVisibilityScope(id, task));
+    }
+
+    private Task updateWithinVisibilityScope(int id, Task task) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         lockAssignee(task, workspaceId);
         List<Task> lockedTasks = lockTaskBoardTasks(workspaceId, id);
@@ -306,13 +323,23 @@ public class TaskService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.TASK_UPDATE)
     public Task complete(int id) {
-        return complete(id, MutationAdmission.UNRESTRICTED);
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> completeWithinVisibilityScope(id));
+    }
+
+    private Task completeWithinVisibilityScope(int id) {
+        return completeWithinVisibilityScope(id, MutationAdmission.UNRESTRICTED);
     }
 
     /** Performs the canonical action after its final under-lock mutation admission. */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.TASK_UPDATE)
     public Task complete(int id, MutationAdmission admission) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> completeWithinVisibilityScope(id, admission));
+    }
+
+    private Task completeWithinVisibilityScope(int id, MutationAdmission admission) {
         return completeLocked(id, null, admission);
     }
 
@@ -320,6 +347,11 @@ public class TaskService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.TASK_UPDATE)
     public Task complete(int id, String expectedStateHash) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> completeWithinVisibilityScope(id, expectedStateHash));
+    }
+
+    private Task completeWithinVisibilityScope(int id, String expectedStateHash) {
         if (expectedStateHash == null || expectedStateHash.isBlank()) {
             throw new BadRequestException("Expected task state is required");
         }
@@ -425,6 +457,11 @@ public class TaskService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.TASK_UPDATE)
     public Task move(int id, String status, int position) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> moveWithinVisibilityScope(id, status, position));
+    }
+
+    private Task moveWithinVisibilityScope(int id, String status, int position) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (status == null || !VALID_STATUSES.contains(status)) {
             throw new BadRequestException("Invalid task status: " + status);
@@ -575,13 +612,23 @@ public class TaskService {
     @Transactional
     @RequirePermission(Permission.TASK_UPDATE)
     public Task reschedule(int id, String dueDate) {
-        return reschedule(id, dueDate, MutationAdmission.UNRESTRICTED);
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> rescheduleWithinVisibilityScope(id, dueDate));
+    }
+
+    private Task rescheduleWithinVisibilityScope(int id, String dueDate) {
+        return rescheduleWithinVisibilityScope(id, dueDate, MutationAdmission.UNRESTRICTED);
     }
 
     /** Performs the canonical action after its final under-lock mutation admission. */
     @Transactional
     @RequirePermission(Permission.TASK_UPDATE)
     public Task reschedule(int id, String dueDate, MutationAdmission admission) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), () -> rescheduleWithinVisibilityScope(id, dueDate, admission));
+    }
+
+    private Task rescheduleWithinVisibilityScope(int id, String dueDate, MutationAdmission admission) {
         try {
             LocalDate.parse(dueDate);
         } catch (DateTimeParseException e) {

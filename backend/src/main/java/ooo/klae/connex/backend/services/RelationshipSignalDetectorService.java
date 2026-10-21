@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
+
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -64,9 +66,17 @@ public class RelationshipSignalDetectorService {
     private final ObjectMapper objectMapper;
     private final Clock clock;
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     /** Detects cooling person and company relationships from the canonical warmth output. */
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public Detection detectDecay(int workspaceId, String generationToken) {
+        RecordVisibilityScope resolvedVisibilityScope = recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceId, resolvedVisibilityScope, () -> detectDecayWithinVisibilityScope(workspaceId, generationToken, resolvedVisibilityScope));
+    }
+
+    private Detection detectDecayWithinVisibilityScope(int workspaceId, String generationToken, RecordVisibilityScope operationVisibilityScope) {
         ScoringService.WorkspaceScores scores = scoringService.scoreWorkspace(workspaceId);
         Map<Integer, String> contactSourceStateHashes =
             scoringService.contactSourceStateHashes(
@@ -108,7 +118,7 @@ public class RelationshipSignalDetectorService {
             .map(candidate -> candidate.temperature().getId())
             .toList();
         if (!companyIds.isEmpty()) {
-            companyMapper.getByIds(workspaceId, companyIds)
+            companyMapper.getByIds(workspaceId, operationVisibilityScope.workspaceIdsJson(), companyIds)
                 .forEach(company -> companies.put(company.getId(), company));
         }
         List<RelationshipSignal> candidates = new ArrayList<>();
@@ -138,6 +148,11 @@ public class RelationshipSignalDetectorService {
     /** Detects high and medium deal risks from the canonical risk assessment output. */
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public Detection detectDealRisk(int workspaceId, String generationToken) {
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceId, () -> detectDealRiskWithinVisibilityScope(workspaceId, generationToken));
+    }
+
+    private Detection detectDealRiskWithinVisibilityScope(int workspaceId, String generationToken) {
         ScoringService.WorkspaceScores scores = scoringService.scoreWorkspace(workspaceId);
         Map<Integer, RelationshipTemperatureDto> warmth = new LinkedHashMap<>();
         scores.contacts().forEach(score -> warmth.put(score.getId(), score));

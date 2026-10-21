@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -278,10 +280,10 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
 
         offboardingService.eraseOrgDataReferences(target.getId());
 
-        assertNull(companyMapper.getCompanyById(workspace.getId(), company.getId()).getOwnerId());
+        assertNull(companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), company.getId()).getOwnerId());
         assertNull(personMapper.getPersonById(workspace.getId(), person.getId()).getOwnerId());
         assertNull(companyMapper.getCompanyById(
-            otherWorkspace.getId(), otherCompany.getId()).getOwnerId());
+            otherWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, otherWorkspace.getId()), otherCompany.getId()).getOwnerId());
         assertNull(personMapper.getPersonById(
             otherWorkspace.getId(), otherPerson.getId()).getOwnerId());
         assertTemplateActorsCleared(workspace.getId(), templateRoot);
@@ -425,11 +427,11 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
 
         offboardingService.detachMemberContent(workspace.getId(), member.getId());
 
-        assertNull(companyMapper.getCompanyById(workspace.getId(), company.getId()).getOwnerId());
+        assertNull(companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), company.getId()).getOwnerId());
         assertNull(personMapper.getPersonById(workspace.getId(), person.getId()).getOwnerId());
         assertNull(dealMapper.getDealById(workspace.getId(), deal.getId()).getOwnerId());
         assertEquals(member.getId(),
-            companyMapper.getCompanyById(otherWorkspace.getId(), otherCompany.getId()).getOwnerId());
+            companyMapper.getCompanyById(otherWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, otherWorkspace.getId()), otherCompany.getId()).getOwnerId());
         assertEquals(member.getId(),
             personMapper.getPersonById(otherWorkspace.getId(), otherPerson.getId()).getOwnerId());
         assertTrue(dealMapper.getCollaboratorIds(workspace.getId(), deal.getId()).isEmpty());

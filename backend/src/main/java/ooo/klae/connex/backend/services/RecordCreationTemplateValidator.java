@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import org.jspecify.annotations.Nullable;
+
 import java.math.BigDecimal;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -113,14 +115,14 @@ public class RecordCreationTemplateValidator {
             LocalizedTextDto name,
             LocalizedTextDto description,
             RecordCreationTemplateDefinitionDto definition) {
-        String orgWorkspaceIdsJson = recordType == RecordCreationRecordType.deal
-            ? recordVisibilityScopeControlAccess.getForWorkspace(workspaceService.getCurrentWorkspaceId()).workspaceIdsJson() : null;
-        return validateAndCanonicalize(recordType, name, description, definition, orgWorkspaceIdsJson);
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScopeRead(
+            workspaceService.getCurrentWorkspaceId(),
+            () -> validateAndCanonicalize(recordType, name, description, definition, null));
     }
 
     ValidatedTemplate validateAndCanonicalize(
             RecordCreationRecordType recordType, LocalizedTextDto name, LocalizedTextDto description,
-            RecordCreationTemplateDefinitionDto definition, String orgWorkspaceIdsJson) {
+            RecordCreationTemplateDefinitionDto definition, @Nullable String orgWorkspaceIdsJson) {
         if (recordType == null) {
             throw invalid("A record type is required");
         }
@@ -155,7 +157,7 @@ public class RecordCreationTemplateValidator {
 
     private RecordCreationTemplateDefinitionDto canonicalDefinition(
             RecordCreationRecordType recordType,
-            RecordCreationTemplateDefinitionDto definition, String orgWorkspaceIdsJson) {
+            RecordCreationTemplateDefinitionDto definition, @Nullable String orgWorkspaceIdsJson) {
         if (definition == null || definition.schemaVersion() != 1 || definition.groups() == null) {
             throw invalid("schemaVersion must be 1 and groups must be present");
         }
@@ -204,7 +206,7 @@ public class RecordCreationTemplateValidator {
         }
         if (pipelineDefault != null && stageDefault != null) {
             Stage stage = pipelineMapper.getVisibleStageById(
-                workspaceService.getCurrentWorkspaceId(), orgWorkspaceIdsJson, stageDefault);
+                workspaceService.getCurrentWorkspaceId(), scopeJson(workspaceService.getCurrentWorkspaceId(), orgWorkspaceIdsJson), stageDefault);
             if (stage == null || stage.getPipeline() == null
                     || stage.getPipeline().getId() != pipelineDefault) {
                 throw defaultForbidden("The default stage does not belong to the default pipeline");
@@ -216,7 +218,7 @@ public class RecordCreationTemplateValidator {
     private RecordCreationTemplateFieldDto canonicalField(
             RecordCreationRecordType recordType,
             RecordCreationTemplateFieldDto field,
-            Set<String> fieldKeys, String orgWorkspaceIdsJson) {
+            Set<String> fieldKeys, @Nullable String orgWorkspaceIdsJson) {
         if (field == null || field.key() == null || field.key().isBlank()) {
             throw invalid("Every field needs a key");
         }
@@ -268,7 +270,7 @@ public class RecordCreationTemplateValidator {
             String fieldKey,
             Set<RecordCreationDefaultKind> allowedKinds,
             CustomFieldDefinition custom,
-            RecordCreationDefaultSpecDto spec, String orgWorkspaceIdsJson) {
+            RecordCreationDefaultSpecDto spec, @Nullable String orgWorkspaceIdsJson) {
         if (spec == null) {
             return null;
         }
@@ -390,15 +392,21 @@ public class RecordCreationTemplateValidator {
         }
     }
 
-    private void validateReference(int workspaceId, String fieldKey, Integer id, String orgWorkspaceIdsJson) {
+    private String scopeJson(int workspaceId, @Nullable String suppliedScopeJson) {
+        return suppliedScopeJson == null
+            ? recordVisibilityScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson()
+            : suppliedScopeJson;
+    }
+
+    private void validateReference(int workspaceId, String fieldKey, Integer id, @Nullable String orgWorkspaceIdsJson) {
         if (id == null || id <= 0) {
             throw defaultForbidden("A reference default must use a positive ID");
         }
         boolean exists = switch (fieldKey) {
-            case "company" -> companyMapper.exists(workspaceId, id);
+            case "company" -> companyMapper.exists(workspaceId, scopeJson(workspaceId, orgWorkspaceIdsJson), id);
             case "referrerPerson" -> personMapper.exists(workspaceId, id);
-            case "pipeline" -> pipelineMapper.pipelineExists(workspaceId, orgWorkspaceIdsJson, id);
-            case "stage" -> pipelineMapper.getVisibleStageById(workspaceId, orgWorkspaceIdsJson, id) != null;
+            case "pipeline" -> pipelineMapper.pipelineExists(workspaceId, scopeJson(workspaceId, orgWorkspaceIdsJson), id);
+            case "stage" -> pipelineMapper.getVisibleStageById(workspaceId, scopeJson(workspaceId, orgWorkspaceIdsJson), id) != null;
             default -> false;
         };
         if (!exists) {

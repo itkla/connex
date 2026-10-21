@@ -33,10 +33,12 @@ import ooo.klae.connex.backend.exceptions.AiAgentGoneException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException;
 import ooo.klae.connex.backend.mappers.AiAgentActionMapper;
 import ooo.klae.connex.backend.mappers.AiAgentRunMapper;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.services.WorkspaceService;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 import tools.jackson.databind.ObjectMapper;
@@ -59,11 +61,17 @@ public class AiAgentProposalDecisionService {
     private final Clock clock;
     private final ObjectMapper json;
     private final ObjectProvider<AiAgentProposalDecisionService> self;
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
 
     /** Every immutable selection is validated before the first independently committed effect. */
     @RequirePermission(Permission.AI_USE)
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public AiAgentProposalDecisionResponse decide(int id, AiAgentProposalDecisionRequest request) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(workspaces.getCurrentWorkspaceId(),
+                () -> decideWithinVisibilityScope(id, request));
+    }
+
+    private AiAgentProposalDecisionResponse decideWithinVisibilityScope(int id, AiAgentProposalDecisionRequest request) {
         reads.validateBatch(id, request);
         var results = new ArrayList<AiAgentProposalDecisionResponse.Item>();
         String stopped = null;
@@ -77,6 +85,8 @@ public class AiAgentProposalDecisionService {
                 String outcome = self.getObject().decideOne(id, request.expectedProposalRevision(), selected, principals);
                 results.add(new AiAgentProposalDecisionResponse.Item(selected.actionSlot(), outcome, null));
                 publishInvalidation(id);
+            } catch (TenantScopeSnapshotException invariant) {
+                throw invariant;
             } catch (ForbiddenException | ResourceNotFoundException | AiAgentGoneException exception) {
                 stopped = "access_lost";
                 results.add(new AiAgentProposalDecisionResponse.Item(selected.actionSlot(), "refused", stopped));
@@ -92,6 +102,8 @@ public class AiAgentProposalDecisionService {
                 try {
                     var canonical = reads.item(id, selected.actionSlot()).card();
                     reconciled = canonicalOutcome(canonical.status(), canonical.reviewState());
+                } catch (TenantScopeSnapshotException invariant) {
+                    throw invariant;
                 } catch (RuntimeException unavailable) {
                     reconciled = "indeterminate";
                 }
@@ -103,6 +115,8 @@ public class AiAgentProposalDecisionService {
             publishInvalidation(id);
             return new AiAgentProposalDecisionResponse(stopped == null, stopped, List.copyOf(results),
                     version, version, false);
+        } catch (TenantScopeSnapshotException invariant) {
+            throw invariant;
         } catch (ForbiddenException | ResourceNotFoundException | AiAgentGoneException | AiAssistantLoopException withheld) {
             return new AiAgentProposalDecisionResponse(false, "content_withheld", List.of(), null, null, true);
         } catch (RuntimeException unavailable) {
@@ -180,6 +194,9 @@ public class AiAgentProposalDecisionService {
         var required = new LinkedHashMap<Integer, Set<Permission>>();
         required.put(owner, Set.of(Permission.AI_USE));
         principals.userIds().forEach(principal -> required.putIfAbsent(principal, Set.of()));
+        if ("approve".equals(selected.decision())) {
+            recordVisibilityScopeControlAccess.getForWorkspace(workspaceId);
+        }
         var authority = workspaces.lockAndRequirePermissionsSnapshot(workspaceId, required);
         AiAgentRun discovered = runs.getRun(workspaceId, id);
         if (discovered == null || discovered.getSessionId() == null || !Objects.equals(discovered.getOwnerUserId(), owner)) {

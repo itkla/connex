@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai.mission;
 
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess;
+
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -46,8 +48,16 @@ public class AiAgentContextBuilder {
                 && snapshot.memory().evidenceReferences().isEmpty();
     }
 
+    private final RecordVisibilityScopeControlAccess recordVisibilityScopeControlAccess;
+
     /** Builds a separate model projection without provenance, canonical IDs, or session history. */
     public AiAssistantToolResult build(AiAgentExecutionPolicy policy, MaskingContext context,
+            AiChatResourceRegistry resources) {
+        return recordVisibilityScopeControlAccess.withDeferredWorkspaceScope(
+            policy.turn().workspaceId(), () -> buildWithinVisibilityScope(policy, context, resources));
+    }
+
+    private AiAssistantToolResult buildWithinVisibilityScope(AiAgentExecutionPolicy policy, MaskingContext context,
             AiChatResourceRegistry resources) {
         var snapshot = policy.persistence().snapshot(policy);
         if (!initialPreparation(policy, snapshot)

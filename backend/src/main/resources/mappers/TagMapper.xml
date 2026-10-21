@@ -3,20 +3,11 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="ooo.klae.connex.backend.mappers.TagMapper">
 
-  <resultMap id="TagFullResult" type="Tag">
-    <id property="id" column="id"/>
-    <result property="workspaceId" column="workspace_id"/>
-    <result property="name" column="name"/>
-    <result property="color" column="color"/>
-    <collection property="people" ofType="Person" column="{workspaceId=workspace_id,tagId=id}" select="ooo.klae.connex.backend.mappers.PersonMapper.getPersonsByTagId"/>
-    <collection property="companies" ofType="Company" column="{workspaceId=workspace_id,tagId=id}" select="ooo.klae.connex.backend.mappers.CompanyMapper.getCompaniesByTagId"/>
-  </resultMap>
-
   <select id="getAllTags" resultType="Tag">
     SELECT id, workspace_id, name, color FROM tag WHERE workspace_id = #{workspaceId} ORDER BY name
   </select>
 
-  <select id="getTagById" resultMap="TagFullResult">
+  <select id="getTagById" resultType="Tag">
     SELECT id, workspace_id, name, color FROM tag WHERE workspace_id = #{workspaceId} AND id = #{id}
   </select>
 

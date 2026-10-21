@@ -55,6 +55,8 @@ class AiAgentProposalDecisionServiceTest {
     private final WorkspaceService workspaces = mock(WorkspaceService.class);
     private final AiAgentRealtimePublisher realtime = mock(AiAgentRealtimePublisher.class);
     private final AiAgentCapabilityGate gate = mock(AiAgentCapabilityGate.class);
+    private final ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess recordScopes =
+            ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
     private final AiAgentProposalDecisionService transaction = mock(AiAgentProposalDecisionService.class);
     private final ObjectProvider<AiAgentProposalDecisionService> self = new ObjectProvider<>() {
         @Override
@@ -64,7 +66,7 @@ class AiAgentProposalDecisionServiceTest {
     };
     private final AiAgentProposalDecisionService service = new AiAgentProposalDecisionService(privacyGuard, reads, proposals,
             writes, actions, runs, chat, workspaces, new AiRestrictionEpoch(), realtime, gate,
-            Clock.fixed(Instant.parse("2026-10-19T00:00:00Z"), ZoneOffset.UTC), JsonMapper.builder().build(), self);
+            Clock.fixed(Instant.parse("2026-10-19T00:00:00Z"), ZoneOffset.UTC), JsonMapper.builder().build(), self, recordScopes);
     private final AiAgentProposalDecisionRequest.Item first = item("approve");
     private final AiAgentProposalDecisionRequest.Item second = item("approve");
 
@@ -201,6 +203,30 @@ class AiAgentProposalDecisionServiceTest {
     }
 
     @Test
+    void missingVisibilitySnapshotRefusesApprovalBeforeAuthorizationLocks() {
+        var failure = new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotMissingException("record visibility");
+        doThrow(failure).when(recordScopes).getForWorkspace(7);
+
+        assertThrows(ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException.class,
+                () -> service.decideOne(31, "3", first, new PreliminaryPrincipals(List.of())));
+
+        verify(workspaces, never()).lockAndRequirePermissionsSnapshot(anyInt(), any());
+        verify(runs, never()).lockRun(anyInt(), anyInt());
+    }
+
+    @Test
+    void batchDoesNotDegradeVisibilitySnapshotInvariantFailure() {
+        when(transaction.decideOne(anyInt(), anyString(), any(), any()))
+                .thenThrow(new ooo.klae.connex.backend.exceptions.TenantScopeSnapshotMissingException("record visibility"));
+
+        assertThrows(ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException.class,
+                () -> service.decide(31, request(first, second)));
+
+        verify(reads, never()).item(anyInt(), anyString());
+        verify(transaction, org.mockito.Mockito.times(1)).decideOne(anyInt(), anyString(), any(), any());
+    }
+
+    @Test
     void discardDoesNotResolveDomainTargetsOrNamedPrincipals() {
         var discard = item("discard");
         when(transaction.decideOne(anyInt(), anyString(), any(), any())).thenReturn("rejected");
@@ -252,6 +278,11 @@ class AiAgentProposalDecisionServiceTest {
 
         verify(proposals, never()).decideLocked(any(), anyString());
         verify(gate, never()).requireReady();
+        var ordered = org.mockito.Mockito.inOrder(recordScopes, workspaces, chat, runs);
+        ordered.verify(recordScopes).getForWorkspace(7);
+        ordered.verify(workspaces).lockAndRequirePermissionsSnapshot(org.mockito.ArgumentMatchers.eq(7), any());
+        ordered.verify(chat).getSessionByIdForUpdate(7, 11, 13);
+        ordered.verify(runs).lockRun(7, 31);
     }
 
     private void prepare(AiAgentProposalDecisionRequest.Item selected, int id) {

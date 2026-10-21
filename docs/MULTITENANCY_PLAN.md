@@ -247,13 +247,14 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   This preserves legacy `JOIN workspace` ceilings that had no lifecycle predicate; lifecycle
   tightening requires a separate explicit decision. It deliberately differs from the active-only
   `OrganizationWorkspaceScopeControlAccess` used by Identity, PersonEdge and assistant ceilings.
-  `IntroductionMapper`, `DuplicateReviewMapper`, `NoteMapper`, `ReportMapper`, `SegmentMapper`, and
-  `PipelineMapper` now bind this set through `JSON_TABLE` and read tenant tables only; duplicate
-  counts omit the optional employer-label joins.
+  `IntroductionMapper`, `DuplicateReviewMapper`, `NoteMapper`, `ReportMapper`, `SegmentMapper`,
+  `PipelineMapper` and `CompanyMapper` now bind this set through `JSON_TABLE` and read tenant tables only;
+  duplicate counts omit the optional employer-label joins.
   Note pages and their counts reuse one scope and author-ID snapshot, and global note search reuses
-  one scope across both bounded candidate streams. Private-note evidence resolves its scope after
-  the existing subject-visibility refusal. Note assistant history retains its separate active-only
-  organization scope. Segment evaluation reuses one unfiltered scope across nested groups, negation,
+  one scope across both bounded candidate streams. Company evidence resolves its scope before the
+  subject lookup, which now needs that ceiling; private counts still follow the subject-visibility
+  refusal. Contact evidence retains its existing subject-first admission. Note assistant history
+  retains its separate active-only organization scope. Segment evaluation reuses one unfiltered scope across nested groups, negation,
   and bounded keyset pages, including both ordinary and restricted person-company field statements.
   Its five converted statements preserve the bounded warm-intro engaged-person provision-ceased
   exception and the unbounded owned-person company-ID projection without a company visibility join.
@@ -267,6 +268,26 @@ sub-partitions inside an org. Decisions locked 2026-07-03 (recorded on #313):
   write. Workflow traversal and workspace batches explicitly reuse one scope across their independent
   transactions, restoring the synchronous operation binding on exit; routed reads continue to validate
   the prepared context on every access. Creation and import history reuse their pre-lock scopes.
+  Company's 23 converted statements retain both the company-share ceiling and the person-share
+  evidence ceiling, including deal-attributed and deal-only evidence, archive/processing restrictions,
+  member scopes, ordering, facets and SQL limits. Page/count and combined-facet service operations
+  share one snapshot. Tag definitions are scalar; `TagService.getTagById` explicitly assembles the
+  original ordered people/company/deal arrays, including empty arrays. Scalar tag mutation checks
+  retain their existing existence and audit behavior without implicit nested record queries.
+  Company validation and reference-hydrating mutation roots resolve scope before their first
+  authorization lock or mutex. Bulk mutations, import previews, signal reconciliation, watch sweeps,
+  workflow deliveries, AI evidence/skill retrieval and history compaction reuse `withWorkspaceScope`
+  across independent transactions; this does not change commits or lock ownership. Read-only and
+  independently handled work may use `withDeferredWorkspaceScope`, the deferred entry to that same
+  synchronous memo: skipped work reads nothing, and each item observes the first ordinary lookup
+  failure through its existing handler without another control query. Mutation delegates still
+  preload before authorization locks; skill steps prime the memo before their first guard/proposal,
+  and actual history compaction preloads before its first ownership guard. Snapshot-invariant
+  refusals use `TenantScopeSnapshotException` (including its existing missing-snapshot subtype)
+  and escape partial-result handlers. Routed reads always revalidate prepared data and destructive
+  fresh reads bypass both memos. The Company
+  parity corpus extends the shared frozen oracle and minimal tenant-catalog fixture without changing
+  existing corpora, and its scratch catalog contains only the ten tenant tables used by these statements.
   These mappers' crossing baseline entries are removed. Segment calls already inside campaign and
   workflow locks retain their transaction shape; #2159 (L-scope) owns the context-installed snapshot
   and fail-fast guard required before catalog routing can be enabled. The routing default

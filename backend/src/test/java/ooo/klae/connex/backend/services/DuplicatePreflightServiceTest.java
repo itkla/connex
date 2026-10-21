@@ -70,7 +70,7 @@ class DuplicatePreflightServiceTest {
             workspaceService,
             workspaceScopeControlAccess,
             rateLimiter,
-            dealReviewProofService);
+            dealReviewProofService, ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
         org.mockito.Mockito.lenient()
             .when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         org.mockito.Mockito.lenient()
@@ -385,7 +385,7 @@ class DuplicatePreflightServiceTest {
         Company company = new Company();
         company.setId(18);
         company.setName("Acme");
-        when(companyMapper.getCompanyById(7, 18)).thenReturn(company);
+        when(companyMapper.getCompanyById(7, "[7,8,9]", 18)).thenReturn(company);
 
         DuplicatePreflightResponse response = service.preflightDeal(request);
 

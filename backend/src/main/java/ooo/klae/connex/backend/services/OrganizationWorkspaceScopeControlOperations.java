@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import ooo.klae.connex.backend.exceptions.TenantScopeSnapshotException;
+
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -26,14 +28,14 @@ public class OrganizationWorkspaceScopeControlOperations {
     public WorkspaceScope getForWorkspace(int workspaceId) {
         Integer orgId = workspaceMapper.getOrgId(workspaceId);
         if (orgId == null) {
-            throw new IllegalStateException("Workspace " + workspaceId + " does not exist");
+            throw new TenantScopeSnapshotException("Workspace " + workspaceId + " does not exist");
         }
         List<Integer> workspaceIds = workspaceMapper.findByOrgId(orgId).stream()
             .map(Workspace::getId)
             .sorted()
             .toList();
         if (!workspaceIds.contains(workspaceId)) {
-            throw new IllegalStateException("Workspace " + workspaceId + " is missing from organization " + orgId);
+            throw new TenantScopeSnapshotException("Workspace " + workspaceId + " is missing from organization " + orgId);
         }
         String workspaceIdsJson = workspaceIds.stream()
             .map(String::valueOf)

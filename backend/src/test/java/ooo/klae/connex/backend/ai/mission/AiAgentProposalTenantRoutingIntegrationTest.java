@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai.mission;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -140,7 +142,7 @@ class AiAgentProposalTenantRoutingIntegrationTest extends AbstractAiAgentProposa
                 + "`.ai_chat_tool_call WHERE workspace_id=? AND id=?", String.class, foreignWorkspace.getId(), originalCall.getId()));
         authenticateAs(currentUser, workspace.getId());
         assertEquals("proposed", chatMapper.getMissionToolCallForMaintenance(workspace.getId(), original.runId(), original.selected().getFirst().getId()).getStatus());
-        assertEquals(primary.getOwnerId(), companyMapper.getCompanyById(workspace.getId(), primary.getId()).getOwnerId());
+        assertEquals(primary.getOwnerId(), companyMapper.getCompanyById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), primary.getId()).getOwnerId());
         String defaultOutput = http.perform(get(outputPath).session(session).header("X-Workspace-Id", workspace.getId()))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertFalse(defaultOutput.contains("Foreign colliding"));
