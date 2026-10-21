@@ -28,7 +28,7 @@ const boundary = vi.hoisted(() => {
 });
 
 vi.mock('next/navigation', () => ({
-    useParams: () => ({ sessionId: '4' }),
+    useSearchParams: () => new URLSearchParams(), useParams: () => ({ sessionId: '4' }),
     usePathname: () => '/ask-connex/4',
     useRouter: () => boundary.router,
 }));

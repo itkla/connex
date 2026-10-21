@@ -121,7 +121,10 @@
         "queuePageEmptyTitle": "No more items on this page",
         "queuePageEmptyBody": "Everything past the first page has been handled or moved.",
         "queueBackToFirstPage": "Back to the first page",
-        "queueAsOf": "Checked {at}"
+        "queueAsOf": "Checked {at}",
+        "queueSource_ai_mission": "Record preparation",
+        "queueReason_mission_review_pending": "Changes are ready for your review.",
+        "queueEvidence_mission_output_prepared": "Changes prepared"
     },
     "MeNoteList": {
         "emptyTitle": "No notes yet",

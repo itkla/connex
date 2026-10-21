@@ -171,6 +171,8 @@ export type AskConnexToolCardLabels = {
     recordLink: (target: string) => string;
     rejectedDetail: string;
     rejectedStatus: string;
+    withdrawnDetail?: string;
+    withdrawnStatus?: string;
     restrictedTarget: string;
     undo: string;
     undoAria: (target: string) => string;
@@ -214,6 +216,11 @@ function statusPresentation(
             className: 'border-primary/25 bg-primary/5',
             badgeVariant: 'default',
         };
+    }
+    if (status === 'withdrawn') {
+        return { icon: NoSymbolIcon, label: labels.withdrawnStatus ?? labels.proposalUnavailable,
+            detail: labels.withdrawnDetail ?? labels.proposalUnavailable,
+            className: 'border-border bg-muted/40', badgeVariant: 'secondary' };
     }
     if (status === 'rejected') {
         return {

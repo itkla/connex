@@ -1,4 +1,4 @@
-# Durable read-only missions
+# Durable missions
 
 Phase 2 slice 2 retains `record_review_v1` definition 1 and introduces runtime contract 2
 for new requests. V235 adds continuation columns and replaces V232's single-segment
@@ -6,6 +6,10 @@ constraint with bounded immutable attempt-number triggers. Existing runtime-1 re
 replay unchanged and execute one logical segment with at most three attempts. Runtime 2
 allows logical segments 1–8, each with attempts 1–3. Neither version permits domain writes,
 questions, proposals, action slots, or larger root limits.
+
+Phase 2 slice 3 adds `record_preparation_v1 / 1 / 3` and V238 singleton proposals.
+Its preparation, review, expiry and source-privacy contracts are defined under
+[Record preparation and singleton review](#record-preparation-and-singleton-review-v238).
 
 ## Execution and scope
 
@@ -31,10 +35,12 @@ Runtime 2 adds only mission-specific `set_todos` and `checkpoint_segment` bookke
 
 ## Durable continuation and model projection
 
-`ai_agent_run` holds compact canonical UTF-8 TEXT plan, checkpoint and memory envelopes,
-all schema 1. Creation initializes their revisions to 1 and the committed cursor to 0.
+`ai_agent_run` holds compact canonical UTF-8 TEXT plan, checkpoint and memory envelopes.
+Runtime 2 uses schema 1; runtime 3 retains plan/memory schema 1 and uses checkpoint schema 2.
+Creation initializes their revisions to 1 and the committed cursor to 0.
 Missing payloads are malformed state. The compatibility catalog accepts only
-`record_review_v1 / 1 / 1` with empty continuation or `/ 1 / 2` with valid bound envelopes.
+`record_review_v1 / 1 / 1` with empty continuation, `/ 1 / 2` with valid bound envelopes,
+or `record_preparation_v1 / 1 / 3` with valid source-observation/action inventory envelopes.
 Unknown definitions, runtimes, schemas or continuation discriminators expose metadata and
 safe stop controls only. They cannot reconstruct, claim, resume, publish or export content.
 Privacy cleanup and expiry never decode payloads.
@@ -168,8 +174,8 @@ rebuilds context. Only the existing final report transaction creates a report.
 
 Orphan settlement preserves continuation/cursor and original caps/deadlines, settles the
 attempt and changes the run to `paused/interrupted`, with lease takeover/release last.
-A separate freshly authorized transaction may queue only supported, unexpired runtime-2
-interrupted READ work with allowance and fewer than three attempts for the next logical
+A separate freshly authorized transaction may queue only supported, unexpired runtime-2/3
+interrupted work with allowance and fewer than three attempts for the next logical
 segment. Discovery excludes exhausted next-segment attempts before applying its page limit,
 so stopped exhausted runs cannot starve later eligible work. It spends no attempt and touches no lease. Member/content/schema/access/source/
 budget/provider/deadline stops never automatically retry. The runner preserves actual
@@ -180,11 +186,12 @@ an acknowledged current-version pause prevents automatic claim.
 
 ## Session API and presentation
 
-The session create endpoint accepts only `record_review_v1`, the primary scope, bounded
+The session create endpoint accepts `record_review_v1` or `record_preparation_v1`, the primary scope, bounded
 goal/limits, and a UUID request key. A successful create returns 202 and a canonical
 Location. Same-key replay preserves the original run and deadline; a changed body conflicts
 and a consumed purged key returns 410. Controls require the decimal-string state version.
-Create bodies are capped at 96 KiB; control and DSR initiation bodies at 4 KiB.
+Create bodies are capped at 96 KiB; control and DSR initiation bodies at 4 KiB;
+proposal decision bodies at 16 KiB.
 
 Browser mission creation and controls pin `X-Workspace-Id` to the rendered workspace,
 including creation delayed by chat-session provisioning. The shared tenant interceptor
@@ -196,8 +203,8 @@ List/detail/output/control APIs require current requester membership, AI permiss
 session access including an active session creator. They never grant the session creator
 control over another requester's mission. Withheld projections expose metadata and safe
 controls only; output refuses stale, blocked, purged, and unknown-runtime content. Lists
-use an owner/filter-bound keyset cursor independently of transcript limits. Reports have
-an empty review collection in this slice.
+use an owner/filter-bound keyset cursor independently of transcript limits. Read-only reports
+have an empty review collection; runtime-3 reports carry their exact frozen collection.
 
 Realtime messages are six-field metadata invalidations on the requester's private channel.
 Fresh access, generation, and state-version checks run immediately before send; the client
@@ -211,7 +218,7 @@ same frontend files through its normal sync script.
 
 Organization authority is unconditional after V237, including for never-tainted chats. The
 workspace-generation and taint rules below govern the additional mission-v1 namespace; they do not
-exempt any chat from organization invalidation. See [the all-chat contract](#organization-wide-assistant-privacy-v236v237).
+exempt any chat from organization invalidation. See [the all-chat contract](#all-chat-privacy-cutover-control-v236-tenant-v237).
 
 Each workspace owns one `ai_agent_privacy_barrier`. Its generation is durable and
 monotonic. A missing barrier fails closed. Runtime generation and revision values use
@@ -296,7 +303,7 @@ A workflow status change never initiates deletion. Organization administrators e
 POST to `/api/orgs/{orgId}/data-subject-requests/{requestId}/mission-holdings-purge`.
 Both versions retain recent authentication, identity verification, linked-subject proof, the current
 full-state `dsr1` snapshot and UUID key requirements. New browser submissions use v2, described in
-[the all-chat contract](#organization-wide-assistant-privacy-v236v237). The original v1 pair remains:
+[the all-chat contract](#all-chat-privacy-cutover-control-v236-tenant-v237). The original v1 pair remains:
 
 - `organization_mission_holdings_v1`
 - `contents_at_each_workspace_first_invalidation_v1`
@@ -394,9 +401,9 @@ before work rows and barriers. Tenant registry residual verification remains man
 Missions remain disabled by default. Initial activation requires one serving application
 JVM, initialized workspace and organization authority, completed active-attempt reconciliation,
 and the full compatible reader/writer rollout. Drain incompatible serving binaries, scheduled
-workers and in-flight writers before V236/V237. Upgrades crossing V232 must also retain that
+workers and in-flight writers before control V236 → tenant V237 → tenant V238. Upgrades crossing V232 must also retain that
 version's stopped-writer sequence-backfill procedure.
-V237 is the rollback floor, including with AI and missions disabled. Multi-instance activation requires the separately reviewed
+V238 is the rollback floor, including with AI and missions disabled. Multi-instance activation requires the separately reviewed
 #941 distributed fencing contract.
 
 Focused continuation selectors are `AiAgentContinuationCodecTest`, `AiAgentPlanServiceTest`,
@@ -471,3 +478,110 @@ After control-root deletion, the durable cleanup tombstone supplies the `tearing
 for the second residual sweep and later teardown retries. An existing workspace root takes
 precedence over a tombstone; without either root or tombstone, lifecycle cleanup remains unavailable.
 The tombstone does not replace missing accepted organization-operation placement evidence.
+
+## Record preparation and singleton review (V238)
+
+`record_preparation_v1 / 1 / 3` prepares the existing CONFIRM tools against the immutable
+primary person, company or deal. Runtime 1/2 behavior and the runtime-2 database default
+remain unchanged. Runtime 3 permits no AUTO effects, task writes, creation, cohort expansion,
+standing-approval lookup, or P1.3 producer. It keeps the same execution, segment and decision
+bounds. Its hard deadline is the fixed execution deadline plus 72 hours.
+
+One root is one logical collection. `ai_agent_action` owns stable server UUID slots, semantic
+target/tool identity, original plan association, preparation UUID/fingerprint, pre-read
+preparation/source anchors and dense frozen output ordinals. Prepared arguments, trust,
+decisions and receipts belong exclusively to `ai_chat_tool_call`. Mission singletons use
+explicit `proposal_origin=mission` and a source FK; all V233 membership columns remain NULL.
+Allocation precedes dispatch in canonical tool order under run X. Bound same-intent replay
+keeps the original pins and anchors; changed intent refuses `action_intent_conflict`.
+
+Checkpoint schema 2 carries strict, bounded source observations and up to 50 action references,
+independently of the 20 lifetime plan keys. Observation timestamps are captured before each
+read, kept apart from version equality and preserved across continuation. Complete candidate
+source vectors are revalidated before binding and final freeze. A changed bound source stops
+with `source_changed`; refreshing requires a new mission.
+
+Freeze commits report, complete bound membership, ordinal assignment and review state together.
+Unused slots stay outside output. Nonempty output enters `waiting_approval` without a live
+attempt/lease; empty output completes without a review deadline. Review ends at the earlier
+of the earliest original preparation plus 72 hours and the hard deadline. Frozen membership
+never changes. Each canonical decision advances state/output revision, even while still waiting.
+Waiting survives execution expiry, cannot pause/resume, and supports cancellation and review.
+
+The requester explicitly selects independent apply/discard decisions. Every item has its own
+ordered READ COMMITTED transaction; there is no batch transaction. Immutable collection and
+preparation contracts for the complete request are validated before processing. Later failures
+stop the batch while preserving earlier committed outcomes under current disclosure authority.
+Infrastructure failures reconcile the failing item using a fresh authorized canonical read;
+failed reconciliation produces `indeterminate`, stops processing and disarms that item. The
+frontend retains outcomes by action slot and preparation UUID across decision batches and
+reopened review. Only a successful canonical read showing that preparation settled removes its
+retained outcome; a pending read keeps uncertainty disarmed. Terminal retries return the actual
+executed, rejected, withdrawn or undone outcome
+before checking waiting state/deadline. Business refusal leaves a pending item disarmed.
+Discard needs AI/session authority without domain-edit authority. Final approval admission
+checks the immutable deadline after domain-lock and privacy contention.
+Deadline refusal at final mutation admission leaves the canonical item pending and returns `refused` with
+`mission_review_expired`; effective expiry on a read is not a committed withdrawal.
+
+Cancellation, fatal settlement, departure and review expiry discover all pending proposals by
+root/action linkage, independently of checkpoint contents. They record canonical `failed` /
+`mission_withdrawn`, preserving executed/rejected/undone receipts. Completing review never
+replaces a cancelled/failed root with done. Reads derive expiry immediately, disarming cards
+and excluding My Work without mutating persisted expiry under a read barrier.
+
+Output and item reads retain authority, exact session S, root S, organization privacy S and
+workspace privacy barrier S through DTO materialization. Frozen membership is read independently of transcript limits. Ordinary,
+retained, overflow and known-ID reactive paths exclude mission proposals. Metadata/control
+authorization is separate: unsupported schemas and blocked/stale generations preserve safe
+list/detail metadata with `contentWithheld` and cancellation; content and counts remain hidden.
+Primary-record visibility loss follows the same metadata path: expected content refusals are
+handled within a non-throwing projection participant, so they do not mark its metadata
+transaction rollback-only. Lists discover a bounded page without locks, then project each
+item in its own transaction, releasing its content roots and barrier before the next item.
+Requester-only product visibility does not restrict lawful tenant export authority.
+Direct proposal-item HTTP reads retain support-journal failures. The shipped client refreshes
+complete output; it does not issue automatic item reads that justify suppressing those failures.
+
+My Work projects one authorized, unexpired waiting root with pending proposals, normal urgency,
+review due date and frozen freshness. Bounded discovery counts only projected roots and reports
+incomplete totals when its scan is exhausted. Its only action opens exact mission review.
+Realtime remains a private six-field invalidation; review changes advance durable state version.
+After commit, publication retains current requester authority, exact session/root shared locks
+and ordered restriction, publication, organization and workspace privacy fences through the local
+broker enqueue. Mission frames carry the same immutable organization token through the outbound
+queue and encoded concurrent-session buffer as ordinary chat. The final WebSocket transport write
+rechecks fresh control authority under publication S; invalidation suppresses already-buffered
+frames. Revoked or superseded sources produce no frame.
+The existing session UI reloads exact output on revision/focus/reconnect and uses shared cards.
+Decision responses bind to frozen membership and preparation identity across concurrent
+state/output revision changes. Every settled batch clears pending indicators; refused and
+indeterminate selections remain disarmed even when canonical reload fails. An attempted item
+that loses domain permission is refused; only skipped selections are `not_processed`.
+Access-refusing refreshes invalidate pending decision reads before clearing private output,
+so a late canonical response cannot restore content after access is lost.
+
+V238 actions, frozen membership, mission-origin canonical calls and proposal outputs belong to
+the original session organization generation. They are governed by the same `AiChatPrivacyGuard`,
+`AiAssistantPrivacyService` and publication guard as ordinary chats. Decisions and freeze retain
+organization authority after content/domain roots and restriction fences, before workspace
+barriers, audit heads and leases. Organization invalidation refuses decisions immediately.
+
+Actions participate in tenant lifecycle at order 451, export and unconditional residual checks.
+Privacy pruning locks all actions before all canonical calls, withdraws pending proposals,
+settles the active attempt once, deletes at most 25 actions/cascaded calls per transaction and
+retains the run cursor until no actions remain. Only then does it clear all four review fields
+with the tombstone and remove bounded attempts. Completion checks action/canonical residues,
+review metadata and schema-2 checkpoints without discovery watermark limits. Erasure removes
+AI holdings and receipts, preserving committed domain changes. The existing `AiAgentPrivacyService`
+phases also include those rows during pre-cutover bootstrap, acknowledged DSR all-chat v2,
+restriction sweeps and lifecycle-authorized full-workspace cleanup. Whole-session v2 erasure
+drains source-linked proposal storage before removing its session; uncapped residual verification
+checks actions, canonical calls, frozen-review metadata and outputs after every bounded pass.
+Positive object receipts and placement evidence remain prerequisites for completion. Export
+decodes source JSON using explicit UTF-8 transport and validates runtime, review metadata and
+action provenance; all-chat invalidation cancels affected exports at actual publication.
+
+V238 raises the rollback floor; see [UPGRADING](../UPGRADING.md#mission-singleton-proposals-tenant-v238)
+and the [lock matrix](LOCKING.md#mission-singleton-proposals-v238). Activation still requires a
+single serving JVM and approved live staging evidence; this slice does not authorize a live run.

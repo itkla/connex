@@ -73,6 +73,7 @@ Numbered and testable. Cite them by number in reviews.
 | The relationship metric (the differentiator) | **Warmth**; bands: **warmth band** (hot / warm / cool / cold); trend: "warmth is cooling" | **温度感**; bands: **温度帯**（ホット／ウォーム／クール／コールド） | relationship temperature, temperature band, relationship score; 温度バンド, 関係の温度, 関係性の温度, 関係スコア, 温度 alone as the metric name |
 | The signals triage surface | **Radar** ("Relationship Radar" only as an occasional full name in onboarding/marketing prose) | **レーダー** | Relationship Radar as the everyday label |
 | Read-only Ask Connex review of one selected record | **Record review** | **レコードの確認** | — |
+| Ask Connex preparation of changes to one selected record for explicit review | **Record preparation** | **レコードの変更案作成** | — |
 | The personal work page | **My Work** — your tasks, your relationships, your follow-ups | **マイワーク** | Profile (for this page); マイページ |
 | Company record | **Company** | **会社** | account (for the record); アカウント, 取引先 (legal pages: allowed) |
 | Person record | **Contact** (labels, columns, counts, search groups); "person/people" only inside explanatory prose | **連絡先**; 文中の「人」は可 | People (as a label for contact lists) |

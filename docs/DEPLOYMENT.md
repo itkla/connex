@@ -363,7 +363,7 @@ create bodies active. Set it to `true` only in the coupled release whose fronten
 nested person, company, and deal create bodies; the enabled backend rejects legacy flat bodies and
 has no compatibility fallback. Values other than the exact literals `true` and `false` fail backend
 startup.
-Record-review missions remain disabled independently of ordinary AI. V232 requires draining all older backends and background message writers, applying the durable sequence backfill, and starting only compatible readers/writers. See [the V232 upgrade cutover](UPGRADING.md#v232-mission-privacy-and-message-sequence-cutover). Activation additionally requires `connex.ai.missions-enabled=true`, `connex.ai.missions-single-jvm-confirmed=true`, successful routed initialization, and an exact `connex.ai.mission-capabilities` declaration containing provider, endpoint, model and `capability: missions_v1`. Absence or loss of any gate refuses execution; stopping and privacy maintenance remain available. Keep disabled until #2101 contains the required MySQL, trajectory, browser and approved synthetic staging evidence. V237 is the rollback floor even while AI and mission flags are off.
+Record review and Record preparation missions remain disabled independently of ordinary AI. V232 requires draining all older backends and background message writers, applying the durable sequence backfill, and starting only compatible readers/writers. See [the V232 upgrade cutover](UPGRADING.md#v232-mission-privacy-and-message-sequence-cutover). Activation additionally requires `connex.ai.missions-enabled=true`, `connex.ai.missions-single-jvm-confirmed=true`, successful routed initialization, and an exact `connex.ai.mission-capabilities` declaration containing provider, endpoint, model and `capability: missions_v1`. Absence or loss of any gate refuses execution; stopping and privacy maintenance remain available. Keep disabled until #2101 contains the required MySQL, trajectory, browser and approved synthetic staging evidence. V238 is the rollback floor even while AI and mission flags are off. Apply control V236 → tenant V237 → tenant V238 in order. Drain serving binaries and mission workers for the singleton-proposal cutover, deploy compatible publication/decision/privacy/export paths together, and keep missions disabled until their evidence is complete; see [the V238 cutover](UPGRADING.md#mission-singleton-proposals-tenant-v238).
 
 AI remains instance-disabled unless `CONNEX_AI_ENABLED=true`. When the master switch is enabled,
 operators may independently disable deal briefs, deal-risk rationales, introduction rationales,
@@ -1043,12 +1043,14 @@ assignment types absent. No schema migration or new dependency is required. Camp
 can now return the existing 409 membership-changing conflict when the target row is busy; callers
 resubmit rather than retry inside the transaction.
 
-### Assistant privacy cutover V236/V237
+### Assistant privacy and singleton-proposal cutover V236/V237/V238
 
 Drain incompatible serving JVMs, scheduled workers and in-flight chat writers before control V236
-and tenant V237. Only privacy-compatible binaries may start afterward, with one serving JVM until
-#941. The rollback floor is tenant V237 even with AI/missions disabled. Proposal-set emission remains
-disabled. Bootstrap and object cleanup continue independently of feature flags. Unreachable
+and tenant V237, followed by tenant V238. Only binaries compatible with organization privacy and
+runtime-3 proposal holdings may start afterward, with one serving JVM until #941. The rollback floor
+is tenant V238 even with AI/missions disabled. Proposal-set emission remains
+disabled; runtime-3 mission singleton proposals use their separate source-linked storage. Bootstrap,
+DSR all-chat cleanup and object cleanup include that storage independently of feature flags. Unreachable
 placements or unreceipted object deletions keep erasure pending. Before serving a restore, reconcile
 original organization operations, placement receipts and generation-0 holdings; never promote
 restored content into the current generation. Use forward fixes for normal recovery.

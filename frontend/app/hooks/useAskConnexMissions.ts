@@ -2,11 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { ApiError, controlAiAgentRun, createAiAgentRun, getAiAgentOutput, getAiAgentRun, getAiAgentRuns, isWorkspaceUnavailableError } from '@/app/lib/api';
-import { askConnexMissionProblem, newerAskConnexMission, type AskConnexMissionProblem } from '@/app/lib/askConnexMissions';
+import { ApiError, controlAiAgentRun, createAiAgentRun, decideAiAgentProposals, getAiAgentOutput, getAiAgentRun, getAiAgentRuns, isWorkspaceUnavailableError } from '@/app/lib/api';
+import { askConnexMissionProblem, askConnexMissionProposalGroup, newerAskConnexMission, type AskConnexMissionProblem } from '@/app/lib/askConnexMissions';
+import { askConnexToolCardAffordances } from '@/app/lib/askConnex';
+import { useProposalReviewNow } from '@/app/hooks/useProposalReviewNow';
 import { workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
-import type { AiAgentOutput, AiAgentRecordScope, AiAgentRun, AiAgentRunControl, AiAgentRunCreateRequest } from '@/app/lib/types';
+import type { AiAgentMissionType, AiAgentOutput, AiAgentProposalDecisionRequest, AiAgentProposalDecisionResult, AiAgentRecordScope, AiAgentRun, AiAgentRunControl, AiAgentRunCreateRequest } from '@/app/lib/types';
 
 const REFRESH_INTERVAL_MS = 5_000;
 const MAX_REFRESH_INTERVAL_MS = 30_000;
@@ -21,6 +23,29 @@ type MissionSnapshot = {
     pendingId: number | null;
 };
 
+type MissionDecisionResult = {
+    batch: AiAgentProposalDecisionResult;
+    outcomes: ReadonlyMap<string, AiAgentProposalDecisionResult['items'][number]>;
+};
+
+/** Retains every batch's outcomes against the exact preparation that was decided. */
+function mergeMissionDecisionResult(
+    previous: MissionDecisionResult | null,
+    batch: AiAgentProposalDecisionResult,
+    items: AiAgentProposalDecisionRequest['items'],
+): MissionDecisionResult {
+    const outcomes = new Map(previous?.outcomes);
+    const batchOutcomes = new Map<string, AiAgentProposalDecisionResult['items'][number]>();
+    for (const outcome of batch.items) {
+        if (!batchOutcomes.has(outcome.actionSlot)) batchOutcomes.set(outcome.actionSlot, outcome);
+    }
+    for (const item of items) {
+        const outcome = batchOutcomes.get(item.actionSlot);
+        if (outcome) outcomes.set(`${item.actionSlot}:${item.expectedPreparationId}`, outcome);
+    }
+    return { batch, outcomes };
+}
+
 function activeMissionRevision(runs: readonly AiAgentRun[]): string {
     const revisions: string[] = [];
     for (const run of runs) {
@@ -29,6 +54,13 @@ function activeMissionRevision(runs: readonly AiAgentRun[]): string {
         }
     }
     return revisions.join(',');
+}
+
+function withholdMission(run: AiAgentRun): AiAgentRun {
+    return { ...run, contentWithheld: true, outputAvailable: false, outputRevision: null, goal: null,
+        scope: null, progress: null, proposalCounts: null, proposalMembershipRevision: null,
+        proposalFrozenAt: null, proposalFirstPreparedAt: null, reviewExpiresAt: null,
+        availableActions: run.availableActions.filter((action) => action === 'cancel') };
 }
 
 /**
@@ -55,6 +87,51 @@ export function useAskConnexMissions({
     const [snapshot, setSnapshot] = useState<MissionSnapshot | null>(null);
     const [reload, setReload] = useState(0);
     const current = enabled && snapshot?.key === key ? snapshot : null;
+    const [reviewState, setReviewState] = useState<{
+        key: string;
+        excluded: ReadonlySet<number>;
+        pending: ReadonlyMap<number, 'approve' | 'reject'>;
+    } | null>(null);
+    const [decisionResults, setDecisionResults] = useState<ReadonlyMap<string, MissionDecisionResult>>(new Map());
+    const reviewKey = current?.output ? `${key}:${current.output.runId}:${current.output.proposalSet.revision}` : null;
+    const review = reviewState?.key === reviewKey ? reviewState : null;
+    const retainedResult = reviewKey ? decisionResults.get(reviewKey) : null;
+    const decisionResult = retainedResult && current?.output ? { ...retainedResult.batch,
+        items: current.output.proposalSet.items.flatMap((item) => {
+            const outcome = retainedResult.outcomes.get(`${item.actionSlot}:${item.preparationId}`);
+            return outcome ? [outcome] : [];
+        }) } : null;
+    const retainDecisionResult = useCallback((reviewKey: string, batch: AiAgentProposalDecisionResult,
+        items: AiAgentProposalDecisionRequest['items']) => {
+        setDecisionResults((previous) => new Map(previous).set(reviewKey,
+            mergeMissionDecisionResult(previous.get(reviewKey) ?? null, batch, items)));
+    }, []);
+    const now = useProposalReviewNow(current?.output ? [current.output.proposalSet.reviewExpiresAt] : []);
+    const proposalGroup = current?.output ? askConnexMissionProposalGroup(current.output,
+        review?.excluded ?? new Set(), review?.pending ?? new Map(), decisionResult, now) : null;
+    const retainedOutputRef = useRef<AiAgentOutput | null>(null);
+    const outputViewRef = useRef(0);
+    useEffect(() => { retainedOutputRef.current = current?.output ?? null; }, [current?.output]);
+    useEffect(() => {
+        const output = current?.output;
+        if (!output || !reviewKey) return;
+        setDecisionResults((previous) => {
+            const result = previous.get(reviewKey);
+            if (!result) return previous;
+            const outcomes = new Map(result.outcomes);
+            for (const item of output.proposalSet.items) {
+                if (item.card.status !== 'proposed'
+                    || item.card.reviewState === 'withdrawn' || item.card.reviewState === 'undone') {
+                    outcomes.delete(`${item.actionSlot}:${item.preparationId}`);
+                }
+            }
+            if (outcomes.size === result.outcomes.size) return previous;
+            const next = new Map(previous);
+            if (outcomes.size > 0) next.set(reviewKey, { ...result, outcomes });
+            else next.delete(reviewKey);
+            return next;
+        });
+    }, [current?.output, reviewKey]);
     const controllerRef = useRef<AbortController | null>(null);
     const refreshRef = useRef(0);
     const operationRef = useRef(false);
@@ -74,6 +151,8 @@ export function useAskConnexMissions({
         const controller = new AbortController();
         controllerRef.current = controller;
         operationRef.current = false;
+        setReviewState(null);
+        setDecisionResults(new Map());
         loadedPagesRef.current = 1;
         pollStateRef.current = null;
         setSnapshot({ key, runs: [], nextCursor: null, loading: sessionId !== null, problem: null, output: null, pendingId: null });
@@ -84,10 +163,13 @@ export function useAskConnexMissions({
     }, [enabled, key, sessionId]);
 
     useEffect(() => {
-        if (!visible) setSnapshot(null);
+        if (!visible) {
+            outputViewRef.current++;
+            setSnapshot(null);
+        }
     }, [visible]);
 
-    const refresh = useCallback(async () => {
+    const refresh = useCallback(async (reloadOutput = false) => {
         const signal = controllerRef.current?.signal;
         if (!enabled || sessionId === null || !signal || signal.aborted) return;
         if (pollTimerRef.current !== null) {
@@ -95,6 +177,7 @@ export function useAskConnexMissions({
             pollTimerRef.current = null;
         }
         const revision = ++refreshRef.current;
+        const outputView = outputViewRef.current;
         try {
             let page = await getAiAgentRuns({ sessionId, limit: 20 }, { signal });
             const runs = [...page.items];
@@ -116,15 +199,42 @@ export function useAskConnexMissions({
             pollStateRef.current = { key, revision: activeRevision,
                 delay: previousPoll?.key === key && previousPoll.revision === activeRevision
                     ? Math.min(previousPoll.delay * 2, MAX_REFRESH_INTERVAL_MS) : REFRESH_INTERVAL_MS };
+            const openOutput = retainedOutputRef.current;
+            const outputRun = runs.find((run) => run.id === openOutput?.runId && run.outputAvailable && !run.contentWithheld);
+            if (openOutput !== null && outputRun === undefined) {
+                outputViewRef.current++;
+                setReviewState(null);
+                setDecisionResults(new Map());
+            }
+            const outputChanged = openOutput !== null && outputRun !== undefined
+                && (reloadOutput || outputRun.outputRevision !== openOutput.outputRevision);
             setSnapshot((previous) => ({
                 key, runs, nextCursor: page.nextCursor, loading: false, problem: null,
                 output: previous?.key === key && runs.some((run) => run.id === previous.output?.runId
-                    && run.outputAvailable && !run.contentWithheld) ? previous.output : null,
+                    && run.outputAvailable && !run.contentWithheld && run.outputRevision === previous.output.outputRevision) ? previous.output : null,
                 pendingId: previous?.key === key ? previous.pendingId : null,
             }));
-            if (contentInvalidated) invalidatedRef.current?.(sessionId);
+            if (contentInvalidated) {
+                outputViewRef.current++;
+                setReviewState(null);
+                setDecisionResults(new Map());
+                invalidatedRef.current?.(sessionId);
+            } else if (outputChanged && outputRun) {
+                const output = await getAiAgentOutput(outputRun.id, { signal });
+                if (!signal.aborted && revision === refreshRef.current && outputView === outputViewRef.current) {
+                    setSnapshot((previous) => previous?.key === key && previous.runs.some((run) =>
+                        run.id === output.runId && run.outputRevision === output.outputRevision && !run.contentWithheld)
+                        ? { ...previous, output } : previous);
+                }
+            }
         } catch (error) {
             if (signal.aborted || revision !== refreshRef.current) return;
+            if (error instanceof ApiError && [401, 403, 404, 410].includes(error.status)) {
+                outputViewRef.current++;
+                setReviewState(null);
+                setDecisionResults(new Map());
+                invalidatedRef.current?.(sessionId);
+            }
             setSnapshot({ key, runs: [], nextCursor: null, loading: false, output: null, pendingId: null,
                 problem: error instanceof ApiError ? askConnexMissionProblem(error.status, error.code) : 'failed' });
         }
@@ -133,8 +243,30 @@ export function useAskConnexMissions({
     useEffect(() => {
         if (!enabled || !visible || sessionId === null) return;
         pollStateRef.current = null;
-        void refresh();
+        void refresh(true);
     }, [enabled, refresh, refreshVersion, reload, sessionId, visible]);
+
+    useEffect(() => {
+        if (!enabled || !visible) return;
+        const reloadCanonical = () => { void refresh(true); };
+        window.addEventListener('focus', reloadCanonical);
+        window.addEventListener('online', reloadCanonical);
+        return () => {
+            window.removeEventListener('focus', reloadCanonical);
+            window.removeEventListener('online', reloadCanonical);
+        };
+    }, [enabled, refresh, visible]);
+
+    const deadlineRefreshRef = useRef<string | null>(null);
+    const reviewDeadline = current?.output?.proposalSet.reviewExpiresAt;
+    const expiredReview = Boolean(reviewDeadline && now >= Date.parse(reviewDeadline));
+    useEffect(() => {
+        const deadlineKey = `${key}:${current?.output?.runId}:${reviewDeadline}`;
+        if (expiredReview && deadlineRefreshRef.current !== deadlineKey) {
+            deadlineRefreshRef.current = deadlineKey;
+            void refresh(true);
+        }
+    }, [current?.output?.runId, expiredReview, key, refresh, reviewDeadline]);
 
     useEffect(() => {
         if (!enabled || !visible || !current?.runs.length) return;
@@ -166,18 +298,20 @@ export function useAskConnexMissions({
             const updated = existing ? newerAskConnexMission(existing, run) : run;
             return { ...previous, problem: null, loading: false,
                 runs: [updated, ...previous.runs.filter((item) => item.id !== run.id)].sort((a, b) => b.id - a.id),
-                output: updated.contentWithheld || !updated.outputAvailable ? null : previous.output };
+                output: updated.contentWithheld || !updated.outputAvailable
+                    || (previous.output?.runId === updated.id && previous.output.outputRevision !== updated.outputRevision)
+                    ? null : previous.output };
         });
     }, [key, sessionId]);
 
-    const create = useCallback(async (targetSessionId: number, goal: string, scope: AiAgentRecordScope, creationSignal?: AbortSignal): Promise<boolean> => {
+    const create = useCallback(async (targetSessionId: number, goal: string, scope: AiAgentRecordScope, creationSignal?: AbortSignal, missionType: AiAgentMissionType = 'record_review_v1'): Promise<boolean> => {
         const signal = creationSignal ?? controllerRef.current?.signal;
         if (!enabled || operationRef.current || !signal || signal.aborted) return false;
         const previous = creationRef.current;
         const body: AiAgentRunCreateRequest = previous?.identity === identity
-            && previous.sessionId === targetSessionId && previous.body.goal === goal
+            && previous.sessionId === targetSessionId && previous.body.goal === goal && previous.body.missionType === missionType
             && previous.body.scope.recordKind === scope.recordKind && previous.body.scope.recordId === scope.recordId
-            ? previous.body : { clientRequestKey: crypto.randomUUID(), missionType: 'record_review_v1', goal, scope };
+            ? previous.body : { clientRequestKey: crypto.randomUUID(), missionType, goal, scope };
         creationRef.current = { identity, sessionId: targetSessionId, body };
         operationRef.current = true;
         setSnapshot((value) => value?.key === key ? { ...value, pendingId: 0, problem: null } : value);
@@ -206,6 +340,7 @@ export function useAskConnexMissions({
         const signal = controllerRef.current?.signal;
         if (!enabled || operationRef.current || !signal || signal.aborted || !run.availableActions.includes(action)) return;
         operationRef.current = true;
+        outputViewRef.current++;
         setSnapshot((value) => value?.key === key ? { ...value, pendingId: run.id, problem: null, output: null } : value);
         try {
             const updated = await controlAiAgentRun(run.id, action, run.stateVersion, workspacePinnedRequest(workspaceId, { signal }));
@@ -236,11 +371,14 @@ export function useAskConnexMissions({
         const signal = controllerRef.current?.signal;
         if (!enabled || operationRef.current || !signal || signal.aborted || !run.outputAvailable || run.contentWithheld) return;
         operationRef.current = true;
+        outputViewRef.current++;
+        setReviewState(null);
         setSnapshot((value) => value?.key === key ? { ...value, pendingId: run.id, output: null, problem: null } : value);
         try {
             const output = await getAiAgentOutput(run.id, { signal });
             if (!signal.aborted) setSnapshot((value) => value?.key === key
-                && value.runs.some((item) => item.id === run.id && item.outputAvailable && !item.contentWithheld)
+                && value.runs.some((item) => item.id === run.id && item.outputAvailable && !item.contentWithheld
+                    && item.outputRevision === output.outputRevision)
                 ? { ...value, output } : value);
         } catch (error) {
             if (signal.aborted) return;
@@ -254,6 +392,100 @@ export function useAskConnexMissions({
             }
         }
     }, [enabled, key, refresh]);
+
+    const decide = useCallback(async (toolCallIds: number[], decision: 'approve' | 'discard') => {
+        const signal = controllerRef.current?.signal;
+        const output = current?.output;
+        if (!enabled || !output || !reviewKey || !proposalGroup || operationRef.current || !signal || signal.aborted) return;
+        const action = decision === 'approve' ? 'approve' : 'reject';
+        const requested = new Set(toolCallIds);
+        const allowed = new Set<number>();
+        for (const card of proposalGroup.cards) {
+            if (requested.has(card.id) && askConnexToolCardAffordances(card, now).includes(action)) allowed.add(card.id);
+        }
+        const items: AiAgentProposalDecisionRequest['items'] = [];
+        for (const item of output.proposalSet.items) {
+            if (allowed.has(item.card.id)) items.push({
+                actionSlot: item.actionSlot, expectedPreparationId: item.preparationId, decision,
+            });
+        }
+        if (items.length === 0) return;
+        const pinned = workspacePinnedRequest(workspaceId, { signal });
+        let settled: AiAgentProposalDecisionResult | null = null;
+        const outputView = outputViewRef.current;
+        operationRef.current = true;
+        setSnapshot((previous) => previous?.key === key ? { ...previous, pendingId: output.runId } : previous);
+        setReviewState({ key: reviewKey, excluded: review?.excluded ?? new Set(),
+            pending: new Map([...allowed].map((id) => [id, action])) });
+        try {
+            const result = await decideAiAgentProposals(output.runId, {
+                expectedProposalRevision: output.proposalSet.revision, items,
+            }, pinned);
+            settled = result;
+            const retained = retainedOutputRef.current;
+            if (signal.aborted || outputViewRef.current !== outputView || (retained !== null && (retained.runId !== output.runId
+                || retained.proposalSet.revision !== output.proposalSet.revision
+                || items.some((selected) => !retained.proposalSet.items.some((member) =>
+                    member.actionSlot === selected.actionSlot && member.preparationId === selected.expectedPreparationId))))) return;
+            setReviewState((previous) => previous?.key === reviewKey ? { ...previous, pending: new Map() } : previous);
+            retainDecisionResult(reviewKey, result, items);
+            if (result.contentWithheld) {
+                setSnapshot((previous) => previous?.key === key ? { ...previous, output: null,
+                    runs: previous.runs.map((run) => run.id === output.runId ? withholdMission(run) : run) } : previous);
+                setReviewState(null);
+                setDecisionResults(new Map());
+                if (sessionId !== null) invalidatedRef.current?.(sessionId);
+                await refresh();
+                return;
+            }
+            const [run, canonical] = await Promise.all([
+                getAiAgentRun(output.runId, { signal }), getAiAgentOutput(output.runId, { signal }),
+            ]);
+            if (signal.aborted || outputViewRef.current !== outputView) return;
+            upsert(run);
+            setSnapshot((previous) => previous?.key === key && !run.contentWithheld
+                && previous.runs.some((retained) => retained.id === canonical.runId && !retained.contentWithheld
+                    && retained.outputAvailable && retained.outputRevision === canonical.outputRevision)
+                ? { ...previous, output: canonical } : previous);
+            if (sessionId !== null) changedRef.current(sessionId);
+        } catch (error) {
+            if (signal.aborted || outputViewRef.current !== outputView) return;
+            if (isWorkspaceUnavailableError(error)) showApiError(error);
+            const inaccessible = error instanceof ApiError && [401, 403, 404, 410].includes(error.status);
+            const refusal = settled === null && error instanceof ApiError && error.status === 409;
+            if (inaccessible) {
+                setReviewState(null);
+                setDecisionResults(new Map());
+                setSnapshot((previous) => previous?.key === key ? { ...previous, output: null,
+                    runs: previous.runs.map((run) => run.id === output.runId ? withholdMission(run) : run) } : previous);
+                if (sessionId !== null) invalidatedRef.current?.(sessionId);
+            } else {
+                setReviewState((previous) => previous?.key === reviewKey ? { ...previous, pending: new Map() } : previous);
+                retainDecisionResult(reviewKey, settled ?? { complete: false, stopReason: refusal ? 'proposal_conflict' : 'reload_required',
+                        stateVersion: null, outputRevision: output.outputRevision, contentWithheld: false,
+                        items: items.map((item) => ({ actionSlot: item.actionSlot,
+                            outcome: refusal ? 'refused' : 'indeterminate', code: error instanceof ApiError ? error.code ?? null : null })) }, items);
+            }
+            setSnapshot((previous) => previous?.key === key ? { ...previous,
+                problem: error instanceof ApiError ? askConnexMissionProblem(error.status, error.code) : 'failed' } : previous);
+            if (settled === null) await refresh();
+        } finally {
+            if (!signal.aborted) {
+                operationRef.current = false;
+                setReviewState((previous) => previous?.key === reviewKey ? { ...previous, pending: new Map() } : previous);
+                setSnapshot((previous) => previous?.key === key ? { ...previous, pendingId: null } : previous);
+            }
+        }
+    }, [current?.output, enabled, key, now, proposalGroup, refresh, retainDecisionResult, review, reviewKey, sessionId, showApiError, upsert, workspaceId]);
+
+    const toggleInclusion = (id: number) => {
+        if (!reviewKey || operationRef.current) return;
+        setReviewState((previous) => {
+            const excluded = new Set(previous?.key === reviewKey ? previous.excluded : []);
+            if (excluded.has(id)) excluded.delete(id); else excluded.add(id);
+            return { key: reviewKey, excluded, pending: previous?.key === reviewKey ? previous.pending : new Map() };
+        });
+    };
 
     const loadMore = useCallback(async () => {
         const signal = controllerRef.current?.signal;
@@ -282,7 +514,8 @@ export function useAskConnexMissions({
     return {
         runs: current?.runs ?? [], loading: current?.loading ?? false, problem: current?.problem ?? null,
         output: current?.output ?? null, pendingId: current?.pendingId ?? null, hasMore: current?.nextCursor != null,
+        proposalGroup, decisionResult, toggleInclusion, decide,
         create, control, viewOutput, loadMore, retry: () => setReload((value) => value + 1),
-        closeOutput: () => setSnapshot((value) => value?.key === key ? { ...value, output: null } : value),
+        closeOutput: () => { outputViewRef.current++; setReviewState(null); setSnapshot((value) => value?.key === key ? { ...value, output: null } : value); },
     };
 }

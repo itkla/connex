@@ -287,6 +287,7 @@ public abstract class AbstractScriptedTrajectoryTest {
         if (workspace != null) {
             jdbcTemplate.update("DELETE FROM ai_run_lease WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("UPDATE ai_agent_run SET status = 'cancelled', active_segment_id = NULL, report_message_id = NULL WHERE workspace_id = ?", workspace.getId());
+            jdbcTemplate.update("DELETE FROM ai_agent_action WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("UPDATE ai_agent_segment SET status = 'cancelled', settled_at = CURRENT_TIMESTAMP(6), turn_id = NULL WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("UPDATE ai_chat_turn SET mission_run_id = NULL, mission_segment_id = NULL WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("DELETE FROM ai_agent_segment WHERE workspace_id = ?", workspace.getId());

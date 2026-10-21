@@ -9,12 +9,14 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.function.Supplier;
 
 import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -43,6 +45,8 @@ import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
+import ooo.klae.connex.backend.tenant.WorkspaceRead;
 import tools.jackson.databind.ObjectMapper;
 
 /** Owner-only mission API orchestration; immutable scope and privacy are independent access checks. */
@@ -64,6 +68,13 @@ public class AiAgentRunService {
     private final WorkspaceService workspaces;
     private final ObjectMapper json;
     private final Clock clock;
+    private final TenantWorkScope tenantWorkScope;
+    @org.springframework.beans.factory.annotation.Autowired
+    private AiAgentProposalReadService proposalReads;
+    @org.springframework.beans.factory.annotation.Autowired
+    private AiAgentProposalBudgetService proposalBudget;
+    @org.springframework.beans.factory.annotation.Autowired
+    private org.springframework.beans.factory.ObjectProvider<AiAgentRunService> self;
 
     /** Creates or replays the same immutable request without refreshing its lifetime. */
     @RequirePermission(Permission.AI_USE)
@@ -83,10 +94,15 @@ public class AiAgentRunService {
             if (!Arrays.equals(existing.getRequestHash(), hash)) {
                 throw new ConflictException("mission_request_conflict");
             }
-            return project(existing);
+            return self.getObject().get(existing.getId());
         }
-        AiAgentBudgetService.requireFeasibleCreation(json.writeValueAsBytes(request.goal()).length,
-                request.limits().maxTokens());
+        if ("record_preparation_v1".equals(request.missionType())) {
+            proposalBudget.requireFeasibleCreation(json.writeValueAsBytes(request.goal()).length,
+                    request.limits().maxTokens());
+        } else {
+            AiAgentBudgetService.requireFeasibleCreation(json.writeValueAsBytes(request.goal()).length,
+                    request.limits().maxTokens());
+        }
         gate.requireReady();
         requirePrivacyReady();
         if (ooo.klae.connex.backend.ai.masking.SpecialCareTextScreen.screen(request.goal()).excluded()) {
@@ -97,22 +113,26 @@ public class AiAgentRunService {
         AiAgentRun run = persistence.create(sessionId, request, locale, hash,
                 json.writeValueAsString(request.scope()), epoch);
         publisher.publish(run, "mission_created");
-        return get(run.getId());
+        return self.getObject().get(run.getId());
     }
 
     /** Returns only metadata when privacy has permanently or temporarily withheld the content. */
     @RequirePermission(Permission.AI_USE)
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public AiAgentRunDto get(int id) {
-        return readProjection(() -> project(owned(id)));
+        return readTransaction(() -> {
+            readAudit.retainTranscriptAuditParents(workspaces.getCurrentWorkspaceId(), workspaces.getCurrentUserId());
+            AiAgentRun run = ownedForRead(id);
+            privacyGuard.retainCurrentOrganization(run.getWorkspaceId());
+            requireBarrier(run.getWorkspaceId());
+            return project(run);
+        });
     }
 
     /** Lists independently of transcript/tool limits with an owner/filter-bound keyset cursor. */
     @RequirePermission(Permission.AI_USE)
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public AiAgentRunPage list(int limit, Integer sessionId, String state, String cursor) {
-        return readProjection(() -> listCurrent(limit, sessionId, state, cursor));
-    }
-
-    private AiAgentRunPage listCurrent(int limit, Integer sessionId, String state, String cursor) {
         if (limit < 1 || limit > 50 || (sessionId != null && sessionId <= 0)
                 || (state != null && !STATES.contains(state))) {
             throw new BadRequestException("Invalid mission page");
@@ -141,9 +161,17 @@ public class AiAgentRunService {
         boolean more = found.size() > limit;
         List<AiAgentRun> page = more ? found.subList(0, limit) : found;
         List<AiAgentRunDto> items = new ArrayList<>();
-        for (AiAgentRun run : page) {
-            if (sessionAccessible(run, owner)) {
-                items.add(project(run));
+        for (AiAgentRun candidate : page) {
+            if (!sessionAccessible(candidate, owner)) {
+                continue;
+            }
+            try {
+                AiAgentRunDto item = self.getObject().get(candidate.getId());
+                if (state == null || state.equals(item.state())) {
+                    items.add(item);
+                }
+            } catch (ResourceNotFoundException inaccessible) {
+                continue;
             }
         }
         String next = more ? Base64.getUrlEncoder().withoutPadding().encodeToString(json.writeValueAsString(
@@ -153,7 +181,15 @@ public class AiAgentRunService {
 
     /** Reads the canonical authorized report; a stopped or missing generation cannot disclose it. */
     @RequirePermission(Permission.AI_USE)
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public AiAgentOutputDto output(int id) {
+        AiAgentRun run = owned(id);
+        if (withheld(run)) {
+            throw new AiAgentGoneException("mission_output_withheld");
+        }
+        if (AiAgentMissionCatalog.proposals(run)) {
+            return proposalReads.output(id);
+        }
         return readProjection(() -> outputCurrent(id));
     }
 
@@ -183,6 +219,9 @@ public class AiAgentRunService {
     @RequirePermission(Permission.AI_USE)
     public AiAgentRunDto control(int id, AiAgentRunControlRequest request, String action) {
         AiAgentRun run = owned(id);
+        if ("waiting_approval".equals(run.getStatus()) && !"cancel".equals(action)) {
+            throw new ConflictException("mission_state_conflict");
+        }
         if ("resume".equals(action)) {
             gate.requireReady();
             requirePrivacyReady();
@@ -198,8 +237,8 @@ public class AiAgentRunService {
             throw new BadRequestException("Invalid mission version");
         }
         AiAgentRun changed = persistence.control(run, version, action);
-        publisher.publish(changed, "mission_state");
-        return project(changed);
+        publisher.publish(changed, changed.getReportMessageId() == null ? "mission_state" : "mission_output");
+        return self.getObject().get(changed.getId());
     }
 
     /** Missing or blocked privacy state refuses admission before any attempt is reserved. */
@@ -213,27 +252,50 @@ public class AiAgentRunService {
     /** Revalidates the one selected record through existing processability and RBAC reads. */
     public void requireScope(AiAgentRunCreateRequest.Scope scope) {
         AiChatResourceRegistry registry = new AiChatResourceRegistry();
-        new AiAgentScopePolicy(scope).evaluate(() -> tools.pageContext(
+        new AiAgentScopePolicy(scope).evaluateRead(() -> tools.pageContext(
                 List.of(new AiChatPageContextDto(scope.recordKind(), scope.recordId())), registry));
         if (registry.handleFor(scope.recordKind(), scope.recordId()).isEmpty()) {
             throw new ResourceNotFoundException("Mission scope inaccessible");
         }
     }
 
-    private <T> T readProjection(Supplier<T> projection) {
+    private AiAgentRun ownedForRead(int id) {
+        AiAgentRun discovered = owned(id);
+        int workspaceId = discovered.getWorkspaceId();
+        int owner = workspaces.getCurrentUserId();
+        workspaces.lockAndRequirePermissionsSnapshot(workspaceId, Map.of(owner, Set.of(Permission.AI_USE)));
+        if (discovered.getSessionId() != null && chat.getMissionSessionForShare(workspaceId, owner, discovered.getSessionId()) == null) {
+            throw new ResourceNotFoundException("Mission inaccessible");
+        }
+        AiAgentRun run = runs.lockRunForShare(workspaceId, id);
+        requireOwner(run);
+        return run;
+    }
+
+    private <T> T readTransaction(WorkspaceRead<T> projection) {
         TransactionTemplate transaction = new TransactionTemplate(transactionManager);
         transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
-        return transaction.execute(status -> {
+        transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        return tenantWorkScope.inWorkspaceRead(workspaces.getCurrentWorkspaceId(),
+                () -> transaction.execute(status -> projection.read()));
+    }
+
+    private <T> T readProjection(WorkspaceRead<T> projection) {
+        return readTransaction(() -> {
             int workspaceId = workspaces.getCurrentWorkspaceId();
             int userId = workspaces.getCurrentUserId();
             requireMembership(workspaceId, userId);
             readAudit.retainTranscriptAuditParents(workspaceId, userId);
             privacyGuard.retainCurrentOrganization(workspaceId);
-            if (chat.lockPrivacyBarrierForShare(workspaceId) == null) {
-                throw new AiAgentUnavailableException();
-            }
-            return projection.get();
+            requireBarrier(workspaceId);
+            return projection.read();
         });
+    }
+
+    private void requireBarrier(int workspaceId) {
+        if (chat.lockPrivacyBarrierForShare(workspaceId) == null) {
+            throw new AiAgentUnavailableException();
+        }
     }
 
     private AiAgentRun owned(int id) {
@@ -290,6 +352,12 @@ public class AiAgentRunService {
 
     private AiAgentRunDto project(AiAgentRun run) {
         boolean hidden = withheld(run);
+        AiAgentOutputDto.Counts proposalCounts = null;
+        if (!hidden && AiAgentMissionCatalog.proposals(run)) {
+            var metadata = proposalReads.metadata(run);
+            hidden = metadata.contentWithheld();
+            proposalCounts = metadata.counts();
+        }
         boolean output = !hidden && run.getReportMessageId() != null;
         List<String> actions = new ArrayList<>();
         if (!hidden && run.getSessionId() != null && ("running".equals(run.getStatus()) || "queued".equals(run.getStatus())
@@ -308,12 +376,16 @@ public class AiAgentRunService {
             actions.add("view_output");
         }
         AiAgentRunDto.Progress progress = hidden ? null : new AiAgentRunDto.Progress(
-                "queued".equals(run.getStatus()) ? "queued" : output ? "writing_report" : "reading", output ? 1 : 0, 1);
+                "queued".equals(run.getStatus()) ? "queued" : "waiting_approval".equals(run.getStatus()) ? "waiting_review"
+                        : output ? "writing_report" : AiAgentMissionCatalog.proposals(run) ? "preparing_changes" : "reading", output ? 1 : 0, 1);
         return new AiAgentRunDto(1, run.getId(), run.getSessionId(), run.getMissionType(), run.getDefinitionVersion(),
                 run.getStatus(), run.getReasonCode(), Long.toString(run.getStateVersion()), hidden ? null : run.getGoal(),
                 hidden ? null : json.readValue(run.getScopeJson(), AiAgentRunCreateRequest.Scope.class),
                 instant(run.getCreatedAt()), instant(run.getExecutionDeadlineAt()), instant(run.getHardDeadlineAt()),
-                instant(run.getStartedAt()), instant(run.getFinishedAt()), output, hidden, List.copyOf(actions), progress);
+                instant(run.getStartedAt()), instant(run.getFinishedAt()), output, hidden, List.copyOf(actions), progress,
+                hidden ? null : Long.toString(run.getProposalMembershipRevision()), hidden ? null : instant(run.getProposalFrozenAt()),
+                hidden ? null : instant(run.getProposalFirstPreparedAt()), hidden ? null : instant(run.getReviewExpiresAt()),
+                proposalCounts, output ? AiAgentMissionCatalog.proposals(run) ? Long.toString(run.getStateVersion()) : "1" : null);
     }
 
     private static Instant instant(LocalDateTime value) {

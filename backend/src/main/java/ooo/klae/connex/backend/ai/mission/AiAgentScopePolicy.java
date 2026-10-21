@@ -5,6 +5,7 @@ import java.util.function.Supplier;
 
 import ooo.klae.connex.backend.ai.assistant.AiAssistantLoopException;
 import ooo.klae.connex.backend.dto.AiAgentRunCreateRequest;
+import ooo.klae.connex.backend.tenant.WorkspaceRead;
 
 /** Closed primary-record allowlist and read-tool ceiling for record_review_v1. */
 public record AiAgentScopePolicy(String kind, int id) {
@@ -30,11 +31,28 @@ public record AiAgentScopePolicy(String kind, int id) {
 
     /** Applies the same retrieval ceiling while validating a scope before an execution exists. */
     public <T> T evaluate(Supplier<T> action) {
+        try (var ignored = enterScope()) {
+            return action.get();
+        }
+    }
+
+    /** Applies the selected-record ceiling without sharing a callback with mission execution. */
+    public <T> T evaluateRead(WorkspaceRead<T> read) {
+        try (var ignored = enterScope()) {
+            return read.read();
+        }
+    }
+
+    private AdmissionScope enterScope() {
         AiAgentScopePolicy previous = ADMISSION_SCOPE.get();
         ADMISSION_SCOPE.set(this);
-        try {
-            return action.get();
-        } finally {
+        return new AdmissionScope(previous);
+    }
+
+    /** Restores the selected-record ceiling independently of the callback's functional type. */
+    private record AdmissionScope(AiAgentScopePolicy previous) implements AutoCloseable {
+        @Override
+        public void close() {
             if (previous == null) {
                 ADMISSION_SCOPE.remove();
             } else {

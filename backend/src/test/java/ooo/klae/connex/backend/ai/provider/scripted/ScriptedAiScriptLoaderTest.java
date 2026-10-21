@@ -595,12 +595,13 @@ class ScriptedAiScriptLoaderTest {
      *
      * @throws Exception if the shipped fixture directory cannot be resolved or read
      */
-    @Test
-    void loadsEveryFixtureThatShipsWithThisSourceSet() throws Exception {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"", "missions"})
+    void loadsEveryFixtureThatShipsWithThisSourceSet(String subdirectory) throws Exception {
         Path shipped = Path.of(Objects.requireNonNull(
                         getClass().getResource("/ai/scripted"),
                         "the scripted fixtures are missing from the test classpath")
-                .toURI());
+                .toURI()).resolve(subdirectory);
         List<Path> files;
         try (Stream<Path> listing = Files.list(shipped)) {
             files = listing
@@ -627,7 +628,7 @@ class ScriptedAiScriptLoaderTest {
      * Loads the fixture directory the CI browser stack boots with, resolved from the workflow.
      *
      * <p>That directory lives on the frontend test tree, so nothing on the backend classpath sees
-     * it and {@link #loadsEveryFixtureThatShipsWithThisSourceSet} does not reach it. Without this
+     * it and {@link #loadsEveryFixtureThatShipsWithThisSourceSet(String)} does not reach it. Without this
      * test a bad edit there — a selector containing another, an unparseable tool argument, a
      * renamed or emptied directory — fails the WAR at bean creation inside the cross-stack CI job,
      * which reports {@code backend failed to boot for the e2e suite} and no Playwright spec at

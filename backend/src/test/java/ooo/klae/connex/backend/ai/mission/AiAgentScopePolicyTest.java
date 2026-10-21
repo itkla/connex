@@ -100,6 +100,22 @@ class AiAgentScopePolicyTest {
     }
 
     @Test
+    void readScopeRestoresOuterContextAfterNestedFailureAndClearsThread() {
+        var inner = new AiAgentScopePolicy("company", 42);
+        assertNull(AiAgentScopePolicy.current());
+        scope.evaluateRead(() -> {
+            assertSame(scope, AiAgentScopePolicy.current());
+            assertThrows(IllegalStateException.class, () -> inner.evaluateRead(() -> {
+                assertSame(inner, AiAgentScopePolicy.current());
+                throw new IllegalStateException("read failed");
+            }));
+            assertSame(scope, AiAgentScopePolicy.current());
+            return null;
+        });
+        assertNull(AiAgentScopePolicy.current());
+    }
+
+    @Test
     void preclaimScopeCannotOverrideAnInstalledExecutionBoundary() {
         AiAgentExecutionPolicy policy = policy(turn(17));
         policy.execute(() -> new AiAgentScopePolicy("company", 42).evaluate(() -> {

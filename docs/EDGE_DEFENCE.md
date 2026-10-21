@@ -76,6 +76,7 @@ independently enforces the same contracts:
 | `/api/client-errors` | 16 KiB | `CONNEX_CLIENT_ERRORS_MAX_BODY_BYTES=16384` |
 | `/api/csp-reports` | 16 KiB | `CONNEX_CSP_REPORTS_MAX_BODY_BYTES=16384` |
 | `/api/auth/webauthn` and descendants | 64 KiB | `CONNEX_WEBAUTHN_MAX_BODY_BYTES=65536` |
+| `/api/ai/assistant/missions/{runId}/proposal-decisions` | 16 KiB | `CONNEX_MISSION_DECISION_MAX_BODY_BYTES=16384`; exact mission review requests |
 | `/api/workflows` and descendants | 96 KiB | `CONNEX_WORKFLOW_MAX_BODY_BYTES=98304` |
 | Other `/api` routes | 10 MiB | `CONNEX_API_MAX_BODY_BYTES=10485760` |
 | `/saml2/*`, `/api/login/saml2/sso/*`, and frontend routes | 1 MiB | Matches the application form-body ceiling without constraining the SAML POST binding |

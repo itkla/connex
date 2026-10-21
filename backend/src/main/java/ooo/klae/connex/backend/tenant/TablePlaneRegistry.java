@@ -132,6 +132,7 @@ public final class TablePlaneRegistry {
         "ai_assistant_proposal_set",
         "ai_brief_schedule",
         "ai_agent_run",
+        "ai_agent_action",
         "ai_agent_segment",
         "ai_agent_privacy_barrier",
         "ai_agent_privacy_work",

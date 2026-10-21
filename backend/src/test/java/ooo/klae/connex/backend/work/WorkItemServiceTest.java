@@ -127,7 +127,8 @@ class WorkItemServiceTest {
         WorkItemService service = service(
             failing(WorkItemSource.task, new IllegalStateException()),
             failing(WorkItemSource.notification, new InvalidWorkItemSourceRowsException()),
-            failing(WorkItemSource.document_approval, new IllegalStateException()));
+            failing(WorkItemSource.document_approval, new IllegalStateException()),
+            failing(WorkItemSource.ai_mission, new IllegalStateException()));
 
         var page = service.getPage(null, null, 1, 25);
 
@@ -189,8 +190,12 @@ class WorkItemServiceTest {
     }
 
     private WorkItemService service(WorkItemProvider... providers) {
+        var sources = new java.util.ArrayList<>(List.of(providers));
+        if (sources.stream().noneMatch(provider -> provider.source() == WorkItemSource.ai_mission)) {
+            sources.add(available(WorkItemSource.ai_mission, List.of(), 0, true));
+        }
         return new WorkItemService(
-            List.of(providers),
+            sources,
             workspaceService,
             userCalendarService,
             Clock.fixed(AS_OF, ZoneOffset.UTC));

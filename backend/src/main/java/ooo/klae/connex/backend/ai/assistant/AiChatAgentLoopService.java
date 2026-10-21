@@ -211,6 +211,8 @@ public class AiChatAgentLoopService {
     private ooo.klae.connex.backend.ai.mission.AiAgentContentScreen missionContentScreen;
     @org.springframework.beans.factory.annotation.Autowired
     private ooo.klae.connex.backend.ai.mission.AiAgentEvidenceService missionEvidenceService;
+    @org.springframework.beans.factory.annotation.Autowired
+    private ooo.klae.connex.backend.ai.mission.AiAgentProposalService missionProposalService;
 
     /**
      * Runs one committed turn under the shared generation context.
@@ -281,7 +283,7 @@ public class AiChatAgentLoopService {
                     ? new AiChatStreamingProgress(turn, persistenceService, maskingContext)
                     : null;
             Runnable ownershipGuard = () -> requireOwnership(ownership);
-            AiChatMemory memory = mission != null && mission.runtimeContractVersion() == 2
+            AiChatMemory memory = mission != null && ooo.klae.connex.backend.ai.mission.AiAgentMissionCatalog.continuation(mission.runtimeContractVersion())
                     ? memoryService.prepare(turn, maskingContext, deadline, ownershipGuard, resources)
                     : memoryService.prepare(turn, maskingContext, deadline, ownershipGuard);
             int stepCallBound = Math.min(
@@ -338,7 +340,9 @@ public class AiChatAgentLoopService {
                     governanceService.assistantMaxSteps(turn.workspaceId()), HARD_MAX_STEPS);
             if (mission != null) {
                 maxSteps = Math.min(maxSteps, mission.maxSteps());
-                state.loadedToolsets.addAll(AiAssistantToolCatalog.ALL);
+                if (!mission.proposalCapable()) {
+                    state.loadedToolsets.addAll(AiAssistantToolCatalog.ALL);
+                }
             }
             if (routing.routed()) {
                 if (ownership.isStopped()) {
@@ -1134,7 +1138,7 @@ public class AiChatAgentLoopService {
         if (missionPolicy != null) {
             missionPolicy.scope().requireTool(toolName);
         }
-        if (missionPolicy != null && missionPolicy.runtimeContractVersion() == 2
+        if (missionPolicy != null && ooo.klae.connex.backend.ai.mission.AiAgentMissionCatalog.continuation(missionPolicy.runtimeContractVersion())
                 && AiAgentToolSchema.bookkeeping(toolName)) {
             return executeMissionBookkeeping(context, stepNumber, nativeTools, call, state, progress);
         }
@@ -1194,6 +1198,29 @@ public class AiChatAgentLoopService {
         }
         if ("set_todos".equals(toolName)) {
             state.planPublications++;
+        }
+        if (toolCatalog.isWrite(toolName) && missionPolicy != null && missionPolicy.proposalCapable()) {
+            try {
+                requireCurrentToolExecution(turn);
+                var prepared = missionProposalService.prepare(missionPolicy, toolName, call.tool().args(),
+                        context.resources(), state.argumentMembers);
+                AiAssistantToolResult result = prepared.result();
+                ToolTurn toolTurn = new ToolTurn(stepNumber, call.ordinal(), toolName, result);
+                state.toolBudgetAudit = promptAssembler.requireAdditionalMissionBookkeepingCapacity(nativeTools,
+                        state.toolTurns, toolTurn, state.nativeCalls, context.maskingContext(), context.budget());
+                missionPolicy.persistence().publishPrepared(missionPolicy, prepared);
+                state.toolTurns.add(toolTurn);
+                state.toolResultCache.put(toolCallKey, result);
+                return progress.fresh(state) ? noProgressOutcome(closingAttempted) : CONTINUE;
+            } catch (AiAssistantLoopException exception) {
+                if (!exception.recoverable()) {
+                    throw exception;
+                }
+                return refuseCall(context, stepNumber, closingAttempted, nativeTools, call, state, progress,
+                        exception.detailReason(), !nativeTools || state.nativeCalls.containsKey(callRef));
+            } catch (ooo.klae.connex.backend.exceptions.ConflictException exception) {
+                return new StepCallOutcome.Fail("action_intent_conflict");
+            }
         }
         if (toolCatalog.isWrite(toolName)) {
             Optional<String> storedArguments =

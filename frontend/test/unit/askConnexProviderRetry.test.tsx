@@ -50,7 +50,7 @@ vi.mock('@/app/components/ask-connex/AskConnexDrawer', () => ({
 }));
 vi.mock('next-intl', () => ({ useLocale: () => 'en', useTranslations: () => boundary.translate }));
 vi.mock('next/navigation', () => ({
-    useParams: () => ({}),
+    useSearchParams: () => new URLSearchParams(), useParams: () => ({}),
     usePathname: () => '/records/contacts',
     useRouter: () => boundary.router,
 }));
@@ -64,7 +64,7 @@ vi.mock('@/app/hooks/usePermissions', () => ({
 }));
 vi.mock('@/app/hooks/useAskConnexSkills', () => ({ useAskConnexSkills: () => [] }));
 vi.mock('@/app/hooks/useIsMobile', () => ({ useIsMobile: () => false }));
-vi.mock('@/app/hooks/useNow', () => ({ useLiveNow: () => Date.parse('2026-10-18T12:00:00Z') }));
+vi.mock('@/app/hooks/useNow', () => ({ useLiveNow: () => Date.parse('2026-10-18T12:00:00Z'), useNow: () => Date.parse('2026-10-18T12:00:00Z') }));
 vi.mock('@/app/hooks/useApiErrorToast', () => ({ useApiErrorToast: () => boundary.showApiError }));
 vi.mock('@/app/hooks/useAccountStorageGeneration', () => ({ useAccountStorageGeneration: () => boundary.canPersist }));
 vi.mock('@/app/lib/realtime', () => ({

@@ -682,7 +682,7 @@ In a test, activate it with `@ActiveProfiles({"test", ScriptedAiProviderProfile.
 
 ### The browser-stack recipe
 
-This is the only copy of the recipe; [`FRONTEND_TESTING.md`](../FRONTEND_TESTING.md) and `frontend/AGENTS.md` point here rather than repeat it. A backend that `ask-connex-trajectory.spec.ts` can drive is the root guide's `dev` boot with the profile added and four more settings, exactly as the `Frontend — unit & e2e` CI job's backend boot step sets them:
+This is the only copy of the recipe; [`FRONTEND_TESTING.md`](../FRONTEND_TESTING.md) and `frontend/AGENTS.md` point here rather than repeat it. The assistant and mission-proposal browser scenarios use the root guide's `dev` boot with the profile and settings below, exactly as the `Frontend — unit & e2e` CI job's backend boot step sets them:
 
 ```bash
 SPRING_PROFILES_ACTIVE=dev,ai-scripted-provider
@@ -690,11 +690,13 @@ CONNEX_AI_ENABLED=true
 CONNEX_AI_SCRIPTED_PROVIDER_ENABLED=true
 CONNEX_AI_SCRIPTED_PROVIDER_FIXTURE_DIR=<absolute path to the checkout>/frontend/test/e2e/fixtures/ai-scripted
 CONNEX_AI_ALLOW_INTERNAL_ENDPOINTS=true
+SPRING_APPLICATION_JSON='{"connex":{"ai":{"missions-enabled":true,"missions-single-jvm-confirmed":true,"mission-capabilities":[{"provider":"openai_compatible","endpoint":"http://127.0.0.1:8080/v1","model":"scripted-json","capability":"missions_v1"}]}}}'
 ```
 
 - **The profile, the flag and the fixture directory** install the seam. Leave the profile and the flag out and the real `openai_compatible` adapter dials the spec's loopback endpoint, so the turn settles `provider_error`; set one without the other, or both without a readable fixture directory, and the boot refuses (layers 3 and 5 above).
 - **The AI master switch** defaults to `false` in `application.yml`, and `AiFeatureGate` checks it before provider readiness. Without it the seam boots but every turn is refused, so the spec never reaches send, tools and answer.
 - **The internal-endpoint opt-in** is needed because the spec *saves* its provider row through `PUT /api/ai/provider`. The save path resolves the submitted endpoint's address, so the loopback literal the browser suite configures fails `AiEndpointAddressValidator.isFetchable` with a 400 without it — while the scripted adapter never dials the endpoint at all, whatever it says. That opt-in is part of the browser recipe and nothing wider: it is confined to a job declaring no deployment profile, the saas edition forbids the key outright, and on silo and on-prem it is a deliberate operator posture for an internal model host rather than a route to this seam. The trajectory harness needs none of it, because it inserts its row directly and readiness there is shape-only.
+- **The mission switches and exact capability declaration** admit the mission-proposal browser scenario on this single test JVM. They bind only the `scripted-json` model and exact endpoint configured by the test and its JSON-protocol fixture; ordinary provider readiness and per-organization governance still apply. Registration provisions the workspace privacy barrier through the normal after-commit `WorkspaceProvisioned` initializer before mission creation.
 
 `ScriptedAiProviderArchTest` pins the whole recipe to that one CI job and step, so a second workflow booting a stack this way fails the backend suite, and it requires this block to carry every `CONNEX_AI_*` setting that step sets and to be the only place the recipe is written down.
 
@@ -702,10 +704,11 @@ CONNEX_AI_ALLOW_INTERNAL_ENDPOINTS=true
 
 - **Any provider adapter must call both `providerAttemptExecutor().execute(...)` (or `.executeStream(...)`) and `providerAttemptExecutor().beforeSend()`, in the real transport's order.** `execute` runs the restriction epoch, the feature gate, the provider guard and the admission commitment; `beforeSend` is the *only* route to the organization budget lease's dispatched mark. An adapter that produces its output inside `execute` without calling `beforeSend` passes every functional test while under-counting real sends. On the streamed path the order matters too: `OpenAiCompatibleClient.sendStream` opens the transport, re-checks cancellation and the caller deadline, and only *then* calls `beforeSend`, because `AiChatStreamingProgress.Observer.onTransportOpen` refuses a turn that is no longer running. `ScriptedAiProviderTest` and `AiBudgetDispatchBoundaryTest` own that boundary.
 - **`scripted-json` rehearses the JSON protocol as other provider families and the runtime native-to-JSON degradation path produce it, not as `openai_compatible` ever presents it** — the real adapter declares `JSON_SCHEMA` and `NATIVE_FUNCTIONS` unconditionally, so a real `openai_compatible` target is always native.
-- **`ScriptedAiTurnCursor` derives protocol control state from the assembler's structure, never from prompt text.** The serialized prompt carries every system, member and CRM string in the turn, so a substring search for the repair delimiter or the closing sentence would let an ordinary member sentence or a record value move the provider into a state the loop never entered. `AiAssistantPromptAssembler` emits untrusted content only inside a `CRM_DATA_BEGIN` or `USER_REQUEST_BEGIN` envelope that occupies a whole message, and its own directives as bare messages, so the segment's shape decides: a repair attempt is the last bare directive ending in the offending-output delimiter, a closing step is a bare directive opening with the closing sentence, and a completed tool call is a message-leading envelope whose top-level type is `tool_result`. The script *selector* is the deliberate exception — it rides in the member's own words on purpose and chooses which fixture answers, not which protocol state the loop is in.
+- **`ScriptedAiTurnCursor` derives protocol control state from the assembler's structure, never from prompt text.** The serialized prompt carries every system, member and CRM string in the turn, so a substring search for the repair delimiter or the closing sentence would let an ordinary member sentence or a record value move the provider into a state the loop never entered. `AiAssistantPromptAssembler` emits untrusted content only inside a `CRM_DATA_BEGIN` or `USER_REQUEST_BEGIN` envelope that occupies a whole message, and its own directives as bare messages, so the segment's shape decides: a repair attempt is the last bare directive ending in the offending-output delimiter, a JSON closing step is a bare directive whose stripped content exactly equals the complete production closing directive, and a completed tool call is a message-leading envelope whose top-level type is `tool_result`. The script *selector* is the deliberate exception — it rides in the member's own words on purpose and chooses which fixture answers, not which protocol state the loop is in.
 
 ### Fixture authoring
 
+- JSON `closing` includes both the ordinary final-only directive and the mission checkpoint-or-report directive, whose opening is `This is the last decision of this segment.` Only the complete, exact bare server-authored directive selects that state; a shared opening sentence or member/CRM envelope cannot. A checkpoint on the last segment decision must declare `closing: true`, including a repair that consumes the last dispatch after native-to-JSON fallback. A fresh segment starts with zero completed tool calls; with only one decision remaining, it immediately uses the ordinary closing directive. Checkpoint settlement queues a fresh claim as specified in [the mission continuation contract](AI_MISSIONS.md#durable-continuation-and-model-projection).
 - **A step predicate is `(afterToolCalls, onRepair, protocol, closing)`, and two steps may not share one.** Alternative outcomes at one cursor position are therefore not expressible inside a single script: three failure kinds after the same successful read need **three fixtures with three selectors**, not three steps.
 - **`protocol` is a closed set — `native`, `json` or `any` (the default).** It exists because one turn can visit both protocols: a client-error rejection on the first native attempt does not fail the turn, it clears the native state and retries the same cursor position as JSON. A fixture that declares `expectsNativeDegradation` must declare both halves — the rejecting native step and the JSON step that answers the retry — and the loader refuses it otherwise, because a trajectory that can only end in a second rejection rehearses nothing.
 - **A tool call's `arguments` must be a JSON object, and the loader parses it.** The provider never re-encodes the value: it becomes the native function call's arguments verbatim, or is spliced into the JSON step envelope as raw JSON. An unparseable fixture value would otherwise surface as malformed model output at trajectory time rather than as a refused fixture at startup.
@@ -714,6 +717,8 @@ CONNEX_AI_ALLOW_INTERNAL_ENDPOINTS=true
 ### Trajectory harness
 
 `AbstractScriptedTrajectoryTest` supplies the shared Spring configuration that activates the profile, and `AiAssistantScriptedTrajectoryTest` runs whole turns through it: `AiAssistantTurnService`, the generation worker, `AiChatAgentLoopService`, the real tool executor and write-tool service, and real MySQL. Delegate behavior below the agent loop remains real, and no provider credential exists. An unstubbed verification spy may require a separate test context.
+
+The non-DB loader tests validate both the base corpus and its `missions` subdirectory, including selector disjointness. Mission trajectory declarations bind `scripted-native` and `scripted-json` at `https://scripted.invalid/v1`; the browser recipe above binds its JSON fixture's exact loopback target. Capability-gate tests validate each corpus against its own declarations without starting MySQL.
 
 - **Run it with `./gradlew scriptedTrajectoryTest`, not `./gradlew test`.** The pattern `**/*ScriptedTrajectory*Test.class` is excluded from `test` so this context key does not evict a hot one out of the shared ten-slot cache. `check` depends on the task. In CI, DB shard 2 runs `dbTestShard2 scriptedTrajectoryTest` behind the required `Backend — build & test` aggregator. `ScriptedAiProviderArchTest` asserts both that a required matrix entry supplies the task to an unconditional Gradle step and that every class extending the harness matches the pattern — so a trajectory class CI would silently skip fails the build instead.
 - **A golden that writes must load its toolset first.** A turn starts holding only the `core` toolset, so every write tool sits behind a `find_tools` step; the fixtures spell that sequence out and the goldens assert the durable tool order, which is where a regression in toolset loading becomes visible.
@@ -741,7 +746,7 @@ Streaming remains inside `AiInvocationService`:
 
 V232 introduces `record_review_v1` inside an existing Ask Connex session. [AI_MISSIONS.md](AI_MISSIONS.md) defines its durable generation/taint predicate, conservative cleanup enrollment, DSR authority, and drained single-JVM activation boundary. Every ordinary message writer uses the same durable session sequence allocator; every derived execution retains its original privacy token through reads, secondary provider dispatch, writes, and deferred requester publication. Missing barriers and stale tokens fail closed after restart and after purge unblocks. V237 adds unconditional organization authority before the workspace check, including for never-tainted chats; workspace taint does not exempt any retained content from all-chat invalidation.
 
-Missions use the existing invocation, masking, leak scan, organization budget, audit and provider transport. Their server policy narrows the catalog and execution boundary to five read tools, enforces the selected primary record before retrieval/registration/handle resolution (including preclaim validation), and never enables CONFIRM/AUTO or question tools. Linked tasks are bounded evidence without task handles in this slice. Shared prompt serialization and envelope constants are unchanged. One `AGENT_RUN` lease covers each attempt; legacy `CHAT_TURN` routes cannot claim or control it.
+Missions use the existing invocation, masking, leak scan, organization budget, audit and provider transport. Read-only runtime-1/2 policy narrows the catalog and execution boundary to five read tools, enforces the selected primary record before retrieval/registration/handle resolution (including preclaim validation), and never enables CONFIRM/AUTO or question tools. Linked tasks are bounded evidence without task handles. Runtime 3 adds only the selected-record CONFIRM allowlist described under [Mission proposal authority](#mission-proposal-authority-v238). One `AGENT_RUN` lease covers each attempt; legacy `CHAT_TURN` routes cannot claim or control it.
 
 Mission realtime sends only requester-authorized metadata invalidations, with fresh membership, permission, session and generation checks inside the local fence. Ordinary content frames revalidate their immutable stored turn provenance and source state at send time. Output is fetched through the canonical owner-only report API; no mission model prose is broadcast.
 
@@ -951,7 +956,8 @@ turn/message association under the session mutex, insert parent and members in o
 and require complete membership before commit. Storage provenance guards and privacy cleanup are
 active at V237. Production set creation, effective-tier decisions and whole-call publication/decision
 routes remain disabled until their own slices. V233 itself retained its then-V232 floor; the current
-V237 privacy floor applies independently of future producer activation.
+V237 privacy compatibility minimum applies independently of future producer activation; V238 is
+the active release rollback floor.
 
 ### Adding an assistant write tool
 
@@ -1240,3 +1246,39 @@ Reconciliation preserves an exact verified receipt while its workspace is termin
 operation's tenant batch and still run full local lifecycle cleanup and residual verification.
 V2 C2 refuses a surviving terminal workspace root; only root deletion enables receipt-only
 completion. Active workspace restoration still reopens stale local evidence.
+
+## Mission proposal authority (V238)
+
+Only `record_preparation_v1/1/3` can prepare mission CONFIRM proposals. Its selected-record
+allowlist and exact immutable target are independently checked at preparation, binding and
+decision boundaries. AUTO, mandates/standing approvals, task writes and creation remain
+unreachable. Mission publication uses ordered MANDATORY participants and source-linked
+canonical tool rows, without the reactive REQUIRES_NEW facade or V233 set producer.
+
+Original preparation/source observations and typed intent are immutable; replay uses original
+pins. Source vectors and privacy ancestry remain server-only. Explicit output/item projection
+supplies origin turn through action→segment ancestry, preparation anchor and frozen deadline.
+Ordinary/retained readers and overflow fallbacks exclude mission rows; legacy known-ID
+approve/reject require mission controls. Unsupported/blocked content retains safe metadata and
+cancel authority while refusing all proposal content/counts.
+
+Batch decisions prevalidate the complete immutable membership before effects, use independent
+item transactions and preserve partial outcomes on later failure. Fresh authorized canonical
+reconciliation resolves uncertain commit acknowledgments; unresolved outcomes are explicitly
+indeterminate and disarmed until reload. Authority loss suppresses disclosures without erasing
+committed effects. Final mutation admission uses the original deadline after domain contention.
+All V238 actions, frozen membership, mission-origin canonical calls and proposal outputs retain
+the original session organization generation. `AiChatPrivacyGuard` and `AiAssistantPrivacyService`
+reject historical generations on reads, freeze and decisions. The ordered admission checkpoint
+takes organization authority after content/domain roots and restriction fences, before workspace
+privacy barriers, audit heads and leases. Source holdings join the existing `AiAgentPrivacyService`
+bootstrap, acknowledged DSR all-chat v2, restriction and lifecycle erasure phases, bounded action-first
+deletion and unconditional residual verification. Positive object receipts and placement evidence
+remain required, and organization invalidation also cancels export publication. Export validates
+UTF-8 source data. See [AI_MISSIONS](AI_MISSIONS.md) and [LOCKING](LOCKING.md).
+After-commit realtime publication retains requester authority, session/root shared locks and
+ordered restriction/publication/organization/workspace privacy fences through local broker enqueue.
+Mission frames carry mainline organization authority through the outbound queue and encoded
+concurrent-session buffer. The final WebSocket delegate freshly revalidates authority under the
+publication read fence retained through the socket write, including frames flushed on another
+thread; revoked, superseded and invalidated sources produce no content.

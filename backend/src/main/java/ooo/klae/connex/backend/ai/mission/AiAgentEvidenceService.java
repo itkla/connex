@@ -1,6 +1,9 @@
 package ooo.klae.connex.backend.ai.mission;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
@@ -29,10 +32,16 @@ import tools.jackson.databind.node.ObjectNode;
 
 /** Versions only privacy-shaped authorized reads and keeps segment observations ephemeral. */
 @Service
-@RequiredArgsConstructor
+@RequiredArgsConstructor(onConstructor_ = @org.springframework.beans.factory.annotation.Autowired)
 public class AiAgentEvidenceService {
     private static final ThreadLocal<Observations> CURRENT = new ThreadLocal<>();
     private final ObjectMapper objectMapper;
+    private final Clock clock;
+
+    /** Preserves direct unit construction while production supplies the server clock. */
+    public AiAgentEvidenceService(ObjectMapper objectMapper) {
+        this(objectMapper, Clock.systemUTC());
+    }
 
     /** Starts a fresh observation inventory for exactly one claimed segment attempt. */
     public void begin(AiAgentExecutionPolicy policy) {
@@ -42,6 +51,30 @@ public class AiAgentEvidenceService {
     /** Removes all request-local evidence after a bounded execution. */
     public void clear() {
         CURRENT.remove();
+    }
+
+    /** Records the authoritative anchor immediately before retrieval begins. */
+    public static void beforeRead(String tool) {
+        Observations observations = CURRENT.get();
+        if (observations != null && observations.policy == AiAgentExecutionPolicy.current()
+                && Set.of("get_record", "get_records", "list_activities", "list_tasks").contains(tool)) {
+            observations.readStartedAt = observations.service.clock.instant().truncatedTo(ChronoUnit.MICROS);
+        }
+    }
+
+    /** Returns server-owned observations for atomic continuation and proposal persistence. */
+    public static AiAgentSourceObservations currentAnchors() {
+        Observations observations = CURRENT.get();
+        return observations == null ? new AiAgentSourceObservations(1, List.of()) : observations.anchors;
+    }
+
+    /** Restores original action provenance before any reconstruction reads capture newer anchors. */
+    public static void carrySources(AiAgentSourceObservations carried) {
+        Observations observations = CURRENT.get();
+        if (observations != null && observations.policy == AiAgentExecutionPolicy.current()
+                && observations.policy.proposalCapable()) {
+            observations.anchors = observations.anchors.merge(carried);
+        }
     }
 
     /** Captures the shaped result before masking; transient handles never affect its version. */
@@ -70,6 +103,15 @@ public class AiAgentEvidenceService {
             throw refused("source_changed");
         }
         observations.references.add(reference);
+        if (observations.policy.proposalCapable()) {
+            if (observations.readStartedAt == null) {
+                throw refused("mission_observation_missing");
+            }
+            observations.anchors = observations.anchors.merge(new AiAgentSourceObservations(1, List.of(
+                    new AiAgentSourceObservations.Observation(reference.kind(), reference.id(), source,
+                            limit, reference.version().sha256(), observations.readStartedAt))));
+        }
+        observations.readStartedAt = null;
         if (observations.references.size() > 64) {
             throw refused("mission_evidence_overflow");
         }
@@ -184,10 +226,14 @@ public class AiAgentEvidenceService {
         private final AiAgentEvidenceService service;
         private final AiAgentExecutionPolicy policy;
         private final List<EvidenceReference> references = new ArrayList<>();
+        private AiAgentSourceObservations anchors;
+        private Instant readStartedAt;
 
         private Observations(AiAgentEvidenceService service, AiAgentExecutionPolicy policy) {
             this.service = service;
             this.policy = policy;
+            anchors = policy.snapshot() != null && policy.snapshot().checkpoint().sourceObservations() != null
+                    ? policy.snapshot().checkpoint().sourceObservations() : new AiAgentSourceObservations(1, List.of());
         }
     }
 }

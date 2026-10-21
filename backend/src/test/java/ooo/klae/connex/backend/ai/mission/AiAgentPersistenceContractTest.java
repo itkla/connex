@@ -110,4 +110,22 @@ class AiAgentPersistenceContractTest {
         assertFalse(mapper.contains("SET message_seq_high_water"));
         assertTrue(mapper.contains("AND revision = #{expectedRevision}"));
     }
+
+    @Test
+    void purgedReviewResidueRemainsEnrolledBehindTheErasedShapeConstraint() throws Exception {
+        var factory = javax.xml.parsers.DocumentBuilderFactory.newInstance();
+        factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+        var document = factory.newDocumentBuilder().parse(Path.of("src/main/resources/mappers/AiAgentPrivacyMapper.xml").toFile());
+        var xpath = javax.xml.xpath.XPathFactory.newInstance().newXPath();
+        String predicate = xpath.evaluate("/mapper/sql[@id='runHasResidualPayload']", document);
+        for (String column : Set.of("proposal_membership_revision", "proposal_frozen_at",
+                "proposal_first_prepared_at", "review_expires_at")) {
+            assertTrue(predicate.contains("r." + column), column);
+        }
+        assertTrue(predicate.contains("ai_agent_action"));
+        assertFalse(predicate.contains("max_run_id"));
+        assertFalse(predicate.contains("last_run_id"));
+        String migration = Files.readString(Path.of("src/main/resources/db/migration/tenant/V238__ai_agent_singleton_proposals.sql"));
+        assertEquals(2, migration.split("NEW.purged_at IS NOT NULL AND", -1).length - 1);
+    }
 }

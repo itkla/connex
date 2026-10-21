@@ -26,6 +26,8 @@ import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseKey;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseService;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseSubject;
+import ooo.klae.connex.backend.beans.AiAgentAction;
+import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.AiAgentPrivacyBarrier;
 import ooo.klae.connex.backend.beans.AiAgentPrivacyWatermarks;
 import ooo.klae.connex.backend.beans.AiAgentPrivacyWork;
@@ -33,6 +35,7 @@ import ooo.klae.connex.backend.beans.AiAgentRun;
 import ooo.klae.connex.backend.beans.AiAgentSegment;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
+import ooo.klae.connex.backend.mappers.AiAgentActionMapper;
 import ooo.klae.connex.backend.mappers.AiAgentPrivacyMapper;
 import ooo.klae.connex.backend.mappers.AiAgentRunMapper;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
@@ -49,6 +52,7 @@ public class AiAgentPrivacyService {
     private static final Set<String> REASONS = Set.of("restriction", "dsr", "offboarding", "account_erasure");
     private final AiAgentPrivacyMapper privacyMapper;
     private final AiAgentRunMapper runMapper;
+    private final AiAgentActionMapper actionMapper;
     private final AiChatMapper chatMapper;
     private final AiRestrictionEpoch restrictionEpoch;
     private final AiRunLeaseService leaseService;
@@ -408,6 +412,23 @@ public class AiAgentPrivacyService {
             if (run == null || !Objects.equals(sessionId, run.getSessionId())) {
                 throw new ConflictException("mission_privacy_cursor_conflict");
             }
+            List<AiAgentAction> actions = actionMapper.listByRoot(workspaceId, runId);
+            if (actions.size() > 50) {
+                throw unavailable();
+            }
+            for (AiAgentAction action : actions.stream().sorted(java.util.Comparator.comparingInt(AiAgentAction::getId)).toList()) {
+                if (actionMapper.lockAction(workspaceId, runId, action.getId()) == null) {
+                    throw unavailable();
+                }
+            }
+            List<AiChatToolCall> tools = actions.stream().filter(action -> action.getPreparationId() != null)
+                    .map(action -> chatMapper.getMissionToolCallForMaintenance(workspaceId, runId, action.getId()))
+                    .filter(Objects::nonNull).sorted(java.util.Comparator.comparingInt(AiChatToolCall::getId)).toList();
+            for (AiChatToolCall tool : tools) {
+                if (chatMapper.lockMissionToolCall(workspaceId, runId, Objects.requireNonNull(tool.getMissionActionId())) == null) {
+                    throw unavailable();
+                }
+            }
             List<AiAgentSegment> segments = runMapper.listSegments(workspaceId, runId);
             int maxSegments = run.getRuntimeContractVersion() == 1 ? 1 : 8;
             if (segments.size() > maxSegments * 3 || segments.stream().anyMatch(segment ->
@@ -415,15 +436,17 @@ public class AiAgentPrivacyService {
                     || segment.getAttemptNo() < 1 || segment.getAttemptNo() > 3)) {
                 throw unavailable();
             }
+            boolean finalActionBatch = actions.size() <= 25;
+            boolean settleAttempts = finalActionBatch || run.getActiveSegmentId() != null;
             List<Integer> turnIds = segments.stream().map(AiAgentSegment::getTurnId)
                     .filter(Objects::nonNull).distinct().sorted().toList();
-            if (sessionId != null) {
+            if (sessionId != null && settleAttempts) {
                 for (int turnId : turnIds) {
                     chatMapper.getTurnByIdForUpdate(workspaceId, sessionId, turnId);
                 }
             }
             AiAgentSegment active = null;
-            for (AiAgentSegment segment : segments) {
+            for (AiAgentSegment segment : settleAttempts ? segments : List.<AiAgentSegment>of()) {
                 AiAgentSegment locked = runMapper.lockSegment(workspaceId, segment.getId());
                 if (locked == null || !Objects.equals(segment.getTurnId(), locked.getTurnId())) {
                     throw unavailable();
@@ -467,6 +490,21 @@ public class AiAgentPrivacyService {
                 run.setStateVersion(Math.incrementExact(version));
                 run.setExecutionGeneration(Math.incrementExact(generation));
                 run.setWithheldAt(now());
+                run.setActiveSegmentId(null);
+                chatMapper.withdrawPendingMissionCalls(workspaceId, runId, "privacy_invalidated", "{}");
+                if (!actions.isEmpty()) {
+                    actionMapper.deleteActions(workspaceId, runId, actions.stream()
+                            .limit(25).map(AiAgentAction::getId).toList());
+                }
+                if (!finalActionBatch) {
+                    requireOne(runMapper.updateRun(run, version, generation));
+                    save(work);
+                    if (active != null) {
+                        leaseService.releaseHeldInCurrentTransaction(
+                                new AiRunLeaseKey(workspaceId, AiRunLeaseSubject.AGENT_RUN, runId));
+                    }
+                    return;
+                }
                 run.setPurgedAt(now());
                 run.setFinishedAt(now());
                 run.setSessionId(null);
@@ -485,6 +523,10 @@ public class AiAgentPrivacyService {
                 run.setMemorySchemaVersion(null);
                 run.setMemoryJson(null);
                 run.setLastCommittedSegmentNo(0);
+                run.setProposalMembershipRevision(0);
+                run.setProposalFrozenAt(null);
+                run.setProposalFirstPreparedAt(null);
+                run.setReviewExpiresAt(null);
                 requireOne(runMapper.updateRun(run, version, generation));
                 runMapper.detachSegmentTurns(workspaceId, runId);
                 if (!turnIds.isEmpty()) {
@@ -494,8 +536,10 @@ public class AiAgentPrivacyService {
             }
             work.setLastRunId(runId);
             save(work);
-            leaseService.releaseHeldInCurrentTransaction(
-                    new AiRunLeaseKey(workspaceId, AiRunLeaseSubject.AGENT_RUN, runId));
+            if (active != null) {
+                leaseService.releaseHeldInCurrentTransaction(
+                        new AiRunLeaseKey(workspaceId, AiRunLeaseSubject.AGENT_RUN, runId));
+            }
         });
         return false;
     }

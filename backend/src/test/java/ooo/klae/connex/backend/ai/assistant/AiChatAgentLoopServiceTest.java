@@ -3374,7 +3374,7 @@ class AiChatAgentLoopServiceTest {
                 mock(CompanyMapper.class),
                 mock(DealMapper.class),
                 mock(AiAssistantDateResolver.class),
-                mock(AiAssistantScopeReadService.class), ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered());
+                mock(AiAssistantScopeReadService.class), ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered(), ooo.klae.connex.backend.support.TenantWorkScopes.passThrough());
         service = new AiChatAgentLoopService(
                 invocationService,
                 invocationAdmissionService,

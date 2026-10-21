@@ -76,7 +76,8 @@ class AiAgentPrivacyEnrollmentTest {
         when(transactions.getTransaction(any())).thenAnswer(call -> new SimpleTransactionStatus());
         var authority = new AiAssistantPrivacyService(control, mock(WorkspaceMapper.class),
                 mock(ApplicationEventPublisher.class));
-        service = new AiAgentPrivacyService(work, mock(AiAgentRunMapper.class), mock(AiChatMapper.class),
+        service = new AiAgentPrivacyService(work, mock(AiAgentRunMapper.class),
+                mock(ooo.klae.connex.backend.mappers.AiAgentActionMapper.class), mock(AiChatMapper.class),
                 mock(AiRestrictionEpoch.class), mock(AiRunLeaseService.class), transactions,
                 mock(WorkspaceMapper.class), lifecycle, mock(UserMapper.class), mock(TenantWorkScope.class),
                 catalogs, context, Clock.fixed(Instant.parse("2026-10-20T00:00:00Z"), ZoneOffset.UTC),

@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.AiAgentActionMapper">
+  <resultMap id="actionResult" type="ooo.klae.connex.backend.beans.AiAgentAction">
+    <id column="id" property="id" />
+    <result column="workspace_id" property="workspaceId" />
+    <result column="root_run_id" property="rootRunId" />
+    <result column="producer_run_id" property="producerRunId" />
+    <result column="action_slot" property="actionSlot" />
+    <result column="semantic_slot_key" property="semanticSlotKey" />
+    <result column="target_kind" property="targetKind" />
+    <result column="target_id" property="targetId" />
+    <result column="tool_name" property="toolName" />
+    <result column="plan_item_key" property="planItemKey" />
+    <result column="plan_revision" property="planRevision" />
+    <result column="preparation_id" property="preparationId" />
+    <result column="intent_fingerprint" property="intentFingerprint" />
+    <result column="prepared_at" property="preparedAt" />
+    <result column="source_observed_at" property="sourceObservedAt" />
+    <result column="utf8_source_versions_json" property="sourceVersionsJson" typeHandler="ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler" />
+    <result column="origin_segment_id" property="originSegmentId" />
+    <result column="origin_execution_generation" property="originExecutionGeneration" />
+    <result column="output_ordinal" property="outputOrdinal" />
+    <result column="privacy_generation" property="privacyGeneration" />
+    <result column="created_at" property="createdAt" />
+    <result column="updated_at" property="updatedAt" />
+  </resultMap>
+
+  <select id="listByRoot" resultMap="actionResult" flushCache="true" useCache="false">
+    SELECT *, CAST(source_versions_json AS BINARY) AS utf8_source_versions_json
+    FROM ai_agent_action
+    WHERE workspace_id = #{workspaceId} AND root_run_id = #{rootRunId}
+    ORDER BY id
+  </select>
+
+  <select id="getById" resultMap="actionResult" flushCache="true" useCache="false">
+    SELECT *, CAST(source_versions_json AS BINARY) AS utf8_source_versions_json
+    FROM ai_agent_action
+    WHERE workspace_id = #{workspaceId} AND root_run_id = #{rootRunId} AND id = #{id}
+  </select>
+
+  <select id="getBySlot" resultMap="actionResult" flushCache="true" useCache="false">
+    SELECT *, CAST(source_versions_json AS BINARY) AS utf8_source_versions_json
+    FROM ai_agent_action
+    WHERE workspace_id = #{workspaceId} AND root_run_id = #{rootRunId} AND action_slot = #{actionSlot}
+  </select>
+
+  <select id="getBySemantic" resultMap="actionResult" flushCache="true" useCache="false">
+    SELECT *, CAST(source_versions_json AS BINARY) AS utf8_source_versions_json
+    FROM ai_agent_action
+    WHERE workspace_id = #{workspaceId} AND root_run_id = #{rootRunId} AND semantic_slot_key = #{semanticSlotKey}
+  </select>
+
+  <select id="lockAction" resultMap="actionResult" flushCache="true" useCache="false">
+    SELECT *, CAST(source_versions_json AS BINARY) AS utf8_source_versions_json
+    FROM ai_agent_action
+    WHERE workspace_id = #{workspaceId} AND root_run_id = #{rootRunId} AND id = #{id}
+    FOR UPDATE
+  </select>
+
+  <insert id="insertSlot" useGeneratedKeys="true" keyProperty="action.id">
+    INSERT INTO ai_agent_action (workspace_id, root_run_id, producer_run_id, action_slot, semantic_slot_key, target_kind, target_id, tool_name, plan_item_key, plan_revision, privacy_generation)
+    VALUES (#{action.workspaceId}, #{action.rootRunId}, #{action.producerRunId}, #{action.actionSlot}, #{action.semanticSlotKey}, #{action.targetKind}, #{action.targetId}, #{action.toolName}, #{action.planItemKey}, #{action.planRevision}, #{action.privacyGeneration})
+  </insert>
+
+  <update id="bindPreparation">
+    UPDATE ai_agent_action SET
+      preparation_id = #{action.preparationId}, intent_fingerprint = #{action.intentFingerprint},
+      prepared_at = #{action.preparedAt}, source_observed_at = #{action.sourceObservedAt},
+      source_versions_json = CONVERT(#{action.sourceVersionsJson,jdbcType=VARBINARY,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4),
+      origin_segment_id = #{action.originSegmentId},
+      origin_execution_generation = #{action.originExecutionGeneration}
+    WHERE workspace_id = #{action.workspaceId} AND root_run_id = #{action.rootRunId}
+      AND id = #{action.id} AND preparation_id IS NULL AND output_ordinal IS NULL
+      AND privacy_generation = #{action.privacyGeneration}
+  </update>
+
+  <update id="assignOutputOrdinal">
+    UPDATE ai_agent_action SET output_ordinal = #{ordinal}
+    WHERE workspace_id = #{workspaceId} AND root_run_id = #{rootRunId} AND id = #{id}
+      AND preparation_id IS NOT NULL AND output_ordinal IS NULL
+  </update>
+
+  <select id="countByRoot" resultType="int" flushCache="true" useCache="false">
+    SELECT COUNT(*) FROM ai_agent_action WHERE workspace_id = #{workspaceId} AND root_run_id = #{rootRunId}
+  </select>
+
+  <delete id="deleteActions">
+    DELETE FROM ai_agent_action
+    WHERE workspace_id = #{workspaceId} AND root_run_id = #{rootRunId}
+      AND id IN <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+    LIMIT 25
+  </delete>
+</mapper>

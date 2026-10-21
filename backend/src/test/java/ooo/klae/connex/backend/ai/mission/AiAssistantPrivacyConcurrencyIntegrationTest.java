@@ -16,6 +16,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.junit.jupiter.api.Test;
@@ -328,6 +329,7 @@ class AiAssistantPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivac
         }
     }
 
+    /** Only the transaction settling the active attempt releases its lease, after durable settlement. */
     @ParameterizedTest
     @CsvSource({"cancel,false", "cancel,true", "expiry,false", "expiry,true"})
     void cancellationAndExpirySerializeWithV2PurgeAtTheContentRoot(String action, boolean purgeFirst) throws Exception {
@@ -381,6 +383,7 @@ class AiAssistantPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivac
         ThreadLocal<Boolean> leaseReleased = ThreadLocal.withInitial(() -> false);
         AtomicBoolean releaseObserved = new AtomicBoolean();
         AtomicBoolean terminalReleaseObserved = new AtomicBoolean();
+        AtomicInteger releaseCount = new AtomicInteger();
         doAnswer(invocation -> {
             if (Boolean.TRUE.equals(purging.get())) {
                 AiAgentRun settled = runs.getRun(workspace.getId(), created.getId());
@@ -397,6 +400,7 @@ class AiAssistantPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivac
                 terminalReleaseObserved.set(true);
             }
             leaseReleased.set(true);
+            releaseCount.incrementAndGet();
             return invocation.callRealMethod();
         }).when(org.springframework.test.util.AopTestUtils.<ooo.klae.connex.backend.ai.lease.AiRunLeaseService>getUltimateTargetObject(leases)).releaseHeldInCurrentTransaction(org.mockito.ArgumentMatchers.any());
         doAnswer(invocation -> {
@@ -458,7 +462,8 @@ class AiAssistantPrivacyConcurrencyIntegrationTest extends AbstractAiAgentPrivac
                 Integer.class, workspace.getId()));
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM ai_chat_session WHERE workspace_id=? AND id=?",
                 Integer.class, workspace.getId(), session.getId()));
-        assertTrue(releaseObserved.get());
+        assertEquals(1, releaseCount.get());
+        assertEquals(purgeFirst, releaseObserved.get());
         assertEquals(!purgeFirst, terminalReleaseObserved.get());
         assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM audit_log WHERE workspace_id=? AND id=? AND action='ai.tool.invoke'", Integer.class, workspace.getId(), invocationAudit));
         assertThrows(RuntimeException.class, () -> missions.recordUsage(policy, reservation, 1, 1));

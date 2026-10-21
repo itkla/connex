@@ -60,6 +60,7 @@ class AiAgentContinuationV235MigrationIntegrationTest {
     private static String password = "";
     private static List<String> tableIdentity = List.of();
     private static List<String> oldRunColumns = List.of();
+    private static List<String> oldSegmentColumns = List.of();
     private static List<String> oldRun = List.of();
     private static List<String> oldSegment = List.of();
 
@@ -108,11 +109,13 @@ class AiAgentContinuationV235MigrationIntegrationTest {
                     """);
             tableIdentity = tableIdentity(connection);
             oldRunColumns = columnNames(connection, "ai_agent_run");
+            oldSegmentColumns = columnNames(connection, "ai_agent_segment");
             oldRun = rows(connection, "SELECT * FROM ai_agent_run WHERE id = 234000");
             oldSegment = rows(connection, "SELECT * FROM ai_agent_segment WHERE id = 234000");
         }
         assertEquals(MigrationVersion.fromVersion("235"),
                 Objects.requireNonNull(migrate("235").info().current()).getVersion());
+        migrate("238");
     }
 
     @AfterAll
@@ -129,7 +132,8 @@ class AiAgentContinuationV235MigrationIntegrationTest {
             assertEquals(2, tableIdentity.size());
             String columns = String.join(", ", oldRunColumns);
             assertEquals(oldRun, rows(connection, "SELECT " + columns + " FROM ai_agent_run WHERE id = 234000"));
-            assertEquals(oldSegment, rows(connection, "SELECT * FROM ai_agent_segment WHERE id = 234000"));
+            assertEquals(oldSegment, rows(connection, "SELECT " + String.join(", ", oldSegmentColumns)
+                    + " FROM ai_agent_segment WHERE id = 234000"));
             assertEquals(List.of("[1, null, 0, null, null, 0, null, null, null, 0]"), rows(connection, """
                     SELECT runtime_contract_version, plan_schema_version, plan_revision, plan_json,
                            checkpoint_schema_version, checkpoint_revision, checkpoint_json,

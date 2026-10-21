@@ -13,7 +13,7 @@ import ooo.klae.connex.backend.ai.mission.AiAgentBudgetService;
 /** Explicit, bounded, read-only record-review request; ownership is resolved by the server. */
 public record AiAgentRunCreateRequest(
         @NotBlank @Pattern(regexp = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}") String clientRequestKey,
-        @NotNull @Pattern(regexp = "record_review_v1") String missionType,
+        @NotNull @Pattern(regexp = "record_review_v1|record_preparation_v1") String missionType,
         @NotBlank @Size(max = 16000) String goal,
         @NotNull @Valid Scope scope,
         @Valid Limits limits) {

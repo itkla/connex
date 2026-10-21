@@ -189,9 +189,7 @@ function clientRecoveryWorkspaceId(): string | null {
     return workspaceId == null ? null : String(workspaceId);
 }
 
-// CSRF token, fetched once from the backend and echoed in a header on state-changing requests.
-// The frontend and backend can be different origins, so the token is delivered via this endpoint
-// rather than a cookie the JS would otherwise be unable to read cross-origin.
+/** The backend delivers the CSRF token and session identity without requiring a same-origin cookie. */
 type CsrfBootstrap = {
     token: string;
     headerName: string;
@@ -209,6 +207,7 @@ type ResolvedClientRequestIdentity = {
 
 const CLIENT_IDENTITY_EVENT_KEY = "connex:client-request-identity";
 let csrfTokenCache: CsrfBootstrap | null = null;
+let csrfTokenRequest: Promise<CsrfBootstrap | null> | null = null;
 let clientRequestIdentityEpoch = 0;
 const inFlightAiMutations = new Map<string, InFlightAiMutation>();
 const inFlightReportGenerations = new Map<string, {
@@ -258,7 +257,17 @@ if (typeof window !== "undefined") {
     });
 }
 
-async function fetchCsrfToken(): Promise<CsrfBootstrap | null> {
+/** Shares CSRF bootstrap work across header callers and fresh identity checks in this generation. */
+function fetchCsrfToken(): Promise<CsrfBootstrap | null> {
+    if (csrfTokenRequest) return csrfTokenRequest;
+    const request = readCsrfToken().finally(() => {
+        if (csrfTokenRequest === request) csrfTokenRequest = null;
+    });
+    csrfTokenRequest = request;
+    return request;
+}
+
+async function readCsrfToken(): Promise<CsrfBootstrap | null> {
     try {
         const res = await fetch(`${API_BASE}/api/auth/csrf`, { credentials: "include", cache: "no-store" });
         if (!res.ok) return null;
@@ -287,18 +296,25 @@ async function fetchCsrfToken(): Promise<CsrfBootstrap | null> {
  * Resolves the CSRF header the backend expects on state-changing requests,
  * as a single-entry `{ [headerName]: token }` map (empty during SSR). Shared
  * with the realtime client, which echoes the same token on the STOMP CONNECT.
+ * Concurrent callers share a bootstrap; identity transitions discard its result.
  * @param forceRefresh when true, discards the cached token and refetches it
  * @returns the CSRF header map, or an empty map when unavailable
  */
 export async function csrfHeader(forceRefresh = false): Promise<Record<string, string>> {
-    if (typeof window === "undefined") return {}; // SSR issues GETs only; CSRF does not apply
+    if (typeof window === "undefined") return {};
     if (forceRefresh) csrfTokenCache = null;
-    if (!csrfTokenCache) csrfTokenCache = await fetchCsrfToken();
+    if (!csrfTokenCache) {
+        const identityEpoch = clientRequestIdentityEpoch;
+        const token = await fetchCsrfToken();
+        if (clientRequestIdentityEpoch !== identityEpoch) return {};
+        csrfTokenCache = token;
+    }
     return csrfTokenCache ? { [csrfTokenCache.headerName]: csrfTokenCache.token } : {};
 }
 
 function invalidateClientRequestIdentity() {
     csrfTokenCache = null;
+    csrfTokenRequest = null;
     clientRequestIdentityEpoch += 1;
     privilegedMfaEventEpoch += 1;
     for (const mutation of inFlightAiMutations.values()) {
@@ -393,8 +409,10 @@ export function synchronizeBrowserAccount(userId: number): void {
 
 async function resolveClientRequestIdentity(): Promise<ResolvedClientRequestIdentity | null> {
     const workspaceId = clientWorkspaceId();
+    const identityEpoch = clientRequestIdentityEpoch;
     const currentCsrf = await fetchCsrfToken();
-    if (workspaceId == null || currentCsrf == null || currentCsrf.requestIdentity == null) {
+    if (clientRequestIdentityEpoch !== identityEpoch
+        || workspaceId == null || currentCsrf == null || currentCsrf.requestIdentity == null) {
         return null;
     }
     const previousCsrf = csrfTokenCache;
@@ -6813,7 +6831,7 @@ export function cancelAiChatTurn(
     );
 }
 
-/** Creates one bounded, read-only mission with a caller-stable idempotency key. */
+/** Creates one bounded mission with a caller-stable idempotency key. */
 export function createAiAgentRun(sessionId: number, payload: Types.AiAgentRunCreateRequest, init: RequestInit = {}) {
     return postJson<Types.AiAgentRun>(`/api/ai/assistant/sessions/${sessionId}/missions`, payload, init);
 }
@@ -6908,6 +6926,17 @@ export function getAiGenerationStatus<T>(handle: string, init: RequestInit = {})
         `/api/ai/generations/${encodeURIComponent(handle)}`,
         { cache: 'no-store', ...init },
     );
+}
+
+/** Reads one exact mission member under current requester and source authorization. */
+export function getAiAgentProposal(id: number, actionSlot: string, init: RequestInit = {}) {
+    return getJson<Types.AiAgentProposalItem>(`/api/ai/assistant/missions/${id}/proposals/${encodeURIComponent(actionSlot)}`, { cache: 'no-store', ...init });
+}
+
+/** Pins the rendered workspace before the shared JSON helper awaits identity or CSRF. */
+export function decideAiAgentProposals(id: number, payload: Types.AiAgentProposalDecisionRequest, init: RequestInit = {}) {
+    const path = `/api/ai/assistant/missions/${id}/proposal-decisions`;
+    return postJson<Types.AiAgentProposalDecisionResult>(path, payload, pinWriteNow(path, init));
 }
 
 /**
