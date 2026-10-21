@@ -19,12 +19,14 @@
     <result property="createdAt" column="created_at"/>
     <result property="updatedAt" column="updated_at"/>
     <result property="expiresAt" column="expires_at"/>
+    <result property="expired" column="expired"/>
   </resultMap>
 
   <sql id="cols">
     id, user_id, provider, status, pairing_code_hash, handoff_ticket_hash,
     state_hash, verifier_ref, redirect_uri, expected_connection_id,
-    expected_credential_generation, error_code, created_at, updated_at, expires_at
+    expected_credential_generation, error_code, created_at, updated_at, expires_at,
+    expires_at &lt;= UTC_TIMESTAMP(6) AS expired
   </sql>
 
   <select id="getLatestByUserAndProvider" resultMap="NativeConnectSessionResult">
@@ -92,7 +94,7 @@
     SET status = 'failed', error_code = #{errorCode}
     WHERE user_id = #{userId}
       AND provider = #{provider}
-      AND status IN ('pending', 'prepared', 'exchanging')
+      AND status IN ('pending', 'prepared')
   </update>
 
   <update id="prepare">
@@ -111,7 +113,7 @@
 
   <update id="claimForExchange">
     UPDATE provider_native_connect_session
-    SET status = 'exchanging', error_code = NULL
+    SET status = 'exchanging', error_code = NULL, updated_at = UTC_TIMESTAMP(6)
     WHERE id = #{id}
       AND handoff_ticket_hash = #{handoffTicketHash}
       AND status = 'prepared'
@@ -122,6 +124,23 @@
     UPDATE provider_native_connect_session
     SET status = 'completed', error_code = NULL
     WHERE id = #{id} AND status = 'exchanging'
+      AND updated_at &gt; TIMESTAMPADD(SECOND, -#{leaseSeconds}, UTC_TIMESTAMP(6))
+  </update>
+
+  <select id="findExpiredExchanges" resultMap="NativeConnectSessionResult">
+    SELECT <include refid="cols"/>
+    FROM provider_native_connect_session
+    WHERE status = 'exchanging'
+      AND updated_at &lt;= TIMESTAMPADD(SECOND, -#{leaseSeconds}, UTC_TIMESTAMP(6))
+    ORDER BY updated_at, id
+    LIMIT #{limit}
+  </select>
+
+  <update id="failExpiredExchange">
+    UPDATE provider_native_connect_session
+    SET status = 'failed', error_code = 'exchange_expired', updated_at = UTC_TIMESTAMP(6)
+    WHERE id = #{id} AND status = 'exchanging'
+      AND updated_at &lt;= TIMESTAMPADD(SECOND, -#{leaseSeconds}, UTC_TIMESTAMP(6))
   </update>
 
   <update id="fail">
@@ -148,6 +167,8 @@
     SELECT <include refid="cols"/>
     FROM provider_native_connect_session
     WHERE expires_at &lt;= #{cutoff}
+      AND status != 'exchanging'
+      AND updated_at &lt;= #{cutoff}
     ORDER BY expires_at, id
     LIMIT #{limit}
   </select>
@@ -156,5 +177,7 @@
     DELETE FROM provider_native_connect_session
     WHERE id = #{id}
       AND expires_at &lt;= #{cutoff}
+      AND status != 'exchanging'
+      AND updated_at &lt;= #{cutoff}
   </delete>
 </mapper>

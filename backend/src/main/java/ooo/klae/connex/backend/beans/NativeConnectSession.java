@@ -28,4 +28,5 @@ public class NativeConnectSession {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private LocalDateTime expiresAt;
+    private boolean expired;
 }
