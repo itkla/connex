@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.NotificationControlMapper">
+  <select id="findRecipientMemberships" resultType="ooo.klae.connex.backend.beans.NotificationMembership"
+          flushCache="true" useCache="false">
+    SELECT wm.workspace_id, wm.user_id AS recipient_id, wm.status, wm.membership_id,
+           w.org_id, w.name AS workspace_name, w.lifecycle_state AS workspace_lifecycle_state,
+           o.lifecycle_state AS organization_lifecycle_state
+    FROM workspace_member wm
+    JOIN workspace w ON w.id = wm.workspace_id
+    JOIN organization o ON o.id = w.org_id
+    WHERE wm.user_id = #{recipientId}
+    ORDER BY wm.workspace_id
+  </select>
+
+  <select id="findOrganizationWorkspaces" resultType="Workspace" flushCache="true" useCache="false">
+    SELECT id, org_id, name
+    FROM workspace
+    WHERE org_id IN
+    <foreach collection="orgIds" item="orgId" open="(" separator="," close=")">
+      #{orgId}
+    </foreach>
+    ORDER BY org_id, id
+  </select>
+
+  <select id="lockMembershipForShare"
+          resultType="ooo.klae.connex.backend.beans.NotificationMembershipAuthority"
+          flushCache="true" useCache="false">
+    SELECT workspace_id, user_id AS recipient_id, status, membership_id
+    FROM workspace_member
+    WHERE workspace_id = #{workspaceId} AND user_id = #{recipientId}
+    FOR SHARE
+  </select>
+
+  <select id="lockMembershipForUpdate"
+          resultType="ooo.klae.connex.backend.beans.NotificationMembershipAuthority"
+          flushCache="true" useCache="false">
+    SELECT workspace_id, user_id AS recipient_id, status, membership_id
+    FROM workspace_member
+    WHERE workspace_id = #{workspaceId} AND user_id = #{recipientId}
+    FOR UPDATE
+  </select>
+
+  <select id="lockActorForShare" resultType="int" flushCache="true" useCache="false">
+    SELECT id FROM app_user WHERE id = #{actorId} FOR SHARE
+  </select>
+</mapper>
