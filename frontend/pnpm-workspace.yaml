@@ -49,8 +49,8 @@ overrides:
   'body-parser@2': ^2.4.0
   # GHSA-3f7j-7jwc-fxfj (high) and two lower advisories: shadcn > dotenvx > systeminformation below 5.33.16.
   systeminformation: ^5.33.16
-  # GHSA-mrhx-c7xc-m3w5 (high): shadcn > MCP SDK > zod below 4.6.6, with no patched 3.x release.
-  # The SDK accepts zod 4, so both resolved lines move to it.
+  # GHSA-mrhx-c7xc-m3w5 (high): zod below 4.6.6, with no patched 3.x release. shadcn needs ^4.22.0 for
+  # this: older releases declare zod 3 and crash on zod 4 at load (deepPartial was removed).
   zod: ^4.6.6
   'baseline-browser-mapping@<2.11.0': 2.11.0
   # GHSA-253c-mchw-3w2r (moderate): quadratic linkify paths, fixed in 14.3.1.

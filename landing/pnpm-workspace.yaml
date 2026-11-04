@@ -37,14 +37,16 @@ overrides:
   'body-parser@2': ^2.4.0
   # GHSA-3f7j-7jwc-fxfj (high) and two lower advisories: shadcn > dotenvx > systeminformation below 5.33.16.
   systeminformation: ^5.33.16
-  # GHSA-mrhx-c7xc-m3w5 (high): shadcn > MCP SDK > zod below 4.6.6, with no patched 3.x release.
-  # The SDK accepts zod 4, so the resolved line moves to it.
+  # GHSA-mrhx-c7xc-m3w5 (high): zod below 4.6.6, with no patched 3.x release. shadcn needs ^4.22.0 for
+  # this: older releases declare zod 3 and crash on zod 4 at load (deepPartial was removed).
   zod: ^4.6.6
   # GHSA-5r4p-p66f-jhc7 (moderate), fixed in 4.13.11, and GHSA-rmxm-3fg6-px4f (moderate), fixed in 2.1.3.
   hono: 4.13.16
   '@hono/node-server': ^2.1.3
   # GHSA-6pq8-jhm2-2vcw (moderate), fixed in 6.16.1.
   'qs@<6.16.1': ^6.16.1
+  # GHSA-5j98-mcp5-4vw2 (high): @opennextjs/aws > @node-minify/core > glob below 10.5.0.
+  'glob@10': ^10.5.0
 # Supply-chain resolution policy (#835). Owner decision 2026-09-19: versions younger
 # than one day and versions without registry publish time are refused, and a
 # package whose trust evidence (staged publish, trusted publisher, provenance)
