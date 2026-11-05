@@ -322,6 +322,7 @@ class DealOutcomeRoutesTest extends AbstractServiceTest {
 
     private void addLine(Deal deal, BigDecimal amount) {
         DealLineItemRequest request = new DealLineItemRequest();
+        request.setConfirmValueReplacement(true);
         request.setName("Outcome line");
         request.setQuantity(BigDecimal.ONE);
         request.setUnitPrice(amount);
