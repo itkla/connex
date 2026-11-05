@@ -749,20 +749,50 @@ step-up counts only when the session's stamp is bound to one of its own **suffic
   passkeys. The first passkey is the exception, and operator recovery leads back to it.
 
 `GET /api/auth/webauthn/register/requirements` stays reachable while confined. It reports the
-account's enforced `standing`, and `approvalGaps`: for each of the account's own passkeys without
+account's passkey `standing`, and `approvalGaps`: for each of the account's own passkeys without
 `BREAK_GLASS` assurance, every organization where the account is privileged and that passkey is not yet
 approved (`credentialId` in the base64url form the passkey list uses, `orgId`, `orgName`). A client
-re-reads it after each ceremony, and releases confinement only on `SATISFIED` or `UNPRIVILEGED`.
+re-reads it after each ceremony. With master enforcement enabled, only `SATISFIED` or
+`UNPRIVILEGED` releases confinement.
+
+The requirements endpoint still reports privilege/passkey standing when the master MFA switch is
+explicitly disabled. The browser therefore reads `GET /api/capabilities` alongside requirements and
+honors `privilegedMfaEnforced: false` before turning enrollment or approval metadata into confinement.
+Raw requirements remain available for passkey management, but they are not proof that access is
+paused. Missing standing metadata also does not establish confinement. A failed posture/requirements
+read preserves an already-known server refusal or step URL. Ordinary pages and shell readers wait
+behind a separate shared readiness state while policy is unresolved or its read has failed; the
+page offers a neutral retry state and keeps Security reachable. An explicit master-off response
+releases fresh ordinary pages immediately, even while enrollment metadata is still pending or fails.
+Cached ready policy survives pending background rechecks, workspace transitions and CSRF-token
+refreshes so the editor stays mounted and pending saves can finish. These request invalidations
+still overtake older policy responses. Confirmed authentication/account transitions reset policy
+readiness; a confirmed enforcement change or lookup failure holds readers until a safe decision.
+Readiness failure ordering remains separate from the original decisive-standing sequence.
 
 The same self-only response always includes `privilegedMemberships` (#1534 slice 4b-1),
 independent of both enforcement switches. An unprivileged account receives `[]`. Each entry is
-`{orgId, orgName, orgRole, workspaces:[{workspaceId, workspaceName}]}`. `orgRole` is explicitly
+`{orgId, orgName, orgRole, lastOwner, workspaces:[{workspaceId, workspaceName, lastOwner}]}`. `orgRole` is explicitly
 `null` without an organization membership. Entries and workspaces are ordered by id. Sources are
 exactly the shared standing privilege branches: active organizations, active workspaces and active
 workspace memberships; built-in owner/admin only when `role_id IS NULL`; custom roles with the
 management permission list above; and organization authority from `org_member`. Permission joins
 are deduplicated, so each workspace appears once. Only the signed-in account's memberships are
 returned, including custom-role workspace exits and org-only privilege with no workspace exits.
+The advisory `lastOwner` flags identify sole organization owners and sole active workspace owners.
+The passkey card hides those impossible leave actions and labels remaining actions by scope;
+locked server leave checks remain authoritative and may still refuse for other safeguards.
+
+The browser shell skips pinned views, assistant reads and skills, notification counts and sockets,
+automatic permission probes, and mobile task counts while policy is unresolved or failed, or
+confinement is known. These reads resume when policy is ready and confinement is released. Client navigation to other
+app pages shows the required passkey step with a link to Security before mounting page data readers.
+Automatic assistant initialization failures remain inline, so a background refusal cannot produce an
+unrelated global error toast. Explicit retries retain the shared error toast and show the actual
+request failure instead of treating a refusal as AI being switched off. Readiness rechecks preserve
+an existing composer and its draft, focus and selection while disabling submission. Other explicit
+user-action refusals still use the shared error toast, with confinement codes mapped to the passkey
+guidance rather than the generic workspace-permission message.
 
 The startup event's inventory also records `attestationRequiredCount`: the privileged accounts
 holding passkeys of which none is sufficient. These are the accounts that enforcement confines.

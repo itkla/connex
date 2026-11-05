@@ -290,9 +290,10 @@ public class PrivilegedAccountService {
             String orgRole = rows.stream().map(PrivilegedMembershipRow::orgRole)
                     .filter(Objects::nonNull).findFirst().orElse(null);
             var workspaces = rows.stream().filter(row -> row.workspaceId() != null)
-                    .map(row -> new PrivilegedMembershipDto.Workspace(row.workspaceId(), row.workspaceName()))
+                    .map(row -> new PrivilegedMembershipDto.Workspace(
+                            row.workspaceId(), row.workspaceName(), row.workspaceLastOwner()))
                     .distinct().toList();
-            return new PrivilegedMembershipDto(first.orgId(), first.orgName(), orgRole, workspaces);
+            return new PrivilegedMembershipDto(first.orgId(), first.orgName(), orgRole, first.orgLastOwner(), workspaces);
         }).toList();
     }
 
