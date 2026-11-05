@@ -1,4 +1,4 @@
-import { getAttachmentsFromCookie, getCommentThreads, getContactById, getContactLifecycle, getContactLifecycleHistory, getContactQualification, getContactConnections, getContactEmployment, getContactEvidence, getContactIntroPath, getContextNotifications, getCurrentUserResultFromCookie, getEffectivePermissionsFromCookie, getEntityCustomFieldsFromCookie, getPersonCampaignTouches, getPersonMarketingStatus, getTags, getUserReferences } from "@/app/lib/api";
+import { getAttachmentsFromCookie, getCommentThreads, getContactById, getContactLifecycle, getContactLifecycleHistory, getContactQualification, getContactConnections, getContactEmployment, getContactEvidence, getContactIntroPath, getContextNotifications, getCurrentUserResultFromCookie, getEffectivePermissionsFromCookie, getEntityCustomFieldsFromCookie, getPersonCampaignTouches, getPersonMarketingStatus, getTags, getUserReferences, getRelationshipMapAvailability } from "@/app/lib/api";
 import { notFound, redirect } from "next/navigation";
 import AccessDeniedPage from "@/app/components/AccessDeniedPage";
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
@@ -63,7 +63,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
     }
 
     const permissionsPromise = getEffectivePermissionsFromCookie(cookie);
-    const [t, locale, contactAccess, allTags, attachments, notificationPage, employment, connections, introPath, customFields, evidence, effectivePermissions, lifecycle, lifecycleHistory, qualification, commentThreads, marketingStatus, campaignTouches] = await Promise.all([
+    const [t, locale, contactAccess, allTags, attachments, notificationPage, employment, connections, introPath, customFields, evidence, effectivePermissions, lifecycle, lifecycleHistory, qualification, commentThreads, marketingStatus, campaignTouches, mapAvailability] = await Promise.all([
         getTranslations("ContactsPage"),
         getLocale(),
         loadRecord<Contact>(() => getContactById(id, init)),
@@ -95,6 +95,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
                     .then((page) => page.items)
                     .catch(() => [])
                 : []),
+        getRelationshipMapAvailability(init),
     ]);
     if (contactAccess.kind === "forbidden") {
         return <AccessDeniedPage />;
@@ -239,6 +240,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
                     <RecordDetailSection recordKind="contact" section="actions" className="mt-4 flex flex-wrap justify-end gap-2">
                         <AskConnexRecordEntry kind="person" />
                         <ContactActionsMenu
+                            mapAvailability={mapAvailability}
                             contact={contact}
                             currentUserId={currentUser.id}
                             dealSeeds={deals}
