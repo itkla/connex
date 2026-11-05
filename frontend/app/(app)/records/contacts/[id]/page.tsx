@@ -293,7 +293,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                                     {stint.companyId ? (
                                                         <Link
                                                             href={`/records/companies/${stint.companyId}`}
-                                                            className="truncate text-sm font-medium text-foreground transition-colors hover:text-brand-hover"
+                                                            className="truncate text-sm font-medium text-foreground transition-colors hover:text-brand-text"
                                                         >
                                                             {stint.companyName ?? t("unknownCompany")}
                                                         </Link>
@@ -303,7 +303,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                                         </span>
                                                     )}
                                                     {stint.current ? (
-                                                        <span className="shrink-0 rounded-full bg-brand-light px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-brand-dark">
+                                                        <span className="shrink-0 rounded-full bg-brand-light px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-brand-text">
                                                             {t("current")}
                                                         </span>
                                                     ) : null}

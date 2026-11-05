@@ -124,7 +124,7 @@ export function SsoLinkForm() {
                         ) : (
                             <>
                                 <ShieldCheckIcon
-                                    className="connex-rise size-11 text-brand"
+                                    className="connex-rise size-11 text-brand-text"
                                     aria-hidden="true"
                                 />
                                 <h1

@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
@@ -553,6 +554,7 @@ class WorkflowServiceTest {
         assertFalse(result.canPublish());
         assertEquals(WorkflowDiagnosticCode.LEGACY_PROJECTION_UNSUPPORTED,
             result.errors().getFirst().code());
+        assertEquals("no_branch_actions", result.errors().getFirst().params().get("reason"));
         verify(workflowDefinitionValidator).validateForMutation(
             eq("deal"), eq("user"), any(WorkflowDefinition.class));
         verifyNoInteractions(ruleMapper, workflowVersionMapper, auditService);
@@ -687,8 +689,9 @@ class WorkflowServiceTest {
         assertEquals(6, inserted.getValue().getVersionNumber());
     }
 
-    @Test
-    void firstPublishCreatesRuleAndVersionThenAssignsBothPointersAtomically() {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void firstPublishCreatesRuleAndVersionThenAssignsBothPointersAtomically(boolean recipe) {
         Workflow workflow = workflow("Workflow", "user", 0, 41, null, null, false);
         when(workflowMapper.getById(7, 101)).thenReturn(workflow);
         when(workflowMapper.getByIdForUpdate(7, 101)).thenReturn(workflow);
@@ -704,7 +707,9 @@ class WorkflowServiceTest {
         }).when(workflowVersionMapper).insert(any(WorkflowVersion.class));
         when(workflowMapper.assignFirstPublication(7, 101, 77, 88L, 41, 0)).thenReturn(1);
 
-        var published = service.publish(101, publishRequest(0));
+        var published = recipe
+            ? service.publishForRecipe(101, publishRequest(0))
+            : service.publish(101, publishRequest(0));
 
         assertEquals(88L, published.activeVersionId());
         ArgumentCaptor<Rule> rule = ArgumentCaptor.forClass(Rule.class);
@@ -730,10 +735,9 @@ class WorkflowServiceTest {
             eq("Workflow published"), eq(Map.of("versionNumber", 1)));
     }
 
-    @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    void firstPublishUsesCanonicalOwnershipForEnabledRuntimeOrRecipeInstallation(boolean recipe) {
-        when(runtimeProperties.enabled()).thenReturn(!recipe);
+    @Test
+    void firstPublishUsesCanonicalOwnershipForEnabledRuntime() {
+        when(runtimeProperties.enabled()).thenReturn(true);
         Workflow workflow = workflow("Workflow", "user", 0, 41, null, null, false);
         when(workflowMapper.getById(7, 101)).thenReturn(workflow);
         when(workflowMapper.getByIdForUpdate(7, 101)).thenReturn(workflow);
@@ -761,9 +765,7 @@ class WorkflowServiceTest {
         when(workflowMapper.assignFirstCanonicalPublication(
             7, 101, 88L, 41, 0)).thenReturn(1);
 
-        WorkflowDto published = recipe
-            ? service.publishForRecipe(101, publishRequest(0))
-            : service.publish(101, publishRequest(0));
+        WorkflowDto published = service.publish(101, publishRequest(0));
 
         assertEquals("canonical", published.runtimeOwner());
         assertEquals(88L, published.activeVersionId());
@@ -774,6 +776,22 @@ class WorkflowServiceTest {
         writes.verify(workflowVersionMapper).insert(any(WorkflowVersion.class));
         writes.verify(workflowMapper).assignFirstCanonicalPublication(
             7, 101, 88L, 41, 0);
+    }
+
+    @Test
+    void canonicalWorkflowCannotBeEnabledWhileExecutionIsUnavailable() {
+        PublishedPair pair = publishedPair("Workflow", false, 4);
+        pair.workflow().setRuntimeOwner("canonical");
+        stubPublishedMutation(pair, null, false);
+        stubUserMutation(Set.of(41), Set.of(41));
+
+        ConflictException failure = assertThrows(ConflictException.class, () -> service.enable(101));
+
+        assertEquals("Workflow cannot run in this environment", failure.getMessage());
+        verify(workflowMapper, never()).updateLifecycle(anyInt(), anyInt(), anyBoolean(), anyInt());
+        verify(ruleMapper, never()).updateEnabled(anyInt(), anyInt(), anyBoolean());
+        assertFalse(service.toDto(pair.workflow()).executionAvailable());
+        assertEquals("execution_unavailable", service.toDto(pair.workflow()).executionUnavailableReason());
     }
 
     @Test

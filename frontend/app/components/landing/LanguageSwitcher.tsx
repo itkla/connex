@@ -56,7 +56,7 @@ export default function LanguageSwitcher({ align = "end" }: { align?: Align }) {
                             <DropdownMenu.Item
                                 key={lang.code}
                                 onSelect={() => selectLanguage(lang.code)}
-                                className="flex cursor-pointer items-center justify-between gap-3 rounded-lg px-2.5 py-2 text-sm outline-none transition-colors data-[highlighted]:bg-brand-light data-[highlighted]:text-brand-dark"
+                                className="flex cursor-pointer items-center justify-between gap-3 rounded-lg px-2.5 py-2 text-sm outline-none transition-colors data-[highlighted]:bg-brand-light data-[highlighted]:text-brand-text"
                             >
                                 <span className={isActive ? "font-medium" : ""}>{t(lang.labelKey)}</span>
                                 {isActive && <CheckIcon className="size-4 text-brand-dark" />}

@@ -288,7 +288,7 @@ function MonthCell({
                                 isSelected
                                     ? 'font-semibold text-brand-foreground'
                                     : isToday
-                                      ? 'font-semibold text-brand-dark'
+                                      ? 'font-semibold text-brand-text'
                                       : inMonth
                                         ? 'text-foreground'
                                         : 'text-muted-foreground/60',

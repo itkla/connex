@@ -373,7 +373,7 @@ function AddTile({
                 whileHover={reduce ? undefined : { y: -2 }}
                 whileTap={reduce ? undefined : { scale: 0.99 }}
                 transition={{ duration: 0.2, ease: EASE_OUT }}
-                className="flex h-full min-h-[8.5rem] w-full flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-border text-muted-foreground transition-colors hover:border-brand hover:bg-brand-light/30 hover:text-brand-dark"
+                className="flex h-full min-h-[8.5rem] w-full flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-border text-muted-foreground transition-colors hover:border-brand hover:bg-brand-light/30 hover:text-brand-text"
             >
                 <PlusIcon className="size-5" strokeWidth={2.5} />
                 <span className="text-sm font-medium">{label}</span>

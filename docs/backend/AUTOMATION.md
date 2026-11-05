@@ -274,6 +274,36 @@ The legacy `/api/rules` surface is not an independent aggregate.
 
 `runtime_owner` on the locked workflow is the database-authoritative predicate for which runtime may claim work. Both runtimes check the opposite ledger under the same root lock.
 
+## Publication and execution availability
+
+Recipe installation uses the same first-publication owner decision as the builder. With the runtime
+flag off, a new representable recipe is published with a legacy rule projection and remains disabled
+until explicitly enabled. This does not attach a projection to existing canonical history or change
+an existing workflow's owner. Job-change follow-up and won-deal handoff retain their ordered task
+and activity effects. Cooling-company review is currently unavailable: `create_task` cannot target a
+company. Preview returns `action_record_type_unsupported`, and installation creates nothing.
+
+An existing canonical-owned workflow cannot be enabled with the flag off. Workflow list/detail
+responses expose execution availability; Operations reports enabled unavailable workflows separately
+from healthy ones. Operations merges `workflow_run` and linked `rule_execution` history with source
+identity in cursor ordering, and includes failed/partial rule executions in recent-failure metrics.
+Health and attention use the newest completed outcome across both histories, ordered by start time
+and then source/id (canonical wins equal timestamps), independently of the 24-hour recent-failure
+window. Failed or partly finished outcomes remain unhealthy until a newer completed outcome
+supersedes them; queued, running and waiting runs do not clear that failure. Existing open
+interventions and unavailable execution remain separate reasons for attention. Tenant V239 adds the
+`(workspace_id, executed_at DESC, id DESC)` index for workspace-wide execution history. Rule executions retain their summary-only
+history and cannot acquire canonical intervention controls through this read projection.
+
+Publication validation uses the same projection boundary as Publish. A single initial condition may
+terminate its two branches at separate End steps. Delays, multiple conditions, actions on the No
+branch, conditions after actions, and action counts over 16 return a focused
+`legacy_projection_unsupported` diagnostic with a bounded reason code. Frontend readiness requires
+validity, publication capability, and an empty diagnostic list.
+Pan and zoom changes, including the initial canvas fit, remain saveable canvas preferences but do
+not require a save before Validate, Preview or Publish, and do not invalidate their evidence.
+Other draft edits retain the save-before-validation requirement.
+
 ## Dedupe and rolling compatibility
 
 One replay-stable trigger envelope derives the dedupe identity used by legacy and canonical ledgers.

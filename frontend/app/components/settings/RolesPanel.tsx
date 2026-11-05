@@ -39,15 +39,13 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
+import { rowActionTrigger } from "@/app/components/settings/SettingsListPrimitives";
 import DeleteRecordDialog from "@/app/components/records/DeleteRecordDialog";
 import Rise from "@/app/components/motion/Rise";
 import { SettingsSection } from "@/app/components/settings/SettingsSection";
 import ConfinementAcknowledgementDialog from "@/app/components/settings/ConfinementAcknowledgementDialog";
 import RoleDialog from "./RoleDialog";
 import { groupPermissions, type PermissionGroup } from "./permissions";
-
-const rowActionTrigger =
-    "flex size-7 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted/70 hover:text-foreground group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100";
 
 function RoleIcon({ locked }: { locked?: boolean }) {
     return (
@@ -74,7 +72,7 @@ function PermissionSummary({
         return <span className="text-xs text-muted-foreground">{t("noPermissions")}</span>;
     }
     if (totalPermissions > 0 && role.permissions.length === totalPermissions) {
-        return <span className="text-xs font-medium text-brand">{t("fullAccess")}</span>;
+        return <span className="text-xs font-medium text-brand-text">{t("fullAccess")}</span>;
     }
     const set = new Set(role.permissions);
     const touched = groups.filter((g) => g.items.some((i) => set.has(i.permission)));

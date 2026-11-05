@@ -912,7 +912,7 @@ export default function NotificationsInbox() {
                                                 </span>
                                             ) : null}
                                             {hasPriority ? (
-                                                <span className="rounded-full bg-brand-light px-1.5 py-0.5 text-[11px] font-medium text-brand-dark">
+                                                <span className="rounded-full bg-brand-light px-1.5 py-0.5 text-[11px] font-medium text-brand-text">
                                                     {t("priority")}
                                                 </span>
                                             ) : null}

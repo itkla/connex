@@ -9,6 +9,7 @@ import lombok.NoArgsConstructor;
 public class WorkflowOperationsSummaryView {
     private int workflowCount;
     private int healthyCount;
+    private int unavailableCount;
     private int pausedCount;
     private int disabledCount;
     private int interventionRequiredCount;

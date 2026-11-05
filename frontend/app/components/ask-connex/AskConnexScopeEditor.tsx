@@ -94,7 +94,7 @@ function ChoiceButton({
             onClick={onSelect}
             className={cn(
                 'font-normal',
-                selected && 'bg-brand-light/60 font-medium text-brand-dark hover:bg-brand-light/70',
+                selected && 'bg-brand-light/60 font-medium text-brand-text hover:bg-brand-light/70',
             )}
         >
             {selected ? <CheckIcon aria-hidden className="size-3" /> : null}
@@ -371,7 +371,7 @@ export function AskConnexScopeFields({
                                 >
                                     <CheckIcon
                                         aria-hidden
-                                        className={cn('size-3.5 shrink-0 text-brand-dark', !selected && 'invisible')}
+                                        className={cn('size-3.5 shrink-0 text-brand-text', !selected && 'invisible')}
                                     />
                                     <span className="min-w-0 truncate">{member.displayName}</span>
                                 </Button>
