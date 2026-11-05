@@ -202,7 +202,7 @@ describe("confinement on onboarding, for an account with no workspace", () => {
     it("lets the account leave the organization that confines it", async () => {
         await renderConfinement(standingFor("ENROLLMENT_REQUIRED"));
 
-        await act(async () => button("Leave Acme").click());
+        await act(async () => button(enAccount.AccountSecurity.exitLeaveOrganization.replace("{name}", "Acme")).click());
         await act(async () => button(enAccount.AccountSecurity.exitConfirm).click());
 
         expect(mocks.leaveOrganization).toHaveBeenCalledWith(3);

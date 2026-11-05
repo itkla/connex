@@ -770,9 +770,12 @@ locked server leave checks remain authoritative and may still refuse for other s
 The browser shell skips pinned views, assistant reads, and mobile task counts while confinement is
 known. These reads resume when the shared standing releases confinement. Client navigation to other
 app pages shows the required passkey step with a link to Security before mounting page data readers.
-Assistant initialization failures remain inline, so a background refusal cannot produce an unrelated
-global error toast. Explicit user-action refusals still use the shared error toast, with confinement
-codes mapped to the passkey guidance rather than the generic workspace-permission message.
+Automatic assistant initialization failures remain inline, so a background refusal cannot produce an
+unrelated global error toast. Explicit retries retain the shared error toast and show the actual
+request failure instead of treating a refusal as AI being switched off. Readiness rechecks preserve
+an existing composer and its draft, focus and selection while disabling submission. Other explicit
+user-action refusals still use the shared error toast, with confinement codes mapped to the passkey
+guidance rather than the generic workspace-permission message.
 
 The startup event's inventory also records `attestationRequiredCount`: the privileged accounts
 holding passkeys of which none is sufficient. These are the accounts that enforcement confines.

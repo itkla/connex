@@ -308,7 +308,7 @@ describe("the Security page while a privileged account is confined", () => {
         }
 
         async function leaveSales() {
-            await act(async () => button("Leave Sales").click());
+            await act(async () => button(enAccount.AccountSecurity.exitLeaveWorkspace.replace("{name}", "Sales")).click());
             await act(async () => button(enAccount.AccountSecurity.exitConfirm).click());
         }
 
@@ -362,7 +362,7 @@ describe("the Security page while a privileged account is confined", () => {
             await leaveSales();
 
             expect(container.textContent).toContain(enAccount.AccountSecurity.exitRefusedWorkspaceLastOwner);
-            expect(button("Leave Sales").disabled).toBe(false);
+            expect(button(enAccount.AccountSecurity.exitLeaveWorkspace.replace("{name}", "Sales")).disabled).toBe(false);
             expect(backend.publish).not.toHaveBeenCalled();
         });
     });

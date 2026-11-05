@@ -205,6 +205,8 @@ const ASK_CONNEX_MENTION_TYPES = {
 type UnavailableState = {
     title: string;
     body: string;
+    /** Retains an existing editor during revalidation while submission stays disabled. */
+    preserveComposer?: boolean;
 } | null;
 
 const noopRecovery = () => {};
@@ -2255,7 +2257,7 @@ function ConversationSurface({
                 </MessageScroller>
             </MessageScrollerProvider>
 
-            {unavailable ? (
+            {unavailable && !unavailable.preserveComposer ? (
                 loadState !== 'forbidden' ? (
                     <div role="status" className="shrink-0 border-t border-border px-4 py-3 text-xs leading-relaxed text-muted-foreground">
                         <span className="font-medium text-foreground">{unavailable.title}</span>{' '}
@@ -2270,6 +2272,12 @@ function ConversationSurface({
                         requestSend();
                     }}
                 >
+                    {unavailable?.preserveComposer ? (
+                        <p role="status" className="mb-3 text-xs leading-relaxed text-muted-foreground">
+                            <span className="font-medium text-foreground">{unavailable.title}</span>{' '}
+                            {unavailable.body}
+                        </p>
+                    ) : null}
                     {offeringJobs ? (
                         <JobSuggestions
                             jobs={jobs}

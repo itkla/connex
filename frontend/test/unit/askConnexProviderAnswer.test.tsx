@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import AskConnexProvider from '@/app/components/ask-connex/AskConnexProvider';
 import AskConnexWorkspaceMount from '@/app/components/ask-connex/AskConnexWorkspaceMount';
-import { getAiChatSession, getAiChatTurn, startAiChatTurn } from '@/app/lib/api';
+import { getAiCommandCenter, getAiChatSession, getAiChatTurn, startAiChatTurn } from '@/app/lib/api';
 import type { AiChatSocketHandlers } from '@/app/lib/realtime';
 import type { AiChatSessionDetail, AiChatTurn } from '@/app/lib/types';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -136,6 +136,55 @@ afterEach(() => {
 });
 
 describe('the provider adopts a successful answer into the real drawer', () => {
+    it.each(['focus', 'visibilitychange'] as const)('preserves the draft, focused editor and selected range during a %s readiness check', async (event) => {
+        const readiness = await getAiCommandCenter();
+        const pending = Promise.withResolvers<Awaited<ReturnType<typeof getAiCommandCenter>>>();
+        vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+        render(
+            <NextIntlClientProvider locale="en" timeZone="UTC" messages={{
+                ...enCommon, ...enActivity, ...enAssistant, ...enContacts, ...enReports,
+            }}>
+                <TooltipProvider>
+                    <AskConnexProvider><AskConnexWorkspaceMount /></AskConnexProvider>
+                </TooltipProvider>
+            </NextIntlClientProvider>,
+        );
+        const composer = await screen.findByRole('combobox', { name: enCommon.AskConnex.composerAria });
+        await waitFor(() => expect(composer.getAttribute('contenteditable')).toBe('true'));
+        composer.textContent = QUESTION;
+        fireEvent.input(composer);
+        composer.focus();
+        const text = composer.firstChild;
+        const selection = window.getSelection();
+        if (!(text instanceof Text) || selection === null) throw new Error('Expected an editable text selection');
+        const range = document.createRange();
+        range.setStart(text, 8);
+        range.setEnd(text, 15);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        vi.mocked(getAiCommandCenter).mockReturnValueOnce(pending.promise);
+        await act(async () => {
+            if (event === 'focus') window.dispatchEvent(new Event(event));
+            else document.dispatchEvent(new Event(event));
+        });
+        expect(screen.getByRole('combobox', { name: enCommon.AskConnex.composerAria })).toBe(composer);
+        expect(document.activeElement).toBe(composer);
+        expect(selection.anchorNode).toBe(text);
+        expect(selection.anchorOffset).toBe(8);
+        expect(selection.focusNode).toBe(text);
+        expect(selection.focusOffset).toBe(15);
+        expect(composer.textContent).toBe(QUESTION);
+        expect(screen.getByRole('button', { name: enCommon.AskConnex.send })).toHaveProperty('disabled', true);
+        await act(async () => pending.resolve(readiness));
+        expect(screen.getByRole('combobox', { name: enCommon.AskConnex.composerAria })).toBe(composer);
+        expect(document.activeElement).toBe(composer);
+        expect(selection.anchorNode).toBe(text);
+        expect(selection.anchorOffset).toBe(8);
+        expect(selection.focusOffset).toBe(15);
+        expect(composer.textContent).toBe(QUESTION);
+        expect(screen.getByRole('button', { name: enCommon.AskConnex.send })).toHaveProperty('disabled', false);
+    });
+
     it.each([
         { projection: 'omitted', activeTurn: {} },
         { projection: 'explicit null', activeTurn: { activeTurn: null } },

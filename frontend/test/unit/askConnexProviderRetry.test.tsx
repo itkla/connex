@@ -360,6 +360,46 @@ describe('the provider guards the Retry callback', () => {
         }
     });
 
+    it('reports a refused explicit Retry after a silent network failure without claiming AI is off', async () => {
+        vi.mocked(getAiChatSessions).mockRejectedValueOnce(new TypeError('Network unavailable'));
+        const root = await mountProvider();
+        try {
+            expect(drawer().loadState).toBe('error');
+            expect(boundary.showApiError).not.toHaveBeenCalled();
+            const refusal = new ApiError('Requires AI_USE', 403, 'FORBIDDEN');
+            vi.mocked(getAiChatSessions).mockRejectedValueOnce(refusal);
+            await act(async () => drawer().onRetry());
+            expect(boundary.showApiError).toHaveBeenCalledExactlyOnceWith(refusal, 'toast.requestFailed');
+            expect(drawer().loadState).toBe('error');
+            expect(drawer().loadError).toBe(refusal);
+            expect(drawer().unavailable?.title).toBe('unavailable.checkFailedTitle');
+            await act(async () => root.render(<AskConnexProvider>{null}</AskConnexProvider>));
+            expect(boundary.showApiError).toHaveBeenCalledOnce();
+        } finally {
+            await act(async () => root.unmount());
+        }
+    });
+
+    it('ignores a pending readiness response after its effect switches workspaces', async () => {
+        const stale = await getAiCommandCenter();
+        const pending = Promise.withResolvers<Awaited<ReturnType<typeof getAiCommandCenter>>>();
+        const root = await mountProvider();
+        try {
+            vi.mocked(getAiCommandCenter).mockReturnValueOnce(pending.promise);
+            await act(async () => publishAiAvailabilityChange());
+            boundary.workspace.activeWorkspaceId = 8;
+            boundary.chatAvailable = false;
+            await act(async () => root.render(<AskConnexProvider>{null}</AskConnexProvider>));
+            expect(drawer().unavailable?.title).toBe('unavailable.featureTitle');
+            await act(async () => pending.resolve(stale));
+            expect(drawer().unavailable?.title).toBe('unavailable.featureTitle');
+            await act(async () => drawer().onSend(QUESTION));
+            expect(startAiChatTurn).not.toHaveBeenCalled();
+        } finally {
+            await act(async () => root.unmount());
+        }
+    });
+
     it('keeps a user-initiated refusal visible and preserves the question without an internal failure', async () => {
         const refusal = new ApiError('AI features are not available', 403, 'FORBIDDEN');
         vi.mocked(startAiChatTurn).mockRejectedValueOnce(refusal);

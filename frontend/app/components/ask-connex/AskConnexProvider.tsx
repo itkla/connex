@@ -559,13 +559,14 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const [composer, setComposer] = useState('');
     const [fileAttachments, setFileAttachments] = useState<AskConnexFileAttachment[]>([]);
     const [featureUnavailable, setFeatureUnavailable] = useState(false);
-    const [availability, setAvailability] = useState<{ identity: string; chat: boolean; watches: boolean; failed?: boolean } | null>(null);
+    const [availability, setAvailability] = useState<{ identity: string; chat: boolean; watches: boolean; failed?: boolean; checking?: boolean } | null>(null);
     const availabilityReadVersionRef = useRef(0);
-    const canAsk = assistantEnabled && !switching && availability?.identity === identity && availability.chat && !featureUnavailable;
-    const canWatch = assistantEnabled && !switching && availability?.identity === identity && availability.watches;
+    const canAsk = assistantEnabled && !switching && availability?.identity === identity && availability.chat && !availability.checking && !featureUnavailable;
+    const canWatch = assistantEnabled && !switching && availability?.identity === identity && availability.watches && !availability.checking;
     const [submissionBlocked, setSubmissionBlocked] = useState(false);
     const [submitting, setSubmitting] = useState(false);
-    const [reloadVersion, setReloadVersion] = useState(0);
+    const [reloadRequest, setReloadRequest] = useState<{ identity: string; version: number } | null>(null);
+    const handledReloadRequestRef = useRef<typeof reloadRequest>(null);
     const [missionRefreshVersion, setMissionRefreshVersion] = useState(0);
     const [missionContentVersion, setMissionContentVersion] = useState(0);
     const [promptRequest, setPromptRequest] = useState(0);
@@ -1700,6 +1701,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     }, [absorbTurnPartial, clearActiveSession, deferApiError, pollDurableTurn, refreshSessions, refreshTranscript, resetStream, terminalMessages, terminalToast, turnKey]);
 
     useEffect(() => {
+        let cancelled = false;
+        const explicitRetry = reloadRequest !== null && reloadRequest.identity === identity
+            && handledReloadRequestRef.current !== reloadRequest;
         sessionEpochRef.current++;
         const controller = new AbortController();
         identityControllerRef.current?.abort();
@@ -1718,7 +1722,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         const initialize = async () => {
             let selectionLoadStarted = false;
             await Promise.resolve();
-            if (controller.signal.aborted) return;
+            if (cancelled || controller.signal.aborted) return;
             setStateIdentity(identity);
             setSessions([]);
             setInvitations([]);
@@ -1749,6 +1753,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             setLoadError(null);
 
             if (!assistantEnabled || userId === null || activeWorkspaceId === null || switching) {
+                if (explicitRetry) handledReloadRequestRef.current = reloadRequest;
                 setLoadState('forbidden');
                 return;
             }
@@ -1759,16 +1764,15 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                     getAiCommandCenter({ signal: controller.signal }),
                     refreshSessions(controller.signal),
                 ]);
-                if (controller.signal.aborted) return;
+                if (cancelled || controller.signal.aborted) return;
                 if (availabilityReadVersion === availabilityReadVersionRef.current) {
                     setAvailability({ identity, chat: readiness.chatAvailable, watches: readiness.watchesAvailable });
                 }
-                if (controller.signal.aborted) return;
+                if (cancelled || controller.signal.aborted) return;
                 if (sharePermission === 'granted') {
                     const workspaceMembers = await getActiveWorkspaceMembers({ signal: controller.signal });
-                    if (!controller.signal.aborted) {
-                        setMembers(workspaceMembers.filter((member) => member.status === 'active'));
-                    }
+                    if (cancelled || controller.signal.aborted) return;
+                    setMembers(workspaceMembers.filter((member) => member.status === 'active'));
                 }
                 if (selectedSessionId === null) {
                     setLoadState('ready');
@@ -1777,7 +1781,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 selectionLoadStarted = true;
                 withdrawnSessionsRef.current.delete(`${activeWorkspaceId}:${selectedSessionId}`);
                 const detail = await refreshTranscript(selectedSessionId, controller.signal, false);
-                if (controller.signal.aborted) return;
+                if (cancelled || controller.signal.aborted) return;
                 if (detail === null) return;
                 if (storedTurn?.sessionId === selectedSessionId) {
                     dispatchTurn({
@@ -1793,7 +1797,16 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                     await followDurableTurn(detail.activeTurn, controller.signal);
                 }
             } catch (error) {
-                if (controller.signal.aborted) return;
+                if (cancelled || controller.signal.aborted) return;
+                if (explicitRetry) {
+                    showApiError(error, 'toast.requestFailed');
+                    setLoadError(error instanceof ApiError ? error : new Error(t('toast.requestFailed')));
+                    if (availabilityReadVersion === availabilityReadVersionRef.current) {
+                        setAvailability({ identity, chat: false, watches: false, failed: true });
+                    }
+                    setLoadState('error');
+                    return;
+                }
                 if (selectionLoadStarted && error instanceof ApiError
                         && (error.status === 403 || error.status === 404)) {
                     clearActiveSession();
@@ -1820,30 +1833,36 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 }
                 setLoadError(nextError);
                 setLoadState('error');
+            } finally {
+                if (!cancelled && !controller.signal.aborted && explicitRetry) handledReloadRequestRef.current = reloadRequest;
             }
         };
 
         void initialize();
-        return () => controller.abort();
-    }, [assistantEnabled, canPersist, activeWorkspaceId, clearActiveSession, followDurableTurn, followTurn, identity, refreshSessions, refreshTranscript, reloadVersion, resetStream, sessionKey, sharePermission, switching, t, turnKey, userId]);
+        return () => {
+            cancelled = true;
+            controller.abort();
+        };
+    }, [assistantEnabled, canPersist, activeWorkspaceId, clearActiveSession, followDurableTurn, followTurn, identity, refreshSessions, refreshTranscript, reloadRequest, resetStream, sessionKey, sharePermission, showApiError, switching, t, turnKey, userId]);
 
     useEffect(() => {
         if (!assistantEnabled || switching) return;
+        let cancelled = false;
         let controller: AbortController | null = null;
         const refresh = () => {
-            if (document.hidden) return;
+            if (cancelled || document.hidden) return;
             controller?.abort();
-            setAvailability(null);
+            setAvailability((current) => current?.identity === identity ? { ...current, checking: true } : null);
             const current = new AbortController();
             controller = current;
             const availabilityReadVersion = ++availabilityReadVersionRef.current;
             void getAiCommandCenter({ signal: current.signal }).then((readiness) => {
-                if (!current.signal.aborted && availabilityReadVersion === availabilityReadVersionRef.current) {
+                if (!cancelled && !current.signal.aborted && availabilityReadVersion === availabilityReadVersionRef.current) {
                     setAvailability({ identity, chat: readiness.chatAvailable, watches: readiness.watchesAvailable });
                     setFeatureUnavailable(false);
                 }
             }).catch(() => {
-                if (!current.signal.aborted && availabilityReadVersion === availabilityReadVersionRef.current) {
+                if (!cancelled && !current.signal.aborted && availabilityReadVersion === availabilityReadVersionRef.current) {
                     setAvailability({ identity, chat: false, watches: false, failed: true });
                 }
             });
@@ -1852,6 +1871,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         document.addEventListener('visibilitychange', refresh);
         const unsubscribe = subscribeAiAvailabilityChange(refresh);
         return () => {
+            cancelled = true;
             controller?.abort();
             window.removeEventListener('focus', refresh);
             document.removeEventListener('visibilitychange', refresh);
@@ -2842,6 +2862,13 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 body: t('unavailable.featureBody'),
             };
         }
+        if (availability?.identity === identity && availability.checking) {
+            return {
+                title: t('unavailable.checkingTitle'),
+                body: t('unavailable.checkingBody'),
+                preserveComposer: availability.chat && !availability.failed,
+            };
+        }
         if (availability?.identity === identity && availability.failed) {
             return { title: t('unavailable.checkFailedTitle'), body: t('unavailable.checkFailedBody') };
         }
@@ -3558,7 +3585,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 onInvite={inviteParticipant}
                 onLeave={() => void leaveSession()}
                 onRemoveParticipant={(participantUserId) => void removeParticipant(participantUserId)}
-                onRetry={() => setReloadVersion((version) => version + 1)}
+                onRetry={() => setReloadRequest((current) => ({ identity, version: (current?.version ?? 0) + 1 }))}
                 onComposerChange={setComposer}
                 onRemoveAttachment={removeAttachment}
                 onTogglePagePin={togglePagePin}
