@@ -594,15 +594,18 @@ class DealServiceTest extends AbstractServiceTest {
         foreign.setWon(true);
         dealMapper.insert(foreign);
 
-        DealRevenueSeriesDto series = dealService.getRevenueTimeseries(null, null, MemberScope.allTeam());
+        DealRevenueSeriesDto series = dealService.getRevenueTimeseries(null, null, MemberScope.allTeam(), false);
         List<DealStageDistributionDto> distribution = dealService.getStageDistribution(null, MemberScope.allTeam());
-        DealRevenueSeriesDto filteredSeries = dealService.getRevenueTimeseries("JPY", null, MemberScope.allTeam());
+        DealRevenueSeriesDto filteredSeries = dealService.getRevenueTimeseries("JPY", null, MemberScope.allTeam(), false);
         List<DealStageDistributionDto> filteredDistribution = dealService.getStageDistribution("JPY", MemberScope.allTeam());
 
         assertEquals(Map.of("2026-2", 180.0, "2026-3", 25.0, "2026-4", 550.0),
             monthTotals(series.closed()));
         assertEquals(Map.of("2026-2", 300.0, "2026-3", 50.0, "2026-4", 400.0),
             monthTotals(series.projected()));
+        DealRevenueSeriesDto openSeries = dealService.getRevenueTimeseries("JPY", null, MemberScope.allTeam(), true);
+        assertEquals(Map.of("2026-2", 100.0), monthTotals(openSeries.projected()));
+        assertEquals(monthTotals(filteredSeries.closed()), monthTotals(openSeries.closed()));
         assertEquals(1, distribution.size());
         DealStageDistributionDto stageTotals = distribution.get(0);
         assertEquals(stage.getId(), stageTotals.stageId());
@@ -636,13 +639,13 @@ class DealServiceTest extends AbstractServiceTest {
         updateChartDeal(newDeal(pipeline, stage, company),
             20.0, 10.0, "USD", false, "2026-07-15", "2026-07-01 03:30:00");
 
-        DealRevenueSeriesDto utc = dealService.getRevenueTimeseries("USD", "UTC", MemberScope.allTeam());
-        DealRevenueSeriesDto newYork = dealService.getRevenueTimeseries("USD", "America/New_York", MemberScope.allTeam());
+        DealRevenueSeriesDto utc = dealService.getRevenueTimeseries("USD", "UTC", MemberScope.allTeam(), false);
+        DealRevenueSeriesDto newYork = dealService.getRevenueTimeseries("USD", "America/New_York", MemberScope.allTeam(), false);
 
         assertEquals(Map.of("2026-1", 90.0, "2026-7", 10.0), monthTotals(utc.closed()));
         assertEquals(Map.of("2025-12", 90.0, "2026-6", 10.0), monthTotals(newYork.closed()));
         assertEquals(Map.of("2026-1", 90.0, "2026-7", 10.0),
-            monthTotals(dealService.getRevenueTimeseries("USD", "+09:00", MemberScope.allTeam()).closed()));
+            monthTotals(dealService.getRevenueTimeseries("USD", "+09:00", MemberScope.allTeam(), false).closed()));
     }
 
     @Test

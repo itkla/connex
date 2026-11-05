@@ -212,13 +212,22 @@ class DealOutcomeRoutesTest extends AbstractServiceTest {
         terminalStage(pipeline, true);
         Deal deal = dealService.create(draft(pipeline, open));
         dealService.close(deal.getId(), true, null, null);
+        Deal lost = dealService.create(draft(pipeline, open));
+        dealService.close(lost.getId(), false, null, null);
         MemberScope scope = MemberScope.allTeam();
         assertEquals(25400.0, dealService.getDealKpis("JPY", 30, scope).wonRevenue(), 0.001);
         assertEquals(25400.0, dealService.getDealKpis("JPY", 30, scope).wonValue(), 0.001);
         assertMoney(VALUE, dealService.getTopDeals("JPY", scope).topWon().getFirst().getActualValue());
-        assertEquals(25400.0, dealMapper.dealMetrics(workspace.getId(), null, "JPY", null, null, null, null).getFirst().closedRevenue(), 0.001);
-        assertMoney(VALUE, dealService.getRevenueTimeseries("JPY", "UTC", scope).closed().stream()
-            .map(month -> month.total()).reduce(BigDecimal.ZERO, BigDecimal::add));
+        var metrics = dealMapper.dealMetrics(workspace.getId(), null, "JPY", null, null, null, null).getFirst();
+        assertEquals(2, metrics.closedCount());
+        assertEquals(1, metrics.wonCount());
+        assertEquals(1, metrics.lostCount());
+        assertEquals(25400.0, metrics.closedForecast(), 0.001);
+        assertEquals(25400.0, metrics.closedRevenue(), 0.001);
+        for (boolean openOnly : List.of(false, true)) {
+            assertMoney(VALUE, dealService.getRevenueTimeseries("JPY", "UTC", scope, openOnly).closed().stream()
+                .map(month -> month.total()).reduce(BigDecimal.ZERO, BigDecimal::add));
+        }
     }
 
     private Deal applyRoute(WinRoute route, Deal deal, Pipeline pipeline, Stage stage) {

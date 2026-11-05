@@ -916,8 +916,8 @@ function PulseStrip({
 
 type Translator = ReturnType<typeof useTranslations>;
 
-function targetText(label: string | null, t: Translator): string | null {
-    if (label === null) return null;
+function targetText(label: string | null | undefined, t: Translator): string | null {
+    if (label == null) return null;
     const key = TARGET_LABEL_KEYS[label];
     if (key !== undefined) return t(key);
     const providerKey = PROVIDER_LABEL_KEYS[label.split("/")[0]];

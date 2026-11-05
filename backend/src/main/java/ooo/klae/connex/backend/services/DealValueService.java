@@ -114,14 +114,12 @@ public class DealValueService {
 
     /**
      * Reconciles and persists realized value for an outcome transition, on every route that can win
-     * or lose a deal — the close dialog, a form edit, a Kanban drag, a bulk stage change, a rule
+     * or lose a deal — the close action, a form edit, a Kanban drag, a bulk stage change, a rule
      * action and a CSV import all resolve the same figure here. Three cases:
      * <ul>
-     *   <li><b>Lost</b> — always zero, and any client-supplied amount is ignored. This is the whole
-     *       reason the reconciliation is centralized: {@code deal_metrics.closed_revenue} sums
-     *       {@code actual_value} across every closed deal, so a won-to-lost transition that kept the
-     *       won figure would inflate reported revenue by the full value of a deal the business
-     *       failed to win. Zeroing reads no line total, so it is also the one case that does not
+     *   <li><b>Lost</b> — always zero, and any client-supplied amount is ignored. Losing a deal
+     *       clears its prior win snapshot independently of how reports filter outcomes.
+     *       Zeroing reads no line total, so it is also the one case that does not
      *       consult line currency — refusing it would strand a deal at its won figure.</li>
      *   <li><b>Freshly won</b> — derives from the line-item total, or records the submitted amount
      *       when the deal has no line items, defaulting to its value when omitted. The stored

@@ -25,9 +25,8 @@ import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.Recor
  * domain and audit writes, before the same transaction completes.
  *
  * <p>The containment is the point. {@code actual_value} is never written by the broad update
- * statement, so a route that changed {@code won} without reconciling realized value would leave a
- * lost deal holding the figure it was won with — and {@code deal_metrics.closed_revenue} sums
- * {@code actual_value} across every closed deal, admitting {@code won = FALSE} explicitly. Keeping
+ * statement, so every outcome change must reconcile its snapshot: a fresh win books its amount,
+ * an existing win stays frozen, and a lost deal resolves to zero. Keeping
  * {@link DealMapper#update} and the deal insert statements reachable only from here means a new
  * route cannot make that mistake: it has no way to write the row at all without reconciling.
  * {@code DealValueContractArchTest} enforces the containment.

@@ -131,11 +131,11 @@ has no line items yet: created won it keeps an explicitly supplied amount (inclu
 `deal.value` when omitted; created lost or open it records zero. A client therefore cannot seed reported revenue by posting `actualValue` alongside a lost
 stage.
 
-The lost-deal rule exists because the deal-browser `closed_revenue` figure sums `actual_value`
-across **all** closed deals, not just won ones. Deriving — or retaining — the booking value on a
-lost deal would inflate reported revenue by the full value of every deal the business failed to
-win. A lost deal records zero realized revenue; its booking value remains visible through
-`deal.value` and its line items.
+A lost deal records zero realized revenue; its booking value remains visible through `deal.value`
+and its line items. The deal-browser `closed_revenue` and `closed_forecast` fields sum actual and
+projected value on **won deals only**, respectively. Their ratio is forecast accuracy, so lost deals
+contribute to neither amount, including historical lost rows with nonzero actual value. The
+`closed_count` field still counts both won and lost deals.
 
 `DealDto.actualValue` and `CloseDealRequest.actualValue` are nullable `BigDecimal`, so absent/null
 and explicit zero are distinguishable at the API boundary. A bean carrying zero is treated as an
@@ -255,6 +255,16 @@ shares.
 
 Note also that the Home pipeline chart mixes bases within one row: won value is period-bounded
 while open value is unbounded.
+
+### Forecast and historical comparison series
+
+Dashboard Projections totals the full open pipeline in its displayed currency, including undated
+and out-of-chart deals. Its monthly chart requests `openOnly=true` on `revenue-timeseries`, which
+restricts the expected-close series to `won IS NULL` without changing the realized series.
+Analytics and Deals retain all outcomes in their expected-close comparison series and label it
+**All deal value** / **全案件の金額**. This preserves the comparison against realized amounts in
+past periods. Forecast accuracy and its two summary amounts use won deals only in both filtered
+and unfiltered browser metrics.
 
 ### Owner scope is not an authorization boundary
 
