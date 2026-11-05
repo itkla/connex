@@ -1,5 +1,6 @@
 'use client';
 
+import { getDateTimeFormatter } from '@/app/lib/intlFormatters';
 import { parseMysqlDateTime } from '@/app/lib/utils';
 import Link from 'next/link';
 import { type ComponentType, useState } from 'react';
@@ -331,7 +332,7 @@ export default function ReportsBoard({
                                                     </Link>
                                                     <p className="hidden shrink-0 text-xs text-muted-foreground sm:block">
                                                         {t('landing.updated', {
-                                                            date: new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeZone }).format(parseMysqlDateTime(report.updatedAt)),
+                                                            date: getDateTimeFormatter(locale, { dateStyle: 'medium', timeZone }).format(parseMysqlDateTime(report.updatedAt)),
                                                         })}
                                                     </p>
                                                     <DropdownMenu>

@@ -1,5 +1,6 @@
 'use client';
 
+import { getNumberFormatter } from '@/app/lib/intlFormatters';
 import { useMemo } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import {
@@ -41,7 +42,7 @@ const CHART_COLORS = [
 export function formatReportValue(value: number | null, unit: string | null, locale: string): string {
     if (value == null) return '-';
     if (unit && /^[A-Z]{3}$/.test(unit)) {
-        return new Intl.NumberFormat(locale, {
+        return getNumberFormatter(locale, {
             style: 'currency',
             currency: unit,
             maximumFractionDigits: 0,
@@ -49,16 +50,16 @@ export function formatReportValue(value: number | null, unit: string | null, loc
         }).format(value);
     }
     if (unit && /^[A-Z]{4,8}$/.test(unit)) {
-        const formatted = new Intl.NumberFormat(locale, {
+        const formatted = getNumberFormatter(locale, {
             maximumFractionDigits: 1,
             notation: Math.abs(value) >= 10000 ? 'compact' : 'standard',
         }).format(value);
         return `${formatted} ${unit}`;
     }
     if (unit === 'percent' || unit === '%') {
-        return new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(value) + '%';
+        return getNumberFormatter(locale, { maximumFractionDigits: 1 }).format(value) + '%';
     }
-    return new Intl.NumberFormat(locale, {
+    return getNumberFormatter(locale, {
         maximumFractionDigits: 1,
         notation: Math.abs(value) >= 10000 ? 'compact' : 'standard',
     }).format(value);
@@ -142,10 +143,10 @@ export default function ReportWidgetRenderer({ widget }: { widget: ReportWidgetD
                             <span className={isAttainment || widget.changePercent >= 0 ? 'text-brand-text' : 'text-destructive'}>
                                 {isAttainment
                                     ? t('document.attainmentValue', {
-                                        value: new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(widget.changePercent),
+                                        value: getNumberFormatter(locale, { maximumFractionDigits: 1 }).format(widget.changePercent),
                                     })
                                     : t('document.changeValue', {
-                                        value: new Intl.NumberFormat(locale, { maximumFractionDigits: 1, signDisplay: 'always' }).format(widget.changePercent),
+                                        value: getNumberFormatter(locale, { maximumFractionDigits: 1, signDisplay: 'always' }).format(widget.changePercent),
                                     })}
                             </span>
                         ) : null}

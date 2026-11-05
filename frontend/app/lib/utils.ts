@@ -1,5 +1,6 @@
 // transplanted from /me 
 
+import { getDateTimeFormatter, getNumberFormatter, getRelativeTimeFormatter } from '@/app/lib/intlFormatters';
 import { type DealRiskSeverity, type TemperatureBand } from '@/app/lib/types';
 import { LOCALE_COOKIE, type Locale } from '@/i18n/config';
 import { DEFAULT_TIME_ZONE, resolveDisplayTimeZone } from '@/app/lib/timeZone';
@@ -13,7 +14,7 @@ export function formatShortDate(value: string | undefined, locale: string, timeZ
 
     if (Number.isNaN(date.getTime())) return value;
 
-    return new Intl.DateTimeFormat(locale, {
+    return getDateTimeFormatter(locale, {
         month: 'short',
         day: 'numeric',
         timeZone: isCalendarDate(value) ? 'UTC' : resolveDisplayTimeZone(timeZone),
@@ -61,7 +62,7 @@ export function formatDate(value: string | undefined, locale: string, timeZone =
         return value;
     }
 
-    return new Intl.DateTimeFormat(locale, {
+    return getDateTimeFormatter(locale, {
         dateStyle: 'long', timeZone: isCalendarDate(value) ? 'UTC' : resolveDisplayTimeZone(timeZone),
     }).format(date);
 }
@@ -77,7 +78,7 @@ export function formatDateTime(value: string | undefined, locale: string, timeZo
         return value;
     }
 
-    return new Intl.DateTimeFormat(locale, {
+    return getDateTimeFormatter(locale, {
         dateStyle: 'medium',
         timeStyle: 'short',
         timeZone: isCalendarDate(value) ? 'UTC' : resolveDisplayTimeZone(timeZone),
@@ -93,7 +94,7 @@ export function formatDateTime(value: string | undefined, locale: string, timeZo
 export function toMysqlDateTime(value?: string | Date | number, timeZone = DEFAULT_TIME_ZONE, previous?: string | null): string {
     const date =
         typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)
-            ? new Date(timestampFromCivilInput(value, timeZone, previous))
+            ? new Date(parseDatetimeLocalValue(value, timeZone, previous))
             : value == null ? new Date() : value instanceof Date ? value
                 : new Date(typeof value === 'string' ? parseMysqlDateTime(value) : value);
 
@@ -172,7 +173,7 @@ export function parseCalendarDateUtc(value: string): number {
 /** Formats a calendar-only date without converting it through the viewer's time zone. */
 export function formatCalendarDate(value: string, locale: string, options: Intl.DateTimeFormatOptions): string {
     const timestamp = parseCalendarDateUtc(value);
-    return Number.isNaN(timestamp) ? value : new Intl.DateTimeFormat(locale, { ...options, timeZone: 'UTC' }).format(timestamp);
+    return Number.isNaN(timestamp) ? value : getDateTimeFormatter(locale, { ...options, timeZone: 'UTC' }).format(timestamp);
 }
 
 /**
@@ -186,7 +187,7 @@ export function toDatetimeLocalValue(value?: string | null, timeZone = DEFAULT_T
 }
 
 function civilParts(timestamp: number, timeZone: string) {
-    const parts = new Intl.DateTimeFormat('en', {
+    const parts = getDateTimeFormatter('en', {
         timeZone: resolveDisplayTimeZone(timeZone), year: 'numeric', month: '2-digit', day: '2-digit',
         hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
     }).formatToParts(timestamp);
@@ -199,7 +200,8 @@ function civilParts(timestamp: number, timeZone: string) {
 }
 
 /** Rejects missing DST times; preserves an unchanged repeated time, otherwise chooses its first occurrence. */
-function timestampFromCivilInput(value: string, timeZone: string, previous?: string | null): number {
+export function parseDatetimeLocalValue(value: string, timeZone = DEFAULT_TIME_ZONE, previous?: string | null): number {
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) return NaN;
     const anchor = Date.parse(`${value}Z`);
     if (!Number.isFinite(anchor)) return NaN;
     const prior = parseMysqlDateTime(previous);
@@ -231,7 +233,7 @@ export function formatUtcDateTime(
 ): string {
     const ms = value && isCalendarDate(value) ? parseCalendarDateUtc(value) : parseMysqlDateTime(value);
     if (Number.isNaN(ms)) return fallback;
-    return new Intl.DateTimeFormat(locale, {
+    return getDateTimeFormatter(locale, {
         dateStyle: 'medium',
         timeStyle: 'short',
         timeZone: value && isCalendarDate(value) ? 'UTC' : resolveDisplayTimeZone(timeZone),
@@ -267,7 +269,7 @@ export function formatRelativeTime(
 
     const diff = ms - now;
     const absSec = Math.abs(diff) / 1000;
-    const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto', style: 'short' });
+    const rtf = getRelativeTimeFormatter(locale, { numeric: 'auto', style: 'short' });
 
     if (absSec < 45) return rtf.format(0, 'second');
     const minute = 60;
@@ -311,7 +313,7 @@ export function pickDominantCurrency(items: { currency?: string | null }[]): str
  */
 export function formatCompactCurrency(value: number, currency = 'USD', locale = 'en-US') {
     try {
-        return new Intl.NumberFormat(locale, {
+        return getNumberFormatter(locale, {
             notation: 'compact',
             minimumFractionDigits: 0,
             maximumFractionDigits: 1,
@@ -319,7 +321,7 @@ export function formatCompactCurrency(value: number, currency = 'USD', locale = 
             currency,
         }).format(value);
     } catch {
-        return new Intl.NumberFormat(locale, {
+        return getNumberFormatter(locale, {
             notation: 'compact',
             maximumFractionDigits: 1,
         }).format(value);
@@ -335,12 +337,12 @@ export function formatCompactCurrency(value: number, currency = 'USD', locale = 
  */
 export function formatCurrency(value: number, currency = 'USD', locale = 'en-US') {
     try {
-        return value.toLocaleString(locale, {
+        return getNumberFormatter(locale, {
             style: 'currency',
             currency,
-        });
+        }).format(value);
     } catch {
-        return value.toLocaleString(locale);
+        return getNumberFormatter(locale).format(value);
     }
 }
 
@@ -649,7 +651,7 @@ export function yearMonthInTimezone(timestamp: number, timezone: string): Calend
         return { year: shifted.getUTCFullYear(), month: shifted.getUTCMonth() + 1 };
     }
     try {
-        const parts = new Intl.DateTimeFormat('en-US', {
+        const parts = getDateTimeFormatter('en-US', {
             timeZone: timezone,
             year: 'numeric',
             month: 'numeric',

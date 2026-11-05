@@ -1,5 +1,6 @@
 'use client';
 
+import { getDateTimeFormatter } from '@/app/lib/intlFormatters';
 import { parseCalendarDateUtc } from '@/app/lib/utils';
 import { useMemo, useState } from 'react';
 import { useTimeZone, useTranslations } from 'next-intl';
@@ -47,11 +48,11 @@ export default function AgendaView({
     const [pastOpen, setPastOpen] = useState(false);
 
     const dateFmt = useMemo(
-        () => new Intl.DateTimeFormat(locale, { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' }),
+        () => getDateTimeFormatter(locale, { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' }),
         [locale],
     );
     const timeFmt = useMemo(
-        () => new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit', timeZone }),
+        () => getDateTimeFormatter(locale, { hour: 'numeric', minute: '2-digit', timeZone }),
         [locale, timeZone],
     );
 

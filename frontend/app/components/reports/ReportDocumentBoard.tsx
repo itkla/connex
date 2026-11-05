@@ -1,5 +1,6 @@
 'use client';
 
+import { getDateTimeFormatter, getNumberFormatter } from '@/app/lib/intlFormatters';
 import Link from 'next/link';
 import { useCallback, useEffect, useReducer, useRef, useState, type RefObject, useMemo } from 'react';
 import { useTimeZone, useLocale, useTranslations } from 'next-intl';
@@ -172,7 +173,7 @@ export default function ReportDocumentBoard({
     const showApiError = useApiErrorToast('Reports');
     const locale = useLocale();
     const timeZone = useTimeZone();
-    const snapshotDateFormatter = useMemo(() => new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeZone }), [locale, timeZone]);
+    const snapshotDateFormatter = useMemo(() => getDateTimeFormatter(locale, { dateStyle: 'medium', timeZone }), [locale, timeZone]);
     const { activeWorkspace } = useWorkspace();
     const [reportState, dispatchReport] = useReducer(liveReportReducer, { status: 'loading' });
     const [snapshots, setSnapshots] = useState<ReportSnapshotSummary[]>(initialSnapshots);
@@ -517,7 +518,7 @@ export default function ReportDocumentBoard({
                         </Button>
                         {snapshots.map((snapshot) => {
                             const active = activeSnapshotId === snapshot.id;
-                            const dateLabel = new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeZone })
+                            const dateLabel = getDateTimeFormatter(locale, { dateStyle: 'medium', timeZone })
                                 .format(new Date(parseMysqlDateTime(snapshot.generatedAt)));
                             const deletable = canDeleteReports
                                 && canDeleteOwnedRecord(snapshot.generatedBy, currentUserId, activeWorkspace?.role);
@@ -812,10 +813,10 @@ function ReportPaper({
                                             <p className="text-xs tabular-nums text-muted-foreground">
                                                 {widget.measure === 'attainment'
                                                     ? t('document.attainmentValue', {
-                                                        value: new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(widget.changePercent),
+                                                        value: getNumberFormatter(locale, { maximumFractionDigits: 1 }).format(widget.changePercent),
                                                     })
                                                     : t('document.changeValue', {
-                                                        value: new Intl.NumberFormat(locale, { maximumFractionDigits: 1, signDisplay: 'always' }).format(widget.changePercent),
+                                                        value: getNumberFormatter(locale, { maximumFractionDigits: 1, signDisplay: 'always' }).format(widget.changePercent),
                                                     })}
                                             </p>
                                         ) : null}
@@ -974,7 +975,7 @@ function SectionHeading({ id, title }: { id: string; title: string }) {
 }
 
 function formatRange(start: string, end: string, locale: string): string {
-    const formatter = new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeZone: 'UTC' });
+    const formatter = getDateTimeFormatter(locale, { dateStyle: 'medium', timeZone: 'UTC' });
     return `${formatter.format(new Date(`${start}T00:00:00Z`))} - ${formatter.format(new Date(`${end}T00:00:00Z`))}`;
 }
 

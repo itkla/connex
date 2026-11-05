@@ -50,7 +50,7 @@ import TaskFilterSheet, {
 import TaskDialog from '@/app/components/activity/tasks/TaskDialog';
 import TasksKanban from '@/app/components/activity/tasks/TasksKanban';
 import NoteContent from '@/app/components/activity/notes/NoteContent';
-import { useNow } from '@/app/hooks/useNow';
+import { useLiveNow } from '@/app/hooks/useNow';
 import { calendarDayInTimeZone } from '@/app/lib/timeZone';
 import { parseCalendarDateUtc } from '@/app/lib/utils';
 import { type DueTone, DUE_CHIP, formatDue } from '@/app/components/activity/tasks/taskDue';
@@ -188,7 +188,7 @@ export default function TasksBrowser({
     const isMobile = useIsMobile();
     const [originPathname] = useState(pathname);
 
-    const now = useNow();
+    const now = useLiveNow();
     const today = parseCalendarDateUtc(calendarDayInTimeZone(now, timeZone));
     const [tasks, setTasks] = useState<Task[]>(initialTasks);
     useEffect(() => {

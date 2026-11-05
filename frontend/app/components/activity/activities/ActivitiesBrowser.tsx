@@ -1,5 +1,6 @@
 'use client';
 
+import { getDateTimeFormatter } from '@/app/lib/intlFormatters';
 import { calendarDayInTimeZone } from '@/app/lib/timeZone';
 import { parseCalendarDateUtc } from '@/app/lib/utils';
 import { useCallback, useEffect, useMemo, useState, type ComponentType } from 'react';
@@ -20,7 +21,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { PlusIcon } from '@heroicons/react/24/solid';
 
-import { useNow } from '@/app/hooks/useNow';
+import { useLiveNow } from '@/app/hooks/useNow';
 import { SearchField, FilterBar, MultiSelectFilter, type FilterChipData } from '@/app/components/filters';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -135,7 +136,7 @@ export default function ActivitiesBrowser({
     const locale = useLocale();
     const timeZone = useTimeZone() ?? 'UTC';
     const reduce = useReducedMotion() ?? false;
-    const now = useNow();
+    const now = useLiveNow();
 
     const personById = useMemo(() => new Map(persons.map((p) => [p.id, p])), [persons]);
     const dealById = useMemo(() => new Map(deals.map((d) => [d.id, d])), [deals]);
@@ -296,7 +297,7 @@ export default function ActivitiesBrowser({
                 else if (diffDays === -1) label = t('groupTomorrow');
                 else {
                     const sameYear = calendarDayInTimeZone(ts, timeZone).slice(0, 4) === calendarDayInTimeZone(now, timeZone).slice(0, 4);
-                    label = new Intl.DateTimeFormat(locale, {
+                    label = getDateTimeFormatter(locale, {
                         timeZone: 'UTC',
                         weekday: 'long',
                         month: 'long',
@@ -338,7 +339,7 @@ export default function ActivitiesBrowser({
     const formatTime = (a: Activity) => {
         const ts = activityTime(a);
         if (ts === -Infinity) return '';
-        return new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit', timeZone }).format(new Date(ts));
+        return getDateTimeFormatter(locale, { hour: 'numeric', minute: '2-digit', timeZone }).format(new Date(ts));
     };
 
     const isEmpty = filtered.length === 0;

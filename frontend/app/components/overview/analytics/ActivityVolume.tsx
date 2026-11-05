@@ -1,6 +1,6 @@
 'use client';
 
-import { useNow } from '@/app/hooks/useNow';
+import { useLiveNow } from '@/app/hooks/useNow';
 import { useMemo } from 'react';
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts';
 import { useTimeZone, useLocale, useTranslations } from 'next-intl';
@@ -46,7 +46,7 @@ export default function ActivityVolume({
     const t = useTranslations('AnalyticsActivity');
     const tPage = useTranslations('AnalyticsPage');
     const locale = useLocale();
-    const now = useNow();
+    const now = useLiveNow();
     const timeZone = useTimeZone() ?? 'UTC';
 
     const { data, activeTypes, tooltipLabels } = useMemo(() => {

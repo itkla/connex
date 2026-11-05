@@ -793,7 +793,7 @@ export default function MyWorkQueue({ userId, initial }: Props) {
                                                     : ""}
                                                 {t(`queueEvidence_${row.code}`)}
                                                 {" · "}
-                                                {formatInstant(format, row.date != null ? `${row.date}T00:00:00` : row.occurredAt)}
+                                                {row.date != null ? formatDay(format, row.date) : formatInstant(format, row.occurredAt)}
                                             </span>
                                         </li>
                                     ))}

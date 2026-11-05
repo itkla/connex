@@ -1,5 +1,6 @@
 'use client';
 
+import { getDateTimeFormatter } from '@/app/lib/intlFormatters';
 import * as React from 'react';
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from 'recharts';
 import { useLocale, useTranslations } from 'next-intl';
@@ -18,7 +19,7 @@ import {
 } from '@/components/ui/tooltip';
 import { type DealMonthTotal, type DealRevenueSeries } from '@/app/lib/types';
 import { cn } from '@/lib/utils';
-import { useNow } from '@/app/hooks/useNow';
+import { useLiveNow } from '@/app/hooks/useNow';
 import { formatCompactCurrency, yearMonthInTimezone } from '@/app/lib/utils';
 import { type RollingRangeKey } from '@/app/components/overview/analytics/metrics';
 
@@ -46,8 +47,8 @@ function buildBuckets(series: DealRevenueSeries, now: number, locale: string, ra
     const current = yearMonthInTimezone(now, timezone);
     const start = new Date(Date.UTC(current.year, current.month - MONTHS_BACK[range], 1));
 
-    const monthLabel = new Intl.DateTimeFormat(locale, { month: 'short', timeZone: 'UTC' });
-    const monthYearLabel = new Intl.DateTimeFormat(locale, { month: 'short', year: '2-digit', timeZone: 'UTC' });
+    const monthLabel = getDateTimeFormatter(locale, { month: 'short', timeZone: 'UTC' });
+    const monthYearLabel = getDateTimeFormatter(locale, { month: 'short', year: '2-digit', timeZone: 'UTC' });
     const buckets: Bucket[] = [];
     const keyToIndex = new Map<string, number>();
     const total = MONTHS_BACK[range] + forwardHorizon(series, now, timezone);
@@ -93,7 +94,7 @@ export default function PipelineChart({
     const t = useTranslations('DashboardPipelineChart');
     const locale = useLocale();
     const [active, setActive] = React.useState<Metric>('projections');
-    const now = useNow();
+    const now = useLiveNow();
 
     const data = React.useMemo(
         () => buildBuckets(series, now, locale, range, timezone),

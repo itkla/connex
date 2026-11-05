@@ -1,5 +1,6 @@
 "use client";
 
+import { getNumberFormatter } from '@/app/lib/intlFormatters';
 import { useEffect, useMemo, useState } from "react";
 import { BriefcaseIcon, BuildingOffice2Icon, EnvelopeIcon, GlobeAltIcon, UserIcon } from "@heroicons/react/24/outline";
 import { useTimeZone, useLocale, useTranslations } from "next-intl";
@@ -85,7 +86,7 @@ function DealPreview({ id }: { id: number }) {
     const { data, loading } = useRecord(getDealSummary, id);
     const currencyFormatter = useMemo(() => {
         try {
-            return new Intl.NumberFormat(locale, {
+            return getNumberFormatter(locale, {
                 style: "currency",
                 currency: data?.currency || "USD",
                 maximumFractionDigits: 0,

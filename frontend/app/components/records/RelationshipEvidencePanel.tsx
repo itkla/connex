@@ -1,5 +1,6 @@
 'use client';
 
+import { getNumberFormatter } from '@/app/lib/intlFormatters';
 import {
     BoltIcon,
     CheckCircleIcon,
@@ -79,7 +80,7 @@ export default function RelationshipEvidencePanel({
     const t = useTranslations('RelationshipEvidence');
     const locale = useLocale();
     const number = useMemo(
-        () => new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }),
+        () => getNumberFormatter(locale, { maximumFractionDigits: 2 }),
         [locale],
     );
     const isDialog = variant === 'dialog';

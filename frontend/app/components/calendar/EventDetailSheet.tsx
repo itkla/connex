@@ -1,5 +1,6 @@
 'use client';
 
+import { getDateTimeFormatter } from '@/app/lib/intlFormatters';
 import { calendarDayInTimeZone } from '@/app/lib/timeZone';
 import { parseCalendarDate, parseCalendarDateUtc } from '@/app/lib/utils';
 import { useMemo } from 'react';
@@ -20,7 +21,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import type { Contact, Deal, RelationshipTemperature } from '@/app/lib/types';
-import { useNow } from '@/app/hooks/useNow';
+import { useLiveNow } from '@/app/hooks/useNow';
 import { addDays, dayKeyOf, type CalendarEvent } from '@/app/lib/calendar';
 import { KIND_ICON, KIND_LABEL_KEY } from './constants';
 import { linkedIds } from './eventLinks';
@@ -65,12 +66,12 @@ export default function EventDetailSheet({
 }) {
     const t = useTranslations('Calendar');
     const timeZone = useTimeZone() ?? 'UTC';
-    const sharedNow = useNow();
+    const sharedNow = useLiveNow();
     const isNarrow = !useMediaQuery('(min-width: 768px)');
 
     const whenLabel = useMemo(() => {
         if (!event) return '';
-        const fmt = new Intl.DateTimeFormat(
+        const fmt = getDateTimeFormatter(
             locale,
             event.allDay ? { dateStyle: 'full', timeZone: 'UTC' } : { dateStyle: 'full', timeStyle: 'short', timeZone },
         );

@@ -1,7 +1,8 @@
 'use client';
 
+import { parseDatetimeLocalValue, toDatetimeLocalValue } from '@/app/lib/utils';
 import { useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useTimeZone, useTranslations } from 'next-intl';
 
 import type { RadarSignal } from '@/app/lib/types';
 import { RADAR_FIELD_SURFACE } from '@/app/components/radar/radarControlSurface';
@@ -16,11 +17,6 @@ import {
 } from '@/components/ui/responsive-dialog';
 
 const MAX_SNOOZE_MS = 30 * 24 * 60 * 60 * 1_000;
-
-function datetimeLocal(date: Date): string {
-    const pad = (value: number) => String(value).padStart(2, '0');
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
 
 /** Explicit snooze-time picker that never invents a duration on the user's behalf. */
 export default function RadarSnoozeDialog({
@@ -37,9 +33,10 @@ export default function RadarSnoozeDialog({
     onSnooze: (until: string) => void;
 }) {
     const t = useTranslations('Radar');
+    const timeZone = useTimeZone() ?? 'UTC';
     const [openedAt] = useState(Date.now);
     const [value, setValue] = useState('');
-    const parsed = value.length > 0 ? new Date(value).getTime() : Number.NaN;
+    const parsed = parseDatetimeLocalValue(value, timeZone);
     const valid = Number.isFinite(parsed) && parsed > openedAt && parsed <= openedAt + MAX_SNOOZE_MS;
 
     return (
@@ -55,7 +52,7 @@ export default function RadarSnoozeDialog({
                     className="grid gap-5 px-6 pb-6 sm:px-0 sm:pb-0"
                     onSubmit={(event) => {
                         event.preventDefault();
-                        if (valid && !busy) onSnooze(new Date(value).toISOString());
+                        if (valid && !busy) onSnooze(new Date(parsed).toISOString());
                     }}
                 >
                     <div className="grid gap-2">
@@ -64,8 +61,8 @@ export default function RadarSnoozeDialog({
                             id={`radar-snooze-${signal.id}`}
                             type="datetime-local"
                             value={value}
-                            min={datetimeLocal(new Date(openedAt + 60_000))}
-                            max={datetimeLocal(new Date(openedAt + MAX_SNOOZE_MS))}
+                            min={toDatetimeLocalValue(new Date(openedAt + 60_000).toISOString(), timeZone)}
+                            max={toDatetimeLocalValue(new Date(openedAt + MAX_SNOOZE_MS).toISOString(), timeZone)}
                             onChange={(event) => setValue(event.target.value)}
                             aria-describedby={`radar-snooze-hint-${signal.id}`}
                             aria-invalid={value.length > 0 && !valid}

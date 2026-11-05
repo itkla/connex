@@ -29,7 +29,8 @@ vi.mock("next-intl", () => ({
         values ? `${key}:${JSON.stringify(values)}` : key,
     useFormatter: () => ({
         number: (value: number) => `#${value}`,
-        dateTime: () => "date",
+        dateTime: (value: number | Date, options: Intl.DateTimeFormatOptions) =>
+            new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", ...options }).format(value),
     }),
 }));
 
@@ -284,6 +285,15 @@ function tabbableControls(rootNode: ParentNode): HTMLElement[] {
 }
 
 describe("My Work queue interactions", () => {
+    it("renders date-only evidence on its due day west of UTC", async () => {
+        const item = { ...workItem(17, "Calendar deadline"), reason: { code: "task_due_soon", date: "2026-11-05" } } satisfies WorkItem;
+        item.evidence = [{ code: "task_due", sourceType: "task", sourceId: 17, date: "2026-11-05", occurredAt: "2026-11-01T01:00:00" }];
+        await mount([item]);
+        await openFocusedItem("Calendar deadline");
+        expect(focusedDrawer().textContent).toContain("Nov 5");
+        expect(focusedDrawer().textContent).not.toContain("Nov 4");
+        expect(focusedDrawer().textContent).not.toContain("4:00 PM");
+    });
     it("opens the exact mission review without any bulk approval action", async () => {
         mediaQuery.wide = true;
         await mount([{ ...workItem(12, "Record preparation"), id: "ai_mission:12", source: "ai_mission",

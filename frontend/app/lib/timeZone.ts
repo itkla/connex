@@ -1,10 +1,12 @@
+import { getDateTimeFormatter } from '@/app/lib/intlFormatters';
+
 export const DEFAULT_TIME_ZONE = 'UTC';
 
 /** Returns a supported zone, rejecting absent or legacy invalid profile values. */
 export function validTimeZone(value?: string | null): string | null {
     if (!value?.trim()) return null;
     try {
-        return new Intl.DateTimeFormat('en', { timeZone: value.trim() }).resolvedOptions().timeZone;
+        return getDateTimeFormatter('en', { timeZone: value.trim() }).resolvedOptions().timeZone;
     } catch {
         return null;
     }
@@ -17,7 +19,7 @@ export function resolveDisplayTimeZone(profile?: string | null, workspace?: stri
 
 /** A stable calendar-day key for an instant in the selected display zone. */
 export function calendarDayInTimeZone(value: number, timeZone: string): string {
-    const parts = new Intl.DateTimeFormat('en', {
+    const parts = getDateTimeFormatter('en', {
         timeZone: resolveDisplayTimeZone(timeZone), year: 'numeric', month: '2-digit', day: '2-digit',
     }).formatToParts(value);
     const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((entry) => entry.type === type)?.value ?? '';
@@ -26,7 +28,7 @@ export function calendarDayInTimeZone(value: number, timeZone: string): string {
 
 /** The civil hour of an instant, independent of the rendering host's zone. */
 export function hourInTimeZone(value: number, timeZone?: string): number {
-    return Number(new Intl.DateTimeFormat('en', {
+    return Number(getDateTimeFormatter('en', {
         timeZone: resolveDisplayTimeZone(timeZone), hour: 'numeric', hourCycle: 'h23',
     }).format(value));
 }
@@ -41,7 +43,7 @@ export function greetingName(displayName: string, locale: string): string {
 export function timeZoneLabel(value: string, locale: string): string {
     const timeZone = validTimeZone(value);
     if (!timeZone) return value;
-    const name = new Intl.DateTimeFormat(locale, { timeZone, timeZoneName: 'long' })
+    const name = getDateTimeFormatter(locale, { timeZone, timeZoneName: 'long' })
         .formatToParts(Date.UTC(2026, 0, 1)).find((part) => part.type === 'timeZoneName')?.value;
     return name ? `${value} · ${name}` : value;
 }

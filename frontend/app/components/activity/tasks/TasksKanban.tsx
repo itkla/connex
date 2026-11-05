@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils';
 import KanbanBoard, { type KanbanColumnDef } from '@/app/components/kanban/KanbanBoard';
 import { kanbanAccessibility } from '@/app/components/kanban/kanbanAccessibility';
 import NoteContent from '@/app/components/activity/notes/NoteContent';
-import { useNow } from '@/app/hooks/useNow';
+import { useLiveNow } from '@/app/hooks/useNow';
 import { DUE_CHIP, formatDue } from '@/app/components/activity/tasks/taskDue';
 import { moveTask } from '@/app/lib/api';
 import { noteContentToPlainText } from '@/app/lib/references';
@@ -57,7 +57,7 @@ export default function TasksKanban({
     const showApiError = useApiErrorToast('ActivityTasks');
     const locale = useLocale();
     const timeZone = useTimeZone() ?? 'UTC';
-    const now = useNow();
+    const now = useLiveNow();
 
     const columns: KanbanColumnDef[] = useMemo(
         () => [

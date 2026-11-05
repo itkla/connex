@@ -63,8 +63,8 @@ type Props = {
     onSaved: (saved: DataSubjectRequest) => void;
 };
 
-function toApiValue(input: string, timeZone: string | undefined) {
-    return input ? toMysqlDateTime(input, timeZone).replace(' ', 'T') : undefined;
+function toApiValue(input: string, timeZone: string | undefined, previous?: string | null) {
+    return input ? toMysqlDateTime(input, timeZone, previous).replace(' ', 'T') : undefined;
 }
 
 /**
@@ -194,11 +194,11 @@ function RequestForm({
                 channel: channel.trim() || undefined,
                 subjectWorkspaceId: subjectLink?.workspaceId,
                 subjectPersonId: subjectLink?.personId,
-                receivedAt: toApiValue(receivedAt, timeZone),
-                identityVerifiedAt: toApiValue(identityVerifiedAt, timeZone),
-                dueAt: toApiValue(dueAt, timeZone),
-                respondedAt: toApiValue(respondedAt, timeZone),
-                closedAt: toApiValue(closedAt, timeZone),
+                receivedAt: toApiValue(receivedAt, timeZone, editing?.receivedAt),
+                identityVerifiedAt: toApiValue(identityVerifiedAt, timeZone, editing?.identityVerifiedAt),
+                dueAt: toApiValue(dueAt, timeZone, editing?.dueAt),
+                respondedAt: toApiValue(respondedAt, timeZone, editing?.respondedAt),
+                closedAt: toApiValue(closedAt, timeZone, editing?.closedAt),
                 summary: summary.trim() || undefined,
                 resolution: resolution.trim() || undefined,
             });

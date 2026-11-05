@@ -1,5 +1,6 @@
 'use client';
 
+import { getDateTimeFormatter } from '@/app/lib/intlFormatters';
 import { parseCalendarDateUtc } from '@/app/lib/utils';
 import { useMemo } from 'react';
 import Link from 'next/link';
@@ -53,7 +54,7 @@ export default function EventPeekPopover({
 
     const whenLabel = useMemo(() => {
         if (!event) return '';
-        return new Intl.DateTimeFormat(
+        return getDateTimeFormatter(
             locale,
             event.allDay ? { dateStyle: 'full', timeZone: 'UTC' } : { dateStyle: 'full', timeStyle: 'short', timeZone },
         ).format(event.allDay ? parseCalendarDateUtc(event.dayKey) : event.startMs);

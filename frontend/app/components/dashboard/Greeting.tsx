@@ -1,4 +1,5 @@
 import { getLocale, getTimeZone, getTranslations } from 'next-intl/server';
+import { getDateTimeFormatter } from '@/app/lib/intlFormatters';
 import { BellAlertIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline';
 
 import { type User } from '@/app/lib/types';
@@ -8,7 +9,7 @@ import { greetingName } from '@/app/lib/timeZone';
 import { requestNow } from '@/app/lib/requestClock';
 
 function todayLabel(locale: string, timeZone: string, now: number): string {
-    return new Intl.DateTimeFormat(locale, {
+    return getDateTimeFormatter(locale, {
         weekday: 'long',
         month: 'long',
         day: 'numeric',

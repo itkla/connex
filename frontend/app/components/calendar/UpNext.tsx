@@ -1,5 +1,6 @@
 'use client';
 
+import { getDateTimeFormatter, getRelativeTimeFormatter } from '@/app/lib/intlFormatters';
 import { parseCalendarDate, parseCalendarDateUtc } from '@/app/lib/utils';
 import { calendarDayInTimeZone } from '@/app/lib/timeZone';
 import { useEffect, useMemo, useState } from 'react';
@@ -38,12 +39,12 @@ export default function UpNext({
         };
     }, []);
 
-    const rtf = useMemo(() => new Intl.RelativeTimeFormat(locale, { numeric: 'auto' }), [locale]);
+    const rtf = useMemo(() => getRelativeTimeFormatter(locale, { numeric: 'auto' }), [locale]);
     const dayTimeFmt = useMemo(
-        () => new Intl.DateTimeFormat(locale, { weekday: 'short', hour: 'numeric', minute: '2-digit', timeZone }),
+        () => getDateTimeFormatter(locale, { weekday: 'short', hour: 'numeric', minute: '2-digit', timeZone }),
         [locale, timeZone],
     );
-    const dayFmt = useMemo(() => new Intl.DateTimeFormat(locale, { weekday: 'long', day: 'numeric', timeZone: 'UTC' }), [locale]);
+    const dayFmt = useMemo(() => getDateTimeFormatter(locale, { weekday: 'long', day: 'numeric', timeZone: 'UTC' }), [locale]);
 
     const next = useMemo(
         () => now == null ? null : nextCalendarEvent(events, now, timeZone),
@@ -65,7 +66,7 @@ export default function UpNext({
         const tomorrowKey = dayKeyOf(addDays(nowDate, 1));
         const day = key === todayKey ? t('today') : key === tomorrowKey ? t('tomorrow') : null;
         if (next.allDay) return day ?? dayFmt.format(parseCalendarDateUtc(next.dayKey));
-        const time = new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit', timeZone }).format(next.startMs);
+        const time = getDateTimeFormatter(locale, { hour: 'numeric', minute: '2-digit', timeZone }).format(next.startMs);
         return day ? `${day}, ${time}` : dayTimeFmt.format(next.startMs);
     })();
 

@@ -1,3 +1,4 @@
+import { getDateTimeFormatter } from '@/app/lib/intlFormatters';
 import type {
     AiChatPageContext,
     AiChatPageContextKind,
@@ -512,7 +513,7 @@ const periodFormats = new Map<string, Intl.DateTimeFormat>();
 function periodFormat(locale: string): Intl.DateTimeFormat {
     const existing = periodFormats.get(locale);
     if (existing !== undefined) return existing;
-    const format = new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeZone: 'UTC' });
+    const format = getDateTimeFormatter(locale, { dateStyle: 'medium', timeZone: 'UTC' });
     periodFormats.set(locale, format);
     return format;
 }

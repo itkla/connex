@@ -1,7 +1,7 @@
 'use client';
 
 import { calendarDayInTimeZone } from '@/app/lib/timeZone';
-import { useNow } from '@/app/hooks/useNow';
+import { useLiveNow } from '@/app/hooks/useNow';
 import { useRef } from 'react';
 import { useTimeZone, useTranslations } from 'next-intl';
 
@@ -28,7 +28,7 @@ export default function GoToDateDialog({
 }) {
     const t = useTranslations('Calendar');
     const timeZone = useTimeZone() ?? 'UTC';
-    const now = useNow();
+    const now = useLiveNow();
     const inputRef = useRef<HTMLInputElement>(null);
 
     const jump = (key: string) => {

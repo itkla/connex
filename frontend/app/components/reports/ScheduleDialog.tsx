@@ -1,5 +1,6 @@
 'use client';
 
+import { getDateTimeFormatter } from '@/app/lib/intlFormatters';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import {
@@ -637,7 +638,7 @@ function isScheduleCadence(value: string): value is ReportScheduleCadence {
 }
 
 function formatHour(hour: number, locale: string): string {
-    return new Intl.DateTimeFormat(locale, {
+    return getDateTimeFormatter(locale, {
         hour: 'numeric',
         minute: '2-digit',
         hourCycle: 'h23',
@@ -648,7 +649,7 @@ function formatHour(hour: number, locale: string): string {
 function formatScheduleTimestamp(value: string, locale: string, timezone: string): string {
     const timestamp = parseMysqlDateTime(value);
     if (Number.isNaN(timestamp)) return value;
-    return new Intl.DateTimeFormat(locale, {
+    return getDateTimeFormatter(locale, {
         year: 'numeric',
         month: 'short',
         day: 'numeric',

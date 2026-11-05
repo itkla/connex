@@ -1,4 +1,5 @@
 import type { Task, Activity, Deal, Note, Contact } from '@/app/lib/types';
+import { getDateTimeFormatter } from '@/app/lib/intlFormatters';
 import { NOTE_URL_KEY, TASK_URL_KEY } from '@/app/hooks/listStateUrl';
 import { parseCalendarDateUtc, parseMysqlDateTime } from '@/app/lib/utils';
 import { calendarDayInTimeZone, hourInTimeZone } from '@/app/lib/timeZone';
@@ -66,6 +67,12 @@ export function dayKeyOf(d: Date): string {
     return `${y}-${m}-${day}`;
 }
 
+/** Carries a selected calendar slot without normalizing it through browser DST. */
+export function calendarSlotInputValue(dayKey: string, minutes: number): string {
+    const pad = (value: number) => String(value).padStart(2, '0');
+    return `${dayKey}T${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}`;
+}
+
 /** Local calendar-day key for a millisecond timestamp. */
 export function dayKeyFromMs(ms: number): string {
     return dayKeyOf(new Date(ms));
@@ -112,7 +119,7 @@ export function sameDay(a: Date, b: Date): boolean {
 
 /** Civil minutes since midnight in the display zone, used to place timed events on the hour timeline. */
 export function minutesSinceMidnight(ms: number, timeZone = 'UTC'): number {
-    const minute = new Intl.DateTimeFormat('en', { minute: 'numeric', timeZone }).format(ms);
+    const minute = getDateTimeFormatter('en', { minute: 'numeric', timeZone }).format(ms);
     return hourInTimeZone(ms, timeZone) * 60 + Number(minute);
 }
 

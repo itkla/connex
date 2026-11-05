@@ -1,5 +1,6 @@
 'use client';
 
+import { getDateTimeFormatter, getNumberFormatter, getRelativeTimeFormatter } from '@/app/lib/intlFormatters';
 import { useMemo, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useTimeZone, useLocale, useTranslations } from 'next-intl';
@@ -115,7 +116,7 @@ function freshnessLabels(value: string, anchor: number, locale: string, timeZone
     const timestamp = parseMysqlDateTime(value);
     if (!Number.isFinite(timestamp) || !Number.isFinite(anchor)) return null;
     const difference = timestamp - anchor;
-    const absolute = new Intl.DateTimeFormat(locale, {
+    const absolute = getDateTimeFormatter(locale, {
         timeZone,
         dateStyle: 'medium',
         timeStyle: 'short',
@@ -123,7 +124,7 @@ function freshnessLabels(value: string, anchor: number, locale: string, timeZone
     const minutes = Math.round(difference / 60_000);
     const hours = Math.round(difference / 3_600_000);
     const days = Math.round(difference / 86_400_000);
-    const formatter = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
+    const formatter = getRelativeTimeFormatter(locale, { numeric: 'auto' });
     const relative = Math.abs(minutes) < 60
         ? formatter.format(minutes, 'minute')
         : Math.abs(hours) < 24
@@ -210,9 +211,9 @@ export default function RadarSignalCard({
     const taskBlockingExplanation = taskPermissionExplanation ?? taskFreshnessExplanation;
     const followed = signal.state === 'followed';
     const dismissed = signal.state === 'dismissed';
-    const numberFormat = useMemo(() => new Intl.NumberFormat(locale), [locale]);
+    const numberFormat = useMemo(() => getNumberFormatter(locale), [locale]);
     const dateFormat = useMemo(
-        () => new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeZone }),
+        () => getDateTimeFormatter(locale, { dateStyle: 'medium', timeZone }),
         [locale, timeZone],
     );
     const names = radarSignalNames(displaySignal);

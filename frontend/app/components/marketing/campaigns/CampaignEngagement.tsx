@@ -1,5 +1,6 @@
 "use client";
 
+import { getNumberFormatter } from '@/app/lib/intlFormatters';
 import { useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import CountUp from "@/app/components/dashboard/CountUp";
@@ -120,7 +121,7 @@ function RateTiles({
     notMeasuredHint: string;
     locale: string;
 }) {
-    const percent = new Intl.NumberFormat(locale, {
+    const percent = getNumberFormatter(locale, {
         style: "percent",
         maximumFractionDigits: 1,
     });

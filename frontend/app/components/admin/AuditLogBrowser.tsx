@@ -1,5 +1,6 @@
 "use client";
 
+import { getDateTimeFormatter } from '@/app/lib/intlFormatters';
 import { calendarDayInTimeZone } from '@/app/lib/timeZone';
 import { parseCalendarDateUtc } from '@/app/lib/utils';
 import { useEffect, useMemo, useState, type ComponentType } from "react";
@@ -813,7 +814,7 @@ function dayLabel(
     }
     const d = new Date(key);
     const currentYear = new Date(now == null ? key : displayDayKey(now, timeZone)).getUTCFullYear();
-    return new Intl.DateTimeFormat(locale, {
+    return getDateTimeFormatter(locale, {
         weekday: "long",
         month: "long",
         day: "numeric",
@@ -880,7 +881,7 @@ function PulseStrip({
     locale: string;
 }) {
     const fmt = useMemo(
-        () => new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", timeZone: "UTC" }),
+        () => getDateTimeFormatter(locale, { month: "short", day: "numeric", timeZone: "UTC" }),
         [locale],
     );
     return (
@@ -1022,7 +1023,7 @@ function AuditRow({
     const ms = parseMysqlDateTime(entry.createdAt);
     const hasMs = !Number.isNaN(ms);
     const absolute = hasMs
-        ? new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "medium", timeZone }).format(ms)
+        ? getDateTimeFormatter(locale, { dateStyle: "medium", timeStyle: "medium", timeZone }).format(ms)
         : entry.createdAt;
     const timeLabel = now == null ? formatShortDate(entry.createdAt, locale, timeZone) : formatRelativeTime(entry.createdAt, locale, now, timeZone);
 

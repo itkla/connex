@@ -1,5 +1,6 @@
 'use client';
 
+import { getDateTimeFormatter } from '@/app/lib/intlFormatters';
 import { useMemo } from 'react';
 import { useTimeZone, useTranslations } from 'next-intl';
 
@@ -66,9 +67,9 @@ export default function WeekView({
     const t = useTranslations('Calendar');
     const timeZone = useTimeZone() ?? 'UTC';
     const days = useMemo(() => weekDays(anchor, WEEK_STARTS_ON), [anchor]);
-    const weekdayFmt = useMemo(() => new Intl.DateTimeFormat(locale, { weekday: 'short' }), [locale]);
+    const weekdayFmt = useMemo(() => getDateTimeFormatter(locale, { weekday: 'short' }), [locale]);
     const timeFmt = useMemo(
-        () => new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit', timeZone }),
+        () => getDateTimeFormatter(locale, { hour: 'numeric', minute: '2-digit', timeZone }),
         [locale, timeZone],
     );
 

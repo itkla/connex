@@ -1,5 +1,6 @@
 'use client';
 
+import { getDateTimeFormatter } from '@/app/lib/intlFormatters';
 import { calendarDayInTimeZone } from '@/app/lib/timeZone';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
@@ -11,7 +12,7 @@ import Rise from '@/app/components/motion/Rise';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { completeTask, rescheduleDeal, rescheduleTask } from '@/app/lib/api';
 import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
-import { useNow } from '@/app/hooks/useNow';
+import { useLiveNow } from '@/app/hooks/useNow';
 import { isTypingTarget, parseCalendarDate, parseCalendarDateUtc } from '@/app/lib/utils';
 import type { Activity, Contact, Deal, Note, RelationshipTemperature, Task } from '@/app/lib/types';
 import {
@@ -118,7 +119,7 @@ export default function CalendarShell({
     const coarse = useCoarsePointer();
     const isWide = useMediaQuery('(min-width: 1024px)');
     const swipeRef = useRef<HTMLDivElement>(null);
-    const now = useNow();
+    const now = useLiveNow();
     const today = useMemo(() => new Date(parseCalendarDate(calendarDayInTimeZone(now, timeZone))), [now, timeZone]);
     const cal = useCalendar(today);
     const [openEventId, setOpenEventId] = useState<string | null>(null);
@@ -255,12 +256,12 @@ export default function CalendarShell({
 
     const periodLabel = useMemo(() => {
         if (cal.view === 'month') {
-            return new Intl.DateTimeFormat(locale, { month: 'long', year: 'numeric' }).format(
+            return getDateTimeFormatter(locale, { month: 'long', year: 'numeric' }).format(
                 startOfMonth(cal.anchor),
             );
         }
         if (cal.view === 'day') {
-            return new Intl.DateTimeFormat(locale, {
+            return getDateTimeFormatter(locale, {
                 weekday: 'long',
                 month: 'long',
                 day: 'numeric',
@@ -269,8 +270,8 @@ export default function CalendarShell({
         }
         if (cal.view === 'week') {
             const days = weekDays(cal.anchor, WEEK_STARTS_ON);
-            const start = new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }).format(days[0]);
-            const end = new Intl.DateTimeFormat(locale, {
+            const start = getDateTimeFormatter(locale, { month: 'short', day: 'numeric' }).format(days[0]);
+            const end = getDateTimeFormatter(locale, {
                 month: 'short',
                 day: 'numeric',
                 year: 'numeric',
@@ -315,13 +316,9 @@ export default function CalendarShell({
         else cal.openDay(day);
     };
 
-    const onSlotCreate = (startMs: number) => {
+    const onSlotCreate = (civilValue: string) => {
         setPeek(null);
-        const d = new Date(startMs);
-        const pad = (n: number) => String(n).padStart(2, '0');
-        setSlotAt(
-            `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`,
-        );
+        setSlotAt(civilValue);
     };
 
     useEffect(() => {

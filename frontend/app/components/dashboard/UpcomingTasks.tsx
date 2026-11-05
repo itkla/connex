@@ -10,7 +10,7 @@ import { updateTask } from '@/app/lib/api';
 import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { noteContentToPlainText } from '@/app/lib/references';
 import { toastError, toastSuccess } from '@/app/lib/toast';
-import { useNow } from '@/app/hooks/useNow';
+import { useLiveNow } from '@/app/hooks/useNow';
 import { calendarDayInTimeZone } from '@/app/lib/timeZone';
 import { formatShortDate } from '@/app/lib/utils';
 import { type Task } from '@/app/lib/types';
@@ -20,7 +20,7 @@ export default function UpcomingTasks({ tasks, locale }: { tasks: Task[]; locale
     const timeZone = useTimeZone();
     const router = useRouter();
     const t = useTranslations('DashboardTaskSummary');
-    const now = useNow();
+    const now = useLiveNow();
     const today = calendarDayInTimeZone(now, timeZone ?? 'UTC');
     const [doneIds, setDoneIds] = useState<Set<number>>(new Set());
 

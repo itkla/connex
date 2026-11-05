@@ -65,32 +65,23 @@ import AccessDenied from "@/app/components/AccessDenied";
 import SectionUnavailable from "@/app/components/SectionUnavailable";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { toastSuccess } from "@/app/lib/toast";
-import { formatCurrency, formatDate } from "@/app/lib/utils";
+import { formatCurrency, formatDate, toDatetimeLocalValue, toMysqlDateTime } from "@/app/lib/utils";
 import type { CapabilityAvailability } from "@/app/lib/capabilityAvailability";
 
 const RECORD_TYPES: CampaignAudienceRecordType[] = ["person", "company", "deal"];
 
 const TERMINAL_STATUSES: CampaignStatus[] = ["completed", "archived"];
 
-/**
- * Renders a stored timestamp for a `datetime-local` input, which accepts no finer than a minute.
- *
- * Deliberately a plain truncation rather than the `toDatetimeLocalValue` used for deals and
- * activities: those round-trip through `toMysqlDateTime`, which emits a space-separated UTC string,
- * while `CampaignRequest` binds `LocalDateTime` and the create path posts the raw input value. Read
- * and write must agree, so campaign timestamps stay in the wall-clock form the backend stores.
- */
-function toFormValue(value: string | null): string | null {
-    return value?.slice(0, 16) ?? null;
+/** Renders a stored UTC instant in the profile zone for the minute-precision campaign editor. */
+function toFormValue(value: string | null, timeZone: string | undefined): string | null {
+    return toDatetimeLocalValue(value, timeZone) || null;
 }
 
-/**
- * Returns the stored timestamp when the reader never touched the field, so saving an unrelated
- * change cannot silently drop the seconds of a campaign window that has them.
- */
-function restoreUntouched(edited: string | null | undefined, stored: string | null): string | null {
+/** Preserves unchanged instants and converts edited civil values once, retaining the API's ISO shape. */
+function restoreUntouched(edited: string | null | undefined, stored: string | null, timeZone: string | undefined): string | null {
     const next = edited ?? null;
-    return next !== null && next === toFormValue(stored) ? stored : next;
+    if (next === null || next.length === 0) return null;
+    return next === toFormValue(stored, timeZone) ? stored : toMysqlDateTime(next, timeZone, stored).replace(' ', 'T');
 }
 
 /**
@@ -98,7 +89,7 @@ function restoreUntouched(edited: string | null | undefined, stored: string | nu
  * fields the form does not show — owner and parent campaign — are carried through rather than
  * dropped, and the timestamps are rendered at the precision the input accepts.
  */
-function toPayload(campaign: Campaign): CampaignPayload {
+function toPayload(campaign: Campaign, timeZone: string | undefined): CampaignPayload {
     return {
         name: campaign.name,
         objective: campaign.objective,
@@ -107,8 +98,8 @@ function toPayload(campaign: Campaign): CampaignPayload {
         ownerUserId: campaign.ownerUserId,
         budgetAmount: campaign.budgetAmount,
         budgetCurrency: campaign.budgetCurrency,
-        startAt: toFormValue(campaign.startAt),
-        endAt: toFormValue(campaign.endAt),
+        startAt: toFormValue(campaign.startAt, timeZone),
+        endAt: toFormValue(campaign.endAt, timeZone),
         parentCampaignId: campaign.parentCampaignId,
     };
 }
@@ -178,7 +169,7 @@ export default function CampaignDetail({
     const [tab, setTab] = useState("overview");
     const [current, setCurrent] = useState<Campaign>(campaign);
     const [editOpen, setEditOpen] = useState(false);
-    const [editPayload, setEditPayload] = useState<CampaignPayload>(() => toPayload(campaign));
+    const [editPayload, setEditPayload] = useState<CampaignPayload>(() => toPayload(campaign, timeZone));
     const [isSavingCampaign, setIsSavingCampaign] = useState(false);
 
     const [syncedCampaign, setSyncedCampaign] = useState(campaign);
@@ -262,7 +253,7 @@ export default function CampaignDetail({
     };
 
     const openEdit = () => {
-        setEditPayload(toPayload(current));
+        setEditPayload(toPayload(current, timeZone));
         setEditOpen(true);
     };
 
@@ -272,8 +263,8 @@ export default function CampaignDetail({
             const updated = await updateCampaign(current.id, {
                 ...editPayload,
                 objective: editPayload.objective?.trim() || null,
-                startAt: restoreUntouched(editPayload.startAt, current.startAt),
-                endAt: restoreUntouched(editPayload.endAt, current.endAt),
+                startAt: restoreUntouched(editPayload.startAt, current.startAt, timeZone),
+                endAt: restoreUntouched(editPayload.endAt, current.endAt, timeZone),
             });
             setCurrent(updated);
             setIsSavingCampaign(false);
