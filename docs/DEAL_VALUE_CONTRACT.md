@@ -44,6 +44,13 @@ false means HTTP 409, including old clients. `expectedManualValue`, when supplie
 must still match the locked manual amount and manual source; `expectedCurrency` must match its
 currency, or the write also conflicts. The confirmation UI sends both expected fields. Line-derived edits do not
 require repeated confirmation. The guard runs before line writes and again at reconciliation.
+Missing consent returns `DEAL_LINE_VALUE_CONSENT_REQUIRED`; changed reviewed state returns
+`DEAL_LINE_VALUE_CONSENT_STALE`. Both are HTTP 409. The client retains the draft and asks for a new
+review without reloading the page.
+
+Drafts capture their workspace when composed. Preview, persistence, confirmation, removal, and
+retries carry that explicit workspace pin. Workspace selection, account revocation, route changes,
+and unmount invalidate the pending write chain before any later request or stale UI update.
 
 From V242 onward, the manual amount (including zero) is stored prospectively in
 `deal.prior_manual_value` when line items take over. Deleting the **last** line automatically
@@ -108,6 +115,9 @@ sum, expressed as a nonnegative percentage rounded to three decimals. It does no
 configured discount percentage. Thus `0.01 × 1` with `20%` configured rounds to subtotal `0.01`,
 giving `0%` effective discount and matching no positive discount threshold. Total-based policies
 continue to compare the frozen grand total in the document's currency.
+Percentage discounts are validated in the request boundary and line arithmetic as at most 100%.
+Fixed-amount discounts retain the money-column bounds. The phone editor groups each line's
+operands, total, and Remove action in a stacked layout without a horizontally scrolling table.
 
 ### Line-item guards apply to CSV import too
 

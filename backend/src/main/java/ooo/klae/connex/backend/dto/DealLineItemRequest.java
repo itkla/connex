@@ -4,6 +4,8 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 
 import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.AssertTrue;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotNull;
@@ -79,4 +81,12 @@ public class DealLineItemRequest {
     private LocalDate servicePeriodEnd;
 
     private Integer position;
+
+    /** Percentage discounts must stay within 100; fixed-amount discounts retain money bounds. */
+    @AssertTrue(message = "Percentage discount must not exceed 100%")
+    @JsonIgnore
+    public boolean isPercentageDiscountValid() {
+        return !"percent".equals(discountType) || discountValue == null
+            || discountValue.compareTo(new BigDecimal("100")) <= 0;
+    }
 }

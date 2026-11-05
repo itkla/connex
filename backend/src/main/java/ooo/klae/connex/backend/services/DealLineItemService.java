@@ -274,6 +274,9 @@ public class DealLineItemService {
      * lines.
      */
     private void compute(DealLineItem item) {
+        if ("percent".equals(item.getDiscountType()) && nz(item.getDiscountValue()).compareTo(HUNDRED) > 0) {
+            throw new BadRequestException("Percentage discount must not exceed 100%");
+        }
         item.setUnitPrice(canonicalOperand(item.getUnitPrice(), MONEY_PRECISION, MONEY_SCALE, "unitPrice"));
         item.setQuantity(
             canonicalOperand(item.getQuantity(), QUANTITY_PRECISION, QUANTITY_SCALE, "quantity"));

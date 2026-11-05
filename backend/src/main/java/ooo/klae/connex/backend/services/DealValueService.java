@@ -13,6 +13,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.dto.DealLineItemDto;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.DealLineValueConsentException;
 import ooo.klae.connex.backend.mappers.DealLineItemMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.DealValueMapper;
@@ -39,9 +40,11 @@ public class DealValueService {
         boolean stale = expectedManualValue != null && (!MANUAL.equals(lockedDeal.getValueSource())
             || money(expectedManualValue).compareTo(money(lockedDeal.getValue())) != 0)
             || expectedCurrency != null && !expectedCurrency.equalsIgnoreCase(lockedDeal.getCurrency());
-        if (stale || MANUAL.equals(lockedDeal.getValueSource()) && money(lockedDeal.getValue()).signum() != 0
-                && !confirmed) {
-            throw new ConflictException("Confirm replacing the manual deal value with line-item totals");
+        if (stale) {
+            throw DealLineValueConsentException.stale();
+        }
+        if (MANUAL.equals(lockedDeal.getValueSource()) && money(lockedDeal.getValue()).signum() != 0 && !confirmed) {
+            throw DealLineValueConsentException.required();
         }
     }
 

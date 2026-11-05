@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.DealLineValueConsentException;
 import ooo.klae.connex.backend.mappers.DealLineItemMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.DealValueMapper;
@@ -28,6 +29,19 @@ class DealValueServiceTest {
     private final DealLineItemMapper dealLineItemMapper = mock(DealLineItemMapper.class);
     private final DealValueMapper dealValueMapper = mock(DealValueMapper.class);
     private final DealValueService service = new DealValueService(dealMapper, dealLineItemMapper, dealValueMapper);
+
+    @Test
+    void consentRequiredAndStaleConsentHaveDistinctMachineCodes() {
+        Deal deal = deal("manual", "1000.00", "0.00");
+        deal.setCurrency("USD");
+        DealLineValueConsentException required = assertThrows(DealLineValueConsentException.class,
+            () -> service.requireConfirmedLineValue(deal, false, null, null));
+        assertEquals(DealLineValueConsentException.REQUIRED, required.getCode());
+        DealLineValueConsentException stale = assertThrows(DealLineValueConsentException.class,
+            () -> service.requireConfirmedLineValue(deal, true, new BigDecimal("999"), "USD"));
+        assertEquals(DealLineValueConsentException.STALE, stale.getCode());
+        verifyNoInteractions(dealMapper, dealValueMapper);
+    }
 
     @Test
     void manualValuesNormalizeToScaleTwoHalfUp() {

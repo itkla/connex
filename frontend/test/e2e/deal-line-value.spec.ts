@@ -59,7 +59,7 @@ async function setup(page: Page, value: number) {
     return { headers, dealId, lines, saved, figures };
 }
 
-test('blank draft, priced confirmation, cancel and final removal preserve deal value @mobile', async ({ page }) => {
+test('blank draft, priced confirmation, cancel and final removal preserve deal value @mobile', async ({ page, isMobile }) => {
     test.setTimeout(120_000);
     const { lines, saved, figures, dealId, headers } = await setup(page, 114200);
     const before = await figures();
@@ -94,6 +94,8 @@ test('blank draft, priced confirmation, cancel and final removal preserve deal v
             headers, data: { name: 'Unconfirmed', unitPrice: 0, quantity: 1 },
         });
         expect(rejected.status()).toBe(409);
+        const refusal: unknown = await rejected.json();
+        expect(record(refusal).code).toBe('DEAL_LINE_VALUE_CONSENT_REQUIRED');
         expect(await saved()).toEqual(original);
     });
     await test.step('confirmed total is saved and removing the final line restores the manual amount', async () => {
@@ -106,6 +108,15 @@ test('blank draft, priced confirmation, cancel and final removal preserve deal v
         await qty.press('Tab');
         await expect.poll(async () => (await saved()).value).toBe(331.38);
         await expect(page.getByRole('dialog')).toHaveCount(0);
+        if (isMobile) {
+            const editor = lines.getByRole('article').first();
+            await expect(editor.getByRole('spinbutton', { name: 'Qty', exact: true })).toBeVisible();
+            await expect(editor.getByRole('spinbutton', { name: 'Unit price', exact: true })).toBeVisible();
+            await expect(editor.getByRole('spinbutton', { name: 'Discount value', exact: true })).toBeVisible();
+            await expect(editor.getByRole('spinbutton', { name: 'Tax rate (%)', exact: true })).toBeVisible();
+            await expect(editor).toContainText('$331.38');
+            expect(await editor.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+        }
         const remove = lines.getByRole('button', { name: 'Remove line', exact: true });
         await expect(remove).toBeInViewport();
         await remove.click();

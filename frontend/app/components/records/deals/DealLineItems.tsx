@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { PlusIcon, TrashIcon } from '@heroicons/react/24/outline';
 
@@ -19,6 +19,9 @@ import {
 } from '@/components/ui/combobox';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
+import { useAccountStorageGeneration } from '@/app/hooks/useAccountStorageGeneration';
+import { renderedWorkspaceId, renderedWorkspaceNavigationVersion, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { formatCurrency } from '@/app/lib/utils';
 import {
     getProducts,
@@ -30,6 +33,7 @@ import type { DealLineItem, DealLineItemPayload, DealLineItemTotals, DealLineIte
 
 type Props = {
     dealId: number;
+    dealWorkspaceId: number | null;
     dealCurrency: string;
     initial: DealLineItemsResponse;
 };
@@ -38,8 +42,17 @@ type Props = {
  * Keeps new lines local until explicitly saved. Proposed totals and persisted amounts are computed
  * by the server; a nonzero manual-value takeover requires separate consent to that exact amount.
  */
-export default function DealLineItems({ dealId, dealCurrency, initial }: Props) {
+export default function DealLineItems({ dealId, dealWorkspaceId, dealCurrency, initial }: Props) {
     const router = useRouter();
+    const pathname = usePathname();
+    const { activeWorkspaceId } = useWorkspace();
+    const [owner] = useState(() => ({ workspaceId: dealWorkspaceId,
+        navigation: renderedWorkspaceNavigationVersion(), pathname, dealId }));
+    const valid = useRef(true);
+    const revoked = useRef(false);
+    const requests = useRef(new Set<AbortController>());
+    const draftWorkspace = useRef<number | null>(null);
+    const [invalidated, setInvalidated] = useState(false);
     const t = useTranslations('DealsLineItems');
     const showApiError = useApiErrorToast('DealsLineItems');
     const locale = useLocale();
@@ -55,11 +68,54 @@ export default function DealLineItems({ dealId, dealCurrency, initial }: Props) 
         manual: number;
         total: number;
         currency: string;
+        workspaceId: number | null;
     } | null>(null);
 
+    const isAccountCurrent = useAccountStorageGeneration(() => {
+        revoked.current = true;
+        valid.current = false;
+        for (const controller of requests.current) controller.abort();
+        requests.current.clear();
+        setPending(null);
+        setInvalidated(true);
+    });
+
+    useLayoutEffect(() => {
+        const abort = () => {
+            valid.current = false;
+            for (const controller of requests.current) controller.abort();
+            requests.current.clear();
+        };
+        const invalidate = () => {
+            revoked.current = true;
+            abort();
+            setInvalidated(true);
+            setPending(null);
+        };
+        if (owner.workspaceId !== activeWorkspaceId || owner.workspaceId !== dealWorkspaceId
+                || owner.pathname !== pathname || owner.dealId !== dealId
+                || owner.navigation !== renderedWorkspaceNavigationVersion()) invalidate();
+        else valid.current = !revoked.current;
+        return abort;
+    }, [activeWorkspaceId, pathname, dealId, dealWorkspaceId, owner]);
+
+    const isCurrent = useCallback(() => valid.current && isAccountCurrent() && owner.workspaceId !== null
+        && owner.workspaceId === renderedWorkspaceId()
+        && owner.navigation === renderedWorkspaceNavigationVersion()
+        && owner.pathname === window.location.pathname, [isAccountCurrent, owner]);
+
     useEffect(() => {
-        getProducts().then((all) => setProducts(all.filter((p) => p.active))).catch(() => setProducts([]));
-    }, []);
+        if (!isCurrent()) return;
+        const controller = new AbortController();
+        const origin = workspacePinnedRequest(owner.workspaceId, { signal: controller.signal });
+        const activeRequests = requests.current;
+        activeRequests.add(controller);
+        getProducts({}, origin)
+            .then((all) => { if (!controller.signal.aborted && isCurrent()) setProducts(all.filter((p) => p.active)); })
+            .catch(() => { if (!controller.signal.aborted && isCurrent()) setProducts([]); })
+            .finally(() => activeRequests.delete(controller));
+        return () => { controller.abort(); activeRequests.delete(controller); };
+    }, [isCurrent, owner]);
 
     const currency = totals?.currency ?? dealCurrency;
     const money = (value: number, lineCurrency = currency) => formatCurrency(value, lineCurrency, locale);
@@ -78,75 +134,107 @@ export default function DealLineItems({ dealId, dealCurrency, initial }: Props) 
         setRestorable(res.restorableManualValue);
     };
 
-    const run = async (op: () => Promise<DealLineItemsResponse>) => {
-        setBusy(true);
-        try {
-            apply(await op());
-            router.refresh();
-        } catch (err) {
-            showApiError(err, 'saveFailed');
-        } finally {
-            setBusy(false);
-        }
-    };
-
-    const writeLine = (payload: DealLineItemPayload, itemId?: number) => itemId === undefined
-        ? createDealLineItem(dealId, payload)
-        : updateDealLineItem(dealId, itemId, payload);
+    const writeLine = (payload: DealLineItemPayload, origin: RequestInit, itemId?: number) => itemId === undefined
+        ? createDealLineItem(dealId, payload, origin)
+        : updateDealLineItem(dealId, itemId, payload, origin);
 
     const saveLine = async (payload: DealLineItemPayload, itemId?: number) => {
+        if (!isCurrent()) return;
+        const workspaceId = itemId === undefined ? draftWorkspace.current : owner.workspaceId;
+        const controller = new AbortController();
+        const origin = workspacePinnedRequest(workspaceId, { signal: controller.signal });
+        requests.current.add(controller);
         setBusy(true);
         try {
-            const preview = await writeLine({ ...payload, previewOnly: true }, itemId);
+            const preview = await writeLine({ ...payload, previewOnly: true }, origin, itemId);
+            if (!isCurrent() || controller.signal.aborted) return;
             if (preview.manualValueToReplace != null) {
                 if (preview.totals === null) throw new Error('Line totals unavailable');
                 setPending({ payload, itemId, manual: preview.manualValueToReplace, total: preview.totals.grandTotal,
-                    currency: preview.totals.currency ?? dealCurrency });
+                    currency: preview.totals.currency ?? dealCurrency, workspaceId });
             } else {
-                apply(await writeLine(payload, itemId));
+                const saved = await writeLine(payload, origin, itemId);
+                if (!isCurrent() || controller.signal.aborted) return;
+                apply(saved);
                 if (itemId === undefined) setDraft(null);
                 router.refresh();
             }
         } catch (err) {
-            showApiError(err, 'saveFailed');
+            if (isCurrent()) showApiError(err, 'saveFailed');
         } finally {
-            setBusy(false);
+            requests.current.delete(controller);
+            if (isCurrent()) setBusy(false);
         }
     };
 
     const confirmLine = async () => {
-        if (!pending) return;
+        if (!pending || !isCurrent()) return;
+        const workspaceId = pending.workspaceId;
+        const controller = new AbortController();
+        const origin = workspacePinnedRequest(workspaceId, { signal: controller.signal });
+        requests.current.add(controller);
         setBusy(true);
         try {
-            apply(await writeLine({ ...pending.payload, confirmValueReplacement: true,
-                expectedManualValue: pending.manual, expectedCurrency: pending.currency }, pending.itemId));
+            const saved = await writeLine({ ...pending.payload, confirmValueReplacement: true,
+                expectedManualValue: pending.manual, expectedCurrency: pending.currency }, origin, pending.itemId);
+            if (!isCurrent() || controller.signal.aborted) return;
+            apply(saved);
             if (pending.itemId === undefined) setDraft(null);
             setPending(null);
             router.refresh();
         } catch (err) {
-            setPending(null);
-            showApiError(err, 'saveFailed');
+            if (isCurrent()) {
+                setPending(null);
+                showApiError(err, 'saveFailed');
+            }
         } finally {
-            setBusy(false);
+            requests.current.delete(controller);
+            if (isCurrent()) setBusy(false);
         }
     };
 
-    const addFromProduct = (product: Product) => setDraft({ productId: product.id, name: product.name,
+    const addFromProduct = (product: Product) => {
+        if (!isCurrent()) return;
+        draftWorkspace.current = renderedWorkspaceId();
+        setDraft({ productId: product.id, name: product.name,
         unitPrice: product.unitPrice, quantity: 1, taxRate: product.taxRate ?? 0,
         billingFrequency: product.billingFrequency, sku: product.sku, unit: product.unit });
+    };
 
-    const addAdhoc = () => setDraft({ name: t('newLineName'), quantity: 1 });
+    const addAdhoc = () => {
+        if (!isCurrent()) return;
+        draftWorkspace.current = renderedWorkspaceId();
+        setDraft({ name: t('newLineName'), quantity: 1 });
+    };
 
     const patchLine = (item: DealLineItem, payload: DealLineItemPayload) =>
         saveLine(payload, item.id);
 
-    const removeLine = (item: DealLineItem) =>
-        run(() => deleteDealLineItem(dealId, item.id));
+    const removeLine = async (item: DealLineItem) => {
+        if (!isCurrent()) return;
+        const controller = new AbortController();
+        const origin = workspacePinnedRequest(owner.workspaceId, { signal: controller.signal });
+        requests.current.add(controller);
+        setBusy(true);
+        try {
+            const saved = await deleteDealLineItem(dealId, item.id, origin);
+            if (!isCurrent() || controller.signal.aborted) return;
+            apply(saved);
+            router.refresh();
+        } catch (error) {
+            if (isCurrent()) showApiError(error, 'saveFailed');
+        } finally {
+            requests.current.delete(controller);
+            if (isCurrent()) setBusy(false);
+        }
+    };
 
     const productItems = useMemo(
         () => products.filter((p) => (p.currency ?? dealCurrency) === currency),
         [products, currency, dealCurrency],
     );
+
+    if (invalidated) return null;
 
     return (
         <section aria-label={t('title')} className="min-w-0">
@@ -207,7 +295,7 @@ export default function DealLineItems({ dealId, dealCurrency, initial }: Props) 
                     <DiscountType value={draft.discountType} disabled={busy}
                         onChange={(discountType) => setDraft({ ...draft, discountType, discountValue: discountType ? draft.discountValue ?? 0 : null })} />
                     <label className="text-sm">{t('discountValue')}
-                        <Input type="number" min="0" step="0.01" inputMode="decimal" value={draft.discountValue ?? ''}
+                        <Input type="number" min="0" max={draft.discountType === 'percent' ? 100 : undefined} step="0.01" inputMode="decimal" value={draft.discountValue ?? ''}
                             disabled={busy || !draft.discountType}
                             onChange={(event) => setDraft({ ...draft, discountValue: Number(event.target.value) })} />
                     </label>
@@ -248,97 +336,85 @@ export default function DealLineItems({ dealId, dealCurrency, initial }: Props) 
                     {t('empty')}
                 </div>
             ) : (
-                <div className="overflow-x-auto rounded-2xl border border-border bg-card">
-                    <table className="w-full text-sm">
-                        <thead>
-                            <tr className="border-b border-border text-left text-xs uppercase tracking-[0.08em] text-muted-foreground">
-                                <th className="px-4 py-3 font-medium">{t('columnItem')}</th>
-                                <th className="w-24 px-4 py-3 font-medium text-right">{t('columnQty')}</th>
-                                <th className="w-32 px-4 py-3 font-medium text-right">{t('columnUnitPrice')}</th>
-                                <th className="w-28 px-4 py-3 font-medium text-right">{t('columnDiscount')}</th>
-                                <th className="w-28 px-4 py-3 font-medium text-right">{t('taxRate')}</th>
-                                <th className="w-32 px-4 py-3 font-medium text-right">{t('columnLineTotal')}</th>
-                                <th className="w-10 px-2 py-3" />
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-border">
-                            {items.map((item) => (
-                                <tr key={item.id} className="align-top">
-                                    <td className="px-4 py-3">
-                                        <Input
-                                            defaultValue={item.name}
-                                            aria-label={t('columnItem')}
-                                            className="h-8 border-0 bg-transparent px-0 shadow-none focus-visible:bg-muted"
-                                            onBlur={(e) => { if (e.target.value !== item.name) patchLine(item, linePayload(item, { name: e.target.value })); }}
-                                            disabled={busy}
-                                        />
-                                        <div className="mt-0.5 text-xs text-muted-foreground">
-                                            {item.billingFrequency === 'recurring' ? t('recurring') : t('oneTime')}
-                                        </div>
-                                        {item.currency.toUpperCase() !== dealCurrency.toUpperCase() && (
-                                            <p className="mt-1 text-xs text-muted-foreground">
-                                                {t('currencyMismatch', { lineCurrency: item.currency, dealCurrency })}
-                                            </p>
-                                        )}
-                                    </td>
-                                    <td className="px-4 py-3 text-right">
-                                        <Input type="number" min="0" step="0.001" inputMode="decimal"
-                                            defaultValue={item.quantity}
-                                            aria-label={t('columnQty')}
-                                            className="h-8 w-20 text-right tabular-nums"
-                                            onBlur={(e) => { const v = Number(e.target.value); if (v !== item.quantity) patchLine(item, linePayload(item, { quantity: v })); }}
-                                            disabled={busy} />
-                                    </td>
-                                    <td className="px-4 py-3 text-right">
+                <div className="rounded-2xl border border-border bg-card">
+                    <div className="divide-y divide-border">
+                        {items.map((item) => (
+                            <article key={item.id} aria-label={item.name} className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3">
+                                <div className="col-span-2 min-w-0 sm:col-span-3">
+                                    <label className="text-xs text-muted-foreground">{t('columnItem')}
+                                        <Input defaultValue={item.name} aria-label={t('columnItem')} disabled={busy}
+                                            onBlur={(event) => { if (event.target.value !== item.name) patchLine(item, linePayload(item, { name: event.target.value })); }} />
+                                    </label>
+                                    <p className="mt-1 text-xs text-muted-foreground">
+                                        {item.billingFrequency === 'recurring' ? t('recurring') : t('oneTime')}
+                                    </p>
+                                    {item.currency.toUpperCase() !== dealCurrency.toUpperCase() && (
+                                        <p className="mt-1 text-xs text-muted-foreground">
+                                            {t('currencyMismatch', { lineCurrency: item.currency, dealCurrency })}
+                                        </p>
+                                    )}
+                                </div>
+                                <label className="min-w-0 text-xs text-muted-foreground">{t('columnQty')}
+                                    <Input type="number" min="0" step="0.001" inputMode="decimal"
+                                        defaultValue={item.quantity} aria-label={t('columnQty')} disabled={busy}
+                                        className="w-full tabular-nums"
+                                        onBlur={(event) => { if (!event.currentTarget.reportValidity()) return;
+                                            const value = Number(event.target.value);
+                                            if (value !== item.quantity) patchLine(item, linePayload(item, { quantity: value })); }} />
+                                </label>
+                                <label className="min-w-0 text-xs text-muted-foreground">{t('columnUnitPrice')}
+                                    <Input type="number" min="0" step="0.01" inputMode="decimal"
+                                        defaultValue={item.unitPrice} aria-label={t('columnUnitPrice')} disabled={busy}
+                                        className="w-full tabular-nums"
+                                        onBlur={(event) => { if (!event.currentTarget.reportValidity()) return;
+                                            const value = Number(event.target.value);
+                                            if (value !== item.unitPrice) patchLine(item, linePayload(item, { unitPrice: value })); }} />
+                                    <span>{item.currency}</span>
+                                </label>
+                                <div className="min-w-0 space-y-1">
+                                    <DiscountType value={item.discountType} disabled={busy}
+                                        onChange={(discountType) => patchLine(item, linePayload(item, {
+                                            discountType, discountValue: discountType ? item.discountValue ?? 0 : null,
+                                        }))} />
+                                    <label className="block text-xs text-muted-foreground">{t('discountValue')}
                                         <Input type="number" min="0" step="0.01" inputMode="decimal"
-                                            defaultValue={item.unitPrice}
-                                            aria-label={t('columnUnitPrice')}
-                                            className="h-8 w-28 text-right tabular-nums"
-                                            onBlur={(e) => { const v = Number(e.target.value); if (v !== item.unitPrice) patchLine(item, linePayload(item, { unitPrice: v })); }}
-                                            disabled={busy} />
-                                        <span className="text-xs text-muted-foreground">{item.currency}</span>
-                                    </td>
-                                    <td className="px-4 py-3 text-right tabular-nums">
-                                        <DiscountType value={item.discountType} disabled={busy}
-                                            onChange={(discountType) => patchLine(item, linePayload(item, {
-                                                discountType, discountValue: discountType ? item.discountValue ?? 0 : null,
-                                            }))} />
-                                        <Input type="number" min="0" step="0.01" inputMode="decimal"
+                                            max={item.discountType === 'percent' ? 100 : undefined}
                                             key={`${item.id}-${item.discountType}-${item.discountValue}`}
                                             defaultValue={item.discountValue ?? 0} aria-label={t('discountValue')}
-                                            className="mt-1 h-8 w-28 text-right" disabled={busy || !item.discountType}
-                                            onBlur={(event) => { const value = Number(event.target.value);
+                                            className="w-full tabular-nums" disabled={busy || !item.discountType}
+                                            onBlur={(event) => { if (!event.currentTarget.reportValidity()) return;
+                                                const value = Number(event.target.value);
                                                 if (value !== item.discountValue) patchLine(item, linePayload(item, { discountValue: value })); }} />
-                                    </td>
-                                    <td className="px-4 py-3 text-right">
-                                        <Input type="number" min="0" max="999.999" step="0.001" inputMode="decimal"
-                                            defaultValue={item.taxRate ?? 0} aria-label={t('taxRate')}
-                                            className="h-8 w-24 text-right" disabled={busy}
-                                            onBlur={(event) => { const value = Number(event.target.value);
-                                                if (value !== (item.taxRate ?? 0)) patchLine(item, linePayload(item, { taxRate: value })); }} />
-                                    </td>
-                                    <td className="px-4 py-3 text-right font-medium tabular-nums">{money(item.lineTotal, item.currency)}</td>
-                                    <td className="sticky right-0 bg-card px-2 py-3 text-right">
-                                        <Button variant="ghost" size="icon" aria-label={t('remove')}
-                                            onClick={() => removeLine(item)} disabled={busy}>
-                                            <TrashIcon className="size-4 text-muted-foreground" />
-                                        </Button>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                        {totals !== null && <tfoot className="border-t border-border bg-muted/40">
-                            <TotalRow label={t('subtotal')} value={money(totals.subtotal)} />
-                            <TotalRow label={t('tax')} value={money(totals.tax)} />
-                            {totals.recurringTotal > 0 && (
-                                <>
-                                    <TotalRow label={t('oneTimeTotal')} value={money(totals.oneTimeTotal)} muted />
-                                    <TotalRow label={t('recurringTotal')} value={money(totals.recurringTotal)} muted />
-                                </>
-                            )}
-                            <TotalRow label={t('grandTotal')} value={money(totals.grandTotal)} emphasis />
-                        </tfoot>}
-                    </table>
+                                    </label>
+                                </div>
+                                <label className="min-w-0 text-xs text-muted-foreground">{t('taxRate')}
+                                    <Input type="number" min="0" max="999.999" step="0.001" inputMode="decimal"
+                                        defaultValue={item.taxRate ?? 0} aria-label={t('taxRate')}
+                                        className="w-full tabular-nums" disabled={busy}
+                                        onBlur={(event) => { if (!event.currentTarget.reportValidity()) return;
+                                            const value = Number(event.target.value);
+                                            if (value !== (item.taxRate ?? 0)) patchLine(item, linePayload(item, { taxRate: value })); }} />
+                                </label>
+                                <div className="col-span-2 flex flex-wrap items-end justify-between gap-3 sm:col-span-3">
+                                    <p className="text-sm text-muted-foreground">{t('columnLineTotal')}
+                                        <span className="ml-2 font-semibold tabular-nums text-foreground">{money(item.lineTotal, item.currency)}</span>
+                                    </p>
+                                    <Button variant="ghost" size="sm" onClick={() => removeLine(item)} disabled={busy}>
+                                        <TrashIcon className="size-4" />{t('remove')}
+                                    </Button>
+                                </div>
+                            </article>
+                        ))}
+                    </div>
+                    {totals !== null && <dl className="space-y-2 rounded-b-2xl border-t border-border bg-muted/40 p-4">
+                        <TotalRow label={t('subtotal')} value={money(totals.subtotal)} />
+                        <TotalRow label={t('tax')} value={money(totals.tax)} />
+                        {totals.recurringTotal > 0 && <>
+                            <TotalRow label={t('oneTimeTotal')} value={money(totals.oneTimeTotal)} />
+                            <TotalRow label={t('recurringTotal')} value={money(totals.recurringTotal)} />
+                        </>}
+                        <TotalRow label={t('grandTotal')} value={money(totals.grandTotal)} emphasis />
+                    </dl>}
                 </div>
             )}
         </section>
@@ -389,15 +465,9 @@ function DiscountType({ value, disabled, onChange }: {
     </div>;
 }
 
-function TotalRow({ label, value, emphasis, muted }: { label: string; value: string; emphasis?: boolean; muted?: boolean }) {
-    return (
-        <tr className={emphasis ? 'text-foreground' : muted ? 'text-muted-foreground' : ''}>
-            <td className="px-4 py-2" colSpan={5} />
-            <td className={`px-4 py-2 text-right ${emphasis ? 'text-base font-semibold' : 'text-sm'}`}>
-                <span className="mr-3 font-normal text-muted-foreground">{label}</span>
-                <span className="tabular-nums">{value}</span>
-            </td>
-            <td className="px-2 py-2" />
-        </tr>
-    );
+function TotalRow({ label, value, emphasis }: { label: string; value: string; emphasis?: boolean }) {
+    return <div className={`flex items-center justify-between gap-4 ${emphasis ? 'font-semibold' : 'text-sm'}`}>
+        <dt className="text-muted-foreground">{label}</dt>
+        <dd className="tabular-nums">{value}</dd>
+    </div>;
 }

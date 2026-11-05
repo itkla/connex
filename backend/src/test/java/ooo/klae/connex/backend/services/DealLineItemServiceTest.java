@@ -231,6 +231,14 @@ class DealLineItemServiceTest extends AbstractServiceTest {
         return r;
     }
 
+    @Test
+    void trustedServiceCallersCannotBypassThePercentageDiscountBound() {
+        Deal deal = jpyDeal();
+        DealLineItemRequest request = adHoc("100.00", "1");
+        request.setDiscountValue(new BigDecimal("200"));
+        assertThrows(BadRequestException.class, () -> lineItemService.create(deal.getId(), request));
+    }
+
     private static void eq(String expected, BigDecimal actual) {
         assertEquals(0, new BigDecimal(expected).compareTo(actual),
             () -> "expected " + expected + " but was " + actual);

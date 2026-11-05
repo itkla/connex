@@ -33,6 +33,23 @@ class DealLineItemRequestValidationTest {
     private static final ValidatorFactory FACTORY = Validation.buildDefaultValidatorFactory();
     private static final Validator VALIDATOR = FACTORY.getValidator();
 
+    @Test
+    void percentageDiscountsAreBoundedButFixedAmountsCanExceedOneHundred() {
+        DealLineItemRequest request = new DealLineItemRequest();
+        request.setQuantity(BigDecimal.ONE);
+        request.setDiscountType("percent");
+        for (String value : List.of("100.01", "200")) {
+            request.setDiscountValue(new BigDecimal(value));
+            assertTrue(VALIDATOR.validate(request).stream().anyMatch(violation ->
+                "percentageDiscountValid".equals(violation.getPropertyPath().toString())));
+        }
+        request.setDiscountValue(new BigDecimal("100"));
+        assertTrue(VALIDATOR.validate(request).isEmpty());
+        request.setDiscountType("amount");
+        request.setDiscountValue(new BigDecimal("200"));
+        assertTrue(VALIDATOR.validate(request).isEmpty());
+    }
+
     @AfterAll
     static void closeValidatorFactory() {
         FACTORY.close();

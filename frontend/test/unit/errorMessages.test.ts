@@ -70,6 +70,19 @@ afterEach(() => {
     vi.clearAllMocks();
 });
 
+describe("deal line consent errors", () => {
+    it.each(["DEAL_LINE_VALUE_CONSENT_REQUIRED", "DEAL_LINE_VALUE_CONSENT_STALE"])("asks for review while preserving the draft for %s", (code) => {
+        const error = new ApiError(POISONED_MESSAGE, 409, code);
+        const english = userMessageFor(error, t)?.description;
+        const japanese = userMessageFor(error, ja)?.description;
+        expect(english).toContain("Your line is still here");
+        expect(english?.toLowerCase()).toContain("review");
+        expect(english).not.toContain("Reload");
+        expect(japanese).toContain("明細は残っています");
+        expect(japanese).not.toContain("再読み込み");
+    });
+});
+
 describe("userMessageFor status mapping", () => {
     it.each([
         [400, "Some of what you entered can't be accepted. Check the details and try again."],

@@ -43,6 +43,8 @@ const WORKSPACE_UNAVAILABLE_NAMED_KEY = "ApiErrors.workspaceUnavailableNamed";
 const CODE_MESSAGE_KEYS = new Map<string, string>([
     ["IDENTITY_COLLISION_REPORT_TIMEOUT", "ApiErrors.identityCollisionReportTimeout"],
     ["SHARE_BLOCKED_PRIVACY_HOLD", "ApiErrors.sharePrivacyHold"],
+    ["DEAL_LINE_VALUE_CONSENT_REQUIRED", "ApiErrors.dealLineValueConsentRequired"],
+    ["DEAL_LINE_VALUE_CONSENT_STALE", "ApiErrors.dealLineValueConsentStale"],
 ]);
 
 function statusMessageKey(status: number): string {

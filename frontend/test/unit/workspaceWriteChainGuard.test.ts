@@ -469,6 +469,8 @@ describe("workspace write-chain inventory", () => {
     it("derives write helpers and their request-options positions from api.ts", () => {
         expect(writeHelpers.get("createContact")).toEqual({ optionsIndex: 1 });
         expect(writeHelpers.get("uploadContactPicture")).toEqual({ optionsIndex: 2 });
+        expect(writeHelpers.get("createDealLineItem")).toEqual({ optionsIndex: 2 });
+        expect(writeHelpers.get("updateDealLineItem")).toEqual({ optionsIndex: 3 });
         expect(writeHelpers.has("getContactById")).toBe(false);
         expect(writeHelpers.has("login")).toBe(false);
         expect(writeHelpers.has("decideCaptureReview")).toBe(true);
@@ -539,6 +541,9 @@ describe("workspace write-chain inventory", () => {
     ])("accepts a pinned chain or separate writes: %s", (body) => { expect(probe(body)).toEqual([]); });
     it("has no unpinned component/page chain outside the shrinking ledger", () => {
         expect(found.filter((entry) => !(entry in EXCEPTIONS))).toEqual([]);
+    });
+    it("keeps the line-item preview and persistence chain pinned without an exception", () => {
+        expect(scan(parse("app/components/records/deals/DealLineItems.tsx"))).toEqual([]);
     });
     it("matches the exact exception ledger with a reason for every entry", () => {
         expect(Object.keys(EXCEPTIONS).sort()).toEqual([...found].sort());

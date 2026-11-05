@@ -438,11 +438,38 @@ class DealMoneySecurityIntegrationTest {
         assertFalse(lineItemMapper.hasCurrencyMismatch(workspace.getId(), deal.getId(), "USD"));
         Deal repaired = dealMapper.getDealById(workspace.getId(), deal.getId());
         assertEquals("manual", repaired.getValueSource());
-        assertEquals(new BigDecimal("30.00"), valueService.canonicalValue(workspace.getId(), repaired));
+        assertEquals(new BigDecimal("0.00"), valueService.canonicalValue(workspace.getId(), repaired));
         addLine(deal, "7");
         mockMvc.perform(auth(post(path + "/close"), actor).content("{\"won\":true}"))
             .andExpect(status().isOk());
         assertEquals(new BigDecimal("7.00"), dealMapper.getDealById(workspace.getId(), deal.getId()).getActualValue());
+    }
+
+    @Test
+    void historicalFinalDeletionRetainsDerivedValueWhenTheFallbackIsUnknown() throws Exception {
+        Deal deal = deal("USD", false);
+        int itemId = addLine(deal, "30");
+        jdbcTemplate.update("UPDATE deal SET prior_manual_value = NULL WHERE workspace_id = ? AND id = ?",
+            workspace.getId(), deal.getId());
+        mockMvc.perform(auth(delete("/api/deals/" + deal.getId() + "/line-items/" + itemId), actor))
+            .andExpect(status().isOk());
+        Deal restored = dealMapper.getDealById(workspace.getId(), deal.getId());
+        assertEquals("manual", restored.getValueSource());
+        assertEquals(new BigDecimal("30.00"), valueService.canonicalValue(workspace.getId(), restored));
+    }
+
+    @Test
+    void percentageDiscountAboveOneHundredIsRejectedOnCreateAndUpdate() throws Exception {
+        Deal deal = deal("USD", false);
+        String path = "/api/deals/" + deal.getId() + "/line-items";
+        String invalid = "{\"name\":\"Service\",\"unitPrice\":100,\"quantity\":1,"
+            + "\"discountType\":\"percent\",\"discountValue\":200}";
+        mockMvc.perform(auth(post(path), actor).content(invalid)).andExpect(status().isBadRequest());
+        assertTrue(lineItemMapper.getByDealId(workspace.getId(), deal.getId()).isEmpty());
+        int itemId = addLine(deal, "100");
+        mockMvc.perform(auth(put(path + "/" + itemId), actor).content(invalid))
+            .andExpect(status().isBadRequest());
+        assertEquals(new BigDecimal("100.00"), lineItemMapper.getById(workspace.getId(), itemId).getLineTotal());
     }
 
     @Test
@@ -1129,7 +1156,12 @@ class DealMoneySecurityIntegrationTest {
             .andExpect(jsonPath("$.totals.grandTotal").value(331.38))
             .andExpect(jsonPath("$.manualValueToReplace").value(114200));
         mockMvc.perform(auth(post(path + "/line-items"), actor).content(priced + "}"))
-            .andExpect(status().isConflict());
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value("DEAL_LINE_VALUE_CONSENT_REQUIRED"));
+        mockMvc.perform(auth(post(path + "/line-items"), actor)
+                .content(priced + ",\"confirmValueReplacement\":true,\"expectedManualValue\":1}"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value("DEAL_LINE_VALUE_CONSENT_STALE"));
         assertTrue(lineItemMapper.getByDealId(workspace.getId(), deal.getId()).isEmpty());
         assertEquals(before.getValue(), dealMapper.getDealById(workspace.getId(), deal.getId()).getValue());
         assertEquals(metricsBefore, json(mockMvc.perform(auth(get(metricsPath), actor))

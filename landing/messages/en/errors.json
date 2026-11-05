@@ -6,6 +6,8 @@
     "forbidden": "You don't have permission to do that here. Ask a workspace admin.",
     "notFound": "That record is no longer available.",
     "conflict": "Someone else changed this just now. Reload and try again.",
+    "dealLineValueConsentRequired": "Review the new deal value and confirm it before saving. Your line is still here.",
+    "dealLineValueConsentStale": "The deal changed while you were reviewing it. Your line is still here. Save the line again to review the latest value.",
     "tooManyRequests": "That's a lot of requests at once. Wait a moment and try again.",
     "offline": "We couldn't reach Connex. Check your connection and try again.",
     "serverError": "Something went wrong on our side. Nothing was lost — try again in a moment.",
