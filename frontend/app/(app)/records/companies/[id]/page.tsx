@@ -28,6 +28,7 @@ import {
     getEntityCustomFieldsFromCookie,
     getTags,
     getUserReferences,
+    isRelationshipMapAvailable,
 } from "@/app/lib/api";
 import { type Company, type Contact, type Deal, type Tag } from "@/app/lib/types";
 import { formatDate, formatDateTime } from "@/app/lib/utils";
@@ -86,6 +87,7 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
         evidence,
         effectivePermissions,
         commentThreads,
+        mapAvailable,
     ] = await Promise.all([
         getTranslations("CompaniesDetail"),
         getLocale(),
@@ -101,6 +103,7 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
         getCompanyEvidence(id, init).catch(() => null),
         getEffectivePermissionsFromCookie(cookie),
         getCommentThreads("company", id, { limit: TIMELINE_COMMENT_LIMIT }, init).catch(() => []),
+        isRelationshipMapAvailable(init),
     ]);
 
     if (companyAccess.kind === "forbidden") {
@@ -203,7 +206,7 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
 
                     <RecordDetailSection recordKind="company" section="actions" className="mt-4 flex flex-wrap justify-end gap-2">
                         <AskConnexRecordEntry kind="company" />
-                        <CompanyActionsMenu company={company} />
+                        <CompanyActionsMenu company={company} mapAvailable={mapAvailable} />
                     </RecordDetailSection>
                 </Rise>
 

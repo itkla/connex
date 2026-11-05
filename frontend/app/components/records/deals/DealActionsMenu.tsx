@@ -70,6 +70,7 @@ export default function DealActionsMenu({
     pipelines,
     stagesByPipeline,
     currentUserId,
+    mapAvailable = false,
     personSeeds = EMPTY_CONTACTS,
     dealSeeds = EMPTY_DEALS,
     collaborators = EMPTY_USERS,
@@ -78,6 +79,7 @@ export default function DealActionsMenu({
     pipelines: Pipeline[];
     stagesByPipeline: Record<number, Stage[]>;
     currentUserId: number;
+    mapAvailable?: boolean;
     personSeeds?: Contact[];
     dealSeeds?: Deal[];
     collaborators?: User[];
@@ -148,15 +150,16 @@ export default function DealActionsMenu({
                         {t('edit')}
                     </Button>
                 )}
-                <Button
-                    variant="outline"
-                    size="toolbar"
-                    disabled={deal.company == null}
-                    onClick={() => deal.company != null && router.push(`/intelligence/map?companyId=${deal.company}`)}
-                >
-                    <EyeIcon className="size-4" />
-                    {t('viewInMap')}
-                </Button>
+                {mapAvailable && deal.company != null && (
+                    <Button
+                        variant="outline"
+                        size="toolbar"
+                        onClick={() => deal.company != null && router.push(`/intelligence/map?companyId=${deal.company}`)}
+                    >
+                        <EyeIcon className="size-4" />
+                        {t('viewInMap')}
+                    </Button>
+                )}
             </ButtonGroup>
             <ButtonGroup orientation="horizontal">
                 {canAttach && (

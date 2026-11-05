@@ -54,8 +54,10 @@ const deal = { id: 5, name: 'Renewal', company: 3, stageId: 2, pipelineId: 1, va
 
 let container: HTMLDivElement;
 let root: Root;
+let mapAvailable: boolean;
 
 beforeEach(() => {
+    mapAvailable = true;
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -78,6 +80,7 @@ async function renderMenu(...permissions: string[]) {
                 pipelines={[]}
                 stagesByPipeline={{}}
                 currentUserId={11}
+                mapAvailable={mapAvailable}
             />
             </TooltipProvider>
         </NextIntlClientProvider>,
@@ -95,6 +98,13 @@ function offers(label: string): boolean {
 }
 
 describe('the deal detail actions follow the member\'s live effective permissions', () => {
+    it('withholds a focused map action when the map is unavailable', async () => {
+        mapAvailable = false;
+        await renderMenu(...ALL);
+        expect(offers(t.viewInMap)).toBe(false);
+        expect(offers(t.edit)).toBe(true);
+    });
+
     it('offers no mutation to a read-only member, and drops the empty menus', async () => {
         await renderMenu();
 

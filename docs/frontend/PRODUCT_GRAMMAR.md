@@ -66,6 +66,16 @@ Per-surface deviations are product decisions, not precedent for inventing a new 
 
 ## Signed-off adaptations
 
+### Map capacity
+
+The relationship map loads the workspace as a whole, including when a record is focused. Keep its
+2,000 combined contacts/companies/deals and 4,000 combined activities/tasks/notes limits. A capacity
+refusal explains both limits and links to the ordinary record lists; a valid focused-record link also
+offers that record's detail page. Fetch failures use the shared segment error and retry state.
+Record action bars offer focused-map navigation only after bounded first-page totals confirm capacity;
+unavailable reads withhold the action. The bounded neighbourhood map and scalable rendering remain
+deferred under [#2262](https://github.com/itkla/connex/issues/2262).
+
 ### Campaigns
 
 Campaign creation asks for the minimum facts required by the backend (name and type) before entering the campaign builder. Objective/status/budget/window belong in the builder rather than an oversized create dialog. Campaign settings use the established quick-edit sheet shell.

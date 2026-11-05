@@ -47,10 +47,12 @@ import {
 export default function ContactActionsMenu({
     contact,
     currentUserId,
+    mapAvailable = false,
     dealSeeds = [],
 }: {
     contact: Contact;
     currentUserId: number;
+    mapAvailable?: boolean;
     dealSeeds?: Deal[];
 }) {
     const router = useRouter();
@@ -133,14 +135,16 @@ export default function ContactActionsMenu({
                         <PencilSquareIcon className="size-4" />
                         {t('edit')}
                     </Button>
-                    <Button
-                        variant="outline"
-                        size="toolbar"
-                        onClick={() => router.push(`/intelligence/map?contactId=${contact.id}`)}
-                    >
-                        <EyeIcon className="size-4" />
-                        {t('viewInMap')}
-                    </Button>
+                    {mapAvailable && (
+                        <Button
+                            variant="outline"
+                            size="toolbar"
+                            onClick={() => router.push(`/intelligence/map?contactId=${contact.id}`)}
+                        >
+                            <EyeIcon className="size-4" />
+                            {t('viewInMap')}
+                        </Button>
+                    )}
                 </ButtonGroup>
                 <ButtonGroup orientation="horizontal">
                     {/* // add attachments, files, pictures, business cards etc */}

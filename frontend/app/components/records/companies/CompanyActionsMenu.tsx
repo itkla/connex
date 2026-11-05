@@ -57,8 +57,10 @@ function emptyDealPayload(companyId: number): CreateDealPayload {
 
 export default function CompanyActionsMenu({
     company,
+    mapAvailable = false,
 }: {
     company: Company;
+    mapAvailable?: boolean;
 }) {
     const router = useRouter();
     const t = useTranslations('CompaniesActionsMenu');
@@ -281,14 +283,16 @@ export default function CompanyActionsMenu({
                     <PencilSquareIcon className="size-4" />
                     {t('edit')}
                 </Button>
-                <Button
-                    variant="outline"
-                    size="toolbar"
-                    onClick={() => router.push(`/intelligence/map?companyId=${company.id}`)}
-                >
-                    <EyeIcon className="size-4" />
-                    {t('viewInMap')}
-                </Button>
+                {mapAvailable && (
+                    <Button
+                        variant="outline"
+                        size="toolbar"
+                        onClick={() => router.push(`/intelligence/map?companyId=${company.id}`)}
+                    >
+                        <EyeIcon className="size-4" />
+                        {t('viewInMap')}
+                    </Button>
+                )}
             </ButtonGroup>
             <ButtonGroup orientation="horizontal">
                 <Button
