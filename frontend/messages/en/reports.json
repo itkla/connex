@@ -259,6 +259,7 @@
       "changeValue": "{value}% vs prior",
       "attainmentValue": "{value}% attainment",
       "dimension": "Dimension",
+      "mixedCurrencyChartUnavailable": "This chart is unavailable because the block contains multiple currencies. Values are shown separately by currency in the table, without conversion.",
       "noData": "No data for this period",
       "noCurrentStateData": "No current-state data",
       "source": "Source",

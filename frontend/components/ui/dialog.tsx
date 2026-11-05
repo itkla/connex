@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { Dialog as DialogPrimitive } from "radix-ui"
+import { useTranslations } from "next-intl"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -62,13 +63,18 @@ function DialogContent({
   showCloseButton = true,
   size = "md",
   onPointerDownOutside,
+  onEscapeKeyDown,
+  onCompositionStartCapture,
+  onCompositionEndCapture,
   ref,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
   size?: DialogSize
 }) {
+  const t = useTranslations("UI")
   const contentRef = React.useRef<HTMLDivElement>(null)
+  const composing = React.useRef(false)
   const composedRef = React.useCallback(
     (node: HTMLDivElement | null) => {
       contentRef.current = node
@@ -83,6 +89,28 @@ function DialogContent({
       <DialogPrimitive.Content
         ref={composedRef}
         data-slot="dialog-content"
+        onCompositionStartCapture={(event) => {
+          composing.current = true
+          onCompositionStartCapture?.(event)
+        }}
+        onCompositionEndCapture={(event) => {
+          composing.current = false
+          onCompositionEndCapture?.(event)
+        }}
+        onEscapeKeyDown={(event) => {
+          const target = event.target instanceof Element ? event.target : null
+          const expandedPicker = contentRef.current?.querySelector(
+            "[role='combobox'][aria-expanded='true']"
+          )
+          const withinPicker = target?.closest(
+            "[data-slot='combobox-content'],[data-slot='autocomplete-content']"
+          )
+          if (composing.current || event.isComposing || event.keyCode === 229 || expandedPicker || withinPicker) {
+            event.preventDefault()
+            return
+          }
+          onEscapeKeyDown?.(event)
+        }}
         onPointerDownOutside={(event) => {
           const origin = event.detail.originalEvent
           const target = origin.target instanceof Element ? origin.target : null
@@ -120,7 +148,7 @@ function DialogContent({
             >
               <XIcon
               />
-              <span className="sr-only">Close</span>
+              <span className="sr-only">{t("close")}</span>
             </Button>
           </DialogPrimitive.Close>
         )}
@@ -147,6 +175,7 @@ function DialogFooter({
 }: React.ComponentProps<"div"> & {
   showCloseButton?: boolean
 }) {
+  const t = useTranslations("UI")
   return (
     <div
       data-slot="dialog-footer"
@@ -159,7 +188,7 @@ function DialogFooter({
       {children}
       {showCloseButton && (
         <DialogPrimitive.Close asChild>
-          <Button variant="outline">Close</Button>
+          <Button variant="outline">{t("close")}</Button>
         </DialogPrimitive.Close>
       )}
     </div>

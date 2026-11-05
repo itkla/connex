@@ -1164,15 +1164,38 @@ class DealMoneySecurityIntegrationTest {
             .andExpect(jsonPath("$.code").value("DEAL_LINE_VALUE_CONSENT_STALE"));
         assertTrue(lineItemMapper.getByDealId(workspace.getId(), deal.getId()).isEmpty());
         assertEquals(before.getValue(), dealMapper.getDealById(workspace.getId(), deal.getId()).getValue());
+        assertEquals(before.getVersion(), dealMapper.getDealById(workspace.getId(), deal.getId()).getVersion());
         assertEquals(metricsBefore, json(mockMvc.perform(auth(get(metricsPath), actor))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString()));
 
         JsonNode saved = json(mockMvc.perform(auth(post(path + "/line-items"), actor)
-                .content(priced + ",\"confirmValueReplacement\":true}"))
+                .content(priced + ",\"confirmValueReplacement\":true,\"expectedManualValue\":114200,\"expectedCurrency\":\"USD\"}"))
             .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
         int itemId = saved.path("items").get(0).path("id").asInt();
+        Deal confirmed = dealMapper.getDealById(workspace.getId(), deal.getId());
+        assertTrue(confirmed.getVersion() > before.getVersion());
+        mockMvc.perform(auth(put(path), actor).content(objectMapper.writeValueAsString(Map.of(
+                "name", confirmed.getName(), "value", confirmed.getValue(), "currency", "USD",
+                "pipeline", pipeline.getId(), "stage", stage.getId(), "expectedVersion", before.getVersion()))))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value("STALE_RECORD"))
+            .andExpect(jsonPath("$.currentVersion").value(confirmed.getVersion()));
+        mockMvc.perform(auth(put(path), actor).content(objectMapper.writeValueAsString(Map.of(
+                "name", confirmed.getName(), "value", confirmed.getValue(), "currency", "USD",
+                "pipeline", pipeline.getId(), "stage", stage.getId(), "expectedVersion", confirmed.getVersion()))))
+            .andExpect(status().isOk());
+        Deal edited = dealMapper.getDealById(workspace.getId(), deal.getId());
+        assertTrue(edited.getVersion() > confirmed.getVersion());
+        mockMvc.perform(auth(put(path + "/line-items/" + itemId), actor)
+                .content("{\"name\":\"Service\",\"unitPrice\":120.50,\"quantity\":1,\"taxRate\":10}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.totals.grandTotal").value(132.55));
+        Deal lineEdited = dealMapper.getDealById(workspace.getId(), deal.getId());
+        assertTrue(lineEdited.getVersion() > edited.getVersion());
+        assertEquals(new BigDecimal("132.55"), lineEdited.getValue());
         mockMvc.perform(auth(delete(path + "/line-items/" + itemId), actor)).andExpect(status().isOk());
         assertEquals(before.getValue(), dealMapper.getDealById(workspace.getId(), deal.getId()).getValue());
+        assertTrue(dealMapper.getDealById(workspace.getId(), deal.getId()).getVersion() > lineEdited.getVersion());
     }
 
     private String lineJson(String price) {

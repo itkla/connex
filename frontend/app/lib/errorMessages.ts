@@ -45,6 +45,7 @@ const CODE_MESSAGE_KEYS = new Map<string, string>([
     ["SHARE_BLOCKED_PRIVACY_HOLD", "ApiErrors.sharePrivacyHold"],
     ["DEAL_LINE_VALUE_CONSENT_REQUIRED", "ApiErrors.dealLineValueConsentRequired"],
     ["DEAL_LINE_VALUE_CONSENT_STALE", "ApiErrors.dealLineValueConsentStale"],
+    ["STALE_RECORD", "ApiErrors.staleRecord"],
 ]);
 
 function statusMessageKey(status: number): string {

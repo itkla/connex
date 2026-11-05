@@ -21,7 +21,7 @@ import {
 } from '@/app/lib/api';
 import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { pendingDealTeamWrites } from '@/app/lib/dealTeam';
-import { type User, type WorkspaceMember } from '@/app/lib/types';
+import { type Deal, type User, type WorkspaceMember } from '@/app/lib/types';
 import { toastSuccess } from '@/app/lib/toast';
 import { cn } from '@/lib/utils';
 
@@ -50,12 +50,14 @@ export default function DealTeamDialog({
     dealId,
     initialOwnerId,
     initialCollaborators,
+    onDealUpdated,
 }: {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     dealId: number;
     initialOwnerId?: number | null;
     initialCollaborators: User[];
+    onDealUpdated?: (deal: Deal) => void;
 }) {
     const t = useTranslations('Notifications');
     const showApiError = useApiErrorToast('Notifications');
@@ -132,7 +134,10 @@ export default function DealTeamDialog({
                 { ownerId: initialOwnerId ?? null, collaboratorIds: initialCollaborators.map((user) => user.id) },
                 { ownerId, collaboratorIds },
             );
-            if (writes.owner) await updateDealOwner(dealId, ownerId, origin);
+            if (writes.owner) {
+                const saved = await updateDealOwner(dealId, ownerId, origin);
+                onDealUpdated?.(saved);
+            }
             if (writes.collaboratorIds) await replaceDealCollaborators(dealId, writes.collaboratorIds, origin);
             toastSuccess(t('dealTeamUpdated'));
             setSaving(false);
@@ -171,15 +176,15 @@ export default function DealTeamDialog({
                                     </InputGroupAddon>
                                 </ComboboxInput>
                                 <ComboboxContent className="pointer-events-auto">
+                                    <ComboboxEmpty>
+                                        {membersLoading ? t('loadingMembers') : t('noUsers')}
+                                    </ComboboxEmpty>
                                     <ComboboxList onWheel={handleListWheel}>
-                                        <ComboboxEmpty>
-                                            {membersLoading ? t('loadingMembers') : t('noUsers')}
-                                        </ComboboxEmpty>
-                                        {members.map((u) => (
+                                        {(u: (typeof members)[number]) => (
                                             <ComboboxItem key={u.id} value={u}>
                                                 {u.displayName}
                                             </ComboboxItem>
-                                        ))}
+                                        )}
                                     </ComboboxList>
                                 </ComboboxContent>
                             </Combobox>

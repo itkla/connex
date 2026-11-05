@@ -249,9 +249,9 @@ export default function DealLineItems({ dealId, dealWorkspaceId, dealCurrency, i
                     >
                         <ComboboxInput placeholder={t('addFromCatalog')} className="w-full sm:w-56" disabled={busy || draft !== null} />
                         <ComboboxContent>
+                            <ComboboxEmpty>{t('noProducts')}</ComboboxEmpty>
                             <ComboboxList>
-                                <ComboboxEmpty>{t('noProducts')}</ComboboxEmpty>
-                                {productItems.map((p) => (
+                                {(p: (typeof productItems)[number]) => (
                                     <ComboboxItem key={p.id} value={p}>
                                         <span className="flex w-full items-center justify-between gap-3">
                                             <span className="truncate">{p.name}</span>
@@ -260,7 +260,7 @@ export default function DealLineItems({ dealId, dealWorkspaceId, dealCurrency, i
                                             </span>
                                         </span>
                                     </ComboboxItem>
-                                ))}
+                                )}
                             </ComboboxList>
                         </ComboboxContent>
                     </Combobox>

@@ -102,8 +102,8 @@ export default function AskConnexMissionCreate({ recordLabel, initialGoal, disab
                         </Button>
                     </DialogFooter>
                 </DialogContent>
+                <ConfirmDiscardDialog {...guard.confirm} />
             </Dialog>
-            <ConfirmDiscardDialog {...guard.confirm} />
         </>
     );
 }

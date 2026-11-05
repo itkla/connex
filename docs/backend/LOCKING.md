@@ -2573,3 +2573,12 @@ fallback FOR UPDATE under that existing lock, so an older repeatable-read snapsh
 restore a stale amount. No additional aggregate or authorization lock is introduced.
 Fallback capture and clear advance the deal version through #2276's UPDATE trigger. Line-item
 confirmation does not submit a parent version or replay a broad deal update after these writes.
+
+## Conditional record edit versions (V241)
+
+Deal full-record UPDATEs condition on the optional client snapshot version in the tenant-scoped
+WHERE clause, before dependent value writes. The database BEFORE UPDATE counter covers every
+writer. The BEFORE DELETE company trigger detaches exact deal references before the FK's existing
+SET NULL action, retaining its parent company → child deal order while advancing the counter.
+No new application lock hierarchy or isolation change is introduced. See
+[Conditional record edits](RECORD_EDIT_CONCURRENCY.md) for the transport, writer inventory and tests.

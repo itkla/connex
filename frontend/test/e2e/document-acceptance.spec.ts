@@ -17,6 +17,7 @@ import {
     registerUser,
 } from "./support/api";
 import { deferred } from "./support/deferred";
+import { useLocale as setUiLocale } from "./support/locale";
 import { message } from "./support/messages";
 
 const MOCK_GRANT = "e".repeat(64);
@@ -457,6 +458,81 @@ test.describe("anonymous and presentation document acceptance", () => {
         await expect(lineItems.getByText("導入支援サービス", { exact: true })).toBeVisible();
         await expectResponsiveDocument(page, mobile);
     });
+});
+
+test("print totals use the frozen document locale under a different UI language @mobile", async ({ browser }, testInfo) => {
+    test.setTimeout(120_000);
+    const unique = randomUUID().replaceAll("-", "").slice(0, 16);
+    const context = await browser.newContext({
+        baseURL: testInfo.project.use.baseURL,
+        storageState: { cookies: [], origins: [] },
+    });
+    try {
+        const api = context.request;
+        await registerUser(api, {
+            username: `quotelocale${unique}`,
+            password: `QuoteLocale!${unique}A1`,
+            email: `quote-locale-${unique}@example.test`,
+        });
+        const workspaceId = await activeWorkspaceId(api);
+        const headers = await authenticatedWriteHeaders(api, workspaceId);
+        const pipeline = await jsonObject(await api.post("/api/pipelines", {
+            headers, data: { name: `Quote locale ${unique}` },
+        }), "quote locale pipeline");
+        const pipelineId = numberField(pipeline, "id", "quote locale pipeline");
+        const stage = await jsonObject(await api.post(`/api/pipelines/${pipelineId}/stages`, {
+            headers, data: { name: "Quote", position: 0, success: false, failure: false },
+        }), "quote locale stage");
+        const name = `Quote locale deal ${unique}`;
+        const review = await jsonObject(await api.post("/api/duplicate-preflight/deals", {
+            headers, data: { name, companyId: null },
+        }), "quote locale duplicate review");
+        if (typeof review.reviewToken !== "string") throw new Error("Missing duplicate review token");
+        const deal = await jsonObject(await api.post("/api/deals", {
+            headers,
+            data: {
+                name, currency: "JPY", value: 0, actualValue: 0, company: null,
+                pipeline: pipelineId, stage: numberField(stage, "id", "quote locale stage"),
+                duplicateReviewToken: review.reviewToken,
+            },
+        }), "quote locale deal");
+        const dealId = numberField(deal, "id", "quote locale deal");
+        await jsonObject(await api.post(`/api/deals/${dealId}/line-items`, {
+            headers,
+            data: { name: "Quoted service", unitPrice: 100, quantity: 2, taxRate: 10, billingFrequency: "one_time" },
+        }), "quote locale line");
+        const page = await context.newPage();
+        await page.addInitScript(() => { window.print = () => undefined; });
+        await page.emulateMedia({ media: "print", reducedMotion: "reduce" });
+        const scenarios: readonly { documentLocale: "en" | "ja"; uiLocale: "en" | "ja"; expected: string }[] = [
+            { documentLocale: "ja", uiLocale: "en", expected: "￥220" },
+            { documentLocale: "en", uiLocale: "ja", expected: "¥220" },
+        ];
+        for (const { documentLocale, uiLocale, expected } of scenarios) {
+            const template = await jsonObject(await api.post("/api/document-templates", {
+                headers,
+                data: {
+                    name: `Quote locale ${documentLocale} ${unique}`, type: "quote", locale: documentLocale,
+                    title: "Quote locale proof", terms: "Frozen total: {{total}}", active: true,
+                },
+            }), "quote locale template");
+            const generated = await jsonObject(await api.post(`/api/deals/${dealId}/documents`, {
+                headers, data: { templateId: numberField(template, "id", "quote locale template") },
+            }), "quote locale document");
+            const documentId = numberField(generated, "id", "quote locale document");
+            await setUiLocale(page, uiLocale);
+            await page.goto(`/records/deals/${dealId}/documents/${documentId}/print`);
+
+            await expect(page.locator("html")).toHaveAttribute("lang", uiLocale);
+            await expect(page.getByText(`Frozen total: ${expected}`, { exact: true })).toBeVisible();
+            const table = page.getByTestId("document-line-items-table");
+            await expect(table).toBeVisible();
+            await expect(table.locator("tfoot tr:last-child td:last-child")).toHaveText(expected);
+            await expect(table.locator("tbody tr td:last-child")).toHaveText(expected);
+        }
+    } finally {
+        await context.close();
+    }
 });
 
 test("authenticated setup completes through a cookie-less public bearer", async ({

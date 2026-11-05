@@ -1,5 +1,7 @@
 "use client";
 
+import { useTimeZoneSearch } from "@/app/hooks/useTimeZoneSearch";
+
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -100,6 +102,8 @@ function WorkspaceIdentityForm({ workspace }: { workspace: Workspace }) {
         }
     }
 
+    const timeZoneSearch = useTimeZoneSearch(timezones);
+
     return (
         <Rise>
             <SettingsSection title={t("title")} description={t("description")}>
@@ -158,7 +162,7 @@ function WorkspaceIdentityForm({ workspace }: { workspace: Workspace }) {
                                     setTimezone(value);
                                     setFieldErrors((current) => ({ ...current, timezone: "" }));
                                 }}
-                                itemToStringLabel={(value: string) => value}
+                                {...timeZoneSearch}
                             >
                                 <ComboboxInput
                                     id="workspace-timezone"
@@ -166,11 +170,11 @@ function WorkspaceIdentityForm({ workspace }: { workspace: Workspace }) {
                                     aria-invalid={Boolean(fieldErrors.timezone)}
                                 />
                                 <ComboboxContent className="pointer-events-auto">
+                                    <ComboboxEmpty>{t("timezoneEmpty")}</ComboboxEmpty>
                                     <ComboboxList>
-                                        <ComboboxEmpty>{t("timezoneEmpty")}</ComboboxEmpty>
-                                        {timezones.map((value) => (
-                                            <ComboboxItem key={value} value={value}>{value}</ComboboxItem>
-                                        ))}
+                                        {(value: (typeof timezones)[number]) => (
+                                            <ComboboxItem key={value} value={value}>{timeZoneSearch.itemToStringLabel(value)}</ComboboxItem>
+                                        )}
                                     </ComboboxList>
                                 </ComboboxContent>
                             </Combobox>

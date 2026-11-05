@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import type { ComboboxRootChangeEventDetails } from '@base-ui/react/combobox';
 
 import {
     getContactById,
@@ -8,6 +9,7 @@ import {
     getDealById,
     getDealsPage,
 } from '@/app/lib/api';
+import { createServerPickerSearch, pickerQueryKey } from '@/lib/server-picker-search';
 import type { Contact, Deal, Page } from '@/app/lib/types';
 
 const SEARCH_SIZE = 50;
@@ -41,24 +43,24 @@ function useRecordTargetSearch<T extends RecordTarget>(
 ) {
     const [query, setQuery] = useState('');
     const [targets, setTargets] = useState<T[]>(seeds);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<unknown>(null);
+    const [result, setResult] = useState<{ query: string; idsKey: string; items: T[]; error: unknown } | null>(null);
+    const normalizedQuery = pickerQueryKey(query);
     const idsKey = selectedKey(ids);
     const stableIds = useMemo(
         () => idsKey ? idsKey.split(',').map(Number) : [],
         [idsKey],
     );
     const stableIdSet = useMemo(() => new Set(stableIds), [stableIds]);
+    const current = enabled && result?.idsKey === idsKey ? result : null;
+    const serverSearch = createServerPickerSearch(normalizedQuery, current);
 
     useEffect(() => {
         if (!enabled) return;
         const controller = new AbortController();
         const timer = window.setTimeout(() => {
-            setLoading(true);
-            setError(null);
             const hydrated: T[] = [];
             Promise.all([
-                loadPage(query.trim(), controller.signal),
+                loadPage(normalizedQuery, controller.signal),
                 Promise.all(stableIds.map((id) =>
                     loadById(id, controller.signal).then(
                         (target) => {
@@ -70,9 +72,10 @@ function useRecordTargetSearch<T extends RecordTarget>(
             ])
                 .then(([page]) => {
                     if (controller.signal.aborted) return;
+                    setResult({ query: normalizedQuery, idsKey, items: page.items, error: null });
                     setTargets((current) => {
                         const retained = current.filter((target) => stableIdSet.has(target.id));
-                        if (query.trim()) {
+                        if (normalizedQuery) {
                             return mergeTargets(hydrated, retained, page.items);
                         }
                         return mergeTargets(hydrated, retained, seeds, page.items);
@@ -81,19 +84,24 @@ function useRecordTargetSearch<T extends RecordTarget>(
                 .catch((nextError: unknown) => {
                     if (controller.signal.aborted) return;
                     setTargets((current) => current.filter((target) => stableIdSet.has(target.id)));
-                    setError(nextError);
-                })
-                .finally(() => {
-                    if (!controller.signal.aborted) setLoading(false);
+                    setResult({ query: normalizedQuery, idsKey, items: [], error: nextError });
                 });
         }, SEARCH_DELAY_MS);
         return () => {
             window.clearTimeout(timer);
             controller.abort();
         };
-    }, [enabled, query, stableIds, stableIdSet, seeds, loadPage, loadById]);
+    }, [enabled, normalizedQuery, idsKey, stableIds, stableIdSet, seeds, loadPage, loadById]);
 
-    return { targets, loading, error, onInputValueChange: setQuery };
+    return {
+        targets,
+        serverSearch,
+        loading: enabled && serverSearch.pending,
+        error: serverSearch.pending ? null : current?.error ?? null,
+        onInputValueChange: (value: string, details?: ComboboxRootChangeEventDetails) => {
+            if (!details || details.reason === 'input-change' || details.reason === 'clear-press') setQuery(value);
+        },
+    };
 }
 
 const loadContactsPage = (query: string, signal: AbortSignal) =>

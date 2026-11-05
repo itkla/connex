@@ -219,6 +219,7 @@
         "save": "Save"
     },
     "ContactsNewContactDialog": {
+        "companySelectionRequired": "Select a company from the results, or clear the company search to continue.",
         "companySearchFailed": "Couldn't search companies. Try again.",
         "dialogTitle": "New contact",
         "description": "Add a person to your contacts. These contacts will be shared with everyone in this workspace.",

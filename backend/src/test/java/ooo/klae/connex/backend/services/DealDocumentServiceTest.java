@@ -17,6 +17,8 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
@@ -98,11 +100,102 @@ class DealDocumentServiceTest extends AbstractServiceTest {
         assertEquals(currentUser.getId(), doc.createdBy());
         assertNotNull(doc.content());
         assertEquals("Quote for " + doc.content().company().name(), doc.content().sections().title());
-        assertTrue(doc.content().sections().terms().contains("JPY 220.00"),
+        assertTrue(doc.content().sections().terms().contains("¥220"),
             () -> "terms should carry resolved total, was: " + doc.content().sections().terms());
         assertTrue(doc.content().sections().intro().contains(currentUser.getDisplayName()));
         assertEquals(1, doc.content().lineItems().size());
         assertEquals(0, new BigDecimal("220.00").compareTo(doc.content().totals().grandTotal()));
+    }
+
+    @ParameterizedTest
+    @CsvSource(value = {
+        "en|JPY|3174499.50|¥3,174,500",
+        "ja|JPY|3174499.50|￥3,174,500",
+        "en|JPY|3174498.50|¥3,174,499",
+        "ja|JPY|3174498.50|￥3,174,499",
+        "en|JPY|0.49|¥0",
+        "ja|JPY|0.50|￥1",
+        "en|KRW|3174499.50|₩3,174,500",
+        "ja|KRW|3174499.50|₩3,174,500",
+        "en|USD|3174499.50|$3,174,499.50",
+        "ja|USD|3174499.50|$3,174,499.50",
+        "en|USD|220.00|$220.00",
+        "ja|USD|220.00|$220.00",
+        "en|EUR|3174499.50|€3,174,499.50",
+        "ja|EUR|3174499.50|€3,174,499.50",
+        "en|CHF|3174499.50|CHF\u00a03,174,499.50",
+        "ja|CHF|3174499.50|CHF\u00a03,174,499.50",
+        "en|YEN|3174499.50|YEN 3174499.50",
+        "ja|YEN|3174499.50|YEN 3174499.50"
+    }, delimiter = '|')
+    void formatsTotalTokensWithoutChangingNumericSnapshot(
+            String locale, String currency, String amount, String expected) {
+        Deal deal = jpyDeal();
+        deal.setCurrency(currency);
+        dealMapper.update(deal);
+        DealLineItemRequest request = new DealLineItemRequest();
+        request.setName("Quoted item");
+        request.setUnitPrice(new BigDecimal(amount));
+        request.setQuantity(BigDecimal.ONE);
+        lineItemService.create(deal.getId(), request);
+        DocumentTemplate tpl = template();
+        tpl.setLocale(locale);
+        tpl.setTitle("{{total}}");
+        tpl.setIntro("{{total}}");
+        tpl.setTerms("{{total}}");
+        tpl.setFooter("{{total}}");
+        tpl.setBody("""
+            {"type":"doc","content":[
+              {"type":"paragraph","content":[{"type":"text","text":"Total {{total}}"}]},
+              {"type":"lineItems"},
+              {"type":"paragraph","content":[{"type":"mergeToken","attrs":{"token":"total"}}]}
+            ]}
+            """);
+        templateService.update(tpl.getId(), tpl);
+
+        DealDocumentDto doc = documentService.generate(deal.getId(), tpl.getId());
+
+        assertEquals(locale, doc.locale());
+        assertEquals(currency, doc.currency());
+        assertEquals(expected, doc.title());
+        assertEquals(expected, doc.content().sections().title());
+        assertEquals(expected, doc.content().sections().intro());
+        assertEquals(expected, doc.content().sections().terms());
+        assertEquals(expected, doc.content().sections().footer());
+        assertEquals("Total " + expected,
+            doc.content().body().path("content").get(0).path("content").get(0).path("text").asString());
+        assertEquals(expected,
+            doc.content().body().path("content").get(2).path("content").get(0).path("text").asString());
+        assertEquals(0, new BigDecimal(amount).compareTo(doc.content().totals().grandTotal()));
+        assertEquals(0, new BigDecimal(amount).compareTo(doc.content().lineItems().getFirst().getLineTotal()));
+        assertEquals(0, new BigDecimal(amount).compareTo(
+            dealMapper.getDealById(workspace.getId(), deal.getId()).getValue()));
+        DealDocumentDto reread = documentService.getOne(deal.getId(), doc.id());
+        assertEquals(doc.content(), reread.content());
+    }
+
+    @Test
+    void leavesPreviouslyGeneratedRawTotalSnapshotsUnchanged() {
+        Deal deal = jpyDeal();
+        lineItemService.create(deal.getId(), line(product("100.00", "10.000").getId(), "2"));
+        DocumentTemplate tpl = template();
+        DealDocumentDto doc = documentService.generate(deal.getId(), tpl.getId());
+        String legacyTerms = "Grand total: JPY 220.00.";
+        jdbcTemplate.update(
+            "UPDATE deal_document SET content = JSON_SET(content, '$.sections.terms', ?) WHERE workspace_id = ? AND id = ?",
+            legacyTerms, workspace.getId(), doc.id());
+        String frozenContent = jdbcTemplate.queryForObject(
+            "SELECT content FROM deal_document WHERE workspace_id = ? AND id = ?",
+            String.class, workspace.getId(), doc.id());
+
+        documentService.generate(deal.getId(), tpl.getId());
+
+        DealDocumentDto reread = documentService.getOne(deal.getId(), doc.id());
+        assertEquals(legacyTerms, reread.content().sections().terms());
+        assertEquals(0, new BigDecimal("220.00").compareTo(reread.content().totals().grandTotal()));
+        assertEquals(frozenContent, jdbcTemplate.queryForObject(
+            "SELECT content FROM deal_document WHERE workspace_id = ? AND id = ?",
+            String.class, workspace.getId(), doc.id()));
     }
 
     /**
@@ -274,7 +367,7 @@ class DealDocumentServiceTest extends AbstractServiceTest {
         String body = doc.content().body().toString();
         assertTrue(body.contains(doc.content().company().name()), () -> "body should carry company name: " + body);
         assertTrue(body.contains(currentUser.getDisplayName()), () -> "mergeToken should resolve to owner: " + body);
-        assertTrue(body.contains("JPY 220.00"), () -> "body should carry resolved total: " + body);
+        assertTrue(body.contains("¥220"), () -> "body should carry resolved total: " + body);
         assertTrue(body.contains("\"textAlign\":\"right\""), () -> "block alignment must be preserved: " + body);
         assertFalse(body.contains("{{"), () -> "no unresolved tokens should remain: " + body);
         assertFalse(body.contains("mergeToken"), () -> "merge nodes must be flattened to text: " + body);
@@ -385,5 +478,6 @@ class DealDocumentServiceTest extends AbstractServiceTest {
         DealDocumentDto doc = documentService.generate(deal.getId(), tpl.getId());
         assertEquals(0, doc.content().lineItems().size());
         assertEquals(0, new BigDecimal("0").compareTo(doc.content().totals().grandTotal()));
+        assertTrue(doc.content().sections().terms().contains("¥0"));
     }
 }

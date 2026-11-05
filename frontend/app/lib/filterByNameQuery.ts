@@ -1,6 +1,6 @@
-/** Returns items whose name contains the query (case-insensitive); empty query returns all. */
+/** Returns NFKC-normalized, case-insensitive name matches; a blank query returns all items. */
 export function filterByNameQuery<T extends { name: string }>(items: T[], query: string): T[] {
-    const needle = query.trim().toLowerCase();
+    const needle = query.normalize("NFKC").trim().toLowerCase();
     if (!needle) return items;
-    return items.filter((item) => item.name.toLowerCase().includes(needle));
+    return items.filter((item) => item.name.normalize("NFKC").toLowerCase().includes(needle));
 }

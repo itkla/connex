@@ -15,6 +15,28 @@ in that order. Follow [the retained-chat cutover](#v236v237-retained-ask-connex-
 [the task-completion cutover](#task-completion-and-relationship-warmth-tenant-v240), and
 [the deal-value cutover](#deal-line-value-takeover-tenant-v243).
 
+## Campaign engagement response compatibility (#2257)
+
+The campaign and send engagement responses add `preparedRecipients` for prepared message entries,
+including drafts and repeated contacts across sends. Older frontends used `totalRecipients` as a
+reach figure, and channel `deliveries` as delivered volume. Both keys remain numeric, documented
+deprecated aliases so those clients can still read the response:
+
+| Response | Deprecated key | Current value |
+| --- | --- | --- |
+| Campaign and send engagement | `totalRecipients` | Confirmed-delivered message count, equal to `delivered` |
+| Channel summary | `deliveries` | Confirmed-delivered message count, equal to `delivered` |
+
+Neither alias includes drafts or submissions without confirmed delivery. Zero is a count of observed
+confirmations, not proof that delivery was measured; clients must use `deliveryReceiptsAvailable`
+to distinguish unavailable outcomes. Updated frontends use the explicit preparation, submission,
+and delivery fields and count message entries, not unique contacts.
+
+Retain the aliases throughout the supported rollback window and while any supported frontend still
+reads them. Remove them only through a reviewed client cutover in a later release. This correction
+adds response fields without a schema change and does not raise or waive the existing release-wide
+rollback floor. The version-locked deployment and recovery rules still apply.
+
 ## Dormant assistant proposal-set storage (tenant V233)
 
 V233 adds the chat-owned proposal-set parent, nullable membership/preparation columns on tool
@@ -57,6 +79,24 @@ V232-compatible binaries continue writing null-set calls. The existing
 still applies, including when missions are disabled. Production set activation and set-specific
 privacy admission require a later semantic cutover; V233 alone authorizes neither. See the
 [storage contract](backend/AI_SECURITY.md#dormant-chat-proposal-set-storage-tenant-v233).
+
+## Conditional deal edits (tenant V241)
+
+V241 adds the non-null deal version counter with `ALGORITHM=INSTANT, LOCK=DEFAULT`. This must fail
+instead of rebuilding the core deal table, including when `old_alter_table=ON`. Do not remove the
+algorithm/lock guards or permit COPY fallback. No data backfill or new index is required.
+
+INSTANT still acquires metadata locks. Both CREATE TRIGGER statements also need metadata locks on
+their target tables; the company deletion trigger references deal. Deploy during a bounded maintenance window outside long-running
+transactions on company/deal and monitor metadata-lock waits. Resolve blocking transactions before retrying rather than weakening the DDL guards.
+
+MySQL DDL commits independently. If migration execution stops, inspect the column and both trigger
+definitions plus Flyway's history before recovery. Keep the serving release that uses conditional
+versions stopped until both counter and company-detach triggers exist. An earlier serving binary
+remains schema-compatible. A partially applied column/trigger prefix must not be blindly rerun:
+reconcile the catalog to the exact reviewed V241 definitions and the deployment's Flyway recovery
+procedure, then rerun validation before enabling the new release. Do not reset versions, alter an
+applied migration, or drop/recreate active triggers under traffic to conceal a failed migration.
 
 ## AI identifier lookup keys (tenant V230)
 

@@ -49,6 +49,9 @@ public class Deal {
     private boolean riskExcluded;
     private String createdAt;
     private String updatedAt;
+    private long version;
+    @JsonIgnore
+    private Long expectedVersion;
     private List<EntityReference> references;
 
     public int getId() {

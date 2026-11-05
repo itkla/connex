@@ -138,6 +138,10 @@ describe('deal line preview and persistence workspace chains', () => {
         await waitFor(() => expect(state.refresh).toHaveBeenCalledOnce());
         expect(backend.requests.map(({ workspace }) => workspace)).toEqual([String(ORIGIN), String(ORIGIN)]);
         expect(backend.requests[1].init.body).toContain('"confirmValueReplacement":true');
+        for (const request of backend.requests) {
+            const payload: unknown = JSON.parse(String(request.init.body));
+            expect(payload).not.toHaveProperty('expectedVersion');
+        }
     });
 
     it('invalidates confirmation and retry when a composed draft loses its workspace', async () => {
