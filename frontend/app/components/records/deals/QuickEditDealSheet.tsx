@@ -254,8 +254,7 @@ export default function QuickEditDealSheet({
                         <QuickEditField label={t('company')} htmlFor={`deal-company-${d.id}`}>
                             <Combobox
                                 items={companySearch.options}
-                                itemsPending={companySearch.loading}
-                                filter={null}
+                                serverSearch={companySearch.serverSearch}
                                 autoHighlight
                                 itemToStringLabel={(c: Company) => c.name}
                                 value={selectedCompany}

@@ -201,7 +201,7 @@ export default function ContactConnections({
                 <div className="min-w-0 flex-1">
                     <Combobox
                         items={candidates}
-                        filter={null}
+                        serverSearch={contactSearch.serverSearch}
                         itemToStringLabel={(c: Contact) => c.name}
                         value={selected}
                         onOpenChange={setPickerOpen}

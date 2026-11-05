@@ -7,15 +7,25 @@ Local matching normalizes labels and queries with NFKC before Base UI's collatio
 half-width kana, voiced combining marks and full-width Latin. A committed selection still opens the
 full collection. The root renders at most 100 matching rows after filtering.
 
-Server-filtered consumers (`filter={null}`) opt in to automatic highlighting only when their option
-source tracks query freshness. `useCompanySearch` keeps hydrated `companies` for selected labels and
-separate `options` containing only the current server page. Query and selected-id keys invalidate
-options immediately, including the debounce interval; obsolete requests are aborted and cannot publish
-results for another query. Failure never turns hydrated selections into selectable search results.
-All four company pickers pass `itemsPending` and the current `options`, keeping website, industry,
-phone and address matching on the server. Root pending guards block both Enter and item selection.
-When a pending response settles, the shared input uses Base UI's keyboard navigation to highlight the
-first ready result; the public boolean highlight mode otherwise only reacts to input events.
+Server searches pass a `serverSearch` snapshot from `lib/server-picker-search.ts`. Raw `filter={null}`
+is excluded from the shared wrapper's public type; the snapshot selects Base UI's server-filtered mode.
+`createServerPickerSearch` binds a response's record IDs to its query. The shared root immediately hides
+options and guards Enter and item selection while the response belongs to another query, including
+the debounce interval. It also rejects an item outside the current response even if an obsolete option
+node is still mounted. Input events invalidate selection synchronously, before the next source render.
+Current-query identity is independent of selected-label hydration, mapped option objects and label text.
+`RecordSelect` permits its explicit None action once the search settles; it never exempts record rows.
+
+`useCompanySearch` and `useRecordTargetSearch` tag response pages separately from hydrated selections.
+Obsolete requests are aborted and cannot publish a newer query's choices. Empty or failed pages never
+turn selected records into selectable fallback results. Note and provenance adapters preserve Base UI's
+change reason so restored labels do not become search queries. Workflow simulation and both import
+linkers provide their query-owned response snapshots through the same contract, including import retry
+options. The shared root preserves server metadata matches whose display name does not contain the query.
+
+Server-filtered consumers explicitly opt in to automatic highlighting. When a pending response settles,
+the shared input uses Base UI's keyboard navigation to highlight the first ready result; the public
+boolean highlight mode otherwise only reacts to input events.
 
 Both normal and chip inputs prevent Enter from submitting while a picker is open or its query is
 uncommitted. Base UI selects the highlighted result. With no result, Enter leaves the query available
@@ -85,9 +95,35 @@ also checked: `activity/tasks/EditTaskSheet.tsx`, `activity/activities/EditActiv
 `settings/workflows/WorkflowSimulationDialog.tsx`. They inherit the shared filtering and keyboard
 behavior without another combobox implementation.
 
+### Server search bindings
+
+Every previous `filter={null}` path uses the shared snapshot guard:
+
+| Consumer | Source / choices verified |
+| --- | --- |
+| `records/contacts/NewContactDialog.tsx` | `useCompanySearch`, company |
+| `records/contacts/ChangeCompanyDialog.tsx` | `useCompanySearch`, company |
+| `records/deals/NewDealDialog.tsx` | `useCompanySearch`, company |
+| `records/deals/QuickEditDealSheet.tsx` | `useCompanySearch`, company |
+| `records/RecordSelect.tsx` → `activity/activities/EditActivitySheet.tsx` | `useRecordTargetSearch`, contact and deal |
+| `records/RecordSelect.tsx` → `activity/tasks/EditTaskSheet.tsx` | `useRecordTargetSearch`, deal (assignee/contact remain local) |
+| `records/RecordSelect.tsx` → `settings/workflows/WorkflowSimulationDialog.tsx` | `useWorkflowEditor`, company/contact/deal/task |
+| `records/contacts/ContactConnections.tsx` | `useRecordTargetSearch`, contact |
+| `records/contacts/ContactProvenanceDialog.tsx` | `useRecordTargetSearch`, referrer contact |
+| `activity/notes/NoteDialog.tsx` | `useRecordTargetSearch` through `ContactActionsMenu.tsx`, `DealActionsMenu.tsx`, `me/TimelineRow.tsx`; contact and deal |
+| `import/ImportDialog.tsx` | query/request-keyed company/contact/deal record and retry choices |
+| `import/InteractionHistoryImportDialog.tsx` | query/request-keyed contact and retry choices |
+
+This inventory is a source/type audit. Automated regressions exercise the shared selection boundary,
+actual RecordSelect contact/deal adapters, ContactConnections, note contact/deal fields, workflow
+simulation and the existing company form. Browser execution is owned by CI.
+
 ## Regression evidence
 
-`companyPickerSafety.test.tsx` exercises delayed and out-of-order search responses, server-only
+`serverPickerSafety.test.tsx` covers debounce and pending requests for the activity contact/deal,
+task deal and ContactConnections pickers; selected-label retention; note contact/deal fields; workflow
+simulation; out-of-order contact/deal responses; a still-mounted stale option; and composition/retry
+selection at the shared boundary. `companyPickerSafety.test.tsx` exercises delayed and out-of-order search responses, server-only
 metadata matches, failed searches, and the actual New contact form's blur/submission and cancellation
 paths. `pickerInputSafety.test.tsx` exercises real Base UI and Radix primitives: bounded filtered collections,
 server filtering, Japanese composition, Enter selection and unmatched queries, nested Escape, safe

@@ -230,6 +230,7 @@ export default function EditTaskSheet({
                                     label: deal.name,
                                 }))}
                                 onInputValueChange={dealSearch.onInputValueChange}
+                                serverSearch={dealSearch.serverSearch}
                                 emptyLabel={dealSearch.loading ? t('searching') : t('noDealFound')}
                             />
                         </div>

@@ -1,5 +1,7 @@
 "use client";
 
+import type { ComboboxRootChangeEventDetails } from "@base-ui/react/combobox";
+import { createServerPickerSearch, pickerQueryKey } from "@/lib/server-picker-search";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -135,7 +137,8 @@ export function useWorkflowEditor({
     const [versionsLoadState, setVersionsLoadState] = useState<PendingState>("idle");
     const [simulation, setSimulation] = useState<WorkflowSimulation | null>(null);
     const [simulationLoadState, setSimulationLoadState] = useState<PendingState>("idle");
-    const [simulationRecords, setSimulationRecords] = useState<RecordSelectOption[]>([]);
+    const [simulationQuery, setSimulationQuery] = useState("");
+    const [simulationSearchResult, setSimulationSearchResult] = useState<{ query: string; items: RecordSelectOption[] }>({ query: "", items: [] });
     const [conflict, setConflict] = useState<ConflictState | null>(null);
     const [conflictOpen, setConflictOpen] = useState(false);
     const [selectedNodeId, setSelectedNodeId] = useState<string | null>(initialDocument.definition.entryNodeId);
@@ -183,7 +186,8 @@ export function useWorkflowEditor({
         if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
         setValidation(null);
         clearSimulation();
-        setSimulationRecords([]);
+        setSimulationQuery("");
+        setSimulationSearchResult({ query: "", items: [] });
     }, [clearSimulation]);
 
     const loadVersions = useCallback(async (id: number, workspaceId: number, signal?: AbortSignal) => {
@@ -664,7 +668,10 @@ export function useWorkflowEditor({
         }
     }, [activeWorkspaceId, beginConflictRecovery, isCurrentWorkflow, scopeReady, t, validationDirty, workflow]);
 
-    const searchSimulationRecords = useCallback((query: string) => {
+    const searchSimulationRecords = useCallback((inputQuery: string, details?: ComboboxRootChangeEventDetails) => {
+        if (details && details.reason !== "input-change" && details.reason !== "clear-press") return;
+        const query = pickerQueryKey(inputQuery);
+        setSimulationQuery(query);
         const workspaceId = activeWorkspaceId;
         if (!workflow || workspaceId == null || !scopeReady) return;
         const id = workflow.id;
@@ -674,7 +681,7 @@ export function useWorkflowEditor({
         if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
         const recordType = history.present.recordType ?? "deal";
         if (query.trim().length < 2 || !supportsSimulation(recordType)) {
-            setSimulationRecords([]);
+            setSimulationSearchResult({ query, items: [] });
             return;
         }
         const documentGeneration = documentGenerationRef.current;
@@ -700,12 +707,12 @@ export function useWorkflowEditor({
                                 : recordType === "deal"
                                     ? results.deals.map((deal) => ({ id: deal.id, label: deal.name }))
                                     : [];
-                    setSimulationRecords(options.slice(0, 50));
+                    setSimulationSearchResult({ query, items: options.slice(0, 50) });
                 })
                 .catch(() => {
                     if (!controller.signal.aborted
                         && documentGeneration === documentGenerationRef.current
-                        && isCurrentWorkflow(id, workspaceId, scopeGeneration)) setSimulationRecords([]);
+                        && isCurrentWorkflow(id, workspaceId, scopeGeneration)) setSimulationSearchResult({ query, items: [] });
                 });
         }, 200);
     }, [activeWorkspaceId, history.present.recordType, isCurrentWorkflow, scopeReady, workflow]);
@@ -771,7 +778,8 @@ export function useWorkflowEditor({
         versionsLoading: scopeReady && versionsLoadState === "loading",
         simulation: scopeReady ? simulation : null,
         simulationLoading: scopeReady && simulationLoadState === "loading",
-        simulationRecords: scopeReady ? simulationRecords : [],
+        simulationRecords: scopeReady ? simulationSearchResult.items : [],
+        simulationServerSearch: createServerPickerSearch(simulationQuery, scopeReady ? simulationSearchResult : null),
         simulationSupported: supportsSimulation(history.present.recordType ?? "deal"),
         conflict,
         conflictOpen,

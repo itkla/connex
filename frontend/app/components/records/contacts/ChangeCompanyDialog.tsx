@@ -160,8 +160,7 @@ export default function ChangeCompanyDialog({ open, onOpenChange, contacts, onSu
                             <Label htmlFor="company">{t('companyLabel')}</Label>
                             <Combobox
                                 items={companySearch.options}
-                                itemsPending={companySearch.loading}
-                                filter={null}
+                                serverSearch={companySearch.serverSearch}
                                 autoHighlight
                                 itemToStringLabel={(c: Company) => c.name}
                                 value={selected}

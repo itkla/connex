@@ -5,6 +5,7 @@ import { Combobox as ComboboxPrimitive } from "@base-ui/react"
 import { useTranslations } from "next-intl"
 
 import { cn } from "@/lib/utils"
+import { pickerQueryKey, type ServerPickerSearch } from "@/lib/server-picker-search"
 import { Button } from "@/components/ui/button"
 import {
   InputGroup,
@@ -43,11 +44,16 @@ function highlightSettledResult(element: HTMLInputElement) {
 
 /** Bounds results, normalizes local matching, and keeps pending server choices unselectable. */
 function Combobox<Value, Multiple extends boolean | undefined = false>(
-  { onInputValueChange, onValueChange, onOpenChange, itemsPending = false, items, filter, autoHighlight,
+  { onInputValueChange, onValueChange, onOpenChange, itemsPending: requestedPending = false, items, filter, serverSearch, autoHighlight,
     itemToStringLabel, ...props }: ComboboxPrimitive.Root.Props<Value, Multiple> & {
+    filter?: Exclude<ComboboxPrimitive.Root.Props<Value, Multiple>["filter"], null>
+    serverSearch?: ServerPickerSearch
     itemsPending?: boolean
   }
 ) {
+  const itemsPending = requestedPending || (serverSearch?.pending ?? false)
+  const searchQuery = serverSearch?.query
+  const latestQuery = React.useRef(searchQuery ?? "")
   const pendingInput = React.useRef(false)
   const [queryEdited, setQueryEdited] = React.useState(false)
   const composing = React.useRef(false)
@@ -56,7 +62,7 @@ function Combobox<Value, Multiple extends boolean | undefined = false>(
     input.current = element
   }, [])
   const wasPending = React.useRef(itemsPending)
-  const highlight = autoHighlight ?? (filter !== null)
+  const highlight = autoHighlight ?? !serverSearch
   const [uncontrolledValue, setUncontrolledValue] = React.useState<ComboboxPrimitive.Root.Props<Value, Multiple>["value"]>(props.defaultValue)
   const selectedValue = props.value === undefined ? uncontrolledValue : props.value
   const { contains } = ComboboxPrimitive.useFilter({ value: selectedValue, multiple: props.multiple })
@@ -64,6 +70,10 @@ function Combobox<Value, Multiple extends boolean | undefined = false>(
   const normalizedFilter = (value: Value, query: string) => (queryEdited ? containsQuery : contains)(
     value, query.normalize("NFKC"), (item) => pickerLabel(item, itemToStringLabel).normalize("NFKC")
   )
+
+  React.useLayoutEffect(() => {
+    if (searchQuery !== undefined) latestQuery.current = searchQuery
+  }, [searchQuery])
 
   React.useLayoutEffect(() => {
     const settled = wasPending.current && !itemsPending
@@ -82,8 +92,8 @@ function Combobox<Value, Multiple extends boolean | undefined = false>(
         autoHighlight={highlight}
         limit={100}
         {...props}
-        items={itemsPending ? [] : items}
-        filter={filter === undefined ? normalizedFilter : filter}
+        items={itemsPending ? [] : serverSearch ? items?.filter(serverSearch.accepts) : items}
+        filter={serverSearch ? null : filter === undefined ? normalizedFilter : filter}
         itemToStringLabel={itemToStringLabel}
         onOpenChange={(open, details) => {
           onOpenChange?.(open, details)
@@ -96,12 +106,14 @@ function Combobox<Value, Multiple extends boolean | undefined = false>(
         onInputValueChange={(value, details) => {
           onInputValueChange?.(value, details)
           if (details.isCanceled) return
+          if (details.reason === "input-change" || details.reason === "clear-press") latestQuery.current = pickerQueryKey(value)
           if (details.reason === "input-change") pendingInput.current = value.trim() !== ""
           else pendingInput.current = false
           setQueryEdited(pendingInput.current)
         }}
         onValueChange={(value, details) => {
-          if (itemsPending && details.reason === "item-press") {
+          const staleSearch = serverSearch && (serverSearch.query !== latestQuery.current || !serverSearch.accepts(value))
+          if (details.reason === "item-press" && (itemsPending || staleSearch || composing.current)) {
             details.cancel()
             return
           }

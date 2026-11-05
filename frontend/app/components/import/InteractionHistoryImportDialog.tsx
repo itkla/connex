@@ -1,5 +1,6 @@
 "use client";
 
+import { createServerPickerSearch } from '@/lib/server-picker-search';
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import {
@@ -937,7 +938,7 @@ function ContactLinker({
             value={null}
             inputValue={query}
             open
-            filter={null}
+            serverSearch={createServerPickerSearch(query, current || queryText.length < 2 ? { query, items: options } : null)}
             itemToStringLabel={(item: ContactOption) => item.label}
             onOpenChange={(next) => {
                 setOpen(next);

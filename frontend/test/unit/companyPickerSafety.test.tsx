@@ -65,7 +65,7 @@ afterEach(() => {
 
 function CompanyPicker({ selected, onSelect = vi.fn() }: { selected?: Company; onSelect?: (value: Company | null) => void }) {
     const search = useCompanySearch(true, selected ? [selected.id] : [], selected ? [selected] : []);
-    return <NextIntlClientProvider locale="en" messages={common}><Combobox items={search.options} itemsPending={search.loading} filter={null} autoHighlight
+    return <NextIntlClientProvider locale="en" messages={common}><Combobox items={search.options} serverSearch={search.serverSearch} autoHighlight
         defaultValue={selected} onInputValueChange={search.onInputValueChange} onValueChange={onSelect}
         itemToStringLabel={(item) => item.name}>
         <ComboboxInput aria-label="Company" />

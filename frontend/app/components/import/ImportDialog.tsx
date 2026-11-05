@@ -1,5 +1,6 @@
 'use client';
 
+import { createServerPickerSearch } from '@/lib/server-picker-search';
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { motion, useReducedMotion } from 'motion/react';
@@ -1029,7 +1030,7 @@ function RowLinker({
             value={null}
             inputValue={query}
             open
-            filter={null}
+            serverSearch={createServerPickerSearch(query, currentSearch || !queryReady ? { query, items: options } : null)}
             autoHighlight
             itemToStringLabel={(item: RowLinkOption) => item.label}
             onOpenChange={(next, details) => {

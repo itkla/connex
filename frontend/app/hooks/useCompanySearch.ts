@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { getCompaniesByIds, getCompaniesPage } from '@/app/lib/api';
+import { createServerPickerSearch } from '@/lib/server-picker-search';
 import type { Company } from '@/app/lib/types';
 import type { ComboboxRootChangeEventDetails } from '@base-ui/react/combobox';
 
@@ -83,6 +84,7 @@ export function useCompanySearch(
     return {
         companies: mergeCompanies(result?.companies ?? [], seeds),
         options: current?.options ?? EMPTY_COMPANIES,
+        serverSearch: createServerPickerSearch(normalizedQuery, current ? { query: current.query, items: current.options } : null),
         loading: enabled && current === null,
         error: current?.error ?? null,
         onInputValueChange: (value: string, details?: ComboboxRootChangeEventDetails) => {

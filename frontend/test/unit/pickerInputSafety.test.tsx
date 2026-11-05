@@ -1,5 +1,6 @@
 /** @vitest-environment jsdom */
 import { useState } from 'react';
+import { createServerPickerSearch } from '@/lib/server-picker-search';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -33,12 +34,11 @@ afterEach(() => {
     vi.unstubAllGlobals();
 });
 
-function Picker({ chips = false, server = false, initialSelection, onValueChange = vi.fn() }: {
-    chips?: boolean; server?: boolean; initialSelection?: string; onValueChange?: (value: string | null, details: unknown) => void;
+function Picker({ chips = false, initialSelection, onValueChange = vi.fn() }: {
+    chips?: boolean; initialSelection?: string; onValueChange?: (value: string | null, details: unknown) => void;
 }) {
     return <Combobox<string, boolean> items={choices} multiple={chips} defaultValue={initialSelection}
-        onValueChange={(value, details) => onValueChange(Array.isArray(value) ? value.at(-1) ?? null : value, details)}
-        filter={server ? null : undefined}>
+        onValueChange={(value, details) => onValueChange(Array.isArray(value) ? value.at(-1) ?? null : value, details)}>
         {chips ? <ComboboxChips><ComboboxChipsInput aria-label="Company" /></ComboboxChips> : <ComboboxInput aria-label="Company" />}
         <ComboboxContent>
             <ComboboxEmpty>No companies</ComboboxEmpty>
@@ -59,9 +59,9 @@ function ZonePicker() {
     </Combobox>;
 }
 
-function Form({ chips = false, server = false, onSelect = vi.fn(), onSubmit = vi.fn() }) {
+function Form({ chips = false, onSelect = vi.fn(), onSubmit = vi.fn() }) {
     return <form onSubmit={(event) => { event.preventDefault(); onSubmit(); }}>
-        <Picker chips={chips} server={server} onValueChange={onSelect} />
+        <Picker chips={chips} onValueChange={onSelect} />
         <button type="submit">Save</button>
     </form>;
 }
@@ -154,7 +154,16 @@ describe('shared picker collection and keys', () => {
     });
 
     it('preserves externally filtered server results', async () => {
-        render(<Form server />);
+        function ServerPicker() {
+            const [query, setQuery] = useState('');
+            const items = choices.map((label, id) => ({ id, label }));
+            return <Combobox<(typeof items)[number]> items={items} serverSearch={createServerPickerSearch(query, { query, items })}
+                onInputValueChange={setQuery} itemToStringLabel={(item) => item.label}>
+                <ComboboxInput />
+                <ComboboxContent><ComboboxList>{(item: (typeof items)[number]) => <ComboboxItem key={item.id} value={item}>{item.label}</ComboboxItem>}</ComboboxList></ComboboxContent>
+            </Combobox>;
+        }
+        render(<ServerPicker />);
         fireEvent.keyDown(screen.getByRole('combobox'), { key: 'ArrowDown' });
         fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Search handled by server' } });
         await waitFor(() => expect(screen.getAllByRole('option')).toHaveLength(100));

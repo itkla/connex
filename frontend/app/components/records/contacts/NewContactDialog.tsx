@@ -1099,9 +1099,8 @@ function ContactDetailsFields({
                 <Label htmlFor="company">{t('company')}</Label>
                 <Combobox
                     items={companySearch.options}
-                    itemsPending={companySearch.loading}
                     disabled={disabled}
-                    filter={null}
+                    serverSearch={companySearch.serverSearch}
                     autoHighlight
                     itemToStringLabel={(company: Company) => company.name}
                     value={resolvedCompany}
