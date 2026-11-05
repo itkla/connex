@@ -167,7 +167,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
                             <MetaRow label={t("contact")}>
                                 <Link
                                     href={`/records/contacts/${person.id}`}
-                                    className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-brand-light/50 px-2.5 py-1 text-sm font-medium text-brand-dark ring-1 ring-inset ring-brand-dark/10 transition hover:bg-brand-light"
+                                    className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-brand-light/50 px-2.5 py-1 text-sm font-medium text-brand-text ring-1 ring-inset ring-brand-dark/10 transition hover:bg-brand-light"
                                 >
                                     <UserIcon className="size-3.5 shrink-0" />
                                     <span className="truncate">{person.name}</span>
@@ -179,7 +179,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
                             <MetaRow label={t("deal")}>
                                 <Link
                                     href={`/records/deals/${deal.id}`}
-                                    className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-brand-light/50 px-2.5 py-1 text-sm font-medium text-brand-dark ring-1 ring-inset ring-brand-dark/10 transition hover:bg-brand-light"
+                                    className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-brand-light/50 px-2.5 py-1 text-sm font-medium text-brand-text ring-1 ring-inset ring-brand-dark/10 transition hover:bg-brand-light"
                                 >
                                     <BriefcaseIcon className="size-3.5 shrink-0" />
                                     <span className="truncate">{deal.name}</span>

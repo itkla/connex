@@ -1175,7 +1175,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
                             {allMatchingSelected ? (
                                 <>
                                     <span>{t('allMatchingSelected', { total })}</span>
-                                    <button type="button" onClick={() => { setSelectedIds(new Set()); setMatchedSignature(null); }} className="font-medium text-brand transition hover:underline">
+                                    <button type="button" onClick={() => { setSelectedIds(new Set()); setMatchedSignature(null); }} className="font-medium text-brand-text transition hover:underline">
                                         {t('clearSelection')}
                                     </button>
                                 </>
@@ -1186,7 +1186,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
                                         type="button"
                                         onClick={selectAllMatching}
                                         disabled={selectingAll || loading}
-                                        className="font-medium text-brand transition hover:underline disabled:opacity-50"
+                                        className="font-medium text-brand-text transition hover:underline disabled:opacity-50"
                                     >
                                         {selectingAll ? t('selecting') : t('selectAllMatching', { total })}
                                     </button>

@@ -72,7 +72,7 @@ export default function UserPerformance({ userId }: { userId: number }) {
             </div>
             <Link
                 href={`/insights/analytics?owner=${userId}&range=${RANGE}`}
-                className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-brand transition-colors hover:text-brand-hover"
+                className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-brand-text transition-colors hover:text-brand-text"
             >
                 {t('viewFullAnalytics')}
                 <ArrowRightIcon className="size-4" />

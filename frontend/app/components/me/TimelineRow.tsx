@@ -33,7 +33,7 @@ import {
 } from '@/app/hooks/useRecordTargetSearch';
 
 const CHIP_CLASS: Record<TimelineEntry['kind'], string> = {
-    task: 'bg-brand-light text-brand-dark',
+    task: 'bg-brand-light text-brand-text',
     activity: 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900',
     note: 'bg-neutral-200 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200',
     lifecycle: 'bg-muted text-muted-foreground',

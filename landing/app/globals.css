@@ -47,7 +47,7 @@
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
-  --color-destructive-foreground: var(--destructive-foreground);
+  --color-brand-text: var(--brand-text);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -69,6 +69,15 @@
   --radius-4xl: calc(var(--radius) * 2.6);
   --ease-hand: var(--motion-ease-hand);
   --ease-calm: var(--motion-ease-calm);
+}
+
+/* Toast helpers read these variables from inline styles even without a matching utility. */
+@theme static {
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
 }
 
 @media print {
@@ -97,12 +106,13 @@
   }
 
   .report-paper {
+    --brand-text: oklch(0.45 0.12 140);
     --background: oklch(1 0 0);
     --foreground: oklch(0.145 0 0);
     --card: oklch(1 0 0);
     --card-foreground: oklch(0.145 0 0);
     --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
+    --muted-foreground: oklch(0.50 0 0);
     --border: oklch(0.922 0 0);
     --chart-grid: var(--border);
     color-scheme: light;
@@ -125,12 +135,13 @@
   }
 
   .document-paper {
+    --brand-text: oklch(0.45 0.12 140);
     --background: oklch(1 0 0);
     --foreground: oklch(0.145 0 0);
     --card: oklch(1 0 0);
     --card-foreground: oklch(0.145 0 0);
     --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
+    --muted-foreground: oklch(0.50 0 0);
     --border: oklch(0.922 0 0);
     color-scheme: light;
     max-width: none;
@@ -174,10 +185,16 @@
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
+  --muted-foreground: oklch(0.50 0 0);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: var(--primary-foreground);
+  --info: var(--chart-2);
+  --info-foreground: var(--color-brand-foreground);
+  --warning: var(--chart-open);
+  --warning-foreground: var(--color-brand-foreground);
+  --brand-text: oklch(0.45 0.12 140);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
@@ -237,10 +254,16 @@
   --secondary: oklch(0.269 0 0);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
+  --muted-foreground: oklch(0.75 0 0);
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: var(--primary-foreground);
+  --info: var(--chart-2);
+  --info-foreground: var(--color-brand-foreground);
+  --warning: var(--chart-open);
+  --warning-foreground: var(--color-brand-foreground);
+  --brand-text: var(--color-brand);
   --border: oklch(1 0 0 / 16%);
   --input: oklch(1 0 0 / 22%);
   --ring: oklch(0.556 0 0);
@@ -337,7 +360,7 @@
     @apply bg-transparent p-0;
   }
   .note-prose :where(a) {
-    @apply text-brand-dark underline underline-offset-2;
+    @apply text-brand-text underline underline-offset-2;
   }
   .note-prose :where(hr) {
     @apply my-6 border-border;
@@ -694,4 +717,8 @@ table[data-density="compact"] :is(thead, tbody) :is(th, td) {
 
 @media (prefers-reduced-motion: reduce) {
   .connex-cloud-drift { animation: none; }
+}
+
+.cn-toast[data-sonner-toast][data-styled="true"] [data-description] {
+  color: inherit;
 }

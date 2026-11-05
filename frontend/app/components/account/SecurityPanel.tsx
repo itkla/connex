@@ -53,15 +53,13 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
+import { rowActionTrigger } from "@/app/components/settings/SettingsListPrimitives";
 import DeleteRecordDialog from "@/app/components/records/DeleteRecordDialog";
 import PasskeyApprovalDialog from "@/app/components/account/PasskeyApprovalDialog";
 import PrivilegedMfaConfinementCard from "@/app/components/account/PrivilegedMfaConfinementCard";
 import PasskeyEnrollmentPasswordDialog from "@/app/components/account/PasskeyEnrollmentPasswordDialog";
 import Rise from "@/app/components/motion/Rise";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
-
-const rowActionTrigger =
-    "flex size-7 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted/70 hover:text-foreground group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100";
 
 function isRoaming(passkey: Passkey): boolean {
     return passkey.transports.some((t) => t === "usb" || t === "nfc" || t === "ble");

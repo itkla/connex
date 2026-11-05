@@ -103,7 +103,7 @@ export default async function MapPage({ searchParams }: { searchParams: Promise<
             {isEmpty ? (
                 <div className="flex min-h-0 flex-1 items-center justify-center">
                     <div className="flex max-w-md flex-col items-center rounded-2xl border border-border bg-card px-6 py-16 text-center">
-                        <span className="flex size-14 items-center justify-center rounded-2xl bg-brand-light text-brand">
+                        <span className="flex size-14 items-center justify-center rounded-2xl bg-brand-light text-brand-text">
                             <ShareIcon className="size-7" />
                         </span>
                         <h2 className="mt-6 text-xl font-semibold text-foreground">{t("emptyTitle")}</h2>

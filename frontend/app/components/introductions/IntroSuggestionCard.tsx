@@ -35,7 +35,7 @@ function Party({
             <div className="min-w-0 flex-1">
                 <Link
                     href={`/records/contacts/${id}`}
-                    className="block truncate text-sm font-semibold text-foreground transition-colors hover:text-brand-hover"
+                    className="block truncate text-sm font-semibold text-foreground transition-colors hover:text-brand-text"
                 >
                     {name}
                 </Link>

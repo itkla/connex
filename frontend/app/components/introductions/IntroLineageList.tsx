@@ -42,7 +42,7 @@ export default function IntroLineageList({ items }: { items: IntroductionRecord[
                         className="flex gap-4 px-4 py-4 transition-colors hover:bg-muted/30 sm:px-6"
                     >
                         <div className="flex flex-col items-center" aria-hidden>
-                            <span className="grid size-7 shrink-0 place-items-center rounded-full bg-brand/12 text-brand ring-1 ring-inset ring-brand/25">
+                            <span className="grid size-7 shrink-0 place-items-center rounded-full bg-brand/12 text-brand-text ring-1 ring-inset ring-brand/25">
                                 <CheckIcon className="size-3.5" />
                             </span>
                             {index < items.length - 1 ? (
@@ -56,7 +56,7 @@ export default function IntroLineageList({ items }: { items: IntroductionRecord[
                                     <PartyAvatar imageUrl={item.personAImageUrl} />
                                     <Link
                                         href={`/records/contacts/${item.personAId}`}
-                                        className="truncate text-sm font-medium text-foreground transition-colors hover:text-brand-hover"
+                                        className="truncate text-sm font-medium text-foreground transition-colors hover:text-brand-text"
                                     >
                                         {item.personAName}
                                     </Link>
@@ -69,7 +69,7 @@ export default function IntroLineageList({ items }: { items: IntroductionRecord[
                                     <PartyAvatar imageUrl={item.personBImageUrl} />
                                     <Link
                                         href={`/records/contacts/${item.personBId}`}
-                                        className="truncate text-sm font-medium text-foreground transition-colors hover:text-brand-hover"
+                                        className="truncate text-sm font-medium text-foreground transition-colors hover:text-brand-text"
                                     >
                                         {item.personBName}
                                     </Link>

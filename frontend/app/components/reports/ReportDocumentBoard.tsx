@@ -663,7 +663,7 @@ function ReportPaper({
             <header className="border-b border-border pb-8">
                 <div className="flex flex-wrap items-start justify-between gap-6">
                     <div className="max-w-3xl">
-                        <p className="text-xs font-medium uppercase tracking-[0.16em] text-brand-dark">{t('document.reportLabel')}</p>
+                        <p className="text-xs font-medium uppercase tracking-[0.16em] text-brand-text">{t('document.reportLabel')}</p>
                         <h1 className="mt-3 text-4xl font-extrabold tracking-tight text-foreground sm:text-5xl">
                             {document.definition.name}
                         </h1>
@@ -857,7 +857,7 @@ function ReportPaper({
                         <tbody className="divide-y divide-border">
                             {document.appendix.map((row) => (
                                 <tr key={row.sourceId} id={`source-${row.sourceId}`}>
-                                    <td className="px-4 py-3 text-xs font-medium text-brand-dark">
+                                    <td className="px-4 py-3 text-xs font-medium text-brand-text">
                                         [{citationIndex.get(row.sourceId) ?? row.sourceId}]
                                     </td>
                                     <td className="px-4 py-3 text-foreground">
@@ -927,7 +927,7 @@ function NarrativeClaim({
                 <a
                     key={reference.sourceId}
                     href={`#source-${reference.sourceId}`}
-                    className="align-super text-[0.7em] font-semibold text-brand-dark hover:underline"
+                    className="align-super text-[0.7em] font-semibold text-brand-text hover:underline"
                 >
                     [{reference.index}]
                 </a>
@@ -951,7 +951,7 @@ function Citation({
 }) {
     return (
         <li className="flex gap-2">
-            <span className="font-semibold text-brand-dark">[{index}]</span>
+            <span className="font-semibold text-brand-text">[{index}]</span>
             <span>
                 {label} · {formatReportValue(citation.value, citation.unit, locale)}
                 {citation.priorValue != null

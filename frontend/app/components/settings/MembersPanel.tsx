@@ -106,7 +106,7 @@ function isWorkspaceRole(role: string): role is WorkspaceRole {
 
 function RoleBadge({ role, label }: { role: string; label: string }) {
     return role === "owner" ? (
-        <Badge className="border-transparent bg-brand-light text-brand-dark">{label}</Badge>
+        <Badge className="border-transparent bg-brand-light text-brand-text">{label}</Badge>
     ) : (
         <Badge variant="secondary">{label}</Badge>
     );
