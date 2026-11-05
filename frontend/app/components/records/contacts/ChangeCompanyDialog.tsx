@@ -159,8 +159,10 @@ export default function ChangeCompanyDialog({ open, onOpenChange, contacts, onSu
                         <div className="ncd-rise grid gap-2" style={{ animationDelay: '90ms' }}>
                             <Label htmlFor="company">{t('companyLabel')}</Label>
                             <Combobox
-                                items={companySearch.companies}
+                                items={companySearch.options}
+                                itemsPending={companySearch.loading}
                                 filter={null}
+                                autoHighlight
                                 itemToStringLabel={(c: Company) => c.name}
                                 value={selected}
                                 onInputValueChange={companySearch.onInputValueChange}
@@ -179,7 +181,7 @@ export default function ChangeCompanyDialog({ open, onOpenChange, contacts, onSu
                                     </InputGroupAddon>
                                 </ComboboxInput>
                                 <ComboboxContent className="pointer-events-auto">
-                                    <ComboboxEmpty>{t('noCompaniesFound')}</ComboboxEmpty>
+                                    <ComboboxEmpty>{companySearch.error ? t('companySearchFailed') : t('noCompaniesFound')}</ComboboxEmpty>
                                     <ComboboxList onWheel={handleListWheel}>
                                         {(company: (typeof companySearch.companies)[number]) => (
                                             <ComboboxItem key={company.id} value={company}>

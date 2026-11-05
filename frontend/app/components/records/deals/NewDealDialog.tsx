@@ -372,8 +372,10 @@ function NewDealFields({
             <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '240ms' }}>
                 <Label htmlFor="deal-company">{t('company')}</Label>
                 <Combobox
-                    items={companySearch.companies}
+                    items={companySearch.options}
+                    itemsPending={companySearch.loading}
                     filter={null}
+                    autoHighlight
                     itemToStringLabel={(company: Company) => company.name}
                     value={selectedCompany}
                     onInputValueChange={companySearch.onInputValueChange}
@@ -393,7 +395,7 @@ function NewDealFields({
                         </InputGroupAddon>
                     </ComboboxInput>
                     <ComboboxContent className="pointer-events-auto">
-                        <ComboboxEmpty>{t('noCompaniesFound')}</ComboboxEmpty>
+                        <ComboboxEmpty>{companySearch.error ? t('companySearchFailed') : t('noCompaniesFound')}</ComboboxEmpty>
                         <ComboboxList onWheel={handleListWheel}>
                             {(company: (typeof companySearch.companies)[number]) => (
                                 <ComboboxItem key={company.id} value={company}>

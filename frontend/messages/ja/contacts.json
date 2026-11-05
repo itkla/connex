@@ -219,6 +219,7 @@
         "save": "保存"
     },
     "ContactsNewContactDialog": {
+        "companySelectionRequired": "検索結果から会社を選択するか、検索欄を空にして続けてください。",
         "companySearchFailed": "会社を検索できませんでした。もう一度お試しください。",
         "dialogTitle": "新規連絡先",
         "description": "連絡先に人物を追加します。追加した連絡先はこのワークスペースのメンバー全員と共有されます。",

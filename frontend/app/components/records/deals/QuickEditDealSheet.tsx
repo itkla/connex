@@ -253,8 +253,10 @@ export default function QuickEditDealSheet({
 
                         <QuickEditField label={t('company')} htmlFor={`deal-company-${d.id}`}>
                             <Combobox
-                                items={companySearch.companies}
+                                items={companySearch.options}
+                                itemsPending={companySearch.loading}
                                 filter={null}
+                                autoHighlight
                                 itemToStringLabel={(c: Company) => c.name}
                                 value={selectedCompany}
                                 onInputValueChange={companySearch.onInputValueChange}
@@ -262,7 +264,7 @@ export default function QuickEditDealSheet({
                             >
                                 <ComboboxInput id={`deal-company-${d.id}`} placeholder={t('selectCompany')} showClear />
                                 <ComboboxContent className="pointer-events-auto">
-                                    <ComboboxEmpty>{t('noCompanies')}</ComboboxEmpty>
+                                    <ComboboxEmpty>{companySearch.error ? t('companySearchFailed') : t('noCompanies')}</ComboboxEmpty>
                                     <ComboboxList onWheel={handleListWheel}>
                                         {(c: (typeof companySearch.companies)[number]) => (
                                             <ComboboxItem key={c.id} value={c}>

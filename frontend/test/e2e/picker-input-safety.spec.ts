@@ -28,14 +28,24 @@ for (const locale of ['en', 'ja'] as const) {
         page.on('request', (request) => {
             if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/persons') creates += 1;
         });
+        await company.fill(fixture.companyName);
+        await expect(page.getByRole('option', { name: fixture.companyName, exact: true })).toBeVisible();
         await company.fill('No matching company for this picker regression');
         await expect(page.getByRole('option')).toHaveCount(0);
         await company.press('Enter');
         await expect(dialog).toBeVisible();
         await expect(company).toHaveValue('No matching company for this picker regression');
         expect(creates).toBe(0);
+        await dialog.getByLabel(contactCopy(locale, 'title'), { exact: true }).fill('Keep the company draft');
+        await expect(company).toHaveValue('No matching company for this picker regression');
+        const create = dialog.getByRole('button', { name: contactCopy(locale, 'create'), exact: true });
+        await expect(create).toBeEnabled();
+        await create.click();
+        await expect(company).toBeFocused();
+        await expect(dialog.getByRole('alert')).toHaveText(contactCopy(locale, 'companySelectionRequired'));
+        expect(creates).toBe(0);
 
-        await company.fill(fixture.companyName);
+        await company.fill('acme-rocket.example.com');
         await expect(page.getByRole('option', { name: fixture.companyName, exact: true })).toBeVisible();
         await expect(page.getByRole('option')).toHaveCount(1);
         await expect(company).toHaveAttribute('aria-activedescendant', /.+/);

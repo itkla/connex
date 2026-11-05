@@ -12,7 +12,7 @@ import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
 import messages from '@/messages/en/common.json';
 import jaMessages from '@/messages/ja/common.json';
 
-const choices = ['Fuji Logistics', '北川商事', 'Kitagawa', ...Array.from({ length: 200 }, (_, i) => `Company ${i}`)];
+const choices = ['Fuji Logistics', '北川商事', 'Kitagawa', 'ガーデン商事', ...Array.from({ length: 200 }, (_, i) => `Company ${i}`)];
 
 beforeEach(() => {
     vi.stubGlobal('ResizeObserver', class {
@@ -33,10 +33,10 @@ afterEach(() => {
     vi.unstubAllGlobals();
 });
 
-function Picker({ chips = false, server = false, onValueChange = vi.fn() }: {
-    chips?: boolean; server?: boolean; onValueChange?: (value: string | null, details: unknown) => void;
+function Picker({ chips = false, server = false, initialSelection, onValueChange = vi.fn() }: {
+    chips?: boolean; server?: boolean; initialSelection?: string; onValueChange?: (value: string | null, details: unknown) => void;
 }) {
-    return <Combobox<string, boolean> items={choices} multiple={chips}
+    return <Combobox<string, boolean> items={choices} multiple={chips} defaultValue={initialSelection}
         onValueChange={(value, details) => onValueChange(Array.isArray(value) ? value.at(-1) ?? null : value, details)}
         filter={server ? null : undefined}>
         {chips ? <ComboboxChips><ComboboxChipsInput aria-label="Company" /></ComboboxChips> : <ComboboxInput aria-label="Company" />}
@@ -132,6 +132,27 @@ describe('shared picker collection and keys', () => {
         expect(input).toHaveProperty('value', 'No match');
     });
 
+    it('keeps the other choices visible for a selection and restores collapsed Enter on cancellation', async () => {
+        render(<Picker initialSelection="Fuji Logistics" />);
+        const input = screen.getByRole('combobox');
+        act(() => input.focus());
+        fireEvent.keyDown(input, { key: 'ArrowDown' });
+        await waitFor(() => expect(screen.getAllByRole('option')).toHaveLength(100));
+        fireEvent.change(input, { target: { value: 'Another company' } });
+        fireEvent.keyDown(input, { key: 'Escape' });
+        await waitFor(() => expect(input).toHaveProperty('value', 'Fuji Logistics'));
+        expect(input.getAttribute('aria-expanded')).toBe('false');
+        expect(fireEvent.keyDown(input, { key: 'Enter' })).toBe(true);
+    });
+
+    it('normalizes half-width kana before Base UI matching', async () => {
+        render(<Form />);
+        const input = screen.getByRole('combobox');
+        fireEvent.keyDown(input, { key: 'ArrowDown' });
+        fireEvent.change(input, { target: { value: 'ｶﾞｰﾃﾞﾝ' } });
+        await waitFor(() => expect(screen.getAllByRole('option').map((node) => node.textContent)).toEqual(['ガーデン商事']));
+    });
+
     it('preserves externally filtered server results', async () => {
         render(<Form server />);
         fireEvent.keyDown(screen.getByRole('combobox'), { key: 'ArrowDown' });
@@ -189,7 +210,14 @@ describe('nested dismissal and safe focus', () => {
         act(() => draft.focus());
         fireEvent.keyDown(draft, { key: 'Escape' });
         const reopenedKeep = await screen.findByRole('button', { name: messages.ConfirmDiscard.keepEditing });
-        fireEvent.keyDown(reopenedKeep, { key: 'Escape' });
+        const parentEscape = vi.fn();
+        document.addEventListener('keydown', parentEscape, true);
+        try {
+            fireEvent.keyDown(reopenedKeep, { key: 'Escape' });
+            expect(parentEscape).not.toHaveBeenCalled();
+        } finally {
+            document.removeEventListener('keydown', parentEscape, true);
+        }
         await waitFor(() => expect(screen.queryByText(messages.ConfirmDiscard.title)).toBeNull());
         await waitFor(() => expect(document.activeElement).toBe(draft));
     });

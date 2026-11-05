@@ -46,6 +46,7 @@ import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
 import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';
 import { useCompanySearch } from '@/app/hooks/useCompanySearch';
+import { usePickerDraft } from '@/app/hooks/usePickerDraft';
 import {
     duplicatePreflightResponseSignature,
     useDuplicatePreflight,
@@ -265,6 +266,7 @@ export function NewContactForm({
     const [imageSelectionPending, setImageSelectionPending] = useState(false);
     const [cardSelectionPending, setCardSelectionPending] = useState(false);
     const [manualRecoveryOverride, setManualRecoveryOverride] = useState(false);
+    const [companySubmitAttempt, setCompanySubmitAttempt] = useState<string | null>(null);
     const [personResolutionSelection, setPersonResolutionSelection] =
         useState<BusinessCardPersonResolutionSelection | null>(null);
     const [prevActive, setPrevActive] = useState(active);
@@ -332,6 +334,9 @@ export function NewContactForm({
     const resolvedCompany = companySearch.companies.find(
         (company) => company.id === newContactPayload.companyId,
     ) ?? (selectedCompany?.id === newContactPayload.companyId ? selectedCompany : null);
+    const companyDraft = usePickerDraft(resolvedCompany?.name ?? '', companySearch.onInputValueChange);
+    const unresolvedCompany = companyDraft.pending && !reuseExistingPerson
+        && !(businessCard.file && businessCard.companyMode === 'create');
     const scanResult = businessCard.result;
     const matchedCompanyName = scanResult?.company.matchedCompanyId === newContactPayload.companyId
         ? scanResult?.company.value ?? null
@@ -504,6 +509,11 @@ export function NewContactForm({
 
     const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
+        if (unresolvedCompany) {
+            setCompanySubmitAttempt(companyDraft.inputValue);
+            document.getElementById('company')?.focus();
+            return;
+        }
         if (submissionPendingRef.current
             || isCreating
             || imageSelectionPendingRef.current
@@ -771,6 +781,9 @@ export function NewContactForm({
                         fieldErrors={fieldErrors}
                         clearError={clearError}
                         companySearch={companySearch}
+                        companyDraft={companyDraft}
+                        unresolvedCompany={unresolvedCompany}
+                        invalidCompany={unresolvedCompany && companySubmitAttempt === companyDraft.inputValue}
                         resolvedCompany={resolvedCompany}
                         matchedCompanyName={matchedCompanyName}
                         isCreating={formPending || recoveryBlocked}
@@ -919,6 +932,9 @@ type ContactDetailsFieldsProps = {
     fieldErrors: ReturnType<typeof useFieldErrors>['fieldErrors'];
     clearError: ReturnType<typeof useFieldErrors>['clearError'];
     companySearch: ReturnType<typeof useCompanySearch>;
+    companyDraft: ReturnType<typeof usePickerDraft>;
+    unresolvedCompany: boolean;
+    invalidCompany: boolean;
     resolvedCompany: Company | null;
     matchedCompanyName: string | null;
     isCreating: boolean;
@@ -939,6 +955,9 @@ function ContactDetailsFields({
     fieldErrors,
     clearError,
     companySearch,
+    companyDraft,
+    unresolvedCompany,
+    invalidCompany,
     resolvedCompany,
     matchedCompanyName,
     isCreating,
@@ -1079,15 +1098,30 @@ function ContactDetailsFields({
             <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '240ms' }}>
                 <Label htmlFor="company">{t('company')}</Label>
                 <Combobox
-                    items={companySearch.companies}
+                    items={companySearch.options}
+                    itemsPending={companySearch.loading}
                     disabled={disabled}
+                    filter={null}
+                    autoHighlight
                     itemToStringLabel={(company: Company) => company.name}
                     value={resolvedCompany}
-                    onInputValueChange={companySearch.onInputValueChange}
-                    onValueChange={(company) => businessCard.selectExistingCompany(company?.id)}
+                    inputValue={companyDraft.inputValue}
+                    onOpenChange={companyDraft.onOpenChange}
+                    onInputValueChange={(value, details) => {
+                        companyDraft.onInputValueChange(value, details);
+                        if (!details.isCanceled && value === '' && details.reason === 'input-change') {
+                            businessCard.selectExistingCompany(undefined);
+                        }
+                    }}
+                    onValueChange={(company) => {
+                        companyDraft.commit();
+                        businessCard.selectExistingCompany(company?.id);
+                    }}
                 >
                     <ComboboxInput
                         id="company"
+                        aria-invalid={invalidCompany}
+                        aria-describedby={unresolvedCompany ? "company-selection-error" : undefined}
                         disabled={disabled}
                         placeholder={t('selectCompanyPlaceholder')}
                         className="rounded-lg border-0 bg-muted shadow-none ring-1 ring-border dark:bg-muted has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-brand"
@@ -1097,7 +1131,7 @@ function ContactDetailsFields({
                         </InputGroupAddon>
                     </ComboboxInput>
                     <ComboboxContent className="pointer-events-auto">
-                        <ComboboxEmpty>{t('noCompaniesFound')}</ComboboxEmpty>
+                        <ComboboxEmpty>{companySearch.error ? t('companySearchFailed') : t('noCompaniesFound')}</ComboboxEmpty>
                         <ComboboxList onWheel={onListWheel}>
                             {(company: (typeof companySearch.companies)[number]) => (
                                 <ComboboxItem key={company.id} value={company}>
@@ -1107,6 +1141,7 @@ function ContactDetailsFields({
                         </ComboboxList>
                     </ComboboxContent>
                 </Combobox>
+                {unresolvedCompany ? <p id="company-selection-error" role={invalidCompany ? 'alert' : 'status'} className={cn('text-sm', invalidCompany ? 'text-destructive' : 'text-muted-foreground')}>{t('companySelectionRequired')}</p> : null}
                 <BusinessCardCompanyChoice
                     active={businessCard.file != null && !reuseExistingPerson}
                     canCreateCompany={businessCard.canCreateCompany}
@@ -1116,7 +1151,10 @@ function ContactDetailsFields({
                     validationError={businessCard.companyValidationError}
                     fieldError={fieldErrors.companyName}
                     disabled={disabled}
-                    onModeChange={businessCard.selectCompanyMode}
+                    onModeChange={(mode) => {
+                        if (mode !== 'existing') companyDraft.commit();
+                        businessCard.selectCompanyMode(mode);
+                    }}
                     onCompanyNameChange={(value) => {
                         businessCard.updateCompanyName(value);
                         clearError('companyName');

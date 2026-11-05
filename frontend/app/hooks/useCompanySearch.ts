@@ -4,11 +4,20 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { getCompaniesByIds, getCompaniesPage } from '@/app/lib/api';
 import type { Company } from '@/app/lib/types';
+import type { ComboboxRootChangeEventDetails } from '@base-ui/react/combobox';
 
 const SEARCH_SIZE = 50;
 const SEARCH_DELAY_MS = 200;
 const EMPTY_IDS: Array<number | null | undefined> = [];
 const EMPTY_COMPANIES: Company[] = [];
+
+type SearchResult = {
+    query: string;
+    selectedKey: string;
+    options: Company[];
+    companies: Company[];
+    error: unknown;
+};
 
 function mergeCompanies(primary: Company[], secondary: Company[]): Company[] {
     const byId = new Map<number, Company>();
@@ -16,16 +25,14 @@ function mergeCompanies(primary: Company[], secondary: Company[]): Company[] {
     return [...byId.values()].sort((left, right) => left.name.localeCompare(right.name));
 }
 
-/** Provides debounced, paged company options while preserving selected records by id. */
+/** Separates current-query matches from hydrated selections throughout debounce, requests and failures. */
 export function useCompanySearch(
     enabled: boolean,
     selectedIds: Array<number | null | undefined> = EMPTY_IDS,
     seeds: Company[] = EMPTY_COMPANIES,
 ) {
     const [query, setQuery] = useState('');
-    const [companies, setCompanies] = useState<Company[]>(seeds);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<unknown>(null);
+    const [result, setResult] = useState<SearchResult | null>(null);
     const selectedKey = [...selectedIds]
         .filter((id): id is number => id != null && Number.isInteger(id) && id > 0)
         .sort((left, right) => left - right)
@@ -34,45 +41,52 @@ export function useCompanySearch(
         () => selectedKey ? selectedKey.split(',').map(Number) : [],
         [selectedKey],
     );
+    const normalizedQuery = query.normalize('NFKC').trim();
+    const current = enabled && result?.query === normalizedQuery && result.selectedKey === selectedKey
+        ? result : null;
 
     useEffect(() => {
         if (!enabled) return;
-        let cancelled = false;
+        const controller = new AbortController();
         const timer = window.setTimeout(() => {
-            setLoading(true);
-            setError(null);
             Promise.all([
-                getCompaniesPage({ q: query.trim() || undefined, size: SEARCH_SIZE }),
-                getCompaniesByIds(stableSelectedIds),
+                getCompaniesPage({ q: normalizedQuery || undefined, size: SEARCH_SIZE }, { signal: controller.signal }),
+                getCompaniesByIds(stableSelectedIds, { signal: controller.signal }),
             ])
                 .then(([page, selected]) => {
-                    if (!cancelled) {
-                        setCompanies((current) => mergeCompanies(
-                            selected,
-                            mergeCompanies(
-                                page.items,
-                                current.filter((company) => stableSelectedIds.includes(company.id)),
-                            ),
-                        ));
-                    }
+                    if (controller.signal.aborted) return;
+                    setResult({
+                        query: normalizedQuery,
+                        selectedKey,
+                        options: page.items,
+                        companies: mergeCompanies(selected, page.items),
+                        error: null,
+                    });
                 })
-                .catch((nextError: unknown) => {
-                    if (!cancelled) {
-                        setCompanies((current) => current.filter(
-                            (company) => stableSelectedIds.includes(company.id),
-                        ));
-                        setError(nextError);
-                    }
-                })
-                .finally(() => {
-                    if (!cancelled) setLoading(false);
+                .catch((error: unknown) => {
+                    if (controller.signal.aborted) return;
+                    setResult((previous) => ({
+                        query: normalizedQuery,
+                        selectedKey,
+                        options: [],
+                        companies: previous?.companies.filter((company) => stableSelectedIds.includes(company.id)) ?? [],
+                        error,
+                    }));
                 });
         }, SEARCH_DELAY_MS);
         return () => {
-            cancelled = true;
+            controller.abort();
             window.clearTimeout(timer);
         };
-    }, [enabled, query, stableSelectedIds]);
+    }, [enabled, normalizedQuery, selectedKey, stableSelectedIds]);
 
-    return { companies, loading, error, onInputValueChange: setQuery };
+    return {
+        companies: mergeCompanies(result?.companies ?? [], seeds),
+        options: current?.options ?? EMPTY_COMPANIES,
+        loading: enabled && current === null,
+        error: current?.error ?? null,
+        onInputValueChange: (value: string, details?: ComboboxRootChangeEventDetails) => {
+            if (!details || details.reason === 'input-change' || details.reason === 'clear-press') setQuery(value);
+        },
+    };
 }

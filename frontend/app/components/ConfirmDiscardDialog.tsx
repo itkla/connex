@@ -28,7 +28,7 @@ export default function ConfirmDiscardDialog({ open, onKeepEditing, onDiscard }:
                 className="sm:max-w-sm"
                 onEscapeKeyDown={(event) => {
                     event.preventDefault();
-                    event.stopPropagation();
+                    event.stopImmediatePropagation();
                     onKeepEditing();
                 }}
                 onOpenAutoFocus={(event) => {
