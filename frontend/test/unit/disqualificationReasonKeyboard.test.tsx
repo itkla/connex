@@ -53,7 +53,6 @@ const ACTIVE_REASON: DisqualificationReason = {
     requiresNote: true,
     position: 10,
     builtIn: false,
-    archivedAt: null,
 };
 
 let container: HTMLDivElement;

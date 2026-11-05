@@ -2,10 +2,22 @@ import Papa from 'papaparse';
 
 import type { ImportEntity } from '@/app/lib/types';
 
+/** Supported CSV encodings, with Shift-JIS decoded using the browser's Windows-932 mapping. */
+export type CsvEncoding = 'utf-8' | 'shift_jis';
+
+/** A CSV rejected for decoding errors, replacement characters, or suspicious fallback text. */
+export class CsvEncodingError extends Error {
+    constructor() {
+        super('CSV text could not be decoded reliably in a supported encoding');
+        this.name = 'CsvEncodingError';
+    }
+}
+
 /**
  * A parsed CSV: trimmed header names and the data rows keyed by header. Empty rows are dropped.
  */
 export type ParsedCsv = {
+    encoding: CsvEncoding;
     headers: string[];
     rows: Record<string, string>[];
 };
@@ -131,26 +143,45 @@ export function columnSamples(rows: Record<string, string>[], header: string, li
 }
 
 /**
- * Parses a CSV {@link File} client-side. Headers are trimmed; fully-empty rows are dropped.
- * Rejects on a fatal parse error.
+ * Parses a CSV {@link File} client-side, trying strict UTF-8 before Windows-932 (Shift-JIS).
+ * Headers are trimmed; fully-empty rows are dropped. Rejects undecodable or replacement text
+ * before any headers or values can reach column mapping or import review.
+ * Successful Shift-JIS fallback alone cannot identify the source encoding. Only on fallback,
+ * rejects a CJK unified ideograph between ASCII letters or halfwidth katakana adjacent to an
+ * ASCII letter as suspected Western mojibake. This heuristic can reject genuine mixed-script
+ * Shift-JIS and cannot detect every unsupported encoding; re-save refused files as CSV UTF-8.
  */
-export function parseCsv(file: File): Promise<ParsedCsv> {
-    return new Promise((resolve, reject) => {
-        Papa.parse<Record<string, string>>(file, {
-            header: true,
-            skipEmptyLines: 'greedy',
-            transformHeader: (header) => header.trim(),
-            complete: (results) => {
-                const headers = (results.meta.fields ?? []).map((h) => h.trim()).filter(Boolean);
-                const rows = results.data.filter((row) =>
-                    Object.values(row).some((value) => value != null && String(value).trim() !== ''),
-                );
-                for (const row of rows) {
-                    delete (row as Record<string, unknown>).__parsed_extra;
-                }
-                resolve({ headers, rows });
-            },
-            error: (error: unknown) => reject(error instanceof Error ? error : new Error(String(error))),
-        });
+export async function parseCsv(file: File): Promise<ParsedCsv> {
+    const bytes = await file.arrayBuffer();
+    let encoding: CsvEncoding = 'utf-8';
+    let text: string;
+    try {
+        text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    } catch {
+        encoding = 'shift_jis';
+        try {
+            text = new TextDecoder('shift_jis', { fatal: true }).decode(bytes);
+        } catch {
+            throw new CsvEncodingError();
+        }
+    }
+    if (text.includes('\uFFFD')) throw new CsvEncodingError();
+    if (encoding === 'shift_jis'
+        && /[A-Za-z]\p{Unified_Ideograph}[A-Za-z]|[A-Za-z][\uFF66-\uFF9F]|[\uFF66-\uFF9F][A-Za-z]/u.test(text)) {
+        throw new CsvEncodingError();
+    }
+
+    const results = Papa.parse<Record<string, string>>(text, {
+        header: true,
+        skipEmptyLines: 'greedy',
+        transformHeader: (header) => header.trim(),
     });
+    const headers = (results.meta.fields ?? []).map((h) => h.trim()).filter(Boolean);
+    const rows = results.data.filter((row) =>
+        Object.values(row).some((value) => value != null && String(value).trim() !== ''),
+    );
+    for (const row of rows) {
+        delete row.__parsed_extra;
+    }
+    return { encoding, headers, rows };
 }
