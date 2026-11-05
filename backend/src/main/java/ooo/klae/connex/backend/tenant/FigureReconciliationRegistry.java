@@ -237,7 +237,7 @@ public final class FigureReconciliationRegistry {
             SharingPosture.COMPANY_PERSON_AND_PIPELINE_SHARE_TRAVERSAL,
             PeriodBasis.UNBOUNDED,
             OwnerBasis.MEMBER_SCOPE_ON_CURRENT_OWNER,
-            "The filtered browser uses canonical open value and realized closed revenue, buckets an "
+            "The filtered browser uses canonical open value plus projected and realized won amounts, buckets an "
                 + "archived company's deals as unassigned, traverses company, pipeline, stage, and "
                 + "contact visibility shares, excludes restricted contacts from contact-filtered "
                 + "figures, remains unbounded, and filters on the current owner.");
@@ -251,7 +251,7 @@ public final class FigureReconciliationRegistry {
             OwnerBasis.NO_MEMBER_SCOPE,
             "The unfiltered browser variant is the deliberate flagship divergence: dealFilterWhere "
                 + "joins nothing, so archived deals remain, no record shares are traversed, and no "
-                + "member scope narrows its unbounded canonical and realized totals.");
+                + "member scope narrows its unbounded open value and won projected and realized totals.");
         declare(entries, Figure.PIPELINE_BOARD,
             List.of(evidence("DealMapper", "getDealBoard")),
             ValueSource.CANONICAL_DEAL_VALUE,

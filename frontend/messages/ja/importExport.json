@@ -14,7 +14,13 @@
     },
     "parsing": "ファイルを読み込み中…",
     "dropPrompt": "CSVをここにドロップ、またはクリックして選択",
-    "uploadHint": "最大5,000行・5MB・.csv",
+    "uploadHint": "最大5,000行・5MB・.csv・UTF-8またはShift-JIS",
+    "detectedEncoding": "検出した文字コード：{encoding}",
+    "encoding": {
+      "utf-8": "UTF-8",
+      "shift_jis": "Shift-JIS（Windows-932）"
+    },
+    "errorEncoding": "ファイルの文字を正しく読み取れませんでした。UTF-8のCSVで保存し直してから、もう一度お試しください。データはインポートされていません。",
     "errorTooLarge": "ファイルが大きすぎます（最大{max}）。",
     "errorNoColumns": "このファイルに列が見つかりません。",
     "errorNoRows": "このファイルにデータ行が見つかりません。",
@@ -138,7 +144,7 @@
         "tasks": "タスク"
       },
       "dropPrompt": "CSVをドロップするか、クリックして選択",
-      "uploadHint": "最大5,000行・5MB・.csv",
+      "uploadHint": "最大5,000行・5MB・.csv・UTF-8またはShift-JIS",
       "errors": {
         "tooLarge": "ファイルサイズが5MBを超えています。",
         "noColumns": "列が見つかりませんでした。",
