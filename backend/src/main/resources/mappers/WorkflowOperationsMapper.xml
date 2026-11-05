@@ -28,6 +28,7 @@
       SUM(
         w.enabled = TRUE
         AND w.intake_paused_at IS NULL
+        AND (#{runtimeEnabled} = TRUE OR w.runtime_owner = 'legacy')
         AND NOT EXISTS (
           SELECT 1
           FROM workflow_intervention wi
@@ -51,7 +52,16 @@
             AND dead.workflow_id = w.id
             AND dead.status = 'dead'
         )
+        AND NOT EXISTS (
+          SELECT 1 FROM rule_execution re
+          WHERE re.workspace_id = w.workspace_id
+            AND re.rule_id = w.legacy_rule_id
+            AND re.status IN ('failed', 'partial')
+            AND re.executed_at &gt;= DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 24 HOUR)
+        )
       ) AS healthy_count,
+      SUM(w.enabled = TRUE AND w.runtime_owner = 'canonical'
+        AND #{runtimeEnabled} = FALSE) AS unavailable_count,
       SUM(w.intake_paused_at IS NOT NULL) AS paused_count,
       SUM(w.enabled = FALSE) AS disabled_count,
       SUM(
@@ -70,6 +80,20 @@
           WHERE dead.workspace_id = w.workspace_id
             AND dead.workflow_id = w.id
             AND dead.status = 'dead'
+        )
+        OR EXISTS (
+          SELECT 1 FROM rule_execution re
+          WHERE re.workspace_id = w.workspace_id
+            AND re.rule_id = w.legacy_rule_id
+            AND re.status IN ('failed', 'partial')
+            AND re.executed_at &gt;= DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 24 HOUR)
+        )
+        OR EXISTS (
+          SELECT 1 FROM workflow_run fr
+          WHERE fr.workspace_id = w.workspace_id
+            AND fr.workflow_id = w.id
+            AND fr.status IN ('failed', 'intervention_required')
+            AND fr.finished_at &gt;= DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 24 HOUR)
         )
       ) AS intervention_required_count,
       COALESCE((
@@ -107,6 +131,12 @@
         WHERE dead.workspace_id = #{workspaceId}
           AND dead.status = 'dead'
           AND dead.completed_at &gt;= DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 24 HOUR)
+      ), 0) + COALESCE((
+        SELECT COUNT(*) FROM rule_execution re
+        JOIN workflow lw ON lw.workspace_id = re.workspace_id AND lw.legacy_rule_id = re.rule_id
+        WHERE re.workspace_id = #{workspaceId}
+          AND re.status IN ('failed', 'partial')
+          AND re.executed_at &gt;= DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 24 HOUR)
       ), 0) AS recent_failure_count
     FROM workflow w
     WHERE w.workspace_id = #{workspaceId}
@@ -143,10 +173,17 @@
           AND resume_at &lt; DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 5 MINUTE))
       ) AS overdue_count,
       MIN(CASE WHEN status = 'waiting' THEN resume_at END) AS next_resume_at,
-      SUM(
+      COALESCE(SUM(
         status IN ('failed', 'intervention_required')
         AND finished_at &gt;= DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 24 HOUR)
-      ) AS recent_failure_count
+      ), 0) + COALESCE((
+        SELECT COUNT(*) FROM rule_execution re
+        JOIN workflow lw ON lw.workspace_id = re.workspace_id AND lw.legacy_rule_id = re.rule_id
+        WHERE re.workspace_id = #{workspaceId}
+          AND lw.id = #{workflowId}
+          AND re.status IN ('failed', 'partial')
+          AND re.executed_at &gt;= DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 24 HOUR)
+      ), 0) AS recent_failure_count
     FROM workflow_run
     WHERE workspace_id = #{workspaceId}
       AND workflow_id = #{workflowId}
@@ -215,6 +252,41 @@
           OR (wr.started_at = #{beforeStartedAt} AND wr.id &lt; #{beforeId}))
       </if>
     ORDER BY wr.started_at DESC, wr.id DESC
+    LIMIT #{limit}
+  </select>
+
+  <select id="getLegacyOperationsRuns" resultType="WorkflowOperationsLegacyRunView">
+    SELECT re.id, re.workspace_id, re.rule_id, re.trigger_entity_type, re.trigger_entity_id,
+           re.status, re.executed_at, w.id AS workflow_id, w.name AS workflow_name, origin.recipe_key
+    FROM rule_execution re
+    JOIN workflow w
+      ON w.workspace_id = re.workspace_id
+     AND w.legacy_rule_id = re.rule_id
+    LEFT JOIN workflow_recipe_origin origin
+      ON origin.workspace_id = w.workspace_id
+     AND origin.workflow_id = w.id
+    WHERE re.workspace_id = #{workspaceId}
+      <if test="status != null">
+        AND CASE re.status
+          WHEN 'matched' THEN 'succeeded'
+          WHEN 'running' THEN 'running'
+          WHEN 'partial' THEN 'partial'
+          WHEN 'skipped' THEN 'skipped'
+          ELSE 'failed'
+        END = #{status}
+      </if>
+      <if test="failureCategory != null">
+        AND #{failureCategory} = 'execution'
+        AND re.status IN ('failed', 'partial')
+      </if>
+      <if test="ownerId != null">
+        AND 1 = 0
+      </if>
+      <if test="beforeStartedAt != null and beforeId != null">
+        AND (re.executed_at &lt; #{beforeStartedAt}
+          OR (re.executed_at = #{beforeStartedAt} AND re.id &lt; #{beforeId}))
+      </if>
+    ORDER BY re.executed_at DESC, re.id DESC
     LIMIT #{limit}
   </select>
 

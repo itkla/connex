@@ -4,6 +4,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
@@ -48,7 +49,7 @@ public class WorkflowOperationsService {
     private static final int MAX_CURSOR_LENGTH = 256;
     private static final Set<String> RUN_STATUSES = Set.of(
         "queued", "running", "waiting", "succeeded", "failed", "skipped",
-        "cancelled", "intervention_required");
+        "cancelled", "intervention_required", "partial");
     private static final Set<String> FAILURE_CATEGORIES = Set.of(
         "actor", "permission", "reference", "retry", "configuration", "execution");
 
@@ -58,15 +59,18 @@ public class WorkflowOperationsService {
     private final WorkflowDraftCanonicalizer canonicalizer;
     private final WorkflowRunReadService runReadService;
     private final WorkspaceService workspaceService;
+    private final WorkflowRuntimeProperties runtimeProperties;
 
     @Transactional(readOnly = true)
     @RequirePermission(Permission.RULE_MANAGE)
     public WorkflowOperationsSummaryDto summary() {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        WorkflowOperationsSummaryView view = operationsMapper.getSummary(workspaceId);
+        WorkflowOperationsSummaryView view = operationsMapper.getSummary(
+            workspaceId, runtimeProperties.enabled());
         return new WorkflowOperationsSummaryDto(
             view.getWorkflowCount(),
             view.getHealthyCount(),
+            view.getUnavailableCount(),
             view.getPausedCount(),
             view.getDisabledCount(),
             view.getInterventionRequiredCount(),
@@ -99,23 +103,39 @@ public class WorkflowOperationsService {
         }
         OperationsCursor cursor = decodeCursor(cursorValue);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        List<WorkflowOperationsRunView> rows = operationsMapper.getOperationsRuns(
-            workspaceId,
-            status,
-            failureCategory,
-            ownerId,
+        List<MergedOperationsRun> rows = new ArrayList<>();
+        operationsMapper.getOperationsRuns(
+            workspaceId, status, failureCategory, ownerId,
             cursor == null ? null : cursor.startedAt(),
-            cursor == null ? null : cursor.id(),
-            limit + 1);
+            cursor == null ? null : cursor.sourceOrder() == 1 ? cursor.id() : 0L,
+            limit + 1).forEach(run -> rows.add(new MergedOperationsRun(
+                runDto(run), run.getStartedAt(), 1, run.getId())));
+        operationsMapper.getLegacyOperationsRuns(
+            workspaceId, status, failureCategory, ownerId,
+            cursor == null ? null : cursor.startedAt(),
+            cursor == null ? null : cursor.sourceOrder() == 0 ? cursor.id() : Long.MAX_VALUE,
+            limit + 1).forEach(run -> {
+                var summary = runReadService.legacySummary(run);
+                rows.add(new MergedOperationsRun(
+                    new WorkflowOperationsRunDto(
+                        run.getWorkflowId(), run.getWorkflowName(), run.getRecipeKey(),
+                        summary,
+                        Set.of("failed", "partial").contains(
+                            WorkflowRunReadService.normalizeLegacyStatus(run.getStatus()))
+                            ? "execution" : null,
+                        null),
+                    summary.startedAt(), 0, run.getId()));
+            });
+        rows.sort(Comparator.comparing(MergedOperationsRun::startedAt)
+            .thenComparing(MergedOperationsRun::sourceOrder)
+            .thenComparing(MergedOperationsRun::id).reversed());
         boolean hasNext = rows.size() > limit;
         List<WorkflowOperationsRunDto> items = rows.stream()
-            .limit(limit)
-            .map(this::runDto)
-            .toList();
-        WorkflowOperationsRunView last = hasNext ? rows.get(limit - 1) : null;
+            .limit(limit).map(MergedOperationsRun::dto).toList();
+        MergedOperationsRun last = hasNext ? rows.get(limit - 1) : null;
         return new WorkflowOperationsRunPageDto(
             items,
-            last == null ? null : encodeCursor(last.getStartedAt(), last.getId()));
+            last == null ? null : encodeCursor(last.startedAt(), last.sourceOrder(), last.id()));
     }
 
     @Transactional(readOnly = true)
@@ -265,6 +285,9 @@ public class WorkflowOperationsService {
         if (workflow.getIntakePausedAt() != null) {
             signals.add("intake_paused");
         }
+        if (!runtimeProperties.enabled() && "canonical".equals(workflow.getRuntimeOwner())) {
+            signals.add("execution_unavailable");
+        }
         if (!interventions.isEmpty()) {
             signals.add("open_intervention");
         }
@@ -285,6 +308,8 @@ public class WorkflowOperationsService {
             state = "archived";
         } else if (!workflow.isEnabled()) {
             state = "disabled";
+        } else if (!runtimeProperties.enabled() && "canonical".equals(workflow.getRuntimeOwner())) {
+            state = "unavailable";
         } else if (workflow.getIntakePausedAt() != null) {
             state = "paused";
         } else if (!interventions.isEmpty()) {
@@ -329,28 +354,36 @@ public class WorkflowOperationsService {
         try {
             String decoded = new String(
                 Base64.getUrlDecoder().decode(value), StandardCharsets.UTF_8);
-            int separator = decoded.lastIndexOf('|');
-            if (separator < 1) {
+            String[] parts = decoded.split("\\|", -1);
+            if (parts.length != 2 && parts.length != 3) {
                 throw new IllegalArgumentException("cursor");
             }
-            LocalDateTime startedAt = LocalDateTime.parse(decoded.substring(0, separator));
-            long id = Long.parseLong(decoded.substring(separator + 1));
+            LocalDateTime startedAt = LocalDateTime.parse(parts[0]);
+            long id = Long.parseLong(parts[parts.length - 1]);
             if (id < 1) {
                 throw new IllegalArgumentException("cursor");
             }
-            return new OperationsCursor(startedAt, id);
+            int sourceOrder = parts.length == 2 ? 1 : Integer.parseInt(parts[1]);
+            if (sourceOrder < 0 || sourceOrder > 1) {
+                throw new IllegalArgumentException("cursor");
+            }
+            return new OperationsCursor(startedAt, sourceOrder, id);
         } catch (IllegalArgumentException exception) {
             throw new BadRequestException("Invalid operations cursor");
         }
     }
 
-    private static String encodeCursor(LocalDateTime startedAt, long id) {
-        String raw = startedAt + "|" + id;
+    private static String encodeCursor(LocalDateTime startedAt, int sourceOrder, long id) {
+        String raw = startedAt + "|" + sourceOrder + "|" + id;
         return Base64.getUrlEncoder().withoutPadding()
             .encodeToString(raw.getBytes(StandardCharsets.UTF_8));
     }
 
-    private record OperationsCursor(LocalDateTime startedAt, long id) { }
+    private record OperationsCursor(LocalDateTime startedAt, int sourceOrder, long id) { }
+
+    private record MergedOperationsRun(
+        WorkflowOperationsRunDto dto, LocalDateTime startedAt, int sourceOrder, long id
+    ) { }
 
     private record NodeDiff(
         List<String> added,

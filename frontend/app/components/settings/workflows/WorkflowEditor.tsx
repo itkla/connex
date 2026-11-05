@@ -341,13 +341,20 @@ function WorkflowEditorBody({
     const diagnosticMessage = useCallback((diagnostic: {
         code: WorkflowDiagnosticCode;
         params: Record<string, string>;
-    }) => t.has(`diagnostics.${diagnostic.code}`)
-        ? t(`diagnostics.${diagnostic.code}`, diagnostic.params)
-        : (
-            <span title={diagnostic.code} aria-description={diagnostic.code}>
-                {t("diagnosticFallback")}
-            </span>
-        ), [t]);
+    }) => {
+        if (diagnostic.code === "legacy_projection_unsupported"
+            && diagnostic.params.reason
+            && t.has(`publicationReason.${diagnostic.params.reason}`)) {
+            return t(`publicationReason.${diagnostic.params.reason}`);
+        }
+        return t.has(`diagnostics.${diagnostic.code}`)
+            ? t(`diagnostics.${diagnostic.code}`, diagnostic.params)
+            : (
+                <span title={diagnostic.code} aria-description={diagnostic.code}>
+                    {t("diagnosticFallback")}
+                </span>
+            );
+    }, [t]);
     const localDiagnostics = useMemo(
         () => workflowDelayDiagnostics(editor.document.definition),
         [editor.document.definition],
@@ -457,6 +464,7 @@ function WorkflowEditorBody({
                 activeVersionNumber={editor.activeVersionNumber}
                 hasActiveVersion={editor.workflow?.activeVersionId != null}
                 enabled={editor.workflow?.enabled ?? false}
+                executionAvailable={editor.workflow?.executionAvailable ?? true}
                 executionMode={editor.history.present.executionMode}
                 archived={editor.workflow?.archivedAt != null}
                 dirty={editor.dirty}

@@ -187,6 +187,24 @@ class WorkflowRunReadServiceTest {
         verify(workflowRunMapper, never()).getViewById(eq(7), eq(11), eq(31L));
     }
 
+    @Test
+    void runningRuleExecutionHasNoCompletionTimestampOrDuration() {
+        RuleExecution execution = new RuleExecution();
+        execution.setId(1);
+        execution.setStatus("running");
+        execution.setExecutedAt(asOf.minusMinutes(1).toString());
+
+        when(workflowMapper.getById(7, 11)).thenReturn(workflow);
+        when(workflowRunMapper.currentTimestamp(7, 11)).thenReturn(asOf);
+        when(ruleMapper.getExecutionPage(7, 13, asOf, null, null, 21))
+            .thenReturn(List.of(execution));
+        var summary = service.listRuns(11, null, null).items().getFirst();
+
+        assertEquals("running", summary.status());
+        assertNull(summary.finishedAt());
+        assertNull(summary.durationMs());
+    }
+
     private static WorkflowRunView canonicalRun(long id, LocalDateTime startedAt) {
         WorkflowRunView run = new WorkflowRunView();
         run.setId(id);

@@ -22,7 +22,9 @@
       "attention": "Needs attention",
       "paused": "Paused",
       "queued": "Queued",
-      "overdue": "Overdue"
+      "overdue": "Overdue",
+      "unavailable": "Unavailable",
+      "unavailableBody": "Some workflows can't run in this environment. Review them and turn them off, or ask your administrator for help."
     },
     "triggerDiagnostics": {
       "title": "Some triggers never reached their workflow",
@@ -33,7 +35,8 @@
       "statusLabel": "Filter by run status",
       "failureLabel": "Filter by reason",
       "allStatuses": "All statuses",
-      "allFailures": "All reasons"
+      "allFailures": "All reasons",
+      "clear": "Clear filters"
     },
     "runs": {
       "title": "Recent runs",
@@ -45,7 +48,9 @@
       "runMeta": "Run #{run} · version {version}",
       "legacyRunMeta": "Earlier run #{run} · version {version}",
       "failureCategory": "Reason: {category}",
-      "recipeOrigin": "From a recipe"
+      "recipeOrigin": "From a recipe",
+      "firstRunTitle": "No runs yet",
+      "firstRunBody": "Runs appear here when a workflow starts. Review your workflows and turn one on to get started."
     },
     "failureCategory": {
       "actor": "Who it runs as",
@@ -100,7 +105,8 @@
         "archived": "Archived",
         "intervention_required": "Needs a person",
         "backlogged": "Behind",
-        "degraded": "Having trouble"
+        "degraded": "Having trouble",
+        "unavailable": "Unavailable"
       },
       "signal": {
         "intake_paused": "New records aren't being picked up. Anything already waiting stays where it is.",
@@ -110,7 +116,8 @@
         "queued_backlog": "Runs are waiting their turn.",
         "waiting_backlog": "Runs are partway through, waiting out a delay.",
         "overdue_backlog": "At least one waiting run is past due.",
-        "recent_failure": "A recent run failed."
+        "recent_failure": "A recent run failed.",
+        "execution_unavailable": "This workflow can't run here. Ask your administrator for help."
       }
     },
     "backlog": {
@@ -314,7 +321,8 @@
           "title": "Review a cooling company",
           "description": "On a schedule, find companies whose warmth is cooling and create a task to check in."
         }
-      }
+      },
+      "coolingUnavailable": "This recipe can't create tasks for companies yet. Choose another recipe."
     },
     "sourceEvent": {
       "person": {

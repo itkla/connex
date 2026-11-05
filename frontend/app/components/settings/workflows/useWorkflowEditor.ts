@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 
 import type { RecordSelectOption } from "@/app/components/records/RecordSelect";
 import { supportsSimulation } from "@/app/components/settings/workflows/vocabulary";
+import { workflowIsReadyToPublish } from "@/app/components/settings/workflows/workflowValidation";
 import {
     connectWorkflowBranch,
     createEmptyWorkflowGraph,
@@ -558,7 +559,7 @@ export function useWorkflowEditor({
                 return;
             }
             setValidation(result);
-            if (result.valid) toastSuccess(t("validationReady"));
+            if (workflowIsReadyToPublish(result)) toastSuccess(t("validationReady"));
         } catch {
             if (documentGeneration === documentGenerationRef.current
                 && actionGeneration === busyActionGenerationRef.current
@@ -571,7 +572,7 @@ export function useWorkflowEditor({
 
     const publish = useCallback(async () => {
         const workspaceId = activeWorkspaceId;
-        if (!workflow || dirty || validation?.draftRevision !== workflow.draftRevision || !validation.canPublish
+        if (!workflow || dirty || validation?.draftRevision !== workflow.draftRevision || !workflowIsReadyToPublish(validation)
             || workspaceId == null || !scopeReady) return;
         const id = workflow.id;
         const scopeGeneration = editorScopeGenerationRef.current;

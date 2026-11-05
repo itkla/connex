@@ -22,7 +22,9 @@
       "attention": "要対応",
       "paused": "一時停止",
       "queued": "順番待ち",
-      "overdue": "期限超過"
+      "overdue": "期限超過",
+      "unavailable": "実行できません",
+      "unavailableBody": "この環境では実行できないワークフローがあります。確認して無効にするか、管理者にご相談ください。"
     },
     "triggerDiagnostics": {
       "title": "ワークフローに届かなかったトリガーがあります",
@@ -33,7 +35,8 @@
       "statusLabel": "実行の状況で絞り込む",
       "failureLabel": "理由で絞り込む",
       "allStatuses": "すべての状況",
-      "allFailures": "すべての理由"
+      "allFailures": "すべての理由",
+      "clear": "絞り込みを解除"
     },
     "runs": {
       "title": "最近の実行",
@@ -45,7 +48,9 @@
       "runMeta": "実行 #{run} · バージョン {version}",
       "legacyRunMeta": "以前の実行 #{run} · バージョン {version}",
       "failureCategory": "理由: {category}",
-      "recipeOrigin": "レシピから作成"
+      "recipeOrigin": "レシピから作成",
+      "firstRunTitle": "実行履歴はまだありません",
+      "firstRunBody": "ワークフローを実行すると、ここに履歴が表示されます。ワークフローを確認して有効にしましょう。"
     },
     "failureCategory": {
       "actor": "実行者",
@@ -100,7 +105,8 @@
         "archived": "アーカイブ済み",
         "intervention_required": "対応が必要",
         "backlogged": "遅れています",
-        "degraded": "不安定"
+        "degraded": "不安定",
+        "unavailable": "実行できません"
       },
       "signal": {
         "intake_paused": "新しいレコードの取り込みを止めています。待機中の処理はそのまま残ります。",
@@ -110,7 +116,8 @@
         "queued_backlog": "順番待ちの実行があります。",
         "waiting_backlog": "待機時間の途中で止まっている実行があります。",
         "overdue_backlog": "予定の時刻を過ぎた待機中の実行があります。",
-        "recent_failure": "最近の実行が失敗しました。"
+        "recent_failure": "最近の実行が失敗しました。",
+        "execution_unavailable": "この環境ではこのワークフローを実行できません。管理者にご相談ください。"
       }
     },
     "backlog": {
@@ -314,7 +321,8 @@
           "title": "温度感が下がった会社の確認",
           "description": "スケジュールに従って、温度感が下がっている会社を見つけ、様子を確認するタスクを作成します。"
         }
-      }
+      },
+      "coolingUnavailable": "このレシピでは、まだ会社へのタスクを作成できません。別のレシピをお選びください。"
     },
     "sourceEvent": {
       "person": {
