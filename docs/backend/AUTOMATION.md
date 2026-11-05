@@ -300,6 +300,9 @@ terminate its two branches at separate End steps. Delays, multiple conditions, a
 branch, conditions after actions, and action counts over 16 return a focused
 `legacy_projection_unsupported` diagnostic with a bounded reason code. Frontend readiness requires
 validity, publication capability, and an empty diagnostic list.
+Pan and zoom changes, including the initial canvas fit, remain saveable canvas preferences but do
+not require a save before Validate, Preview or Publish, and do not invalidate their evidence.
+Other draft edits retain the save-before-validation requirement.
 
 ## Dedupe and rolling compatibility
 

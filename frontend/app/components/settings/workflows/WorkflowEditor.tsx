@@ -468,6 +468,7 @@ function WorkflowEditorBody({
                 executionMode={editor.history.present.executionMode}
                 archived={editor.workflow?.archivedAt != null}
                 dirty={editor.dirty}
+                validationDirty={editor.validationDirty}
                 validation={editor.validation}
                 canUndo={editor.history.past.length > 0 || editor.history.transientBase != null}
                 canRedo={editor.history.future.length > 0}

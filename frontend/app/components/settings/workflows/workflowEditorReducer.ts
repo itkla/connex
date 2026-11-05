@@ -63,7 +63,7 @@ export type WorkflowEditorHistory = {
 export type WorkflowEditorAction =
     | { type: "initialize"; document: WorkflowEditorDocument }
     | { type: "replace"; document: WorkflowEditorDocument }
-    | { type: "untracked"; document: WorkflowEditorDocument }
+    | { type: "moveViewport"; viewport: WorkflowCanvas["viewport"] }
     | { type: "commit"; document: WorkflowEditorDocument }
     | { type: "commitTransient" }
     | { type: "undo" }
@@ -111,10 +111,13 @@ export function workflowEditorReducer(
                 transientBase: state.transientBase ?? structuredClone(state.present),
                 future: [],
             };
-        case "untracked":
+        case "moveViewport":
             return {
                 ...state,
-                present: structuredClone(action.document),
+                present: {
+                    ...state.present,
+                    canvas: { ...state.present.canvas, viewport: structuredClone(action.viewport) },
+                },
             };
         case "commit": {
             const historyBase = state.transientBase ?? state.present;
@@ -191,6 +194,14 @@ export function workflowEditorReducer(
 /** Returns whether the working document differs from its last saved server baseline. */
 export function workflowDocumentIsDirty(history: WorkflowEditorHistory): boolean {
     return !equal(history.present, history.baseline);
+}
+
+/** Returns whether saved-draft validation would miss edits other than pan and zoom preferences. */
+export function workflowDocumentNeedsValidationSave(history: WorkflowEditorHistory): boolean {
+    return !equal({
+        ...history.present,
+        canvas: { ...history.present.canvas, viewport: history.baseline.canvas.viewport },
+    }, history.baseline);
 }
 
 function mergeEntityMap<T extends { id: string }>(

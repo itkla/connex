@@ -30,6 +30,7 @@ export default function WorkflowLifecycleBar({
     executionMode,
     archived,
     dirty,
+    validationDirty,
     validation,
     canUndo,
     canRedo,
@@ -57,6 +58,7 @@ export default function WorkflowLifecycleBar({
     executionMode: WorkflowExecutionMode;
     archived: boolean;
     dirty: boolean;
+    validationDirty: boolean;
     validation: WorkflowValidation | null;
     canUndo: boolean;
     canRedo: boolean;
@@ -77,7 +79,7 @@ export default function WorkflowLifecycleBar({
 }) {
     const t = useTranslations("WorkspaceWorkflows");
     const validationCurrent = validation?.draftRevision === revision;
-    const canPublish = !readOnly && !dirty && validationCurrent && workflowIsReadyToPublish(validation);
+    const canPublish = !readOnly && !validationDirty && validationCurrent && workflowIsReadyToPublish(validation);
     const permissionLabel = (permission: string) => {
         switch (permission) {
             case "TASK_CREATE":
@@ -117,11 +119,11 @@ export default function WorkflowLifecycleBar({
                         <Redo2Icon className="size-4" />
                     </Button>
                 </div>
-                <Button variant="outline" size="sm" onClick={onOpenSimulation} disabled={dirty || revision < 0 || readOnly}>
+                <Button variant="outline" size="sm" onClick={onOpenSimulation} disabled={validationDirty || revision < 0 || readOnly}>
                     <BeakerIcon className="size-4" />
                     {t("previewAction")}
                 </Button>
-                <Button variant="outline" size="sm" onClick={onValidate} disabled={dirty || revision < 0 || readOnly || busyAction !== null}>
+                <Button variant="outline" size="sm" onClick={onValidate} disabled={validationDirty || revision < 0 || readOnly || busyAction !== null}>
                     {busyAction === "validate" ? <Loader2Icon className="size-4 animate-spin motion-reduce:animate-none" /> : <CheckCircleIcon className="size-4" />}
                     {t("validate")}
                 </Button>

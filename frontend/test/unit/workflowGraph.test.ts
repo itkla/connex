@@ -19,6 +19,7 @@ import {
     createWorkflowEditorHistory,
     mergeWorkflowDocuments,
     workflowDocumentIsDirty,
+    workflowDocumentNeedsValidationSave,
     workflowEditorReducer,
     type WorkflowEditorDocument,
 } from "@/app/components/settings/workflows/workflowEditorReducer";
@@ -270,6 +271,86 @@ describe("canonical workflow graph editing", () => {
 });
 
 describe("workflow editor history and recovery", () => {
+    it("keeps validation available after fitting the default viewport and panning manually", () => {
+        const source = document(migratedDefinition, {
+            ...migratedCanvas,
+            viewport: { x: 0, y: 0, zoom: 1 },
+        });
+        let history = createWorkflowEditorHistory(source);
+        const fittedViewport = { x: 120, y: 20, zoom: 0.75 };
+        history = workflowEditorReducer(history, { type: "moveViewport", viewport: fittedViewport });
+
+        expect(history.present.canvas.viewport).toEqual(fittedViewport);
+        expect(history.baseline).toEqual(source);
+        expect(history.past).toHaveLength(0);
+        expect(workflowDocumentIsDirty(history)).toBe(true);
+        expect(workflowDocumentNeedsValidationSave(history)).toBe(false);
+
+        const manualViewport = { x: 240, y: 60, zoom: 0.5 };
+        history = workflowEditorReducer(history, { type: "moveViewport", viewport: manualViewport });
+        expect(history.present.canvas.viewport).toEqual(manualViewport);
+        expect(workflowDocumentIsDirty(history)).toBe(true);
+        expect(workflowDocumentNeedsValidationSave(history)).toBe(false);
+
+        const submittedDocument = structuredClone(history.present);
+        history = workflowEditorReducer(history, {
+            type: "markSaved",
+            submittedDocument,
+            document: submittedDocument,
+        });
+        expect(history.baseline.canvas.viewport).toEqual(manualViewport);
+        expect(workflowDocumentIsDirty(history)).toBe(false);
+    });
+
+    it("does not hide unsaved authoring edits when the viewport moves", () => {
+        let history = createWorkflowEditorHistory(document());
+        history = workflowEditorReducer(history, {
+            type: "replace",
+            document: { ...history.present, name: "Unsaved name" },
+        });
+        history = workflowEditorReducer(history, {
+            type: "moveViewport",
+            viewport: { x: 120, y: 20, zoom: 0.75 },
+        });
+        expect(history.present.name).toBe("Unsaved name");
+        expect(workflowDocumentNeedsValidationSave(history)).toBe(true);
+        history = workflowEditorReducer(history, { type: "undo" });
+        expect(workflowDocumentNeedsValidationSave(history)).toBe(false);
+    });
+
+    it("still requires saved graph and node-position edits before validation", () => {
+        const history = createWorkflowEditorHistory(document());
+        const graphEdit = structuredClone(history.present);
+        graphEdit.definition.edges = [];
+        expect(workflowDocumentNeedsValidationSave(workflowEditorReducer(history, {
+            type: "commit",
+            document: graphEdit,
+        }))).toBe(true);
+
+        const positionEdit = structuredClone(history.present);
+        positionEdit.canvas.positions.trigger = { x: 140, y: 200 };
+        expect(workflowDocumentNeedsValidationSave(workflowEditorReducer(history, {
+            type: "commit",
+            document: positionEdit,
+        }))).toBe(true);
+    });
+
+    it("retains viewport changes made while saving for the next explicit save", () => {
+        let history = createWorkflowEditorHistory(document());
+        const submittedDocument = structuredClone(history.present);
+        const viewport = { x: 240, y: 60, zoom: 0.5 };
+        history = workflowEditorReducer(history, { type: "moveViewport", viewport });
+        history = workflowEditorReducer(history, {
+            type: "markSaved",
+            submittedDocument,
+            document: submittedDocument,
+        });
+        expect(history.present.canvas.viewport).toEqual(viewport);
+        expect(history.baseline.canvas.viewport).toEqual(submittedDocument.canvas.viewport);
+        expect(workflowDocumentIsDirty(history)).toBe(true);
+        expect(workflowDocumentNeedsValidationSave(history)).toBe(false);
+    });
+
     it("preserves edits made while a save request is in flight", () => {
         let history = createWorkflowEditorHistory(document());
         const submittedDocument = { ...history.present, name: "Submitted name" };
