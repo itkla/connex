@@ -16,14 +16,14 @@ function reportDocument(definition: ReportDefinition, mixed: boolean): ReportDoc
         measure: widget.measure,
         groupBy: widget.groupBy,
         unit: mixed ? 'mixed' : 'USD',
-        total: mixed ? null : 1_450_000.25,
+        total: mixed ? null : 1_450_000.257,
         priorTotal: mixed ? null : 1_020_000.75,
         changePercent: null,
         points: [
             {
                 key: mixed ? 'USD:owner' : 'owner',
                 label: mixed ? 'USD · Owner' : 'Owner',
-                value: 1_450_000.25,
+                value: 1_450_000.257,
                 priorValue: 1_020_000.75,
                 sourceId: `${widget.id}-usd`,
             },
@@ -123,9 +123,15 @@ for (const locale of ['en', 'ja'] as const) {
         await expect(paper.getByRole('heading', { name: input.name, exact: true })).toBeVisible();
         await expect(paper.locator('[data-slot="chart"]')).toHaveCount(3);
         await expect(paper.getByText(notice, { exact: true })).toHaveCount(0);
-        await expect(appendix.getByRole('row').filter({ hasText: '$1,450,000.25' })).toHaveCount(4);
+        await expect(appendix.getByRole('row').filter({ hasText: '$1,450,000.26' })).toHaveCount(4);
         await expect(appendix.getByRole('row').filter({ hasText: '$1,020,000.75' })).toHaveCount(4);
-        await expect(citations.getByRole('listitem').filter({ hasText: '$1,450,000.25' })).toHaveCount(4);
+        await expect(citations.getByRole('listitem').filter({ hasText: '$1,450,000.26' })).toHaveCount(4);
+        const barFigure = paper.locator('section').filter({
+            has: page.getByRole('heading', { name: 'Revenue bar', exact: true }),
+        }).last();
+        const bar = barFigure.locator('.recharts-bar-rectangle').first();
+        await bar.hover();
+        await expect(barFigure.locator('.recharts-tooltip-wrapper')).toContainText('$1,450,000.26');
 
         mixed = true;
         await page.getByRole('button', { name: message(locale, 'reports', 'Reports.document.run'), exact: true }).click();
@@ -138,7 +144,7 @@ for (const locale of ['en', 'ja'] as const) {
             }).last();
             await expect(figure.getByRole('table')).toBeVisible();
             const usdRow = figure.getByRole('row').filter({ hasText: 'USD · Owner' });
-            await expect(usdRow.getByRole('cell', { name: '$1,450,000.25', exact: true })).toBeVisible();
+            await expect(usdRow.getByRole('cell', { name: '$1,450,000.26', exact: true })).toBeVisible();
             await expect(usdRow.getByRole('cell', { name: '$1,020,000.75', exact: true })).toBeVisible();
             await expect(figure.getByRole('row').filter({ hasText: 'JPY · Owner' }))
                 .toContainText(yen);
@@ -147,6 +153,6 @@ for (const locale of ['en', 'ja'] as const) {
         await expect(citations.getByRole('listitem').filter({ hasText: yen })).toHaveCount(4);
         await page.emulateMedia({ media: 'print' });
         await expect(paper.getByText(notice, { exact: true }).first()).toBeVisible();
-        await expect(appendix.getByRole('cell', { name: '$1,450,000.25', exact: true }).first()).toBeVisible();
+        await expect(appendix.getByRole('cell', { name: '$1,450,000.26', exact: true }).first()).toBeVisible();
     });
 }

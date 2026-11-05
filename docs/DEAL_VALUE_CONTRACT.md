@@ -205,10 +205,11 @@ re-derives every claim from the mapper SQL, failing loudly when SQL and declarat
 
 ### Report display precision
 
-Report tables, totals, legends, the data appendix, and source citations show monetary amounts in
-standard notation, retaining up to two decimal places and omitting trailing zeros. Monetary chart
-axes use compact notation with up to two decimal places. PNG and print/PDF exports use the same
-rendered document; CSV retains the underlying amounts and currency codes. A mixed-currency chart
+Report tables, totals, legends, chart tooltips, the data appendix, and source citations show monetary
+amounts in standard notation, using the currency's minor-unit precision from `Intl.NumberFormat`
+(whole yen for JPY) and omitting trailing zeros. Monetary chart axes use compact notation with up to
+two decimal places. PNG and print/PDF exports use the same rendered document; CSV retains the
+underlying amounts and currency codes. A mixed-currency chart
 remains a currency-partitioned table with an explanation, without conversion or a combined axis.
 
 ### Declared divergences — do not "fix" these

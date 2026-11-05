@@ -37,15 +37,23 @@ function renderWidget(widget: ReportWidgetData, locale: keyof typeof catalogues)
 }
 
 describe('report monetary precision', () => {
-    it.each(['en', 'ja'])('retains full monetary amounts and cents in %s', (locale) => {
+    it.each(['en', 'ja'])('retains full monetary amounts using currency precision in %s', (locale) => {
         expect(formatReportValue(1_450_000.25, 'USD', locale)).toBe('$1,450,000.25');
         expect(formatReportValue(1_020_000.75, 'USD', locale)).toBe('$1,020,000.75');
         expect(formatReportValue(1_733_430_000, 'JPY', locale))
             .toBe(locale === 'ja' ? '￥1,733,430,000' : '¥1,733,430,000');
         expect(formatReportValue(1_000.25, 'JPY', locale))
-            .toBe(locale === 'ja' ? '￥1,000.25' : '¥1,000.25');
+            .toBe(locale === 'ja' ? '￥1,000' : '¥1,000');
         expect(formatReportValue(-10_000.25, 'USD', locale)).toBe('-$10,000.25');
         expect(formatReportValue(0, 'USD', locale)).toBe('$0');
+    });
+
+    it('uses currency minor units in standard notation and below the compact threshold', () => {
+        expect(formatReportValue(1_450_000.257, 'USD', 'en')).toBe('$1,450,000.26');
+        expect(formatReportValue(1_000.75, 'JPY', 'en')).toBe('¥1,001');
+        expect(formatReportValue(1_000.75, 'KRW', 'en')).toBe('₩1,001');
+        expect(formatReportValue(1_000.257, 'KWD', 'en')).toBe('KWD\u00a01,000.257');
+        expect(formatReportValue(1_000.25, 'JPY', 'en', 'compact')).toBe('¥1,000');
     });
 
     it('keeps useful precision on compact monetary axes', () => {
