@@ -880,7 +880,7 @@
                     },
                     {
                         "type": "prose",
-                        "text": "When a deal is done, mark it won or lost to record the outcome, an optional reason, and the value you actually landed. The close date is filled in for you, and reopening clears it again. For closed deals, Connex shows how the final value compared to what you projected, and status pills read open, won, or lost at a glance. Your expected and actual close dates tell you whether a deal is on time, ahead, behind, or overdue."
+                        "text": "Mark a deal won or lost to record its outcome and close date. On a fresh win, the actual value comes from line items, or from the deal value if you do not enter an amount. An amount you enter, including zero, is kept for deals without line items. Reopening clears the outcome, close date and reason while keeping the last actual value; winning again records a fresh amount. Existing wins recorded at zero are not automatically corrected. For closed deals, Connex shows how the actual value compares with the projected value."
                     },
                     {
                         "type": "featureList",
@@ -915,7 +915,7 @@
                             },
                             {
                                 "question": "What happens when I move a deal to a won or lost stage?",
-                                "answer": "It closes on its own with that outcome. If the deal was already closed, its outcome updates to match the new stage."
+                                "answer": "It closes with that outcome. If the deal was already closed, its outcome updates to match the new stage. A transition into won or lost triggers the matching workflows once; edits that keep the same outcome do not trigger them again."
                             },
                             {
                                 "question": "Who can change deals and pipelines?",
@@ -1127,11 +1127,11 @@
                             ],
                             [
                                 "The deal is won",
-                                "The calculated total becomes the realised value and is frozen there, so later edits move the deal value but never the revenue you booked."
+                                "The line-item total becomes the realised value. Without line items, it defaults to the deal value unless you enter another amount, including zero. This amount is frozen at the win, so later line-item edits change the deal value without rewriting booked revenue."
                             ],
                             [
                                 "The deal is lost",
-                                "The realised value is set to zero when you lose the deal through the close dialog. Other routes to a lost stage do not currently clear a realised value that was already recorded, so a deal won and later marked lost can keep its won figure; this is a known defect rather than the intended contract."
+                                "The realised value becomes zero on every route to a loss, including Mark lost, edits, board moves, bulk changes, workflows and imports."
                             ]
                         ]
                     },

@@ -34,6 +34,15 @@ export function actualValueForOutcome(won: boolean | null | undefined, actualVal
     return won === false ? 0 : actualValue;
 }
 
+/** Omits an untouched amount so the server can resolve a fresh win; an entered zero is explicit. */
+export function requestedActualValue(
+    won: boolean | null | undefined,
+    actualValue: number,
+    edited?: boolean,
+): number | undefined {
+    return won === false ? 0 : edited === false ? undefined : actualValue;
+}
+
 /**
  * Whether a deal is closed (won or lost). A deal is closed exactly when it has an
  * explicit outcome: the DB enforces `(won IS NULL) = (closed_at IS NULL)`, so `won`
