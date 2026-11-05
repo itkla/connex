@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DealMetrics } from "@/app/lib/types";
-import { currencyCountsForMetrics, resolveCurrency } from "@/app/components/overview/analytics/currencyScope";
+import { currencyCountsForDeals, currencyCountsForMetrics, resolveCurrency } from "@/app/components/overview/analytics/currencyScope";
 
 function metrics(entries: Array<[string, number, number]>): DealMetrics {
     return {
@@ -32,5 +32,21 @@ describe("shared Analytics currency scope", () => {
     it("keeps single-currency and empty defaults", () => {
         expect(resolveCurrency(currencyCountsForMetrics(metrics([["JPY", 1, 0]])), null)).toBe("JPY");
         expect(resolveCurrency(currencyCountsForMetrics(metrics([])), null)).toBe("USD");
+    });
+
+    it("rebuilds the same counts and default from loaded deals when metrics are unavailable", () => {
+        const deals = [
+            ...Array.from({ length: 10 }, () => ({ currency: "USD" })),
+            ...Array.from({ length: 6 }, () => ({ currency: "JPY" })),
+        ];
+        const fallback = currencyCountsForDeals(deals);
+        expect(fallback).toEqual(currencyCountsForMetrics(metrics([["JPY", 5, 1], ["USD", 7, 3]])));
+        expect(resolveCurrency(fallback, null)).toBe("USD");
+        expect(resolveCurrency(fallback, "JPY")).toBe("JPY");
+    });
+
+    it("preserves the metrics endpoint's currency ordering for ties and the empty fallback", () => {
+        expect(resolveCurrency(currencyCountsForDeals([{ currency: "USD" }, { currency: "JPY" }]), null)).toBe("JPY");
+        expect(resolveCurrency(currencyCountsForDeals([]), null)).toBe("USD");
     });
 });

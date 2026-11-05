@@ -21,7 +21,7 @@ import {
 } from "@/app/lib/api";
 import SectionUnavailable from "@/app/components/SectionUnavailable";
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
-import type { Activity, Contact, Deal, DealRisk, Note, RelationshipTemperature, Task, User } from "@/app/lib/types";
+import type { Activity, Contact, DealRisk, Note, RelationshipTemperature, Task, User } from "@/app/lib/types";
 import { formatDate, formatDateTime } from "@/app/lib/utils";
 import { settingsDestination } from "@/app/lib/settingsEntryPoints";
 import { resolveWorkspaceTimezone } from "@/app/lib/workspaceSnapshot";
@@ -59,10 +59,10 @@ export default async function MePage() {
     }
 
     const init = { headers: { cookie: cookie ?? "" } } as const;
-    const [contacts, deals, tasks, activities, notes, users, myWorkResult, noteActivityResult, dealMetrics, workspaces]
+    const [contacts, dealResult, tasks, activities, notes, users, myWorkResult, noteActivityResult, dealMetrics, workspaces]
         = await Promise.all([
             getContactsFromCookie(cookie).catch(() => [] as Contact[]),
-            getDealsFromCookie(cookie).catch(() => [] as Deal[]),
+            getDealsFromCookie(cookie).catch(() => null),
             getUserTasksFromCookie(user.id, cookie).catch(() => [] as Task[]),
             getUserActivitiesFromCookie(user.id, cookie).catch(() => [] as Activity[]),
             getUserNotesFromCookie(user.id, cookie, { size: 25 }).catch(() => [] as Note[]),
@@ -72,6 +72,7 @@ export default async function MePage() {
             getDealMetricsFromCookie(cookie, { scope: "me" }).catch(() => null),
             getMyWorkspacesFromCookie(cookie),
         ]);
+    const deals = dealResult ?? [];
     const myDeals = deals.filter((deal) => deal.ownerId === user.id);
     const [temps, dealRisks] = await Promise.all([
         getContactTemperaturesFromCookie(cookie, contacts.map((contact) => contact.id))
@@ -102,7 +103,7 @@ export default async function MePage() {
                 </Rise>
 
                 <Rise delay={0.08}>
-                    {dealMetrics ? (
+                    {dealResult ? (
                         <PersonalDealSignals
                             key={`${user.id}:${workspaces.activeWorkspaceId}`}
                             deals={myDeals}

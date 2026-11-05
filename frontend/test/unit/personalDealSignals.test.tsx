@@ -7,7 +7,7 @@ import PersonalDealSignals from "@/app/components/me/PersonalDealSignals";
 import { personalDealKpis } from "@/app/components/me/personalDealKpis";
 import type { Deal, DealMetrics } from "@/app/lib/types";
 import { computeKpis, resolveAnalyticsWindow } from "@/app/components/overview/analytics/metrics";
-import { toTiles } from "@/app/components/overview/analytics/KpiCluster";
+import { toTiles } from "@/app/components/overview/analytics/currencyScope";
 import en from "@/messages/en/me.json";
 import ja from "@/messages/ja/me.json";
 
@@ -53,7 +53,7 @@ const deals: Deal[] = [
     })),
 ];
 
-function mount(locale: "en" | "ja" = "en", data = metrics, personalDeals = deals) {
+function mount(locale: "en" | "ja" = "en", data: DealMetrics | null = metrics, personalDeals = deals) {
     return render(
         <NextIntlClientProvider locale={locale} messages={locale === "ja" ? ja : en}>
             <PersonalDealSignals deals={personalDeals} dealMetrics={data} timezone="Asia/Tokyo" />
@@ -103,6 +103,32 @@ describe("personal currency aggregation", () => {
         expect(kpis.newPipelineSeries).toEqual([10, 20]);
     });
 
+    it("pins Analytics' 90-day calendar boundary instead of the former trailing-hour cutoff", () => {
+        const now = Date.parse("2026-07-15T12:00:00Z");
+        const window = resolveAnalyticsWindow("90d", now, "UTC");
+        expect(window).toEqual({ from: "2026-04-17", to: "2026-07-15" });
+        const data = [
+            deal({ value: 1_000, actualValue: 100, won: true, createdAt: "2026-04-16T23:59:59Z", closedAt: "2026-04-16T23:59:59Z" }),
+            deal({ value: 200, actualValue: 20, won: true, createdAt: "2026-04-17T00:00:00Z", closedAt: "2026-04-17T00:00:00Z" }),
+            deal({ value: 300, actualValue: 30, won: true, createdAt: "2026-07-15T23:59:59Z", closedAt: "2026-07-15T23:59:59Z" }),
+            deal({ value: 4_000, actualValue: 400, won: true, createdAt: "2026-07-16T00:00:00Z", closedAt: "2026-07-16T00:00:00Z" }),
+        ];
+        const kpis = personalDealKpis(data, "USD", window, "UTC");
+        expect(kpis).toMatchObject({ newPipeline: 500, wonRevenue: 50, newPipelinePrev: 1_000, wonRevenuePrev: 100, wonCount: 2 });
+        expect(kpis.newPipelineSeries.reduce((sum, value) => sum + value, 0)).toBe(500);
+        expect(kpis.wonSeries.reduce((sum, value) => sum + value, 0)).toBe(50);
+        const legacy = computeKpis(data, now, 90);
+        expect(legacy.find((tile) => tile.key === "newPipeline")?.value).toBe(1_200);
+        expect(legacy.find((tile) => tile.key === "wonRevenue")?.value).toBe(120);
+    });
+
+    it("pins Analytics' same-day cycle at zero UTC calendar days", () => {
+        const data = [deal({ won: true, createdAt: "2026-07-10T00:01:00Z", closedAt: "2026-07-10T23:59:00Z" })];
+        expect(personalDealKpis(data, "USD", WINDOW, "Asia/Tokyo").avgCycleDays).toBe(0);
+        const legacy = computeKpis(data, NOW, 90).find((tile) => tile.key === "avgCycle");
+        expect(Math.round(legacy?.value ?? 0)).toBe(1);
+    });
+
     it("uses Analytics' UTC calendar-day cycle length and excludes invalid cycles", () => {
         const data = [
             deal({ won: true, actualValue: 10, createdAt: "2026-07-10 23:55:00", closedAt: "2026-07-11 00:05:00" }),
@@ -127,6 +153,20 @@ describe("personal currency aggregation", () => {
 });
 
 describe("personal deal signal tiles", () => {
+    it("derives currency options and preserves every KPI when the metrics request fails", () => {
+        mount("en", null);
+        expect(screen.getByText("$735K")).toBeTruthy();
+        expect(screen.getByText("$35.4K")).toBeTruthy();
+        expect(screen.getByText("67")).toBeTruthy();
+        expect(screen.getByText("10")).toBeTruthy();
+        fireEvent.click(screen.getByRole("button", { name: "JPY" }));
+        expect(screen.getByText("¥45.5M")).toBeTruthy();
+        expect(screen.getByText("¥1.2M")).toBeTruthy();
+        expect(screen.getByText("100")).toBeTruthy();
+        expect(screen.getByText("30")).toBeTruthy();
+        expect(screen.getAllByText("JPY only")).toHaveLength(2);
+    });
+
     it("shows only the dominant currency, with a visible scope on both money tiles", () => {
         mount();
         expect(screen.getByText("$735K")).toBeTruthy();

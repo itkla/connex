@@ -76,8 +76,26 @@ describe("authored note timeline pages", () => {
         expect(findByType(page, SignalStrip)).toHaveLength(0);
     });
 
-    it("shows unavailable deal signals when currency aggregates cannot be loaded", async () => {
+    it("keeps the loaded personal deal signals when currency aggregates cannot be loaded", async () => {
+        vi.mocked(getDealsFromCookie).mockResolvedValueOnce([
+            { id: 1, name: "Yen deal", ownerId: 51, currency: "JPY", value: 45_450_000, actualValue: 1_200_000, pipeline: null, stage: null, position: 0, company: null, createdAt: "2026-07-01T00:00:00Z", updatedAt: "2026-07-01T00:00:00Z" },
+            { id: 2, name: "Dollar deal", ownerId: 51, currency: "USD", value: 735_000, actualValue: 35_400, pipeline: null, stage: null, position: 0, company: null, createdAt: "2026-07-01T00:00:00Z", updatedAt: "2026-07-01T00:00:00Z" },
+            { id: 3, name: "Another owner's deal", ownerId: 99, currency: "EUR", value: 999_000_000, actualValue: 0, pipeline: null, stage: null, position: 0, company: null, createdAt: "2026-07-01T00:00:00Z", updatedAt: "2026-07-01T00:00:00Z" },
+        ]);
         vi.mocked(getDealMetricsFromCookie).mockRejectedValueOnce(new Error("Unavailable"));
+        const page = await MePage();
+        expect(findByType(page, PersonalDealSignals)[0]?.props).toMatchObject({
+            dealMetrics: null,
+            deals: [expect.objectContaining({ id: 1, currency: "JPY" }), expect.objectContaining({ id: 2, currency: "USD" })],
+            timezone: "UTC",
+        });
+        expect(findByType(page, SignalStrip)).toHaveLength(0);
+        expect(findByType(page, SectionUnavailable)).toHaveLength(0);
+    });
+
+    it.each([false, true])("keeps unavailable deal data distinct from an empty result (metrics unavailable: %s)", async (metricsUnavailable) => {
+        vi.mocked(getDealsFromCookie).mockRejectedValueOnce(new Error("Unavailable"));
+        if (metricsUnavailable) vi.mocked(getDealMetricsFromCookie).mockRejectedValueOnce(new Error("Unavailable"));
         const page = await MePage();
         expect(findByType(page, PersonalDealSignals)).toHaveLength(0);
         expect(findByType(page, SignalStrip)).toHaveLength(0);
