@@ -7,9 +7,14 @@ import ja from '@/messages/ja/importExport.json';
 
 import { activeWorkspaceId, csrfBootstrap, registerUser, seeder } from './support/api';
 import { useLocale } from './support/locale';
+import { message } from './support/messages';
 
 test.use({ storageState: { cookies: [], origins: [] } });
 test.setTimeout(120_000);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null;
+}
 
 for (const locale of ['en', 'ja'] as const) {
     test(`reviews missing close dates and imports mapped deal history in ${locale}`, async ({ page }) => {
@@ -20,7 +25,13 @@ for (const locale of ['en', 'ja'] as const) {
             email: `${key}@example.invalid`,
         });
         const workspaceId = await activeWorkspaceId(page.request);
-        const seed = seeder(page.request, workspaceId, await csrfBootstrap(page.request));
+        const csrf = await csrfBootstrap(page.request);
+        const timezoneResponse = await page.request.patch('/api/users/me', {
+            headers: { 'X-Workspace-Id': String(workspaceId), [csrf.headerName]: csrf.token },
+            data: { timezone: 'Asia/Tokyo' },
+        });
+        expect(timezoneResponse.status()).toBe(200);
+        const seed = seeder(page.request, workspaceId, csrf);
         const pipeline = await seed.post('/api/pipelines', { name: 'Historical pipeline' });
         if (typeof pipeline.id !== 'number') throw new Error('Pipeline id is missing');
         await seed.post(`/api/pipelines/${pipeline.id}/stages`, {
@@ -40,15 +51,16 @@ for (const locale of ['en', 'ja'] as const) {
         await page.getByRole('menuitem', { name: t('openImport'), exact: true }).click();
         const dialog = page.getByRole('dialog');
         await expect(dialog.getByRole('heading', { name: t('title.deals') })).toBeVisible();
+        const futureCloseDate = `${new Date().getUTCFullYear() + 1}-01-01`;
         await dialog.locator('input[type="file"]').setInputFiles({
             name: 'historical-deals.csv',
             mimeType: 'text/csv',
             buffer: Buffer.from([
-                'Name,Value,Pipeline,Stage,Close history,Creation history',
-                ...Array.from({ length: 100 }, () => 'Historic won,300,Historical pipeline,Won,2025/03/01,2025-02-01'),
-                'Missing won,100,Historical pipeline,Won,,',
-                'Missing lost,50,Historical pipeline,Lost,,',
-                'Future won,25,Historical pipeline,Won,2099-01-01,2025-02-01',
+                'Name,Value,Pipeline,Stage,Close history,Creation history,Expected close date',
+                ...Array.from({ length: 100 }, () => 'Historic won,300,Historical pipeline,Won,2025/03/01,2025-02-01,2026-11-01'),
+                'Missing won,100,Historical pipeline,Won,,,',
+                'Missing lost,50,Historical pipeline,Lost,,,',
+                `Future won,25,Historical pipeline,Won,${futureCloseDate},2025-02-01,2026-11-01`,
             ].join('\n')),
         });
         for (const [header, field] of [['Close history', 'closedAt'], ['Creation history', 'createdAt']] as const) {
@@ -67,7 +79,7 @@ for (const locale of ['en', 'ja'] as const) {
             rows: expect.arrayContaining([expect.objectContaining({
                 rowIndex: 0,
                 dealDates: expect.objectContaining({
-                    closedAt: '2025-03-01T00:00:00Z', createdAt: '2025-02-01T00:00:00Z', usesImportTime: false,
+                    closedAt: '2025-02-28T15:00:00Z', createdAt: '2025-01-31T15:00:00Z', usesImportTime: false,
                 }),
             })]),
         });
@@ -98,8 +110,26 @@ for (const locale of ['en', 'ja'] as const) {
         expect(stored.status()).toBe(200);
         const records: unknown = await stored.json();
         expect(records).toMatchObject({ items: expect.arrayContaining([expect.objectContaining({
-            name: 'Historic won', closedAt: '2025-03-01 00:00:00', createdAt: '2025-02-01 00:00:00',
+            name: 'Historic won', closedAt: '2025-02-28 15:00:00', createdAt: '2025-01-31 15:00:00',
         })]) });
+        if (!isRecord(records) || !Array.isArray(records.items)) throw new Error('Deal page is missing');
+        const items: unknown[] = records.items;
+        const historical = items.find((item) => isRecord(item) && item.name === 'Historic won');
+        if (!isRecord(historical) || typeof historical.id !== 'number') throw new Error('Historic deal id is missing');
+        const revenue = await page.request.get('/api/deals/revenue-timeseries?currency=USD&timezone=Asia%2FTokyo', {
+            headers: { 'X-Workspace-Id': String(workspaceId) },
+        });
+        expect(revenue.status()).toBe(200);
+        const chart: unknown = await revenue.json();
+        expect(chart).toMatchObject({ closed: expect.arrayContaining([{ year: 2025, month: 3, total: 300 }]) });
+        await page.goto(`/records/deals/${historical.id}`);
+        const closeDate = new Intl.DateTimeFormat(locale, { dateStyle: 'long', timeZone: 'Asia/Tokyo' })
+            .format(new Date('2025-02-28T15:00:00Z'));
+        await expect(page.getByText(closeDate, { exact: true })).toHaveCount(3);
+        await expect(page.getByText(closeDate, { exact: true }).first()).toBeVisible();
+        await page.getByRole('button', { name: message(locale, 'deals', 'DealsActionsMenu.edit'), exact: true }).click();
+        await expect(page.getByLabel(message(locale, 'deals', 'DealsQuickEditSheet.closedAt'), { exact: true }))
+            .toHaveValue('2025-03-01T00:00');
         expect(pageErrors).toEqual([]);
     });
 }

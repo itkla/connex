@@ -126,13 +126,19 @@ class ExportServiceTest {
                 productMapper, dealService, tagMapper, customFieldValueService);
     }
 
-    @Test
-    void exportDealsPreservesWholeNumberCsvBytesForScaleTwoValues() {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void exportDealsPreservesWholeNumberCsvBytesAndExplicitUtcHistory(boolean withHistory) {
         Deal deal = new Deal();
         deal.setId(7);
         deal.setName("Renewal");
         deal.setValue(new BigDecimal("1000.00"));
         deal.setCurrency("USD");
+        if (withHistory) {
+            deal.setClosedAt("2025-02-28 15:00:00");
+            deal.setCreatedAt("2025-01-31 15:00:00");
+            deal.setWon(true);
+        }
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(42);
         when(dealService.queryDealsForExport(
             null, null, List.of(), List.of(), List.of(), List.of(), false,
@@ -151,8 +157,10 @@ class ExportServiceTest {
             List.of(), List.of(), null);
 
         assertEquals(
-            "id,name,value,currency,company,pipeline,stage,expectedCloseDate,status,tags\r\n"
-                + "7,Renewal,1000,USD,,,,,open,\r\n",
+            "id,name,value,currency,company,pipeline,stage,expectedCloseDate,closedAt,createdAt,status,tags\r\n"
+                + (withHistory
+                    ? "7,Renewal,1000,USD,,,,,2025-02-28T15:00:00Z,2025-01-31T15:00:00Z,won,\r\n"
+                    : "7,Renewal,1000,USD,,,,,,,open,\r\n"),
             csv);
     }
 

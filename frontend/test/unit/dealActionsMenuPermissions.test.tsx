@@ -74,6 +74,7 @@ async function renderMenu(...permissions: string[]) {
         <NextIntlClientProvider locale="en" messages={enDeals}>
             <TooltipProvider>
             <DealActionsMenu
+                timezone="UTC"
                 deal={deal}
                 pipelines={[]}
                 stagesByPipeline={{}}

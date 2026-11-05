@@ -448,7 +448,7 @@
       AND d.currency = #{currency}
     </if>
       AND d.closed_at IS NOT NULL
-      AND (d.won = FALSE OR d.expected_close_date IS NULL)
+      AND d.won = TRUE
       AND d.actual_value != 0
   </select>
 
@@ -465,7 +465,7 @@
              </if>
                AND d.closed_at &gt;= boundary.start_utc
                AND d.closed_at &lt; boundary.end_utc
-               AND (d.won = FALSE OR d.expected_close_date IS NULL)
+               AND d.won = TRUE
                AND d.actual_value != 0
            ) AS total
     FROM (
@@ -478,22 +478,6 @@
     ) boundary
     HAVING total IS NOT NULL
     ORDER BY boundary.local_year, boundary.local_month
-  </select>
-
-  <select id="revenueScheduledClosedByMonth" resultType="ooo.klae.connex.backend.dto.DealMonthDecimalTotalDto">
-    SELECT YEAR(d.expected_close_date) AS year,
-           MONTH(d.expected_close_date) AS month,
-           COALESCE(SUM(d.actual_value), 0) AS total
-    FROM deal d
-    WHERE d.workspace_id = #{workspaceId}
-    <include refid="memberScopePredicate"/>
-    <if test="currency != null">
-      AND d.currency = #{currency}
-    </if>
-      AND d.closed_at IS NOT NULL
-      AND d.won = TRUE
-      AND d.expected_close_date IS NOT NULL
-    GROUP BY YEAR(d.expected_close_date), MONTH(d.expected_close_date)
   </select>
 
   <select id="revenueProjectedByMonth" resultType="ooo.klae.connex.backend.dto.DealMonthDecimalTotalDto">
@@ -757,30 +741,8 @@
     </if>
       AND d.closed_at &gt;= #{startUtc}
       AND d.closed_at &lt; #{endUtc}
-      AND (d.won = FALSE OR d.expected_close_date IS NULL)
-      AND d.actual_value != 0
-    GROUP BY boundary.bucket_index
-    ORDER BY boundary.bucket_index
-  </select>
-
-  <select id="revenueScheduledClosedByPeriods"
-          resultType="ooo.klae.connex.backend.dto.DealPeriodDecimalTotalDto">
-    SELECT boundary.bucket_index,
-           COALESCE(SUM(d.actual_value), 0) AS total
-    FROM (<include refid="analyticsPeriods"/>) boundary
-    JOIN deal d
-      ON d.workspace_id = #{workspaceId}
-      AND d.expected_close_date &gt;= boundary.start_date
-      AND d.expected_close_date &lt; boundary.end_date
-    WHERE d.workspace_id = #{workspaceId}
-    <include refid="memberScopePredicate"/>
-    <if test="currency != null">
-      AND d.currency = #{currency}
-    </if>
-      AND d.closed_at IS NOT NULL
       AND d.won = TRUE
-      AND d.expected_close_date &gt;= #{startDate}
-      AND d.expected_close_date &lt; #{endDate}
+      AND d.actual_value != 0
     GROUP BY boundary.bucket_index
     ORDER BY boundary.bucket_index
   </select>

@@ -5,6 +5,7 @@ import { getLocale, getTranslations } from 'next-intl/server';
 import { type Stage, type NoteReference, type DealStageHistory } from '@/app/lib/types';
 import NoteContent from '@/app/components/activity/notes/NoteContent';
 import { formatDate, formatShortDate, parseMysqlDateTime, startOfLocalDay } from '@/app/lib/utils';
+import { formatDealClosedAt } from './dealDates';
 import { classifyStage, type DealOutcome } from '@/app/components/records/deals/dealOutcome';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 
@@ -14,6 +15,7 @@ type ScheduleTone = 'early' | 'late' | 'neutral';
 
 export default async function DealLifecycleProgress({
     stages,
+    timezone,
     currentStageId,
     outcome,
     createdAt,
@@ -24,6 +26,7 @@ export default async function DealLifecycleProgress({
     stageHistory,
 }: {
     stages: Stage[];
+    timezone: string;
     currentStageId: number | null;
     outcome: DealOutcome;
     createdAt: string;
@@ -278,7 +281,7 @@ export default async function DealLifecycleProgress({
                                 {isClosed ? t('closed') : t('expectedClose')}
                             </span>
                             <span>
-                                {formatDate(isClosed && closedAt ? closedAt : expectedCloseDate, locale)}
+                                {isClosed && closedAt ? formatDealClosedAt(closedAt, locale, timezone) : formatDate(expectedCloseDate, locale)}
                             </span>
 
                         </div>

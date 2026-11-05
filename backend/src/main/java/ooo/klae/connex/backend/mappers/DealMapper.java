@@ -141,11 +141,6 @@ public interface DealMapper {
         @Param("boundaries") List<DealRevenueMonthBoundary> boundaries,
         @Param("memberScope") MemberScope memberScope
     );
-    List<DealMonthDecimalTotalDto> revenueScheduledClosedByMonth(
-        @Param("workspaceId") int workspaceId,
-        @Param("currency") String currency,
-        @Param("memberScope") MemberScope memberScope
-    );
     List<DealMonthDecimalTotalDto> revenueProjectedByMonth(
         @Param("workspaceId") int workspaceId,
         @Param("currency") String currency,
@@ -225,14 +220,6 @@ public interface DealMapper {
         @Param("currency") String currency,
         @Param("startUtc") LocalDateTime startUtc,
         @Param("endUtc") LocalDateTime endUtc,
-        @Param("periods") List<AnalyticsPeriod> periods,
-        @Param("memberScope") MemberScope memberScope
-    );
-    List<DealPeriodDecimalTotalDto> revenueScheduledClosedByPeriods(
-        @Param("workspaceId") int workspaceId,
-        @Param("currency") String currency,
-        @Param("startDate") LocalDate startDate,
-        @Param("endDate") LocalDate endDate,
         @Param("periods") List<AnalyticsPeriod> periods,
         @Param("memberScope") MemberScope memberScope
     );

@@ -497,14 +497,14 @@ class DealMapperTest extends AbstractMapperTest {
             400.0, 0.0, "USD", null, "2026-03-15", null);
 
         DealRevenueRangeDto closedRange = dealMapper.revenueClosedEventRange(workspace.getId(), null, MemberScope.allTeam());
-        assertEquals(LocalDateTime.of(2026, 5, 20, 0, 0), closedRange.earliest());
-        assertEquals(LocalDateTime.of(2026, 5, 20, 0, 0), closedRange.latest());
-        List<DealRevenueMonthBoundary> mayBoundary = List.of(new DealRevenueMonthBoundary(
-            2026, 5, LocalDateTime.of(2026, 5, 1, 0, 0), LocalDateTime.of(2026, 6, 1, 0, 0)));
-        assertEquals(Map.of("2026-5", 25.0),
-            monthTotals(dealMapper.revenueClosedByBoundaries(workspace.getId(), null, mayBoundary, MemberScope.allTeam())));
-        assertEquals(Map.of("2026-2", 430.0),
-            monthTotals(dealMapper.revenueScheduledClosedByMonth(workspace.getId(), null, MemberScope.allTeam())));
+        assertEquals(LocalDateTime.of(2026, 1, 10, 0, 0), closedRange.earliest());
+        assertEquals(LocalDateTime.of(2026, 2, 5, 0, 0), closedRange.latest());
+        List<DealRevenueMonthBoundary> boundaries = List.of(
+            new DealRevenueMonthBoundary(2026, 1, LocalDateTime.of(2026, 1, 1, 0, 0), LocalDateTime.of(2026, 2, 1, 0, 0)),
+            new DealRevenueMonthBoundary(2026, 2, LocalDateTime.of(2026, 2, 1, 0, 0), LocalDateTime.of(2026, 3, 1, 0, 0)),
+            new DealRevenueMonthBoundary(2026, 5, LocalDateTime.of(2026, 5, 1, 0, 0), LocalDateTime.of(2026, 6, 1, 0, 0)));
+        assertEquals(Map.of("2026-1", 180.0, "2026-2", 250.0),
+            monthTotals(dealMapper.revenueClosedByBoundaries(workspace.getId(), null, boundaries, MemberScope.allTeam())));
         assertEquals(Map.of("2026-2", 600.0, "2026-3", 450.0),
             monthTotals(dealMapper.revenueProjectedByMonth(workspace.getId(), null, MemberScope.allTeam(), false)));
 
@@ -523,11 +523,15 @@ class DealMapperTest extends AbstractMapperTest {
         assertEquals(1, second.closedCount());
         assertEquals(250.0, second.closedValue(), 0.0001);
 
-        assertEquals(closedRange, dealMapper.revenueClosedEventRange(workspace.getId(), "JPY", MemberScope.allTeam()));
-        assertEquals(Map.of("2026-5", 25.0),
-            monthTotals(dealMapper.revenueClosedByBoundaries(workspace.getId(), "JPY", mayBoundary, MemberScope.allTeam())));
-        assertEquals(Map.of("2026-2", 180.0),
-            monthTotals(dealMapper.revenueScheduledClosedByMonth(workspace.getId(), "JPY", MemberScope.allTeam())));
+        assertEquals(new DealRevenueRangeDto(LocalDateTime.of(2026, 1, 10, 0, 0), LocalDateTime.of(2026, 1, 10, 0, 0)),
+            dealMapper.revenueClosedEventRange(workspace.getId(), "JPY", MemberScope.allTeam()));
+        assertEquals(Map.of("2026-1", 180.0),
+            monthTotals(dealMapper.revenueClosedByBoundaries(workspace.getId(), "JPY", boundaries, MemberScope.allTeam())));
+        assertTrue(dealMapper.revenueClosedByBoundaries(workspace.getId(), "EUR", boundaries, MemberScope.allTeam()).isEmpty());
+        assertTrue(dealMapper.revenueClosedByBoundaries(workspace.getId() + 1000000, null, boundaries, MemberScope.allTeam()).isEmpty());
+        User selectedMember = newUser();
+        assertTrue(dealMapper.revenueClosedByBoundaries(workspace.getId(), null, boundaries,
+            MemberScope.fromRequest("members", List.of(selectedMember.getId()), selectedMember.getId())).isEmpty());
         assertEquals(Map.of("2026-2", 300.0, "2026-3", 50.0),
             monthTotals(dealMapper.revenueProjectedByMonth(workspace.getId(), "JPY", MemberScope.allTeam(), false)));
         List<DealStageDistributionDto> filtered =

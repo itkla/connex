@@ -12,7 +12,7 @@ import { Combobox, ComboboxItem, ComboboxList, ComboboxContent, ComboboxEmpty, C
 import { type Company, type Deal, type Pipeline, type Stage } from '@/app/lib/types';
 import { type SelectionId } from '@/app/components/records/types';
 import { cn } from '@/lib/utils';
-import { toMysqlDateTime, toDatetimeLocalValue } from '@/app/lib/utils';
+import { toMysqlDateTime } from '@/app/lib/utils';
 import {
     EASE_OUT,
     QuickEditField,
@@ -22,6 +22,7 @@ import {
 import { quickEditErrorId } from '@/app/hooks/useFieldErrors';
 import { useCompanySearch } from '@/app/hooks/useCompanySearch';
 import { toastError } from '@/app/lib/toast';
+import { dealClosedAtInput, dealClosedAtFromInput } from './dealDates';
 import { actualValueForOutcome } from '@/app/components/records/deals/dealOutcome';
 
 export type DealDraft = {
@@ -39,6 +40,7 @@ export type DealDraft = {
 };
 
 type Props = {
+    timezone: string;
     open: boolean;
     onOpenChange: (open: boolean) => void;
     selectedIds: Set<SelectionId>;
@@ -65,6 +67,7 @@ const OUTCOME_SELECTED: Record<OutcomeOption['key'], string> = {
 };
 
 export default function QuickEditDealSheet({
+    timezone,
     open,
     onOpenChange,
     selectedDeals,
@@ -124,7 +127,7 @@ export default function QuickEditDealSheet({
                 const stages = draft.pipeline ? stagesByPipeline[draft.pipeline] ?? [] : [];
                 const selectedStage = stages.find((s) => s.id === draft.stage) ?? null;
                 const expectedCloseDate = draft.expectedCloseDate ? draft.expectedCloseDate.slice(0, 10) : '';
-                const closedAt = toDatetimeLocalValue(draft.closedAt);
+                const closedAt = dealClosedAtInput(draft.closedAt, timezone);
                 const actualValue = actualValueForOutcome(draft.won, draft.actualValue ?? 0);
                 const isLost = draft.won === false;
 
@@ -330,12 +333,18 @@ export default function QuickEditDealSheet({
                                                 id={`deal-closed-at-${d.id}`}
                                                 type="datetime-local"
                                                 value={closedAt}
-                                                onChange={(e) =>
-                                                    updateDraft(d.id, {
-                                                        closedAt: e.target.value ? toMysqlDateTime(e.target.value) : null,
-                                                    })
-                                                }
+                                                aria-describedby={`deal-closed-at-zone-${d.id}`}
+                                                onChange={(e) => {
+                                                    const value = e.target.value;
+                                                    const parsed = value ? dealClosedAtFromInput(value, timezone, draft.closedAt) : null;
+                                                    if (value && parsed === null) {
+                                                        toastError(t('invalidClosedAt'));
+                                                        return;
+                                                    }
+                                                    updateDraft(d.id, { closedAt: parsed });
+                                                }}
                                             />
+                                            <p id={`deal-closed-at-zone-${d.id}`} className="text-xs text-muted-foreground">{timezone}</p>
                                         </QuickEditField>
                                         <QuickEditField label={t('actualValue')} htmlFor={`deal-actual-value-${d.id}`}>
                                             <Input

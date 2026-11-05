@@ -2353,12 +2353,13 @@ class ImportServiceTest extends AbstractServiceTest {
         Stage lost = terminalStage(pipeline, 1, false);
         ImportRequest request = req(
             List.of(map("Deal", "name"), map("Value", "value"), map("Pipe", "pipeline"),
-                map("Stage", "stage"), map("Closed", "closedAt"), map("Created", "createdAt")),
+                map("Stage", "stage"), map("Closed", "closedAt"), map("Created", "createdAt"),
+                map("Expected", "expectedCloseDate")),
             List.of(
                 Map.of("Deal", "Historic won", "Value", "300", "Pipe", pipeline.getName(),
-                    "Stage", won.getName(), "Closed", closedAt, "Created", "2025/02/01"),
+                    "Stage", won.getName(), "Closed", closedAt, "Created", "2025/02/01", "Expected", "2026-11-01"),
                 Map.of("Deal", "Historic lost", "Value", "100", "Pipe", pipeline.getName(),
-                    "Stage", lost.getName(), "Closed", closedAt, "Created", "2025-02-01")),
+                    "Stage", lost.getName(), "Closed", closedAt, "Created", "2025-02-01", "Expected", "2026-11-01")),
             "fill_empty");
 
         ImportPreviewResult preview = importService.previewDeals(request);
@@ -2380,6 +2381,40 @@ class ImportServiceTest extends AbstractServiceTest {
         assertEquals(1, march.lostCount());
         assertTrue(march.avgCycleDays() >= 28);
         assertEquals(0.0, february.wonRevenue());
+        var months = dealService.getRevenueTimeseries("USD", "Asia/Tokyo", MemberScope.allTeam(), false);
+        assertEquals(List.of(new ooo.klae.connex.backend.dto.DealMonthTotalDto(2025, 3, new BigDecimal("300.00"))), months.closed());
+        var window = ooo.klae.connex.backend.util.AnalyticsPeriods.requiredWindow(
+            "2025-03-01", "2026-11-30", "Asia/Tokyo", null);
+        var series = dealService.getRevenueSeries("USD", window,
+            ooo.klae.connex.backend.util.AnalyticsPeriods.periods(window, "month"), MemberScope.allTeam());
+        assertEquals(300.0, series.realized().getFirst().total());
+        assertEquals(0.0, series.realized().getLast().total());
+        assertEquals(400.0, series.projected().getLast().total());
+
+        String csv = exportService.exportDeals(null, null, List.of(), List.of(), List.of(), List.of(),
+            false, List.of(), List.of(), MemberScope.allTeam());
+        List<String> lines = csv.lines().toList();
+        List<String> headers = List.of(lines.getFirst().split(",", -1));
+        List<Map<String, String>> exportedRows = new java.util.ArrayList<>();
+        for (String line : lines.subList(1, lines.size())) {
+            String[] values = line.split(",", -1);
+            Map<String, String> exported = new java.util.HashMap<>();
+            for (String field : List.of("name", "value", "currency", "pipeline", "stage", "expectedCloseDate", "closedAt", "createdAt")) {
+                exported.put(field, values[headers.indexOf(field)]);
+            }
+            exported.put("name", exported.get("name") + " reimported");
+            assertTrue(exported.get("closedAt").endsWith("Z"));
+            assertTrue(exported.get("createdAt").endsWith("Z"));
+            exportedRows.add(exported);
+        }
+        List<ColumnMapping> exportedMapping = headers.stream()
+            .filter(field -> !List.of("id", "status", "tags").contains(field))
+            .map(field -> map(field, field)).toList();
+        assertEquals(2, reviewAndCommitDeals(req(exportedMapping, exportedRows, "fill_empty")).getCreated());
+        for (Deal deal : dealMapper.getAllDeals(workspace.getId())) {
+            assertEquals(stored, deal.getClosedAt());
+            assertEquals("2025-01-31 15:00:00", deal.getCreatedAt());
+        }
     }
 
     @ParameterizedTest

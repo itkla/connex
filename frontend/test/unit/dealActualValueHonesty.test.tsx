@@ -228,6 +228,7 @@ function findFailureStageSelector(root: unknown): (stage: Stage) => unknown {
 function createOutcomeDraftHarness() {
     let draft: DealDraft = { ...WON_LINE_ITEM_DRAFT };
     const props = {
+        timezone: "UTC",
         open: true,
         onOpenChange: () => undefined,
         selectedIds: new Set([WON_LINE_ITEM_DEAL.id]),
@@ -268,6 +269,7 @@ beforeEach(() => {
 describe("lost-deal actual value", () => {
     function renderActualValueInput(won: boolean, actualValue: number) {
         const html = renderToStaticMarkup(createElement(QuickEditDealSheet, {
+            timezone: "UTC",
             open: true,
             onOpenChange: () => undefined,
             selectedIds: new Set([LOST_DEAL.id]),
