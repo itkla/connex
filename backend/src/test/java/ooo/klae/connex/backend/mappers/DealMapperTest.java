@@ -444,7 +444,7 @@ class DealMapperTest extends AbstractMapperTest {
         assertEquals(1, jpy.openCount());
         assertEquals(100.0, jpy.openValue(), 0.0001);
         assertEquals(2, jpy.closedCount());
-        assertEquals(250.0, jpy.closedForecast(), 0.0001);
+        assertEquals(200.0, jpy.closedForecast(), 0.0001);
         assertEquals(180.0, jpy.closedRevenue(), 0.0001);
         assertEquals(1, jpy.wonCount());
         assertEquals(1, jpy.lostCount());
@@ -464,7 +464,7 @@ class DealMapperTest extends AbstractMapperTest {
         assertEquals(1, filtered.size());
         assertEquals(0, filtered.get(0).openCount());
         assertEquals(2, filtered.get(0).closedCount());
-        assertEquals(250.0, filtered.get(0).closedForecast(), 0.0001);
+        assertEquals(200.0, filtered.get(0).closedForecast(), 0.0001);
         assertEquals(180.0, filtered.get(0).closedRevenue(), 0.0001);
         assertEquals(1, dealMapper.countDeals(
             workspace.getId(), null, null, null, null, null, "open"));
@@ -506,7 +506,7 @@ class DealMapperTest extends AbstractMapperTest {
         assertEquals(Map.of("2026-2", 430.0),
             monthTotals(dealMapper.revenueScheduledClosedByMonth(workspace.getId(), null, MemberScope.allTeam())));
         assertEquals(Map.of("2026-2", 600.0, "2026-3", 450.0),
-            monthTotals(dealMapper.revenueProjectedByMonth(workspace.getId(), null, MemberScope.allTeam())));
+            monthTotals(dealMapper.revenueProjectedByMonth(workspace.getId(), null, MemberScope.allTeam(), false)));
 
         List<DealStageDistributionDto> distribution =
             dealMapper.stageDistribution(workspace.getId(), null, MemberScope.allTeam());
@@ -529,13 +529,67 @@ class DealMapperTest extends AbstractMapperTest {
         assertEquals(Map.of("2026-2", 180.0),
             monthTotals(dealMapper.revenueScheduledClosedByMonth(workspace.getId(), "JPY", MemberScope.allTeam())));
         assertEquals(Map.of("2026-2", 300.0, "2026-3", 50.0),
-            monthTotals(dealMapper.revenueProjectedByMonth(workspace.getId(), "JPY", MemberScope.allTeam())));
+            monthTotals(dealMapper.revenueProjectedByMonth(workspace.getId(), "JPY", MemberScope.allTeam(), false)));
         List<DealStageDistributionDto> filtered =
             dealMapper.stageDistribution(workspace.getId(), "JPY", MemberScope.allTeam());
         assertEquals(1, filtered.size());
         assertEquals(firstStage.getId(), filtered.get(0).stageId());
         assertEquals(firstPipeline.getId(), filtered.get(0).pipelineId());
         assertEquals(230.0, filtered.get(0).closedValue(), 0.0001);
+    }
+
+    @Test
+    void openProjectionAndWonAccuracyKeepCurrencyWorkspaceAndMemberScope() {
+        workspace = newWorkspace();
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        User owner = newUser();
+        Deal open = newDeal(pipeline, stage, company);
+        updateChartDeal(open, 441000.0, 0.0, "USD", null, "2026-10-10", null);
+        dealMapper.updateOwner(workspace.getId(), open.getId(), owner.getId());
+        updateChartDeal(newDeal(pipeline, stage, company),
+            139600.0, 139600.0, "USD", true, "2026-10-10", "2026-10-11 00:00:00");
+        updateChartDeal(newDeal(pipeline, stage, company),
+            154400.0, 500.0, "USD", false, "2026-10-10", "2026-10-11 00:00:00");
+        updateChartDeal(newDeal(pipeline, stage, company),
+            900.0, 0.0, "JPY", null, "2026-10-10", null);
+        Workspace foreignWorkspace = newWorkspace();
+        Pipeline foreignPipeline = newPipelineIn(foreignWorkspace);
+        Stage foreignStage = newStageIn(foreignWorkspace, foreignPipeline, 0);
+        updateChartDeal(newDealIn(foreignWorkspace, foreignPipeline, foreignStage),
+            999999.0, 0.0, "USD", null, "2026-10-10", null);
+        MemberScope all = MemberScope.allTeam();
+
+        assertEquals(Map.of("2026-10", 441000.0), monthTotals(
+            dealMapper.revenueProjectedByMonth(workspace.getId(), "USD", all, true)));
+        assertEquals(Map.of("2026-10", 735000.0), monthTotals(
+            dealMapper.revenueProjectedByMonth(workspace.getId(), "USD", all, false)));
+        assertEquals(Map.of("2026-10", 900.0), monthTotals(
+            dealMapper.revenueProjectedByMonth(workspace.getId(), "JPY", all, true)));
+        assertEquals(Map.of("2026-10", 441000.0), monthTotals(
+            dealMapper.revenueProjectedByMonth(workspace.getId(), "USD",
+                MemberScope.fromRequest("me", null, owner.getId()), true)));
+        assertTrue(dealMapper.revenueProjectedByMonth(workspace.getId(), "USD",
+            MemberScope.fromRequest("unassigned", null, owner.getId()), true).isEmpty());
+        assertTrue(dealMapper.revenueProjectedByMonth(workspace.getId(), "EUR", all, true).isEmpty());
+
+        DealCurrencyMetricsDto legacy = metricsFor(dealMapper.dealMetrics(
+            workspace.getId(), null, "USD", null, null, null, null), "USD");
+        DealCurrencyMetricsDto filtered = metricsFor(dealMapper.dealMetricsFiltered(
+            workspace.getId(), dealScope(workspace.getId()), null, null, "USD", null,
+            null, null, null, false, null, null, all), "USD");
+        for (DealCurrencyMetricsDto metrics : List.of(legacy, filtered)) {
+            assertEquals(2, metrics.closedCount());
+            assertEquals(139600.0, metrics.closedForecast(), 0.0001);
+            assertEquals(139600.0, metrics.closedRevenue(), 0.0001);
+            assertEquals(1.0, metrics.closedRevenue() / metrics.closedForecast(), 0.0001);
+        }
+        DealCurrencyMetricsDto lostOnly = metricsFor(dealMapper.dealMetricsFiltered(
+            workspace.getId(), dealScope(workspace.getId()), null, null, "USD", null,
+            null, null, null, false, List.of("lost"), null, all), "USD");
+        assertEquals(0.0, lostOnly.closedForecast(), 0.0001);
+        assertEquals(0.0, lostOnly.closedRevenue(), 0.0001);
     }
 
     @Test

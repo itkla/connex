@@ -65,8 +65,8 @@ type PendingState = "idle" | "loading";
 function documentFromWorkflow(workflow: WorkflowDto): WorkflowEditorDocument {
     return {
         name: workflow.name,
-        description: workflow.description,
-        recordType: workflow.recordType,
+        description: workflow.description ?? null,
+        recordType: workflow.recordType ?? null,
         executionMode: workflow.executionMode,
         definition: workflow.definition,
         canvas: workflow.canvas,

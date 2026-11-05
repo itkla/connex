@@ -196,7 +196,7 @@
     "chartDescription": "実績と予測の比較",
     "currency": "通貨",
     "profitTooltip": "成約した案件から得られた実績売上。",
-    "projectionsTooltip": "オープン案件の予測値（予定成約日ベース）。"
+    "projectionsTooltip": "この通貨の進行中案件の金額合計です。グラフは予定成約日がある案件を月別に表示します。"
   },
   "DashboardTaskSummary": {
     "openTasks": "オープンなタスク",

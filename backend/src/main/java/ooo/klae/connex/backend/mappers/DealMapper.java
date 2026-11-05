@@ -149,7 +149,8 @@ public interface DealMapper {
     List<DealMonthDecimalTotalDto> revenueProjectedByMonth(
         @Param("workspaceId") int workspaceId,
         @Param("currency") String currency,
-        @Param("memberScope") MemberScope memberScope
+        @Param("memberScope") MemberScope memberScope,
+        @Param("openOnly") boolean openOnly
     );
     List<DealStageDistributionDto> stageDistribution(
         @Param("workspaceId") int workspaceId,

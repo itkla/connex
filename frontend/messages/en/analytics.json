@@ -44,7 +44,7 @@
     "agingTitle": "Open deal aging",
     "topDealsTitle": "Top deals",
     "infoAria": "How this is calculated",
-    "revenueInfo": "Won revenue (realized) vs projected value of all deals, by month.",
+    "revenueInfo": "All deal value sums open, won, and lost deals by expected close date, for comparison with realized revenue.",
     "stageInfo": "Open deals in the selected pipeline, by stage. Bar = total value, number = open deals.",
     "winRateInfo": "Deals closed this period, won vs lost. Center = win rate (won ÷ won+lost).",
     "activityInfo": "Logged activities by type over the period, dated by timestamp.",
@@ -94,14 +94,14 @@
     "activityTooltip": "Calls, emails, meetings, notes, and other logged interactions in the selected period."
   },
   "AnalyticsRevenue": {
-    "subtitle": "Won vs projected over time",
+    "subtitle": "Won revenue vs all deal value",
     "openPipeline": "Open pipeline",
     "actual": "Won",
-    "projected": "Projected",
+    "projected": "All deal value",
     "today": "Today",
     "empty": "No revenue to chart yet",
     "actualAmount": "Won · {amount}",
-    "projectedAmount": "Projected · {amount}"
+    "projectedAmount": "All deal value · {amount}"
   },
   "AnalyticsStageFunnel": {
     "selectPipeline": "Select pipeline",
