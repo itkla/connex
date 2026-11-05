@@ -1,6 +1,6 @@
 'use client';
 
-import { type ReactNode } from 'react';
+import { type ComponentProps, type ReactNode } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Loader2Icon } from 'lucide-react';
@@ -10,6 +10,7 @@ import { type SelectionId } from '@/app/components/records/types';
 type Props<T> = {
     open: boolean;
     onOpenChange: (open: boolean) => void;
+    onCloseAutoFocus?: ComponentProps<typeof DialogContent>['onCloseAutoFocus'];
     selectedIds: Set<SelectionId>;
     selectedItems: T[];
     entityLabel: string;
@@ -29,6 +30,7 @@ type Props<T> = {
 export default function DeleteRecordDialog<T>({
     open,
     onOpenChange,
+    onCloseAutoFocus,
     selectedIds,
     selectedItems,
     entityLabel,
@@ -42,7 +44,7 @@ export default function DeleteRecordDialog<T>({
     const single = count === 1 ? selectedItems[0] : null;
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent>
+            <DialogContent onCloseAutoFocus={onCloseAutoFocus}>
                 <DialogHeader>
                     <DialogTitle>
                         {count === 1 ? t('titleSingle', { entityLabel }) : t('titleMultiple', { count, entityLabel })}

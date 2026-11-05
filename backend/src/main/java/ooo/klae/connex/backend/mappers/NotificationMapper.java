@@ -298,6 +298,14 @@ public interface NotificationMapper {
         @Param("dedupeKey") String dedupeKey
     );
 
+    /** Marks a task recipient's existing assignment notice resolved within its workspace. */
+    int resolveTaskAssignment(
+        @Param("workspaceId") int workspaceId,
+        @Param("recipientId") int recipientId,
+        @Param("taskId") int taskId,
+        @Param("resolvedAt") String resolvedAt
+    );
+
     List<Notification> findReminderNotifications(
         @Param("workspaceId") int workspaceId,
         @Param("recipientId") int recipientId
