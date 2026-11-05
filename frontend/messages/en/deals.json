@@ -113,7 +113,7 @@
         "dealClosed": "Deal closed",
         "dealReopened": "Deal reopened",
         "failedToUpdateStatus": "Couldn't update the deal status",
-        "failedToLoadDeal": "Couldn't load the deal. Try again."
+        "failedToLoadDeal": "Couldn't load the deal"
     },
     "DealsActivityBreakdown": {
         "activityMix": "Activity mix",
