@@ -555,7 +555,7 @@
         "statusFailed": "ドキュメントのステータスを更新できませんでした"
     },
     "DealsEditConflict": {
-        "title": "商談が更新されています",
+        "title": "案件が更新されています",
         "description": "「{name}」を読み込んだ後に、別の変更が保存されました。入力中の内容は保持されています。変更された項目：",
         "loadFailed": "「{name}」は更新されています。入力中の内容は保持されていますが、最新の情報を取得できませんでした。編集を続け、再度保存すると変更内容を確認できます。",
         "otherChanges": "表示中の項目以外も含め、別の更新が保存されています。",
@@ -565,8 +565,8 @@
         "confirmDescription": "「{name}」の未保存の変更は失われます。最新の保存内容に置き換わります。",
         "discardAndReload": "破棄して再読み込み",
         "fields": {
-            "name": "商談名",
-            "value": "見込金額",
+            "name": "案件名",
+            "value": "予測金額",
             "actualValue": "実績金額",
             "valueSource": "金額の算出方法",
             "currency": "通貨",
@@ -575,11 +575,11 @@
             "position": "ボード内の位置",
             "company": "会社",
             "ownerId": "担当者",
-            "expectedCloseDate": "受注予定日",
-            "closedAt": "クローズ日時",
-            "closedReason": "クローズ理由",
+            "expectedCloseDate": "決着予定日",
+            "closedAt": "決着日時",
+            "closedReason": "決着理由",
             "won": "結果",
-            "riskExcluded": "商談リスク評価"
+            "riskExcluded": "案件リスク評価"
         }
     }
 }
