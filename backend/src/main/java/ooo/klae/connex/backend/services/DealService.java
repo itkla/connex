@@ -1497,7 +1497,7 @@ public class DealService {
         notificationChanges.publish(workspaceId, "deal", id);
         ruleTriggers.publish(workspaceId, "deal", id, Boolean.TRUE.equals(deal.getWon()) ? "deal.won" : "deal.lost");
         syncClosedReasonMentions(workspaceId, deal);
-        return hydrateReferences(workspaceId, deal);
+        return hydrateReferences(workspaceId, requireDeal(workspaceId, id));
     }
 
     /**
@@ -1549,7 +1549,7 @@ public class DealService {
             auditService.diff(before, deal, AUDIT_FIELDS));
         notificationChanges.publish(workspaceId, "deal", id);
         syncClosedReasonMentions(workspaceId, deal);
-        return hydrateReferences(workspaceId, deal);
+        return hydrateReferences(workspaceId, requireDeal(workspaceId, id));
     }
 
     /**

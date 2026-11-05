@@ -1,5 +1,8 @@
+-- Explicit INSTANT refuses a table rebuild even when old_alter_table is enabled.
+-- Metadata locks and partial-DDL recovery requirements are documented in docs/UPGRADING.md.
 ALTER TABLE deal
-    ADD COLUMN version BIGINT NOT NULL DEFAULT 0;
+    ADD COLUMN version BIGINT NOT NULL DEFAULT 0,
+    ALGORITHM=INSTANT, LOCK=DEFAULT;
 
 -- A database-owned counter includes legacy binaries, maintenance, bulk and targeted writers,
 -- even writes that deliberately preserve updated_at or occur within the same clock tick.

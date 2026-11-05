@@ -11,46 +11,11 @@ import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import QuickEditDealSheet, { type DealDraft } from '@/app/components/records/deals/QuickEditDealSheet';
 import { CustomFieldsEditSection, type CustomFieldsEditHandle } from '@/app/components/records/CustomFieldsEditSection';
-import { actualValueForOutcome } from '@/app/components/records/deals/dealOutcome';
-import { getDealById, getPipelines, getStagesByPipelineId, updateDeal } from '@/app/lib/api';
+import { submitDealDraftUpdate, toDealDraft as toDraft } from './dealEditConflict';
+import { getDealById, getPipelines, getStagesByPipelineId } from '@/app/lib/api';
 import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
-import { type Deal, type Pipeline, type Stage, type UpdateDealPayload } from '@/app/lib/types';
+import { type Deal, type Pipeline, type Stage } from '@/app/lib/types';
 
-function toDraft(d: Deal): DealDraft {
-    return {
-        expectedVersion: d.version,
-        name: d.name ?? '',
-        value: d.value ?? 0,
-        actualValue: d.actualValue ?? 0,
-        currency: d.currency ?? 'USD',
-        pipeline: d.pipeline ?? 0,
-        stage: d.stage ?? 0,
-        company: d.company ?? null,
-        expectedCloseDate: d.expectedCloseDate ?? '',
-        closedAt: d.closedAt ?? null,
-        closedReason: d.closedReason ?? null,
-        won: d.won ?? null,
-    };
-}
-
-/** Persists one edit-sheet draft with outcome-canonicalized realized value. */
-export async function submitDealDraftUpdate(dealId: number, draft: DealDraft, init: RequestInit = {}): Promise<Deal> {
-    const payload: UpdateDealPayload = {
-        expectedVersion: draft.expectedVersion,
-        name: draft.name.trim(),
-        value: draft.value,
-        actualValue: actualValueForOutcome(draft.won, draft.actualValue),
-        currency: draft.currency.trim() || 'USD',
-        pipeline: draft.pipeline,
-        stage: draft.stage,
-        company: draft.company,
-        expectedCloseDate: draft.expectedCloseDate || null,
-        closedAt: draft.closedAt || null,
-        closedReason: draft.closedReason || null,
-        won: draft.won,
-    };
-    return updateDeal(dealId, payload, init);
-}
 
 export default function EditDealSheet({
     deal,
@@ -58,12 +23,14 @@ export default function EditDealSheet({
     onOpenChange,
     pipelines,
     stagesByPipeline,
+    onDealUpdated,
 }: {
     deal: Deal;
     open: boolean;
     onOpenChange: (open: boolean) => void;
     pipelines: Pipeline[];
     stagesByPipeline: Record<number, Stage[]>;
+    onDealUpdated?: (saved: Deal) => void;
 }) {
     const router = useRouter();
     const t = useTranslations('DealsEditSheet');
@@ -159,6 +126,7 @@ export default function EditDealSheet({
         try {
             const saved = await submitDealDraftUpdate(base.id, draft, origin);
             setBase(saved);
+            onDealUpdated?.(saved);
             setDraft(toDraft(saved));
             await cfRef.current?.save(origin);
             toastSuccess(t('dealUpdated'));

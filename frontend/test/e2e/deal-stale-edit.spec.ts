@@ -97,3 +97,46 @@ for (const locale of ['en', 'ja'] as const) {
         }
     }
 }
+
+test('an inline value save followed by quick-edit name save uses the advanced version', async ({ page, context }, testInfo) => {
+    const fixture = runFixture(testInfo.project.name);
+    await useLocale(context, 'en');
+    const seed = seeder(context.request, fixture.workspaceId, await csrfBootstrap(context.request));
+    const sourceResponse = await context.request.get(`/api/deals/${fixture.deals.primary.id}`);
+    expect(sourceResponse.ok()).toBe(true);
+    const source: unknown = await sourceResponse.json();
+    if (!isRecord(source) || typeof source.pipeline !== 'number' || typeof source.stage !== 'number') {
+        throw new Error('The seeded deal has no pipeline or stage');
+    }
+    const name = `Inline deal ${Date.now()} ${testInfo.testId}`;
+    const review = await seed.post('/api/duplicate-preflight/deals', { name, companyId: null });
+    const created = await seed.post('/api/deals', {
+        name, value: 100, actualValue: 0, currency: 'JPY', pipeline: source.pipeline,
+        stage: source.stage, company: null, duplicateReviewToken: review.reviewToken,
+    });
+    if (typeof created.id !== 'number') throw new Error('The created deal has no id');
+    const id = created.id;
+    await page.goto(`/records/deals?view=table&q=${encodeURIComponent(name)}`);
+    const row = page.getByRole('row').filter({ hasText: name });
+    const editValue = message('en', 'records', 'RecordsRenderView.editFieldAria')
+        .replace('{field}', message('en', 'deals', 'DealsBrowser.columnValue')).replace('{name}', name);
+    await row.getByRole('button', { name: editValue, exact: true }).dblclick();
+    const input = row.getByRole('textbox');
+    await input.fill('99999');
+    const valueSaved = page.waitForResponse((response) => response.url().endsWith(`/api/deals/${id}/value`)
+        && response.request().method() === 'PUT');
+    await input.press('Enter');
+    expect((await valueSaved).status()).toBe(200);
+    await expect(input).not.toBeVisible();
+    const editor = await openEditor(page, 'list', name, 'en');
+    await expect(editor.locator(`#deal-value-${id}`)).toHaveValue('99999');
+    await editor.locator(`#deal-name-${id}`).fill(`${name} edited`);
+    const nameSaved = page.waitForResponse((response) => response.url().endsWith(`/api/deals/${id}`)
+        && response.request().method() === 'PUT');
+    await editor.getByRole('button', { name: message('en', 'deals', 'DealsQuickEditSheet.save'), exact: true }).click();
+    expect((await nameSaved).status()).toBe(200);
+    await expect(editor).not.toBeVisible();
+    const storedResponse = await context.request.get(`/api/deals/${id}`);
+    const stored: unknown = await storedResponse.json();
+    expect(stored).toEqual(expect.objectContaining({ name: `${name} edited`, value: 99999 }));
+});

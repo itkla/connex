@@ -140,6 +140,7 @@ class ImportDealVisibilityScopeTest {
                 deal.setStageId(11);
                 existing.add(deal);
                 when(deals.getDealByIdForUpdate(7, id)).thenReturn(deal);
+                if ("overwrite".equals(action)) when(deals.update(deal)).thenReturn(1);
             }
             when(deals.getDealsForDedup(7)).thenReturn(existing);
             when(deals.insertBatch(anyList())).thenAnswer(invocation -> {

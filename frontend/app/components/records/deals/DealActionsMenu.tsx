@@ -36,6 +36,7 @@ import { ButtonGroup } from '@/components/ui/button-group';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import DealTeamDialog from '@/app/components/records/deals/DealTeamDialog';
 import EditDealSheet from '@/app/components/records/deals/EditDealSheet';
+import { latestDealSnapshot } from './dealEditConflict';
 import {
     RecordActivityComposer,
     RecordTaskComposer,
@@ -92,6 +93,8 @@ export default function DealActionsMenu({
     const canAddTask = usePermission('TASK_CREATE');
     const showApiError = useApiErrorToast('DealsActionsMenu');
     const { inputRef: attachmentInputRef, uploading: attachmentsUploading, openPicker: openAttachmentPicker, onFilesSelected: onAttachmentFilesSelected } = useAttachmentUploader('deal', deal.id);
+    const [lastSavedDeal, setLastSavedDeal] = useState<Deal | null>(null);
+    const editDeal = latestDealSnapshot(deal, lastSavedDeal);
     const [editOpen, setEditOpen] = useState(false);
     const [teamOpen, setTeamOpen] = useState(false);
     const [activityOpen, setActivityOpen] = useState(false);
@@ -110,13 +113,12 @@ export default function DealActionsMenu({
     const personSearch = useContactTargetSearch(noteOpen, [], personSeeds);
     const dealSearch = useDealTargetSearch(noteOpen, [deal.id], stableDealSeeds);
 
-    const closed = isDealClosed(deal);
+    const closed = isDealClosed(editDeal);
 
     const toggleDealStatus = async (won: boolean | null) => {
         setIsUpdatingStatus(true);
         try {
-            if (won === null) await reopenDeal(deal.id);
-            else await closeDeal(deal.id, { won });
+            setLastSavedDeal(won === null ? await reopenDeal(deal.id) : await closeDeal(deal.id, { won }));
             toastSuccess(won === null ? t('dealReopened') : t('dealClosed'));
             router.refresh();
         } catch (err) {
@@ -293,19 +295,21 @@ export default function DealActionsMenu({
             />
 
             <EditDealSheet
-                deal={deal}
+                deal={editDeal}
                 open={editOpen}
                 onOpenChange={setEditOpen}
                 pipelines={pipelines}
                 stagesByPipeline={stagesByPipeline}
+                onDealUpdated={setLastSavedDeal}
             />
 
             <DealTeamDialog
                 open={teamOpen}
                 onOpenChange={setTeamOpen}
                 dealId={deal.id}
-                initialOwnerId={deal.ownerId}
+                initialOwnerId={editDeal.ownerId}
                 initialCollaborators={collaborators}
+                onDealUpdated={setLastSavedDeal}
             />
 
             <RecordActivityComposer

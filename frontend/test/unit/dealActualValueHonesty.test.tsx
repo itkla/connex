@@ -8,8 +8,7 @@ import {
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { submitDealDraftUpdates } from "@/app/components/records/deals/DealsBrowser";
-import { submitDealDraftUpdate } from "@/app/components/records/deals/EditDealSheet";
+import { submitDealDraftUpdate, submitDealDraftUpdates } from "@/app/components/records/deals/dealEditConflict";
 import QuickEditDealSheet, { type DealDraft } from "@/app/components/records/deals/QuickEditDealSheet";
 import { actualValueForOutcome } from "@/app/components/records/deals/dealOutcome";
 import type { Deal, Pipeline, Stage } from "@/app/lib/types";

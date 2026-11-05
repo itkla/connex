@@ -24,7 +24,10 @@ contact edits and other whole-record forms. Tenant, visibility and permission ch
   This code is distinct from the existing line-item value/currency conflicts.
 - Run the conditional broad write before dependent value/outcome writes. Its transaction covers
   every dependent write, history, audit and event. A refusal rolls everything back. Return a
-  fresh record after all writes so its version includes every mutation in that transaction.
+  fresh record after all writes so its version includes every mutation in that transaction. Close and reopen
+  use the same final re-read; targeted name/value/date/owner/evaluation and board writes already
+  return freshly selected records. Creation inserts at version zero and its augmentation changes
+  junction/custom-field rows only.
 
 ## Version ownership and writer inventory
 
@@ -32,6 +35,8 @@ Tenant V241 adds `deal.version` and `trg_deal_edit_version`, a BEFORE UPDATE cou
 `OLD.version + 1`. Application writers cannot preserve or assign the counter. Every UPDATE,
 including a no-op, advances it. This deliberately favors a conservative conflict over a lost edit.
 No timestamp conversion, client clock, precision assumption or read-then-write claim is involved.
+The column addition explicitly requires `ALGORITHM=INSTANT, LOCK=DEFAULT`; metadata-lock and
+partial-DDL recovery requirements are in [Upgrading](../UPGRADING.md#conditional-deal-edits-tenant-v241).
 
 `updated_at` remains the record freshness timestamp. It is unsuitable as this token: identifier
 backfill deliberately assigns `updated_at = updated_at`, and even fractional timestamps can collide
@@ -57,7 +62,13 @@ Any new cascading parent action must account for this exception too.
 
 Capture a base record and token together when opening the form, including from an already stale
 page/list. Do not update the base token when props or list data refresh while a draft exists.
-Both deal sheets carry the token in their drafts. A STALE_RECORD refusal fetches the latest record
+Both deal sheets carry the token in their drafts. Inline value edits replace the complete row with
+its successful response before a subsequent sheet captures it. Detail close/reopen, owner and full-edit
+responses stay available as edit bases until refreshed props reach that version. Board moves adopt
+the returned deal. Board Quick edit fetches a current record before opening because a move can
+advance neighboring rows' position versions while the board reloads. Other bulk/calendar actions
+refresh their records rather than seed an edit from a partial response. Submission and snapshot helpers live in `dealEditConflict.ts`, outside component
+modules. A STALE_RECORD refusal fetches the latest record
 using the write's captured workspace and compares it with the base, not with the edited draft.
 `recordEditConflict.ts` and `useRecordEditConflict` provide the reusable discriminator, comparison
 and latest-record loading pattern. Shared error copy maps the stable code before generic 409 text.
@@ -73,6 +84,9 @@ invalidates late fetch answers, so an older form cannot reopen its prompt over a
 Multi-record quick edits save sequentially, retain each successful response/base/token, and stop
 on the first refusal. Remaining drafts stay open. A retry never resends already saved records.
 Partial successes are intentionally separate transactions, as they were before this contract.
+Both the helper's batch loop and the browser's record-save loop intentionally await sequentially:
+stop on the first refusal and retain each successful response before attempting the next record.
+These ordering requirements are part of the partial-save/error contract.
 
 ## Verification
 

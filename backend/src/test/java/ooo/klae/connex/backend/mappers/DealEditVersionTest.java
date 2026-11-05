@@ -50,6 +50,7 @@ class DealEditVersionTest {
     void databaseCounterIncludesWritersThatPreserveTheTimestamp() throws Exception {
         String migration = resource("db/migration/tenant/V241__deal_edit_version.sql");
         assertTrue(migration.contains("ADD COLUMN version BIGINT NOT NULL DEFAULT 0"));
+        assertTrue(migration.contains("ALGORITHM=INSTANT, LOCK=DEFAULT"));
         assertTrue(migration.contains("BEFORE UPDATE ON deal"));
         assertTrue(migration.contains("FOR EACH ROW"));
         assertTrue(migration.contains("SET NEW.version = OLD.version + 1"));

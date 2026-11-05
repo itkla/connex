@@ -262,6 +262,24 @@ class DealUpdateConcurrencyIntegrationTest {
     }
 
     @Test
+    void closeAndReopenResponsesCanSeedTheNextConditionalEdit() {
+        when(referenceService.hydrateDeals(anyInt(), anyList())).thenAnswer(invocation -> invocation.getArgument(1));
+        asCurrentUser(() -> {
+            Deal closed = dealService.close(deal.getId(), true, null, new BigDecimal("333"));
+            assertEquals(dealMapper.getDealById(workspace.getId(), deal.getId()).getVersion(), closed.getVersion());
+            closed.setExpectedVersion(closed.getVersion());
+            closed.setName("Edited after close");
+            dealService.update(deal.getId(), closed);
+            Deal reopened = dealService.reopen(deal.getId());
+            assertEquals(dealMapper.getDealById(workspace.getId(), deal.getId()).getVersion(), reopened.getVersion());
+            reopened.setExpectedVersion(reopened.getVersion());
+            reopened.setName("Edited after reopen");
+            Deal saved = dealService.update(deal.getId(), reopened);
+            assertEquals("Edited after reopen", saved.getName());
+        });
+    }
+
+    @Test
     void omittedExpectedVersionRetainsLegacyFullEditBehavior() {
         when(referenceService.hydrateDeals(anyInt(), anyList())).thenAnswer(invocation -> invocation.getArgument(1));
         Deal legacy = dealMapper.getDealById(workspace.getId(), deal.getId());

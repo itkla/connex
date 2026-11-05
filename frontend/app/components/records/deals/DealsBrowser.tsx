@@ -63,6 +63,7 @@ import DealsKanban from '@/app/components/records/deals/DealsKanban';
 import DealsQueryUrlSync from '@/app/components/records/deals/DealsQueryUrlSync';
 import NewDealDialog, { isDealPayloadDirty } from '@/app/components/records/deals/NewDealDialog';
 import DealEditConflictDialog from './DealEditConflictDialog';
+import { submitDealDraftUpdates, submitInlineDealValue, toDealDraft as toDraft } from './dealEditConflict';
 import { useRecordEditConflict } from '@/app/hooks/useRecordEditConflict';
 import QuickEditDealSheet, { type DealDraft } from '@/app/components/records/deals/QuickEditDealSheet';
 import {
@@ -70,8 +71,6 @@ import {
     getDealById,
     closeDeal,
     reopenDeal,
-    updateDeal,
-    updateDealValue,
     getCompaniesByIds,
     getDealsPage,
     getDealsSegmentPage,
@@ -129,11 +128,10 @@ import {
     type Pipeline,
     type Stage,
     type Contact,
-    type UpdateDealPayload,
     type Tag,
     type WorkspaceMember,
 } from '@/app/lib/types';
-import { actualValueForOutcome, isDealClosed } from './dealOutcome';
+import { isDealClosed } from './dealOutcome';
 import { DEAL_COMPANY_FILTER_KEY, DEAL_CONTACT_FILTER_KEY, DEAL_PIPELINE_FILTER_KEY } from './dealLinks';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import ContactAvatar from '../contacts/ContactAvatar';
@@ -150,22 +148,6 @@ import {
     segmentConditionEntries,
 } from '@/app/lib/segmentDefinition';
 
-function toDraft(d: Deal): DealDraft {
-    return {
-        expectedVersion: d.version,
-        name: d.name ?? '',
-        value: d.value ?? 0,
-        actualValue: d.actualValue ?? 0,
-        currency: d.currency ?? 'USD',
-        pipeline: d.pipeline ?? 0,
-        stage: d.stage ?? 0,
-        company: d.company ?? null,
-        expectedCloseDate: d.expectedCloseDate ?? '',
-        closedAt: d.closedAt ?? null,
-        closedReason: d.closedReason ?? null,
-        won: d.won ?? null,
-    };
-}
 
 function diffDraft(original: DealDraft, draft: DealDraft): boolean {
     return (
@@ -183,33 +165,6 @@ function diffDraft(original: DealDraft, draft: DealDraft): boolean {
     );
 }
 
-type DealDraftUpdate = {
-    dealId: number;
-    draft: DealDraft;
-};
-
-/** Persists quick-edit drafts with outcome-canonicalized realized values. */
-export async function submitDealDraftUpdates(updates: ReadonlyArray<DealDraftUpdate>, init: RequestInit = {}): Promise<Deal[]> {
-    const saved: Deal[] = [];
-    for (const { dealId, draft } of updates) {
-        const payload: UpdateDealPayload = {
-            expectedVersion: draft.expectedVersion,
-            name: draft.name.trim(),
-            value: draft.value,
-            actualValue: actualValueForOutcome(draft.won, draft.actualValue),
-            currency: draft.currency.trim(),
-            pipeline: draft.pipeline,
-            stage: draft.stage,
-            company: draft.company ?? null,
-            expectedCloseDate: draft.expectedCloseDate || null,
-            closedAt: draft.closedAt,
-            closedReason: draft.closedReason,
-            won: draft.won,
-        };
-        saved.push(await updateDeal(dealId, payload, init));
-    }
-    return saved;
-}
 
 /**
  * Maps a table column key to the backend {@code sort} token accepted by
@@ -605,6 +560,11 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         !loadingPage,
     );
     const [selectedBoardDeal, setSelectedBoardDeal] = useState<Deal | null>(null);
+    const replaceDeal = useCallback((saved: Deal) => {
+        if (saved.workspaceId !== undefined && saved.workspaceId !== renderedWorkspaceId()) return;
+        setDeals((current) => current.map((row) => row.id === saved.id ? saved : row));
+        setSelectedBoardDeal((current) => current?.id === saved.id ? saved : current);
+    }, []);
     const selectedDeals = useMemo(() => {
         if (pageSelectedDeals.length > 0) return pageSelectedDeals;
         return selectedBoardDeal != null && selectedIds.has(selectedBoardDeal.id)
@@ -949,6 +909,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                 try {
                     const [saved] = await submitDealDraftUpdates([{ dealId: base.id, draft }], origin);
                     if (!saved) throw new Error('Deal update returned no record');
+                    replaceDeal(saved);
                     setEditBases((current) => current.map((item) => item.id === saved.id ? saved : item));
                     setDrafts((current) => ({ ...current, [saved.id]: toDraft(saved) }));
                 } catch (error) {
@@ -1072,14 +1033,14 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
 
     const toggleDealStatus = useCallback(async (deal: Deal, won: boolean | null) => {
         try {
-            if (won === null) await reopenDeal(deal.id);
-            else await closeDeal(deal.id, { won });
+            const saved = won === null ? await reopenDeal(deal.id) : await closeDeal(deal.id, { won });
+            replaceDeal(saved);
             toastSuccess(won === null ? t('dealReopened') : t('dealClosed'));
             refreshRecords();
         } catch (err) {
             reportApiError(err, 'failedToUpdateStatus');
         }
-    }, [refreshRecords, reportApiError, t]);
+    }, [refreshRecords, replaceDeal, reportApiError, t]);
 
     const summary = useMemo(() => {
         const m = dealMetrics.byCurrency.find((c) => c.currency === activeCurrency);
@@ -1115,9 +1076,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             editable: {
                 getValue: (d) => (d.value != null ? String(d.value) : ''),
                 save: (d, v) =>
-                    inlineEdit.commit(d, 'value', Number(v), async (full) => {
-                        await updateDealValue(full.id, full.value ?? 0);
-                    }),
+                    inlineEdit.commit(d, 'value', Number(v), (full) => submitInlineDealValue(full, replaceDeal)),
                 validate: (v) => (v !== '' && /^\d+(\.\d{1,2})?$/.test(v) ? null : t('valueInvalid')),
                 disabled: (d) => (d.valueSource === 'line_items' ? t('valueDerivedFromLineItems') : null),
             },
@@ -1221,7 +1180,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             getSortValue: (d) => (d.updatedAt ? Date.parse(d.updatedAt) : null),
             render: (d) => formatDateTime(d.updatedAt, locale),
         },
-    ], [companyById, pipelineById, stageById, riskByDealId, toggleDealStatus, levelLabel, t, locale, inlineEdit, commentCounts]);
+    ], [companyById, pipelineById, stageById, riskByDealId, toggleDealStatus, levelLabel, t, locale, inlineEdit, replaceDeal, commentCounts]);
 
     const visibleDeals = deals;
 
