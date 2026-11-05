@@ -3,6 +3,8 @@ package ooo.klae.connex.backend.dto;
 import java.util.List;
 import java.util.Map;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 /**
  * Deterministic engagement rollup for a whole campaign, aggregated across its sends.
  *
@@ -52,4 +54,16 @@ public record CampaignEngagementDto(
         Double bounceRate,
         Double complaintRate,
         List<CampaignSendEngagementDto> sends) {
+
+    /**
+     * Compatibility count for older frontends that labeled this field as recipients reached.
+     * Retained throughout the supported rollback window; removal requires a reviewed client cutover.
+     * @return confirmed-delivered messages, excluding drafts and unconfirmed submissions
+     * @deprecated use {@link #preparedRecipients()} for preparation or {@link #delivered()} for delivery
+     */
+    @Deprecated
+    @JsonProperty("totalRecipients")
+    public int totalRecipients() {
+        return delivered;
+    }
 }

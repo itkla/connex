@@ -55,10 +55,11 @@ for (const locale of ["en", "ja"] as const) {
         expect(response.ok()).toBe(true);
         expect(await response.json()).toMatchObject({
             preparedRecipients: 1,
+            totalRecipients: 0,
             dispatched: 0,
             delivered: 0,
             deliveryReceiptsAvailable: false,
-            channels: [{ channel: "email", preparedRecipients: 1, dispatched: 0, delivered: 0, deliveryReceiptsAvailable: false }],
+            channels: [{ channel: "email", preparedRecipients: 1, dispatched: 0, delivered: 0, deliveries: 0, deliveryReceiptsAvailable: false }],
         });
         const sentRecipients = await page.request.get(`${base}/recipients?submitted=true&page=1&size=25`, { headers });
         expect(sentRecipients.ok()).toBe(true);
@@ -77,5 +78,23 @@ for (const locale of ["en", "ja"] as const) {
         await expect(engagement.getByText(message(locale, "campaigns", "CampaignEngagement.channelSent").replace("{count}", "0"), { exact: true })).toBeVisible();
         await expect(engagement.getByText(message(locale, "campaigns", "CampaignEngagement.channelDeliveryNotMeasured"), { exact: true })).toBeVisible();
         await expect(engagement).not.toContainText(message(locale, "campaigns", "CampaignEngagement.deliveries").replace("{count}", "1"));
+
+        await seed.post(`${base}/sends`, {
+            snapshotVersion: numericField(snapshot, "version"), messageId, messageVersion: 1, purpose: "marketing",
+        });
+        await page.reload();
+        await page.getByRole("tab", { name: message(locale, "campaigns", "CampaignDetail.tabEngagement"), exact: true }).click();
+        const drillLabel = message(locale, "campaigns", "CampaignEngagement.drillThrough")
+            .replace("{count}", "2")
+            .replace("{counter}", message(locale, "campaigns", "CampaignEngagement.recipients"));
+        await page.getByRole("button", { name: drillLabel, exact: true }).click();
+        const dialog = page.getByRole("dialog");
+        await expect(dialog).toContainText(locale === "en" ? "2 message entries prepared" : "準備済みのメッセージ2件");
+        await expect(dialog.getByRole("link", { name, exact: true })).toHaveCount(2);
+        for (const number of [1, 2]) {
+            const label = message(locale, "campaigns", "CampaignRecipients.sendLabel")
+                .replace("{number}", String(number)).replace("{message}", "Prepared message");
+            await expect(dialog.getByText(label, { exact: true })).toBeVisible();
+        }
     });
 }

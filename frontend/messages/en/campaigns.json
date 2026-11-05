@@ -256,7 +256,7 @@
         "queueFailed": "Couldn't queue the send"
     },
     "CampaignEngagement": {
-        "drillThrough": "Show the {count} contacts behind {counter}",
+        "drillThrough": "Show the {count} message entries for {counter}",
         "title": "Engagement",
         "subtitle": "Delivery outcomes aggregated across this campaign's sends.",
         "empty": "No engagement yet",
@@ -346,14 +346,14 @@
         "createFailed": "Couldn't create the export"
     },
     "CampaignRecipients": {
-        "descriptionRecipients": "{count, plural, one {# contact} other {# contacts}} this campaign was prepared for, whether or not it reached them.",
-        "descriptionDispatched": "{count, plural, one {# contact} other {# contacts}} this campaign was sent to.",
-        "descriptionDelivered": "{count, plural, one {# contact} other {# contacts}} it reached.",
-        "descriptionBounced": "{count, plural, one {# contact} other {# contacts}} it couldn't reach — their address rejected it.",
-        "descriptionComplained": "{count, plural, one {# contact} other {# contacts}} who received it and marked it as spam.",
-        "descriptionUnsubscribed": "{count, plural, one {# contact} other {# contacts}} who unsubscribed after this campaign.",
-        "descriptionSkipped": "{count, plural, one {# contact} other {# contacts}} it was withheld from, so nothing was sent to them.",
-        "descriptionFailed": "{count, plural, one {# contact} other {# contacts}} it couldn't reach — sending itself failed.",
+        "descriptionRecipients": "{count, plural, one {# message entry prepared} other {# message entries prepared}}, including drafts. Repeat sends to the same contact count separately.",
+        "descriptionDispatched": "{count, plural, one {# message sent} other {# messages sent}}. Repeat sends to the same contact count separately.",
+        "descriptionDelivered": "{count, plural, one {# message reached its recipient} other {# messages reached their recipients}}. Repeat sends to the same contact count separately.",
+        "descriptionBounced": "{count, plural, one {# message bounced} other {# messages bounced}} because the receiving address rejected it. Repeat sends count separately.",
+        "descriptionComplained": "{count, plural, one {# message was marked as spam} other {# messages were marked as spam}}. Repeat sends count separately.",
+        "descriptionUnsubscribed": "{count, plural, one {# message was followed by an unsubscribe} other {# messages were followed by an unsubscribe}}. Repeat sends count separately.",
+        "descriptionSkipped": "{count, plural, one {# message was withheld} other {# messages were withheld}}, so nothing was sent for these entries. Repeat sends count separately.",
+        "descriptionFailed": "{count, plural, one {# message failed} other {# messages failed}} to send or arrive. Repeat sends count separately.",
         "title": "{counter}",
         "loading": "Loading contacts…",
         "emptyTitle": "No contacts here",
@@ -386,6 +386,9 @@
         "reconcileFailed": "Couldn't update the delivery result",
         "page": "Page {page} of {pageCount}",
         "previousPage": "Previous page",
-        "nextPage": "Next page"
+        "nextPage": "Next page",
+        "sendLabel": "Send {number} · {message}",
+        "messageUnnamed": "Unnamed message",
+        "sendDetailsUnavailable": "Send details unavailable"
     }
 }

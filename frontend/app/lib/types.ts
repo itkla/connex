@@ -2646,6 +2646,8 @@ export type CampaignRecipient = {
     reasonCode: CampaignDeliveryFailureReason | null;
     createdAt?: string;
     updatedAt?: string;
+    messageName?: string;
+    sendNumber?: number;
 };
 
 export type CampaignDeliveryFailureReason =

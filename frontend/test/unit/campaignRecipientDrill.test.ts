@@ -177,12 +177,13 @@ describe('a campaign engagement count opens the contacts behind it', () => {
         }
     });
 
-    it('counts contacts in whole words rather than "1 contacts"', () => {
+    it('counts message entries in whole words rather than unique contacts', () => {
         const catalog = messages('en');
 
         for (const counter of ENGAGEMENT_COUNTERS) {
             expect(catalog[descriptionKey(counter)], `${counter} must pluralize`)
                 .toContain('{count, plural,');
+            expect(catalog[descriptionKey(counter)]).not.toContain('# contact');
         }
     });
 

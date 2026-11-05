@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 /**
  * Per-channel preparation, dispatch evidence, and receipt-backed delivery outcomes.
  * @param channel the delivery channel
@@ -14,4 +16,16 @@ public record CampaignChannelStatDto(
         int dispatched,
         int delivered,
         boolean deliveryReceiptsAvailable) {
+
+    /**
+     * Compatibility count for older frontends that labeled this field as delivered.
+     * Retained throughout the supported rollback window; removal requires a reviewed client cutover.
+     * @return confirmed-delivered messages, never prepared or merely submitted messages
+     * @deprecated use {@link #delivered()} and {@link #deliveryReceiptsAvailable()} instead
+     */
+    @Deprecated
+    @JsonProperty("deliveries")
+    public int deliveries() {
+        return delivered;
+    }
 }

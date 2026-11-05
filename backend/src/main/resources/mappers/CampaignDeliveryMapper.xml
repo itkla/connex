@@ -49,9 +49,14 @@
   <select id="listRecipients" resultType="ooo.klae.connex.backend.dto.CampaignRecipientRow">
     SELECT d.id AS delivery_id, d.send_id, s.channel, d.person_id, d.status, d.skip_reason,
            d.reconciliation_required_at, d.last_error_code AS reason_code,
-           d.created_at, d.updated_at
+           d.created_at, d.updated_at, m.name AS message_name,
+           (SELECT COUNT(*) FROM campaign_send preceding_send
+            WHERE preceding_send.workspace_id = #{workspaceId}
+              AND preceding_send.campaign_id = s.campaign_id
+              AND preceding_send.id &lt;= s.id) AS send_number
     FROM campaign_delivery d
     JOIN campaign_send s ON s.workspace_id = d.workspace_id AND s.id = d.send_id
+    LEFT JOIN campaign_message m ON m.workspace_id = s.workspace_id AND m.id = s.message_id
     <include refid="recipientFilter"/>
     ORDER BY d.id
     LIMIT #{limit} OFFSET #{offset}

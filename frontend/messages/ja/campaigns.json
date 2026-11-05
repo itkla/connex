@@ -256,7 +256,7 @@
         "queueFailed": "配信をキューに追加できませんでした"
     },
     "CampaignEngagement": {
-        "drillThrough": "{counter}の対象となった{count}件の連絡先を表示",
+        "drillThrough": "{counter}の対象となった{count}件のメッセージを表示",
         "title": "エンゲージメント",
         "subtitle": "このキャンペーンの各配信を集計した到達結果です。",
         "empty": "エンゲージメントはまだありません",
@@ -346,14 +346,14 @@
         "createFailed": "エクスポートを作成できませんでした"
     },
     "CampaignRecipients": {
-        "descriptionRecipients": "このキャンペーンの配信対象{count}件です。到達したかどうかは問いません。",
-        "descriptionDispatched": "このキャンペーンを送信した連絡先{count}件です。",
-        "descriptionDelivered": "到達した連絡先{count}件です。",
-        "descriptionBounced": "アドレス側で受け取られず、届かなかった連絡先{count}件です。",
-        "descriptionComplained": "受信後に迷惑メールとして報告した連絡先{count}件です。",
-        "descriptionUnsubscribed": "このキャンペーンのあとに配信を停止した連絡先{count}件です。",
-        "descriptionSkipped": "送信対象から除外し、何も送信しなかった連絡先{count}件です。",
-        "descriptionFailed": "送信に失敗し、届かなかった連絡先{count}件です。",
+        "descriptionRecipients": "準備済みのメッセージ{count}件です。下書きも含み、同じ連絡先への複数回の配信も、それぞれ数えます。",
+        "descriptionDispatched": "送信済みメッセージ{count}件です。同じ連絡先への複数回の送信も、それぞれ数えます。",
+        "descriptionDelivered": "到達が確認されたメッセージ{count}件です。同じ連絡先への複数回の送信も、それぞれ数えます。",
+        "descriptionBounced": "受信側で拒否されたメッセージ{count}件です。同じ連絡先への複数回の送信も、それぞれ数えます。",
+        "descriptionComplained": "迷惑メールとして報告されたメッセージ{count}件です。同じ連絡先への複数回の送信も、それぞれ数えます。",
+        "descriptionUnsubscribed": "受信後に配信停止の手続きが行われたメッセージ{count}件です。同じ連絡先への複数回の送信も、それぞれ数えます。",
+        "descriptionSkipped": "送信対象から除外したメッセージ{count}件です。これらは送信されていません。同じ連絡先への複数回の配信も、それぞれ数えます。",
+        "descriptionFailed": "送信または到達に失敗したメッセージ{count}件です。同じ連絡先への複数回の送信も、それぞれ数えます。",
         "title": "{counter}",
         "loading": "連絡先を読み込んでいます…",
         "emptyTitle": "該当する連絡先はありません",
@@ -386,6 +386,9 @@
         "reconcileFailed": "配信結果を更新できませんでした",
         "page": "{pageCount} ページ中 {page} ページ",
         "previousPage": "前のページ",
-        "nextPage": "次のページ"
+        "nextPage": "次のページ",
+        "sendLabel": "配信{number} · {message}",
+        "messageUnnamed": "名称未設定のメッセージ",
+        "sendDetailsUnavailable": "配信の詳細を取得できません"
     }
 }

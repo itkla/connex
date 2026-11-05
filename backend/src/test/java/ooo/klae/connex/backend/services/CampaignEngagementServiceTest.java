@@ -12,6 +12,8 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import tools.jackson.databind.ObjectMapper;
+
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.CampaignDeliveryEvent;
 import ooo.klae.connex.backend.beans.Person;
@@ -46,6 +48,56 @@ class CampaignEngagementServiceTest extends AbstractServiceTest {
     @Autowired private CampaignDeliveryMapper campaignDeliveryMapper;
     @Autowired private WorkspaceService workspaceService;
     @Autowired private RoleMapper roleMapper;
+    @Autowired private ObjectMapper objectMapper;
+
+    @Test
+    void deprecatedResponseAliasesRetainNumericConfirmedDeliveryCounts() {
+        CampaignSendDto send = seedSend("aliases-" + unique(), 6);
+        List<Integer> ids = campaignDeliveryMapper.pendingDeliveryIds(workspace.getId(), send.id());
+
+        assertLegacyAliases(send, 0);
+        toDispatched(ids.getFirst());
+        assertLegacyAliases(send, 0);
+        toDelivered(ids.get(1));
+        assertLegacyAliases(send, 1);
+    }
+
+    private void assertLegacyAliases(CampaignSendDto send, int confirmedDelivered) {
+        var campaignJson = objectMapper.readTree(objectMapper.writeValueAsString(
+                campaignEngagementService.getCampaignEngagement(send.campaignId())));
+        var sendJson = objectMapper.readTree(objectMapper.writeValueAsString(
+                campaignEngagementService.getSendEngagement(send.campaignId(), send.id())));
+        assertEquals(6, campaignJson.path("preparedRecipients").asInt());
+        assertEquals(6, sendJson.path("preparedRecipients").asInt());
+        assertTrue(campaignJson.path("totalRecipients").isIntegralNumber());
+        assertEquals(confirmedDelivered, campaignJson.path("totalRecipients").asInt());
+        assertTrue(sendJson.path("totalRecipients").isIntegralNumber());
+        assertEquals(confirmedDelivered, sendJson.path("totalRecipients").asInt());
+        assertEquals(confirmedDelivered, campaignJson.path("sends").path(0).path("totalRecipients").asInt());
+        var channel = campaignJson.path("channels").path(0);
+        assertTrue(channel.path("deliveries").isIntegralNumber());
+        assertEquals(confirmedDelivered, channel.path("deliveries").asInt());
+    }
+
+    @Test
+    void repeatedContactRowsIdentifyTheirOwnSendWithinTheCampaign() {
+        String prefix = "send-labels-" + unique();
+        CampaignSendDto first = seedSend(prefix, 1);
+        CampaignSendDto second = campaignSendService.createSend(first.campaignId(),
+                new CampaignSendRequest(1, first.messageId(), 1, null, null));
+        toDispatched(campaignDeliveryMapper.pendingDeliveryIds(workspace.getId(), first.id()).getFirst());
+        toDispatched(campaignDeliveryMapper.pendingDeliveryIds(workspace.getId(), second.id()).getFirst());
+
+        var page = campaignRecipientService.getRecipients(first.campaignId(), null, null, null, 25, 0, true);
+
+        assertEquals(2, page.total());
+        assertEquals(page.items().getFirst().personId(), page.items().getLast().personId());
+        assertEquals(List.of(1, 2), page.items().stream().map(row -> row.sendNumber()).toList());
+        assertEquals(first.id(), page.items().getFirst().sendId());
+        assertEquals(second.id(), page.items().getLast().sendId());
+        assertEquals("Message " + prefix, page.items().getFirst().messageName());
+        assertEquals(page.items().getFirst().messageName(), page.items().getLast().messageName());
+    }
 
     @Test
     void draftRecipientsAreNeverReportedAsSentOrDelivered() {

@@ -788,6 +788,12 @@ not that a provider supports them. Without observed receipts, the UI shows deliv
 and rates as not measured, including for unsent drafts and for services such as SMTP that supply
 no delivery receipts.
 
+Engagement recipient lists count message entries for individual sends, not unique contacts. The
+same contact can appear once for each send. Each row identifies the message name and a one-based
+send number in creation order within its campaign, independent of database identifiers. Recipient
+pages preserve their contact access checks. Deprecated numeric response aliases remain available
+for older frontends under the [response compatibility contract](UPGRADING.md#campaign-engagement-response-compatibility-2257).
+
 **SMTP acceptance is not idempotent.** The stable `Message-ID` is useful when searching relay logs,
 but it is not a duplicate-suppression guarantee. When a campaign recipient is marked as needing
 confirmation, inspect the relay before resolving it. Mark it `delivered` when the relay accepted the

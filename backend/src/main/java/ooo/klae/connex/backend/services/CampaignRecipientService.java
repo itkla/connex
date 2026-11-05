@@ -120,7 +120,7 @@ public class CampaignRecipientService {
                         row.deliveryId(), row.sendId(), row.channel(), row.personId(),
                         row.personId() == null ? null : labels.get(row.personId()),
                         row.status(), row.skipReason(), row.reconciliationRequiredAt() != null,
-                        row.reasonCode(), row.createdAt(), row.updatedAt()))
+                        row.reasonCode(), row.createdAt(), row.updatedAt(), row.messageName(), row.sendNumber()))
                 .toList();
     }
 }
