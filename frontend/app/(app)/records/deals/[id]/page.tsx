@@ -30,6 +30,7 @@ import {
     getDealPeople,
     getDealRisk,
     getDealStageHistory,
+    getRelationshipMapAvailability,
     getNotesForDeal,
     getPipelineById,
     getStagesByPipelineId,
@@ -124,6 +125,7 @@ export default async function DealPage({ params }: DealPageProps) {
         customFields,
         risk,
         stageHistory,
+        mapAvailability,
     ] =
         await Promise.all([
             getTranslations('DealsPage'),
@@ -145,6 +147,7 @@ export default async function DealPage({ params }: DealPageProps) {
             getEntityCustomFieldsFromCookie("deal", id, cookie),
             getDealRisk(id, init).catch(() => null),
             getDealStageHistory(id, init).catch(() => [] as DealStageHistory[]),
+            getRelationshipMapAvailability(init),
         ]);
 
     if (dealAccess.kind === 'forbidden') return <AccessDeniedPage />;
@@ -313,6 +316,7 @@ export default async function DealPage({ params }: DealPageProps) {
                     <RecordDetailSection recordKind="deal" section="actions" className="mt-4 flex flex-wrap justify-end gap-2">
                         <AskConnexRecordEntry kind="deal" />
                         <DealActionsMenu
+                            mapAvailability={mapAvailability}
                             deal={deal}
                             pipelines={pipelines}
                             stagesByPipeline={stagesByPipeline}

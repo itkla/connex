@@ -529,6 +529,8 @@
         "subtitle": "通知方法を選択します。この設定はワークスペース全体ではなく、あなたにのみ適用されます。メールにはSMTPサーバーの設定が必要です（設定 → メール）。",
         "columnInApp": "アプリ内",
         "columnEmail": "メール",
+        "taskAssignedTitle": "タスクの依頼",
+        "taskAssignedDescription": "メンバーからタスクを依頼されたときや、担当者があなたに変更されたとき。",
         "taskTitle": "タスクのリマインダー",
         "taskDescription": "担当しているタスクの期限が近づいた、または過ぎたとき。",
         "dealTitle": "案件のリマインダー",

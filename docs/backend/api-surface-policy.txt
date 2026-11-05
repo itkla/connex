@@ -653,7 +653,7 @@ src/main/java/ooo/klae/connex/backend/services/SupportBundleService.java	746131a
 src/main/java/ooo/klae/connex/backend/services/SuppressionService.java	5de28f4691d2126b916b12a81779ff6113d2b3511c8ead4d359744ddb16da37f
 src/main/java/ooo/klae/connex/backend/services/SystemActor.java	3192b67fa96bf09fb216fde4b6b890cb2506261e26a3abf384c5901aa1b73019
 src/main/java/ooo/klae/connex/backend/services/TagService.java	f4ea74c1546b870da4bc8b14984f0ec53f114ca31b1d749d68a78093543287dd
-src/main/java/ooo/klae/connex/backend/services/TaskService.java	0204fd7b0424b40bbb6884ff7419af2e1e8b4f84a13b5d8875a5ee1110db5e0e
+src/main/java/ooo/klae/connex/backend/services/TaskService.java	85b48e4831fbde5d34d7ebaf9f4e8840d72df2e6d596b7cc3cf9dffaeb40b7fe
 src/main/java/ooo/klae/connex/backend/services/TeamService.java	18c89698a55a332b55902c89653ce26a2aaf8ed0dd88ce0c5e790fb1ec1c4c33
 src/main/java/ooo/klae/connex/backend/services/TenantDiagnosticsService.java	88740b9c9c24f65d119c23c4ce79d457c086727d2e7bfa819e4b596d9f2915be
 src/main/java/ooo/klae/connex/backend/services/TenantDiagnosticsTenantAccess.java	209eaf4bab4791c102dd630ddacf94dda1e36674f62aaf7cd035bcbf71617358

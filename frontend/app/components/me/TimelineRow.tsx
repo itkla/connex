@@ -10,6 +10,7 @@ import { CheckIcon, EllipsisVerticalIcon, PencilIcon, TrashIcon, UserIcon } from
 
 import { type Contact, type ContactLifecycleStage, type Deal, type Note, type UserReference } from '@/app/lib/types';
 import { formatShortDate } from '@/app/lib/utils';
+import { deriveNoteTitle, noteSnippet } from '@/app/lib/noteText';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { IconButton } from '@/components/ui/icon-button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -18,6 +19,7 @@ import { deleteActivity, deleteNote, deleteTask, getNoteById } from '@/app/lib/a
 import { ACTIVITY_URL_KEY, COMMENT_URL_KEY, NOTE_URL_KEY, TASK_URL_KEY } from '@/app/hooks/listStateUrl';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { type TimelineEntry } from '@/app/components/me/timelineEntries';
+import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import EditTaskSheet from '@/app/components/activity/tasks/EditTaskSheet';
 import EditActivitySheet from '@/app/components/activity/activities/EditActivitySheet';
 import NoteDialog from '@/app/components/activity/notes/NoteDialog';
@@ -142,10 +144,13 @@ export default function TimelineRow({
     const router = useRouter();
     const pathname = usePathname();
     const [editOpen, setEditOpen] = useState(false);
+    const [deleteOpen, setDeleteOpen] = useState(false);
+    const [deleting, setDeleting] = useState(false);
     const [editingNote, setEditingNote] = useState<Note | null>(null);
     const [loadingNote, setLoadingNote] = useState(false);
     const noteRequest = useRef<AbortController | null>(null);
     const rowRef = useRef<HTMLLIElement>(null);
+    const actionsRef = useRef<HTMLButtonElement>(null);
     const searchParams = useSearchParams();
     const reduceMotion = useReducedMotion();
     const deepLink = entryDeepLink(entry);
@@ -195,6 +200,8 @@ export default function TimelineRow({
     };
 
     const handleDelete = async () => {
+        if (deleting || !deleteOpen) return;
+        setDeleting(true);
         try {
             if (entry.kind === 'task') {
                 await deleteTask(entry.task.id);
@@ -206,9 +213,12 @@ export default function TimelineRow({
                 await deleteNote(entry.note.id);
                 toastSuccess(t('noteDeleted'));
             }
+            setDeleteOpen(false);
             router.refresh();
         } catch (err) {
             showApiError(err, 'deleteFailed');
+        } finally {
+            setDeleting(false);
         }
     };
 
@@ -217,6 +227,9 @@ export default function TimelineRow({
     const commentAuthor = entry.kind === 'comment' ? entry.comment.author : null;
     const avatarUrl = commentAuthor?.profilePictureUrl ?? author?.profilePictureUrl;
     const avatarName = commentAuthor?.displayName || author?.displayName || author?.username || t('unknownAuthor');
+    const deleteName = entry.kind === 'task' ? noteSnippet(entry.task.description, 120)
+        : entry.kind === 'activity' ? entry.activity.subject
+        : entry.kind === 'note' ? deriveNoteTitle(entry.note, chipLabel) : chipLabel;
 
     let title: React.ReactNode;
     let subtitle: React.ReactNode = null;
@@ -385,7 +398,7 @@ export default function TimelineRow({
             {!readOnlyEntry && (entry.kind !== 'activity' || !isProviderOwnedActivity(entry.activity)) ? (
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <IconButton variant="ghost" size="icon-inline" label={t('actionsAria')} aria-busy={loadingNote}>
+                        <IconButton ref={actionsRef} variant="ghost" size="icon-inline" label={t('actionsAria')} aria-busy={loadingNote}>
                             <EllipsisVerticalIcon className="text-muted-foreground" />
                         </IconButton>
                     </DropdownMenuTrigger>
@@ -395,13 +408,35 @@ export default function TimelineRow({
                             {t('edit')}
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem variant="destructive" onClick={handleDelete}>
+                        <DropdownMenuItem variant="destructive" onClick={() => setDeleteOpen(true)}>
                             <TrashIcon className="size-4" />
                             {t('delete')}
                         </DropdownMenuItem>
                     </DropdownMenuContent>
                 </DropdownMenu>
             ) : null}
+
+            {deepLink !== null && (entry.kind !== 'activity' || !isProviderOwnedActivity(entry.activity)) && (
+                <DeleteRecordDialog<TimelineEntry>
+                    open={deleteOpen}
+                    onOpenChange={(open) => {
+                        if (!deleting) setDeleteOpen(open);
+                    }}
+                    onCloseAutoFocus={(event) => {
+                        event.preventDefault();
+                        actionsRef.current?.focus();
+                    }}
+                    selectedIds={new Set([deepLink.id])}
+                    selectedItems={[entry]}
+                    entityLabel={t(`deleteEntity.${entry.kind}`)}
+                    getDisplayName={() => deleteName || chipLabel}
+                    details={<p className="text-sm text-muted-foreground">{
+                        t(entry.kind === 'task' ? 'deleteTaskAssignee' : 'deleteEntryAuthor', { name: avatarName })
+                    }</p>}
+                    isDeleting={deleting}
+                    confirmDelete={() => void handleDelete()}
+                />
+            )}
 
             {entry.kind === 'task' && (
                 <EditTaskSheet

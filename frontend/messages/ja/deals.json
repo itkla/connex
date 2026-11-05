@@ -147,6 +147,7 @@
         "achievedOn": "{date} に到達"
     },
     "DealsTaskList": {
+        "entityLabel": "タスク",
         "taskDeleted": "タスクを削除しました",
         "failedToDeleteTask": "タスクを削除できませんでした",
         "taskMarkedAsComplete": "タスクを完了にしました",
