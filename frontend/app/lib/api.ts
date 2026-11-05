@@ -1744,6 +1744,8 @@ export class ApiError extends Error {
      * change would leave without a passkey approved in the organization.
      */
     affectedCount?: number;
+    /** Current database version when a conditional edit returns STALE_RECORD. */
+    currentVersion?: number;
     /**
      * True when the response carried no body. A bodyless 401/403 is how Spring Security signals an
      * unauthenticated caller (expired or missing session), as opposed to a genuine authorization
@@ -1897,7 +1899,7 @@ async function getApiError(res: Response): Promise<ApiError> {
         const data = JSON.parse(text) as unknown;
 
         if (isErrorRecord(data)) {
-            const { message, error, code, correlationId, fieldErrors, affectedCount, ...rest } = data;
+            const { message, error, code, correlationId, fieldErrors, affectedCount, currentVersion, ...rest } = data;
             const flat = Object.fromEntries(
                 Object.entries(rest).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
             );
@@ -1916,6 +1918,10 @@ async function getApiError(res: Response): Promise<ApiError> {
                     && Number.isSafeInteger(affectedCount)
                     && affectedCount >= 0) {
                 apiError.affectedCount = affectedCount;
+            }
+            if (apiError.code === "STALE_RECORD" && typeof currentVersion === "number"
+                    && Number.isSafeInteger(currentVersion) && currentVersion >= 0) {
+                apiError.currentVersion = currentVersion;
             }
             return apiError;
         }

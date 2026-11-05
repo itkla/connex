@@ -14,7 +14,8 @@
     "sharePrivacyHold": "This contact asked not to be shared outside this workspace, so new shares are blocked.",
     "workspaceUnavailable": "This belongs to a workspace that is no longer available to you, so nothing was saved. Everything you entered is still here. Copy what you want to keep before you reload.",
     "workspaceUnavailableNamed": "This belongs to {workspace}, which is no longer available to you, so nothing was saved. Everything you entered is still here. Copy what you want to keep before you reload.",
-    "reference": "Reference: {id}"
+    "reference": "Reference: {id}",
+    "staleRecord": "This record has changed since you loaded it. Your changes were not saved. Review the latest version before saving again."
   },
   "ErrorState": {
     "title": "Something went wrong",

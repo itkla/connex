@@ -10,6 +10,7 @@ import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
@@ -100,6 +101,14 @@ public class DealDto {
     private String updatedAt;
 
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private Long version;
+
+    /** Optional compare-and-set token from the snapshot that seeded the edit form. */
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
+    @Min(0)
+    private Long expectedVersion;
+
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private List<ReferenceDto> references;
 
     public static DealDto from(Deal d) {
@@ -132,6 +141,7 @@ public class DealDto {
         dto.tagIds = d.getTags() == null ? null : Arrays.stream(d.getTags()).mapToInt(Tag::getId).toArray();
         dto.createdAt = d.getCreatedAt();
         dto.updatedAt = d.getUpdatedAt();
+        dto.version = d.getVersion();
         dto.references = d.getReferences() == null
             ? List.of()
             : d.getReferences().stream().map(ReferenceDto::from).toList();
@@ -156,6 +166,7 @@ public class DealDto {
         d.setWon(won);
         d.setCreatedAt(createdAt);
         d.setUpdatedAt(updatedAt);
+        d.setExpectedVersion(expectedVersion);
         return d;
     }
 

@@ -15,6 +15,8 @@ import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.util.RecordInsertBatches;
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.exceptions.StaleRecordException;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 
@@ -87,7 +89,13 @@ public class DealOutcomeWriter {
             int workspaceId, Deal deal, Boolean previousOutcome,
             BigDecimal requestedActualValue, String stageOutcome) {
         applyCloseState(deal, stageOutcome);
-        dealMapper.update(deal);
+        if (dealMapper.update(deal) == 0) {
+            Deal current = dealMapper.getDealById(workspaceId, deal.getId());
+            if (current == null) {
+                throw new ResourceNotFoundException("Deal not found");
+            }
+            throw new StaleRecordException(current.getVersion());
+        }
         dealValueService.reconcileRealizedValue(
             workspaceId, deal, previousOutcome, requestedActualValue);
         return outcomeChange(workspaceId, deal, previousOutcome);

@@ -45,6 +45,7 @@ const CODE_MESSAGE_KEYS = new Map<string, string>([
     ["PRIVILEGED_MFA_ATTESTATION_REQUIRED", "AccountSecurity.approvalNeededDescription"],
     ["IDENTITY_COLLISION_REPORT_TIMEOUT", "ApiErrors.identityCollisionReportTimeout"],
     ["SHARE_BLOCKED_PRIVACY_HOLD", "ApiErrors.sharePrivacyHold"],
+    ["STALE_RECORD", "ApiErrors.staleRecord"],
 ]);
 
 function statusMessageKey(status: number): string {
