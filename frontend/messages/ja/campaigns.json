@@ -89,9 +89,10 @@
         "audienceType": "対象",
         "snapshotCount": "スナップショット数",
         "latestSnapshot": "最新スナップショット",
-        "recipientsReached": "到達数",
         "deleteFailed": "キャンペーンを削除できませんでした",
-        "saveFailed": "キャンペーンを保存できませんでした"
+        "saveFailed": "キャンペーンを保存できませんでした",
+        "preparedRecipients": "準備済みの配信対象数",
+        "preparedRecipientsHint": "下書きの配信も含みます。同じ連絡先が複数の配信に含まれる場合は、配信ごとに数えます。"
     },
     "CampaignAudience": {
         "title": "対象者",
@@ -260,7 +261,7 @@
         "subtitle": "このキャンペーンの各配信を集計した到達結果です。",
         "empty": "エンゲージメントはまだありません",
         "emptyHint": "配信をキューに追加すると、到達結果の収集が始まります。",
-        "recipients": "対象者",
+        "recipients": "準備済みの配信対象数",
         "dispatched": "送信済み",
         "delivered": "到達",
         "bounced": "バウンス",
@@ -269,7 +270,7 @@
         "skipped": "送信対象外",
         "failed": "送信できませんでした",
         "notMeasured": "計測不可",
-        "notMeasuredHint": "SMTPは到達通知を返しません。計測するにはメール配信サービスを接続してください。",
+        "notMeasuredHint": "到達通知はまだ届いていません。SMTPなど、到達通知に対応していない配信サービスもあります。",
         "deliveryRate": "到達率",
         "bounceRate": "バウンス率",
         "complaintRate": "苦情率",
@@ -291,7 +292,11 @@
             "not_dispatchable": "配信が停止されました"
         },
         "sendsTitle": "配信別",
-        "sendLabel": "配信 #{id}"
+        "sendLabel": "配信 #{id}",
+        "preparedRecipientsHint": "下書きの配信も含みます。同じ連絡先が複数の配信に含まれる場合は、配信ごとに数えます。",
+        "channelPrepared": "準備済み {count}件",
+        "channelSent": "送信済み {count}件",
+        "channelDeliveryNotMeasured": "到達は計測不可"
     },
     "CampaignExports": {
         "title": "エクスポート",

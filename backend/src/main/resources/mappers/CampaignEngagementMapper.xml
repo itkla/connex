@@ -58,13 +58,4 @@
     GROUP BY e.event_type
   </select>
 
-  <select id="channelSplit"
-          resultType="ooo.klae.connex.backend.dto.CampaignEngagementCountRow">
-    SELECT s.channel AS key_value, COUNT(d.id) AS count_value
-    FROM campaign_send s
-    LEFT JOIN campaign_delivery d ON d.workspace_id = s.workspace_id AND d.send_id = s.id
-    WHERE s.workspace_id = #{workspaceId} AND s.campaign_id = #{campaignId}
-    GROUP BY s.channel
-  </select>
-
 </mapper>

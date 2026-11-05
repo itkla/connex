@@ -494,7 +494,7 @@ class DeliverySecurityIntegrationTest extends CampaignRealDbTestSupport {
         assertNotNull(refused.getFrequencyReservedAt());
         assertNull(refused.getSubmittedAt());
         var recipientRow = deliveryMapper.listRecipients(workspace.getId(), first.campaignId(), first.id(),
-                List.of("failed"), null, 10, 0).getFirst();
+                List.of("failed"), null, 10, 0, false).getFirst();
         assertEquals(refused.getReconciliationRequiredAt(), recipientRow.reconciliationRequiredAt());
         assertEquals("deadline_ambiguous", recipientRow.reasonCode());
         assertEquals(1, submissions.size());
@@ -1211,7 +1211,7 @@ class DeliverySecurityIntegrationTest extends CampaignRealDbTestSupport {
         assertEquals(1, deliveryEvents(deliveryId, "failed"));
         assertEquals(0, submissions.size());
         var recipientRow = deliveryMapper.listRecipients(workspace.getId(), send.campaignId(), send.id(),
-                List.of("failed"), null, 10, 0).getFirst();
+                List.of("failed"), null, 10, 0, false).getFirst();
         assertEquals(swept.getReconciliationRequiredAt(), recipientRow.reconciliationRequiredAt());
         assertEquals("deadline_ambiguous", recipientRow.reasonCode());
 

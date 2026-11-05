@@ -89,9 +89,10 @@
         "audienceType": "Audience",
         "snapshotCount": "Snapshots",
         "latestSnapshot": "Latest snapshot",
-        "recipientsReached": "Recipients reached",
         "deleteFailed": "Couldn't delete the campaign",
-        "saveFailed": "Couldn't save the campaign"
+        "saveFailed": "Couldn't save the campaign",
+        "preparedRecipients": "Prepared recipients",
+        "preparedRecipientsHint": "Includes draft sends. A contact in multiple sends is counted once per send."
     },
     "CampaignAudience": {
         "title": "Audience",
@@ -260,7 +261,7 @@
         "subtitle": "Delivery outcomes aggregated across this campaign's sends.",
         "empty": "No engagement yet",
         "emptyHint": "Queue a send to start collecting delivery outcomes.",
-        "recipients": "Recipients",
+        "recipients": "Prepared recipients",
         "dispatched": "Sent",
         "delivered": "Delivered",
         "bounced": "Bounced",
@@ -269,7 +270,7 @@
         "skipped": "Withheld",
         "failed": "Couldn't send",
         "notMeasured": "Not measured",
-        "notMeasuredHint": "SMTP returns no delivery receipts. Connect an email service provider to measure this.",
+        "notMeasuredHint": "No delivery receipts have been reported. Some services, including SMTP, do not provide them.",
         "deliveryRate": "Delivery rate",
         "bounceRate": "Bounce rate",
         "complaintRate": "Complaint rate",
@@ -291,7 +292,11 @@
             "not_dispatchable": "Send no longer active"
         },
         "sendsTitle": "By send",
-        "sendLabel": "Send #{id}"
+        "sendLabel": "Send #{id}",
+        "preparedRecipientsHint": "Includes draft sends. A contact in multiple sends is counted once per send.",
+        "channelPrepared": "{count} prepared",
+        "channelSent": "{count} sent",
+        "channelDeliveryNotMeasured": "Delivery not measured"
     },
     "CampaignExports": {
         "title": "Exports",

@@ -5,9 +5,10 @@ import java.util.Map;
 /**
  * Deterministic engagement rollup for a single campaign send.
  *
- * <p>The named counts are read from the delivery pipeline's current status, except
- * {@code unsubscribed}, which is only ever an append-only event and never a delivery
- * status. {@code deliveryReceiptsAvailable} is {@code true} only when the send's provider
+ * <p>Outcome counts use the delivery pipeline's current status. {@code dispatched} counts
+ * persisted confirmed submissions, including operator-confirmed acceptance and later failures;
+ * {@code unsubscribed} counts unsubscribe events.
+ * {@code deliveryReceiptsAvailable} is {@code true} only when the send's provider
  * reported at least one delivery, bounce, or complaint event; on the plain SMTP path no
  * such receipts exist, so {@code delivered}/{@code bounced}/{@code complained} are zero by
  * absence of measurement rather than by measurement, and the rate fields are {@code null}
@@ -17,8 +18,8 @@ import java.util.Map;
  * @param sendId the send id
  * @param status the send lifecycle status
  * @param channel the delivery channel
- * @param totalRecipients the materialized recipient count
- * @param dispatched deliveries currently in the dispatched status
+ * @param preparedRecipients prepared recipients, including draft sends
+ * @param dispatched confirmed submissions, regardless of current delivery status
  * @param delivered deliveries a provider confirmed delivered
  * @param bounced deliveries a provider reported bounced
  * @param complained deliveries a recipient reported as spam
@@ -36,7 +37,7 @@ public record CampaignSendEngagementDto(
         int sendId,
         String status,
         String channel,
-        int totalRecipients,
+        int preparedRecipients,
         int dispatched,
         int delivered,
         int bounced,

@@ -42,9 +42,31 @@ class CampaignEngagementServiceTest extends AbstractServiceTest {
     @Autowired private CampaignService campaignService;
     @Autowired private CampaignSendService campaignSendService;
     @Autowired private CampaignEngagementService campaignEngagementService;
+    @Autowired private CampaignRecipientService campaignRecipientService;
     @Autowired private CampaignDeliveryMapper campaignDeliveryMapper;
     @Autowired private WorkspaceService workspaceService;
     @Autowired private RoleMapper roleMapper;
+
+    @Test
+    void draftRecipientsAreNeverReportedAsSentOrDelivered() {
+        CampaignSendDto send = seedSend("draft-" + unique(), 6);
+
+        CampaignEngagementDto engagement = campaignEngagementService.getCampaignEngagement(send.campaignId());
+
+        assertEquals(6, engagement.preparedRecipients());
+        assertEquals(0, engagement.dispatched());
+        assertEquals(0, engagement.delivered());
+        assertFalse(engagement.deliveryReceiptsAvailable());
+        assertNull(engagement.deliveryRate());
+        assertEquals(new CampaignChannelStatDto("email", 6, 0, 0, false), engagement.channels().getFirst());
+        assertEquals(6, campaignEngagementService.getSendEngagement(send.campaignId(), send.id()).preparedRecipients());
+        assertEquals(0, campaignRecipientService.getRecipients(
+                send.campaignId(), null, null, null, 25, 0, true).total());
+        int pending = campaignDeliveryMapper.pendingDeliveryIds(workspace.getId(), send.id()).getFirst();
+        recordEvent(pending, "queued");
+        campaignDeliveryMapper.claim(workspace.getId(), pending, AUDIENCE_LEASE_MICROS);
+        assertEquals(0, campaignEngagementService.getCampaignEngagement(send.campaignId()).dispatched());
+    }
 
     @Test
     void campaignAndSendRollupsMatchTheSeededDeliveriesWithProviderReceipts() {
@@ -62,8 +84,8 @@ class CampaignEngagementServiceTest extends AbstractServiceTest {
 
         CampaignEngagementDto engagement = campaignEngagementService.getCampaignEngagement(send.campaignId());
 
-        assertEquals(6, engagement.totalRecipients());
-        assertEquals(1, engagement.dispatched());
+        assertEquals(6, engagement.preparedRecipients());
+        assertEquals(4, engagement.dispatched());
         assertEquals(2, engagement.delivered());
         assertEquals(1, engagement.bounced());
         assertEquals(0, engagement.complained());
@@ -74,16 +96,47 @@ class CampaignEngagementServiceTest extends AbstractServiceTest {
         assertTrue(engagement.deliveryReceiptsAvailable());
         assertEquals(0.5, engagement.deliveryRate(), 1.0e-9);
         assertEquals(0.25, engagement.bounceRate(), 1.0e-9);
-        assertEquals(6, channelTotal(engagement.channels(), "email"));
+        assertEquals(new CampaignChannelStatDto("email", 6, 4, 2, true), engagement.channels().getFirst());
+        assertEquals(4, engagement.eventCounts().get("dispatched"));
+        assertEquals(2, engagement.eventCounts().get("delivered"));
 
         assertEquals(1, engagement.sends().size());
         CampaignSendEngagementDto sendRollup = engagement.sends().getFirst();
         assertEquals(send.id(), sendRollup.sendId());
         assertEquals("email", sendRollup.channel());
+        assertEquals(4, sendRollup.dispatched());
         assertEquals(2, sendRollup.delivered());
         assertEquals(1, sendRollup.unsubscribed());
         assertTrue(sendRollup.deliveryReceiptsAvailable());
         assertEquals(0.5, sendRollup.deliveryRate(), 1.0e-9);
+    }
+
+    @Test
+    void confirmedAcceptanceAndRecoveredReceiptsCountAsSentWithoutDispatchEvents() {
+        CampaignSendDto send = seedSend("confirmed-" + unique(), 4);
+        List<Integer> ids = campaignDeliveryMapper.pendingDeliveryIds(workspace.getId(), send.id());
+        toDelivered(ids.getFirst());
+        campaignDeliveryMapper.claim(workspace.getId(), ids.get(1), AUDIENCE_LEASE_MICROS);
+        campaignDeliveryMapper.markDispatched(workspace.getId(), ids.get(1), "prov", "confirmed");
+        campaignDeliveryMapper.claim(workspace.getId(), ids.get(2), AUDIENCE_LEASE_MICROS);
+        campaignDeliveryMapper.markAmbiguous(workspace.getId(), ids.get(2), "ambiguous", "deadline_ambiguous");
+        assertEquals(1, campaignDeliveryMapper.applyProviderStatus(
+                workspace.getId(), ids.get(2), "delivered", List.of("failed")));
+        recordEvent(ids.get(2), "delivered");
+        toDispatched(ids.get(3));
+        assertEquals(1, campaignDeliveryMapper.applyProviderStatus(
+                workspace.getId(), ids.get(3), "failed", List.of("dispatched")));
+        recordEvent(ids.get(3), "failed");
+
+        CampaignEngagementDto engagement = campaignEngagementService.getCampaignEngagement(send.campaignId());
+
+        assertEquals(2, engagement.eventCounts().get("dispatched"));
+        assertEquals(4, engagement.dispatched());
+        assertEquals(2, engagement.delivered());
+        assertEquals(0.5, engagement.deliveryRate(), 1.0e-9);
+        assertEquals(new CampaignChannelStatDto("email", 4, 4, 2, true), engagement.channels().getFirst());
+        assertEquals(4, campaignRecipientService.getRecipients(
+                send.campaignId(), null, null, null, 25, 0, true).total());
     }
 
     @Test
@@ -106,12 +159,37 @@ class CampaignEngagementServiceTest extends AbstractServiceTest {
         assertNull(engagement.complaintRate());
         assertEquals(3, engagement.eventCounts().get("dispatched"));
         assertFalse(engagement.eventCounts().containsKey("delivered"));
+        assertEquals(new CampaignChannelStatDto("email", 3, 3, 0, false), engagement.channels().getFirst());
+    }
+
+    @Test
+    void repeatedDraftRecipientsRemainPreparationAndDoNotInflateDispatchOrDelivery() {
+        CampaignSendDto first = seedSend("repeat-" + unique(), 2);
+        List<Integer> ids = campaignDeliveryMapper.pendingDeliveryIds(workspace.getId(), first.id());
+        toDelivered(ids.getFirst());
+        CampaignSendDto second = campaignSendService.createSend(first.campaignId(),
+                new CampaignSendRequest(1, first.messageId(), 1, null, null));
+        CampaignSendDto unrelated = seedSend("unrelated-" + unique(), 1);
+        toDelivered(campaignDeliveryMapper.pendingDeliveryIds(workspace.getId(), unrelated.id()).getFirst());
+
+        CampaignEngagementDto engagement = campaignEngagementService.getCampaignEngagement(first.campaignId());
+
+        assertEquals(4, engagement.preparedRecipients());
+        assertEquals(1, engagement.dispatched());
+        assertEquals(1, engagement.delivered());
+        assertEquals(new CampaignChannelStatDto("email", 4, 1, 1, true), engagement.channels().getFirst());
+        CampaignSendEngagementDto draft = campaignEngagementService.getSendEngagement(first.campaignId(), second.id());
+        assertEquals(2, draft.preparedRecipients());
+        assertEquals(0, draft.dispatched());
+        assertEquals(0, draft.delivered());
+        assertFalse(draft.deliveryReceiptsAvailable());
     }
 
     @Test
     void otherTenantCannotReadCampaignOrSendEngagement() {
         String prefix = "iso-" + unique();
         CampaignSendDto send = seedSend(prefix, 1);
+        toDelivered(campaignDeliveryMapper.pendingDeliveryIds(workspace.getId(), send.id()).getFirst());
         User other = newUser();
         WorkspaceMembershipDto otherWorkspace = workspaceService.createWorkspace("Tenant B", other.getId());
         authenticateAs(other, otherWorkspace.getId());
@@ -120,6 +198,10 @@ class CampaignEngagementServiceTest extends AbstractServiceTest {
                 () -> campaignEngagementService.getCampaignEngagement(send.campaignId()));
         assertThrows(ResourceNotFoundException.class,
                 () -> campaignEngagementService.getSendEngagement(send.campaignId(), send.id()));
+        assertEquals(0, campaignDeliveryMapper.countRecipients(
+                otherWorkspace.getId(), send.campaignId(), null, null, null, true));
+        assertTrue(campaignDeliveryMapper.listRecipients(
+                otherWorkspace.getId(), send.campaignId(), null, null, null, 25, 0, true).isEmpty());
     }
 
     @Test
@@ -193,13 +275,6 @@ class CampaignEngagementServiceTest extends AbstractServiceTest {
         event.setDeliveryId(deliveryId);
         event.setEventType(eventType);
         campaignDeliveryMapper.insertEvent(event);
-    }
-
-    private static int channelTotal(List<CampaignChannelStatDto> channels, String channel) {
-        return channels.stream()
-                .filter(stat -> channel.equals(stat.channel()))
-                .mapToInt(CampaignChannelStatDto::deliveries)
-                .sum();
     }
 
     private Person person(Company company, String name, String email) {

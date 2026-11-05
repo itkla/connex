@@ -770,6 +770,24 @@ handoff and nothing after, so `delivered`, `bounced`, and `complained` on the ca
 figures are all zero. Zero there means *no receipts*, not *no bounces* — do not read a clean SMTP
 campaign report as a clean campaign.
 
+Campaign engagement separates preparation from delivery evidence. The campaign and per-send
+engagement APIs expose `preparedRecipients` for materialized send recipients, including drafts.
+The campaign total counts a contact again for each send; it is not a distinct audience or reach
+count. Snapshot inclusion remains a separate audience estimate. `dispatched` counts deliveries
+with a persisted `submitted_at` fact, including operator-confirmed acceptance and receipt recovery
+without an earlier dispatch event. A later failure receipt does not erase that submission. The
+Sent drill-through uses `submitted=true` on the recipient endpoint to select the same population.
+Repeated receipts do not inflate status counts.
+`delivered`, `bounced`, and `complained` use current provider-confirmed delivery statuses; their
+rates divide by the confirmed-handoff count. No dispatch or eligibility decision depends on these reporting counts.
+
+Channel summaries use those same preparation, dispatch, and delivery counts. Receipt availability
+is evaluated independently for each channel, so a receipt on one channel does not make another
+channel measurable. `deliveryReceiptsAvailable` means receipts have actually been observed,
+not that a provider supports them. Without observed receipts, the UI shows delivery outcomes
+and rates as not measured, including for unsent drafts and for services such as SMTP that supply
+no delivery receipts.
+
 **SMTP acceptance is not idempotent.** The stable `Message-ID` is useful when searching relay logs,
 but it is not a duplicate-suppression guarantee. When a campaign recipient is marked as needing
 confirmation, inspect the relay before resolving it. Mark it `delivered` when the relay accepted the

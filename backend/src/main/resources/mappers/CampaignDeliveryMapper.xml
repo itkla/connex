@@ -29,6 +29,9 @@
     <if test="sendId != null">
       AND d.send_id = #{sendId}
     </if>
+    <if test="submitted">
+      AND d.submitted_at IS NOT NULL
+    </if>
     <if test="statuses != null and statuses.size() > 0">
       AND d.status IN
       <foreach collection="statuses" item="status" open="(" separator="," close=")">#{status}</foreach>
