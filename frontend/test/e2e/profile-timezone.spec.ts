@@ -43,22 +43,22 @@ for (const locale of ['en', 'ja'] as const) {
             const page = await context.newPage();
             await useLocale(page, locale);
             await page.goto('/me');
-            await expect(page.getByText(taskTitle, { exact: true }).first()).toBeVisible();
+            await expect(page.getByText(taskTitle, { exact: true }).filter({ visible: true }).first()).toBeVisible();
             const day = new Intl.DateTimeFormat(locale, { timeZone: 'UTC', month: 'short', day: 'numeric' })
                 .format(new Date(`${dueDate}T00:00:00Z`));
             const dueLabel = message(locale, 'me', 'MeTimeline.due').replace('{date}', day);
-            await expect(page.getByText(dueLabel, { exact: true }).first()).toBeVisible();
+            await expect(page.getByText(dueLabel, { exact: true }).filter({ visible: true }).first()).toBeVisible();
 
             await page.goto(`/activity/activities/${activityId}`);
             const instant = new Date('2026-06-01T23:30:00Z');
             const tokyoTime = new Intl.DateTimeFormat(locale, { timeZone: 'Asia/Tokyo', dateStyle: 'medium', timeStyle: 'short' }).format(instant);
-            await expect(page.getByText(tokyoTime, { exact: true }).first()).toBeVisible();
+            await expect(page.getByText(tokyoTime, { exact: true }).filter({ visible: true }).first()).toBeVisible();
             expect((await context.request.patch('/api/users/me', { headers, data: { timezone: 'UTC' } })).ok()).toBe(true);
             await page.reload();
             const utcTime = new Intl.DateTimeFormat(locale, { timeZone: 'UTC', dateStyle: 'medium', timeStyle: 'short' }).format(instant);
-            await expect(page.getByText(utcTime, { exact: true }).first()).toBeVisible();
+            await expect(page.getByText(utcTime, { exact: true }).filter({ visible: true }).first()).toBeVisible();
             await page.goto('/me');
-            await expect(page.getByText(dueLabel, { exact: true }).first()).toBeVisible();
+            await expect(page.getByText(dueLabel, { exact: true }).filter({ visible: true }).first()).toBeVisible();
             await page.goto('/settings/personal/profile');
             const picker = page.getByRole('combobox', { name: message(locale, 'account', 'AccountProfile.timezoneLabel') });
             await picker.fill(locale === 'ja' ? '日本' : 'Japan');
