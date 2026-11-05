@@ -108,6 +108,9 @@ export default function ReportWidgetRenderer({ widget }: { widget: ReportWidgetD
         const payload: unknown = item.payload;
         const indicatorColor = typeof payload === 'object' && payload !== null && 'fill' in payload
             && typeof payload.fill === 'string' ? payload.fill : item.color;
+        const formattedValue = typeof value === 'number' && (widget.unit == null || widget.unit === 'count')
+            ? new Intl.NumberFormat(locale).format(value)
+            : formatReportValue(typeof value === 'number' ? value : null, widget.unit, locale);
         return (
             <>
                 <span className="size-2.5 shrink-0 rounded-[2px]" style={{ backgroundColor: indicatorColor }} />
@@ -116,7 +119,7 @@ export default function ReportWidgetRenderer({ widget }: { widget: ReportWidgetD
                         {name === 'current' ? config.current.label : name === 'prior' ? config.prior.label : name}
                     </span>
                     <span className="font-mono font-medium text-foreground tabular-nums">
-                        {formatReportValue(typeof value === 'number' ? value : null, widget.unit, locale)}
+                        {formattedValue}
                     </span>
                 </div>
             </>

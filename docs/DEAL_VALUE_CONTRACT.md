@@ -243,6 +243,8 @@ amounts in standard notation, using the currency's minor-unit precision from `In
 two decimal places. PNG and print/PDF exports use the same rendered document; CSV retains the
 underlying amounts and currency codes. A mixed-currency chart
 remains a currency-partitioned table with an explanation, without conversion or a combined axis.
+Count tooltips use standard locale-aware number notation so nearby counts remain distinguishable,
+even when chart axes abbreviate them.
 
 ### Declared divergences — do not "fix" these
 
