@@ -788,6 +788,7 @@ describe('deal draft persistence', () => {
             name: 'Won renewal',
             duplicateReviewToken: 'review-token',
         }), {});
+        expect(api.createDeal).toHaveBeenCalledWith(expect.objectContaining({ actualValue: undefined }), {});
         expect(readDealDraft()).toBeNull();
         await mounted.unmount();
     });

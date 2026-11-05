@@ -27,6 +27,8 @@ import {
     ssoStartPath,
 } from "@/app/lib/api";
 import { usePasskeySupport } from "@/app/hooks/usePasskeySupport";
+import { MAX_NEW_PASSWORD_LENGTH, missingPasswordRequirements } from "@/app/lib/passwordPolicy";
+import { PasswordRequirements } from "@/app/components/auth/PasswordRequirements";
 import AuthBrandPanel from "@/app/components/auth/AuthBrandPanel";
 import PermissionsUnavailable from "@/app/components/PermissionsUnavailable";
 import WorkspaceUnavailableRetry from "@/app/components/WorkspaceUnavailableRetry";
@@ -41,7 +43,6 @@ const SSO_ENFORCED_CODE = "SSO_ENFORCED";
 const BREACHED_PASSWORD_CODE = "BREACHED_PASSWORD";
 const BREACHED_PASSWORD_CHECK_UNAVAILABLE_CODE = "BREACHED_PASSWORD_CHECK_UNAVAILABLE";
 const PASSWORD_TOO_LONG_CODE = "PASSWORD_TOO_LONG";
-const MAX_NEW_PASSWORD_LENGTH = 72;
 
 const FORM_FIELDS: Record<AuthMode, FieldKey[]> = {
     login: ["username", "password"],
@@ -95,6 +96,7 @@ export function AuthForm({
 }) {
     const router = useRouter();
     const tForm = useTranslations("AuthForm");
+    const tPassword = useTranslations("PasswordPolicy");
     const tMode = useTranslations(mode === "login" ? "AuthLogin" : "AuthRegister");
     const tLogin = useTranslations("AuthLogin");
     const tCapability = useTranslations("CapabilityUnavailable");
@@ -250,6 +252,13 @@ export function AuthForm({
         e.preventDefault();
         setError(null);
         setFieldErrors({});
+        if (mode === "register") {
+            const missing = missingPasswordRequirements(values.password)[0];
+            if (missing) {
+                setFieldErrors({ password: tPassword(missing) });
+                return;
+            }
+        }
         setSubmitting(true);
 
         try {
@@ -339,7 +348,7 @@ export function AuthForm({
                                 const fieldId = `${mode}-${key}`;
                                 const errorId = `${fieldId}-error`;
                                 const isNewPassword = isPassword && mode === "register";
-                                const hintId = isNewPassword && !fieldError ? `${fieldId}-hint` : undefined;
+                                const hintId = isNewPassword ? `${fieldId}-hint` : undefined;
 
                                 return (
                                     <div
@@ -358,7 +367,7 @@ export function AuthForm({
                                                 maxLength={isNewPassword ? MAX_NEW_PASSWORD_LENGTH : undefined}
                                                 required
                                                 aria-invalid={Boolean(fieldError)}
-                                                aria-describedby={fieldError ? errorId : hintId}
+                                                aria-describedby={[fieldError ? errorId : undefined, hintId].filter(Boolean).join(" ") || undefined}
                                                 className={`peer h-14 w-full rounded-xl border bg-input px-4 pt-5 pb-1.5 text-base text-foreground outline-none transition-[border-color,box-shadow,background-color] duration-150 ease-out placeholder:text-transparent focus:bg-background focus:ring-4 ${
                                                     isPassword ? "pr-12" : ""
                                                 } ${
@@ -404,9 +413,7 @@ export function AuthForm({
                                             </p>
                                         )}
                                         {hintId && (
-                                            <p id={hintId} className="mt-1.5 px-1 text-sm text-muted-foreground">
-                                                {tForm("passwordLengthHint")}
-                                            </p>
+                                            <PasswordRequirements id={hintId} password={values.password} />
                                         )}
                                     </div>
                                 );
@@ -437,10 +444,10 @@ export function AuthForm({
 
                             <button
                                 type="submit"
-                                disabled={submitting || hasFieldErrors}
+                                disabled={submitting || (mode === "login" && hasFieldErrors)}
                                 style={{ animationDelay: `${120 + fields.length * 60}ms` }}
                                 className={`connex-rise mt-2 flex w-full items-center justify-center gap-2 rounded-full px-6 py-3.5 text-base font-semibold transition-[transform,background-color,opacity] duration-150 ease-out active:scale-[0.98] disabled:cursor-not-allowed ${
-                                    hasFieldErrors
+                                    mode === "login" && hasFieldErrors
                                         ? "bg-muted text-muted-foreground"
                                         : "bg-brand text-brand-foreground hover:bg-brand-hover disabled:opacity-70"
                                 }`}
@@ -450,7 +457,7 @@ export function AuthForm({
                                         <LoaderCircle className="size-4 animate-spin" />
                                         {tMode("submittingLabel")}
                                     </>
-                                ) : hasFieldErrors ? (
+                                ) : mode === "login" && hasFieldErrors ? (
                                     tForm("resolveErrors")
                                 ) : (
                                     <>
