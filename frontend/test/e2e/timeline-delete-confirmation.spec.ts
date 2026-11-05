@@ -36,21 +36,29 @@ for (const locale of ["en", "ja"] as const) {
         const row = section.getByRole("listitem").filter({ hasText: name });
         await expect(row).toHaveCount(1);
         const actions = row.getByRole("button", { expanded: false });
+        let deletes = 0;
+        page.on("request", (request) => {
+            if (request.method() === "DELETE" && new URL(request.url()).pathname === path) deletes++;
+        });
         await actions.click();
         const remove = message(locale, "deals", "DealsTaskList.delete");
         await page.getByRole("menuitem", { name: remove, exact: true }).click();
         const dialog = page.getByRole("dialog");
+        await expect(dialog).toBeVisible();
         await expect(dialog).toContainText(name);
-        await expect(row).toHaveCount(1);
+        expect(deletes).toBe(0);
         await dialog.getByRole("button", { name: message(locale, "records", "RecordsDeleteDialog.cancel"), exact: true }).click();
         await expect(dialog).toBeHidden();
+        await expect(row).toHaveCount(1);
         await expect(actions).toBeFocused();
+        expect(deletes).toBe(0);
         expect((await page.request.get(path, { headers })).ok()).toBe(true);
         await actions.click();
         await page.getByRole("menuitem", { name: remove, exact: true }).click();
         await dialog.getByRole("button", { name: remove, exact: true }).click();
         await expect(dialog).toBeHidden();
         await expect(row).toHaveCount(0);
+        expect(deletes).toBe(1);
         expect((await page.request.get(path, { headers })).status()).toBe(404);
     });
 
