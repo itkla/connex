@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.dto;
 
 /**
  * Deal summary metrics for a single currency across the matching workspace deals.
+ * closedCount includes won and lost deals; closedForecast and closedRevenue use won deals only.
  */
 public record DealCurrencyMetricsDto(
     String currency,

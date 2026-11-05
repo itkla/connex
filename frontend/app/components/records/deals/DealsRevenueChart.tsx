@@ -146,8 +146,8 @@ interface RevenueChartTooltipProps {
     active?: boolean;
     payload?: Array<{ payload: Bucket }>;
     currency?: string;
-    projectedLabel?: (amount: string) => string;
-    actualLabel?: (amount: string) => string;
+    projectedLabel: (amount: string) => string;
+    actualLabel: (amount: string) => string;
 }
 
 function RevenueChartTooltip({ active, payload, currency = 'USD', projectedLabel, actualLabel }: RevenueChartTooltipProps) {
@@ -164,11 +164,11 @@ function RevenueChartTooltip({ active, payload, currency = 'USD', projectedLabel
             <div className="space-y-0.5">
                 <div className="flex items-center gap-1.5 text-muted-foreground">
                     <span className="inline-block size-2 rounded-sm" style={{ backgroundColor: 'var(--muted-foreground)' }} />
-                    {projectedLabel ? projectedLabel(projectedAmount) : `Projected · ${projectedAmount}`}
+                    {projectedLabel(projectedAmount)}
                 </div>
                 <div className="flex items-center gap-1.5 text-muted-foreground">
                     <span className="inline-block size-2 rounded-sm bg-brand" />
-                    {actualLabel ? actualLabel(actualAmount) : `Actual · ${actualAmount}`}
+                    {actualLabel(actualAmount)}
                 </div>
             </div>
         </div>

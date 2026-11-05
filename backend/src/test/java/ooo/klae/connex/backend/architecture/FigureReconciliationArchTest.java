@@ -199,7 +199,9 @@ class FigureReconciliationArchTest {
                     requireContains(definition, evidence, posture,
                         "CASE WHEN d.won IS NULL THEN d.value END", sql, violations);
                     requireContains(definition, evidence, posture,
-                        "CASE WHEN d.won IS NOT NULL THEN d.actual_value END", sql, violations);
+                        "CASE WHEN d.won = TRUE THEN d.value END", sql, violations);
+                    requireContains(definition, evidence, posture,
+                        "CASE WHEN d.won = TRUE THEN d.actual_value END", sql, violations);
                 }
             }
             case CLAMPED_CANONICAL_VALUE_TIMES_WIN_RATE -> {
