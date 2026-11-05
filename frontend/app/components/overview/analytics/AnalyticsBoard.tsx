@@ -4,14 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { motion, useReducedMotion } from 'motion/react';
 import { useLocale, useTranslations } from 'next-intl';
-import { ChevronDownIcon } from '@heroicons/react/24/outline';
-
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import CurrencyControl from '@/app/components/overview/analytics/CurrencyControl';
+import { currencyCountsForMetrics, resolveCurrency } from '@/app/components/overview/analytics/currencyScope';
 
 import {
     type ActivityVolumeBucket,
@@ -253,26 +247,9 @@ export default function AnalyticsBoard({
 
     const stageById = useMemo(() => new Map(stages.map((s) => [s.id, s])), [stages]);
 
-    const currencyCounts = useMemo(() => {
-        const counts = new Map<string, number>();
-        for (const c of dealMetrics.byCurrency) counts.set(c.currency, c.openCount + c.closedCount);
-        return counts;
-    }, [dealMetrics]);
-    const dominantCurrency = useMemo(() => {
-        let best: string | null = null;
-        let bestCount = -1;
-        for (const c of dealMetrics.byCurrency) {
-            const n = c.openCount + c.closedCount;
-            if (n > bestCount) {
-                bestCount = n;
-                best = c.currency;
-            }
-        }
-        return best ?? 'USD';
-    }, [dealMetrics]);
+    const currencyCounts = useMemo(() => currencyCountsForMetrics(dealMetrics), [dealMetrics]);
     const [selectedCurrency, setSelectedCurrency] = useState<string | null>(() => searchParams.get('currency'));
-    const currency =
-        selectedCurrency && currencyCounts.has(selectedCurrency) ? selectedCurrency : dominantCurrency;
+    const currency = resolveCurrency(currencyCounts, selectedCurrency);
 
     useOwnedUrlParams({
         range: range === '90d' ? undefined : range,
@@ -494,36 +471,12 @@ export default function AnalyticsBoard({
                             ariaLabel={t('userFilterAria')}
                         />
                     )}
-                    {currencyCounts.size > 1 ? (
-                        <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                                <button
-                                    type="button"
-                                    aria-label={t('currency')}
-                                    className="flex items-center gap-1.5 rounded-full bg-muted px-3 py-1.5 text-xs font-medium text-foreground ring-1 ring-border transition hover:bg-muted/80"
-                                >
-                                    {currency}
-                                    <ChevronDownIcon className="size-3.5 text-muted-foreground" />
-                                </button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                                {Array.from(currencyCounts.entries())
-                                    .sort((a, b) => b[1] - a[1])
-                                    .map(([code, count]) => (
-                                        <DropdownMenuItem key={code} onSelect={() => setSelectedCurrency(code)}>
-                                            <span className={code === currency ? 'font-semibold' : ''}>{code}</span>
-                                            <span className="ml-auto text-xs text-muted-foreground">
-                                                {t('currencyCount', { count })}
-                                            </span>
-                                        </DropdownMenuItem>
-                                    ))}
-                            </DropdownMenuContent>
-                        </DropdownMenu>
-                    ) : hasDeals ? (
-                        <span className="rounded-full bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground ring-1 ring-border">
-                            {currency}
-                        </span>
-                    ) : null}
+                    <CurrencyControl
+                        counts={currencyCounts}
+                        currency={currency}
+                        hasDeals={hasDeals}
+                        onChange={setSelectedCurrency}
+                    />
                     <RangeControl
                         value={range}
                         onChange={(key) => setRangeState((current) => ({ ...current, key }))}

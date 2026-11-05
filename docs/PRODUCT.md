@@ -204,7 +204,7 @@ The top-level IA contract. **This section is normative target state** — the st
 **The sidebar:**
 
 1. **Dashboard** — "your workspace today", the one home. No second surface claims "at a glance".
-2. **My Work** — your tasks, your relationships, your follow-ups: the personal page beside the workspace home. The user menu offers "My Work" and "Account settings" as distinct entries — neither is called "Profile".
+2. **My Work** — your tasks, your relationships, your follow-ups: the personal page beside the workspace home. The user menu offers "My Work" and "Account settings" as distinct entries — neither is called "Profile". Personal deal KPIs at `/me` use Analytics' currency selection and 90-day calendar window in the workspace reporting timezone. Money tiles name their currency; mixed-currency owners can switch between their currencies. Totals, comparisons, and trends always stay within the selected currency.
 3. **Intelligence** — Radar, Introductions, Map: the differentiator, grouped and celebrated, never buried in a grab-bag. Radar is the signature surface — visual-first exploration that answers what no other page can (portfolio-wide warmth, where attention is bleeding, clusters at risk, unknown paths), with every signal offering one action; the rest of the app quotes its visual vocabulary in miniature, so Radar reads as the source of the intelligence.
 4. **Records** — the nouns: Companies, Contacts, Deals, Pipelines, Products. Every Records noun has a working destination: full detail pages for Companies, Contacts, and Deals; Pipelines and Products are managed in place through their edit sheet/dialog and have no detail route. Nothing anywhere links to a route that doesn't exist.
 5. **Activity** — the verbs: Activities, Tasks, Notes, Calendar.
