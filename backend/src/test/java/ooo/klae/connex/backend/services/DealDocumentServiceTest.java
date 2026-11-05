@@ -134,6 +134,7 @@ class DealDocumentServiceTest extends AbstractServiceTest {
         deal.setCurrency(currency);
         dealMapper.update(deal);
         DealLineItemRequest request = new DealLineItemRequest();
+        request.setConfirmValueReplacement(true);
         request.setName("Quoted item");
         request.setUnitPrice(new BigDecimal(amount));
         request.setQuantity(BigDecimal.ONE);
