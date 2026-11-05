@@ -114,6 +114,15 @@ async function workflowResponses(page: Page) {
     await page.route(/\/api\/workflows(?:\?.*)?$/, (route) => {
         const item: WorkflowListItem = {
             ...workflow,
+            description: workflow.description ?? null,
+            executionUnavailableReason: workflow.executionUnavailableReason ?? null,
+            archivedAt: workflow.archivedAt ?? null,
+            intakePausedAt: workflow.intakePausedAt ?? null,
+            intakePausedById: workflow.intakePausedById ?? null,
+            recordType: workflow.recordType ?? null,
+            runAsUserId: workflow.runAsUserId ?? null,
+            createdById: workflow.createdById ?? null,
+            updatedById: workflow.updatedById ?? null,
             activeVersion: { id: 1, number: 1, publishedAt: CREATED_AT },
             nodeCount: 2,
             actionCount: 0,

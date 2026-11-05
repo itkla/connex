@@ -241,8 +241,8 @@ export default function WorkflowsPanel() {
             updatePanelState((current) => ({
                 workflows: current.workflows.map((item) => item.id === workflow.id ? {
                     ...item,
-                    intakePausedAt: updated.intakePausedAt,
-                    intakePausedById: updated.intakePausedById,
+                    intakePausedAt: updated.intakePausedAt ?? null,
+                    intakePausedById: updated.intakePausedById ?? null,
                 } : item),
             }));
             toastSuccess(t(workflow.intakePausedAt ? "resumed" : "paused"));

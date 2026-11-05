@@ -1425,11 +1425,11 @@ export type QualificationCriterionPayload = {
 export type DisqualificationReason = {
     id: number;
     code: string;
-    label: string | null;
+    label?: string | null;
     requiresNote: boolean;
     position: number;
     builtIn: boolean;
-    archivedAt: string | null;
+    archivedAt?: string | null;
 };
 
 /** Editable fields for a disqualification reason. Codes remain immutable after creation. */
@@ -3255,8 +3255,8 @@ export type AiChatMessage = {
     sessionId: number;
     seq: number;
     authorKind: string;
-    authorUserId: number | null;
-    authorDisplayName: string | null;
+    authorUserId?: number | null;
+    authorDisplayName?: string | null;
     content: string;
     contentWithheld?: boolean;
     historySummarized?: boolean;
@@ -4184,14 +4184,14 @@ export type RecordCommentAuthor = {
 export type RecordComment = {
     id: number;
     threadId: number;
-    /** Null when the author's account has been permanently erased. */
-    author: RecordCommentAuthor | null;
-    /** Null once the comment has been redacted; the row survives as a tombstone. */
-    content: string | null;
+    /** Absent or null when the author's account has been permanently erased. */
+    author?: RecordCommentAuthor | null;
+    /** Absent or null once the comment has been redacted; the row survives as a tombstone. */
+    content?: string | null;
     createdAt: string;
     /** Set when the author edited the comment within the edit window. */
     editedAt?: string | null;
-    deletedAt: string | null;
+    deletedAt?: string | null;
     deletedByUserId?: number | null;
     /** Server-authorized @/# references resolved from the content tokens. */
     references?: NoteReference[];
@@ -4953,23 +4953,23 @@ export type WorkflowCanvas = {
 export type WorkflowDto = {
     id: number;
     name: string;
-    description: string | null;
+    description?: string | null;
     enabled: boolean;
     runtimeOwner: WorkflowRuntimeOwner;
     executionAvailable: boolean;
-    executionUnavailableReason: string | null;
-    archivedAt: string | null;
-    intakePausedAt: string | null;
-    intakePausedById: number | null;
+    executionUnavailableReason?: string | null;
+    archivedAt?: string | null;
+    intakePausedAt?: string | null;
+    intakePausedById?: number | null;
     draftRevision: number;
-    recordType: string | null;
+    recordType?: string | null;
     executionMode: WorkflowExecutionMode;
-    runAsUserId: number | null;
+    runAsUserId?: number | null;
     definition: WorkflowDefinition;
     canvas: WorkflowCanvas;
-    activeVersionId: number | null;
-    createdById: number | null;
-    updatedById: number | null;
+    activeVersionId?: number | null;
+    createdById?: number | null;
+    updatedById?: number | null;
     createdAt: string;
     updatedAt: string;
 };
@@ -4986,7 +4986,7 @@ export type WorkflowRunStatus =
 
 export type WorkflowRunWireStatus = WorkflowRunStatus | "partial";
 
-export type WorkflowListItem = Omit<WorkflowDto, "definition" | "canvas" | "activeVersionId"> & {
+export type WorkflowListItem = Required<Omit<WorkflowDto, "definition" | "canvas" | "activeVersionId">> & {
     activeVersion: {
         id: number;
         number: number;
@@ -5301,9 +5301,9 @@ export type WorkflowOperationsDetail = {
         id: number;
         name: string;
         enabled: boolean;
-        archivedAt: string | null;
-        intakePausedAt: string | null;
-        intakePausedById: number | null;
+        archivedAt?: string | null;
+        intakePausedAt?: string | null;
+        intakePausedById?: number | null;
         runtimeOwner: WorkflowRuntimeOwner;
     };
     health: {
@@ -5542,13 +5542,13 @@ export type InviteLinkPreview = {
 export type AuditLogEntry = {
     id: number;
     action: string;
-    entityType: string | null;
-    entityId: number | null;
-    actorId: number | null;
-    actorLabel: string | null;
-    targetLabel: string | null;
-    outcome: string | null;
-    summary: string | null;
+    entityType?: string | null;
+    entityId?: number | null;
+    actorId?: number | null;
+    actorLabel?: string | null;
+    targetLabel?: string | null;
+    outcome?: string | null;
+    summary?: string | null;
     changes?: Record<string, unknown> | null;
     context?: Record<string, unknown> | null;
     ipAddress?: string | null;
