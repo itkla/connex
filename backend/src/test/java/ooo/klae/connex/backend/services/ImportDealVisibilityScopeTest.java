@@ -96,7 +96,7 @@ class ImportDealVisibilityScopeTest {
             PipelineMapper pipelines = mock(PipelineMapper.class);
             DealStageHistoryService history = mock(DealStageHistoryService.class);
             DealValueService values = mock(DealValueService.class);
-            DealOutcomeWriter outcomes = new DealOutcomeWriter(deals, values);
+            DealOutcomeWriter outcomes = new DealOutcomeWriter(deals, values, mock(RuleTriggerPublisher.class));
             DuplicatePreflightService preflight = mock(DuplicatePreflightService.class);
             AuditService audit = mock(AuditService.class);
             ImportService service = new ImportService(
