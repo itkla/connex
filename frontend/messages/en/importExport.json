@@ -20,7 +20,7 @@
       "utf-8": "UTF-8",
       "shift_jis": "Shift-JIS (Windows-932)"
     },
-    "errorEncoding": "We couldn't read this file's text correctly. Save it as a UTF-8 or Shift-JIS CSV and try again. No records were imported.",
+    "errorEncoding": "We couldn't read this file's text correctly. Save it as a UTF-8 CSV and try again. No records were imported.",
     "errorTooLarge": "File is too large (max {max}).",
     "errorNoColumns": "No columns found in this file.",
     "errorNoRows": "No data rows found in this file.",

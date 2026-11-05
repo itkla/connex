@@ -20,7 +20,7 @@
       "utf-8": "UTF-8",
       "shift_jis": "Shift-JIS（Windows-932）"
     },
-    "errorEncoding": "ファイルの文字を正しく読み取れませんでした。UTF-8またはShift-JISのCSVで保存し直してから、もう一度お試しください。データはインポートされていません。",
+    "errorEncoding": "ファイルの文字を正しく読み取れませんでした。UTF-8のCSVで保存し直してから、もう一度お試しください。データはインポートされていません。",
     "errorTooLarge": "ファイルが大きすぎます（最大{max}）。",
     "errorNoColumns": "このファイルに列が見つかりません。",
     "errorNoRows": "このファイルにデータ行が見つかりません。",

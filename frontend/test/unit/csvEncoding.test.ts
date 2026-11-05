@@ -45,6 +45,41 @@ describe('CSV encoding detection', () => {
         expect(result.headers.map((header) => suggestField(header, 'persons'))).toEqual(['name', 'company']);
     });
 
+    it.each([
+        { name: 'François', bytes: [0x46, 0x72, 0x61, 0x6e, 0xe7, 0x6f, 0x69, 0x73] },
+        { name: 'O’Neill', bytes: [0x4f, 0x92, 0x4e, 0x65, 0x69, 0x6c, 0x6c] },
+        { name: 'École', bytes: [0xc9, 0x63, 0x6f, 0x6c, 0x65] },
+    ])('refuses Windows-1252 bytes for $name instead of importing mojibake as Shift-JIS', async ({ bytes }) => {
+        await expect(parseCsv(csvFile([
+            ...utf8('Name\n'), ...bytes, 0x0a,
+        ]))).rejects.toBeInstanceOf(CsvEncodingError);
+    });
+
+    it.each([
+        { name: '株式会社ABC', bytes: [0x8a, 0x94, 0x8e, 0xae, 0x89, 0xef, 0x8e, 0xd0, 0x41, 0x42, 0x43] },
+        { name: 'ABC株式会社', bytes: [0x41, 0x42, 0x43, 0x8a, 0x94, 0x8e, 0xae, 0x89, 0xef, 0x8e, 0xd0] },
+        { name: 'NTTデータ', bytes: [0x4e, 0x54, 0x54, 0x83, 0x66, 0x81, 0x5b, 0x83, 0x5e] },
+        { name: '3Mジャパン', bytes: [0x33, 0x4d, 0x83, 0x57, 0x83, 0x83, 0x83, 0x70, 0x83, 0x93] },
+        { name: '山田 Taro', bytes: [0x8e, 0x52, 0x93, 0x63, 0x20, 0x54, 0x61, 0x72, 0x6f] },
+        { name: 'ﾔﾏﾀﾞﾀﾛｳ', bytes: [0xd4, 0xcf, 0xc0, 0xde, 0xc0, 0xdb, 0xb3] },
+        { name: 'ﾔﾏﾀﾞ ﾀﾛｳ', bytes: [0xd4, 0xcf, 0xc0, 0xde, 0x20, 0xc0, 0xdb, 0xb3] },
+    ])('preserves ordinary Japanese business data $name in Windows-932', async ({ name, bytes }) => {
+        const result = await parseCsv(csvFile([...utf8('Name\n'), ...bytes, 0x0a]));
+
+        expect(result.encoding).toBe('shift_jis');
+        expect(result.rows).toEqual([{ Name: name }]);
+    });
+
+    it.each(['François', 'O’Neill', 'École', 'A山B', 'Aﾔ', 'ﾔA'])(
+        'preserves valid UTF-8 text %s without applying the fallback heuristic',
+        async (name) => {
+            const result = await parseCsv(csvFile(utf8(`Name\n${name}\n`)));
+
+            expect(result.encoding).toBe('utf-8');
+            expect(result.rows).toEqual([{ Name: name }]);
+        },
+    );
+
     it('preserves Japanese headers without auto-mapping stray bytes from mojibake', async () => {
         const result = await parseCsv(csvFile([
             142, 129, 150, 188, 44, 137, 239, 142, 208, 150, 188, 44,

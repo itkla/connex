@@ -5,10 +5,10 @@ import type { ImportEntity } from '@/app/lib/types';
 /** Supported CSV encodings, with Shift-JIS decoded using the browser's Windows-932 mapping. */
 export type CsvEncoding = 'utf-8' | 'shift_jis';
 
-/** A CSV that cannot be decoded losslessly in a supported encoding. */
+/** A CSV rejected for decoding errors, replacement characters, or suspicious fallback text. */
 export class CsvEncodingError extends Error {
     constructor() {
-        super('CSV encoding is invalid or contains replacement characters');
+        super('CSV text could not be decoded reliably in a supported encoding');
         this.name = 'CsvEncodingError';
     }
 }
@@ -146,6 +146,10 @@ export function columnSamples(rows: Record<string, string>[], header: string, li
  * Parses a CSV {@link File} client-side, trying strict UTF-8 before Windows-932 (Shift-JIS).
  * Headers are trimmed; fully-empty rows are dropped. Rejects undecodable or replacement text
  * before any headers or values can reach column mapping or import review.
+ * Successful Shift-JIS fallback alone cannot identify the source encoding. Only on fallback,
+ * rejects a CJK unified ideograph between ASCII letters or halfwidth katakana adjacent to an
+ * ASCII letter as suspected Western mojibake. This heuristic can reject genuine mixed-script
+ * Shift-JIS and cannot detect every unsupported encoding; re-save refused files as CSV UTF-8.
  */
 export async function parseCsv(file: File): Promise<ParsedCsv> {
     const bytes = await file.arrayBuffer();
@@ -162,6 +166,10 @@ export async function parseCsv(file: File): Promise<ParsedCsv> {
         }
     }
     if (text.includes('\uFFFD')) throw new CsvEncodingError();
+    if (encoding === 'shift_jis'
+        && /[A-Za-z]\p{Unified_Ideograph}[A-Za-z]|[A-Za-z][\uFF66-\uFF9F]|[\uFF66-\uFF9F][A-Za-z]/u.test(text)) {
+        throw new CsvEncodingError();
+    }
 
     const results = Papa.parse<Record<string, string>>(text, {
         header: true,

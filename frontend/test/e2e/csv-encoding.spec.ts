@@ -1,4 +1,7 @@
-import { expect, test, type Page } from '@playwright/test';
+import { randomUUID } from 'node:crypto';
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+
+import type { Page as RecordPage } from '@/app/lib/types';
 
 import { registerUser, activeWorkspaceId, csrfBootstrap, seeder } from './support/api';
 import { useLocale as setLocale } from './support/locale';
@@ -6,6 +9,7 @@ import { message } from './support/messages';
 
 type Locale = 'en' | 'ja';
 type Encoding = 'utf-8' | 'utf-8-bom' | 'shift_jis';
+type StoredPagePath = '/api/persons/page' | '/api/companies/page' | '/api/activities/page';
 
 const japaneseName = [0x8e, 0x52, 0x93, 0x63, 0x91, 0xbe, 0x98, 0x59];
 const windowsCompany = [0x87, 0x8a, 0x83, 0x65, 0x83, 0x58, 0x83, 0x67];
@@ -14,7 +18,7 @@ test.use({ storageState: { cookies: [], origins: [] } });
 test.setTimeout(120_000);
 
 test.beforeEach(async ({ page }) => {
-    const key = `csv${Date.now()}${Math.random().toString(36).slice(2, 7)}`;
+    const key = `csv${randomUUID().replaceAll('-', '').slice(0, 12)}`;
     await registerUser(page.request, {
         username: key,
         password: `CsvHarness!${key}A1`,
@@ -40,6 +44,21 @@ function bom(encoding: Encoding): Buffer {
     return Buffer.from(encoding === 'utf-8-bom' ? [0xef, 0xbb, 0xbf] : []);
 }
 
+/** Reads a workspace-pinned page through the same bounded list endpoints as the API client. */
+async function readStoredPage(api: APIRequestContext, workspaceId: number, path: StoredPagePath): Promise<RecordPage<unknown>> {
+    const response = await api.get(`${path}?page=1&size=25`, {
+        headers: { 'X-Workspace-Id': String(workspaceId) },
+    });
+    expect(response.status(), `${path}: ${await response.text()}`).toBe(200);
+    const body: unknown = await response.json();
+    if (typeof body !== 'object' || body === null
+        || !('items' in body) || !Array.isArray(body.items)
+        || !('total' in body) || typeof body.total !== 'number') {
+        throw new Error(`${path} did not return a record page`);
+    }
+    return { items: body.items, total: body.total };
+}
+
 async function openImport(page: Page, locale: Locale, history: boolean): Promise<void> {
     await setLocale(page, locale);
     if (history) {
@@ -59,6 +78,7 @@ async function openImport(page: Page, locale: Locale, history: boolean): Promise
 
 for (const encoding of ['utf-8', 'utf-8-bom', 'shift_jis'] as const) {
     test(`imports contacts and companies losslessly from ${encoding}`, async ({ page }) => {
+        const workspaceId = await activeWorkspaceId(page.request);
         const errors: string[] = [];
         page.on('pageerror', (error) => errors.push(error.message));
         page.on('console', (entry) => {
@@ -84,12 +104,10 @@ for (const encoding of ['utf-8', 'utf-8-bom', 'shift_jis'] as const) {
         await page.getByRole('button', { name: text('en', 'import'), exact: true }).click();
         await expect(page.getByText(text('en', 'doneTitle'), { exact: true })).toBeVisible();
 
-        const contacts = await page.request.get('/api/persons');
-        const companies = await page.request.get('/api/companies');
-        expect(contacts.ok()).toBe(true);
-        expect(companies.ok()).toBe(true);
-        expect(await contacts.text()).toContain('山田太郎');
-        expect(await companies.text()).toContain('㈱テスト');
+        const contacts = await readStoredPage(page.request, workspaceId, '/api/persons/page');
+        const companies = await readStoredPage(page.request, workspaceId, '/api/companies/page');
+        expect(contacts.items).toEqual(expect.arrayContaining([expect.objectContaining({ name: '山田太郎' })]));
+        expect(companies.items).toEqual(expect.arrayContaining([expect.objectContaining({ name: '㈱テスト' })]));
         expect(errors).toEqual([]);
     });
 
@@ -123,21 +141,21 @@ for (const encoding of ['utf-8', 'utf-8-bom', 'shift_jis'] as const) {
         await expect(page.getByLabel(`${text('ja', 'history.counts.ready')}: 1`)).toBeVisible();
         await page.getByRole('button', { name: text('ja', 'history.import'), exact: true }).click();
         await expect(page.getByText(text('ja', 'history.doneTitle'), { exact: true })).toBeVisible();
-        const activities = await page.request.get('/api/activities');
-        expect(activities.ok()).toBe(true);
-        expect(await activities.text()).toContain('㈱テスト');
+        const activities = await readStoredPage(page.request, workspaceId, '/api/activities/page');
+        expect(activities.items).toEqual(expect.arrayContaining([expect.objectContaining({ subject: '㈱テスト' })]));
         expect(errors).toEqual([]);
     });
 }
 
 for (const locale of ['en', 'ja'] as const) {
     for (const history of [false, true]) {
-        test(`refuses undecodable ${history ? 'history' : 'contacts'} files before any writes in ${locale}`, async ({ page }) => {
+        test(`refuses undecodable or suspicious ${history ? 'history' : 'contacts'} files before any writes in ${locale}`, async ({ page }) => {
+            const workspaceId = await activeWorkspaceId(page.request);
             const writes: string[] = [];
             await openImport(page, locale, history);
-            const beforeContacts = await (await page.request.get('/api/persons')).text();
-            const beforeCompanies = await (await page.request.get('/api/companies')).text();
-            const beforeActivities = await (await page.request.get('/api/activities')).text();
+            const beforeContacts = await readStoredPage(page.request, workspaceId, '/api/persons/page');
+            const beforeCompanies = await readStoredPage(page.request, workspaceId, '/api/companies/page');
+            const beforeActivities = await readStoredPage(page.request, workspaceId, '/api/activities/page');
             page.on('request', (request) => {
                 if (request.method() === 'POST' && new URL(request.url()).pathname.startsWith('/api/imports/')) {
                     writes.push(request.url());
@@ -147,6 +165,13 @@ for (const locale of ['en', 'ja'] as const) {
             for (const buffer of [
                 Buffer.concat([Buffer.from('Name,Company\n'), Buffer.from([0x81])]),
                 Buffer.from('Name,Company\n山田太郎,\uFFFD\n', 'utf8'),
+                ...[
+                    [0x46, 0x72, 0x61, 0x6e, 0xe7, 0x6f, 0x69, 0x73],
+                    [0x4f, 0x92, 0x4e, 0x65, 0x69, 0x6c, 0x6c],
+                    [0xc9, 0x63, 0x6f, 0x6c, 0x65],
+                ].map((bytes) => Buffer.concat([
+                    Buffer.from('Name,Company\n'), Buffer.from(bytes), Buffer.from(',Example Company\n'),
+                ])),
             ]) {
                 await page.locator('input[type="file"]').setInputFiles({
                     name: 'invalid.csv', mimeType: 'text/csv', buffer,
@@ -158,9 +183,9 @@ for (const locale of ['en', 'ja'] as const) {
             }
 
             expect(writes).toEqual([]);
-            expect(await (await page.request.get('/api/persons')).text()).toBe(beforeContacts);
-            expect(await (await page.request.get('/api/companies')).text()).toBe(beforeCompanies);
-            expect(await (await page.request.get('/api/activities')).text()).toBe(beforeActivities);
+            expect(await readStoredPage(page.request, workspaceId, '/api/persons/page')).toEqual(beforeContacts);
+            expect(await readStoredPage(page.request, workspaceId, '/api/companies/page')).toEqual(beforeCompanies);
+            expect(await readStoredPage(page.request, workspaceId, '/api/activities/page')).toEqual(beforeActivities);
         });
     }
 }
