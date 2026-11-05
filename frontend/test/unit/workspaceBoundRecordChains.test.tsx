@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { createHash, webcrypto } from "node:crypto";
-import { act, useEffect, useState, type ComponentProps, type ReactNode } from "react";
+import { act, isValidElement, useEffect, useState, type ComponentProps, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -70,6 +70,7 @@ const browser = vi.hoisted(() => ({
     filterState: {},
     items: [],
     search: new URLSearchParams(),
+    showSelectionActions: false,
 }));
 const translate = vi.hoisted(() => Object.assign((key: string) => key, { has: () => false }));
 vi.mock("next/navigation", () => ({
@@ -105,7 +106,10 @@ vi.mock("@/app/hooks/useServerRecords", () => ({
 vi.mock("@/app/components/records/useRecordPeekController", () => ({ useRecordPeekController: () => ({ activeId: null, drawer: null }) }));
 vi.mock("@/app/components/records/CustomFieldColumns", () => ({ useCustomFieldColumns: () => ({ columns: [], addColumnSlot: null }) }));
 vi.mock("@/app/components/PageShell", () => ({ PageShell: ({ children }: { children?: ReactNode }) => <>{children}</> }));
-vi.mock("@/app/components/motion/Rise", () => ({ default: () => null }));
+vi.mock("@/app/components/motion/Rise", () => ({
+    default: ({ children }: { children?: ReactNode }) => browser.showSelectionActions && isValidElement<{ selectionActions?: ReactNode }>(children)
+        ? <>{children.props.selectionActions}</> : null,
+}));
 vi.mock("@/components/ui/segmented-control", () => ({ SegmentedControl: () => null }));
 vi.mock("@/components/ui/dialog-status-cover", async (importOriginal) => ({ ...await importOriginal<typeof import("@/components/ui/dialog-status-cover")>(), DialogStatusCover: () => null }));
 vi.mock("@/app/components/records/ArchiveRecordDialog", () => ({ default: () => null }));
@@ -155,6 +159,8 @@ beforeEach(() => {
     document.body.appendChild(container);
     root = createRoot(container);
     for (const key of Object.keys(captured)) Reflect.set(captured, key, null);
+    browser.selectedIds = new Set([41]);
+    browser.showSelectionActions = false;
     bindRenderedWorkspace(shell, ORIGIN);
     document.cookie = "connex_workspace=" + ORIGIN + "; path=/";
 });
@@ -220,6 +226,98 @@ describe("deal edit origins", () => {
             await act(async () => get("dealConflict").onReload(snapshot));
             expect(get("dealSheet").drafts[41]).toMatchObject({ expectedVersion: 2, name: current.name });
         }
+    });
+});
+
+describe("in-flight deal drafts", () => {
+    it("retains input made before and after the first batch response and retries only that draft", async () => {
+        const first = { ...deal, version: 1 };
+        const second = { ...deal, id: 42, version: 5, name: "Other deal" };
+        const firstSaved = { ...first, version: 2, name: "First submitted" };
+        const secondSaved = { ...second, version: 6, name: "Second submitted" };
+        const backend = stubBackend("/api/deals/41", (path, method) => {
+            if (path === "/api/deals/page") return json({ items: [first, second], total: 2 });
+            if (path === "/api/deals/41" && method === "PUT") return json({ ...firstSaved, version: 3, name: "Newest first input" });
+            if (path === "/api/deals/42" && method === "PUT") return json(secondSaved);
+            return undefined;
+        });
+        const secondStarted = deferred<void>();
+        const secondResponse = deferred<Response>();
+        const transport = vi.mocked(fetch);
+        const original = transport.getMockImplementation();
+        if (!original) throw new Error("Expected the stub transport");
+        transport.mockImplementation((input, init = {}) => {
+            const response = original(input, init);
+            if (String(input).endsWith("/api/deals/42") && init.method === "PUT") {
+                secondStarted.resolve();
+                return secondResponse.promise;
+            }
+            return response;
+        });
+        browser.selectedIds = new Set([41, 42]);
+        browser.showSelectionActions = true;
+        await render(<DealsBrowser
+            deals={[first, second]} total={2} metrics={{ byCurrency: [], totalCount: 2 }}
+            serverFacets={{ status: [], stages: [], pipelines: [], companies: [], currencies: [], risk: [], owners: [] }}
+            savedViews={[]} defaultView={null} timezone="UTC" currentUserId={7}
+        />);
+        const edit = [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "quickEdit");
+        if (!edit) throw new Error("Expected the multi-record Quick edit action");
+        await act(async () => edit.click());
+        await act(async () => {
+            get("dealSheet").updateDraft(41, { name: "First submitted" });
+            get("dealSheet").updateDraft(42, { name: " Second submitted " });
+        });
+        let pending: unknown;
+        await act(async () => {
+            pending = get("dealSheet").saveEdits();
+            await backend.started.promise;
+        });
+        expect(get("dealSheet").isSaving).toBe(true);
+        await act(async () => get("dealSheet").updateDraft(41, { name: "Newer first input" }));
+        await act(async () => {
+            backend.held.resolve(json(firstSaved));
+            await secondStarted.promise;
+        });
+        expect(get("dealSheet").drafts[41]).toMatchObject({ name: "Newer first input", expectedVersion: 2 });
+        expect(get("dealSheet").selectedDeals.find((row) => row.id === 41)).toMatchObject(firstSaved);
+        await act(async () => get("dealSheet").updateDraft(41, { name: "Newest first input" }));
+        await act(async () => { secondResponse.resolve(json(secondSaved)); await pending; });
+        expect(get("dealSheet").open).toBe(true);
+        expect(get("dealSheet").isSaving).toBe(false);
+        expect(get("dealSheet").drafts[41]).toMatchObject({ name: "Newest first input", expectedVersion: 2 });
+        expect(get("dealSheet").drafts[42]).toMatchObject({ name: "Second submitted", expectedVersion: 6 });
+        await act(async () => get("dealSheet").saveEdits());
+        expectWrites(backend, ["/api/deals/41", "/api/deals/42", "/api/deals/41"]);
+        const retryBody = backend.requests[2]?.init.body;
+        if (typeof retryBody !== "string") throw new Error("Expected the retried draft payload");
+        expect(JSON.parse(retryBody)).toMatchObject({ expectedVersion: 2, name: "Newest first input" });
+        expect(get("dealSheet").open).toBe(false);
+    });
+
+    it("retains newer detail input and uses the acknowledged version on the next save", async () => {
+        const firstSaved = { ...deal, version: 2, name: "Submitted detail" };
+        const backend = stubBackend("/api/deals/41", (path, method) => path === "/api/deals/41" && method === "PUT"
+            ? json({ ...firstSaved, version: 3, name: "Newer detail input" }) : undefined);
+        const onOpenChange = vi.fn();
+        await render(<EditDealSheet deal={{ ...deal, version: 1 }} open onOpenChange={onOpenChange} pipelines={[pipeline]} stagesByPipeline={{ 41: [stage] }} />);
+        await act(async () => get("dealSheet").updateDraft(41, { name: "Submitted detail" }));
+        let pending: unknown;
+        await act(async () => { pending = get("dealSheet").saveEdits(); await backend.started.promise; });
+        await act(async () => get("dealSheet").updateDraft(41, { name: "Newer detail input" }));
+        await act(async () => { backend.held.resolve(json(firstSaved)); await pending; });
+        expect(get("dealSheet").drafts[41]).toMatchObject({ name: "Newer detail input", expectedVersion: 2 });
+        expect(get("dealSheet").selectedDeals[0]).toMatchObject(firstSaved);
+        expect(get("dealSheet").isSaving).toBe(false);
+        expect(onOpenChange).not.toHaveBeenCalled();
+        expect(browser.refresh).not.toHaveBeenCalled();
+        await act(async () => get("dealSheet").saveEdits());
+        expectWrites(backend, ["/api/deals/41", "/api/deals/41"]);
+        const retryBody = backend.requests[1]?.init.body;
+        if (typeof retryBody !== "string") throw new Error("Expected the retried detail payload");
+        expect(JSON.parse(retryBody)).toMatchObject({ expectedVersion: 2, name: "Newer detail input" });
+        expect(onOpenChange).toHaveBeenCalledExactlyOnceWith(false);
+        expect(browser.refresh).toHaveBeenCalledOnce();
     });
 });
 

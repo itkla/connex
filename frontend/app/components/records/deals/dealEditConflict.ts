@@ -35,6 +35,11 @@ export function toDealDraft(d: Deal): DealDraft {
     };
 }
 
+/** Adopts a saved draft only when no newer input exists; otherwise advances its acknowledged token. */
+export function reconcileSavedDealDraft(current: DealDraft, submitted: DealDraft, saved: Deal): DealDraft {
+    return current === submitted ? toDealDraft(saved) : { ...current, expectedVersion: saved.version };
+}
+
 /** Persists one edit-sheet draft with outcome-canonicalized realized value. */
 export async function submitDealDraftUpdate(dealId: number, draft: DealDraft, init: RequestInit = {}): Promise<Deal> {
     const payload: UpdateDealPayload = {

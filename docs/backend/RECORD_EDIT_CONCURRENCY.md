@@ -88,6 +88,11 @@ invalidates late fetch answers, so an older form cannot reopen its prompt over a
 Multi-record quick edits save sequentially, retain each successful response/base/token, and stop
 on the first refusal. Remaining drafts stay open. A retry never resends already saved records.
 Partial successes are intentionally separate transactions, as they were before this contract.
+Core deal fields remain editable while a save is pending. Each response always advances the base
+snapshot and token, but replaces the draft only if it is still the immutable draft sent by that
+request. Newer input keeps all its fields and receives only the acknowledged version. Edits made
+during a save keep the sheet open, including after a successful batch; the next explicit Save
+submits remaining differences against the acknowledged snapshots. This also applies to detail edits.
 Both the helper's batch loop and the browser's record-save loop intentionally await sequentially:
 stop on the first refusal and retain each successful response before attempting the next record.
 These ordering requirements are part of the partial-save/error contract.

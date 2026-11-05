@@ -63,7 +63,7 @@ import DealsKanban from '@/app/components/records/deals/DealsKanban';
 import DealsQueryUrlSync from '@/app/components/records/deals/DealsQueryUrlSync';
 import NewDealDialog, { isDealPayloadDirty } from '@/app/components/records/deals/NewDealDialog';
 import DealEditConflictDialog from './DealEditConflictDialog';
-import { submitDealDraftUpdates, submitInlineDealValue, toDealDraft as toDraft } from './dealEditConflict';
+import { reconcileSavedDealDraft, submitDealDraftUpdates, submitInlineDealValue, toDealDraft as toDraft } from './dealEditConflict';
 import { useRecordEditConflict } from '@/app/hooks/useRecordEditConflict';
 import QuickEditDealSheet, { type DealDraft } from '@/app/components/records/deals/QuickEditDealSheet';
 import {
@@ -817,6 +817,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     const [editReloadRevision, setEditReloadRevision] = useState(0);
     const { conflict, captureConflict, clearConflict } = useRecordEditConflict(getDealById);
     const [drafts, setDrafts] = useState<Record<number, DealDraft>>({});
+    const draftRevisionRef = useRef(0);
     const [isSaving, setIsSaving] = useState(false);
 
     const [newDialogOpen, setNewDialogOpen] = useState(false);
@@ -875,6 +876,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     };
 
     const updateDraft = (id: number, patch: Partial<DealDraft>) => {
+        draftRevisionRef.current += 1;
         setDrafts((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
     };
 
@@ -900,6 +902,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         }
 
         const origin = workspacePinnedRequest(renderedWorkspaceId());
+        const submittedRevision = draftRevisionRef.current;
         setIsSaving(true);
         try {
             for (const base of changed) {
@@ -910,12 +913,16 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                     if (!saved) throw new Error('Deal update returned no record');
                     replaceDeal(saved);
                     setEditBases((current) => current.map((item) => item.id === saved.id ? saved : item));
-                    setDrafts((current) => ({ ...current, [saved.id]: toDraft(saved) }));
+                    setDrafts((current) => {
+                        const latest = current[saved.id];
+                        return latest ? { ...current, [saved.id]: reconcileSavedDealDraft(latest, draft, saved) } : current;
+                    });
                 } catch (error) {
                     if (!await captureConflict(error, base, origin)) reportApiError(error, 'failedToSave');
                     return;
                 }
             }
+            if (draftRevisionRef.current !== submittedRevision) return;
             toastSuccess(
                 changed.length === 1 ? t('dealUpdated') : t('dealsUpdated', { count: changed.length }),
             );

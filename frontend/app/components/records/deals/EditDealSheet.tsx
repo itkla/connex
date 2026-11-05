@@ -11,7 +11,7 @@ import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import QuickEditDealSheet, { type DealDraft } from '@/app/components/records/deals/QuickEditDealSheet';
 import { CustomFieldsEditSection, type CustomFieldsEditHandle } from '@/app/components/records/CustomFieldsEditSection';
-import { submitDealDraftUpdate, toDealDraft as toDraft } from './dealEditConflict';
+import { reconcileSavedDealDraft, submitDealDraftUpdate, toDealDraft as toDraft } from './dealEditConflict';
 import { getDealById, getPipelines, getStagesByPipelineId } from '@/app/lib/api';
 import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { type Deal, type Pipeline, type Stage } from '@/app/lib/types';
@@ -39,6 +39,7 @@ export default function EditDealSheet({
     const [reloadRevision, setReloadRevision] = useState(0);
     const { conflict, captureConflict, clearConflict } = useRecordEditConflict(getDealById);
     const [draft, setDraft] = useState<DealDraft>(() => toDraft(deal));
+    const draftRevisionRef = useRef(0);
     const [isSaving, setIsSaving] = useState(false);
     const [pipelineOptions, setPipelineOptions] = useState(pipelines);
     const [stageOptionsByPipeline, setStageOptionsByPipeline] = useState(stagesByPipeline);
@@ -122,13 +123,15 @@ export default function EditDealSheet({
             return;
         }
 
+        const submittedRevision = draftRevisionRef.current;
         setIsSaving(true);
         try {
             const saved = await submitDealDraftUpdate(base.id, draft, origin);
             setBase(saved);
             onDealUpdated?.(saved);
-            setDraft(toDraft(saved));
+            setDraft((current) => reconcileSavedDealDraft(current, draft, saved));
             await cfRef.current?.save(origin);
+            if (draftRevisionRef.current !== submittedRevision) return;
             toastSuccess(t('dealUpdated'));
             onOpenChange(false);
             router.refresh();
@@ -149,6 +152,7 @@ export default function EditDealSheet({
                 selectedDeals={[base]}
                 drafts={{ [base.id]: draft }}
                 updateDraft={(_id, patch) => {
+                    draftRevisionRef.current += 1;
                     for (const key of Object.keys(patch)) clearError(key);
                     setDraft((prev) => ({ ...prev, ...patch }));
                 }}
