@@ -80,6 +80,27 @@ still applies, including when missions are disabled. Production set activation a
 privacy admission require a later semantic cutover; V233 alone authorizes neither. See the
 [storage contract](backend/AI_SECURITY.md#dormant-chat-proposal-set-storage-tenant-v233).
 
+## Conditional contact edits (tenant V242)
+
+V242 adds the non-null person version counter with `ALGORITHM=INSTANT, LOCK=DEFAULT`. It must fail
+instead of rebuilding the core person table, including with `old_alter_table=ON`. No data backfill
+or new index is required. The person BEFORE UPDATE trigger owns the version and includes legacy,
+targeted, import, maintenance and ownership-cleanup writers.
+
+INSTANT and both CREATE TRIGGER statements acquire metadata locks. The new company BEFORE DELETE
+trigger references person and follows the existing V241 company→deal trigger; it explicitly detaches
+contacts before FK SET NULL, which otherwise bypasses UPDATE triggers. Deploy in a bounded window
+outside long-running company/person transactions and monitor metadata-lock waits. Resolve blockers
+before retrying; retain the algorithm and lock guards.
+
+MySQL DDL commits independently. On interruption, inspect the column, both V242 trigger definitions
+and Flyway history. Keep the serving release requiring conditional contact versions stopped until
+both triggers exist. Reconcile a partially applied prefix to the exact reviewed definitions using
+the deployment's Flyway recovery procedure, then validate before serving. Do not blindly rerun the
+prefix, reset versions, edit an applied migration, or recreate active triggers under traffic.
+Earlier binaries remain schema-compatible: omitted expected tokens retain legacy write behavior,
+and every person UPDATE still advances the database counter.
+
 ## Conditional deal edits (tenant V241)
 
 V241 adds the non-null deal version counter with `ALGORITHM=INSTANT, LOCK=DEFAULT`. This must fail

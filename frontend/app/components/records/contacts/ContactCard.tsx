@@ -8,12 +8,12 @@ import { copyToClipboard, readableTextColor } from '@/app/lib/utils';
 import { cn } from '@/lib/utils';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 
-import QuickEditSheet, { type ContactDraft } from '@/app/components/records/contacts/QuickEditSheet';
+import EditContactSheet from './EditContactSheet';
 import ProtectedMediaImage from '@/app/components/ProtectedMediaImage';
 import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompanyDialog';
-import { updateContact, uploadContactPicture } from '@/app/lib/api';
+import { getContactById } from '@/app/lib/api';
 import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
-import type { Contact, UpdateContactPayload } from '@/app/lib/types';
+import type { Contact } from '@/app/lib/types';
 import type { RecordMenuModel, RecordRemoveIntent } from '@/app/components/records/types';
 import { BuildingOffice2Icon, UserCircleIcon } from '@heroicons/react/24/outline';
 import type { Tag } from '@/app/lib/types';
@@ -100,9 +100,8 @@ export default function ContactCard({
     const t = useTranslations('ContactsCard');
     const reportApiError = useApiErrorToast('ContactsCard');
     const [editSheetOpen, setEditSheetOpen] = useState(false);
-    const [draft, setDraft] = useState<ContactDraft>({ name: '', email: '', phone: '', title: '' });
-    const [imageFile, setImageFile] = useState<File | null>(null);
-    const [isSaving, setIsSaving] = useState(false);
+    const [editContact, setEditContact] = useState<Contact | null>(null);
+    const [isPreparingEdit, setIsPreparingEdit] = useState(false);
     const [changeCompanyOpen, setChangeCompanyOpen] = useState(false);
     const ownedByActiveWorkspace = activeWorkspaceId !== null
         && Number.isFinite(activeWorkspaceId)
@@ -119,57 +118,30 @@ export default function ContactCard({
         openContactPage();
     }
 
-    function openInternalQuickEdit() {
-        setDraft({
-            name: name ?? '',
-            email: email ?? '',
-            phone: phone ?? '',
-            title: title ?? '',
-        });
-        setImageFile(null);
-        setEditSheetOpen(true);
+    async function openInternalQuickEdit() {
+        if (isPreparingEdit) return;
+        const originWorkspaceId = renderedWorkspaceId();
+        setIsPreparingEdit(true);
+        try {
+            const current = await getContactById(id, workspacePinnedRequest(originWorkspaceId));
+            if (renderedWorkspaceId() !== originWorkspaceId) return;
+            setEditContact(current);
+            setEditSheetOpen(true);
+        } catch (error) {
+            reportApiError(error, 'toastFailedLoadContact');
+        } finally {
+            setIsPreparingEdit(false);
+        }
     }
 
     function openChangeCompanyDialog() {
         setChangeCompanyOpen(true);
     }
 
-    async function saveInternalEdits() {
-        const origin = workspacePinnedRequest(renderedWorkspaceId());
-        const trimmedName = draft.name.trim();
-        if (!trimmedName) {
-            toastError(t('toastNameRequired'));
-            return;
-        }
-        setIsSaving(true);
-        let detailsSaved = false;
-        try {
-            const payload: UpdateContactPayload = {
-                name: trimmedName,
-                email: draft.email.trim() || undefined,
-                phone: draft.phone.trim() || undefined,
-                title: draft.title.trim() || undefined,
-                companyId: companyId ?? null,
-            };
-            await updateContact(id, payload, origin);
-            detailsSaved = true;
-            if (imageFile) await uploadContactPicture(id, imageFile, origin);
-            toastSuccess(t('toastContactUpdated'));
-            setEditSheetOpen(false);
-            setImageFile(null);
-            router.refresh();
-        } catch (err) {
-            if (detailsSaved && imageFile) toastError(t('toastPartiallySaved'));
-            else reportApiError(err, 'toastFailedSave');
-            if (detailsSaved) router.refresh();
-        } finally {
-            setIsSaving(false);
-        }
-    }
-
     const syntheticContact: Contact = {
         id,
         workspaceId,
+        companyId: companyId ?? undefined,
         name: name ?? '',
         email: email ?? '',
         phone: phone ?? '',
@@ -294,19 +266,8 @@ export default function ContactCard({
     return (
         <>
             {hasMenuActions ? <RecordContextMenu model={menuModel}>{card}</RecordContextMenu> : card}
-            {canMutate && !onQuickEdit && (
-                <QuickEditSheet
-                    editSheetOpen={editSheetOpen}
-                    setEditSheetOpen={setEditSheetOpen}
-                    selectedIds={new Set([id])}
-                    selectedContacts={[syntheticContact]}
-                    drafts={{ [id]: draft }}
-                    updateDraft={(_id, patch) => setDraft((d) => ({ ...d, ...patch }))}
-                    imageFiles={{ [id]: imageFile }}
-                    updateImageFile={(_id, file) => setImageFile(file)}
-                    isSaving={isSaving}
-                    saveEdits={saveInternalEdits}
-                />
+            {canMutate && !onQuickEdit && editContact && (
+                <EditContactSheet contact={editContact} open={editSheetOpen} onOpenChange={setEditSheetOpen} onContactUpdated={setEditContact} />
             )}
 
             {canMutate && (

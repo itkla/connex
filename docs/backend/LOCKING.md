@@ -2574,11 +2574,15 @@ restore a stale amount. No additional aggregate or authorization lock is introdu
 Fallback capture and clear advance the deal version through #2276's UPDATE trigger. Line-item
 confirmation does not submit a parent version or replay a broad deal update after these writes.
 
-## Conditional record edit versions (V241)
+## Conditional record edit versions (V241/V242)
 
 Deal full-record UPDATEs condition on the optional client snapshot version in the tenant-scoped
 WHERE clause, before dependent value writes. The database BEFORE UPDATE counter covers every
 writer. The BEFORE DELETE company trigger detaches exact deal references before the FK's existing
 SET NULL action, retaining its parent company → child deal order while advancing the counter.
+V242 applies the same atomic expected-version fence to person full edits under their existing
+organization duplicate mutex → person row lock order at READ_COMMITTED. The company-delete person
+trigger follows V241's deal-detach trigger and detaches indexed person references before FK SET
+NULL; person ownership cleanup remains explicit (the V90 owner column has no FK).
 No new application lock hierarchy or isolation change is introduced. See
 [Conditional record edits](RECORD_EDIT_CONCURRENCY.md) for the transport, writer inventory and tests.

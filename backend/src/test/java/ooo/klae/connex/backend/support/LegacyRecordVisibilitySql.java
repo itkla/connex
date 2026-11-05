@@ -3056,6 +3056,7 @@ public final class LegacyRecordVisibilitySql {
             <result property="title"     column="title"/>
             <result property="createdAt" column="created_at"/>
             <result property="updatedAt" column="updated_at"/>
+            <result property="version" column="version"/>
             <result property="imageUrl" column="image_url"/>
             <result property="riskExcluded" column="risk_excluded"/>
             <result property="introExcluded" column="intro_excluded"/>
@@ -3085,7 +3086,7 @@ public final class LegacyRecordVisibilitySql {
           </resultMap>
 
           <sql id="personColumns">
-            p.id, p.workspace_id, p.owner_id, p.name, p.email, p.phone, p.title, p.created_at, p.updated_at, p.image_url,
+            p.id, p.workspace_id, p.owner_id, p.name, p.email, p.phone, p.title, p.created_at, p.updated_at, p.version, p.image_url,
             p.risk_excluded, p.intro_excluded, p.suspended_at, p.provision_ceased_at, p.archived_at,
             <include refid="lifecycleColumns"/>
           </sql>
