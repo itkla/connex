@@ -22,6 +22,8 @@
         "kpi_newPipeline": "新規パイプライン",
         "kpi_avgCycle": "平均日数",
         "kpiNoBaseline": "新規",
+        "dealSignals": "自分の案件・過去90日間",
+        "currencyScope": "{currency}建て",
         "daysUnit": "日",
         "coolingTitle": "冷めかけている関係",
         "coolingEmpty": "冷めている関係はありません。よく手入れされています。",
