@@ -24,7 +24,6 @@ function comment(overrides: Partial<RecordComment> & Pick<RecordComment, 'id' | 
         threadId: 1,
         author: { id: 7, displayName: 'Mei Tanaka' },
         content: 'Looks good to me',
-        deletedAt: null,
         ...overrides,
     };
 }
@@ -107,6 +106,15 @@ describe('the record timeline carries comments', () => {
         ]);
 
         expect(comments.map((entry) => entry.id)).toEqual([50, 52]);
+    });
+
+    it('drops tombstones whose content and deletion timestamp are both absent', () => {
+        const tombstone: RecordComment = {
+            id: 53,
+            threadId: 1,
+            createdAt: '2026-03-01T09:00:00Z',
+        };
+        expect(commentsFromThreads([thread([tombstone])])).toEqual([]);
     });
 
     it('leaves the thread view as the comment composer, and the timeline as the chronology', () => {
