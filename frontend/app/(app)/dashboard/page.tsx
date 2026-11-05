@@ -428,15 +428,18 @@ export default async function Dashboard() {
     const activationExtrasPromise = activationNeedsEvaluation ? loadActivationExtras(cookie) : null;
 
     const currency = dominantCurrency(dealMetrics);
-    const [dealKpisResult, pipelineValuesResult, revenueSeriesResult, stageDistributionResult] = await Promise.all([
+    const [dealKpisResult, pipelineValuesResult, revenueSeriesResult, openRevenueSeriesResult, stageDistributionResult] = await Promise.all([
         toResult(getDealKpisFromCookie(cookie, currency, DASHBOARD_RANGE)),
         toResult(getDealPipelineValueFromCookie(cookie, currency, DASHBOARD_RANGE)),
         toResult(getDealRevenueTimeseries(currency, timezone, {}, init)),
+        toResult(getDealRevenueTimeseries(currency, timezone, {}, init, true)),
         toResult(getDealStageDistribution(currency, {}, init)),
     ]);
     const dealKpis = dealKpisResult.ok ? dealKpisResult.data : EMPTY_DEAL_KPIS;
     const pipelineValues = pipelineValuesResult.ok ? pipelineValuesResult.data : [];
     const revenueSeries = revenueSeriesResult.ok ? revenueSeriesResult.data : EMPTY_REVENUE_SERIES;
+    const openRevenueSeries = openRevenueSeriesResult.ok ? openRevenueSeriesResult.data : EMPTY_REVENUE_SERIES;
+    const openValue = dealMetrics.byCurrency.find((metrics) => metrics.currency === currency)?.openValue ?? 0;
     const stageDistribution = stageDistributionResult.ok ? stageDistributionResult.data : [];
     const currencyKnown = dealMetricsResult.ok;
     const kpisAvailable = currencyKnown && dealKpisResult.ok;
@@ -524,8 +527,8 @@ export default async function Dashboard() {
                 <OverviewCard index={3} label={t('pipelines')} value={pipelines.length} icon={FunnelIcon} href="/records/pipelines" unavailable={!pipelinesResult.ok} unavailableLabel={tUnavailable('title')} />
             </div>
         ),
-        pipeline: revenueAvailable
-            ? <PipelineChart series={revenueSeries} currency={currency} range={DASHBOARD_RANGE} />
+        pipeline: currencyKnown && openRevenueSeriesResult.ok
+            ? <PipelineChart series={openRevenueSeries} openValue={openValue} currency={currency} range={DASHBOARD_RANGE} />
             : <SectionUnavailable />,
         tasks: taskSummaryResult.ok && upcomingTasksResult.ok
             ? <TaskSummary summary={taskSummary} upcoming={upcomingTasks} />
