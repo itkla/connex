@@ -16,6 +16,10 @@ function backend(csrf: () => Promise<Response>) {
         const url = input instanceof Request ? input.url : String(input);
         if (url.endsWith("/api/auth/csrf")) return csrf();
         if (url.endsWith("/api/auth/logout")) return new Response(null, { status: 204 });
+        if (url.endsWith("/api/capabilities")) return json({ privilegedMfaEnforced: false });
+        if (url.endsWith("/api/auth/webauthn/register/requirements")) return json({
+            currentPasswordRequired: true, emailConfirmationRequired: false, emailConfirmationSatisfied: false,
+        });
         return json({ method: init?.method });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -51,13 +55,7 @@ describe("API client CSRF bootstrap", () => {
     });
 
     it("invalidates resolved policy readiness when another tab changes request identity", async () => {
-        const fetchMock = backend(async () => bootstrap());
-        fetchMock.mockImplementation(async (input: string | URL | Request) => {
-            const url = input instanceof Request ? input.url : String(input);
-            if (url.endsWith("/api/auth/csrf")) return bootstrap();
-            if (url.endsWith("/api/capabilities")) return json({ privilegedMfaEnforced: false });
-            return json({ currentPasswordRequired: true, emailConfirmationRequired: false, emailConfirmationSatisfied: false });
-        });
+        backend(async () => bootstrap());
         const api = await import("@/app/lib/api");
         await api.csrfHeader();
         await expect(api.settlePrivilegedMfaStanding("check")).resolves.toBe("applied");
@@ -65,6 +63,32 @@ describe("API client CSRF bootstrap", () => {
         changeIdentity();
         expect(api.currentPrivilegedMfaReadiness()).toBe("loading");
         expect(api.privilegedMfaConfinementReason()).toBeNull();
+    });
+
+    it.each([false, true])("resets resolved policy only when CSRF bootstrap confirms a changed session: %s", async (sessionChanged) => {
+        const csrf = vi.fn<() => Promise<Response>>()
+            .mockResolvedValueOnce(bootstrap("old-token"))
+            .mockImplementation(async () => bootstrap("new-token", sessionChanged ? "new-session" : "session-identity"));
+        backend(csrf);
+        const api = await import("@/app/lib/api");
+        await api.csrfHeader();
+        await api.settlePrivilegedMfaStanding("check");
+        expect(api.currentPrivilegedMfaReadiness()).toBe("ready");
+
+        await api.startAiChatTurn(7, { content: "Review this record" });
+
+        expect(api.currentPrivilegedMfaReadiness()).toBe(sessionChanged ? "loading" : "ready");
+    });
+
+    it.each(["login", "register"] as const)("resets resolved policy after successful %s", async (action) => {
+        backend(async () => bootstrap());
+        const api = await import("@/app/lib/api");
+        await api.settlePrivilegedMfaStanding("check");
+        expect(api.currentPrivilegedMfaReadiness()).toBe("ready");
+
+        await api[action]({ username: "new-user", password: "test-password", displayName: "Test", email: "test@example.com" });
+
+        expect(api.currentPrivilegedMfaReadiness()).toBe("loading");
     });
 
     it("shares one fetch across N concurrent header requests and caches the result", async () => {

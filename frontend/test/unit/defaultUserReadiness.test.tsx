@@ -199,6 +199,28 @@ describe("fresh account policy readiness", () => {
         expect(boundary.recordMounted).toHaveBeenCalledOnce();
     });
 
+    it("holds readers when master enforcement is confirmed enabled during revalidation", async () => {
+        let enforced = false;
+        const standing = Promise.withResolvers<Response>();
+        const reads = transport(async () => json({ privilegedMfaEnforced: enforced }),
+            () => enforced ? standing.promise : Promise.resolve(requirements(undefined)));
+        mount();
+        await waitFor(() => expect(boundary.recordMounted).toHaveBeenCalledOnce());
+        reads.length = 0;
+        enforced = true;
+        let check: Promise<unknown> = Promise.resolve();
+        await act(async () => { check = settlePrivilegedMfaStanding("check"); });
+        await waitFor(() => expect(currentPrivilegedMfaReadiness()).toBe("loading"));
+        expect(screen.getByRole("heading", { name: account.AccountSecurity.accessCheckingTitle })).toBeTruthy();
+        expect(screen.queryByRole("heading", { name: "Contacts" })).toBeNull();
+        expect(reads).toEqual([]);
+        await act(async () => { standing.resolve(requirements("ENROLLMENT_REQUIRED")); await check; });
+        expect(screen.getByRole("heading", { name: account.AccountSecurity.enrollmentNeededTitle })).toBeTruthy();
+        expect(reads).toEqual([]);
+        expect(boundary.recordMounted).toHaveBeenCalledOnce();
+        expect(boundary.toast).not.toHaveBeenCalled();
+    });
+
     it("keeps Security reachable while policy is unresolved", async () => {
         boundary.pathname = "/settings/personal/security";
         const reads = transport(() => new Promise(() => undefined), () => new Promise(() => undefined));

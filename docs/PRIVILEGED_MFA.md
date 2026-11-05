@@ -764,9 +764,11 @@ read preserves an already-known server refusal or step URL. Ordinary pages and s
 behind a separate shared readiness state while policy is unresolved or its read has failed; the
 page offers a neutral retry state and keeps Security reachable. An explicit master-off response
 releases fresh ordinary pages immediately, even while enrollment metadata is still pending or fails.
-Cached ready policy survives a pending background recheck so the editor is not remounted; an actual
-lookup failure blocks reads until retry succeeds. Readiness failure ordering is separate from the
-original decisive-standing sequence, and identity invalidation clears both.
+Cached ready policy survives pending background rechecks, workspace transitions and CSRF-token
+refreshes so the editor stays mounted and pending saves can finish. These request invalidations
+still overtake older policy responses. Confirmed authentication/account transitions reset policy
+readiness; a confirmed enforcement change or lookup failure holds readers until a safe decision.
+Readiness failure ordering remains separate from the original decisive-standing sequence.
 
 The same self-only response always includes `privilegedMemberships` (#1534 slice 4b-1),
 independent of both enforcement switches. An unprivileged account receives `[]`. Each entry is

@@ -241,6 +241,7 @@ if (typeof window !== "undefined") {
         else if (action === "account") invalidateAccountStorage();
         else if (action === "refresh") reconcileBrowserAccount();
         if (action === "logout" || action === "account") resetPrivilegedMfaState();
+        else if (action === "refresh") resetPrivilegedMfaReadiness();
         abandonPendingPinnedWrites();
         invalidateClientRequestIdentity();
         if (action === "logout") {
@@ -313,15 +314,13 @@ export async function csrfHeader(forceRefresh = false): Promise<Record<string, s
     return csrfTokenCache ? { [csrfTokenCache.headerName]: csrfTokenCache.token } : {};
 }
 
+/** Invalidates request caches while retaining account policy during workspace/CSRF revalidation. */
 function invalidateClientRequestIdentity() {
     csrfTokenCache = null;
     csrfTokenRequest = null;
     clientRequestIdentityEpoch += 1;
     privilegedMfaEventEpoch += 1;
-    privilegedMfaReadiness = "loading";
-    privilegedMfaPolicyEnforced = null;
     privilegedMfaReadinessSequence = privilegedMfaReadSequence;
-    notifyPrivilegedMfaListeners();
     for (const mutation of inFlightAiMutations.values()) {
         mutation.controller.abort();
     }
@@ -393,6 +392,7 @@ function signalClientRequestIdentityTransition(action: ClientIdentityTransition)
     if (action === "account") invalidateAccountStorage();
     if (action === "logout") resetBrowserAccount();
     if (action === "account" || action === "logout") resetPrivilegedMfaState();
+    else if (action === "refresh") resetPrivilegedMfaReadiness();
     abandonPendingPinnedWrites();
     invalidateClientRequestIdentity();
     broadcastClientRequestIdentityTransition(action);
@@ -427,6 +427,7 @@ async function resolveClientRequestIdentity(): Promise<ResolvedClientRequestIden
         || previousCsrf.requestIdentity !== currentCsrf.requestIdentity
     )) {
         const serverIdentityChanged = previousCsrf.requestIdentity !== currentCsrf.requestIdentity;
+        if (serverIdentityChanged) resetPrivilegedMfaReadiness();
         invalidateClientRequestIdentity();
         if (serverIdentityChanged) {
             broadcastClientRequestIdentityTransition("refresh");
@@ -790,6 +791,14 @@ function notePrivilegedMfaRefusal(reason: PrivilegedMfaConfinementReason) {
     notifyPrivilegedMfaListeners();
 }
 
+/** Rechecks session policy without discarding a known confinement or approval requirement. */
+function resetPrivilegedMfaReadiness() {
+    privilegedMfaReadiness = "loading";
+    privilegedMfaReadinessSequence = privilegedMfaReadSequence;
+    privilegedMfaPolicyEnforced = null;
+    notifyPrivilegedMfaListeners();
+}
+
 /** Forgets the previous account's standing when the browser signs out or changes account. */
 function resetPrivilegedMfaState() {
     privilegedMfaConfinement = null;
@@ -799,10 +808,7 @@ function resetPrivilegedMfaState() {
     privilegedMfaEventEpoch += 1;
     privilegedMfaAppliedSequence = privilegedMfaReadSequence;
     privilegedMfaRequirements = null;
-    privilegedMfaReadiness = "loading";
-    privilegedMfaReadinessSequence = privilegedMfaReadSequence;
-    privilegedMfaPolicyEnforced = null;
-    notifyPrivilegedMfaListeners();
+    resetPrivilegedMfaReadiness();
 }
 
 /**
