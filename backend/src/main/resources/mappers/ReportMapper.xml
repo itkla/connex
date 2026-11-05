@@ -1016,12 +1016,13 @@
           UNION ALL
           SELECT t.person_id, #{model.taskWeight} AS weight,
                  GREATEST(0.0,
-                   TIMESTAMPDIFF(MICROSECOND, t.created_at, #{warmthReference})
+                   TIMESTAMPDIFF(MICROSECOND, t.completed_at, #{warmthReference})
                      / #{model.microsecondsPerDay}) AS age_days
           FROM task t
           WHERE t.workspace_id = #{query.workspaceId}
             AND t.person_id IS NOT NULL
-            AND t.created_at &lt; #{query.endUtc}
+            AND t.completed = TRUE AND t.completed_at IS NOT NULL
+            AND t.completed_at &lt; #{query.endUtc}
         ) warmth_touch
         GROUP BY warmth_touch.person_id
       ) person_warmth ON person_warmth.person_id = gap_person.id

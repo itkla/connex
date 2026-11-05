@@ -20,8 +20,9 @@ import org.apache.ibatis.transaction.jdbc.JdbcTransactionFactory;
  * Frozen pre-#485 visibility SQL used only as a semantic-parity oracle. These statements retain
  * their original control-table joins and may execute only on the migrated single catalog,
  * never on a scratch tenant catalog. No production mapper loads these copies.
- * Financial and representation changes are mirrored here so the oracle isolates visibility;
- * its frozen control-table joins and visibility assertions remain unchanged.
+ * Task touch eligibility follows warmth-v2. Financial and representation changes are mirrored
+ * here so the oracle isolates visibility; its original control-table joins and visibility
+ * assertions remain frozen.
  */
 public final class LegacyRecordVisibilitySql {
     private final SqlSessionFactory sessions;
@@ -792,12 +793,13 @@ public final class LegacyRecordVisibilitySql {
                   UNION ALL
                   SELECT t.person_id, #{model.taskWeight} AS weight,
                          GREATEST(0.0,
-                           TIMESTAMPDIFF(MICROSECOND, t.created_at, #{warmthReference})
+                           TIMESTAMPDIFF(MICROSECOND, t.completed_at, #{warmthReference})
                              / #{model.microsecondsPerDay}) AS age_days
                   FROM task t
                   WHERE t.workspace_id = #{query.workspaceId}
                     AND t.person_id IS NOT NULL
-                    AND t.created_at &lt; #{query.endUtc}
+                    AND t.completed = TRUE AND t.completed_at IS NOT NULL
+                    AND t.completed_at &lt; #{query.endUtc}
                 ) warmth_touch
                 GROUP BY warmth_touch.person_id
               ) person_warmth ON person_warmth.person_id = gap_person.id
@@ -1175,6 +1177,9 @@ public final class LegacyRecordVisibilitySql {
                     SELECT 1 FROM task engaged_task
                     WHERE engaged_task.workspace_id = #{workspaceId}
                       AND engaged_task.person_id = engaged.id
+              AND engaged_task.completed = TRUE
+              AND engaged_task.completed_at IS NOT NULL
+              AND engaged_task.completed_at &lt;= UTC_TIMESTAMP(6)
                   )
                   AND NOT EXISTS (
                     SELECT 1 FROM activity user_activity
@@ -1624,22 +1629,24 @@ public final class LegacyRecordVisibilitySql {
                    t.id AS source_id,
                    p.company_id,
                    'task' AS interaction_type,
-                   t.created_at AS touched_at,
+                   t.completed_at AS touched_at,
                    #{model.taskWeight} AS weight
             FROM task t
             JOIN person p ON p.id = t.person_id
             WHERE t.workspace_id = #{workspaceId} AND p.company_id IS NOT NULL
+              AND t.completed = TRUE AND t.completed_at IS NOT NULL
               AND <include refid="attributablePerson"/>
             UNION ALL
             SELECT 'task' AS source_type,
                    t.id AS source_id,
                    d.company_id,
                    'task' AS interaction_type,
-                   t.created_at AS touched_at,
+                   t.completed_at AS touched_at,
                    #{model.taskWeight} AS weight
             FROM task t
             JOIN deal d ON d.id = t.deal_id
             WHERE t.workspace_id = #{workspaceId} AND d.workspace_id = #{workspaceId}
+              AND t.completed = TRUE AND t.completed_at IS NOT NULL
               AND d.company_id IS NOT NULL
               AND (t.person_id IS NULL OR EXISTS (
                 SELECT 1 FROM person p
@@ -1718,22 +1725,24 @@ public final class LegacyRecordVisibilitySql {
             SELECT 'task' AS source_type,
                    t.id AS source_id,
                    'task' AS interaction_type,
-                   t.created_at AS touched_at,
+                   t.completed_at AS touched_at,
                    #{model.taskWeight} AS weight
             FROM task t
             JOIN person p ON p.id = t.person_id
             WHERE t.workspace_id = #{workspaceId} AND p.company_id = #{companyId}
+              AND t.completed = TRUE AND t.completed_at IS NOT NULL
               AND <include refid="attributablePerson"/>
-              AND t.created_at IS NOT NULL AND t.created_at &lt;= #{reference}
+              AND t.completed_at &lt;= #{reference}
             UNION ALL
             SELECT 'task' AS source_type,
                    t.id AS source_id,
                    'task' AS interaction_type,
-                   t.created_at AS touched_at,
+                   t.completed_at AS touched_at,
                    #{model.taskWeight} AS weight
             FROM task t
             JOIN deal d ON d.id = t.deal_id
             WHERE t.workspace_id = #{workspaceId} AND d.workspace_id = #{workspaceId}
+              AND t.completed = TRUE AND t.completed_at IS NOT NULL
               AND d.company_id = #{companyId}
               AND (t.person_id IS NULL OR EXISTS (
                 SELECT 1 FROM person p
@@ -1744,7 +1753,7 @@ public final class LegacyRecordVisibilitySql {
                 WHERE p.id = t.person_id AND p.company_id = d.company_id
                   AND <include refid="attributablePerson"/>
               )
-              AND t.created_at IS NOT NULL AND t.created_at &lt;= #{reference}
+              AND t.completed_at &lt;= #{reference}
           </sql>
 
           <!-- Company evidence reads the capped source set twice: once collapsed to totals, once ranked for
@@ -3180,10 +3189,11 @@ public final class LegacyRecordVisibilitySql {
                    'task' AS source_type,
                    t.id AS source_id,
                    'task' AS interaction_type,
-                   t.created_at AS touched_at,
+                   t.completed_at AS touched_at,
                    #{model.taskWeight} AS weight
             FROM task t
             WHERE t.workspace_id = #{workspaceId} AND t.person_id IS NOT NULL
+              AND t.completed = TRUE AND t.completed_at IS NOT NULL
           </sql>
 
           <sql id="relationshipTouchSourcesExcludingHistoryImports">
@@ -3222,10 +3232,11 @@ public final class LegacyRecordVisibilitySql {
                    'task' AS source_type,
                    t.id AS source_id,
                    'task' AS interaction_type,
-                   t.created_at AS touched_at,
+                   t.completed_at AS touched_at,
                    #{model.taskWeight} AS weight
             FROM task t
             WHERE t.workspace_id = #{workspaceId} AND t.person_id IS NOT NULL
+              AND t.completed = TRUE AND t.completed_at IS NOT NULL
             <if test="!excludedTaskIds.isEmpty()">
               AND t.id NOT IN
               <foreach collection="excludedTaskIds" item="id" open="(" separator="," close=")">
@@ -3257,11 +3268,12 @@ public final class LegacyRecordVisibilitySql {
             SELECT 'task' AS source_type,
                    t.id AS source_id,
                    'task' AS interaction_type,
-                   t.created_at AS touched_at,
+                   t.completed_at AS touched_at,
                    #{model.taskWeight} AS weight
             FROM task t
             WHERE t.workspace_id = #{workspaceId} AND t.person_id = #{personId}
-              AND t.created_at IS NOT NULL AND t.created_at &lt;= #{reference}
+              AND t.completed = TRUE AND t.completed_at IS NOT NULL
+              AND t.completed_at &lt;= #{reference}
           </sql>
 
           <sql id="personEvidenceScope">
@@ -3824,6 +3836,7 @@ public final class LegacyRecordVisibilitySql {
               UNION SELECT person_id FROM note
                 WHERE workspace_id = #{workspaceId} AND visibility = 'workspace' AND person_id IS NOT NULL
               UNION SELECT person_id FROM task WHERE workspace_id = #{workspaceId} AND person_id IS NOT NULL
+                AND completed = TRUE AND completed_at IS NOT NULL AND completed_at &lt;= UTC_TIMESTAMP(6)
             ) engaged
             JOIN person p ON p.id = engaged.person_id
             WHERE <include refid="visible"/>
