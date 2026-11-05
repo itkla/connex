@@ -51,6 +51,7 @@ import {
 } from '@/app/hooks/useRecordTargetSearch';
 
 import { closeDeal, deleteDeal, getDealById, reopenDeal } from '@/app/lib/api';
+import type { RelationshipMapAvailability } from '@/app/lib/api';
 import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { type Contact, type Deal, type Pipeline, type Stage, type User } from '@/app/lib/types';
 import { isDealClosed } from './dealOutcome';
@@ -72,6 +73,7 @@ export default function DealActionsMenu({
     pipelines,
     stagesByPipeline,
     currentUserId,
+    mapAvailability = 'unknown',
     personSeeds = EMPTY_CONTACTS,
     dealSeeds = EMPTY_DEALS,
     collaborators = EMPTY_USERS,
@@ -80,6 +82,7 @@ export default function DealActionsMenu({
     pipelines: Pipeline[];
     stagesByPipeline: Record<number, Stage[]>;
     currentUserId: number;
+    mapAvailability?: RelationshipMapAvailability;
     personSeeds?: Contact[];
     dealSeeds?: Deal[];
     collaborators?: User[];
@@ -167,15 +170,16 @@ export default function DealActionsMenu({
                         {t('edit')}
                     </Button>
                 )}
-                <Button
-                    variant="outline"
-                    size="toolbar"
-                    disabled={deal.company == null}
-                    onClick={() => deal.company != null && router.push(`/intelligence/map?companyId=${deal.company}`)}
-                >
-                    <EyeIcon className="size-4" />
-                    {t('viewInMap')}
-                </Button>
+                {mapAvailability !== 'overCapacity' && deal.company != null && (
+                    <Button
+                        variant="outline"
+                        size="toolbar"
+                        onClick={() => deal.company != null && router.push(`/intelligence/map?companyId=${deal.company}`)}
+                    >
+                        <EyeIcon className="size-4" />
+                        {t('viewInMap')}
+                    </Button>
+                )}
             </ButtonGroup>
             <ButtonGroup orientation="horizontal">
                 {canAttach && (

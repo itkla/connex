@@ -1571,20 +1571,51 @@ export function getDealsCappedResultFromCookie(cookie: string | null, cap = CALE
     );
 }
 
-/** Complete, explicitly capped inputs for the relationship graph. */
-export async function getRelationshipMapData(init: RequestInit = {}) {
+/** The workspace exceeds the relationship map's rendering capacity. */
+export class RelationshipMapCapacityError extends Error {
+    constructor() {
+        super('The relationship map exceeds its safe rendering limit');
+        this.name = 'RelationshipMapCapacityError';
+    }
+}
+
+async function getRelationshipMapFirstPages(size: number, init: RequestInit) {
     const [companies, contacts, deals, activities, tasks, notes] = await Promise.all([
-        getCompaniesPage({ page: 1, size: WORKSPACE_LIST_PAGE_SIZE }, init),
-        getContactsPage({ page: 1, size: WORKSPACE_LIST_PAGE_SIZE }, init),
-        getDealsPage({ page: 1, size: WORKSPACE_LIST_PAGE_SIZE }, init),
-        getActivitiesPage({ page: 1, size: WORKSPACE_LIST_PAGE_SIZE }, init),
-        getTasksPage({ page: 1, size: WORKSPACE_LIST_PAGE_SIZE }, init),
-        getNotesPage({ page: 1, size: WORKSPACE_LIST_PAGE_SIZE, workspaceOnly: true }, init),
+        getCompaniesPage({ page: 1, size }, init),
+        getContactsPage({ page: 1, size }, init),
+        getDealsPage({ page: 1, size }, init),
+        getActivitiesPage({ page: 1, size }, init),
+        getTasksPage({ page: 1, size }, init),
+        getNotesPage({ page: 1, size, workspaceOnly: true }, init),
     ]);
+    return { companies, contacts, deals, activities, tasks, notes };
+}
+
+function assertRelationshipMapCapacity({ companies, contacts, deals, activities, tasks, notes }: Awaited<ReturnType<typeof getRelationshipMapFirstPages>>) {
     if (companies.total + contacts.total + deals.total > RELATIONSHIP_MAP_RECORD_LIMIT
         || activities.total + tasks.total + notes.total > RELATIONSHIP_MAP_TOUCH_LIMIT) {
-        throw new Error('The relationship map exceeds its safe rendering limit');
+        throw new RelationshipMapCapacityError();
     }
+}
+
+/** A failed capacity check remains distinct from a confirmed rendering limit. */
+export type RelationshipMapAvailability = 'available' | 'overCapacity' | 'unknown';
+
+/** Checks map capacity with one item per source; failed reads leave navigation available for retry. */
+export async function getRelationshipMapAvailability(init: RequestInit = {}): Promise<RelationshipMapAvailability> {
+    try {
+        assertRelationshipMapCapacity(await getRelationshipMapFirstPages(1, init));
+        return 'available';
+    } catch (error: unknown) {
+        return error instanceof RelationshipMapCapacityError ? 'overCapacity' : 'unknown';
+    }
+}
+
+/** Complete, explicitly capped inputs for the relationship graph. */
+export async function getRelationshipMapData(init: RequestInit = {}) {
+    const pages = await getRelationshipMapFirstPages(WORKSPACE_LIST_PAGE_SIZE, init);
+    assertRelationshipMapCapacity(pages);
+    const { companies, contacts, deals, activities, tasks, notes } = pages;
     const [allCompanies, allContacts, allDeals, allActivities, allTasks, allNotes] = await Promise.all([
         getCompleteKnownPage(companies, getCompaniesPage, init),
         getCompleteKnownPage(contacts, getContactsPage, init),
