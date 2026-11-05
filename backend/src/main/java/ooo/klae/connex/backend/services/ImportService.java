@@ -46,6 +46,7 @@ import ooo.klae.connex.backend.dto.ColumnMapping;
 import ooo.klae.connex.backend.dto.CompanyDuplicatePreflightRequest;
 import ooo.klae.connex.backend.dto.DuplicateCandidateDto;
 import ooo.klae.connex.backend.dto.DuplicateImportPreflightReview;
+import ooo.klae.connex.backend.dto.DuplicateMatchKind;
 import ooo.klae.connex.backend.dto.DuplicateMatchStrength;
 import ooo.klae.connex.backend.dto.DuplicatePreflightResponse;
 import ooo.klae.connex.backend.dto.ImportPreviewResult;
@@ -981,7 +982,7 @@ public class ImportService {
             String entityLabel) {
         List<DuplicateCandidateDto> strong = row.duplicateCandidates.stream()
             .filter(candidate -> recordType.equals(candidate.recordType()))
-            .filter(candidate -> candidate.strength() == DuplicateMatchStrength.STRONG)
+            .filter(ImportService::hasAutomaticMatchEvidence)
             .toList();
         if (strong.isEmpty()) return;
         if (strong.size() > 1) {
@@ -997,6 +998,14 @@ public class ImportService {
         row.automaticIdentityMatch = true;
     }
 
+    private static boolean hasAutomaticMatchEvidence(DuplicateCandidateDto candidate) {
+        return candidate.strength() == DuplicateMatchStrength.STRONG
+            && (!"person".equals(candidate.recordType())
+                || candidate.matches().stream().anyMatch(match ->
+                    match.kind() == DuplicateMatchKind.EMAIL
+                        && match.strength() == DuplicateMatchStrength.STRONG));
+    }
+
     private static boolean manualLinkConflicts(
             PlanRow row,
             int linkedId,
@@ -1004,8 +1013,7 @@ public class ImportService {
             String entityLabel) {
         boolean conflicts = row.duplicateCandidates.stream()
             .filter(candidate -> recordType.equals(candidate.recordType()))
-            .filter(candidate ->
-                candidate.strength() == DuplicateMatchStrength.STRONG)
+            .filter(ImportService::hasAutomaticMatchEvidence)
             .anyMatch(candidate -> candidate.recordId() != linkedId);
         if (conflicts) {
             fail(
@@ -1800,7 +1808,6 @@ public class ImportService {
             if (!def.isArchived()) byId.put(def.getId(), def);
         }
         Map<String, Integer> columnToDef = new HashMap<>();
-        Map<String, String> newFieldKeys = new HashMap<>();
         for (ColumnMapping cm : mapping) {
             String field = cm.getField();
             if (field != null && field.startsWith("custom:")) {
@@ -1811,19 +1818,63 @@ public class ImportService {
         List<ColumnMapping> newMappings = mapping.stream()
             .filter(cm -> Boolean.TRUE.equals(cm.getCreateCustomField()))
             .filter(cm -> usedNewColumns.contains(cm.getColumn()))
-            .sorted(Comparator.comparing((ColumnMapping cm) -> slug(customLabel(cm)))
+            .toList();
+        Map<String, String> definitionKeys = newCustomFieldKeys(workspaceId, entityType, newMappings);
+        List<ColumnMapping> orderedMappings = newMappings.stream()
+            .sorted(Comparator.comparing((ColumnMapping cm) -> definitionKeys.get(cm.getColumn()))
                 .thenComparing(ColumnMapping::getColumn, String.CASE_INSENSITIVE_ORDER))
             .toList();
-        for (ColumnMapping cm : newMappings) {
-            String prior = newFieldKeys.putIfAbsent(slug(customLabel(cm)), cm.getColumn());
+        for (ColumnMapping cm : orderedMappings) {
+            columnToDef.put(cm.getColumn(), createDefinition(
+                workspaceId, entityType, cm, definitionKeys.get(cm.getColumn())));
+        }
+        return columnToDef;
+    }
+
+    private Map<String, String> newCustomFieldKeys(
+            int workspaceId, String entityType, List<ColumnMapping> mapping) {
+        Map<String, String> keysByColumn = new LinkedHashMap<>();
+        Map<String, String> columnsByKey = new HashMap<>();
+        for (ColumnMapping cm : mapping) {
+            String key = customDefinitionKey(workspaceId, entityType, cm);
+            String prior = columnsByKey.putIfAbsent(key, cm.getColumn());
             if (prior != null) {
                 throw new BadRequestException(
                     "Columns '" + prior + "' and '" + cm.getColumn()
                         + "' would create the same custom field");
             }
-            columnToDef.put(cm.getColumn(), createDefinition(workspaceId, entityType, cm));
+            keysByColumn.put(cm.getColumn(), key);
         }
-        return columnToDef;
+        return keysByColumn;
+    }
+
+    private String customDefinitionKey(int workspaceId, String entityType, ColumnMapping cm) {
+        String label = customLabel(cm);
+        String key = slug(label);
+        CustomFieldDefinition existing = customFieldDefinitionMapper.getByKey(workspaceId, entityType, key);
+        if (sameCustomDefinition(existing, cm)) {
+            return key;
+        }
+        String alternativeKey = hashedFieldKey(key, label, normalizeCustomType(cm.getCustomFieldType()));
+        CustomFieldDefinition alternative = customFieldDefinitionMapper.getByKey(workspaceId, entityType, alternativeKey);
+        if (sameCustomDefinition(alternative, cm)) {
+            return alternativeKey;
+        }
+        if (existing == null) {
+            return key;
+        }
+        if (alternative == null) {
+            return alternativeKey;
+        }
+        throw new BadRequestException(
+            "Custom field '" + label + "' conflicts with an existing field; choose a different label or map to an existing field");
+    }
+
+    private static boolean sameCustomDefinition(@Nullable CustomFieldDefinition definition, ColumnMapping cm) {
+        return definition != null
+            && !definition.isArchived()
+            && customLabel(cm).equals(definition.getLabel())
+            && normalizeCustomType(cm.getCustomFieldType()).equals(definition.getFieldType());
     }
 
     private void lockCustomFieldTemplateSetBeforeTargets(
@@ -1840,11 +1891,8 @@ public class ImportService {
             return;
         }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        List<String> definitionKeys = usedMappings.stream()
-            .map(ImportService::customLabel)
-            .map(ImportService::slug)
-            .toList();
-        Set<String> missingBeforeLock = missingDefinitionKeys(workspaceId, entityType, definitionKeys);
+        Map<String, String> definitionKeys = newCustomFieldKeys(workspaceId, entityType, usedMappings);
+        Set<String> missingBeforeLock = missingDefinitionKeys(workspaceId, entityType, List.copyOf(definitionKeys.values()));
         if (!missingBeforeLock.isEmpty()) {
             workspaceService.lockAndRequirePermissions(
                 workspaceId,
@@ -1857,7 +1905,9 @@ public class ImportService {
         if (recordCreationTemplateMapper.getSetForUpdate(workspaceId, recordType.name()) == null) {
             throw new IllegalStateException("Record creation template set could not be locked");
         }
-        if (!missingDefinitionKeys(workspaceId, entityType, definitionKeys).equals(missingBeforeLock)) {
+        Map<String, String> lockedKeys = newCustomFieldKeys(workspaceId, entityType, usedMappings);
+        if (!lockedKeys.equals(definitionKeys)
+                || !missingDefinitionKeys(workspaceId, entityType, List.copyOf(lockedKeys.values())).equals(missingBeforeLock)) {
             throw new ConflictException(
                 "Custom field definitions changed; review the import again");
         }
@@ -1882,12 +1932,14 @@ public class ImportService {
                 Set.of(permission)));
     }
 
-    private int createDefinition(int workspaceId, String entityType, ColumnMapping cm) {
+    private int createDefinition(int workspaceId, String entityType, ColumnMapping cm, String key) {
         String type = normalizeCustomType(cm.getCustomFieldType());
         String label = customLabel(cm);
-        String key = slug(label);
         CustomFieldDefinition existing = customFieldDefinitionMapper.getByKey(workspaceId, entityType, key);
-        if (existing != null) return existing.getId();
+        if (existing != null && sameCustomDefinition(existing, cm)) return existing.getId();
+        if (existing != null) {
+            throw new ConflictException("Custom field definitions changed; review the import again");
+        }
         CustomFieldDefinition def = new CustomFieldDefinition();
         def.setEntityType(entityType);
         def.setFieldKey(key);
@@ -2008,6 +2060,7 @@ public class ImportService {
             this::personCanonicalIdentities,
             identityMapper::lockCurrentPersonIdentityGroup,
             identityMapper::findCurrentPersonIdentityMatches,
+            key -> IdentityKind.EMAIL.getDatabaseValue().equals(key.kind()),
             "contact");
     }
 
@@ -2026,6 +2079,7 @@ public class ImportService {
                 row.std.get("phone")),
             identityMapper::lockCurrentCompanyIdentityGroup,
             identityMapper::findCurrentCompanyIdentityMatches,
+            key -> true,
             "company");
     }
 
@@ -2036,6 +2090,7 @@ public class ImportService {
             Function<PlanRow, List<CanonicalIdentity>> identities,
             IdentityGroupLocker locker,
             CurrentIdentityMatcher matcher,
+            Predicate<CanonicalIdentity> exclusiveIdentity,
             String entityLabel) {
         Map<PlanRow, List<CanonicalIdentity>> keysByRow = new LinkedHashMap<>();
         Set<CanonicalIdentity> keys = new TreeSet<>(Comparator
@@ -2074,6 +2129,7 @@ public class ImportService {
         for (Map.Entry<PlanRow, List<CanonicalIdentity>> entry : keysByRow.entrySet()) {
             PlanRow row = entry.getKey();
             Set<Integer> currentRecordIds = entry.getValue().stream()
+                .filter(exclusiveIdentity)
                 .flatMap(key -> matchesByKey.getOrDefault(key, Set.of()).stream())
                 .collect(java.util.stream.Collectors.toCollection(TreeSet::new));
             if (CREATE.equals(row.status) && !currentRecordIds.isEmpty()) {
@@ -2095,9 +2151,9 @@ public class ImportService {
             }
             if (MATCH.equals(row.status)) {
                 entry.getValue().stream()
-                    .filter(key -> matchesByKey
+                    .filter(key -> !matchesByKey
                         .getOrDefault(key, Set.of())
-                        .isEmpty())
+                        .contains(row.matchedId))
                     .forEach(row.missingCanonicalIdentities::add);
             }
         }
@@ -2151,15 +2207,13 @@ public class ImportService {
     private void requireCustomFieldPermission(String entityType, int workspaceId, List<ColumnMapping> mapping,
             List<PlanRow> plan, String action) {
         Set<String> usedNewColumns = usedNewCustomFieldColumns(plan, action);
-        for (ColumnMapping cm : mapping) {
-            if (!Boolean.TRUE.equals(cm.getCreateCustomField()) || !usedNewColumns.contains(cm.getColumn())) {
-                continue;
-            }
-            String key = slug(customLabel(cm));
-            if (customFieldDefinitionMapper.getByKey(workspaceId, entityType, key) == null) {
-                workspaceService.requirePermission(Permission.CUSTOM_FIELD_MANAGE);
-                return;
-            }
+        List<ColumnMapping> usedMappings = mapping.stream()
+            .filter(cm -> Boolean.TRUE.equals(cm.getCreateCustomField()))
+            .filter(cm -> usedNewColumns.contains(cm.getColumn()))
+            .toList();
+        Map<String, String> keys = newCustomFieldKeys(workspaceId, entityType, usedMappings);
+        if (!missingDefinitionKeys(workspaceId, entityType, List.copyOf(keys.values())).isEmpty()) {
+            workspaceService.requirePermission(Permission.CUSTOM_FIELD_MANAGE);
         }
     }
 
@@ -2759,6 +2813,7 @@ public class ImportService {
 
     private List<String> personIdentityKeys(PlanRow row) {
         return personCanonicalIdentities(row).stream()
+            .filter(key -> IdentityKind.EMAIL.getDatabaseValue().equals(key.kind()))
             .map(CanonicalIdentity::dedupeKey)
             .toList();
     }
@@ -2905,17 +2960,18 @@ public class ImportService {
     }
 
     private static String normalizeCustomType(String type) {
-        String t = type == null ? "text" : type.trim().toLowerCase();
+        String t = type == null ? "text" : type.trim().toLowerCase(Locale.ROOT);
         return AUTO_CUSTOM_TYPES.contains(t) ? t : "text";
     }
 
     private static String customLabel(ColumnMapping cm) {
         String label = cm.getCustomFieldLabel();
-        return (label == null || label.isBlank()) ? cm.getColumn() : label.trim();
+        return ((label == null || label.isBlank()) ? cm.getColumn() : label).trim();
     }
 
     private static String slug(String label) {
-        String collapsed = label.trim().toLowerCase().replaceAll("[^a-z0-9]+", "_");
+        String trimmed = label.trim();
+        String collapsed = trimmed.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", "_");
         int start = 0;
         int end = collapsed.length();
         while (start < end && collapsed.charAt(start) == '_') {
@@ -2925,7 +2981,22 @@ public class ImportService {
             end--;
         }
         String s = collapsed.substring(start, end);
-        if (s.isEmpty()) s = "field";
-        return s.length() > 64 ? s.substring(0, 64) : s;
+        if (s.isEmpty() || s.length() > 64 || trimmed.chars().anyMatch(character -> character > 127)) {
+            return hashedFieldKey(s.isEmpty() ? "field" : s, trimmed, null);
+        }
+        return s;
+    }
+
+    private static String hashedFieldKey(String prefix, String label, @Nullable String type) {
+        MessageDigest digest;
+        try {
+            digest = MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable", exception);
+        }
+        updateReviewDigest(digest, label);
+        updateReviewDigest(digest, type);
+        String suffix = HexFormat.of().formatHex(digest.digest()).substring(0, 32);
+        return prefix.substring(0, Math.min(prefix.length(), 31)) + "_" + suffix;
     }
 }
