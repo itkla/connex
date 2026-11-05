@@ -11,6 +11,20 @@ function savesContent(response: Response, content: string): boolean {
     return typeof body === "object" && body !== null && "content" in body && body.content === content;
 }
 
+function nullableLinkId(value: unknown): number | null {
+    if (value == null) return null;
+    if (typeof value !== "number" || !Number.isInteger(value)) throw new Error("Invalid note link id");
+    return value;
+}
+
+function noteLinks(value: unknown) {
+    if (typeof value !== "object" || value === null) throw new Error("Invalid note response");
+    return {
+        person: nullableLinkId("person" in value ? value.person : undefined),
+        deal: nullableLinkId("deal" in value ? value.deal : undefined),
+    };
+}
+
 async function selectMention(page: Page, label: string) {
     const editor = page.locator('.tiptap[contenteditable="true"]');
     await editor.fill("Owner: ");
@@ -86,7 +100,8 @@ test("full-page autosave preserves links and reconciles its chip with the respon
         const response = await route.fetch();
         const body: unknown = await response.json();
         if (typeof body !== "object" || body === null) throw new Error("Invalid note response");
-        await route.fulfill({ response, json: { ...body, person: null, deal: null } });
+        const withoutLinks = Object.fromEntries(Object.entries(body).filter(([key]) => key !== "person" && key !== "deal"));
+        await route.fulfill({ response, json: withoutLinks });
     });
     await page.locator('.tiptap[contenteditable="true"]').fill("Response reconciliation");
     await expect(page.getByRole("link", { name: fixture.contacts.activity.name, exact: true })).toHaveCount(0);
@@ -107,11 +122,11 @@ test("HTTP updates distinguish omitted links from explicit null", async ({ reque
     expect(await omitted.json()).toMatchObject({ person: fixture.contacts.activity.id, deal: fixture.deals.primary.id });
     const clearPerson = await request.put(`/api/notes/${note.id}`, { headers, data: { content: "Clear contact", person: null } });
     expect(clearPerson.status()).toBe(200);
-    expect(await clearPerson.json()).toMatchObject({ person: null, deal: fixture.deals.primary.id });
+    expect(noteLinks(await clearPerson.json())).toEqual({ person: null, deal: fixture.deals.primary.id });
     const clearDeal = await request.put(`/api/notes/${note.id}`, { headers, data: { content: "Clear deal", deal: null } });
     expect(clearDeal.status()).toBe(200);
-    expect(await clearDeal.json()).toMatchObject({ person: null, deal: null });
-    expect(await (await request.get(`/api/notes/${note.id}`)).json()).toMatchObject({ person: null, deal: null });
+    expect(noteLinks(await clearDeal.json())).toEqual({ person: null, deal: null });
+    expect(noteLinks(await (await request.get(`/api/notes/${note.id}`)).json())).toEqual({ person: null, deal: null });
 });
 
 test("metadata edits preserve body bytes and the dialog can explicitly remove links", async ({ page, request }, testInfo) => {
@@ -143,7 +158,9 @@ test("metadata edits preserve body bytes and the dialog can explicitly remove li
     await page.getByRole("button", { name: "Save", exact: true }).click();
     expect((await dialogSave).request().postDataJSON()).toMatchObject({ person: null, deal: null, content });
     const persisted = await request.get(`/api/notes/${note.id}`);
-    expect(await persisted.json()).toMatchObject({ person: null, deal: null, content });
+    const saved: unknown = await persisted.json();
+    expect(saved).toMatchObject({ content });
+    expect(noteLinks(saved)).toEqual({ person: null, deal: null });
 });
 
 test("a saved member mention creates a note.mention notification", async ({ browser }) => {

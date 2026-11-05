@@ -80,11 +80,15 @@ counted by this sentinel test. No alternate port, proxy deployment, or productio
 ## Note link updates
 
 `PUT /api/notes/{id}` distinguishes an omitted `person` or `deal` property from explicit
-JSON `null`. Omission preserves that link; `null` removes it; an ID replaces it after the
-existing workspace and record-visibility checks. Each link is handled independently.
-The returned note includes the resulting links. The full-page editor sends its held links
-and reconciles its header with that response; the dialog removes a link when its selector
-is emptied and sends explicit `null`.
+JSON `null`. Omission preserves that link; `null` removes it; a newly assigned ID passes the
+existing workspace and record-visibility checks. An unchanged stored link is retained without
+rechecking the linked record's visibility, so archiving a contact does not prevent edits to
+its readable notes. Each link is handled independently. DTO deserialization uses the no-arg
+constructor and link setters to track presence; the internal flags are never wire properties.
+The returned note includes the resulting non-null links. The full-page editor sends its held
+links and reconciles its header and save snapshot with save responses and refreshed server
+props. A response from a save started before a refresh cannot restore the older links. The
+dialog removes a link when its selector is emptied and sends explicit `null`.
 
 Standard note audit diffs retain content, title and visibility (visibility alone for private
 notes), not the person/deal relationship fields. Inline references in audited content do not

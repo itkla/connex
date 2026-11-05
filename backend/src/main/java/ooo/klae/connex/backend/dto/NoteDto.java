@@ -10,7 +10,6 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonSetter;
 
-import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
@@ -28,7 +27,6 @@ import ooo.klae.connex.backend.beans.User;
  */
 @Data
 @NoArgsConstructor
-@AllArgsConstructor
 public class NoteDto {
 
     private Integer id;

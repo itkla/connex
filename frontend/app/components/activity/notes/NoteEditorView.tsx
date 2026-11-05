@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
@@ -100,7 +100,19 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
     const [originWorkspaceId] = useState(activeWorkspaceId);
     const [originNavigationVersion] = useState(renderedWorkspaceNavigationVersion);
     const [noteId, setNoteId] = useState<number | null>(note?.id ?? null);
-    const [links, setLinks] = useState({ person: note?.person ?? null, deal: note?.deal ?? null });
+    const [linkState, setLinkState] = useState({
+        source: note,
+        revision: 0,
+        links: { person: note?.person ?? null, deal: note?.deal ?? null },
+    });
+    if (linkState.source !== note) {
+        setLinkState({
+            source: note,
+            revision: linkState.revision + 1,
+            links: { person: note?.person ?? null, deal: note?.deal ?? null },
+        });
+    }
+    const { links, revision: linkRevision } = linkState;
     const editorDraftScope = noteId === null ? "new" : `note:${noteId}`;
     const editorDraftParts = useMemo<DraftKeyParts>(() => ({
         userId: currentUserId,
@@ -128,11 +140,11 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
     const savingRef = useRef(false);
     const mountedRef = useRef(true);
     const saveRef = useRef<() => void>(() => {});
-    const stateRef = useRef({ noteId, title, content, visibility, ...links });
+    const stateRef = useRef({ noteId, title, content, visibility, ...links, linkRevision });
 
-    useEffect(() => {
-        stateRef.current = { noteId, title, content, visibility, ...links };
-    }, [noteId, title, content, visibility, links]);
+    useLayoutEffect(() => {
+        stateRef.current = { noteId, title, content, visibility, ...links, linkRevision };
+    }, [noteId, title, content, visibility, links, linkRevision]);
 
     useEffect(() => {
         mountedRef.current = true;
@@ -228,8 +240,12 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
         request
             .then((saved) => {
                 const savedLinks = { person: saved.person ?? null, deal: saved.deal ?? null };
-                stateRef.current = { ...stateRef.current, ...savedLinks };
-                setLinks(savedLinks);
+                if (stateRef.current.linkRevision === snapshot.linkRevision) {
+                    stateRef.current = { ...stateRef.current, ...savedLinks };
+                    setLinkState((current) => current.revision === snapshot.linkRevision
+                        ? { ...current, links: savedLinks }
+                        : current);
+                }
                 if (snapshot.noteId == null && saved?.id) {
                     rekeyEditorDraft(`note:${saved.id}`);
                     stateRef.current = { ...stateRef.current, noteId: saved.id };
@@ -287,8 +303,12 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
             }, workspacePinnedRequest(originWorkspaceId));
             if (!saved?.id) throw new Error("missing-note-id");
             const savedLinks = { person: saved.person ?? null, deal: saved.deal ?? null };
-            stateRef.current = { ...stateRef.current, ...savedLinks };
-            setLinks(savedLinks);
+            if (stateRef.current.linkRevision === snapshot.linkRevision) {
+                stateRef.current = { ...stateRef.current, ...savedLinks };
+                setLinkState((current) => current.revision === snapshot.linkRevision
+                    ? { ...current, links: savedLinks }
+                    : current);
+            }
             rekeyEditorDraft(`note:${saved.id}`);
             stateRef.current = { ...stateRef.current, noteId: saved.id };
             setNoteId(saved.id);

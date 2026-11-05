@@ -7,6 +7,7 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Predicate;
 
@@ -208,7 +209,7 @@ public class NoteService {
         note.setAuthor(actor);
         note.setVisibility(normalizeVisibility(note.getVisibility(),
             note.getPerson() == null && note.getDeal() == null ? PRIVATE : "workspace"));
-        requireLinkedRecordsVisible(workspaceId, note, personWorkspaceIdsJson);
+        requireLinkedRecordsVisible(workspaceId, note, null, personWorkspaceIdsJson);
         note.setCreatedAt(null);
         admission.beforeMutation();
         noteMapper.insert(note);
@@ -244,7 +245,7 @@ public class NoteService {
         note.setVisibility(normalizeVisibility(note.getVisibility(), before.getVisibility()));
         if (!note.isPersonSpecified()) note.setPerson(before.getPerson());
         if (!note.isDealSpecified()) note.setDeal(before.getDeal());
-        requireLinkedRecordsVisible(workspaceId, note, personWorkspaceIdsJson);
+        requireLinkedRecordsVisible(workspaceId, note, before, personWorkspaceIdsJson);
         if (noteMapper.update(note) != 1) {
             throw new ResourceNotFoundException("Note not found with id: " + id);
         }
@@ -384,12 +385,16 @@ public class NoteService {
         return PRIVATE.equals(note.getVisibility()) ? "" : note.getContent();
     }
 
-    private void requireLinkedRecordsVisible(int workspaceId, Note note, String personWorkspaceIdsJson) {
+    private void requireLinkedRecordsVisible(int workspaceId, Note note, Note before, String personWorkspaceIdsJson) {
+        Integer previousPersonId = before != null && before.getPerson() != null ? before.getPerson().getId() : null;
+        Integer previousDealId = before != null && before.getDeal() != null ? before.getDeal().getId() : null;
         if (note.getPerson() != null && note.getPerson().getId() > 0
+                && !Objects.equals(note.getPerson().getId(), previousPersonId)
                 && !personMapper.exists(workspaceId, personWorkspaceIdsJson, note.getPerson().getId())) {
             throw new ResourceNotFoundException("Contact not found");
         }
         if (note.getDeal() != null && note.getDeal().getId() > 0
+                && !Objects.equals(note.getDeal().getId(), previousDealId)
                 && !dealMapper.exists(workspaceId, note.getDeal().getId())) {
             throw new ResourceNotFoundException("Deal not found");
         }
