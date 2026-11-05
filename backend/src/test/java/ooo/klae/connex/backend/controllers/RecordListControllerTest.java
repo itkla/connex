@@ -743,19 +743,19 @@ class RecordListControllerTest {
         DealRevenueSeriesDto series = new DealRevenueSeriesDto(List.of(), List.of());
         List<DealStageDistributionDto> distribution = List.of(
             new DealStageDistributionDto(1, 2, 3, 4.0, 5, 6.0));
-        when(dealService.getRevenueTimeseries("JPY", "Pacific/Honolulu", allTeam)).thenReturn(series);
+        when(dealService.getRevenueTimeseries("JPY", "Pacific/Honolulu", allTeam, false)).thenReturn(series);
         when(dealService.getStageDistribution("JPY", allTeam)).thenReturn(distribution);
 
         assertSame(series, controller.getRevenueTimeseries(
-            "JPY", "Mars/Olympus", "25:00", null, null));
+            "JPY", "Mars/Olympus", "25:00", null, null, false));
         assertSame(distribution, controller.getStageDistribution("JPY", null, null));
 
-        controller.getRevenueTimeseries("  ", null, null, null, null);
+        controller.getRevenueTimeseries("  ", null, null, null, null, true);
         controller.getStageDistribution("", null, null);
 
-        verify(dealService).getRevenueTimeseries("JPY", "Pacific/Honolulu", allTeam);
+        verify(dealService).getRevenueTimeseries("JPY", "Pacific/Honolulu", allTeam, false);
         verify(dealService).getStageDistribution("JPY", allTeam);
-        verify(dealService).getRevenueTimeseries(null, "Pacific/Honolulu", allTeam);
+        verify(dealService).getRevenueTimeseries(null, "Pacific/Honolulu", allTeam, true);
         verify(dealService).getStageDistribution(null, allTeam);
     }
 

@@ -45,7 +45,8 @@ class DealMapperXmlTest {
         "dealPipelineValueWindow",
         "revenueClosedByPeriods",
         "revenueScheduledClosedByPeriods",
-        "revenueProjectedByPeriods"
+        "revenueProjectedByPeriods",
+        "revenueProjectedByMonth"
     );
 
     @Test
