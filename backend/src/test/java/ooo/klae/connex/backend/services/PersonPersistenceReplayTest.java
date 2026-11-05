@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -142,7 +143,7 @@ class PersonPersistenceReplayTest extends AbstractServiceTest {
         assertTrue(afterFirst.tags() >= 2);
         assertTrue(afterFirst.relationships() >= 1);
         assertTrue(afterFirst.notifications() >= 1);
-        assertEquals(2, afterFirst.relationshipEvidenceEvents());
+        assertEquals(1, afterFirst.relationshipEvidenceEvents());
         assertEquals(afterFirst, afterSecond);
         assertEquals(afterFirst, replayArtifacts(first.getId()));
     }
@@ -190,6 +191,11 @@ class PersonPersistenceReplayTest extends AbstractServiceTest {
                 "SELECT COUNT(*) FROM task WHERE workspace_id = ? AND person_id = ?",
                 workspace.getId(),
                 personId),
+            jdbcTemplate.queryForList(
+                "SELECT id, completed, completed_at, status FROM task "
+                    + "WHERE workspace_id = ? AND person_id = ? ORDER BY id",
+                workspace.getId(),
+                personId),
             tags,
             relationships,
             rowCount(
@@ -223,6 +229,7 @@ class PersonPersistenceReplayTest extends AbstractServiceTest {
         int records,
         int activities,
         int tasks,
+        List<Map<String, Object>> taskStates,
         int tags,
         int relationships,
         int notifications,

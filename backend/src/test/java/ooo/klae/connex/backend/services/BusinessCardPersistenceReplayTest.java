@@ -283,7 +283,7 @@ class BusinessCardPersistenceReplayTest extends AbstractServiceTest {
         assertEquals(1, afterFirst.artifacts().tasks());
         assertTrue(afterFirst.artifacts().tags() >= 2);
         assertTrue(afterFirst.artifacts().notifications() >= 1);
-        assertEquals(2, afterFirst.artifacts().relationshipEvidenceEvents());
+        assertEquals(1, afterFirst.artifacts().relationshipEvidenceEvents());
         assertEquals(afterFirst, afterSecond);
         assertEquals(afterFirst, replayState(personId, idempotencyKey));
         assertEquals(
@@ -394,7 +394,7 @@ class BusinessCardPersistenceReplayTest extends AbstractServiceTest {
                 workspace.getId(),
                 personId),
             jdbcTemplate.queryForList(
-                "SELECT id, workspace_id, description, completed, status, position, due_date, "
+                "SELECT id, workspace_id, description, completed, completed_at, status, position, due_date, "
                     + "assigned_to_id, person_id, deal_id, created_at, updated_at FROM task "
                     + "WHERE workspace_id = ? AND person_id = ? ORDER BY id",
                 workspace.getId(),

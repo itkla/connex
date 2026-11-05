@@ -42,6 +42,24 @@ class ConnectionServiceTest extends AbstractServiceTest {
     @Autowired private ShareMapper shareMapper;
     @MockitoBean private OrganizationWorkspaceScopeControlAccess workspaceScopeControlAccess;
 
+    @Test
+    void introRequestTaskDoesNotMakeAStrangerDirectlyKnown() {
+        Person stranger = newPerson(newCompany());
+        var request = new ooo.klae.connex.backend.beans.Task();
+        request.setWorkspaceId(workspace.getId());
+        request.setDescription("Ask for an introduction");
+        request.setAssignedTo(currentUser);
+        request.setPerson(stranger);
+        request.setStatus("todo");
+        taskMapper.insert(request);
+
+        assertFalse(connectionService.findIntroPath(stranger.getId()).isDirectlyKnown());
+        taskMapper.complete(workspace.getId(), request.getId(), currentUser.getId(), 0);
+        assertTrue(connectionService.findIntroPath(stranger.getId()).isDirectlyKnown());
+        taskMapper.moveTask(workspace.getId(), request.getId(), "todo", false, 0);
+        assertFalse(connectionService.findIntroPath(stranger.getId()).isDirectlyKnown());
+    }
+
     @BeforeEach
     void useTransactionalOrganizationWorkspaceScope() {
         OrganizationWorkspaceScopeControlOperations scopeOperations =

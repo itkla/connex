@@ -46,6 +46,8 @@ type Props = {
  * `[Label](type:id)` reference tokens so the backend ReferenceService keeps
  * resolving @/# mentions unchanged. Supported file embeds are attachment
  * references (`[Label](file:id)`), not binary uploads into the body.
+ * Controlled value echoes retain the current document and selection; only an
+ * external value replacement reloads the Markdown document.
  *
  * Block reorder for assistive tech uses the toolbar Move up/down controls; the
  * drag grip is decorative (`aria-hidden`) and is not the accessible path.
@@ -63,6 +65,7 @@ export default function RichNoteEditor({
     const t = useTranslations("ActivityNotesEditor");
     const onChangeRef = useRef(onChange);
     const loadingRef = useRef(false);
+    const syncedValueRef = useRef<{ editor: Editor; value: string } | null>(null);
     const [filePickerOpen, setFilePickerOpen] = useState(false);
     const lastFileOpenRequest = useRef(0);
 
@@ -107,22 +110,30 @@ export default function RichNoteEditor({
         },
         onUpdate: ({ editor: instance }) => {
             if (loadingRef.current) return;
-            onChangeRef.current(readMarkdown(instance));
+            const markdown = readMarkdown(instance);
+            syncedValueRef.current = { editor: instance, value: markdown };
+            onChangeRef.current(markdown);
         },
     });
 
     useEffect(() => {
         if (!editor) return;
-        if (readMarkdown(editor) === (value ?? "")) return;
+        const nextValue = value ?? "";
+        const synced = syncedValueRef.current;
+        if (synced?.editor === editor && synced.value === nextValue) return;
+        syncedValueRef.current = { editor, value: nextValue };
         loadingRef.current = true;
-        const { text, mentions } = encodeMentions(value ?? "");
-        editor.commands.setContent(text);
-        restoreMentions(editor, mentions);
-        loadingRef.current = false;
+        try {
+            const { text, mentions } = encodeMentions(nextValue);
+            editor.commands.setContent(text, { emitUpdate: false });
+            restoreMentions(editor, mentions);
+        } finally {
+            loadingRef.current = false;
+        }
     }, [editor, value]);
 
     useEffect(() => {
-        editor?.setEditable(editable);
+        editor?.setEditable(editable, false);
     }, [editor, editable]);
 
     useEffect(() => {
