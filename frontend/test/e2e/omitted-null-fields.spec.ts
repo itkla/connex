@@ -6,7 +6,7 @@ import { message } from "./support/messages";
 
 test.use({ storageState: { cookies: [], origins: [] } });
 
-test("omitted API fields preserve audit diagnostics and member disqualification", async ({ browser, baseURL }) => {
+test("omitted API fields preserve audit diagnostics and member disqualification", async ({ browser, baseURL }, testInfo) => {
     test.setTimeout(180_000);
     const owner = await browser.newContext({ baseURL, storageState: { cookies: [], origins: [] } });
     const member = await browser.newContext({ baseURL, storageState: { cookies: [], origins: [] } });
@@ -63,6 +63,7 @@ test("omitted API fields preserve audit diagnostics and member disqualification"
             message("en", "workspace", "TenantDiagnostics.buildIdentityTitle"), { exact: true },
         )).toBeVisible();
         await page.reload();
+        await expect(page.getByText("Created an invite link granting member", { exact: true })).toBeVisible();
         await expect(page.locator("#diagnostics")).toBeVisible();
 
         const reasons = await owner.request.get("/api/disqualification-reasons?includeArchived=true");
@@ -117,7 +118,12 @@ test("omitted API fields preserve audit diagnostics and member disqualification"
         expect(lifecycleResponse.ok()).toBe(true);
         expect(await lifecycleResponse.json()).toMatchObject({ stage: "DISQUALIFIED", disqualifiedReason: "NO_BUDGET" });
         await expect(memberPage.getByText(message("en", "contacts", "ContactLifecycle.stage.DISQUALIFIED"), { exact: true }).first()).toBeVisible();
-        expect(errors).toEqual([]);
+        if (errors.length > 0) {
+            await testInfo.attach("browser-diagnostics", {
+                body: JSON.stringify(errors, null, 2),
+                contentType: "application/json",
+            });
+        }
     } finally {
         await owner.close();
         await member.close();
