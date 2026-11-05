@@ -197,6 +197,14 @@ case registers two isolated accounts, completes the owner's passkey step-up, add
 the second workspace member, then verifies a real `note.mention` notification after saving a
 member mention. The ordinary notifications spec still does not mark a real notification as read.
 
+`recentRecordsHydration.test.tsx` pauses a consumer's Suspense hydration while the real recents
+provider loads stored history or records a view. Consumers must hydrate from the stable empty
+server snapshot, then display the scoped cache without a recoverable hydration error. Scope-switch
+cases retain the previous `record` callback and reject its writes; `staleAccountStorageWriters.test.tsx`
+keeps account revocation synchronous and checks failed-logout recovery. The browser note cases keep
+the contact-page entry point and their zero-page-error assertion. In the note edit drawer, Tab leaves
+a cleared selector; Escape requests dismissal and correctly invokes the unsaved-changes guard.
+
 The document-acceptance spec creates frozen documents both without and with a real deal line item,
 then sends their deliveries with the authenticated request context. CI configures the backend's
 instance SMTP transport on loopback port 2525, where the spec's dependency-free SMTP capture
