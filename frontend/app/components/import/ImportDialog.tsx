@@ -26,6 +26,7 @@ import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import {
     columnSamples,
+    CsvEncodingError,
     CREATE_CUSTOM_FIELD,
     IGNORE_COLUMN,
     inferColumnType,
@@ -216,8 +217,8 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
             setParsed(result);
             setColumns(initial);
             setStep('map');
-        } catch {
-            setParseError(t('errorParse'));
+        } catch (error) {
+            setParseError(t(error instanceof CsvEncodingError ? 'errorEncoding' : 'errorParse'));
         } finally {
             setParsing(false);
         }
@@ -421,6 +422,11 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
                     <DialogTitle>{t(`title.${entity}`)}</DialogTitle>
                     <DialogDescription className="sr-only">{t('description')}</DialogDescription>
                     <StepRail step={step} />
+                    {parsed && (step === 'map' || step === 'review') && (
+                        <p className="mt-2 text-xs text-muted-foreground">
+                            {t('detectedEncoding', { encoding: t(`encoding.${parsed.encoding}`) })}
+                        </p>
+                    )}
                 </DialogHeader>
 
                 <div className="max-h-[60vh] overflow-y-auto px-6 py-5">

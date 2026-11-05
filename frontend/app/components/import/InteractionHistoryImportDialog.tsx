@@ -20,7 +20,7 @@ import {
     previewInteractionHistoryImport,
     search,
 } from "@/app/lib/api";
-import { columnSamples, parseCsv, type ParsedCsv } from "@/app/lib/import";
+import { columnSamples, CsvEncodingError, parseCsv, type ParsedCsv } from "@/app/lib/import";
 import {
     buildHistoryImportMapping,
     historyImportFields,
@@ -124,6 +124,7 @@ export default function InteractionHistoryImportDialog({
     onOpenChange: (open: boolean) => void;
 }) {
     const t = useTranslations("importExport.history");
+    const tImport = useTranslations("importExport");
     const showApiError = useApiErrorToast();
     const reportFailure = (error: unknown, fallback: string) => {
         if (isWorkspaceUnavailableError(error)) showApiError(error);
@@ -251,9 +252,9 @@ export default function InteractionHistoryImportDialog({
             setParsed(csv);
             initializeTargets(csv, kind);
             setStep("map");
-        } catch {
+        } catch (error) {
             if (operationGenerationRef.current === generation) {
-                setParseError(t("errors.parse"));
+                setParseError(error instanceof CsvEncodingError ? tImport("errorEncoding") : t("errors.parse"));
             }
         } finally {
             if (operationGenerationRef.current === generation) {
@@ -385,6 +386,11 @@ export default function InteractionHistoryImportDialog({
                     <ResponsiveDialogTitle>{t("title")}</ResponsiveDialogTitle>
                     <ResponsiveDialogDescription>{t("description")}</ResponsiveDialogDescription>
                     <StepRail step={step} />
+                    {parsed && (step === "map" || step === "review") && (
+                        <p className="mt-2 text-xs text-muted-foreground">
+                            {tImport("detectedEncoding", { encoding: tImport(`encoding.${parsed.encoding}`) })}
+                        </p>
+                    )}
                 </ResponsiveDialogHeader>
 
                 <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
