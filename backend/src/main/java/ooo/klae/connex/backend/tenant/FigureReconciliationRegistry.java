@@ -59,6 +59,8 @@ public final class FigureReconciliationRegistry {
          * branches and {@code d.value} for unbounded open branches under member scope.
          */
         HOME_PIPELINE_CHART,
+        /** Realized won revenue in close-date calendar buckets across chart surfaces. */
+        REALIZED_REVENUE_CHARTS,
         /**
          * Evidence: the {@code won_revenue} branch of {@code ReportMapper#aggregateDeals} sums
          * {@code d.actual_value}, requires won rows and half-open {@code closed_at} UTC bounds,
@@ -151,6 +153,8 @@ public final class FigureReconciliationRegistry {
          * half-open {@code d.closed_at} report window.
          */
         CLOSED_AT_UTC_HALF_OPEN,
+        /** Evidence: won revenue uses half-open UTC close-date calendar bucket boundaries. */
+        CLOSED_AT_CALENDAR_BUCKETS,
         /**
          * Evidence: the statement contains {@code query.startDate} and
          * {@code query.endDateExclusive} for a half-open {@code d.expected_close_date} window.
@@ -276,6 +280,20 @@ public final class FigureReconciliationRegistry {
             "The home chart deliberately mixes a rolling or half-open closed-at won cohort using "
                 + "actual value with an unbounded open cohort using canonical value. Its current-owner "
                 + "member scope is presentational, and unlike reports it traverses no shares.");
+        declare(entries, Figure.REALIZED_REVENUE_CHARTS,
+            List.of(
+                evidence("DealMapper", "revenueClosedByBoundaries"),
+                evidence("DealMapper", "revenueClosedByPeriods")),
+            ValueSource.ACTUAL_DEAL_VALUE,
+            ArchivePosture.NO_ARCHIVE_PREDICATE,
+            RestrictionPosture.NO_PERSON_RESTRICTION_PREDICATE,
+            SharingPosture.NO_SHARE_TRAVERSAL,
+            PeriodBasis.CLOSED_AT_CALENDAR_BUCKETS,
+            OwnerBasis.MEMBER_SCOPE_ON_CURRENT_OWNER,
+            "Analytics, dashboard and deal revenue charts sum realized won value in reporting-timezone "
+                + "calendar buckets bounded by canonical closed-at UTC instants. Expected close dates "
+                + "never move realized revenue; projected series retain their expected-date basis. "
+                + "The charts traverse no shares and apply the selected current-owner scope.");
         declare(entries, Figure.REPORT_WON_REVENUE,
             List.of(evidence("ReportMapper", "aggregateDeals")),
             ValueSource.ACTUAL_DEAL_VALUE,

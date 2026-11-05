@@ -3,6 +3,9 @@ package ooo.klae.connex.backend.services;
 import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -257,9 +260,12 @@ public class ExportService {
         }
 
         StringBuilder sb = new StringBuilder();
-        writeRow(sb, headers(
+        List<String> columnHeaders = headers(
             List.of("id", "name", "value", "currency", "company", "pipeline", "stage", "expectedCloseDate", "status"),
-            defs));
+            defs);
+        columnHeaders.add("closedAt");
+        columnHeaders.add("createdAt");
+        writeRow(sb, columnHeaders);
         for (Deal d : deals) {
             List<String> row = new ArrayList<>();
             row.add(Integer.toString(d.getId()));
@@ -273,9 +279,17 @@ public class ExportService {
             row.add(dealStatus(d.getWon()));
             appendCustom(row, defs, custom.get(d.getId()));
             row.add(joinTags(tags.get(d.getId())));
+            row.add(exportInstant(d.getClosedAt()));
+            row.add(exportInstant(d.getCreatedAt()));
             writeRow(sb, row);
         }
         return sb.toString();
+    }
+
+    private static String exportInstant(String value) {
+        return value == null || value.isBlank() ? null
+            : LocalDateTime.parse(value, DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm:ss"))
+                .toInstant(ZoneOffset.UTC).toString();
     }
 
     private List<CustomFieldDefinition> activeDefinitions(int workspaceId, String entityType) {

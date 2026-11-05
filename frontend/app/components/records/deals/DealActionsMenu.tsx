@@ -68,6 +68,7 @@ const EMPTY_USERS: User[] = [];
  */
 export default function DealActionsMenu({
     deal,
+    timezone,
     pipelines,
     stagesByPipeline,
     currentUserId,
@@ -77,6 +78,7 @@ export default function DealActionsMenu({
     collaborators = EMPTY_USERS,
 }: {
     deal: Deal;
+    timezone: string;
     pipelines: Pipeline[];
     stagesByPipeline: Record<number, Stage[]>;
     currentUserId: number;
@@ -297,6 +299,7 @@ export default function DealActionsMenu({
             />
 
             <EditDealSheet
+                timezone={timezone}
                 deal={deal}
                 open={editOpen}
                 onOpenChange={setEditOpen}

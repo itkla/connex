@@ -177,6 +177,14 @@ export type DealDuplicatePreflightRequest = {
     reviewToken?: string;
 };
 
+export type DealImportDateReview = {
+    closedAt?: string | null;
+    createdAt?: string | null;
+    timezone: string;
+    usesImportTime: boolean;
+    futureClosedAt: boolean;
+};
+
 export type ImportRowAnalysis = {
     rowIndex: number;
     status: ImportRowStatus;
@@ -186,6 +194,7 @@ export type ImportRowAnalysis = {
     mergedRowCount?: number | null;
     errors?: string[] | null;
     candidates?: DuplicateCandidate[] | null;
+    dealDates?: DealImportDateReview | null;
 };
 
 export type ImportPreviewResult = {

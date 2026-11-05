@@ -321,6 +321,7 @@
         "create": "Create"
     },
     "DealsQuickEditSheet": {
+        "invalidClosedAt": "Enter a valid close time in the workspace reporting timezone.",
         "companySearchFailed": "Couldn't search companies. Try again.",
         "titleSingle": "Quick edit deal",
         "titleMulti": "Quick edit {count} deals",

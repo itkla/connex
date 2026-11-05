@@ -20,6 +20,7 @@ import {
     getContacts,
     getContactTemperatures,
     getCurrentUserResultFromCookie,
+    getMyWorkspacesFromCookie,
     getEntityCustomFieldsFromCookie,
     getContextNotifications,
     getDealById,
@@ -58,6 +59,8 @@ import {
     formatDateTime,
     parseMysqlDateTime,
 } from '@/app/lib/utils';
+import { resolveWorkspaceTimezone } from '@/app/lib/workspaceSnapshot';
+import { formatDealClosedAt } from '@/app/components/records/deals/dealDates';
 import { citationTitleKey } from '@/app/lib/dealBriefCitations';
 
 import Rise from '@/app/components/motion/Rise';
@@ -108,6 +111,8 @@ export default async function DealPage({ params }: DealPageProps) {
     if (!currentUserResult.ok) return <WorkspaceUnavailablePage />;
     const currentUser = currentUserResult.data;
     if (!currentUser) redirect('/auth/login');
+    const workspaceSnapshot = await getMyWorkspacesFromCookie(cookie);
+    const timezone = resolveWorkspaceTimezone(workspaceSnapshot, currentUser.timezone);
 
     const [
         t,
@@ -315,6 +320,7 @@ export default async function DealPage({ params }: DealPageProps) {
                     <RecordDetailSection recordKind="deal" section="actions" className="mt-4 flex flex-wrap justify-end gap-2">
                         <AskConnexRecordEntry kind="deal" />
                         <DealActionsMenu
+                            timezone={timezone}
                             mapAvailability={mapAvailability}
                             deal={deal}
                             pipelines={pipelines}
@@ -348,7 +354,7 @@ export default async function DealPage({ params }: DealPageProps) {
                                         <InfoRow label={t('company')} value={company?.name ?? '—'} />
                                         <InfoRow label={t('currency')} value={deal.currency ?? '—'} />
                                         <InfoRow label={t('expectedClose')} value={formatDate(deal.expectedCloseDate, locale)} />
-                                        <InfoRow label={t('closedAt')} value={closed ? formatDate(deal.closedAt, locale) : '—'} />
+                                        <InfoRow label={t('closedAt')} value={closed ? formatDealClosedAt(deal.closedAt, locale, timezone) : '—'} />
                                         <InfoRow label={t('created')} value={formatDate(deal.createdAt, locale)} />
                                         <InfoRow label={t('updated')} value={formatDateTime(deal.updatedAt, locale)} />
                                         <CustomFieldRows entityType="deal" entityId={deal.id} initialEntries={customFields} />
@@ -450,6 +456,7 @@ export default async function DealPage({ params }: DealPageProps) {
                                         }
                                     />
                                     <DealLifecycleProgress
+                                        timezone={timezone}
                                         stages={stages}
                                         currentStageId={deal.stage ?? null}
                                         outcome={outcome}
@@ -495,7 +502,7 @@ export default async function DealPage({ params }: DealPageProps) {
                                         />
                                         <SummaryTile
                                             label={closed ? t('closed') : t('expectedClose')}
-                                            value={closed ? formatDate(deal.closedAt, locale) : formatDate(deal.expectedCloseDate, locale)}
+                                            value={closed ? formatDealClosedAt(deal.closedAt, locale, timezone) : formatDate(deal.expectedCloseDate, locale)}
                                         />
                                     </div>
                                 </div>
