@@ -387,14 +387,15 @@ export default function CampaignDetail({
                                         }
                                     />
                                     <GlanceTile
-                                        label={t("recipientsReached")}
+                                        label={t("preparedRecipients")}
                                         value={
                                             initialEngagement
-                                                ? initialEngagement.totalRecipients.toLocaleString(locale)
+                                                ? initialEngagement.preparedRecipients.toLocaleString(locale)
                                                 : t("noValue")
                                         }
                                     />
                                 </div>
+                                <p className="mt-2 text-xs text-muted-foreground">{t("preparedRecipientsHint")}</p>
                             </div>
                         </div>
                     </TabsContent>

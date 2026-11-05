@@ -14,6 +14,11 @@ authority. Public requests without a session use UTC without fetching the backen
 Refreshing after a profile save updates the provider's zone. The profile picker filters localized
 zone names and Tokyo/UTC aliases while retaining canonical API identifiers.
 
+Commercial document money and generated-date values use the frozen `documentLocale`, including
+preview, print and recipient views. Date values still use the shared UTC parser and resolved display
+zone; the frozen locale does not freeze a timezone. Surrounding UI labels and acceptance-flow expiry
+information retain the viewer's UI locale.
+
 Calendar-only values (`yyyy-MM-dd`, including task due dates, birthdays and expected close dates)
 remain dates. `formatDate` and `formatShortDate` recognize this shape and render it on a fixed UTC
 calendar. For custom next-intl options, use `parseCalendarDateUtc` with `timeZone: 'UTC'`, or

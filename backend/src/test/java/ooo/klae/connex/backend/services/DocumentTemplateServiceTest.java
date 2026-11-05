@@ -129,11 +129,13 @@ class DocumentTemplateServiceTest extends AbstractCommittedDocumentDeliveryServi
                 {"type":"lineItems"}]}]}]}]}
             """;
         DocumentFixture fixture = monetaryDocument(body);
+        BigDecimal canonicalTotal = new BigDecimal("100000.00");
+        assertEquals(0, canonicalTotal.compareTo(fixture.document().content().totals().grandTotal()));
         DocumentDeliveryDto delivery = send(fixture, signer("signer@example.test", 1));
         String token = installToken(delivery.recipients().getFirst().id());
         var preview = acceptanceService.preview(link(token), "192.0.2.18");
-        assertEquals(0, new BigDecimal("100000").compareTo(preview.content().totals().grandTotal()));
-        assertTrue(preview.content().body().toString().contains("USD 100000"));
+        assertEquals(0, canonicalTotal.compareTo(preview.content().totals().grandTotal()));
+        assertTrue(preview.content().body().toString().contains("$100,000.00"));
 
         assertTrue(acceptanceService.accept(link(token), acceptRequest(token, "Signer"),
             "192.0.2.18", "test-agent").completed());
@@ -145,6 +147,9 @@ class DocumentTemplateServiceTest extends AbstractCommittedDocumentDeliveryServi
             fixture.deal().getId(), fixture.document().id(), delivery.id(), artifactId);
         try (var stream = stored.inputStream()) {
             JsonNode signed = objectMapper.readTree(new String(stream.readAllBytes(), StandardCharsets.UTF_8));
+            JsonNode signedTotal = signed.path("totals").path("grandTotal");
+            assertTrue(signedTotal.isNumber());
+            assertEquals(0, canonicalTotal.compareTo(signedTotal.decimalValue()));
             assertEquals(objectMapper.readTree(objectMapper.writeValueAsString(preview.content())), signed);
         }
     }

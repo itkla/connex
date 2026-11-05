@@ -2582,10 +2582,13 @@ export type CampaignSendPayload = {
     purpose?: string | null;
 };
 
-/** Per-channel delivery tally within a campaign's engagement rollup. */
+/** Prepared send recipients, dispatch evidence, and receipt-backed outcomes for one channel. */
 export type CampaignChannelStat = {
     channel: string;
-    deliveries: number;
+    preparedRecipients: number;
+    dispatched: number;
+    delivered: number;
+    deliveryReceiptsAvailable: boolean;
 };
 
 /** Delivery-outcome rollup for a single send within a campaign's engagement view. */
@@ -2593,7 +2596,7 @@ export type CampaignSendEngagement = {
     sendId: number;
     status: string;
     channel: string;
-    totalRecipients: number;
+    preparedRecipients: number;
     dispatched: number;
     delivered: number;
     bounced: number;
@@ -2616,7 +2619,7 @@ export type CampaignSendEngagement = {
  */
 export type CampaignEngagement = {
     campaignId: number;
-    totalRecipients: number;
+    preparedRecipients: number;
     dispatched: number;
     delivered: number;
     bounced: number;
@@ -2652,6 +2655,8 @@ export type CampaignRecipient = {
     reasonCode: CampaignDeliveryFailureReason | null;
     createdAt?: string;
     updatedAt?: string;
+    messageName?: string;
+    sendNumber?: number;
 };
 
 export type CampaignDeliveryFailureReason =
@@ -2679,6 +2684,7 @@ export type CampaignRecipientsPageParams = PageParams & {
     sendId?: number;
     status?: string[];
     event?: string;
+    submitted?: boolean;
 };
 
 /**

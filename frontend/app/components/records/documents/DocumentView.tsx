@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, type CSSProperties, type ReactNode } from 'react';
-import { useTimeZone, useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useTranslations } from 'next-intl';
 
 import { formatCurrency, formatUtcDateTime } from '@/app/lib/utils';
 import type {
@@ -23,6 +23,7 @@ const TYPE_KEY: Record<DocumentType, string> = {
 type Props = {
     content: DocumentContent;
     type: DocumentType;
+    documentLocale: string;
     title?: string;
     status?: DocumentStatus;
     version?: number;
@@ -34,13 +35,13 @@ type Props = {
  * template used the block builder, expanding the {@code lineItems} placeholder into the frozen table;
  * otherwise it falls back to the legacy intro/terms/footer sections. Presentational only — it renders
  * the paper body, not page or print chrome, and never computes money (totals come pre-computed).
+ * Money and generated dates use the frozen document locale independently of the viewer's UI locale.
  */
-export default function DocumentView({ content, type, title, status, version, generatedAt }: Props) {
+export default function DocumentView({ content, type, documentLocale, title, status, version, generatedAt }: Props) {
     const timeZone = useTimeZone();
     const t = useTranslations('DealsDocuments');
     const tp = useTranslations('DealsDocuments.print');
-    const locale = useLocale();
-    const money = (value: number) => formatCurrency(value, content.deal.currency, locale);
+    const money = (value: number) => formatCurrency(value, content.deal.currency, documentLocale);
     const watermark = status === 'superseded'
         ? tp('supersededWatermark')
         : status != null && status !== 'final' ? tp('draftWatermark') : null;
@@ -158,7 +159,7 @@ export default function DocumentView({ content, type, title, status, version, ge
                         {generatedAt && (
                             <div>
                                 <span className="text-muted-foreground">{tp('generatedOn')} </span>
-                                <span className="font-medium text-foreground">{formatUtcDateTime(generatedAt, locale, undefined, timeZone)}</span>
+                                <span className="font-medium text-foreground">{formatUtcDateTime(generatedAt, documentLocale, undefined, timeZone)}</span>
                             </div>
                         )}
                     </div>

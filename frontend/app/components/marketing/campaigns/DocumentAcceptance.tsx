@@ -189,6 +189,7 @@ export default function DocumentAcceptance({
                     <DocumentView
                         content={preview.content}
                         type={preview.documentType}
+                        documentLocale={preview.documentLocale}
                         title={documentTitle}
                         status="final"
                         version={preview.documentVersion}

@@ -23,6 +23,7 @@ public interface CampaignDeliveryMapper {
      * @param eventType a lifecycle event the delivery must carry, or null
      * @param limit the page size
      * @param offset the page offset
+     * @param submitted whether to restrict to confirmed submissions, regardless of current status
      * @return the page rows, ordered by delivery id
      */
     List<CampaignRecipientRow> listRecipients(
@@ -32,7 +33,8 @@ public interface CampaignDeliveryMapper {
             @Param("statuses") List<String> statuses,
             @Param("eventType") String eventType,
             @Param("limit") int limit,
-            @Param("offset") int offset);
+            @Param("offset") int offset,
+            @Param("submitted") boolean submitted);
 
     /**
      * The total row count the matching {@link #listRecipients} page is drawn from.
@@ -42,6 +44,7 @@ public interface CampaignDeliveryMapper {
      * @param sendId one send to restrict to, or null for every send
      * @param statuses the requested delivery statuses, or null for every status
      * @param eventType a lifecycle event the delivery must carry, or null
+     * @param submitted whether to restrict to confirmed submissions, regardless of current status
      * @return the matching recipient count
      */
     long countRecipients(
@@ -49,7 +52,8 @@ public interface CampaignDeliveryMapper {
             @Param("campaignId") int campaignId,
             @Param("sendId") Integer sendId,
             @Param("statuses") List<String> statuses,
-            @Param("eventType") String eventType);
+            @Param("eventType") String eventType,
+            @Param("submitted") boolean submitted);
 
     /**
      * One bounded page of the campaign touches on a contact's timeline, newest first.

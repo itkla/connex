@@ -13,6 +13,7 @@ import type {
     CampaignAudienceEstimate,
     CampaignAudienceExport,
     CampaignAudienceSnapshotSummary,
+    CampaignEngagement,
     CampaignMessage,
 } from "@/app/lib/types";
 import enCampaigns from "@/messages/en/campaigns.json";
@@ -286,6 +287,7 @@ const COMPLETED_EXPORT = {
 function detailHtml(
     audienceUnavailable: boolean,
     snapshots: CampaignAudienceSnapshotSummary[] = [SNAPSHOT],
+    engagement: CampaignEngagement | null = null,
 ): string {
     return renderToStaticMarkup(
         <CampaignDetail
@@ -296,7 +298,7 @@ function detailHtml(
             initialMessages={[]}
             initialSends={[]}
             initialExports={[]}
-            initialEngagement={null}
+            initialEngagement={engagement}
             access={{ manage: true, send: true, consent: true }}
             snapshotsRestricted={false}
             deliveryAvailability="enabled"
@@ -359,6 +361,28 @@ describe("campaign date inputs", () => {
 });
 
 describe("campaign audience labels and unavailable state", () => {
+    it("labels draft send membership as prepared recipients in both locales", () => {
+        for (const locale of ["en", "ja"] as const) {
+            localeState.locale = locale;
+            const counts = {
+                preparedRecipients: 6, dispatched: 0, delivered: 0, bounced: 0, complained: 0,
+                unsubscribed: 0, failed: 0, skipped: 0, skipReasons: {}, eventCounts: {},
+                deliveryReceiptsAvailable: false, deliveryRate: null, bounceRate: null, complaintRate: null,
+            };
+            const html = detailHtml(false, [SNAPSHOT], {
+                ...counts,
+                campaignId: CAMPAIGN.id,
+                channels: [],
+                sends: [{ ...counts, sendId: 11, status: "draft", channel: "email" }],
+            });
+            const catalog = locale === "en" ? enCampaigns : jaCampaigns;
+
+            expect(html).toMatch(new RegExp(`${catalog.CampaignDetail.preparedRecipients}</span><span[^>]*>6</span>`));
+            expect(html).toContain(catalog.CampaignDetail.preparedRecipientsHint);
+            expect(html).not.toContain(locale === "en" ? "Recipients reached" : ">到達数<");
+        }
+    });
+
     it("labels a custom-purpose estimate with its channel and exact purpose", () => {
         const estimate = {
             channel: "email",

@@ -54,6 +54,17 @@ New document generation locks authorization roots before the deal row and revali
 It freezes the parent currency and line items from that one locked snapshot and explicitly checks
 that every line uses that currency. It cannot combine an earlier parent currency with later totals.
 
+New documents resolve `{{total}}` using the template locale and frozen deal currency, with grouped
+digits, localized currency symbols and `HALF_UP` rounding to the currency's minor unit (zero decimal
+places for JPY and KRW). This is display formatting only: the numeric totals remain scale 2, and
+reading or generating another version never reformats a previously generated snapshot. Historical
+non-ISO currency codes retain their existing code-and-amount representation.
+
+Document tables, including the print and recipient views, format money with the frozen document
+locale independently of the viewer's UI language. Generated-date values use that same frozen locale
+with the shared display-zone rules in [the date/time contract](frontend/DATES_AND_TIME_ZONES.md).
+Reconciliation of independently rounded rows and totals is a separate accounting decision tracked in [#2288](https://github.com/itkla/connex/issues/2288).
+
 Documents generated without line items persist zero totals in that locked parent deal's currency.
 Before draft or approved finalization, the frozen deal, every line, and totals must agree with the
 stored document currency, independently of later parent-deal changes. Historical snapshots with
