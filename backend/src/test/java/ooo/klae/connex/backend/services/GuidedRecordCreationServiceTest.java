@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import static ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -140,7 +141,7 @@ class GuidedRecordCreationServiceTest {
 
         assertEquals("https://connex.example", company.getWebsite());
         assertEquals(new BigDecimal("12.34"), deal.getValue());
-        assertEquals(new BigDecimal("0.00"), deal.getActualValue());
+        assertNull(deal.getActualValue());
         assertEquals("2026-12-31", deal.getExpectedCloseDate());
         verify(companyService).createCompanyReviewed(any(), eq(null), any(), eq(MutationAdmission.UNRESTRICTED));
         verify(dealService).createReviewed(any(), eq(null), any(), eq(MutationAdmission.UNRESTRICTED), eq(SCOPE));

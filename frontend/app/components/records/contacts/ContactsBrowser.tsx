@@ -45,6 +45,7 @@ import FirstRunDoors from '@/app/components/FirstRunDoors';
 import { firstRunDoors } from '@/app/lib/firstRunJourney';
 import { useSavedViewScope } from '@/app/hooks/useSavedViewScope';
 import { useServerRecords } from '@/app/hooks/useServerRecords';
+import { RecordListState } from '@/app/components/records/RecordListState';
 import SavedViewsBar from '@/app/components/records/SavedViewsBar';
 import type { SavedView, SavedViewConfig } from '@/app/lib/types';
 import { type ColumnDef, type ColumnFilterFacet, type FilterState, type SelectionId, FILTER_EMPTY, facetChips, countActiveFilters } from '@/app/components/records/types';
@@ -195,6 +196,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
         items: contacts,
         total,
         loading,
+        error,
         page,
         setPage,
         size,
@@ -215,7 +217,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
         selectedIds,
         setSelectedIds,
         contacts,
-        !loading,
+        !loading && !error,
     );
 
     const selectedContacts = useMemo(() => contacts.filter((c) => selectedIds.has(c.id)), [contacts, selectedIds]);
@@ -1073,75 +1075,77 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
                 })()}
 
                 <Rise delay={0.18}>
-                    <RecordsRenderView<Contact>
-                        data={contacts}
-                        columns={visibleColumns}
-                        addColumnSlot={addColumnSlot}
-                        renderCard={(item, { onQuickEdit, onDelete, menu }) => (
-                            <ContactCard
-                                id={item.id}
-                                workspaceId={item.workspaceId}
-                                name={item.name}
-                                title={item.title}
-                                company={item.company?.name}
-                                email={item.email}
-                                phone={item.phone}
-                                imageUrl={item.imageUrl}
-                                ownerName={item.ownerId != null ? memberById.get(item.ownerId)?.displayName : undefined}
-                                onQuickEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
-                                onDelete={onDelete ? () => onDelete(item) : undefined}
-                                menu={menu}
-                                readOnly={showArchived}
-                                removeIntent={showArchived ? 'restore' : 'archive'}
-                                returnSelection={returnSelection}
-                            />
-                        )}
-                        cardOwnsRecordMenu
-                        renderListRow={(item) => (
-                            <ContactListRow
-                                contact={item}
-                                temperature={showArchived ? undefined : tempByContactId.get(item.id)}
-                            />
-                        )}
-                        renderAvatar={(item) => <ContactAvatar contact={item} />}
-                        detailPath={showArchived ? undefined : (item) => `/records/contacts/${item.id}`}
-                        onRowClick={showArchived ? undefined : (item) => peek.openPeek(item.id)}
-                        activeId={peek.activeId}
-                        recordRef={recordRef}
-                        displayMode={effectiveDisplayMode}
-                        density={density}
-                        selectedIds={selectedIds}
-                        onSelectedIdsChange={handleSelectedIdsChange}
-                        onQuickEdit={showArchived ? undefined : quickEditOne}
-                        onDelete={archiveOne}
-                        readOnly={showArchived}
-                        removeIntent={showArchived ? 'restore' : 'archive'}
-                        entityLabel="contact"
-                        selectionActions={selectionActions}
-                        loading={loading}
-                        emptyState={
-                            <EmptyState
-                                icon={UsersIcon}
-                                title={t('emptyTitle')}
-                                body={canCreateContacts ? t('emptyJourneyBody') : t('emptyReadOnlyBody')}
-                                action={
-                                    <FirstRunDoors
-                                        doors={firstRunEntryDoors}
-                                        size="page"
-                                        importLabel={tActions('utility.importContacts')}
-                                        createLabel={t('emptyCta')}
-                                        importPending={importPending}
-                                        onImport={runContactImport}
-                                        onCreate={openNewContactDialog}
-                                    />
-                                }
-                            />
-                        }
-                        filtersActive={hasActiveFiltersOrScope}
-                        onClearFilters={clearFiltersAndScope}
-                        pagination={{ page, pageSize: size, total, onPageChange: setPage, onPageSizeChange: setSize }}
-                        sortState={{ key: sortKey, direction: sortDirection, onSortChange }}
-                    />
+                    <RecordListState error={error} loading={loading} hasRecords={contacts.length > 0} onRetry={reload}>
+                        <RecordsRenderView<Contact>
+                            data={contacts}
+                            columns={visibleColumns}
+                            addColumnSlot={addColumnSlot}
+                            renderCard={(item, { onQuickEdit, onDelete, menu }) => (
+                                <ContactCard
+                                    id={item.id}
+                                    workspaceId={item.workspaceId}
+                                    name={item.name}
+                                    title={item.title}
+                                    company={item.company?.name}
+                                    email={item.email}
+                                    phone={item.phone}
+                                    imageUrl={item.imageUrl}
+                                    ownerName={item.ownerId != null ? memberById.get(item.ownerId)?.displayName : undefined}
+                                    onQuickEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
+                                    onDelete={onDelete ? () => onDelete(item) : undefined}
+                                    menu={menu}
+                                    readOnly={showArchived}
+                                    removeIntent={showArchived ? 'restore' : 'archive'}
+                                    returnSelection={returnSelection}
+                                />
+                            )}
+                            cardOwnsRecordMenu
+                            renderListRow={(item) => (
+                                <ContactListRow
+                                    contact={item}
+                                    temperature={showArchived ? undefined : tempByContactId.get(item.id)}
+                                />
+                            )}
+                            renderAvatar={(item) => <ContactAvatar contact={item} />}
+                            detailPath={showArchived ? undefined : (item) => `/records/contacts/${item.id}`}
+                            onRowClick={showArchived ? undefined : (item) => peek.openPeek(item.id)}
+                            activeId={peek.activeId}
+                            recordRef={recordRef}
+                            displayMode={effectiveDisplayMode}
+                            density={density}
+                            selectedIds={selectedIds}
+                            onSelectedIdsChange={handleSelectedIdsChange}
+                            onQuickEdit={showArchived ? undefined : quickEditOne}
+                            onDelete={archiveOne}
+                            readOnly={showArchived}
+                            removeIntent={showArchived ? 'restore' : 'archive'}
+                            entityLabel="contact"
+                            selectionActions={selectionActions}
+                            loading={loading}
+                            emptyState={
+                                <EmptyState
+                                    icon={UsersIcon}
+                                    title={t('emptyTitle')}
+                                    body={canCreateContacts ? t('emptyJourneyBody') : t('emptyReadOnlyBody')}
+                                    action={
+                                        <FirstRunDoors
+                                            doors={firstRunEntryDoors}
+                                            size="page"
+                                            importLabel={tActions('utility.importContacts')}
+                                            createLabel={t('emptyCta')}
+                                            importPending={importPending}
+                                            onImport={runContactImport}
+                                            onCreate={openNewContactDialog}
+                                        />
+                                    }
+                                />
+                            }
+                            filtersActive={hasActiveFiltersOrScope}
+                            onClearFilters={clearFiltersAndScope}
+                            pagination={{ page, pageSize: size, total, onPageChange: setPage, onPageSizeChange: setSize }}
+                            sortState={{ key: sortKey, direction: sortDirection, onSortChange }}
+                        />
+                    </RecordListState>
                 </Rise>
 
                 {peek.drawer}
