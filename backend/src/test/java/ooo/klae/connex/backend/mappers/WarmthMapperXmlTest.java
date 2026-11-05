@@ -90,6 +90,12 @@ class WarmthMapperXmlTest {
             )
         );
 
+        for (String statement : List.of(personAggregate, companyAggregate, personEvidenceTotals,
+                companyEvidenceTotals, personEvidence, companyEvidence)) {
+            assertTrue(statement.contains("t.completed = TRUE"));
+            assertTrue(statement.contains("t.completed_at AS touched_at"));
+            assertFalse(statement.contains("t.created_at AS touched_at"));
+        }
         assertTrue(personAggregate.contains("POW(?, -touch.age_days / ?)"));
         assertTrue(companyAggregate.contains("POW(?, -touch.age_days / ?)"));
         assertTrue(personEvidenceTotals.contains("POW(?, -capped.age_days / ?)"));

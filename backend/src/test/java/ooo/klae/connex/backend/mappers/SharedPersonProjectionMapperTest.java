@@ -57,6 +57,8 @@ class SharedPersonProjectionMapperTest extends AbstractMapperTest {
         assertEquals(1, dealMapper.addPerson(
             workspace.getId(), dealScope(workspace.getId()), deal.getId(), shared.getId(), "champion"));
         Task task = taskFor(recipient, shared, deal);
+        Task completed = taskFor(recipient, shared, deal);
+        taskMapper.complete(workspace.getId(), completed.getId(), recipient.getId(), 0);
 
         assertEquals(Set.of(owned.getId(), shared.getId()), dealPersonIds(deal));
         assertEquals(Set.of(owned.getId(), shared.getId()), stakeholderIds(deal));

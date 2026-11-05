@@ -7,11 +7,12 @@ migration-discipline part of #87 §9 / #102).
 > The specific support window below is a **proposed** policy; confirm it before it is published to
 > customers.
 
-The active rollback floor for this release is tenant V238, including with AI and missions disabled.
+The active rollback floor for this release is tenant V240, including with AI and missions disabled.
 Earlier floors in version-specific sections below describe historical component contracts and do not
-permit rollback after V238. Apply control V236 → tenant V237 → tenant V238 in that order. Follow
-[the retained-chat cutover](#v236v237-retained-ask-connex-privacy-cutover) and
-[the singleton-proposal cutover](#mission-singleton-proposals-tenant-v238).
+permit rollback after V240. Apply control V236 → tenant V237 → tenant V238 → tenant V239 → tenant V240
+in that order. Follow [the retained-chat cutover](#v236v237-retained-ask-connex-privacy-cutover),
+[the singleton-proposal cutover](#mission-singleton-proposals-tenant-v238), and
+[the task-completion cutover](#task-completion-and-relationship-warmth-tenant-v240).
 
 ## Dormant assistant proposal-set storage (tenant V233)
 
@@ -1127,7 +1128,7 @@ Column additions and the default change require `ALGORITHM=INSTANT, LOCK=DEFAULT
 
 DDL auto-commits. If migration fails, keep writers disabled, inspect the applied statements and Flyway failure record, and recover through the normal migration procedure. Do not bypass the algorithm guards.
 
-V235 established the continuation compatibility minimum; V238 is now the overall rollback floor, including when AI and missions are disabled. Earlier binaries cannot safely clean up runtime-2 holdings. Returning below the floor requires an explicit reviewed drain, settlement, privacy-purge, and residual-verification procedure.
+V235 established the continuation compatibility minimum; V240 is now the overall rollback floor, including when AI and missions are disabled. Pre-V235 binaries cannot safely clean up runtime-2 holdings. Returning below the V235 component minimum requires an explicit reviewed drain, settlement, privacy-purge, and residual-verification procedure; it does not waive later rollback floors.
 
 ## V236/V237: retained Ask Connex privacy cutover
 
@@ -1142,7 +1143,7 @@ applying `control/V236__ai_assistant_privacy_coordination.sql` and
 serving JVM. Proposal-set production remains disabled.
 
 V237 established the all-chat privacy compatibility minimum: earlier binaries can disclose or
-republish invalidated content despite accepting the additive schema. V238 is the active rollback
+republish invalidated content despite accepting the additive schema. V240 is the active rollback
 floor for this release, including when AI and missions are disabled. Recovery below the active
 floor requires a separately reviewed procedure; normal recovery is a forward fix.
 
@@ -1193,12 +1194,34 @@ while adding the previously unused nullable link, then restored. Do not remove a
 guards or permit COPY fallback. Online algorithms still require metadata-lock acquisition.
 
 DDL auto-commits. If migration fails, retain the drain, inspect applied statements and Flyway
-history, and recover forward. The rollback floor is
-`tenant/V238__ai_agent_singleton_proposals.sql`, including when missions are disabled. Earlier
-binaries cannot safely purge/export source-linked proposals or preserve frozen-review
-invariants. Returning below the floor requires a separately reviewed drain, settlement,
-complete enrolled privacy purge and unconditional residual verification.
+history, and recover forward. V238 established the singleton-proposal compatibility minimum;
+the higher release-wide rollback floor is now `tenant/V240__task_completion_warmth.sql`, including
+when missions are disabled. Pre-V238 binaries still cannot safely purge/export source-linked
+proposals or preserve frozen-review invariants. Returning below that V238 component minimum
+requires a separately reviewed drain, settlement, complete enrolled privacy purge and unconditional
+residual verification. Those procedures do not waive the higher V240 task-writer requirement.
 
 Review expires at the earlier of earliest authoritative preparation plus 72 hours and the
 fixed hard deadline. Publication, retries and restart never refresh preparation age. Waiting
 review is independent of the execution deadline.
+
+## Task completion and relationship warmth (tenant V240)
+
+V240 adds nullable `task.completed_at` and versioned warmth notification state. Completed tasks
+contribute to warmth only when they have a recorded completion instant. Existing completions stay
+undated: there is no `updated_at` backfill, and scores based on those tasks can fall. Notes retain
+their existing weight.
+
+Drain pre-V240 serving binaries and task writers before this cutover. Once the V240 backend may
+have run, the active rollback floor is `tenant/V240__task_completion_warmth.sql`. Older task update,
+board-move and completion writers do not maintain `completed_at`: a task completed at T1, reopened
+and completed at T2 under an older binary can retain T1. A later compatible binary would then score
+that stale instant. Rollback candidates must retain completion stamping and clearing on reopen;
+copying only the migration resource into an older binary does not make it compatible. The existing
+proven-not-started exception in the staging rollback procedure is unchanged.
+
+This raises the previous V238 floor and keeps the V236/V237 privacy and V238 singleton-proposal
+constraints in force. Binaries that contain V238 or V239 but lack V240 are refused, even if they
+satisfy the older component floors. Recover forward with a compatible binary. A scoring-policy
+change remains possible in a forward release that preserves the V240 task writers and rollback
+floor; deploying a pre-V240 binary is not a supported way to reverse the scoring change.

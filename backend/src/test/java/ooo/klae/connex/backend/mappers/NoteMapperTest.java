@@ -329,6 +329,54 @@ class NoteMapperTest extends AbstractMapperTest {
         assertEquals("after", found.getContent());
     }
 
+    @Test
+    void update_omittedLinksSurviveAndExplicitNullClearsThem() {
+        Person person = newPerson(newCompany());
+        Pipeline pipeline = newPipeline();
+        Deal deal = newDeal(pipeline, newStage(pipeline, 0), newCompany());
+        Note original = build("before", newUser(), person, deal);
+        noteMapper.insert(original);
+        Note update = new Note();
+        update.setId(original.getId());
+        update.setWorkspaceId(workspace.getId());
+        update.setAuthor(original.getAuthor());
+        update.setContent("after");
+
+        assertEquals(1, noteMapper.update(update));
+        Note found = noteMapper.getNoteById(workspace.getId(), original.getId());
+        assertEquals(person.getId(), found.getPerson().getId());
+        assertEquals(deal.getId(), found.getDeal().getId());
+
+        update.setPerson(null);
+        assertEquals(1, noteMapper.update(update));
+        found = noteMapper.getNoteById(workspace.getId(), original.getId());
+        assertNull(found.getPerson());
+        assertEquals(deal.getId(), found.getDeal().getId());
+
+        update.setDeal(null);
+        assertEquals(1, noteMapper.update(update));
+        found = noteMapper.getNoteById(workspace.getId(), original.getId());
+        assertNull(found.getPerson());
+        assertNull(found.getDeal());
+    }
+
+    @Test
+    void update_cannotChangeAnExistingNoteInAnotherWorkspace() {
+        Note original = build("before", newUser(), null, null);
+        noteMapper.insert(original);
+        Workspace other = newWorkspace();
+        Note update = new Note();
+        update.setId(original.getId());
+        update.setWorkspaceId(other.getId());
+        update.setAuthor(original.getAuthor());
+        update.setContent("unwanted");
+        update.setPerson(null);
+        update.setDeal(null);
+
+        assertEquals(0, noteMapper.update(update));
+        assertEquals("before", noteMapper.getNoteById(workspace.getId(), original.getId()).getContent());
+    }
+
     /**
      * Deletes a note and checks if the note is removed.
      */

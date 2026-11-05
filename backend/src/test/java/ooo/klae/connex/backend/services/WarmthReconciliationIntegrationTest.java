@@ -88,6 +88,97 @@ class WarmthReconciliationIntegrationTest {
     private Workspace workspace;
     private User user;
 
+    @Test
+    void planningAFollowUpPreservesAnExistingRelationshipAndItsForecast() {
+        LocalDateTime reference = LocalDateTime.of(2026, 6, 30, 0, 0);
+        Instant asOf = reference.toInstant(ZoneOffset.UTC);
+        Company company = company("Planned follow-up");
+        Person person = person("Planned follow-up", company);
+        activity(person, "meeting", reference.minusDays(15));
+        var service = new ScoringService(personMapper, companyMapper, dealMapper,
+            activityMapper, noteMapper, taskMapper, Clock.fixed(asOf, ZoneOffset.UTC), recordVisibilityScopeControlAccess);
+        var contactBefore = score(ScorePath.CONTACT_LIVE, service, person, company, asOf);
+        var companyBefore = score(ScorePath.COMPANY_LIVE, service, person, company, asOf);
+        assertTrue(contactBefore.getGoesColdAt() != null);
+        Task task = task(person);
+        taskMapper.moveTask(workspace.getId(), task.getId(), "todo", false, 0);
+        jdbcTemplate.update("UPDATE task SET created_at = ? WHERE workspace_id = ? AND id = ?",
+            Timestamp.valueOf(reference), workspace.getId(), task.getId());
+
+        assertTemperatureEquals(contactBefore, score(ScorePath.CONTACT_LIVE, service, person, company, asOf));
+        assertTemperatureEquals(companyBefore, score(ScorePath.COMPANY_LIVE, service, person, company, asOf));
+    }
+
+    @Test
+    void taskTransitionsReconcileAcrossSqlJavaAndEvidence() {
+        LocalDateTime reference = LocalDateTime.of(2026, 6, 30, 0, 0);
+        Instant asOf = reference.toInstant(ZoneOffset.UTC);
+        Company company = company("Task transitions");
+        Person person = person("Task transitions", company);
+        Task task = task(person);
+        taskMapper.moveTask(workspace.getId(), task.getId(), "todo", false, 0);
+        taskMapper.updateDueDate(workspace.getId(), task.getId(), "2027-12-31");
+        jdbcTemplate.update("UPDATE task SET created_at = ? WHERE workspace_id = ? AND id = ?",
+            Timestamp.valueOf(reference.minusDays(30)), workspace.getId(), task.getId());
+        ScoringService service = new ScoringService(personMapper, companyMapper, dealMapper,
+            activityMapper, noteMapper, taskMapper, Clock.fixed(asOf, ZoneOffset.UTC), recordVisibilityScopeControlAccess);
+        assertTaskParity(service, person, company, asOf, 0, 0, null);
+        assertFalse(personMapper.getEngagedPersonIds(workspace.getId(),
+            orgWorkspaceIdsJson(workspaceMapper, workspace.getId())).contains(person.getId()));
+
+        taskMapper.complete(workspace.getId(), task.getId(), user.getId(), 0);
+        LocalDateTime completion = reference.minusDays(2);
+        setCreatedAt("task", task.getId(), completion);
+        int expected = MODEL.score(MODEL.decayedContribution(MODEL.taskWeight(), 2));
+        assertTaskParity(service, person, company, asOf, 1, expected, completion.format(MYSQL_DATETIME));
+        assertTrue(personMapper.getEngagedPersonIds(workspace.getId(),
+            orgWorkspaceIdsJson(workspaceMapper, workspace.getId())).contains(person.getId()));
+
+        taskMapper.moveTask(workspace.getId(), task.getId(), "todo", false, 0);
+        assertTaskParity(service, person, company, asOf, 0, 0, null);
+        taskMapper.moveTask(workspace.getId(), task.getId(), "done", true, 0);
+        setCreatedAt("task", task.getId(), reference.plusYears(2));
+        assertTaskParity(service, person, company, asOf, 0, 0, null);
+        assertFalse(personMapper.getEngagedPersonIds(workspace.getId(),
+            orgWorkspaceIdsJson(workspaceMapper, workspace.getId())).contains(person.getId()));
+        jdbcTemplate.update("UPDATE task SET completed_at = NULL WHERE workspace_id = ? AND id = ?",
+            workspace.getId(), task.getId());
+        assertTaskParity(service, person, company, asOf, 0, 0, null);
+    }
+
+    private void assertTaskParity(ScoringService service, Person person, Company company, Instant asOf,
+            int count, int expectedScore, String lastTouch) {
+        for (ScorePath path : ScorePath.values()) {
+            RelationshipTemperatureDto temperature = score(path, service, person, company, asOf);
+            assertEquals(count, temperature.getTouchCount(), path.name());
+            assertEquals(expectedScore, temperature.getScore(), path.name());
+            assertEquals(lastTouch, temperature.getLastTouchAt(), path.name());
+            if (count == 0) assertEquals(null, temperature.getGoesColdAt(), path.name());
+        }
+        LocalDateTime reference = LocalDateTime.ofInstant(asOf, ZoneOffset.UTC);
+        String scope = orgWorkspaceIdsJson(workspaceMapper, workspace.getId());
+        var personTotals = personMapper.getRelationshipEvidenceTotals(workspace.getId(), scope, person.getId(),
+            reference, MODEL.sqlParameters(), 100_001);
+        var companyTotals = companyMapper.getRelationshipEvidenceTotals(workspace.getId(), scope, company.getId(),
+            reference, MODEL.sqlParameters(), 100_001);
+        assertEquals(count, personTotals.taskCount());
+        assertEquals(count, companyTotals.taskCount());
+        var personEvidence = personMapper.getRelationshipEvidenceContributors(workspace.getId(), scope, person.getId(),
+            reference, MODEL.sqlParameters(), 100_001, 20);
+        var companyEvidence = companyMapper.getRelationshipEvidenceContributors(workspace.getId(), scope, company.getId(),
+            reference, MODEL.sqlParameters(), 100_001, 20);
+        assertEquals(count, personEvidence.size());
+        assertEquals(count, companyEvidence.size());
+        if (count > 0) {
+            assertEquals(lastTouch, personEvidence.getFirst().occurredAt());
+            assertEquals(lastTouch, companyEvidence.getFirst().occurredAt());
+        }
+        var replay = service.replayBands(workspace.getId(), new long[] {asOf.toEpochMilli()},
+            (id, at) -> company.getId(), Set.of(person.getId()), Map.of());
+        assertEquals(MODEL.band(expectedScore), replay.contactFrames().getFirst().getOrDefault(person.getId(), "cold"));
+        assertEquals(MODEL.band(expectedScore), replay.companyFrames().getFirst().getOrDefault(company.getId(), "cold"));
+    }
+
     @BeforeEach
     void setUp() {
         String suffix = UUID.randomUUID().toString().substring(0, 8);
@@ -147,6 +238,8 @@ class WarmthReconciliationIntegrationTest {
         activity(privateSensitiveAnchor, "meeting", REPORT_END.minusHours(1));
         Note privateSensitiveVisible = note(privateSensitiveNote, "workspace");
         Note privateSensitiveExcluded = note(privateSensitiveNote, "private");
+        Task planned = task(privateSensitiveNote);
+        taskMapper.moveTask(workspace.getId(), planned.getId(), "todo", false, 0);
         setCreatedAt("note", privateSensitiveVisible.getId(), REPORT_END.minusHours(1));
         setCreatedAt("note", privateSensitiveExcluded.getId(), REPORT_END.minusHours(1));
 
@@ -316,7 +409,7 @@ class WarmthReconciliationIntegrationTest {
         assertEquals(reference.format(MYSQL_DATETIME), at.getLastTouchAt());
         assertTrue(at.getScore() > before.getScore());
         assertEquals(asOf, at.getAsOf());
-        assertEquals("warmth-v1", at.getModelVersion());
+        assertEquals("warmth-v2", at.getModelVersion());
     }
 
     private void addTouch(String source, Person person, Deal deal, LocalDateTime at) {
@@ -376,6 +469,7 @@ class WarmthReconciliationIntegrationTest {
         assertEquals(expected.getLastTouchAt(), actual.getLastTouchAt());
         assertEquals(expected.getDaysSinceTouch(), actual.getDaysSinceTouch());
         assertEquals(expected.getTouchCount(), actual.getTouchCount());
+        assertEquals(expected.getGoesColdAt(), actual.getGoesColdAt());
         assertEquals(expected.getDaysUntilCold(), actual.getDaysUntilCold());
         assertEquals(expected.getModelVersion(), actual.getModelVersion());
         assertEquals(expected.getAsOf(), actual.getAsOf());
@@ -466,7 +560,8 @@ class WarmthReconciliationIntegrationTest {
         Task task = new Task();
         task.setWorkspaceId(workspace.getId());
         task.setDescription("Warmth fixture");
-        task.setStatus("todo");
+        task.setStatus("done");
+        task.setCompleted(true);
         task.setAssignedTo(user);
         task.setPerson(person);
         taskMapper.insert(task);
@@ -482,7 +577,8 @@ class WarmthReconciliationIntegrationTest {
             throw new IllegalArgumentException("Unsupported fixture table");
         }
         jdbcTemplate.update(
-            "UPDATE " + resolved + " SET created_at = ? WHERE workspace_id = ? AND id = ?",
+            "UPDATE " + resolved + " SET " + ("task".equals(resolved) ? "completed_at" : "created_at")
+                + " = ? WHERE workspace_id = ? AND id = ?",
             Timestamp.valueOf(timestamp),
             workspace.getId(),
             id
