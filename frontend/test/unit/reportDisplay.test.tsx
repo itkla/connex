@@ -37,6 +37,12 @@ function renderWidget(widget: ReportWidgetData, locale: keyof typeof catalogues)
 }
 
 describe('report monetary precision', () => {
+    it.each(['en', 'ja'])('rounds half-yen ties up consistently with narrative figures in %s', (locale) => {
+        const symbol = locale === 'ja' ? '￥' : '¥';
+        expect(formatReportValue(1_000.50, 'JPY', locale)).toBe(`${symbol}1,001`);
+        expect(formatReportValue(1_000.49, 'JPY', locale)).toBe(`${symbol}1,000`);
+    });
+
     it.each(['en', 'ja'])('retains full monetary amounts using currency precision in %s', (locale) => {
         expect(formatReportValue(1_450_000.25, 'USD', locale)).toBe('$1,450,000.25');
         expect(formatReportValue(1_020_000.75, 'USD', locale)).toBe('$1,020,000.75');
