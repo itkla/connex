@@ -59,6 +59,6 @@ test("planned follow-ups leave warmth unchanged until completion and reopen remo
     await seed.post(`/api/tasks/${task.id}/move`, { status: "todo", position: 0 });
     const reopened = await evidence(page.request, person.id);
     expect(reopened.score).toBe(0);
-    expect(reopened.lastTouchAt).toBeNull();
+    expect(reopened).not.toHaveProperty("lastTouchAt");
     expect(reopened.touchCount).toBe(0);
 });
