@@ -8,9 +8,10 @@ import PrivilegedMfaRouteGate from "@/app/components/account/PrivilegedMfaRouteG
 import en from "@/messages/en/account.json";
 import ja from "@/messages/ja/account.json";
 
-const state = vi.hoisted(() => ({ confined: true, reason: "enrollment", pathname: "/records/contacts", mounted: vi.fn() }));
+const state = vi.hoisted(() => ({ readiness: "ready", confined: true, reason: "enrollment", pathname: "/records/contacts", mounted: vi.fn() }));
 vi.mock("next/navigation", () => ({ usePathname: () => state.pathname }));
 vi.mock("@/app/hooks/usePrivilegedMfaStanding", () => ({ usePrivilegedMfaStanding: () => state }));
+vi.mock("@/app/hooks/usePrivilegedMfaConfinement", () => ({ usePrivilegedMfaReadiness: () => state.readiness }));
 vi.mock("@/app/lib/api", () => ({ privilegedMfaConfinementDestination: () => `/settings/personal/security?mfa=${state.reason === "attestation" ? "approve" : "enroll"}` }));
 
 function RecordBrowser() {
@@ -20,6 +21,7 @@ function RecordBrowser() {
 
 afterEach(() => {
     cleanup();
+    state.readiness = "ready";
     state.confined = true;
     state.reason = "enrollment";
     state.pathname = "/records/contacts";

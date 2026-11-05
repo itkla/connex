@@ -134,6 +134,47 @@ describe("privileged MFA confinement in the browser", () => {
         expect(api.privilegedMfaConfinementReason()).toBe("attestation");
     });
 
+    it("keeps a newer readiness failure when an older master-off read finishes", async () => {
+        stubBrowser("/dashboard");
+        const olderPolicy = Promise.withResolvers<Response>();
+        let policies = 0;
+        stubBackend((url) => {
+            if (url.endsWith(REQUIREMENTS)) return requirements("SATISFIED");
+            if (url.endsWith("/api/capabilities")) return ++policies === 1 ? olderPolicy.promise : json({});
+            return null;
+        });
+        const api = await import("@/app/lib/api");
+        const older = api.settlePrivilegedMfaStanding("check");
+        await flush();
+        await expect(api.settlePrivilegedMfaStanding("check")).resolves.toBe("failed");
+        olderPolicy.resolve(json({ privilegedMfaEnforced: false }));
+        await expect(older).resolves.toBe("applied");
+        expect(api.currentPrivilegedMfaReadiness()).toBe("failed");
+    });
+
+    it("does not let older enforced metadata undo an early master-off decision", async () => {
+        stubBrowser("/dashboard");
+        const reads = standingReads();
+        let policies = 0;
+        stubBackend((url) => {
+            if (url.endsWith(REQUIREMENTS)) return reads.next();
+            if (url.endsWith("/api/capabilities")) return json({ privilegedMfaEnforced: ++policies === 1 });
+            return null;
+        });
+        const api = await import("@/app/lib/api");
+        const older = api.settlePrivilegedMfaStanding("check");
+        await flush();
+        const newer = api.settlePrivilegedMfaStanding("check");
+        await flush();
+        expect(api.currentPrivilegedMfaReadiness()).toBe("ready");
+        reads.release(0, requirements("ENROLLMENT_REQUIRED"));
+        await expect(older).resolves.toBe("superseded");
+        expect(api.privilegedMfaConfinementReason()).toBeNull();
+        reads.release(1, requirements("ENROLLMENT_REQUIRED"));
+        await expect(newer).resolves.toBe("applied");
+        expect(api.currentPrivilegedMfaReadiness()).toBe("ready");
+    });
+
     it.each([true, false])("reconciles an enrollment refusal against master enforcement %s", async (enforced) => {
         const { location } = stubBrowser(SECURITY);
         let enrolled = false;

@@ -90,6 +90,46 @@ test("a sole owner's passkey step stays quiet and explains client navigation @mo
     await expect(page.locator('[data-sonner-toast][data-type="error"]')).toHaveCount(0);
 });
 
+test("a fresh enforced owner waits for the account check before mounting readers @mobile", async ({ page }) => {
+    const suffix = `gatesfresh${randomUUID().replaceAll("-", "").slice(0, 16)}`;
+    await registerUser(page.request, { username: suffix, email: `${suffix}@example.com`, password: `Gates!${suffix}A1` });
+    await useLocale(page, "en");
+    const standing = Promise.withResolvers<void>();
+    await page.route("**/api/capabilities", async (route) => {
+        const response = await route.fetch();
+        const body: unknown = await response.json();
+        if (typeof body !== "object" || body === null || Array.isArray(body)) throw new Error("Expected capability posture");
+        await route.fulfill({ response, json: { ...body, privilegedMfaEnforced: true } });
+    });
+    await page.route("**/api/auth/webauthn/register/requirements", async (route) => {
+        await standing.promise;
+        await route.fallback();
+    });
+    const observed = observeRefusals(page);
+    const protectedReads: string[] = [];
+    page.on("request", (request) => {
+        const path = new URL(request.url()).pathname;
+        if (["/api/saved-views/pins", "/api/notifications/counts", "/api/tasks/summary", "/api/persons/page"].includes(path)) protectedReads.push(path);
+    });
+    try {
+        await page.goto("/records/contacts");
+        await expect(page.getByRole("heading", { name: message("en", "account", "AccountSecurity.accessCheckingTitle") })).toBeVisible();
+        expect(protectedReads).toEqual([]);
+        expect(observed.assistantReads).toEqual([]);
+        standing.resolve();
+        await expect(page.getByRole("link", { name: message("en", "account", "AccountSecurity.returnToSecurity") })).toBeVisible();
+        await page.waitForLoadState("networkidle");
+        expect(protectedReads).toEqual([]);
+        expect(observed.assistantReads).toEqual([]);
+        expect(observed.responses).toEqual([]);
+        expect(observed.consoleErrors).toEqual([]);
+        await expect(page.locator('[data-sonner-toast][data-type="error"]')).toHaveCount(0);
+    } finally {
+        standing.resolve();
+        await page.unrouteAll({ behavior: "wait" });
+    }
+});
+
 test("an unconfigured assistant explains availability before accepting a question", async ({ page }) => {
     const suffix = `gatesai${randomUUID().replaceAll("-", "").slice(0, 16)}`;
     await registerUser(page.request, {

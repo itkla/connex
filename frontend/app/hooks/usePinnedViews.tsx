@@ -5,7 +5,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { SavedView } from "@/app/lib/types";
 import { getSavedViewPins } from "@/app/lib/api";
 import { subscribeToSavedViewMutations } from "@/app/lib/saved-view-events";
-import { usePrivilegedMfaConfinement } from "@/app/hooks/usePrivilegedMfaConfinement";
+import { usePrivilegedMfaConfinement, usePrivilegedMfaReadiness } from "@/app/hooks/usePrivilegedMfaConfinement";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 
 type PinnedViewsContextValue = {
@@ -30,7 +30,8 @@ const EMPTY_PINS: SavedView[] = [];
 export function PinnedViewsProvider({ children }: { children: ReactNode }) {
     const { activeWorkspaceId, switching } = useWorkspace();
     const confined = usePrivilegedMfaConfinement();
-    const enabled = !confined && !switching && activeWorkspaceId !== null;
+    const policyReady = usePrivilegedMfaReadiness() === "ready";
+    const enabled = policyReady && !confined && !switching && activeWorkspaceId !== null;
     const [state, setState] = useState<{
         workspaceId: number | null;
         pins: SavedView[];

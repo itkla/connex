@@ -13,6 +13,8 @@ import {
     getAiChatInvitations,
     getAiChatParticipants,
     getAiChatPresence,
+    touchAiChatPresence,
+    leaveAiChatPresence,
     getAiChatSession,
     getAiChatSessions,
     getAiCommandCenter,
@@ -37,6 +39,7 @@ const boundary = vi.hoisted(() => {
         socket,
         permission: "granted",
         confined: false,
+        readiness: 'ready',
         chatAvailable: true,
         watchesAvailable: true,
         refreshAvailability: null as (() => void) | null,
@@ -76,7 +79,7 @@ vi.mock('@/app/lib/aiAvailabilityEvents', () => ({
         return () => { boundary.refreshAvailability = null; };
     },
 }));
-vi.mock('@/app/hooks/usePrivilegedMfaConfinement', () => ({ usePrivilegedMfaConfinement: () => boundary.confined }));
+vi.mock('@/app/hooks/usePrivilegedMfaConfinement', () => ({ usePrivilegedMfaReadiness: () => boundary.readiness, usePrivilegedMfaConfinement: () => boundary.confined }));
 vi.mock('@/app/hooks/useAskConnexSkills', () => ({ useAskConnexSkills: () => [] }));
 vi.mock('@/app/hooks/useIsMobile', () => ({ useIsMobile: () => false }));
 vi.mock('@/app/hooks/useNow', () => ({ useLiveNow: () => Date.parse('2026-10-18T12:00:00Z'), useNow: () => Date.parse('2026-10-18T12:00:00Z') }));
@@ -90,6 +93,8 @@ vi.mock('@/app/lib/realtime', () => ({
 }));
 vi.mock('@/app/lib/api', async (importOriginal) => ({
     ...await importOriginal<typeof import('@/app/lib/api')>(),
+    currentPrivilegedMfaReadiness: () => boundary.readiness,
+    privilegedMfaConfinementReason: () => boundary.confined ? 'enrollment' : null,
     getAiCommandCenter: vi.fn().mockImplementation(async () => ({ chatAvailable: boundary.chatAvailable, watchesAvailable: boundary.watchesAvailable })),
     getAiChatSessions: vi.fn().mockResolvedValue({ items: [], total: 0 }),
     getAiChatInvitations: vi.fn().mockResolvedValue({ items: [], total: 0 }),
@@ -232,6 +237,7 @@ describe('the provider guards the Retry callback', () => {
         boundary.socket.current = null;
         boundary.permission = 'granted';
         boundary.confined = false;
+        boundary.readiness = "ready";
         boundary.chatAvailable = true;
         boundary.watchesAvailable = true;
         vi.mocked(getAiChatSessions).mockReset().mockResolvedValue({ items: [], total: 0 });
@@ -268,6 +274,68 @@ describe('the provider guards the Retry callback', () => {
             expect(getAiChatInvitations).not.toHaveBeenCalled();
             expect(getAiCommandCenter).not.toHaveBeenCalled();
             expect(boundary.socket.current).toBeNull();
+            expect(boundary.showApiError).not.toHaveBeenCalled();
+        } finally {
+            await act(async () => root.unmount());
+        }
+    });
+
+    it.each(['loading', 'failed'])('holds assistant startup while policy is %s', async (status) => {
+        boundary.readiness = status;
+        const root = await mountProvider();
+        try {
+            expect(getAiCommandCenter).not.toHaveBeenCalled();
+            expect(getAiChatSessions).not.toHaveBeenCalled();
+            expect(getAiChatInvitations).not.toHaveBeenCalled();
+            expect(boundary.socket.current).toBeNull();
+            expect(boundary.showApiError).not.toHaveBeenCalled();
+        } finally {
+            await act(async () => root.unmount());
+        }
+    });
+
+    it('preserves an unsent question across a policy-only pause but clears it on identity change', async () => {
+        const root = await mountProvider();
+        try {
+            await act(async () => drawer().onComposerChange(QUESTION));
+            vi.mocked(getAiCommandCenter).mockClear();
+            vi.mocked(getAiChatSessions).mockClear();
+            boundary.readiness = 'failed';
+            await act(async () => root.render(<AskConnexProvider>{null}</AskConnexProvider>));
+            expect(drawer().composer).toBe(QUESTION);
+            expect(drawer().unavailable?.preserveComposer).toBe(true);
+            expect(getAiCommandCenter).not.toHaveBeenCalled();
+            expect(getAiChatSessions).not.toHaveBeenCalled();
+            boundary.readiness = 'ready';
+            await act(async () => root.render(<AskConnexProvider>{null}</AskConnexProvider>));
+            expect(drawer().composer).toBe(QUESTION);
+            boundary.workspace.activeWorkspaceId = 8;
+            boundary.readiness = 'loading';
+            await act(async () => root.render(<AskConnexProvider>{null}</AskConnexProvider>));
+            expect(drawer().composer).toBe('');
+            boundary.readiness = 'ready';
+            await act(async () => root.render(<AskConnexProvider>{null}</AskConnexProvider>));
+            expect(drawer().composer).toBe('');
+        } finally {
+            await act(async () => root.unmount());
+        }
+    });
+
+    it('stops shared-chat presence and its cleanup request during a policy hold', async () => {
+        vi.mocked(getAiChatSession).mockReset().mockResolvedValue({
+            ...DETAIL, session: { ...DETAIL.session, visibility: 'shared' },
+        });
+        const root = await mountProvider();
+        try {
+            await act(async () => drawer().onOpenChange(true));
+            expect(touchAiChatPresence).toHaveBeenCalled();
+            vi.mocked(touchAiChatPresence).mockClear();
+            vi.mocked(leaveAiChatPresence).mockClear();
+            boundary.readiness = 'failed';
+            await act(async () => root.render(<AskConnexProvider>{null}</AskConnexProvider>));
+            await act(async () => { await vi.advanceTimersByTimeAsync(8_000); });
+            expect(touchAiChatPresence).not.toHaveBeenCalled();
+            expect(leaveAiChatPresence).not.toHaveBeenCalled();
             expect(boundary.showApiError).not.toHaveBeenCalled();
         } finally {
             await act(async () => root.unmount());

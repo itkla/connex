@@ -14,6 +14,7 @@ vi.mock('@/app/hooks/useWorkspace', () => ({
 }));
 
 vi.mock('@/app/hooks/usePrivilegedMfaConfinement', () => ({
+    usePrivilegedMfaReadiness: () => "ready",
     usePrivilegedMfaConfinement: () => activeWorkspace.confined,
 }));
 

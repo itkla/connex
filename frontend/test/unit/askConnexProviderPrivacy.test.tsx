@@ -39,7 +39,7 @@ vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams()
 vi.mock('@/app/hooks/useActions', () => ({ useActions: () => ({ context: harness.context }), useRegisterActions: () => {} }));
 vi.mock('@/app/hooks/useWorkspace', () => ({ useWorkspace: () => harness.workspace }));
 vi.mock('@/app/hooks/usePermissions', () => ({ usePermissionCheck: () => 'granted' }));
-vi.mock('@/app/hooks/usePrivilegedMfaConfinement', () => ({ usePrivilegedMfaConfinement: () => false }));
+vi.mock('@/app/hooks/usePrivilegedMfaConfinement', () => ({ usePrivilegedMfaReadiness: () => "ready", usePrivilegedMfaConfinement: () => false }));
 vi.mock('@/app/hooks/useAskConnexSkills', () => ({ useAskConnexSkills: () => [] }));
 vi.mock('@/app/hooks/useApiErrorToast', () => ({ useApiErrorToast: () => harness.toast }));
 vi.mock('@/app/hooks/useIsMobile', () => ({ useIsMobile: () => false }));
@@ -48,6 +48,8 @@ vi.mock('@/app/hooks/useAccountStorageGeneration', () => ({ useAccountStorageGen
 vi.mock('@/app/lib/realtime', () => ({ createAiChatSocket: harness.socket }));
 vi.mock('@/app/lib/api', async (importOriginal) => ({
     ...await importOriginal<typeof import('@/app/lib/api')>(),
+    currentPrivilegedMfaReadiness: () => 'ready',
+    privilegedMfaConfinementReason: () => null,
     getAiCommandCenter: vi.fn().mockResolvedValue({ chatAvailable: true, watchesAvailable: true }),
     getAiChatSessions: harness.getSessions,
     getAiChatInvitations: async () => ({ items: [] }),

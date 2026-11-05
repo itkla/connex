@@ -37,6 +37,11 @@
         "partiallySaved": "一部のプロフィール変更は保存されましたが、別の変更に失敗しました。現在の内容を確認して、もう一度お試しください。"
     },
     "AccountSecurity": {
+        "accessCheckingTitle": "アカウントを確認しています",
+        "accessCheckingBody": "確認が完了すると、ワークスペースが開きます。",
+        "accessCheckFailedTitle": "アカウントを確認できませんでした",
+        "accessCheckFailedBody": "このページを開くには、もう一度お試しください。セキュリティ設定は引き続き開けます。",
+        "accessSecurity": "セキュリティ設定",
         "title": "パスキー",
         "subtitle": "パスキーを使うと、パスワードの代わりに指紋・顔認証・セキュリティキーでログインできます。パスキーはワークスペースではなく、あなたのアカウントに紐づきます。",
         "add": "パスキーを追加",

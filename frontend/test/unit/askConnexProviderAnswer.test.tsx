@@ -27,6 +27,10 @@ const boundary = vi.hoisted(() => {
     };
 });
 
+vi.mock('@/app/hooks/usePrivilegedMfaConfinement', async (importOriginal) => ({
+    ...await importOriginal<typeof import('@/app/hooks/usePrivilegedMfaConfinement')>(),
+    usePrivilegedMfaReadiness: () => 'ready',
+}));
 vi.mock('next/navigation', () => ({
     useSearchParams: () => new URLSearchParams(), useParams: () => ({ sessionId: '4' }),
     usePathname: () => '/ask-connex/4',
@@ -56,6 +60,8 @@ vi.mock('@/app/lib/realtime', () => ({
 }));
 vi.mock('@/app/lib/api', async (importOriginal) => ({
     ...await importOriginal<typeof import('@/app/lib/api')>(),
+    currentPrivilegedMfaReadiness: () => 'ready',
+    privilegedMfaConfinementReason: () => null,
     getAiCommandCenter: vi.fn().mockResolvedValue({
         chatAvailable: true, watchesAvailable: true, briefSkillAvailable: true, watches: [], watchLimit: 20,
         latestBriefSessionId: null, latestBriefKind: null, latestBriefDeliveredAt: null,

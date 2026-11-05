@@ -34,12 +34,14 @@ import { useAskConnexSkills } from '@/app/hooks/useAskConnexSkills';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useIsMobile } from '@/app/hooks/useIsMobile';
 import { useLiveNow } from '@/app/hooks/useNow';
-import { usePrivilegedMfaConfinement } from '@/app/hooks/usePrivilegedMfaConfinement';
+import { usePrivilegedMfaConfinement, usePrivilegedMfaReadiness } from '@/app/hooks/usePrivilegedMfaConfinement';
 import { usePermissionCheck } from '@/app/hooks/usePermissions';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { subscribeAiAvailabilityChange } from '@/app/lib/aiAvailabilityEvents';
 import {
     ApiError,
+    currentPrivilegedMfaReadiness,
+    privilegedMfaConfinementReason,
     approveAiAssistantToolCall,
     archiveAiChatSession,
     cancelAiChatTurn,
@@ -467,7 +469,13 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const { activeWorkspaceId, switching } = useWorkspace();
     const permission = usePermissionCheck('AI_USE');
     const confined = usePrivilegedMfaConfinement();
-    const assistantEnabled = permission === 'granted' && !confined;
+    const policyReadiness = usePrivilegedMfaReadiness();
+    const policyReady = policyReadiness === 'ready';
+    const assistantEnabled = policyReady && permission === 'granted' && !confined;
+    const assistantEnabledRef = useRef(assistantEnabled && !switching);
+    useLayoutEffect(() => {
+        assistantEnabledRef.current = assistantEnabled && !switching;
+    }, [assistantEnabled, switching]);
     const skills = useAskConnexSkills();
     const attachmentCreatePermission = usePermissionCheck('ATTACHMENT_CREATE');
     const attachmentDeletePermission = usePermissionCheck('ATTACHMENT_DELETE');
@@ -544,6 +552,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const [desktopRoot, setDesktopRoot] = useState<HTMLElement | null>(null);
     const [workspaceRoot, setWorkspaceRoot] = useState<HTMLElement | null>(null);
     const [stateIdentity, setStateIdentity] = useState<string | null>(null);
+    const initializedIdentityRef = useRef<string | null>(null);
+    const policyPausedIdentityRef = useRef<string | null>(null);
     const [sessions, setSessions] = useState<AiChatSession[]>([]);
     const [invitations, setInvitations] = useState<AiChatSession[]>([]);
     const [activeSession, setActiveSession] = useState<AiChatSession | null>(null);
@@ -1719,6 +1729,11 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             controller.abort();
             return;
         }
+        if (!policyReady && permission === 'granted' && !confined) {
+            policyPausedIdentityRef.current = initializedIdentityRef.current === identity ? identity : null;
+            controller.abort();
+            return;
+        }
         sessionControllerRef.current?.abort();
         sessionControllerRef.current = null;
         const storedSessionId = parseStoredAskConnexSession(safeStorageGet(sessionKey));
@@ -1730,6 +1745,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             let selectionLoadStarted = false;
             await Promise.resolve();
             if (cancelled || controller.signal.aborted) return;
+            const preserveDraft = assistantEnabled && policyPausedIdentityRef.current === identity && initializedIdentityRef.current === identity;
+            policyPausedIdentityRef.current = null;
+            initializedIdentityRef.current = identity;
             setStateIdentity(identity);
             setSessions([]);
             setInvitations([]);
@@ -1741,8 +1759,14 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             messagesRef.current = [];
             setMessages([]);
             setFreshMessageIds(new Set());
-            setComposer('');
-            setFileAttachments([]);
+            if (!preserveDraft) {
+                setComposer('');
+                setFileAttachments([]);
+                setScopeDraft(EMPTY_ASK_CONNEX_SCOPE_DRAFT);
+                setScopeInterpretation(null);
+                setScopeRoutingContent('');
+                setScopeEditorOpen(false);
+            }
             setFeatureUnavailable(false);
             setAvailability(null);
             setSubmissionBlocked(false);
@@ -1752,10 +1776,6 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             dispatchTurn({ type: 'reset' });
             setTurnRecovery(null);
             dispatchToolCalls({ type: 'reset' });
-            setScopeDraft(EMPTY_ASK_CONNEX_SCOPE_DRAFT);
-            setScopeInterpretation(null);
-            setScopeRoutingContent('');
-            setScopeEditorOpen(false);
             setLoadState('loading');
             setLoadError(null);
 
@@ -1851,7 +1871,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             cancelled = true;
             controller.abort();
         };
-    }, [assistantEnabled, canPersist, activeWorkspaceId, clearActiveSession, followDurableTurn, followTurn, identity, refreshSessions, refreshTranscript, reloadRequest, resetStream, sessionKey, sharePermission, showApiError, switching, t, turnKey, userId]);
+    }, [assistantEnabled, canPersist, activeWorkspaceId, clearActiveSession, confined, followDurableTurn, followTurn, identity, permission, policyReady, refreshSessions, refreshTranscript, reloadRequest, resetStream, sessionKey, sharePermission, showApiError, switching, t, turnKey, userId]);
 
     useEffect(() => {
         if (!assistantEnabled || switching) return;
@@ -2127,13 +2147,16 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     }, [assistantEnabled, absorbTurnPartial, activeWorkspaceId, clearActiveSession, enqueueRealtimeRefresh, handleNarrationFrame, handleStreamDelta, handleThinkingFrame, handleTodosFrame, invalidateSessionContent, loadFollowedTurn, refreshSessions, resetStream, switching, userId]);
 
     useEffect(() => {
-        if (!surfaceVisible || presenceSessionId === null || loadState !== 'ready') {
+        if (!assistantEnabled || switching || !surfaceVisible || presenceSessionId === null || loadState !== 'ready') {
             return;
         }
         const sessionId = presenceSessionId;
         const controller = new AbortController();
         let timeout: number | null = null;
+        const eligible = () => assistantEnabledRef.current && currentPrivilegedMfaReadiness() === 'ready'
+            && privilegedMfaConfinementReason() === null;
         const heartbeat = async () => {
+            if (controller.signal.aborted || !eligible()) return;
             const startedAt = performance.now();
             try {
                 const snapshot = await touchAiChatPresence(
@@ -2158,9 +2181,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         return () => {
             if (timeout !== null) window.clearTimeout(timeout);
             controller.abort();
-            void leaveAiChatPresence(sessionId).catch(() => {});
+            if (eligible()) void leaveAiChatPresence(sessionId).catch(() => {});
         };
-    }, [loadState, presenceSessionId, surfaceVisible]);
+    }, [assistantEnabled, loadState, presenceSessionId, surfaceVisible, switching]);
 
     const shareSession = useCallback(async (shared: boolean): Promise<boolean> => {
         if (!activeSession?.ownedByCurrentUser || sharePermission !== 'granted') return false;
@@ -2865,6 +2888,13 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         if (permission === 'unavailable') {
             return { title: t('unavailable.lookupTitle'), body: t('unavailable.lookupBody') };
         }
+        if (!policyReady) {
+            return {
+                title: t(policyReadiness === 'failed' ? 'unavailable.checkFailedTitle' : 'unavailable.checkingTitle'),
+                body: t(policyReadiness === 'failed' ? 'unavailable.checkFailedBody' : 'unavailable.checkingBody'),
+                preserveComposer: availability?.identity === identity && availability.chat && !availability.failed,
+            };
+        }
         if (featureUnavailable) {
             return {
                 title: t('unavailable.featureTitle'),
@@ -2890,7 +2920,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             return { title: t('unavailable.uncertainTitle'), body: t('unavailable.uncertainBody') };
         }
         return null;
-    }, [availability, canAsk, confined, identity, permission, privacyInitializing, privacyUnavailable, submissionBlocked, t, featureUnavailable]);
+    }, [availability, canAsk, confined, identity, permission, policyReadiness, policyReady, privacyInitializing, privacyUnavailable, submissionBlocked, t, featureUnavailable]);
 
     const canRetryTurn = retryPrompt !== null
         && unavailable === null

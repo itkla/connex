@@ -167,8 +167,6 @@ test.describe("workspace and organization identity", () => {
             storageState: { cookies: [], origins: [] },
         });
         let removeVirtualAuthenticator: (() => Promise<void>) | null = null;
-        let releaseStandingRead: () => void = () => undefined;
-        const firstRefusal = new Promise<void>((resolve) => { releaseStandingRead = resolve; });
         try {
             await registerUser(context.request, {
                 username: runId,
@@ -185,11 +183,14 @@ test.describe("workspace and organization identity", () => {
                 if (!isRecord(body)) throw new Error("Expected capability posture");
                 await route.fulfill({ response, json: { ...body, privilegedMfaEnforced: true } });
             });
-            await page.route("**/api/auth/webauthn/register/requirements", async (route) => {
-                await firstRefusal;
-                await route.fallback();
-            });
             let notificationCountRequests = 0;
+            await page.route("**/api/auth/webauthn/register/requirements", async (route) => {
+                const response = await route.fetch();
+                const body: unknown = await response.json();
+                if (!isRecord(body)) throw new Error("Expected passkey requirements");
+                await route.fulfill({ response, json: notificationCountRequests === 0
+                    ? { ...body, standing: "SATISFIED" } : body });
+            });
             await page.route("**/api/notifications/counts", async (route) => {
                 notificationCountRequests += 1;
                 if (notificationCountRequests === 1) {
@@ -201,7 +202,6 @@ test.describe("workspace and organization identity", () => {
                             message: "A passkey must be enrolled before this privileged account can continue",
                         }),
                     });
-                    releaseStandingRead();
                 } else {
                     await route.fallback();
                 }
@@ -223,7 +223,6 @@ test.describe("workspace and organization identity", () => {
             await expect(page).toHaveURL(/\/dashboard$/);
             await expect.poll(() => notificationCountRequests).toBeGreaterThan(1);
         } finally {
-            releaseStandingRead();
             if (removeVirtualAuthenticator) await removeVirtualAuthenticator();
             await Promise.all(context.pages().map((page) => page.unrouteAll({ behavior: "wait" })));
             await context.close();

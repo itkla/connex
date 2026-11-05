@@ -37,6 +37,11 @@
         "partiallySaved": "Some profile changes were saved, but another change failed. Review the current values and try again."
     },
     "AccountSecurity": {
+        "accessCheckingTitle": "Checking your account",
+        "accessCheckingBody": "Your workspace will open when this check finishes.",
+        "accessCheckFailedTitle": "Couldn’t check your account",
+        "accessCheckFailedBody": "Try again to open this page. You can still open Security settings.",
+        "accessSecurity": "Security settings",
         "title": "Passkeys",
         "subtitle": "Passkeys let you sign in with your fingerprint, face, or a security key instead of a password. These are tied to your account, not this workspace.",
         "add": "Add a passkey",

@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 
-import { getEffectivePermissions } from "@/app/lib/api";
+import { currentPrivilegedMfaReadiness, getEffectivePermissions, privilegedMfaConfinementReason } from "@/app/lib/api";
 import {
     checkPermission,
     permissionsDrifted,
@@ -82,7 +82,7 @@ export function PermissionsProvider({
 
     useEffect(() => {
         const refreshWhenVisible = () => {
-            if (document.hidden) return;
+            if (document.hidden || currentPrivilegedMfaReadiness() !== "ready" || privilegedMfaConfinementReason() !== null) return;
             void refresh();
         };
         window.addEventListener("focus", refreshWhenVisible);

@@ -318,6 +318,10 @@ function invalidateClientRequestIdentity() {
     csrfTokenRequest = null;
     clientRequestIdentityEpoch += 1;
     privilegedMfaEventEpoch += 1;
+    privilegedMfaReadiness = "loading";
+    privilegedMfaPolicyEnforced = null;
+    privilegedMfaReadinessSequence = privilegedMfaReadSequence;
+    notifyPrivilegedMfaListeners();
     for (const mutation of inFlightAiMutations.values()) {
         mutation.controller.abort();
     }
@@ -641,6 +645,9 @@ const PRIVILEGED_MFA_CONFINEMENT_MESSAGES: Record<PrivilegedMfaConfinementReason
 /** How a standing check ended: it decided confinement, a newer read already had, or it failed. */
 export type PrivilegedMfaSettleOutcome = "applied" | "superseded" | "failed";
 
+/** Whether ordinary client reads can rely on a resolved privileged-MFA policy. */
+export type PrivilegedMfaReadiness = "loading" | "ready" | "failed";
+
 const PRIVILEGED_MFA_READ_ATTEMPTS = 3;
 const PRIVILEGED_MFA_STANDINGS: ReadonlySet<unknown> = new Set<Types.PrivilegedMfaStanding>([
     "UNPRIVILEGED",
@@ -656,6 +663,9 @@ let privilegedMfaEventEpoch = 0;
 let privilegedMfaReadSequence = 0;
 let privilegedMfaAppliedSequence = 0;
 let privilegedMfaRequirements: Types.PasskeyRegistrationRequirements | null = null;
+let privilegedMfaReadiness: PrivilegedMfaReadiness = "loading";
+let privilegedMfaReadinessSequence = 0;
+let privilegedMfaPolicyEnforced: boolean | null = null;
 const privilegedMfaListeners = new Set<() => void>();
 
 function privilegedMfaReasonForStep(mfaParam: string | null): PrivilegedMfaConfinementReason | null {
@@ -725,6 +735,11 @@ export function currentPrivilegedMfaRequirements(): Types.PasskeyRegistrationReq
     return privilegedMfaRequirements;
 }
 
+/** Shared policy readiness; unresolved policy never establishes permission for background reads. */
+export function currentPrivilegedMfaReadiness(): PrivilegedMfaReadiness {
+    return privilegedMfaReadiness;
+}
+
 /** Subscribes to browser-local privileged MFA confinement and standing changes. */
 export function subscribePrivilegedMfaConfinement(listener: () => void): () => void {
     privilegedMfaListeners.add(listener);
@@ -733,6 +748,14 @@ export function subscribePrivilegedMfaConfinement(listener: () => void): () => v
 
 function notifyPrivilegedMfaListeners() {
     for (const listener of [...privilegedMfaListeners]) listener();
+}
+
+function publishPrivilegedMfaReadiness(status: PrivilegedMfaReadiness, sequence: number, epoch: number, enforced?: boolean) {
+    if (epoch !== privilegedMfaEventEpoch || sequence < privilegedMfaReadinessSequence) return;
+    privilegedMfaReadinessSequence = sequence;
+    privilegedMfaReadiness = status;
+    if (enforced !== undefined) privilegedMfaPolicyEnforced = enforced;
+    notifyPrivilegedMfaListeners();
 }
 
 /** Moves the Security step parameter to the reason in force, without navigating. */
@@ -761,6 +784,8 @@ function releasePrivilegedMfaConfinement() {
 /** Records the server refusing a request for a confinement reason, which overtakes reads in flight. */
 function notePrivilegedMfaRefusal(reason: PrivilegedMfaConfinementReason) {
     privilegedMfaEventEpoch += 1;
+    privilegedMfaReadiness = "loading";
+    privilegedMfaPolicyEnforced = null;
     confinePrivilegedMfa(reason);
     notifyPrivilegedMfaListeners();
 }
@@ -774,6 +799,9 @@ function resetPrivilegedMfaState() {
     privilegedMfaEventEpoch += 1;
     privilegedMfaAppliedSequence = privilegedMfaReadSequence;
     privilegedMfaRequirements = null;
+    privilegedMfaReadiness = "loading";
+    privilegedMfaReadinessSequence = privilegedMfaReadSequence;
+    privilegedMfaPolicyEnforced = null;
     notifyPrivilegedMfaListeners();
 }
 
@@ -859,6 +887,9 @@ function applyPrivilegedMfaStanding(requirements: Types.PasskeyRegistrationRequi
  * {@link currentPrivilegedMfaRequirements}. The public master-enforcement flag is read alongside
  * requirements: when it is false, enrollment/approval metadata does not confine the account. An
  * unknown enforcement posture fails the read and preserves any already-known confinement.
+ * A validated master-off response releases ordinary reads before requirements finish. Readiness
+ * failures have their own publication order, so a newer failed check still holds readers even if
+ * an older standing later settles. Pending background checks retain a valid readiness snapshot.
  *
  * @param settlement what prompted the check; a ceremony is one the server has just accepted
  * @returns whether this read decided the standing, a newer one had, or the read failed
@@ -871,33 +902,64 @@ export async function settlePrivilegedMfaStanding(
         privilegedMfaEventEpoch += 1;
         privilegedMfaCeremonyEpoch = privilegedMfaEventEpoch;
     }
-    const failedUnlessOvertaken = (sequence: number): PrivilegedMfaSettleOutcome =>
-        sequence < privilegedMfaAppliedSequence ? "superseded" : "failed";
+    const failedUnlessOvertaken = (sequence: number, epoch: number, disabled = false): PrivilegedMfaSettleOutcome => {
+        if (sequence < privilegedMfaAppliedSequence) return "superseded";
+        if (!disabled) publishPrivilegedMfaReadiness("failed", sequence, epoch);
+        return "failed";
+    };
     let sequence = privilegedMfaReadSequence;
+    let readEpoch = privilegedMfaEventEpoch;
     for (let attempt = 0; attempt < PRIVILEGED_MFA_READ_ATTEMPTS; attempt += 1) {
         const epoch = privilegedMfaEventEpoch;
         privilegedMfaReadSequence += 1;
         sequence = privilegedMfaReadSequence;
+        const readSequence = sequence;
+        readEpoch = epoch;
+        if (privilegedMfaReadiness !== "ready") publishPrivilegedMfaReadiness("loading", sequence, epoch);
         let response: unknown;
         let enforced: boolean;
+        let disabled = false;
+        let readFailed = false;
         try {
             const [requirements, capabilities] = await Promise.all([
                 getPasskeyRegistrationRequirements(),
-                getCapabilities(),
+                getCapabilities().then((capabilities) => {
+                    if (typeof capabilities.privilegedMfaEnforced !== "boolean") throw new Error("Unknown MFA policy");
+                    if (epoch === privilegedMfaEventEpoch && readSequence >= privilegedMfaAppliedSequence) {
+                        if (!capabilities.privilegedMfaEnforced) {
+                            disabled = true;
+                            privilegedMfaAppliedSequence = readSequence;
+                            releasePrivilegedMfaConfinement();
+                            publishPrivilegedMfaReadiness("ready", readSequence, epoch, false);
+                        } else if (!readFailed && privilegedMfaPolicyEnforced === false) {
+                            publishPrivilegedMfaReadiness("loading", readSequence, epoch, true);
+                        }
+                    }
+                    return capabilities;
+                }),
             ]);
             response = requirements;
-            if (typeof capabilities.privilegedMfaEnforced !== "boolean") return failedUnlessOvertaken(sequence);
             enforced = capabilities.privilegedMfaEnforced;
         } catch {
-            return failedUnlessOvertaken(sequence);
+            readFailed = true;
+            return failedUnlessOvertaken(sequence, epoch, disabled);
         }
-        if (!isPasskeyRegistrationRequirements(response)) return failedUnlessOvertaken(sequence);
+        if (!isPasskeyRegistrationRequirements(response)) return failedUnlessOvertaken(sequence, epoch, disabled);
         if (sequence < privilegedMfaAppliedSequence) return "superseded";
         if (epoch !== privilegedMfaEventEpoch) continue;
+        const legacyRelease = response.standing === undefined
+            && privilegedMfaCeremonyEpoch === privilegedMfaEventEpoch
+            && !privilegedMfaAttestationObserved
+            && privilegedMfaDestinationReason() !== "attestation";
         applyPrivilegedMfaStanding(response, sequence, enforced);
+        publishPrivilegedMfaReadiness(
+            !enforced || response.standing !== undefined || activePrivilegedMfaConfinement() !== null
+                || legacyRelease ? "ready" : "failed",
+            sequence, epoch, enforced,
+        );
         return "applied";
     }
-    return failedUnlessOvertaken(sequence);
+    return failedUnlessOvertaken(sequence, readEpoch);
 }
 
 /**

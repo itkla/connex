@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 
 import { useActions } from '@/app/hooks/useActions';
-import { usePrivilegedMfaConfinement } from '@/app/hooks/usePrivilegedMfaConfinement';
+import { usePrivilegedMfaConfinement, usePrivilegedMfaReadiness } from '@/app/hooks/usePrivilegedMfaConfinement';
 import { usePermissionCheck } from '@/app/hooks/usePermissions';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { getAiAssistantSkills } from '@/app/lib/api';
@@ -73,6 +73,7 @@ function readDirectory(
 export function useAskConnexSkills(context?: AiChatPageContextKind): readonly AiAssistantSkill[] {
     const permission = usePermissionCheck('AI_USE');
     const confined = usePrivilegedMfaConfinement();
+    const policyReady = usePrivilegedMfaReadiness() === "ready";
     const { activeWorkspaceId, switching } = useWorkspace();
     const { context: actionContext } = useActions();
     const userId = actionContext.user?.id ?? null;
@@ -80,7 +81,7 @@ export function useAskConnexSkills(context?: AiChatPageContextKind): readonly Ai
         key: string;
         skills: readonly AiAssistantSkill[];
     } | null>(null);
-    const enabled = !confined && permission === 'granted'
+    const enabled = policyReady && !confined && permission === 'granted'
         && activeWorkspaceId !== null
         && userId !== null
         && !switching;

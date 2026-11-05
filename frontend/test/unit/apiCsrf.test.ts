@@ -50,6 +50,23 @@ describe("API client CSRF bootstrap", () => {
         vi.unstubAllGlobals();
     });
 
+    it("invalidates resolved policy readiness when another tab changes request identity", async () => {
+        const fetchMock = backend(async () => bootstrap());
+        fetchMock.mockImplementation(async (input: string | URL | Request) => {
+            const url = input instanceof Request ? input.url : String(input);
+            if (url.endsWith("/api/auth/csrf")) return bootstrap();
+            if (url.endsWith("/api/capabilities")) return json({ privilegedMfaEnforced: false });
+            return json({ currentPasswordRequired: true, emailConfirmationRequired: false, emailConfirmationSatisfied: false });
+        });
+        const api = await import("@/app/lib/api");
+        await api.csrfHeader();
+        await expect(api.settlePrivilegedMfaStanding("check")).resolves.toBe("applied");
+        expect(api.currentPrivilegedMfaReadiness()).toBe("ready");
+        changeIdentity();
+        expect(api.currentPrivilegedMfaReadiness()).toBe("loading");
+        expect(api.privilegedMfaConfinementReason()).toBeNull();
+    });
+
     it("shares one fetch across N concurrent header requests and caches the result", async () => {
         const pending = Promise.withResolvers<Response>();
         const csrf = vi.fn(() => pending.promise);

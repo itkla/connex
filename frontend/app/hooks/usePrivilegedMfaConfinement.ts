@@ -3,7 +3,12 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 
-import { observePrivilegedMfaConfinementDestination, privilegedMfaConfinementFor, subscribePrivilegedMfaConfinement } from "@/app/lib/api";
+import { currentPrivilegedMfaReadiness, observePrivilegedMfaConfinementDestination, privilegedMfaConfinementFor, subscribePrivilegedMfaConfinement, type PrivilegedMfaReadiness } from "@/app/lib/api";
+
+/** Observes shared policy readiness without issuing another standing request. */
+export function usePrivilegedMfaReadiness(): PrivilegedMfaReadiness {
+    return useSyncExternalStore(subscribePrivilegedMfaConfinement, currentPrivilegedMfaReadiness, () => "loading");
+}
 
 /** Observes known passkey confinement without starting another standing request. */
 export function usePrivilegedMfaConfinement(): boolean {

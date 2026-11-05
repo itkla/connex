@@ -23,6 +23,7 @@ import {
 } from "@/app/components/notifications/notificationEvents";
 import {
     getNotificationCounts,
+    currentPrivilegedMfaReadiness,
     privilegedMfaConfinementFor,
     subscribePrivilegedMfaConfinement,
 } from "@/app/lib/api";
@@ -83,14 +84,14 @@ export function NotificationProvider({
     const searchParams = useSearchParams();
     const { openNotification } = useNotificationWorkspaceActions();
 
-    const privilegedMfaConfinementActive = useSyncExternalStore(
+    const privilegedMfaReadsBlocked = useSyncExternalStore(
         subscribePrivilegedMfaConfinement,
-        () => privilegedMfaConfinementFor(pathname, searchParams.get("mfa")),
-        () => false,
+        () => currentPrivilegedMfaReadiness() !== "ready" || privilegedMfaConfinementFor(pathname, searchParams.get("mfa")),
+        () => true,
     );
 
     const refreshUnread = useCallback(async () => {
-        if (privilegedMfaConfinementActive) return;
+        if (privilegedMfaReadsBlocked) return;
         if (document.hidden) return;
         if (loadingRef.current) {
             pendingRef.current = true;
@@ -161,7 +162,7 @@ export function NotificationProvider({
         } finally {
             loadingRef.current = false;
         }
-    }, [privilegedMfaConfinementActive, recipientId]);
+    }, [privilegedMfaReadsBlocked, recipientId]);
 
     useEffect(() => {
         const invalidateRequest = () => {
@@ -243,7 +244,7 @@ export function NotificationProvider({
     }, [handleFrame]);
 
     useEffect(() => {
-        if (privilegedMfaConfinementActive) return;
+        if (privilegedMfaReadsBlocked) return;
         const initial = window.setTimeout(() => void refreshUnread(), 0);
         const onVisibilityChange = () => {
             if (document.hidden) requestRef.current?.abort();
@@ -259,17 +260,17 @@ export function NotificationProvider({
                 snoozeExpiryTimerRef.current = null;
             }
         };
-    }, [privilegedMfaConfinementActive, refreshUnread]);
+    }, [privilegedMfaReadsBlocked, refreshUnread]);
 
     useEffect(() => {
-        if (privilegedMfaConfinementActive) return;
+        if (privilegedMfaReadsBlocked) return;
         const period = connected ? POLL_SAFETY_INTERVAL_MS : POLL_INTERVAL_MS;
         const interval = window.setInterval(() => void refreshUnread(), period);
         return () => window.clearInterval(interval);
-    }, [connected, privilegedMfaConfinementActive, refreshUnread]);
+    }, [connected, privilegedMfaReadsBlocked, refreshUnread]);
 
     useEffect(() => {
-        if (privilegedMfaConfinementActive) return;
+        if (privilegedMfaReadsBlocked) return;
         const socket = createNotificationSocket({
             onFrame: (frame) => handleFrameRef.current(frame),
             onStatusChange: (status) => {
@@ -280,7 +281,7 @@ export function NotificationProvider({
         });
         socket.activate();
         return () => socket.deactivate();
-    }, [privilegedMfaConfinementActive, refreshUnread]);
+    }, [privilegedMfaReadsBlocked, refreshUnread]);
 
     return (
         <NotificationContext.Provider value={{ recipientId, unread, snoozed, quietHoursActive, refreshUnread }}>

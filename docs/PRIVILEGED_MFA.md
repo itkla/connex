@@ -760,8 +760,13 @@ explicitly disabled. The browser therefore reads `GET /api/capabilities` alongsi
 honors `privilegedMfaEnforced: false` before turning enrollment or approval metadata into confinement.
 Raw requirements remain available for passkey management, but they are not proof that access is
 paused. Missing standing metadata also does not establish confinement. A failed posture/requirements
-read preserves an already-known server refusal or step URL; it does not block an ordinary page that
-has no confinement reason.
+read preserves an already-known server refusal or step URL. Ordinary pages and shell readers wait
+behind a separate shared readiness state while policy is unresolved or its read has failed; the
+page offers a neutral retry state and keeps Security reachable. An explicit master-off response
+releases fresh ordinary pages immediately, even while enrollment metadata is still pending or fails.
+Cached ready policy survives a pending background recheck so the editor is not remounted; an actual
+lookup failure blocks reads until retry succeeds. Readiness failure ordering is separate from the
+original decisive-standing sequence, and identity invalidation clears both.
 
 The same self-only response always includes `privilegedMemberships` (#1534 slice 4b-1),
 independent of both enforcement switches. An unprivileged account receives `[]`. Each entry is
@@ -776,8 +781,9 @@ The advisory `lastOwner` flags identify sole organization owners and sole active
 The passkey card hides those impossible leave actions and labels remaining actions by scope;
 locked server leave checks remain authoritative and may still refuse for other safeguards.
 
-The browser shell skips pinned views, assistant reads, and mobile task counts while confinement is
-known. These reads resume when the shared standing releases confinement. Client navigation to other
+The browser shell skips pinned views, assistant reads and skills, notification counts and sockets,
+automatic permission probes, and mobile task counts while policy is unresolved or failed, or
+confinement is known. These reads resume when policy is ready and confinement is released. Client navigation to other
 app pages shows the required passkey step with a link to Security before mounting page data readers.
 Automatic assistant initialization failures remain inline, so a background refusal cannot produce an
 unrelated global error toast. Explicit retries retain the shared error toast and show the actual
