@@ -134,13 +134,15 @@ class DealValueServiceTest {
     }
 
     @Test
-    void freshWinWithoutLinesRecordsOnlyWhatWasSubmitted() {
+    void freshWinWithoutLinesDefaultsOnlyAnOmittedAmountToTheDealValue() {
         Deal deal = deal("manual", "75.56", "4.126");
         deal.setWon(Boolean.TRUE);
         when(dealLineItemMapper.countByDealId(WORKSPACE_ID, DEAL_ID)).thenReturn(0);
 
-        assertMoney("0.00",
+        assertMoney("75.56",
             service.reconcileRealizedValue(WORKSPACE_ID, deal, null, null));
+        assertMoney("0.00", service.reconcileRealizedValue(
+            WORKSPACE_ID, deal, null, BigDecimal.ZERO));
         assertMoney("9.88", service.reconcileRealizedValue(
             WORKSPACE_ID, deal, null, new BigDecimal("9.876")));
     }
@@ -186,12 +188,16 @@ class DealValueServiceTest {
 
     @Test
     void newDealsOnlyCarryRealizedValueWhenCreatedWon() {
+        assertMoney("75.56", service.resolveRealizedValueForNewDeal(
+            Boolean.TRUE, new BigDecimal("75.56"), null));
+        assertMoney("0.00", service.resolveRealizedValueForNewDeal(
+            Boolean.TRUE, new BigDecimal("75.56"), BigDecimal.ZERO));
         assertMoney("999999.00", service.resolveRealizedValueForNewDeal(
-            Boolean.TRUE, new BigDecimal("999999.00")));
+            Boolean.TRUE, new BigDecimal("75.56"), new BigDecimal("999999.00")));
         assertMoney("0.00", service.resolveRealizedValueForNewDeal(
-            Boolean.FALSE, new BigDecimal("999999.00")));
+            Boolean.FALSE, new BigDecimal("75.56"), new BigDecimal("999999.00")));
         assertMoney("0.00", service.resolveRealizedValueForNewDeal(
-            null, new BigDecimal("999999.00")));
+            null, new BigDecimal("75.56"), new BigDecimal("999999.00")));
     }
 
     private static Deal deal(String source, String value, String actualValue) {

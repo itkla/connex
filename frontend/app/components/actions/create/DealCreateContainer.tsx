@@ -22,7 +22,6 @@ import type { CreateDefaults } from '@/app/lib/actions/types';
 const EMPTY_DRAFT: CreateDealPayload = {
     name: '',
     value: 0,
-    actualValue: 0,
     currency: 'USD',
     pipeline: 0,
     stage: 0,
@@ -279,7 +278,7 @@ const DealCreateContainer = forwardRef<DealCreateContainerHandle, DealCreateCont
                     ...payload,
                     name: payload.name.trim(),
                     value: Number.isFinite(payload.value) ? payload.value : 0,
-                    actualValue: Number.isFinite(payload.actualValue) ? payload.actualValue : 0,
+                    actualValue: Number.isFinite(payload.actualValue) ? payload.actualValue : undefined,
                     currency: payload.currency.trim() || 'USD',
                     pipeline: payload.pipeline || null,
                     stage: payload.stage || null,
