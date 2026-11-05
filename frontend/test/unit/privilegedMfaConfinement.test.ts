@@ -134,6 +134,35 @@ describe("privileged MFA confinement in the browser", () => {
         expect(api.privilegedMfaConfinementReason()).toBe("attestation");
     });
 
+    it.each([true, false])("reconciles an enrollment refusal against master enforcement %s", async (enforced) => {
+        const { location } = stubBrowser(SECURITY);
+        let enrolled = false;
+        let countRequests = 0;
+        stubBackend((url) => {
+            if (url.endsWith("/api/capabilities")) return json({ privilegedMfaEnforced: enforced });
+            if (url.endsWith(REQUIREMENTS)) return requirements(enrolled ? "SATISFIED" : "ENROLLMENT_REQUIRED");
+            if (url.endsWith("/api/notifications/counts")) {
+                countRequests += 1;
+                return countRequests === 1 ? refusal(ENROLLMENT) : json({ unread: 0 });
+            }
+            return null;
+        });
+        const api = await import("@/app/lib/api");
+        await expect(api.getNotificationCounts()).rejects.toMatchObject({ code: ENROLLMENT });
+        await expect(api.settlePrivilegedMfaStanding("check")).resolves.toBe("applied");
+        if (enforced) {
+            expect(api.privilegedMfaConfinementReason()).toBe("enrollment");
+            await expect(api.getNotificationCounts()).rejects.toMatchObject({ code: ENROLLMENT });
+            expect(countRequests).toBe(1);
+            enrolled = true;
+            await expect(api.settlePrivilegedMfaStanding("ceremony")).resolves.toBe("applied");
+        }
+        expect(api.privilegedMfaConfinementReason()).toBeNull();
+        expect(location.search).toBe("");
+        await expect(api.getNotificationCounts()).resolves.toMatchObject({ unread: 0 });
+        expect(countRequests).toBe(2);
+    });
+
     it("confines on an approval refusal, routes to the approval step and raises later refusals itself", async () => {
         const { location } = stubBrowser("/dashboard");
         const requests = stubBackend((url) => {

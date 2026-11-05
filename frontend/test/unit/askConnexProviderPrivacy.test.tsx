@@ -5,8 +5,9 @@ import AskConnexProvider from '@/app/components/ask-connex/AskConnexProvider';
 import type AskConnexDrawer from '@/app/components/ask-connex/AskConnexDrawer';
 import type AskConnexMissionProgress from '@/app/components/ask-connex/AskConnexMissionProgress';
 import { ASK_CONNEX_REALTIME_REFRESH_DELAY_MS } from '@/app/components/ask-connex/realtimeRefreshCoalescer';
-import { ApiError } from '@/app/lib/api';
+import { ApiError, getAiCommandCenter } from '@/app/lib/api';
 import type { AskConnexScopeDraft } from '@/app/lib/askConnexScope';
+import { askConnexTurnStorageKey, serializeStoredAskConnexTurn, type StoredAskConnexTurn } from '@/app/lib/askConnex';
 import type { AiChatSocketHandlers } from '@/app/lib/realtime';
 import type { AiAgentRun, AiAgentRunPage, AiChatSession, AiChatSessionDetail, AiChatTurn } from '@/app/lib/types';
 import { installInteractiveDocument } from '@/test/unit/helpers/interactiveDocument';
@@ -53,6 +54,7 @@ vi.mock('@/app/lib/api', async (importOriginal) => ({
     getActiveWorkspaceMembers: async () => [],
     getAiChatSession: harness.getSession,
     getAiChatTurn: harness.getTurn,
+    getAiGenerationStatus: vi.fn().mockRejectedValue(new Error('Generation handle is no longer retained')),
     getAiChatAttachments: async () => [],
     getAiAssistantToolCalls: async () => [],
     getAiAgentRuns: harness.getMissions,
@@ -108,14 +110,15 @@ async function flushRealtimeRefresh() {
     await act(async () => { await vi.advanceTimersByTimeAsync(ASK_CONNEX_REALTIME_REFRESH_DELAY_MS); });
 }
 
-async function mount(active = true, generation = '1') {
+async function mount(active = true, generation = '1', storedTurn?: StoredAskConnexTurn) {
     const interactive = installInteractiveDocument();
+    const storage = new Map(storedTurn ? [[askConnexTurnStorageKey(1, 1), serializeStoredAskConnexTurn(storedTurn)]] : []);
     Object.assign(window, {
         setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout,
         setInterval: globalThis.setInterval, clearInterval: globalThis.clearInterval,
         requestAnimationFrame: (callback: FrameRequestCallback) => window.setTimeout(() => callback(0), 0),
         cancelAnimationFrame: (handle: number) => window.clearTimeout(handle),
-        localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+        localStorage: { getItem: (key: string) => storage.get(key) ?? null, setItem: () => {}, removeItem: (key: string) => storage.delete(key) },
     });
     const running: AiChatTurn = { turnId: 9, sessionId: 7, status: 'running', terminalReason: null, progress: [] };
     harness.getSession.mockResolvedValue({ ...detail(active ? running : null),
@@ -145,6 +148,51 @@ describe('Ask Connex provider privacy withdrawal', () => {
         harness.getMissions.mockResolvedValue({ items: [], nextCursor: null });
     });
     afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+    it('keeps a newer deep-link selection when initial readiness finishes late', async () => {
+        const ready = await getAiCommandCenter();
+        const readiness = Promise.withResolvers<typeof ready>();
+        vi.mocked(getAiCommandCenter).mockReturnValueOnce(readiness.promise);
+        const mounted = await mount(false);
+        try {
+            expect(props().activeSession?.id).toBe(7);
+            expect(props().unavailable?.title).toBe('unavailable.checkingTitle');
+            const second = { ...session, id: 8, title: 'Second chat' };
+            harness.getSession.mockResolvedValueOnce({ ...detail(null), session: second });
+            await act(async () => props().onSelectSession(second));
+            expect(props().activeSession?.id).toBe(8);
+            expect(harness.router.replace).toHaveBeenCalledWith('/ask-connex/8');
+            harness.sessionId = '8';
+            await mounted.render();
+            await act(async () => readiness.resolve(ready));
+            expect(props().activeSession?.id).toBe(8);
+            expect(harness.toast).not.toHaveBeenCalled();
+        } finally {
+            readiness.resolve(ready);
+            await mounted.unmount();
+        }
+    });
+
+    it('recovers a stored terminal turn on the same deep link after pending readiness', async () => {
+        const ready = await getAiCommandCenter();
+        const readiness = Promise.withResolvers<typeof ready>();
+        vi.mocked(getAiCommandCenter).mockReturnValueOnce(readiness.promise);
+        const mounted = await mount(false, '1', { sessionId: 7, turnId: 9, generationHandle: 'generation-9' });
+        try {
+            expect(props().activeSession?.id).toBe(7);
+            expect(harness.getTurn).not.toHaveBeenCalled();
+            harness.getTurn.mockResolvedValue({
+                turnId: 9, sessionId: 7, status: 'timed_out', terminalReason: 'turn_deadline_exceeded', progress: [],
+            });
+            await act(async () => readiness.resolve(ready));
+            expect(harness.getTurn).toHaveBeenCalled();
+            expect(props().turn.phase).toBe('timed_out');
+            expect(props().activeSession?.id).toBe(7);
+        } finally {
+            readiness.resolve(ready);
+            await mounted.unmount();
+        }
+    });
 
     it('does not resolve the previous workspace session while its dashboard navigation is pending', async () => {
         const mounted = await mount(false);

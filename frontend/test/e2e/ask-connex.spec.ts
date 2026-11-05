@@ -64,6 +64,10 @@ test.describe("Ask Connex dual surface", () => {
         });
     });
 
+    test.afterEach(async ({ page }) => {
+        await page.unrouteAll({ behavior: "wait" });
+    });
+
     test("the workspace route is protected and returns the visitor after signing in", async ({ browser }, testInfo) => {
         const baseURL = testInfo.project.use.baseURL;
         if (typeof baseURL !== "string") throw new Error("The E2E project requires a base URL");

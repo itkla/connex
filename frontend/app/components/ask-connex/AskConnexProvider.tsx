@@ -611,6 +611,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const tempMessageIdRef = useRef(-1);
     const sessionCreationRef = useRef<Promise<AiChatSession> | null>(null);
     const sessionEpochRef = useRef(0);
+    const sessionSelectionVersionRef = useRef(0);
     const activeSessionRef = useRef<AiChatSession | null>(null);
     const knownSessionsRef = useRef<AiChatSession[]>([]);
     const workspacePrivacyCutoffsRef = useRef(new Map<number, bigint>());
@@ -873,6 +874,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     }, [activeWorkspaceId, canAsk, missionContentVersion, scopePreviewKey, scopeRoutingContent, switching]);
 
     useEffect(() => {
+        if (workspaceSessionId !== null && workspaceSessionIdRef.current !== workspaceSessionId) {
+            sessionSelectionVersionRef.current += 1;
+        }
         workspaceSessionIdRef.current = workspaceSessionId;
         workspaceRouteNavigationRef.current = renderedWorkspaceNavigationVersion();
     }, [pathname, workspaceSessionId]);
@@ -942,6 +946,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         if (activeSessionRef.current?.id !== sessionId) return;
         scopePrivacyEpochRef.current += 1;
         sessionEpochRef.current += 1;
+        sessionSelectionVersionRef.current += 1;
         sessionControllerRef.current?.abort();
         sessionContentControllerRef.current.abort();
         sessionContentControllerRef.current = new AbortController();
@@ -1498,6 +1503,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         setPrivacyUnavailable(false);
         setPrivacyInitializing(false);
         sessionEpochRef.current++;
+        sessionSelectionVersionRef.current += 1;
         sessionControllerRef.current?.abort();
         transcriptRefreshVersionRef.current += 1;
         safeStorageRemove(sessionKey);
@@ -1705,6 +1711,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         const explicitRetry = reloadRequest !== null && reloadRequest.identity === identity
             && handledReloadRequestRef.current !== reloadRequest;
         sessionEpochRef.current++;
+        const initializationSelectionVersion = sessionSelectionVersionRef.current;
         const controller = new AbortController();
         identityControllerRef.current?.abort();
         identityControllerRef.current = controller;
@@ -1774,6 +1781,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                     if (cancelled || controller.signal.aborted) return;
                     setMembers(workspaceMembers.filter((member) => member.status === 'active'));
                 }
+                if (initializationSelectionVersion !== sessionSelectionVersionRef.current) return;
                 if (selectedSessionId === null) {
                     setLoadState('ready');
                     return;
@@ -1882,6 +1890,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const selectSession = useCallback(async (session: AiChatSession) => {
         if (working) return;
         sessionEpochRef.current++;
+        sessionSelectionVersionRef.current += 1;
         sessionControllerRef.current?.abort();
         const controller = new AbortController();
         sessionControllerRef.current = controller;

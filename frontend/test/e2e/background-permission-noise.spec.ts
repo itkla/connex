@@ -99,6 +99,6 @@ test("an unconfigured assistant explains availability before accepting a questio
     await page.goto("/ask-connex");
     await expect(page.getByRole("heading", { name: message("en", "common", "AskConnex.unavailable.featureTitle") })).toBeVisible();
     await expect(page.getByRole("combobox", { name: message("en", "common", "AskConnex.composerAria") })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: message("en", "common", "AskConnex.jobs.dailyWorkBrief.label") })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: message("en", "common", "AskConnex.jobs.workspaceActivity.label"), exact: true })).toHaveCount(0);
     await expect(page.locator('[data-sonner-toast][data-type="error"]')).toHaveCount(0);
 });
