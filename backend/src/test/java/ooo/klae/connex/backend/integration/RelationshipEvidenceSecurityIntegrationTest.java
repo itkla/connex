@@ -168,7 +168,7 @@ class RelationshipEvidenceSecurityIntegrationTest {
             .andExpect(jsonPath("$.subjectId").value(person.getId()))
             .andExpect(jsonPath("$.asOf").exists())
             .andExpect(jsonPath("$.temperature.asOf").exists())
-            .andExpect(jsonPath("$.temperature.modelVersion").value("warmth-v1"))
+            .andExpect(jsonPath("$.temperature.modelVersion").value("warmth-v2"))
             .andExpect(jsonPath("$.attributionRule").value("direct_person_touches"))
             .andExpect(jsonPath("$.contributors", hasSize(3)))
             .andExpect(jsonPath("$.contributors[*].sourceType",
@@ -518,7 +518,8 @@ class RelationshipEvidenceSecurityIntegrationTest {
         Task task = new Task();
         task.setWorkspaceId(workspace.getId());
         task.setDescription("Eligible evidence task");
-        task.setStatus("todo");
+        task.setCompleted(true);
+        task.setStatus("done");
         task.setAssignedTo(user);
         task.setPerson(person);
         task.setCreatedAt(LocalDateTime.now(ZoneOffset.UTC)

@@ -187,7 +187,7 @@ class RelationshipSignalDetectorServiceTest {
             1,
             null,
             null,
-            "warmth-v1",
+            "warmth-v2",
             AS_OF);
         when(scoringService.scoreWorkspace(WORKSPACE_ID)).thenReturn(
             new ScoringService.WorkspaceScores(List.of(cooling), List.of()));
@@ -509,7 +509,7 @@ class RelationshipSignalDetectorServiceTest {
             3,
             "2026-08-20",
             daysUntilCold,
-            "warmth-v1",
+            "warmth-v2",
             AS_OF);
     }
 
@@ -524,7 +524,7 @@ class RelationshipSignalDetectorServiceTest {
             3,
             null,
             null,
-            "warmth-v1",
+            "warmth-v2",
             AS_OF);
     }
 

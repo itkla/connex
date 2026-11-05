@@ -40,6 +40,31 @@ class RelationshipSignalMapperTest extends AbstractServiceTest {
     @Autowired private JdbcTemplate jdbcTemplate;
 
     @Test
+    void modelCutoverRetainsMatchedActorStateAndLaterSourceChangesStillResurface() {
+        var writer = new RelationshipSignalWriteService(signalMapper);
+        LocalDateTime at = LocalDateTime.of(2026, 8, 8, 12, 0);
+        RelationshipSignal first = signal("relationship_decay", "person", 41,
+            "relationship_decay:person:41", "first");
+        first.setSourceModelVersion("warmth-v1");
+        writer.replaceFamily(workspace.getId(), "relationship_decay", "first", List.of(first), at, at);
+        signalMapper.insertState(workspace.getId(), first.getId(), currentUser.getId(),
+            "dismissed", null, first.getSourceStateHash());
+        RelationshipSignal next = signal("relationship_decay", "person", 41,
+            first.getDedupeKey(), "next");
+        next.setSourceStateHash("b".repeat(64));
+        writer.replaceFamily(workspace.getId(), "relationship_decay", "next", List.of(next), at.plusMinutes(1), at);
+        var persisted = signalMapper.getActiveForActor(workspace.getId(), first.getId(), currentUser.getId());
+        assertEquals(next.getSourceStateHash(), persisted.getDismissedSourceHash());
+        assertEquals("dismissed", persisted.getDisposition());
+        assertNull(signalMapper.lockByDedupeKey(workspace.getId() + 100_000, first.getDedupeKey()));
+        next.setSourceStateHash("c".repeat(64));
+        next.setGenerationToken("live-change");
+        writer.replaceFamily(workspace.getId(), "relationship_decay", "live-change", List.of(next), at.plusMinutes(2), at);
+        persisted = signalMapper.getActiveForActor(workspace.getId(), first.getId(), currentUser.getId());
+        assertNotEquals(persisted.getSourceStateHash(), persisted.getDismissedSourceHash());
+    }
+
+    @Test
     void threeIdenticalGenerationCyclesCreateNoDuplicateDomainRowsOrNotifications() {
         int notificationsBefore = count("notification");
         int activitiesBefore = count("activity");
@@ -342,7 +367,7 @@ class RelationshipSignalMapperTest extends AbstractServiceTest {
             3,
             goesColdAt,
             daysUntilCold,
-            "warmth-v1",
+            "warmth-v2",
             asOf);
     }
 

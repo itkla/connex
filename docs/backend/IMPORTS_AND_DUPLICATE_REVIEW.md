@@ -99,6 +99,7 @@ The Settings → Data interaction-history wizard imports one historical person p
 - Never call per-row domain services or publish rules, mentions, audit, or notifications from the backfill path.
 - Never auto-link shared or ambiguous candidates.
 - Keep the backfill inert: imported history does not masquerade as live user activity.
+- For completed task history, the supplied interaction occurrence is the completion instant (`completed_at`); open imported tasks have no completion instant. Do not infer one for previously stored rows.
 
 Source-less rows receive their stable semantic-occurrence ordinal before participant resolution. Identical legitimate interactions remain distinct, while replaying the same ordered file remains idempotent.
 

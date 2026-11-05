@@ -344,6 +344,7 @@ public final class TenantLifecycleRegistry {
         raw.add(direct("document_template", 520));
         raw.add(direct("entity_reference", 530));
         raw.add(direct("historical_notification_baseline", 535));
+        raw.add(direct("warmth_notification_model_state", 536));
         raw.add(direct("notification", 540));
         raw.add(direct("relationship_signal_family_state", 541));
         raw.add(direct("relationship_signal", 542));

@@ -382,8 +382,8 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
             controlJdbc.update("INSERT INTO deal_person (deal_id, person_id, role) VALUES (?, ?, 'Contact')",
                 dealIds.getFirst(), person);
             addActivity(workspaceId, userId, person, null, "2026-09-15 12:00:00");
-            controlJdbc.update("INSERT INTO task (workspace_id, person_id, description, created_at) "
-                + "VALUES (?, ?, 'Person Matrix Task', '2026-09-16')", workspaceId, person);
+            controlJdbc.update("INSERT INTO task (workspace_id, person_id, description, completed, status, completed_at, created_at) "
+                + "VALUES (?, ?, 'Person Matrix Task', TRUE, 'done', '2026-09-16', '2026-09-16')", workspaceId, person);
         }
     }
 
@@ -534,8 +534,8 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
             addActivity(workspaceId, userId, person, deal, "2026-09-30 12:00:00");
             addNote(workspaceId, userId, person, deal,
                 "workspace", "Company Evidence Note " + i, "Evidence", "2026-09-30 12:00:00");
-            controlJdbc.update("INSERT INTO task (workspace_id, person_id, deal_id, description, created_at) "
-                + "VALUES (?, ?, ?, ?, '2026-09-30 12:00:00')", workspaceId, person, deal,
+            controlJdbc.update("INSERT INTO task (workspace_id, person_id, deal_id, description, completed, status, completed_at, created_at) "
+                + "VALUES (?, ?, ?, ?, TRUE, 'done', '2026-09-30 12:00:00', '2026-09-30 12:00:00')", workspaceId, person, deal,
                 "Company Evidence Task " + i);
         }
         int sharedAccountDeal = addReportDeal(companyIds.get(1), "Company Evidence Shared Account", "10", "USD");
@@ -544,15 +544,15 @@ public final class RecordVisibilityPlaneFixture implements AutoCloseable {
             addActivity(workspaceId, userId, person, sharedAccountDeal, "2026-09-30 12:00:00");
             addNote(workspaceId, userId, person, sharedAccountDeal,
                 "workspace", "Deal-attributed company note", "Evidence", "2026-09-30 12:00:00");
-            controlJdbc.update("INSERT INTO task (workspace_id, person_id, deal_id, description, created_at) "
-                + "VALUES (?, ?, ?, 'Deal-attributed company task', '2026-09-30 12:00:00')",
+            controlJdbc.update("INSERT INTO task (workspace_id, person_id, deal_id, description, completed, status, completed_at, created_at) "
+                + "VALUES (?, ?, ?, 'Deal-attributed company task', TRUE, 'done', '2026-09-30 12:00:00', '2026-09-30 12:00:00')",
                 workspaceId, person, sharedAccountDeal);
         }
         addActivity(workspaceId, userId, null, sharedAccountDeal, "2026-09-30 12:00:00");
         addNote(workspaceId, userId, null, sharedAccountDeal,
             "workspace", "Deal-only company note", "Evidence", "2026-09-30 12:00:00");
-        controlJdbc.update("INSERT INTO task (workspace_id, deal_id, description, created_at) "
-            + "VALUES (?, ?, 'Deal-only company task', '2026-09-30 12:00:00')", workspaceId, sharedAccountDeal);
+        controlJdbc.update("INSERT INTO task (workspace_id, deal_id, description, completed, status, completed_at, created_at) "
+            + "VALUES (?, ?, 'Deal-only company task', TRUE, 'done', '2026-09-30 12:00:00', '2026-09-30 12:00:00')", workspaceId, sharedAccountDeal);
         controlJdbc.update("UPDATE company SET archived_at = '2026-08-03' WHERE id = ?", companyIds.get(5));
         controlJdbc.update("UPDATE person SET archived_at = '2026-08-03' WHERE id = ?", personIds.get(5));
         addNote(workspaceId, userId, personIds.getFirst(), null, "private", "Company Private Note", "Private", "2026-09-30 12:00:00");
