@@ -488,7 +488,7 @@ class ImportServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void recordPreviewsDedupeEveryCanonicalStrongKeyWithinTheFile() {
+    void recordPreviewsKeepPeopleWithSharedPhonesSeparateAndDedupeCompanies() {
         ImportPreviewResult people = importService.previewPersons(req(
             List.of(
                 map("Name", "name"),
@@ -520,7 +520,7 @@ class ImportServiceTest extends AbstractServiceTest {
                     "Phone", "+81 90 2345 6789")),
             "fill_empty"));
 
-        assertEquals(1, people.getToCreate());
+        assertEquals(2, people.getToCreate());
         assertEquals(0, people.getToSkip());
         assertEquals(1, companies.getToCreate());
         assertEquals(0, companies.getToSkip());
@@ -621,7 +621,7 @@ class ImportServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void personImportRejectsBridgedCanonicalIdentityGroups() {
+    void personImportSeparatesEmailGroupsConnectedOnlyByPhone() {
         ImportPreviewResult result = importService.previewPersons(req(
             List.of(
                 map("Name", "name"),
@@ -642,10 +642,10 @@ class ImportServiceTest extends AbstractServiceTest {
                     "Phone", "+1 202 555 0102")),
             "fill_empty"));
 
-        assertEquals(3, result.getInvalid());
-        assertTrue(result.getRows().stream()
-            .allMatch(row -> row.getErrors().stream()
-                .anyMatch(error -> error.contains("explicit duplicate resolution"))));
+        assertEquals(0, result.getInvalid());
+        assertEquals(2, result.getToCreate());
+        assertEquals(List.of(0, 1, 1), result.getRows().stream()
+            .map(row -> row.getCanonicalRowIndex()).toList());
     }
 
     @Test
@@ -1641,6 +1641,7 @@ class ImportServiceTest extends AbstractServiceTest {
         Person target = new Person();
         target.setName("Changing automatic target");
         target.setEmail("changing-target-" + unique() + "@example.test");
+        target.setPhone("03-5555-0007");
         Person created = personService.create(target);
         doReturn(List.of()).when(identityMapperSpy)
             .findCurrentPersonIdentityMatches(
@@ -1649,10 +1650,11 @@ class ImportServiceTest extends AbstractServiceTest {
                 List.of(target.getEmail()));
 
         ImportResult result = reviewAndCommitPersons(req(
-            List.of(map("Name", "name"), map("Email", "email")),
+            List.of(map("Name", "name"), map("Email", "email"), map("Phone", "phone")),
             List.of(Map.of(
                 "Name", "Stale automatic update",
-                "Email", created.getEmail())),
+                "Email", created.getEmail(),
+                "Phone", created.getPhone())),
             "overwrite"));
 
         assertEquals(0, result.getUpdated());
@@ -2645,6 +2647,35 @@ class ImportServiceTest extends AbstractServiceTest {
 
         assertEquals(1, preview.getToCreate());
         assertEquals(1, result.getCreated());
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @Test
+    void personPreviewDoesNotReuseACollidingDefinitionWithoutCreationPermission() {
+        CustomFieldDefinition definition = new CustomFieldDefinition();
+        definition.setWorkspaceId(workspace.getId());
+        definition.setEntityType("person");
+        definition.setFieldKey("a_b");
+        definition.setLabel("A-B");
+        definition.setFieldType("text");
+        customFieldDefinitionMapper.insert(definition);
+        memberWithPermissions("PERSON_CREATE");
+
+        assertThrows(ForbiddenException.class, () -> importService.previewPersons(req(
+            List.of(map("Name", "name"), new ColumnMapping("Custom", null, true, "text", "A B")),
+            List.of(Map.of("Name", "Separate field contact", "Custom", "Separate value")), "fill_empty")));
+    }
+
+    @Test
+    void personPreviewRejectsTwoColumnsThatWouldCreateTheSameDefinition() {
+        BadRequestException exception = assertThrows(BadRequestException.class, () -> importService.previewPersons(req(
+            List.of(map("Name", "name"),
+                new ColumnMapping("First", null, true, "text", "Same field"),
+                new ColumnMapping("Second", null, true, "text", "Same field")),
+            List.of(Map.of("Name", "Duplicate field contact", "First", "one", "Second", "two")), "fill_empty")));
+
+        assertTrue(exception.getMessage().contains("would create the same custom field"));
+        assertNull(customFieldDefinitionMapper.getByKey(workspace.getId(), "person", "same_field"));
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
