@@ -78,6 +78,43 @@ class ScoringServiceTest {
     private static final Instant NOW = Instant.parse("2026-06-30T00:00:00Z");
 
     @Test
+    void taskReplayAndFingerprintsUseOnlyRecordedCompletions() {
+        Person person = person(1, 10);
+        Task task = task(person, null, "2026-06-01 00:00:00");
+        task.setId(40);
+        task.setCompleted(false);
+        task.setCompletedAt(null);
+        TaskMapper tasks = mock(TaskMapper.class);
+        PersonMapper people = mock(PersonMapper.class);
+        when(tasks.getAllTasks(WS)).thenReturn(List.of(task));
+        when(people.getProcessablePersons(WS, "[1]")).thenReturn(List.of(person));
+        ScoringService service = new ScoringService(people, mock(CompanyMapper.class), mock(DealMapper.class),
+            mock(ActivityMapper.class), mock(NoteMapper.class), tasks, Clock.fixed(NOW, ZoneOffset.UTC), recordScopes());
+        long[] frames = {NOW.minusSeconds(86_400).toEpochMilli(), NOW.toEpochMilli()};
+
+        assertTrue(service.contactSourceStateHashes(WS, Set.of(), Set.of(), Set.of()).isEmpty());
+        assertTrue(service.companySourceStateHashes(WS).isEmpty());
+        assertTrue(service.replayBands(WS, frames, (id, at) -> 10, Set.of(1), Map.of())
+            .contactFrames().getLast().isEmpty());
+
+        task.setCompleted(true);
+        assertTrue(service.contactSourceStateHashes(WS, Set.of(), Set.of(), Set.of()).isEmpty());
+        task.setCompletedAt("2026-06-30 00:00:00");
+        Map<Integer, String> completedHashes = service.contactSourceStateHashes(WS, Set.of(), Set.of(), Set.of());
+        assertTrue(completedHashes.containsKey(1));
+        assertTrue(service.companySourceStateHashes(WS).containsKey(10));
+        ScoringService.ReplayBands replay = service.replayBands(WS, frames, (id, at) -> 10, Set.of(1), Map.of());
+        assertEquals("cold", replay.contactFrames().getFirst().get(1));
+        assertEquals("cool", replay.contactFrames().getLast().get(1));
+        assertEquals("cool", replay.companyFrames().getLast().get(10));
+        task.setCreatedAt("2026-05-01 00:00:00");
+        assertEquals(completedHashes, service.contactSourceStateHashes(WS, Set.of(), Set.of(), Set.of()));
+        task.setCompleted(false);
+        assertTrue(service.contactSourceStateHashes(WS, Set.of(), Set.of(), Set.of()).isEmpty());
+        assertTrue(service.companySourceStateHashes(WS).isEmpty());
+    }
+
+    @Test
     void emptyOrNullOnlyCompanySelectionsDoNotTouchTheScopeBoundary() {
         var scopes = ooo.klae.connex.backend.support.RecordVisibilityScopes.unfiltered();
         var companies = mock(CompanyMapper.class);
@@ -227,7 +264,7 @@ class ScoringServiceTest {
 
         assertEquals(live, asOfNow);
         assertNotEquals("cold", scoreFor(live, 1).getBand());
-        assertEquals("warmth-v1", scoreFor(live, 1).getModelVersion());
+        assertEquals("warmth-v2", scoreFor(live, 1).getModelVersion());
         assertEquals(NOW, scoreFor(live, 1).getAsOf());
     }
 
@@ -242,7 +279,7 @@ class ScoringServiceTest {
         RelationshipTemperatureDto live = service.scoreCompanies(WS).getFirst();
 
         assertEquals(List.of(live), service.scoreCompanies(WS, NOW));
-        assertEquals("warmth-v1", live.getModelVersion());
+        assertEquals("warmth-v2", live.getModelVersion());
         assertEquals(NOW, live.getAsOf());
     }
 
@@ -999,8 +1036,8 @@ class ScoringServiceTest {
             activity.getTimestamp(), model.activityWeight(activity.getType()))));
         notes.stream().filter(note -> "workspace".equals(note.getVisibility())).forEach(note ->
             sources.add(new SourceTouch(note.getPerson(), note.getDeal(), note.getCreatedAt(), model.noteWeight())));
-        tasks.forEach(task -> sources.add(new SourceTouch(task.getPerson(), task.getDeal(),
-            task.getCreatedAt(), model.taskWeight())));
+        tasks.stream().filter(Task::isCompleted).forEach(task -> sources.add(new SourceTouch(task.getPerson(), task.getDeal(),
+            task.getCompletedAt(), model.taskWeight())));
         return sources;
     }
 
@@ -1087,6 +1124,8 @@ class ScoringServiceTest {
         task.setPerson(person);
         task.setDeal(deal);
         task.setCreatedAt(createdAt);
+        task.setCompleted(true);
+        task.setCompletedAt(createdAt);
         return task;
     }
 

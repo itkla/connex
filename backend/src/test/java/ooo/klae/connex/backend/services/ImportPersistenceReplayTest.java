@@ -175,7 +175,7 @@ class ImportPersistenceReplayTest extends AbstractServiceTest {
         assertEquals(6, afterFirst.artifacts().tags());
         assertEquals(2, afterFirst.artifacts().relationships());
         assertEquals(1, afterFirst.artifacts().notifications());
-        assertEquals(2, afterFirst.artifacts().relationshipEvidenceEvents());
+        assertEquals(1, afterFirst.artifacts().relationshipEvidenceEvents());
         assertEquals(afterFirst, afterSecond);
         assertEquals(afterFirst, afterThird);
     }
@@ -236,7 +236,7 @@ class ImportPersistenceReplayTest extends AbstractServiceTest {
             personEmail,
             dealName);
         List<Map<String, Object>> tasks = jdbcTemplate.queryForList(
-            "SELECT t.id, t.workspace_id, t.description, t.completed, t.status, t.position, "
+            "SELECT t.id, t.workspace_id, t.description, t.completed, t.completed_at, t.status, t.position, "
                 + "t.due_date, t.assigned_to_id, t.person_id, t.deal_id, t.created_at, "
                 + "t.updated_at FROM task t LEFT JOIN person p ON p.id = t.person_id "
                 + "LEFT JOIN deal d ON d.id = t.deal_id "

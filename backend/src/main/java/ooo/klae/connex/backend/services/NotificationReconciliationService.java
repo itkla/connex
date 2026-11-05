@@ -43,6 +43,7 @@ import ooo.klae.connex.backend.beans.TaskReminderCandidate;
 import ooo.klae.connex.backend.dto.DealRiskDto;
 import ooo.klae.connex.backend.dto.IntroSuggestionDto;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
+import ooo.klae.connex.backend.warmth.RelationshipWarmthModel;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.PreferenceMapper;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
@@ -144,8 +145,6 @@ public class NotificationReconciliationService {
         Instant evaluationInstant = clock.instant();
         String triggeredAt = utcTimestamp(evaluationInstant);
         Map<ReminderKey, Notification> existing = loadExisting(workspaceId);
-        List<HistoricalNotificationBaseline> baselines =
-            notificationMapper.findHistoricalNotificationBaselines(workspaceId);
         Map<PreferenceKey, Boolean> preferences = loadPreferences(workspaceId);
         Map<ReminderKey, Notification> expected = new LinkedHashMap<>();
         Set<String> managedTypes = new HashSet<>();
@@ -161,6 +160,10 @@ public class NotificationReconciliationService {
             includeRelationshipNudges && recordVisibilityScope != null
                 ? relationshipSourceSnapshot(workspaceId, evaluationInstant)
                 : null;
+        if (relationshipSources != null && recordVisibilityScope != null
+                && !baselineWarmthModel(workspaceId, evaluationInstant, recordVisibilityScope)) {
+            relationshipSources = null;
+        }
         Map<Integer, RelationshipTemperatureDto> temperatures =
             relationshipSources == null
                 ? null
@@ -205,6 +208,8 @@ public class NotificationReconciliationService {
             }
         }
 
+        List<HistoricalNotificationBaseline> baselines =
+            notificationMapper.findHistoricalNotificationBaselines(workspaceId);
         Set<ReminderKey> historicallySuppressed = reconcileHistoricalBaselines(
             workspaceId,
             expected,
@@ -266,25 +271,36 @@ public class NotificationReconciliationService {
             Instant evaluationInstant,
             HistoricalBaselineScope exclusion,
             RecordVisibilityScope recordVisibilityScope) {
+        return historicalExpectationSnapshot(workspaceId, evaluationInstant, exclusion, recordVisibilityScope, false);
+    }
+
+    private HistoricalExpectationSnapshot historicalExpectationSnapshot(
+            int workspaceId,
+            Instant evaluationInstant,
+            HistoricalBaselineScope exclusion,
+            RecordVisibilityScope recordVisibilityScope,
+            boolean warmthOnly) {
         String triggeredAt = utcTimestamp(evaluationInstant);
         Map<ReminderKey, Notification> existing = loadExisting(workspaceId);
         Map<PreferenceKey, Boolean> preferences = Map.of();
         Map<ReminderKey, Notification> expected = new LinkedHashMap<>();
-        addTaskReminders(
-            workspaceId,
-            existing,
-            expected,
-            preferences,
-            triggeredAt,
-            evaluationInstant,
-            exclusion.taskIds());
-        addDealCloseReminders(
-            workspaceId,
-            existing,
-            expected,
-            preferences,
-            triggeredAt,
-            evaluationInstant);
+        if (!warmthOnly) {
+            addTaskReminders(
+                workspaceId,
+                existing,
+                expected,
+                preferences,
+                triggeredAt,
+                evaluationInstant,
+                exclusion.taskIds());
+            addDealCloseReminders(
+                workspaceId,
+                existing,
+                expected,
+                preferences,
+                triggeredAt,
+                evaluationInstant);
+        }
         RelationshipSourceSnapshot relationshipSources =
             relationshipSourceSnapshotStrict(
                 workspaceId, evaluationInstant, exclusion);
@@ -454,6 +470,54 @@ public class NotificationReconciliationService {
         }
     }
 
+    private boolean baselineWarmthModel(
+            int workspaceId,
+            Instant evaluationInstant,
+            RecordVisibilityScope visibilityScope) {
+        String currentVersion = RelationshipWarmthModel.current().version();
+        String previousVersion = notificationMapper.getWarmthModelVersion(workspaceId);
+        if (currentVersion.equals(previousVersion)) return true;
+        if (previousVersion != null) {
+            HistoricalExpectationSnapshot snapshot;
+            try {
+                snapshot = historicalExpectationSnapshot(workspaceId, evaluationInstant,
+                    HistoricalBaselineScope.empty(), visibilityScope, true);
+            } catch (TenantScopeSnapshotException exception) {
+                throw exception;
+            } catch (RuntimeException exception) {
+                log.warn("Warmth model baseline failed for workspace={} exceptionClass={}",
+                    workspaceId, exception.getClass().getSimpleName());
+                return false;
+            }
+            notificationMapper.deletePreviousWarmthBaselines(workspaceId, currentVersion);
+            List<HistoricalNotificationBaseline> replacements = new ArrayList<>();
+            for (Map.Entry<HistoricalExpectationKey, HistoricalExpectation> entry
+                    : snapshot.expectations().entrySet()) {
+                HistoricalExpectation expectation = entry.getValue();
+                if (!warmthDerivedType(expectation.type())) continue;
+                HistoricalNotificationBaseline baseline = new HistoricalNotificationBaseline();
+                baseline.setWorkspaceId(workspaceId);
+                baseline.setRecipientId(entry.getKey().recipientId());
+                baseline.setDedupeKey(entry.getKey().dedupeKey());
+                baseline.setNotificationType(expectation.type());
+                baseline.setBaselineSeverity(expectation.severity());
+                baseline.setSourceStateHash(expectation.sourceStateHash());
+                baseline.setImportRunId(hashValues(List.of("warmth-model-cutover", currentVersion)));
+                replacements.add(baseline);
+            }
+            for (int offset = 0; offset < replacements.size(); offset += BASELINE_BATCH_SIZE) {
+                notificationMapper.insertHistoricalNotificationBaselines(workspaceId,
+                    replacements.subList(offset, Math.min(offset + BASELINE_BATCH_SIZE, replacements.size())));
+            }
+        }
+        notificationMapper.setWarmthModelVersion(workspaceId, currentVersion);
+        return true;
+    }
+
+    private static boolean warmthDerivedType(String type) {
+        return RELATIONSHIP_TYPE.equals(type) || INTRO_OPPORTUNITY_TYPE.equals(type) || DEAL_RISK_TYPE.equals(type);
+    }
+
     private Set<ReminderKey> reconcileHistoricalBaselines(
             int workspaceId,
             Map<ReminderKey, Notification> expected,
@@ -465,6 +529,10 @@ public class NotificationReconciliationService {
         Set<ReminderKey> suppressed = new HashSet<>();
         List<HistoricalNotificationBaseline> removals = new ArrayList<>();
         for (HistoricalNotificationBaseline baseline : baselines) {
+            if (warmthDerivedType(baseline.getNotificationType())
+                    && !RelationshipWarmthModel.current().version().equals(baseline.getModelVersion())) {
+                continue;
+            }
             ReminderKey key = new ReminderKey(
                 workspaceId, baseline.getRecipientId(), baseline.getDedupeKey());
             Notification notification = expected.get(key);
