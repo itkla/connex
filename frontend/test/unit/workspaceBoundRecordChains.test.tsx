@@ -17,6 +17,8 @@ import EditContactSheet from "@/app/components/records/contacts/EditContactSheet
 import EditCompanySheet from "@/app/components/records/companies/EditCompanySheet";
 import EditDealSheet from "@/app/components/records/deals/EditDealSheet";
 import DealsBrowser from "@/app/components/records/deals/DealsBrowser";
+import { submitDealDraftUpdates, toDealDraft } from "@/app/components/records/deals/dealEditConflict";
+import type DealEditConflictDialog from "@/app/components/records/deals/DealEditConflictDialog";
 import EditPipelineSheet from "@/app/components/records/pipelines/EditPipelineSheet";
 import PipelinesBrowser from "@/app/components/records/pipelines/PipelinesBrowser";
 import type TaskDialog from "@/app/components/activity/tasks/TaskDialog";
@@ -32,7 +34,7 @@ import type QuickEditPipelineSheet from "@/app/components/records/pipelines/Quic
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { bindRenderedWorkspace, releaseRenderedWorkspace, workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
 import type { BusinessCardImportDraft } from "@/app/lib/types";
-import { company, contact, deal, image, ORIGIN, pipeline, shell, stage, stubBackend, switchWorkspace } from "./helpers/workspaceChainBackend";
+import { company, contact, deal, image, json, ORIGIN, pipeline, shell, stage, stubBackend, switchWorkspace } from "./helpers/workspaceChainBackend";
 
 const captured = vi.hoisted<{
     task: ComponentProps<typeof TaskDialog> | null;
@@ -44,6 +46,7 @@ const captured = vi.hoisted<{
     contactSheet: ComponentProps<typeof QuickEditSheet> | null;
     companySheet: ComponentProps<typeof QuickEditCompanySheet> | null;
     dealSheet: ComponentProps<typeof QuickEditDealSheet> | null;
+    dealConflict: ComponentProps<typeof DealEditConflictDialog> | null;
     pipelineSheet: ComponentProps<typeof QuickEditPipelineSheet> | null;
 }>(() => ({
     task: null,
@@ -55,6 +58,7 @@ const captured = vi.hoisted<{
     contactSheet: null,
     companySheet: null,
     dealSheet: null,
+    dealConflict: null,
     pipelineSheet: null,
 }));
 const browser = vi.hoisted(() => ({
@@ -113,6 +117,7 @@ vi.mock("@/app/components/activity/activities/ActivityDialog", () => ({ default:
 vi.mock("@/app/components/records/contacts/QuickEditSheet", () => ({ default: (props: ComponentProps<typeof QuickEditSheet>) => { captured.contactSheet = props; return <>{props.customFieldsSlot}</>; } }));
 vi.mock("@/app/components/records/companies/QuickEditCompanySheet", () => ({ default: (props: ComponentProps<typeof QuickEditCompanySheet>) => { captured.companySheet = props; return <>{props.customFieldsSlot}</>; } }));
 vi.mock("@/app/components/records/deals/QuickEditDealSheet", () => ({ default: (props: ComponentProps<typeof QuickEditDealSheet>) => { captured.dealSheet = props; return <>{props.customFieldsSlot}</>; } }));
+vi.mock("@/app/components/records/deals/DealEditConflictDialog", () => ({ default: (props: ComponentProps<typeof DealEditConflictDialog>) => { captured.dealConflict = props; return null; } }));
 vi.mock("@/app/components/records/pipelines/QuickEditPipelineSheet", () => ({ default: (props: ComponentProps<typeof QuickEditPipelineSheet>) => { captured.pipelineSheet = props; return null; } }));
 
 let root: Root;
@@ -159,6 +164,60 @@ afterEach(async () => {
     document.cookie = "connex_workspace=; path=/; max-age=0";
     vi.unstubAllGlobals();
     vi.clearAllMocks();
+});
+
+describe("deal edit origins", () => {
+    const updates = [41, 42].map((dealId) => ({ dealId, draft: toDealDraft(deal) }));
+
+    it("captures one origin before the first batch write without caller options", async () => {
+        const backend = stubBackend("/api/deals/41");
+        await holdAndSwitch(backend, () => submitDealDraftUpdates(updates), "/api/deals/41");
+        expectWrites(backend, ["/api/deals/41", "/api/deals/42"]);
+    });
+
+    it("retains an earlier caller origin and cancellation signal after a switch", async () => {
+        const backend = stubBackend();
+        const controller = new AbortController();
+        const origin = workspacePinnedRequest(ORIGIN, { signal: controller.signal });
+        switchWorkspace();
+        await submitDealDraftUpdates(updates, origin);
+        expectWrites(backend, ["/api/deals/41", "/api/deals/42"]);
+        expect(backend.requests.every(({ init }) => init.signal === controller.signal)).toBe(true);
+    });
+
+    it.each(["current", "refused"] as const)("pins a conflict's %s read to the write origin after a switch", async (result) => {
+        const path = "/api/deals/41";
+        const current = { ...deal, version: 2, name: "Latest origin deal" };
+        const backend = stubBackend(path, (requestPath, method) => requestPath === path && method === "GET"
+            ? result === "current" ? json(current) : json({ code: "FORBIDDEN", message: `Not a member of workspace ${ORIGIN}` }, 403)
+            : undefined);
+        await render(<EditDealSheet deal={{ ...deal, version: 1 }} open onOpenChange={browser.noop} pipelines={[pipeline]} stagesByPipeline={{ 41: [stage] }} />);
+        await act(async () => get("dealSheet").updateDraft(41, { name: "My unsaved draft" }));
+        let pending: unknown;
+        await act(async () => {
+            pending = get("dealSheet").saveEdits();
+            await backend.started.promise;
+        });
+        switchWorkspace();
+        await act(async () => {
+            backend.held.resolve(json({ code: "STALE_RECORD", message: "Changed", currentVersion: 2 }, 409));
+            await pending;
+        });
+        expectWrites(backend, [path]);
+        const reads = vi.mocked(fetch).mock.calls.filter(([input, init]) => String(input).endsWith(path) && (init?.method ?? "GET") === "GET");
+        expect(reads).toHaveLength(1);
+        expect(new Headers(reads[0]?.[1]?.headers).get("X-Workspace-Id")).toBe(String(ORIGIN));
+        expect(get("dealSheet").drafts[41].name).toBe("My unsaved draft");
+        const snapshot = get("dealConflict").conflict.current;
+        if (result === "refused") {
+            expect(snapshot).toBeNull();
+        } else {
+            expect(snapshot).toEqual(current);
+            if (snapshot === null) throw new Error("Expected the current origin deal");
+            await act(async () => get("dealConflict").onReload(snapshot));
+            expect(get("dealSheet").drafts[41]).toMatchObject({ expectedVersion: 2, name: current.name });
+        }
+    });
 });
 
 describe("record composers preserve one origin", () => {

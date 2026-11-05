@@ -3,6 +3,7 @@ import type { DealDraft } from './QuickEditDealSheet';
 import { actualValueForOutcome } from './dealOutcome';
 import type { Deal, UpdateDealPayload } from '@/app/lib/types';
 import { changedRecordFields } from '@/app/lib/recordEditConflict';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 
 /** All persisted deal fields an external writer can change while an edit remains open. */
 export const DEAL_CONFLICT_FIELDS = [
@@ -57,8 +58,9 @@ type DealDraftUpdate = {
     draft: DealDraft;
 };
 
-/** Persists quick-edit drafts with outcome-canonicalized realized values. */
-export async function submitDealDraftUpdates(updates: ReadonlyArray<DealDraftUpdate>, init: RequestInit = {}): Promise<Deal[]> {
+/** Persists quick-edit drafts in one captured workspace, retaining any caller-supplied origin. */
+export async function submitDealDraftUpdates(updates: ReadonlyArray<DealDraftUpdate>, init?: RequestInit): Promise<Deal[]> {
+    const origin = init ?? workspacePinnedRequest(renderedWorkspaceId());
     const saved: Deal[] = [];
     for (const { dealId, draft } of updates) {
         const payload: UpdateDealPayload = {
@@ -75,7 +77,7 @@ export async function submitDealDraftUpdates(updates: ReadonlyArray<DealDraftUpd
             closedReason: draft.closedReason,
             won: draft.won,
         };
-        saved.push(await updateDeal(dealId, payload, init));
+        saved.push(await updateDeal(dealId, payload, origin));
     }
     return saved;
 }

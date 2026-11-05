@@ -87,6 +87,12 @@ Partial successes are intentionally separate transactions, as they were before t
 Both the helper's batch loop and the browser's record-save loop intentionally await sequentially:
 stop on the first refusal and retain each successful response before attempting the next record.
 These ordering requirements are part of the partial-save/error contract.
+The batch helper captures a workspace pin before its first write when its caller supplies no
+origin. Callers that already captured an origin forward those same options, including cancellation
+signals. Conflict reads reuse the refused write's origin; a refusal never falls back to the newly
+selected workspace. Board Quick edit pins its snapshot read and discards its response if the
+rendered workspace changes before it completes. The workspace write-chain guard's exception
+ledger remains limited to the dashboard queue; deal edits require no exception.
 
 ## Verification
 
