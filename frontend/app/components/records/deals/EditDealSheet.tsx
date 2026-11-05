@@ -5,17 +5,20 @@ import { useRouter } from 'next/navigation';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { useTranslations } from 'next-intl';
 
+import DealEditConflictDialog from './DealEditConflictDialog';
+import { useRecordEditConflict } from '@/app/hooks/useRecordEditConflict';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import QuickEditDealSheet, { type DealDraft } from '@/app/components/records/deals/QuickEditDealSheet';
 import { CustomFieldsEditSection, type CustomFieldsEditHandle } from '@/app/components/records/CustomFieldsEditSection';
 import { actualValueForOutcome } from '@/app/components/records/deals/dealOutcome';
-import { getPipelines, getStagesByPipelineId, updateDeal } from '@/app/lib/api';
+import { getDealById, getPipelines, getStagesByPipelineId, updateDeal } from '@/app/lib/api';
 import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { type Deal, type Pipeline, type Stage, type UpdateDealPayload } from '@/app/lib/types';
 
 function toDraft(d: Deal): DealDraft {
     return {
+        expectedVersion: d.version,
         name: d.name ?? '',
         value: d.value ?? 0,
         actualValue: d.actualValue ?? 0,
@@ -31,8 +34,9 @@ function toDraft(d: Deal): DealDraft {
 }
 
 /** Persists one edit-sheet draft with outcome-canonicalized realized value. */
-export async function submitDealDraftUpdate(dealId: number, draft: DealDraft, init: RequestInit = {}): Promise<void> {
+export async function submitDealDraftUpdate(dealId: number, draft: DealDraft, init: RequestInit = {}): Promise<Deal> {
     const payload: UpdateDealPayload = {
+        expectedVersion: draft.expectedVersion,
         name: draft.name.trim(),
         value: draft.value,
         actualValue: actualValueForOutcome(draft.won, draft.actualValue),
@@ -45,7 +49,7 @@ export async function submitDealDraftUpdate(dealId: number, draft: DealDraft, in
         closedReason: draft.closedReason || null,
         won: draft.won,
     };
-    await updateDeal(dealId, payload, init);
+    return updateDeal(dealId, payload, init);
 }
 
 export default function EditDealSheet({
@@ -64,6 +68,9 @@ export default function EditDealSheet({
     const router = useRouter();
     const t = useTranslations('DealsEditSheet');
     const reportApiError = useApiErrorToast('DealsEditSheet');
+    const [base, setBase] = useState(deal);
+    const [reloadRevision, setReloadRevision] = useState(0);
+    const { conflict, captureConflict, clearConflict } = useRecordEditConflict(getDealById);
     const [draft, setDraft] = useState<DealDraft>(() => toDraft(deal));
     const [isSaving, setIsSaving] = useState(false);
     const [pipelineOptions, setPipelineOptions] = useState(pipelines);
@@ -78,7 +85,11 @@ export default function EditDealSheet({
     if (open !== wasOpen) {
         setWasOpen(open);
         resetFieldErrors();
-        if (open) setDraft(toDraft(deal));
+        clearConflict();
+        if (open) {
+            setBase(deal);
+            setDraft(toDraft(deal));
+        }
     }
 
     useEffect(() => {
@@ -132,7 +143,7 @@ export default function EditDealSheet({
         resetFieldErrors();
         if (!draft.name.trim()) {
             setFieldErrors({ name: t('nameRequired') });
-            requestAnimationFrame(() => document.getElementById(`deal-name-${deal.id}`)?.focus());
+            requestAnimationFrame(() => document.getElementById(`deal-name-${base.id}`)?.focus());
             return;
         }
         if (!draft.pipeline || !draft.stage) {
@@ -140,49 +151,66 @@ export default function EditDealSheet({
                 ? { stage: t('pipelineStageRequired') }
                 : { pipeline: t('pipelineStageRequired') });
             requestAnimationFrame(() =>
-                document.getElementById(draft.pipeline ? `deal-stage-${deal.id}` : `deal-pipeline-${deal.id}`)?.focus());
+                document.getElementById(draft.pipeline ? `deal-stage-${base.id}` : `deal-pipeline-${base.id}`)?.focus());
             return;
         }
 
         setIsSaving(true);
         try {
-            await submitDealDraftUpdate(deal.id, draft, origin);
+            const saved = await submitDealDraftUpdate(base.id, draft, origin);
+            setBase(saved);
+            setDraft(toDraft(saved));
             await cfRef.current?.save(origin);
             toastSuccess(t('dealUpdated'));
             onOpenChange(false);
             router.refresh();
         } catch (err) {
-            reportApiError(err, 'failedToSave');
+            if (!await captureConflict(err, base, origin)) reportApiError(err, 'failedToSave');
         } finally {
             setIsSaving(false);
         }
     };
 
     return (
-        <QuickEditDealSheet
-            open={open}
-            onOpenChange={onOpenChange}
-            selectedIds={new Set([deal.id])}
-            selectedDeals={[deal]}
-            drafts={{ [deal.id]: draft }}
-            updateDraft={(_id, patch) => {
-                for (const key of Object.keys(patch)) clearError(key);
-                setDraft((prev) => ({ ...prev, ...patch }));
-            }}
-            pipelines={pipelineOptions}
-            stagesByPipeline={stageOptionsByPipeline}
-            isSaving={isSaving}
-            saveEdits={saveEdits}
-            fieldErrors={{ [deal.id]: fieldErrors }}
-            customFieldsDirty={customFieldsDirty}
-            customFieldsSlot={(
-                <CustomFieldsEditSection
-                    ref={cfRef}
-                    entityType="deal"
-                    entityId={deal.id}
-                    onDirtyChange={setCustomFieldsDirty}
-                />
-            )}
-        />
+        <>
+            <QuickEditDealSheet
+                key={reloadRevision}
+                open={open}
+                onOpenChange={onOpenChange}
+                selectedIds={new Set([base.id])}
+                selectedDeals={[base]}
+                drafts={{ [base.id]: draft }}
+                updateDraft={(_id, patch) => {
+                    for (const key of Object.keys(patch)) clearError(key);
+                    setDraft((prev) => ({ ...prev, ...patch }));
+                }}
+                pipelines={pipelineOptions}
+                stagesByPipeline={stageOptionsByPipeline}
+                isSaving={isSaving}
+                saveEdits={saveEdits}
+                fieldErrors={{ [base.id]: fieldErrors }}
+                customFieldsDirty={customFieldsDirty}
+                customFieldsSlot={(
+                    <CustomFieldsEditSection
+                        ref={cfRef}
+                        entityType="deal"
+                        entityId={base.id}
+                        onDirtyChange={setCustomFieldsDirty}
+                    />
+                )}
+            />
+            {open && conflict && <DealEditConflictDialog
+                conflict={conflict}
+                onKeepEditing={clearConflict}
+                onReload={(current) => {
+                    setBase(current);
+                    setDraft(toDraft(current));
+                    resetFieldErrors();
+                    setCustomFieldsDirty(false);
+                    setReloadRevision((revision) => revision + 1);
+                    clearConflict();
+                }}
+            />}
+        </>
     );
 }

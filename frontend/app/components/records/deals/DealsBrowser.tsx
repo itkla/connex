@@ -62,9 +62,12 @@ import { useRiskText } from '@/app/components/records/deals/dealRisk';
 import DealsKanban from '@/app/components/records/deals/DealsKanban';
 import DealsQueryUrlSync from '@/app/components/records/deals/DealsQueryUrlSync';
 import NewDealDialog, { isDealPayloadDirty } from '@/app/components/records/deals/NewDealDialog';
+import DealEditConflictDialog from './DealEditConflictDialog';
+import { useRecordEditConflict } from '@/app/hooks/useRecordEditConflict';
 import QuickEditDealSheet, { type DealDraft } from '@/app/components/records/deals/QuickEditDealSheet';
 import {
     createDeal,
+    getDealById,
     closeDeal,
     reopenDeal,
     updateDeal,
@@ -149,6 +152,7 @@ import {
 
 function toDraft(d: Deal): DealDraft {
     return {
+        expectedVersion: d.version,
         name: d.name ?? '',
         value: d.value ?? 0,
         actualValue: d.actualValue ?? 0,
@@ -185,9 +189,11 @@ type DealDraftUpdate = {
 };
 
 /** Persists quick-edit drafts with outcome-canonicalized realized values. */
-export async function submitDealDraftUpdates(updates: ReadonlyArray<DealDraftUpdate>): Promise<void> {
-    await Promise.all(updates.map(({ dealId, draft }) => {
+export async function submitDealDraftUpdates(updates: ReadonlyArray<DealDraftUpdate>, init: RequestInit = {}): Promise<Deal[]> {
+    const saved: Deal[] = [];
+    for (const { dealId, draft } of updates) {
         const payload: UpdateDealPayload = {
+            expectedVersion: draft.expectedVersion,
             name: draft.name.trim(),
             value: draft.value,
             actualValue: actualValueForOutcome(draft.won, draft.actualValue),
@@ -195,13 +201,14 @@ export async function submitDealDraftUpdates(updates: ReadonlyArray<DealDraftUpd
             pipeline: draft.pipeline,
             stage: draft.stage,
             company: draft.company ?? null,
-            expectedCloseDate: draft.expectedCloseDate || undefined,
+            expectedCloseDate: draft.expectedCloseDate || null,
             closedAt: draft.closedAt,
             closedReason: draft.closedReason,
             won: draft.won,
         };
-        return updateDeal(dealId, payload);
-    }));
+        saved.push(await updateDeal(dealId, payload, init));
+    }
+    return saved;
 }
 
 /**
@@ -847,6 +854,9 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
 
     const [isDeleting, setIsDeleting] = useState(false);
     const [editSheetOpen, setEditSheetOpen] = useState(false);
+    const [editBases, setEditBases] = useState<Deal[]>([]);
+    const [editReloadRevision, setEditReloadRevision] = useState(0);
+    const { conflict, captureConflict, clearConflict } = useRecordEditConflict(getDealById);
     const [drafts, setDrafts] = useState<Record<number, DealDraft>>({});
     const [isSaving, setIsSaving] = useState(false);
 
@@ -897,6 +907,8 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     };
 
     const openEditSheet = () => {
+        clearConflict();
+        setEditBases(selectedDeals);
         const next: Record<number, DealDraft> = {};
         for (const d of selectedDeals) next[d.id] = toDraft(d);
         setDrafts(next);
@@ -908,7 +920,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     };
 
     const saveEdits = async () => {
-        const changed = selectedDeals.filter((d) => {
+        const changed = editBases.filter((d) => {
             const draft = drafts[d.id];
             return draft && diffDraft(toDraft(d), draft);
         });
@@ -928,26 +940,34 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             return;
         }
 
+        const origin = workspacePinnedRequest(renderedWorkspaceId());
         setIsSaving(true);
         try {
-            const updates = changed.flatMap((deal) => {
-                const draft = drafts[deal.id];
-                return draft ? [{ dealId: deal.id, draft }] : [];
-            });
-            await submitDealDraftUpdates(updates);
+            for (const base of changed) {
+                const draft = drafts[base.id];
+                if (!draft) continue;
+                try {
+                    const [saved] = await submitDealDraftUpdates([{ dealId: base.id, draft }], origin);
+                    if (!saved) throw new Error('Deal update returned no record');
+                    setEditBases((current) => current.map((item) => item.id === saved.id ? saved : item));
+                    setDrafts((current) => ({ ...current, [saved.id]: toDraft(saved) }));
+                } catch (error) {
+                    if (!await captureConflict(error, base, origin)) reportApiError(error, 'failedToSave');
+                    return;
+                }
+            }
             toastSuccess(
                 changed.length === 1 ? t('dealUpdated') : t('dealsUpdated', { count: changed.length }),
             );
             setEditSheetOpen(false);
             refreshRecords();
-        } catch (err) {
-            reportApiError(err, 'failedToSave');
         } finally {
             setIsSaving(false);
         }
     };
 
     const quickEditOne = useCallback((deal: Deal) => {
+        setEditBases([deal]);
         clearSelection();
         setSelectedBoardDeal(deal);
         setSelectedIds(new Set([deal.id]));
@@ -1798,10 +1818,11 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                 {peek.drawer}
 
                 <QuickEditDealSheet
+                    key={editReloadRevision}
                     open={editSheetOpen}
-                    onOpenChange={setEditSheetOpen}
+                    onOpenChange={(open) => { setEditSheetOpen(open); if (!open) clearConflict(); }}
                     selectedIds={selectedIds}
-                    selectedDeals={selectedDeals}
+                    selectedDeals={editBases}
                     drafts={drafts}
                     updateDraft={updateDraft}
                     pipelines={pipelines}
@@ -1809,6 +1830,21 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                     isSaving={isSaving}
                     saveEdits={saveEdits}
                 />
+
+                {editSheetOpen && conflict && <DealEditConflictDialog
+                    conflict={conflict}
+                    onKeepEditing={clearConflict}
+                    onReload={(current) => {
+                        const otherDraftsRemain = editBases.some((base) => {
+                            const draft = drafts[base.id];
+                            return base.id !== current.id && draft && diffDraft(toDraft(base), draft);
+                        });
+                        setEditBases((bases) => bases.map((item) => item.id === current.id ? current : item));
+                        setDrafts((currentDrafts) => ({ ...currentDrafts, [current.id]: toDraft(current) }));
+                        if (!otherDraftsRemain) setEditReloadRevision((revision) => revision + 1);
+                        clearConflict();
+                    }}
+                />}
 
                 <NewDealDialog
                     open={newDialogOpen}

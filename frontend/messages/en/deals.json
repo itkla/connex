@@ -551,5 +551,33 @@
         "approverChangeRefusedDescription": "One or more selected members may not be allowed to approve documents. No approvers were changed. Review the selection and try again.",
         "refreshFailed": "Couldn't refresh the document",
         "statusFailed": "Couldn't update the document status"
+    },
+    "DealsEditConflict": {
+        "title": "This deal has changed",
+        "description": "Changes to “{name}” were saved after you loaded it. Your draft is still here. Changed fields:",
+        "loadFailed": "“{name}” has changed. Your draft is still here, but the latest version could not be loaded. Keep editing and try saving again to check the changes.",
+        "otherChanges": "Another update was saved, including changes outside the fields shown here.",
+        "keepEditing": "Keep editing",
+        "reload": "Reload latest",
+        "confirmTitle": "Discard your draft and reload?",
+        "confirmDescription": "Your unsaved changes to “{name}” will be lost. The latest saved version will replace this draft.",
+        "discardAndReload": "Discard draft and reload",
+        "fields": {
+            "name": "Name",
+            "value": "Value",
+            "actualValue": "Actual value",
+            "valueSource": "Value source",
+            "currency": "Currency",
+            "pipeline": "Pipeline",
+            "stage": "Stage",
+            "position": "Board position",
+            "company": "Company",
+            "ownerId": "Owner",
+            "expectedCloseDate": "Expected close date",
+            "closedAt": "Closed date",
+            "closedReason": "Closed reason",
+            "won": "Outcome",
+            "riskExcluded": "Deal risk evaluation"
+        }
     }
 }

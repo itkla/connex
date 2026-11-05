@@ -321,6 +321,12 @@ public class GlobalExceptionHandler {
                 "code", "AI_PROPOSAL_EXPIRED", "message", ex.getMessage()));
     }
 
+    @ExceptionHandler(StaleRecordException.class)
+    public ResponseEntity<Map<String, Object>> staleRecord(StaleRecordException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+            "code", "STALE_RECORD", "message", ex.getMessage(), "currentVersion", ex.getCurrentVersion()));
+    }
+
     @ExceptionHandler(ConflictException.class)
     public ResponseEntity<Map<String, String>> conflict(ConflictException ex) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", ex.getMessage()));

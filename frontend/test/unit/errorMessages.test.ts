@@ -71,6 +71,13 @@ afterEach(() => {
 });
 
 describe("userMessageFor status mapping", () => {
+    it("gives stale edits specific localized copy ahead of generic conflict fallbacks", () => {
+        const error = new ApiError(POISONED_MESSAGE, 409, "STALE_RECORD");
+        expect(userMessageFor(error, t, undefined, "Contacts.refusalDescription")?.description)
+            .toBe(t("ApiErrors.staleRecord"));
+        expect(userMessageFor(error, ja)?.description).toBe(ja("ApiErrors.staleRecord"));
+    });
+
     it.each([
         [400, "Some of what you entered can't be accepted. Check the details and try again."],
         [422, "Some of what you entered can't be accepted. Check the details and try again."],

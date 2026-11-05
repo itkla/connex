@@ -23,6 +23,7 @@
     <result property="riskExcluded" column="risk_excluded"/>
     <result property="createdAt" column="created_at"/>
     <result property="updatedAt" column="updated_at"/>
+    <result property="version" column="version"/>
   </resultMap>
 
   <resultMap id="DealPersonResult" type="DealPerson">
@@ -42,13 +43,13 @@
 
   <sql id="dealColumns">
     id, workspace_id, owner_id, name, value, actual_value, value_source, currency, pipeline_id, stage_id, position, company_id,
-    expected_close_date, closed_at, closed_reason, won, risk_excluded, created_at, updated_at
+    expected_close_date, closed_at, closed_reason, won, risk_excluded, created_at, updated_at, version
   </sql>
 
   <sql id="qualifiedDealColumns">
     d.id, d.workspace_id, d.owner_id, d.name, d.value, d.actual_value, d.value_source, d.currency,
     d.pipeline_id, d.stage_id, d.position, d.company_id, d.expected_close_date, d.closed_at,
-    d.closed_reason, d.won, d.risk_excluded, d.created_at, d.updated_at
+    d.closed_reason, d.won, d.risk_excluded, d.created_at, d.updated_at, d.version
   </sql>
 
   <sql id="visibleCompanyJoin">
@@ -1162,6 +1163,9 @@
         closed_reason = #{closedReason},
         won = #{won}
     WHERE workspace_id = #{workspaceId} AND id = #{id}
+    <if test="expectedVersion != null">
+      AND version = #{expectedVersion}
+    </if>
   </update>
 
   <update id="updateOutcome">
