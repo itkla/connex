@@ -176,6 +176,7 @@ test('line rename followed by detail Edit uses the reconciled version while rout
     const id = created.id;
     const lines = await seed.post(`/api/deals/${id}/line-items`, {
         name: 'Consulting', unitPrice: 100, quantity: 1, billingFrequency: 'one_time',
+        confirmValueReplacement: true, expectedManualValue: 100, expectedCurrency: 'JPY',
     });
     const line = Array.isArray(lines.items) ? lines.items.find(isRecord) : undefined;
     if (!line || typeof line.id !== 'number') throw new Error('The created line has no id');
@@ -196,17 +197,30 @@ test('line rename followed by detail Edit uses the reconciled version while rout
     try {
         const itemName = page.getByRole('textbox', { name: message('en', 'deals', 'DealsLineItems.columnItem'), exact: true });
         await itemName.fill('Renamed consulting');
-        const lineSaved = page.waitForResponse((response) => response.url().endsWith(`/api/deals/${id}/line-items/${lineId}`)
-            && response.request().method() === 'PUT');
+        const lineSaved = page.waitForResponse((response) => {
+            if (!response.url().endsWith(`/api/deals/${id}/line-items/${lineId}`)
+                    || response.request().method() !== 'PUT') return false;
+            const payload: unknown = response.request().postDataJSON();
+            return isRecord(payload) && payload.previewOnly !== true;
+        });
         await itemName.press('Tab');
         expect((await lineSaved).status()).toBe(200);
         await expect.poll(() => refreshStarted).toBe(true);
+        const editSnapshot = page.waitForResponse((response) => response.url().endsWith(`/api/deals/${id}`)
+            && response.request().method() === 'GET');
         const editor = await openEditor(page, 'detail', name, 'en');
+        const snapshotResponse = await editSnapshot;
+        expect(snapshotResponse.status()).toBe(200);
+        const snapshot: unknown = await snapshotResponse.json();
+        if (!isRecord(snapshot) || typeof snapshot.version !== 'number') throw new Error('Missing reconciled deal version');
         await editor.locator(`#deal-name-${id}`).fill(`${name} edited`);
         const saved = page.waitForResponse((response) => response.url().endsWith(`/api/deals/${id}`)
             && response.request().method() === 'PUT');
         await editor.getByRole('button', { name: message('en', 'deals', 'DealsQuickEditSheet.save'), exact: true }).click();
-        expect((await saved).status()).toBe(200);
+        const savedResponse = await saved;
+        expect(savedResponse.status()).toBe(200);
+        const submitted: unknown = savedResponse.request().postDataJSON();
+        expect(submitted).toMatchObject({ expectedVersion: snapshot.version });
         await expect(editor).not.toBeVisible();
         const stored = await context.request.get(`/api/deals/${id}`);
         expect(await stored.json()).toMatchObject({ name: `${name} edited`, value: 100 });
