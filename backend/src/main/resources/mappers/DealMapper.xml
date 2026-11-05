@@ -1132,7 +1132,7 @@
     INSERT INTO deal (
       workspace_id, owner_id, name, ai_identifier_literal_key, ai_identifier_label_key,
       ai_identifier_source_name, ai_identifier_key_version, duplicate_normalized_name, value, actual_value, value_source, currency, pipeline_id, stage_id, position, company_id,
-      expected_close_date, closed_at, closed_reason, won
+      expected_close_date, closed_at, closed_reason, won, created_at
     )
     VALUES
     <foreach collection="list" item="d" separator=",">
@@ -1142,7 +1142,7 @@
       CONVERT(#{d.name,jdbcType=VARCHAR,typeHandler=ooo.klae.connex.backend.mappers.AiIdentifierUtf8TextTypeHandler} USING utf8mb4), 3, #{d.duplicateNormalizedName,jdbcType=VARCHAR}, #{d.value,jdbcType=DECIMAL},
        #{d.actualValue,jdbcType=DECIMAL}, #{d.valueSource}, #{d.currency},
        #{d.pipelineId}, #{d.stageId}, #{d.position}, #{d.companyId}, #{d.expectedCloseDate}, #{d.closedAt},
-       #{d.closedReason}, #{d.won})
+       #{d.closedReason}, #{d.won}, COALESCE(#{d.createdAt,jdbcType=TIMESTAMP}, CURRENT_TIMESTAMP))
     </foreach>
   </insert>
 
@@ -1229,6 +1229,11 @@
       <foreach collection="positions" item="entry" open="(" separator="," close=")">
         #{entry.id}
       </foreach>
+  </update>
+
+  <update id="updateImportedCreatedAt">
+    UPDATE deal SET created_at = #{createdAt,jdbcType=TIMESTAMP}
+    WHERE workspace_id = #{workspaceId} AND id = #{dealId}
   </update>
 
   <update id="updateExpectedCloseDate">

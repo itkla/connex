@@ -17,12 +17,17 @@ import static org.junit.jupiter.api.Assertions.assertTimeout;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InOrder;
+import org.mybatis.spring.SqlSessionTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
@@ -60,9 +65,11 @@ import org.springframework.transaction.annotation.Transactional;
 class ImportServiceTest extends AbstractServiceTest {
 
     @Autowired ImportService importService;
+    @Autowired SqlSessionTemplate sqlSessionTemplate;
     @Autowired ooo.klae.connex.backend.mappers.PersonEmploymentMapper employmentMapper;
     @Autowired ExportService exportService;
     @Autowired DealService dealService;
+    @Autowired DealOutcomeWriter dealOutcomeWriter;
     @Autowired DealLineItemService dealLineItemService;
     @Autowired DealStageHistoryService dealStageHistoryService;
     @Autowired CustomFieldValueService customFieldValueService;
@@ -2330,6 +2337,192 @@ class ImportServiceTest extends AbstractServiceTest {
         lineItem.setUnitPrice(new BigDecimal(unitPrice));
         lineItem.setQuantity(BigDecimal.ONE);
         dealLineItemService.create(deal.getId(), lineItem);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "2025-03-01, 2025-02-28 15:00:00",
+        "2025/03/01, 2025-02-28 15:00:00",
+        "2025-03-01T00:00:00+09:00, 2025-02-28 15:00:00",
+        "2025-03-01T09:30:45.123Z, 2025-03-01 09:30:45"
+    })
+    void dealImportPreservesHistoricalDatesAndTokyoRevenuePeriod(String closedAt, String stored) {
+        jdbcTemplate.update("UPDATE workspace SET timezone = 'Asia/Tokyo' WHERE id = ?", workspace.getId());
+        Pipeline pipeline = newPipeline();
+        Stage won = terminalStage(pipeline, 0, true);
+        Stage lost = terminalStage(pipeline, 1, false);
+        ImportRequest request = req(
+            List.of(map("Deal", "name"), map("Value", "value"), map("Pipe", "pipeline"),
+                map("Stage", "stage"), map("Closed", "closedAt"), map("Created", "createdAt")),
+            List.of(
+                Map.of("Deal", "Historic won", "Value", "300", "Pipe", pipeline.getName(),
+                    "Stage", won.getName(), "Closed", closedAt, "Created", "2025/02/01"),
+                Map.of("Deal", "Historic lost", "Value", "100", "Pipe", pipeline.getName(),
+                    "Stage", lost.getName(), "Closed", closedAt, "Created", "2025-02-01")),
+            "fill_empty");
+
+        ImportPreviewResult preview = importService.previewDeals(request);
+        assertEquals(0, preview.getInvalid());
+        assertFalse(preview.getRows().getFirst().getDealDates().usesImportTime());
+        assertEquals("Asia/Tokyo", preview.getRows().getFirst().getDealDates().timezone());
+        request.setDuplicateReviewProof(preview.getDuplicateReviewProof());
+        assertEquals(2, importService.commitDeals(request).getCreated());
+        for (Deal deal : dealMapper.getAllDeals(workspace.getId())) {
+            assertEquals(stored, deal.getClosedAt());
+            assertEquals("2025-01-31 15:00:00", deal.getCreatedAt());
+        }
+        var march = dealMapper.dealKpiWindow(workspace.getId(), "USD",
+            LocalDateTime.of(2025, 2, 28, 15, 0), LocalDateTime.of(2025, 3, 31, 15, 0), MemberScope.allTeam());
+        var february = dealMapper.dealKpiWindow(workspace.getId(), "USD",
+            LocalDateTime.of(2025, 1, 31, 15, 0), LocalDateTime.of(2025, 2, 28, 15, 0), MemberScope.allTeam());
+        assertEquals(300.0, march.wonRevenue());
+        assertEquals(1, march.wonCount());
+        assertEquals(1, march.lostCount());
+        assertTrue(march.avgCycleDays() >= 28);
+        assertEquals(0.0, february.wonRevenue());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"2025-02-30", "2025/02/29", "2025/03-01", "03/01/2025", "yesterday", "2025-03-01T12:00:00"})
+    void dealImportInvalidHistoryDateFailsOnlyItsRow(String invalidDate) {
+        Pipeline pipeline = newPipeline();
+        Stage won = terminalStage(pipeline, 0, true);
+        ImportRequest request = req(
+            List.of(map("Deal", "name"), map("Pipe", "pipeline"), map("Stage", "stage"),
+                map("Closed", "closedAt"), map("Created", "createdAt")),
+            List.of(
+                Map.of("Deal", "Bad close", "Pipe", pipeline.getName(), "Stage", won.getName(), "Closed", invalidDate),
+                Map.of("Deal", "Bad creation", "Pipe", pipeline.getName(), "Stage", won.getName(), "Created", invalidDate),
+                Map.of("Deal", "No close", "Pipe", pipeline.getName(), "Stage", won.getName())), "fill_empty");
+
+        ImportPreviewResult preview = importService.previewDeals(request);
+        assertEquals(2, preview.getInvalid());
+        assertTrue(preview.getRows().get(0).getErrors().getFirst().contains("Invalid Closed at"));
+        assertTrue(preview.getRows().get(1).getErrors().getFirst().contains("Invalid Created at"));
+        assertTrue(preview.getRows().get(2).getDealDates().usesImportTime());
+        request.setDuplicateReviewProof(preview.getDuplicateReviewProof());
+        LocalDateTime beforeImport = LocalDateTime.now(java.time.ZoneOffset.UTC).withNano(0);
+        ImportResult result = importService.commitDeals(request);
+        assertEquals(1, result.getCreated());
+        assertEquals(2, result.getFailed().size());
+        Deal imported = dealMapper.getAllDeals(workspace.getId()).getFirst();
+        assertNotNull(imported.getClosedAt());
+        assertNotNull(imported.getCreatedAt());
+        for (String date : List.of(imported.getClosedAt(), imported.getCreatedAt())) {
+            LocalDateTime storedDate = LocalDateTime.parse(date.replace(' ', 'T'));
+            assertFalse(storedDate.isBefore(beforeImport));
+            assertFalse(storedDate.isAfter(LocalDateTime.now(java.time.ZoneOffset.UTC)));
+        }
+    }
+
+    @Test
+    void dealImportWarnsForWonAndLostMissingDatesAndFutureCloseWithoutBlocking() {
+        Pipeline pipeline = newPipeline();
+        Stage won = terminalStage(pipeline, 0, true);
+        Stage lost = terminalStage(pipeline, 1, false);
+        Stage open = newStage(pipeline, 2);
+        ImportRequest request = req(
+            List.of(map("Deal", "name"), map("Pipe", "pipeline"), map("Stage", "stage"), map("Closed", "closedAt")),
+            List.of(
+                Map.of("Deal", "Missing won", "Pipe", pipeline.getName(), "Stage", won.getName()),
+                Map.of("Deal", "Missing lost", "Pipe", pipeline.getName(), "Stage", lost.getName()),
+                Map.of("Deal", "Future won", "Pipe", pipeline.getName(), "Stage", won.getName(), "Closed", "2099-01-01"),
+                Map.of("Deal", "Open", "Pipe", pipeline.getName(), "Stage", open.getName())), "fill_empty");
+        ImportPreviewResult preview = importService.previewDeals(request);
+        assertEquals(2, preview.getRows().stream().filter(row -> row.getDealDates().usesImportTime()).count());
+        assertTrue(preview.getRows().get(2).getDealDates().futureClosedAt());
+        assertFalse(preview.getRows().get(3).getDealDates().usesImportTime());
+        request.setDuplicateReviewProof(preview.getDuplicateReviewProof());
+        assertEquals(4, importService.commitDeals(request).getCreated());
+    }
+
+    @Test
+    void dealImportDatesRespectMergeActionAndKeepCreatedAtOutsideOrdinaryEdits() {
+        Pipeline pipeline = newPipeline();
+        Stage won = terminalStage(pipeline, 0, true);
+        String name = "Historical merge";
+        ImportRequest request = req(
+            List.of(map("Deal", "name"), map("Pipe", "pipeline"), map("Stage", "stage"),
+                map("Closed", "closedAt"), map("Created", "createdAt")),
+            List.of(Map.of("Deal", name, "Pipe", pipeline.getName(), "Stage", won.getName(),
+                "Closed", "2025-03-01T00:00:00Z", "Created", "2025-02-01T00:00:00Z")), "fill_empty");
+        assertEquals(1, reviewAndCommitDeals(request).getCreated());
+        request.setRows(List.of(Map.of("Deal", name, "Pipe", pipeline.getName(), "Stage", won.getName(),
+            "Closed", "2024-03-01T00:00:00Z", "Created", "2024-02-01T00:00:00Z")));
+        assertEquals(0, reviewAndCommitDeals(request).getUpdated());
+        request.setOnDuplicate("skip");
+        assertNull(importService.previewDeals(request).getRows().getFirst().getDealDates());
+        assertEquals(1, reviewAndCommitDeals(request).getSkipped());
+        request.setOnDuplicate("overwrite");
+        assertEquals(1, reviewAndCommitDeals(request).getUpdated());
+        Deal deal = dealMapper.getAllDeals(workspace.getId()).getFirst();
+        assertEquals("2024-03-01 00:00:00", deal.getClosedAt());
+        assertEquals("2024-02-01 00:00:00", deal.getCreatedAt());
+        deal.setCreatedAt("2000-01-01 00:00:00");
+        dealOutcomeWriter.write(workspace.getId(), deal, deal.getWon(), null, "won");
+        assertEquals("2024-02-01 00:00:00", dealMapper.getDealById(workspace.getId(), deal.getId()).getCreatedAt());
+        assertEquals(0, dealMapper.updateImportedCreatedAt(workspace.getId() + 1000000, deal.getId(), "2000-01-01 00:00:00"));
+        assertEquals("2024-02-01 00:00:00", dealMapper.getDealById(workspace.getId(), deal.getId()).getCreatedAt());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void dealImportWritesTheAdmittedOutcomeWhenAStageChangesAfterRecheck(boolean matched) {
+        Pipeline pipeline = newPipeline();
+        Stage won = terminalStage(pipeline, 0, true);
+        ImportRequest request = req(
+            List.of(map("Deal", "name"), map("Pipe", "pipeline"), map("Stage", "stage"),
+                map("Closed", "closedAt"), map("Company", "company")),
+            List.of(Map.of("Deal", "Admitted outcome", "Pipe", pipeline.getName(), "Stage", won.getName(),
+                "Closed", "2025-03-01T00:00:00Z")), "overwrite");
+        if (matched) {
+            Stage open = newStage(pipeline, 1);
+            request.setRows(List.of(Map.of("Deal", "Admitted outcome", "Pipe", pipeline.getName(), "Stage", open.getName())));
+            assertEquals(1, reviewAndCommitDeals(request).getCreated());
+            request.setLinks(Map.of(0, dealMapper.getAllDeals(workspace.getId()).getFirst().getId()));
+        }
+        request.setRows(List.of(Map.of("Deal", "Admitted outcome", "Pipe", pipeline.getName(), "Stage", won.getName(),
+            "Closed", "2025-04-01T00:00:00Z", "Company", "New dependency " + unique())));
+        ImportPreviewResult preview = importService.previewDeals(request);
+        request.setDuplicateReviewProof(preview.getDuplicateReviewProof());
+        CompanyMapper realCompanyMapper = sqlSessionTemplate.getMapper(CompanyMapper.class);
+        doAnswer(invocation -> {
+            jdbcTemplate.update("UPDATE stage SET is_success = FALSE WHERE workspace_id = ? AND id = ?",
+                workspace.getId(), won.getId());
+            return realCompanyMapper.insert(invocation.getArgument(0, Company.class));
+        }).when(companyMapperSpy).insert(org.mockito.ArgumentMatchers.any(Company.class));
+
+        ImportResult result = importService.commitDeals(request);
+
+        assertEquals(1, matched ? result.getUpdated() : result.getCreated());
+        Deal imported = dealMapper.getAllDeals(workspace.getId()).getFirst();
+        assertEquals(Boolean.TRUE, imported.getWon());
+        assertEquals("2025-04-01 00:00:00", imported.getClosedAt());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"target", "value", "timezone", "outcome"})
+    void dealImportProofBindsDateValuesTargetsTimezoneAndTerminalOutcome(String change) {
+        Pipeline pipeline = newPipeline();
+        Stage won = terminalStage(pipeline, 0, true);
+        ImportRequest request = req(
+            List.of(map("Deal", "name"), map("Pipe", "pipeline"), map("Stage", "stage"), map("Date", "closedAt")),
+            List.of(Map.of("Deal", "Bound history", "Pipe", pipeline.getName(), "Stage", won.getName(), "Date", "2025-03-01")), "fill_empty");
+        ImportPreviewResult preview = importService.previewDeals(request);
+        request.setDuplicateReviewProof(preview.getDuplicateReviewProof());
+        switch (change) {
+            case "target" -> request.setMapping(List.of(map("Deal", "name"), map("Pipe", "pipeline"),
+                map("Stage", "stage"), map("Date", "createdAt")));
+            case "value" -> request.setRows(List.of(Map.of("Deal", "Bound history", "Pipe", pipeline.getName(),
+                "Stage", won.getName(), "Date", "2025-04-01")));
+            case "timezone" -> jdbcTemplate.update("UPDATE workspace SET timezone = 'Asia/Tokyo' WHERE id = ?", workspace.getId());
+            case "outcome" -> jdbcTemplate.update("UPDATE stage SET is_success = FALSE WHERE workspace_id = ? AND id = ?",
+                workspace.getId(), won.getId());
+            default -> throw new IllegalArgumentException("Unknown proof change");
+        }
+
+        assertThrows(ConflictException.class, () -> importService.commitDeals(request));
+        assertTrue(dealMapper.getAllDeals(workspace.getId()).isEmpty());
     }
 
     @Test

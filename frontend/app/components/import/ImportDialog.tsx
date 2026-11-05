@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useFormatter, useTranslations } from 'next-intl';
 import { motion, useReducedMotion } from 'motion/react';
 import { ArrowUpTrayIcon, CheckCircleIcon, DocumentTextIcon, ExclamationTriangleIcon, XMarkIcon } from '@heroicons/react/24/outline';
 import { LoaderCircle } from 'lucide-react';
@@ -612,6 +612,7 @@ function MapStep({
     return (
         <div className="space-y-4">
             <p className="text-sm text-muted-foreground">{t('mapHint', { mapped: mappedCount, total: parsed.headers.length })}</p>
+            {entity === 'deals' && <p className="text-xs text-muted-foreground">{t('dealDateHint')}</p>}
             <div className="space-y-2">
                 {parsed.headers.map((header) => {
                     const col = columns[header];
@@ -690,12 +691,15 @@ function ReviewStep({
     requestInit?: RequestInit;
 }) {
     const t = useTranslations('importExport');
+    const formatter = useFormatter();
+    const missingCloseDates = preview.rows.filter((row) => row.dealDates?.usesImportTime).length;
     const reviewable = preview.rows.filter((row) => row.status !== 'skip');
     const candidateRows = reviewable.filter((row) => (row.candidates?.length ?? 0) > 0);
-    const ordinaryRows = reviewable.filter((row) => (row.candidates?.length ?? 0) === 0);
+    const priorityRows = reviewable.filter((row) => (row.candidates?.length ?? 0) > 0 || row.dealDates?.futureClosedAt);
+    const ordinaryRows = reviewable.filter((row) => (row.candidates?.length ?? 0) === 0 && !row.dealDates?.futureClosedAt);
     const shown = [
-        ...candidateRows,
-        ...ordinaryRows.slice(0, Math.max(0, 100 - candidateRows.length)),
+        ...priorityRows,
+        ...ordinaryRows.slice(0, Math.max(0, 100 - priorityRows.length)),
     ].sort((left, right) => left.rowIndex - right.rowIndex);
     return (
         <div className="space-y-5">
@@ -727,6 +731,12 @@ function ReviewStep({
                 <Count label={t('countSkip')} value={preview.toSkip} className="text-muted-foreground" />
                 <Count label={t('countInvalid')} value={preview.invalid} className="text-destructive" />
             </div>
+
+            {missingCloseDates > 0 && (
+                <div className="rounded-lg border border-warning/40 bg-warning/5 px-3 py-2 text-sm text-foreground" role="status">
+                    {t('missingCloseDates', { count: missingCloseDates })}
+                </div>
+            )}
 
             {shown.length > 0 && (
                 <div className="space-y-2">
@@ -767,6 +777,27 @@ function ReviewStep({
                                                         ? row.errors.join('; ')
                                                         : row.matchedLabel ?? (nameColumn && parsed ? parsed.rows[row.rowIndex]?.[nameColumn] ?? '' : '')}
                                                 </p>
+                                                {row.dealDates && (
+                                                    <div className="space-y-1 text-xs text-muted-foreground">
+                                                        {(['closedAt', 'createdAt'] as const).map((field) => {
+                                                            const value = row.dealDates?.[field];
+                                                            if (!value) return null;
+                                                            return (
+                                                                <p key={field}>
+                                                                    {t(`fields.${field}`)}: {formatter.dateTime(new Date(value), {
+                                                                        year: 'numeric', month: '2-digit', day: '2-digit',
+                                                                        hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+                                                                        timeZone: row.dealDates?.timezone,
+                                                                    })} ({row.dealDates?.timezone})
+                                                                </p>
+                                                            );
+                                                        })}
+                                                        {row.dealDates.usesImportTime && <p>{t('rowUsesImportTime')}</p>}
+                                                        {row.dealDates.futureClosedAt && (
+                                                            <p className="text-warning">{t('futureCloseDate')}</p>
+                                                        )}
+                                                    </div>
+                                                )}
                                                 {row.canonicalRowIndex != null && row.mergedRowCount != null && (
                                                     <p className="text-xs text-muted-foreground">
                                                         {row.rowIndex === row.canonicalRowIndex

@@ -379,6 +379,12 @@ public interface DealMapper {
         @Param("positions") List<BoardPositionUpdate> positions
     );
 
+    /** Stores a historical creation timestamp only from the locked CSV import path. */
+    int updateImportedCreatedAt(
+        @Param("workspaceId") int workspaceId,
+        @Param("dealId") int dealId,
+        @Param("createdAt") String createdAt
+    );
     /** Sets only a deal's expected close date, scoped to the workspace. */
     int updateExpectedCloseDate(
         @Param("workspaceId") int workspaceId,
