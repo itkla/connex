@@ -4,6 +4,7 @@ import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useServerRecords } from '@/app/hooks/useServerRecords';
+import { ApiError } from '@/app/lib/api';
 import type { Page, PageParams } from '@/app/lib/types';
 
 const workspace = vi.hoisted(() => ({ activeWorkspaceId: 7 }));
@@ -96,6 +97,30 @@ describe('useServerRecords failures and recovery', () => {
         expect(result.current.loading).toBe(false);
         expect(result.current.items).toEqual([]);
         expect(result.current.total).toBe(0);
+    });
+
+    it.each([401, 403])('discards retained rows on %i and does not restore them after another failed retry', async (status) => {
+        const failure = new ApiError('Access unavailable', status);
+        const fetcher = vi.fn<(params: PageParams) => Promise<Page<Record>>>()
+            .mockResolvedValueOnce(firstPage)
+            .mockRejectedValueOnce(failure)
+            .mockRejectedValueOnce(new Error('Unavailable'))
+            .mockResolvedValueOnce(firstPage);
+        const { result } = renderHook(() => useServerRecords(fetcher));
+        await waitFor(() => expect(result.current.items).toEqual(firstPage.items));
+
+        await act(async () => result.current.reload());
+        expect(result.current.error).toBe(failure);
+        expect(result.current.items).toEqual([]);
+        expect(result.current.total).toBe(0);
+        await act(async () => result.current.reload());
+        expect(result.current.error?.message).toBe('Unavailable');
+        expect(result.current.items).toEqual([]);
+        expect(result.current.total).toBe(0);
+        await act(async () => result.current.reload());
+        expect(result.current.error).toBeNull();
+        expect(result.current.items).toEqual(firstPage.items);
+        expect(result.current.total).toBe(firstPage.total);
     });
 
     it('keeps even a null rejection distinguishable from a successful empty list', async () => {

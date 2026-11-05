@@ -75,4 +75,63 @@ for (const locale of ['en', 'ja'] as const) {
         await expect(row).toHaveCount(0);
         await expect(main.getByText(message(locale, 'records', 'RecordsRenderView.noResults'), { exact: true })).toBeVisible();
     });
+
+    test(`${locale} Files keeps the focused search available after a failed filter without retained rows @mobile`, async ({ page }) => {
+        await useLocale(page, locale);
+        await page.route('**/api/attachments/facets', (route) => route.fulfill({
+            status: 200,
+            json: { total: 1, totalSize: 0, sources: [], kinds: [], tags: [], orphaned: 0 },
+        }));
+        await page.route('**/api/attachments/page?*', (route) => {
+            const failed = new URL(route.request().url()).searchParams.get('q') === 'unavailable';
+            return route.fulfill(failed ? {
+                status: 503,
+                json: { message: 'List unavailable' },
+            } : {
+                status: 200,
+                json: { items: [], total: 0 },
+            });
+        });
+        await page.goto('/library/files?q=initial');
+        const main = page.locator('[data-app-main]');
+        const search = main.getByRole('textbox', {
+            name: message(locale, 'attachments', 'LibraryFiles.searchPlaceholder'), exact: true,
+        });
+        await expect(search).toBeVisible();
+        await search.fill('unavailable');
+
+        const alert = main.getByRole('alert').filter({
+            hasText: message(locale, 'records', 'RecordListState.title'),
+        });
+        await expect(alert).toBeVisible();
+        await expect(search).toBeFocused();
+        await expect(search).toHaveValue('unavailable');
+        await search.press('Escape');
+        await expect(search).toHaveValue('');
+        await expect(alert).toHaveCount(0);
+    });
+
+    test(`${locale} contacts hide retained rows when a filter is denied @mobile`, async ({ page }, testInfo) => {
+        const contact = runFixture(testInfo.project.name).contacts.peek;
+        await useLocale(page, locale);
+        let denied = false;
+        await page.route('**/api/persons/page?*', (route) => denied
+            ? route.fulfill({ status: 403, json: { message: 'Access denied' } })
+            : route.continue());
+        await page.goto(`/records/contacts?view=table&q=${encodeURIComponent(contact.name)}`);
+        const main = page.locator('[data-app-main]');
+        const row = main.locator(`[data-record-row-id="${contact.id}"]`);
+        await expect(row).toBeVisible();
+
+        denied = true;
+        const search = main.getByPlaceholder(message(locale, 'contacts', 'ContactsBrowser.searchPlaceholder'));
+        await search.fill(`${contact.name} denied`);
+        const alert = main.getByRole('alert').filter({
+            hasText: message(locale, 'records', 'RecordListState.deniedTitle'),
+        });
+        await expect(alert).toBeVisible();
+        await expect(row).toHaveCount(0);
+        await expect(search).toBeFocused();
+        await expect(page).toHaveURL(/\/records\/contacts/);
+    });
 }

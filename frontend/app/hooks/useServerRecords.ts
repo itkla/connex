@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
 import type { Page, PageParams } from '@/app/lib/types';
+import { ApiError } from '@/app/lib/api';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { MAX_URL_PAGE_SIZE, parseListInt, writeListStateToUrl, type SortDir } from '@/app/hooks/listStateUrl';
 
@@ -27,8 +28,9 @@ type RecordsState<T> = Page<T> & {
  * values land. That path is for browsers whose `sort` value space conflicts with the records-browser
  * `sort`/`dir` pair — they write pagination through their own owned-params writer instead of
  * enabling full `urlSync`.
- * Failed requests retain the last successful page in the same workspace and expose `error` until a successful retry.
- * Consumers must show a retryable error instead of empty-state copy while `error` is present.
+ * Retryable failures retain the last successful page in the same workspace and expose `error` until a successful retry.
+ * Authentication and permission failures discard that page so later outages cannot reveal denied rows again.
+ * Consumers must handle expired sessions and access denials separately, never showing empty-state copy for a failure.
  *
  * @param fetcher - loads a page of results for the given params
  * @param extraParams - non-paging params merged into every fetch
@@ -118,8 +120,11 @@ export function useServerRecords<T, P extends PageParams = PageParams>(
                 if (page > maxPage) setPage(maxPage);
             })
             .catch((failure: unknown) => {
+                const denied = failure instanceof ApiError && (failure.status === 401 || failure.status === 403);
                 if (active) setRecords((previous) => ({
                     ...previous,
+                    items: denied ? [] : previous.items,
+                    total: denied ? 0 : previous.total,
                     error: failure instanceof Error ? failure : new Error('Record list request failed'),
                 }));
             })

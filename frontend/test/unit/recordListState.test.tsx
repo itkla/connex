@@ -2,14 +2,21 @@
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { RecordListState } from '@/app/components/records/RecordListState';
 import { ApiError } from '@/app/lib/api';
+import * as sessionExpiry from '@/app/lib/sessionExpiry';
 import en from '@/messages/en/records.json';
 import ja from '@/messages/ja/records.json';
 
-afterEach(cleanup);
+beforeEach(() => {
+    vi.spyOn(sessionExpiry, 'redirectToSignIn').mockReturnValue(true);
+});
+afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+});
 
 describe.each([{ locale: 'en', messages: en }, { locale: 'ja', messages: ja }])('record list recovery in $locale', ({ locale, messages }) => {
     const t = messages.RecordListState;
@@ -58,6 +65,48 @@ describe.each([{ locale: 'en', messages: en }, { locale: 'ja', messages: ja }])(
         expect(screen.getByRole('alert').textContent).toContain(t.deniedTitle);
         expect(screen.getByRole('alert').textContent).toContain(t.deniedBody);
         expect(screen.queryByText('No contacts yet')).toBeNull();
+        expect(sessionExpiry.redirectToSignIn).not.toHaveBeenCalled();
+    });
+
+    it('hides retained rows after a permission refusal until a successful retry', () => {
+        const content = (error: Error | null) => (
+            <NextIntlClientProvider locale={locale} messages={messages}>
+                <RecordListState error={error} loading={false} hasRecords onRetry={vi.fn()}>
+                    <p>Previously loaded contact</p>
+                </RecordListState>
+            </NextIntlClientProvider>
+        );
+        const { rerender } = render(content(null));
+        expect(screen.getByText('Previously loaded contact')).toBeDefined();
+
+        rerender(content(new ApiError('internal permission', 403)));
+        expect(screen.queryByText('Previously loaded contact')).toBeNull();
+        expect(screen.getByRole('alert').textContent).toContain(t.deniedBody);
+        expect(screen.getByRole('alert').textContent).not.toContain(t.refreshBody);
+        expect(sessionExpiry.redirectToSignIn).not.toHaveBeenCalled();
+
+        rerender(content(null));
+        expect(screen.queryByRole('alert')).toBeNull();
+        expect(screen.getByText('Previously loaded contact')).toBeDefined();
+    });
+
+    it.each([
+        { status: 401, emptyBody: false },
+        { status: 401, emptyBody: true },
+        { status: 403, emptyBody: true },
+    ])('redirects an expired session ($status, empty body: $emptyBody) without collection errors or retained rows', ({ status, emptyBody }) => {
+        render(
+            <NextIntlClientProvider locale={locale} messages={messages}>
+                <RecordListState error={new ApiError('session expired', status, undefined, undefined, undefined, emptyBody)} loading={false} hasRecords onRetry={vi.fn()}>
+                    <p>Previously loaded contact</p>
+                </RecordListState>
+            </NextIntlClientProvider>,
+        );
+
+        expect(sessionExpiry.redirectToSignIn).toHaveBeenCalledOnce();
+        expect(screen.queryByRole('alert')).toBeNull();
+        expect(screen.queryByRole('button')).toBeNull();
+        expect(screen.queryByText('Previously loaded contact')).toBeNull();
     });
 
     it('allows the genuinely empty state after success', () => {

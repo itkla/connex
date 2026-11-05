@@ -1,14 +1,15 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
 import { ArrowPathIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { ApiError } from '@/app/lib/api';
+import { isSessionExpired, redirectToSignIn } from '@/app/lib/sessionExpiry';
 
-/** Keeps a failed collection distinct from an empty one while preserving previously loaded rows. */
+/** Distinguishes retryable collection failures, empty results, access denials and expired sessions. */
 export function RecordListState({
     error,
     loading,
@@ -23,13 +24,21 @@ export function RecordListState({
     children: ReactNode;
 }) {
     const t = useTranslations('RecordListState');
+    const sessionExpired = isSessionExpired(error);
     const denied = error instanceof ApiError && error.status === 403;
     const reference = error instanceof ApiError ? error.correlationId : undefined;
+    const showRecords = !error || (hasRecords && !denied);
+
+    useEffect(() => {
+        if (sessionExpired) redirectToSignIn();
+    }, [sessionExpired]);
+
+    if (sessionExpired) return null;
 
     return (
         <>
             {error ? (
-                <Alert className={hasRecords ? 'mb-4' : undefined}>
+                <Alert className={showRecords ? 'mb-4' : undefined}>
                     <ExclamationTriangleIcon aria-hidden />
                     <AlertTitle className="line-clamp-none">{t(denied ? 'deniedTitle' : 'title')}</AlertTitle>
                     <AlertDescription>
@@ -45,7 +54,7 @@ export function RecordListState({
                     </AlertDescription>
                 </Alert>
             ) : null}
-            {!error || hasRecords ? children : null}
+            {showRecords ? children : null}
         </>
     );
 }

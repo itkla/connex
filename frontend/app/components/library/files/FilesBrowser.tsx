@@ -241,6 +241,8 @@ export default function FilesBrowser() {
     const filtersActive =
         query.trim() !== '' || kind !== 'all' || source !== 'all' || tagIds.length > 0 || orphaned;
 
+    const showEmptyLibrary = isEmptyLibrary && !loading && !error && items.length === 0 && !filtersActive;
+
     const clearFilters = () => {
         setQuery('');
         setKind('all');
@@ -476,101 +478,100 @@ export default function FilesBrowser() {
                 </div>
             </Rise>
 
-            <RecordListState error={error} loading={loading} hasRecords={items.length > 0} onRetry={reload}>
-                {isEmptyLibrary && !loading && items.length === 0 ? (
-                    <Rise delay={0.06}>{libraryEmptyState}</Rise>
-                ) : (
-                    <>
-                        <Rise delay={0.06}>
-                        <FilterBar
-                            reduce={reduce}
-                            chips={chips}
-                            hasActiveFilters={filtersActive}
-                            onClearAll={clearFilters}
-                            clearAllLabel={tf('clearAll')}
-                            search={
-                                <SearchField
-                                    value={query}
-                                    onChange={setQuery}
-                                    onClear={() => setQuery('')}
-                                    placeholder={t('searchPlaceholder')}
-                                    searchAria={t('searchPlaceholder')}
-                                    clearAria={tf('clearSearchAria')}
-                                />
-                            }
-                            trailing={
-                                <div className="flex items-center gap-1.5">
-                                    <RadioFilter
-                                        label={t('sortLabel')}
-                                        ariaLabel={t('sortLabel')}
-                                        value={sort}
-                                        onValueChange={(v) => setSort(v as SortKey)}
-                                        options={SORT_KEYS.map((key) => ({ value: key, label: t(SORT_LABEL_KEY[key]) }))}
-                                    />
-                                    <SegmentedControl
-                                        ariaLabel={t('displayMode')}
-                                        value={view}
-                                        onChange={setView}
-                                        options={[
-                                            { value: 'grid', icon: <Squares2X2Icon className="size-4" />, ariaLabel: t('viewGrid') },
-                                            { value: 'list', icon: <Bars3Icon className="size-4" />, ariaLabel: t('viewList') },
-                                        ]}
-                                    />
-                                </div>
-                            }
-                        >
-                            {kindOptions.length > 1 && (
+            {!showEmptyLibrary ? (
+                <Rise delay={0.06}>
+                    <FilterBar
+                        reduce={reduce}
+                        chips={chips}
+                        hasActiveFilters={filtersActive}
+                        onClearAll={clearFilters}
+                        clearAllLabel={tf('clearAll')}
+                        search={
+                            <SearchField
+                                value={query}
+                                onChange={setQuery}
+                                onClear={() => setQuery('')}
+                                placeholder={t('searchPlaceholder')}
+                                searchAria={t('searchPlaceholder')}
+                                clearAria={tf('clearSearchAria')}
+                            />
+                        }
+                        trailing={
+                            <div className="flex items-center gap-1.5">
                                 <RadioFilter
-                                    label={t('typeLabel')}
-                                    ariaLabel={t('typeLabel')}
-                                    value={kind}
-                                    onValueChange={(v) => setKind(v as FileKind | 'all')}
+                                    label={t('sortLabel')}
+                                    ariaLabel={t('sortLabel')}
+                                    value={sort}
+                                    onValueChange={(v) => setSort(v as SortKey)}
+                                    options={SORT_KEYS.map((key) => ({ value: key, label: t(SORT_LABEL_KEY[key]) }))}
+                                />
+                                <SegmentedControl
+                                    ariaLabel={t('displayMode')}
+                                    value={view}
+                                    onChange={setView}
                                     options={[
-                                        { value: 'all', label: t('typeAll') },
-                                        ...kindOptions.map(({ kind: k, count }) => ({ value: k, label: t(KIND_LABEL_KEY[k]), count })),
+                                        { value: 'grid', icon: <Squares2X2Icon className="size-4" />, ariaLabel: t('viewGrid') },
+                                        { value: 'list', icon: <Bars3Icon className="size-4" />, ariaLabel: t('viewList') },
                                     ]}
                                 />
-                            )}
-                            {sourceOptions.length > 1 && (
-                                <RadioFilter
-                                    label={t('sourceLabel')}
-                                    ariaLabel={t('sourceLabel')}
-                                    value={source}
-                                    onValueChange={(v) => setSource(v as SourceType | 'all')}
-                                    options={[
-                                        { value: 'all', label: t('sourceAll') },
-                                        ...sourceOptions.map(({ source: s, count }) => ({ value: s, label: t(SOURCE_LABEL_KEY[s]), count })),
-                                    ]}
-                                />
-                            )}
-                            {tagOptions.length > 0 && (
-                                <MultiSelectFilter
-                                    label={t('tagLabel')}
-                                    ariaLabel={t('tagLabel')}
-                                    options={tagOptions.map(({ tag, count }) => ({ value: String(tag.id), label: tag.name, total: count }))}
-                                    selected={new Set(tagIds.map(String))}
-                                    onToggle={(v) => toggleTag(Number(v))}
-                                    onClear={() => setTagIds([])}
-                                    clearLabel={tf('clear')}
-                                    scroll
-                                />
-                            )}
-                            {facets && facets.orphaned > 0 && (
-                                <FilterTrigger
-                                    type="button"
-                                    onClick={() => setOrphaned((o) => !o)}
-                                    active={orphaned}
-                                    title={t('unlinkedHint')}
-                                >
-                                    <LinkSlashIcon className="size-3.5" />
-                                    {t('unlinked')}
-                                    <span className="tabular-nums">{facets.orphaned}</span>
-                                </FilterTrigger>
-                            )}
-                        </FilterBar>
-                        </Rise>
+                            </div>
+                        }
+                    >
+                        {kindOptions.length > 1 && (
+                            <RadioFilter
+                                label={t('typeLabel')}
+                                ariaLabel={t('typeLabel')}
+                                value={kind}
+                                onValueChange={(v) => setKind(v as FileKind | 'all')}
+                                options={[
+                                    { value: 'all', label: t('typeAll') },
+                                    ...kindOptions.map(({ kind: k, count }) => ({ value: k, label: t(KIND_LABEL_KEY[k]), count })),
+                                ]}
+                            />
+                        )}
+                        {sourceOptions.length > 1 && (
+                            <RadioFilter
+                                label={t('sourceLabel')}
+                                ariaLabel={t('sourceLabel')}
+                                value={source}
+                                onValueChange={(v) => setSource(v as SourceType | 'all')}
+                                options={[
+                                    { value: 'all', label: t('sourceAll') },
+                                    ...sourceOptions.map(({ source: s, count }) => ({ value: s, label: t(SOURCE_LABEL_KEY[s]), count })),
+                                ]}
+                            />
+                        )}
+                        {tagOptions.length > 0 && (
+                            <MultiSelectFilter
+                                label={t('tagLabel')}
+                                ariaLabel={t('tagLabel')}
+                                options={tagOptions.map(({ tag, count }) => ({ value: String(tag.id), label: tag.name, total: count }))}
+                                selected={new Set(tagIds.map(String))}
+                                onToggle={(v) => toggleTag(Number(v))}
+                                onClear={() => setTagIds([])}
+                                clearLabel={tf('clear')}
+                                scroll
+                            />
+                        )}
+                        {facets && facets.orphaned > 0 && (
+                            <FilterTrigger
+                                type="button"
+                                onClick={() => setOrphaned((o) => !o)}
+                                active={orphaned}
+                                title={t('unlinkedHint')}
+                            >
+                                <LinkSlashIcon className="size-3.5" />
+                                {t('unlinked')}
+                                <span className="tabular-nums">{facets.orphaned}</span>
+                            </FilterTrigger>
+                        )}
+                    </FilterBar>
+                </Rise>
+            ) : null}
 
-                        <Rise delay={0.12}>
+            <Rise delay={showEmptyLibrary ? 0.06 : 0.12}>
+                <RecordListState error={error} loading={loading} hasRecords={items.length > 0} onRetry={reload}>
+                    {showEmptyLibrary ? libraryEmptyState : (
                         <RecordsRenderView<Attachment>
                             data={items}
                             columns={columns}
@@ -609,10 +610,9 @@ export default function FilesBrowser() {
                                 onPageSizeChange: setSize,
                             }}
                         />
-                        </Rise>
-                    </>
-                )}
-            </RecordListState>
+                    )}
+                </RecordListState>
+            </Rise>
 
             <DeleteRecordDialog
                 open={!!deleting}
