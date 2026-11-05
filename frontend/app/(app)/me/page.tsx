@@ -150,7 +150,7 @@ export default async function MePage() {
                     </div>
                     <Link
                         href={settingsDestination("account.home").href}
-                        className="inline-flex items-center gap-1.5 font-medium text-brand transition-colors hover:text-brand-hover"
+                        className="inline-flex items-center gap-1.5 font-medium text-brand-text transition-colors hover:text-brand-text"
                     >
                         <Cog6ToothIcon className="size-4" />
                         {t("accountSettings")}

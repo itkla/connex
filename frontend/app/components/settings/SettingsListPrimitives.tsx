@@ -9,9 +9,9 @@
  * these keep the settings panels' own spacing rather than being folded into it.
  */
 
-/** Shared row-action trigger: a subtle ellipsis button that reveals on row hover. */
+/** Row actions stay visible on touch and reveal on row hover, focus, or an open menu elsewhere. */
 export const rowActionTrigger =
-    "flex size-7 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted/70 hover:text-foreground group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100";
+    "flex size-7 items-center justify-center rounded-full text-muted-foreground opacity-0 [@media(hover:none)]:opacity-100 transition-colors motion-reduce:transition-none hover:bg-muted/70 hover:text-foreground group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100";
 
 /** The bordered card a settings list of rows sits in, with hairlines between the rows. */
 export function ListCard({ children }: { children: React.ReactNode }) {

@@ -627,7 +627,7 @@ export default function CampaignDetail({
                                                     </span>
                                                 </div>
                                                 <div className="flex items-center gap-3 tabular-nums text-sm">
-                                                    <span className="font-medium text-brand-hover">
+                                                    <span className="font-medium text-brand-text">
                                                         {at("snapshotIncluded", {
                                                             count: snapshot.estimatedIncluded.toLocaleString(
                                                                 locale,
