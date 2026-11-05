@@ -46,6 +46,7 @@ export default function DocumentPaper({ document: doc }: { document: DealDocumen
                 <DocumentView
                     content={doc.content}
                     type={doc.type}
+                    documentLocale={doc.locale}
                     status={doc.status}
                     version={doc.version}
                     generatedAt={doc.generatedAt}

@@ -60,6 +60,10 @@ places for JPY and KRW). This is display formatting only: the numeric totals rem
 reading or generating another version never reformats a previously generated snapshot. Historical
 non-ISO currency codes retain their existing code-and-amount representation.
 
+Document tables, including the print and recipient views, format money with the frozen document
+locale independently of the viewer's UI language. Reconciliation of independently rounded rows and
+totals is a separate accounting decision tracked in [#2288](https://github.com/itkla/connex/issues/2288).
+
 Documents generated without line items persist zero totals in that locked parent deal's currency.
 Before draft or approved finalization, the frozen deal, every line, and totals must agree with the
 stored document currency, independently of later parent-deal changes. Historical snapshots with
