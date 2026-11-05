@@ -32,6 +32,73 @@ class TaskMapperTest extends AbstractMapperTest {
     @Autowired TaskMapper taskMapper;
     @Autowired JdbcTemplate jdbcTemplate;
 
+    @Test
+    void historyImportDatesOnlyExplicitCompletionsAtTheSuppliedOccurrence() {
+        User user = newUser();
+        Person person = newPerson(newCompany());
+        var rows = new java.util.ArrayList<ooo.klae.connex.backend.beans.HistoryImportWrite>();
+        for (boolean completed : List.of(false, true)) {
+            var row = new ooo.klae.connex.backend.beans.HistoryImportWrite();
+            row.setPersonId(person.getId());
+            row.setActorId(user.getId());
+            row.setDescription("Imported task " + completed);
+            row.setCompleted(completed);
+            row.setStatus(completed ? "done" : "todo");
+            row.setOccurredAt("2026-06-01 12:00:00");
+            row.setHistoryImportKey((completed ? "a" : "b").repeat(64));
+            row.setHistoryPayloadHash("c".repeat(64));
+            row.setHistorySourceRowRef("test-row:" + completed);
+            rows.add(row);
+        }
+        taskMapper.insertHistoryBatch(workspace.getId(), rows);
+        for (Task task : taskMapper.getTasksByPersonId(workspace.getId(), person.getId())) {
+            assertEquals(task.isCompleted() ? "2026-06-01 12:00:00" : null, task.getCompletedAt());
+        }
+        assertEquals(2, taskMapper.getTasksByPersonId(workspace.getId(), person.getId()).size());
+    }
+
+    @Test
+    void completionWritersStampTransitionsAndPreserveUndatedHistory() {
+        User user = newUser();
+        Task task = build("Completion transitions", user, null, null);
+        taskMapper.insert(task);
+        int ws = workspace.getId();
+        assertNull(taskMapper.getTaskById(ws, task.getId()).getCompletedAt());
+        taskMapper.complete(ws, task.getId(), user.getId(), 0);
+        Task completed = taskMapper.getTaskById(ws, task.getId());
+        assertNotNull(completed.getCompletedAt());
+        String instant = completed.getCompletedAt();
+        completed.setDescription("Edited after completion");
+        taskMapper.update(completed);
+        taskMapper.moveTask(ws, task.getId(), "done", true, 2);
+        assertEquals(instant, taskMapper.getTaskById(ws, task.getId()).getCompletedAt());
+
+        taskMapper.moveTask(ws, task.getId(), "todo", false, 0);
+        assertNull(taskMapper.getTaskById(ws, task.getId()).getCompletedAt());
+        Task reopened = taskMapper.getTaskById(ws, task.getId());
+        reopened.setCompleted(true);
+        reopened.setStatus("done");
+        taskMapper.update(reopened);
+        assertNotNull(taskMapper.getTaskById(ws, task.getId()).getCompletedAt());
+        reopened.setCompleted(false);
+        reopened.setStatus("todo");
+        taskMapper.update(reopened);
+        assertNull(taskMapper.getTaskById(ws, task.getId()).getCompletedAt());
+
+        Task createdDone = build("Created completed", user, null, null);
+        createdDone.setCompleted(true);
+        createdDone.setStatus("done");
+        taskMapper.insert(createdDone);
+        assertNotNull(taskMapper.getTaskById(ws, createdDone.getId()).getCompletedAt());
+        jdbcTemplate.update("UPDATE task SET completed_at = NULL WHERE workspace_id = ? AND id = ?",
+            ws, createdDone.getId());
+        taskMapper.update(taskMapper.getTaskById(ws, createdDone.getId()));
+        taskMapper.complete(ws, createdDone.getId(), user.getId(), 0);
+        taskMapper.moveTask(ws, createdDone.getId(), "done", true, 0);
+        assertNull(taskMapper.getTaskById(ws, createdDone.getId()).getCompletedAt());
+        assertEquals(0, taskMapper.complete(newWorkspace().getId(), task.getId(), user.getId(), 0));
+    }
+
     private Task build(String description, User assignedTo, Person person, Deal deal) {
         Task task = new Task();
         task.setWorkspaceId(workspace.getId());

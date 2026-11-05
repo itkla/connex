@@ -7,8 +7,9 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonSetter;
 
-import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
@@ -22,10 +23,10 @@ import ooo.klae.connex.backend.beans.User;
  * never needed the embedded objects, and accepting bare ids avoids the Jackson
  * ObjectId resolver having to find a User/Person/Deal in the same JSON tree
  * during deserialization.
+ * Omitted links on update preserve the stored relationship; explicit null clears it.
  */
 @Data
 @NoArgsConstructor
-@AllArgsConstructor
 public class NoteDto {
 
     private Integer id;
@@ -46,6 +47,24 @@ public class NoteDto {
     private Integer person;
 
     private Integer deal;
+
+    @JsonIgnore
+    private boolean personSpecified;
+
+    @JsonIgnore
+    private boolean dealSpecified;
+
+    @JsonSetter("person")
+    public void setPerson(Integer person) {
+        this.person = person;
+        this.personSpecified = true;
+    }
+
+    @JsonSetter("deal")
+    public void setDeal(Integer deal) {
+        this.deal = deal;
+        this.dealSpecified = true;
+    }
 
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private String createdAt;
@@ -87,11 +106,15 @@ public class NoteDto {
             Person p = new Person();
             p.setId(person);
             n.setPerson(p);
+        } else if (personSpecified) {
+            n.setPerson(null);
         }
         if (deal != null) {
             Deal d = new Deal();
             d.setId(deal);
             n.setDeal(d);
+        } else if (dealSpecified) {
+            n.setDeal(null);
         }
         n.setCreatedAt(createdAt);
         n.setUpdatedAt(updatedAt);

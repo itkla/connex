@@ -117,8 +117,8 @@ class TaskScoringShareIsolationMapperTest extends AbstractMapperTest {
         Task task = new Task();
         task.setWorkspaceId(workspace.getId());
         task.setDescription("Task " + unique());
-        task.setCompleted(false);
-        task.setStatus("todo");
+        task.setCompleted(true);
+        task.setStatus("done");
         task.setDueDate("2026-07-31");
         task.setAssignedTo(assignee);
         task.setPerson(person);

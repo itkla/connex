@@ -8,6 +8,7 @@
     <result property="workspaceId" column="workspace_id"/>
     <result property="description" column="description"/>
     <result property="completed" column="completed"/>
+    <result property="completedAt" column="completed_at"/>
     <result property="status" column="status"/>
     <result property="position" column="position"/>
     <result property="dueDate" column="due_date"/>
@@ -26,7 +27,7 @@
 
   <sql id="taskColumns">
     id, workspace_id, description, completed, status, position, due_date, assigned_to_id, person_id, deal_id,
-    created_at, updated_at
+    created_at, updated_at, completed_at
   </sql>
 
   <sql id="assistantProcessablePerson">
@@ -220,7 +221,7 @@
 
   <select id="getAiAssistantTasksByPersonId" resultMap="TaskResult">
     SELECT t.id, t.workspace_id, t.description, t.completed, t.status, t.position, t.due_date,
-      t.assigned_to_id, t.person_id, t.deal_id, t.created_at, t.updated_at
+      t.assigned_to_id, t.person_id, t.deal_id, t.created_at, t.updated_at, t.completed_at
     FROM task t
     WHERE t.workspace_id = #{workspaceId} AND t.person_id = #{personId}
       AND <include refid="assistantLinkedPeopleProcessable"/>
@@ -258,7 +259,7 @@
 
   <select id="getAiAssistantTasksByDealId" resultMap="TaskResult">
     SELECT t.id, t.workspace_id, t.description, t.completed, t.status, t.position, t.due_date,
-      t.assigned_to_id, t.person_id, t.deal_id, t.created_at, t.updated_at
+      t.assigned_to_id, t.person_id, t.deal_id, t.created_at, t.updated_at, t.completed_at
     FROM task t
     WHERE t.workspace_id = #{workspaceId} AND t.deal_id = #{dealId}
       AND <include refid="assistantLinkedPeopleProcessable"/>
@@ -283,7 +284,7 @@
 
   <select id="getAiAssistantTasksByCompanyId" resultMap="TaskResult">
     SELECT t.id, t.workspace_id, t.description, t.completed, t.status, t.position, t.due_date,
-      t.assigned_to_id, t.person_id, t.deal_id, t.created_at, t.updated_at
+      t.assigned_to_id, t.person_id, t.deal_id, t.created_at, t.updated_at, t.completed_at
     FROM task t
     WHERE t.workspace_id = #{workspaceId}
       AND <include refid="assistantLinkedPeopleProcessable"/>
@@ -330,7 +331,7 @@
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO task (
       workspace_id, description, completed, status, position, due_date, assigned_to_id, person_id, deal_id,
-      created_at
+      created_at, completed_at
     )
     VALUES (
       #{workspaceId}, #{description}, #{completed}, #{status}, #{position}, #{dueDate}, #{assignedTo.id},
@@ -342,7 +343,8 @@
         <when test="deal != null">#{deal.id}</when>
         <otherwise>NULL</otherwise>
       </choose>,
-      COALESCE(#{createdAt}, CURRENT_TIMESTAMP)
+      COALESCE(#{createdAt}, CURRENT_TIMESTAMP),
+      CASE WHEN #{completed} THEN UTC_TIMESTAMP() ELSE NULL END
     )
   </insert>
 
@@ -361,7 +363,7 @@
   <insert id="insertHistoryBatch">
     INSERT INTO task (
       workspace_id, description, completed, status, position, due_date, assigned_to_id,
-      person_id, deal_id, created_at, updated_at, history_import_key, history_payload_hash,
+      person_id, deal_id, created_at, updated_at, completed_at, history_import_key, history_payload_hash,
       history_source_system, history_source_id, history_source_row_ref, history_imported_at
     )
     VALUES
@@ -369,6 +371,7 @@
       (
         #{workspaceId}, #{row.description}, #{row.completed}, #{row.status}, #{row.position},
         #{row.dueDate}, #{row.actorId}, #{row.personId}, NULL, #{row.occurredAt}, #{row.occurredAt},
+        CASE WHEN #{row.completed} THEN #{row.occurredAt} ELSE NULL END,
         #{row.historyImportKey}, #{row.historyPayloadHash}, 'csv',
         #{row.historySourceId}, #{row.historySourceRowRef}, UTC_TIMESTAMP(6)
       )
@@ -377,7 +380,11 @@
 
   <update id="update">
     UPDATE task
-    SET description = #{description},
+    SET completed_at = CASE
+          WHEN NOT #{completed} THEN NULL
+          WHEN NOT completed THEN UTC_TIMESTAMP()
+          ELSE completed_at END,
+        description = #{description},
         completed = #{completed},
         status = #{status},
         position = #{position},
@@ -402,7 +409,8 @@
 
   <update id="complete">
     UPDATE task
-    SET completed = TRUE, status = 'done', position = #{position}
+    SET completed_at = CASE WHEN NOT completed THEN UTC_TIMESTAMP() ELSE completed_at END,
+        completed = TRUE, status = 'done', position = #{position}
     WHERE workspace_id = #{workspaceId}
       AND id = #{id}
       AND assigned_to_id = #{assignedToId}
@@ -447,7 +455,12 @@
   </update>
 
   <update id="moveTask">
-    UPDATE task SET status = #{status}, completed = #{completed}, position = #{position}
+    UPDATE task
+    SET completed_at = CASE
+          WHEN NOT #{completed} THEN NULL
+          WHEN NOT completed THEN UTC_TIMESTAMP()
+          ELSE completed_at END,
+        status = #{status}, completed = #{completed}, position = #{position}
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
 

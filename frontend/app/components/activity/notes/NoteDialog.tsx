@@ -611,7 +611,6 @@ export function NoteDialogForm({
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         resetFieldErrors();
-        const trimmed = content.trim();
         const normalizedTitle = title.trim() || null;
         setSubmitting(true);
         onSubmittingChange(true);
@@ -620,7 +619,7 @@ export function NoteDialogForm({
                 await updateNote(
                     persistedNoteId,
                     {
-                        content: trimmed,
+                        content,
                         title: normalizedTitle,
                         visibility,
                         author: note?.author ?? currentUserId,
@@ -639,7 +638,7 @@ export function NoteDialogForm({
             } else {
                 await createNote(
                     {
-                        content: trimmed,
+                        content,
                         title: normalizedTitle,
                         visibility,
                         author: currentUserId,
