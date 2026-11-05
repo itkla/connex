@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
 
-import { csrfBootstrap, seeder } from "./support/api";
+import { activeWorkspaceId, csrfBootstrap, registerUser, seeder } from "./support/api";
 import { runFixture } from "./support/fixtures";
 import { useLocale } from "./support/locale";
 import { message } from "./support/messages";
+
+test.use({ storageState: { cookies: [], origins: [] } });
 
 function numericField(body: Record<string, unknown>, key: string): number {
     const value = body[key];
@@ -16,16 +18,23 @@ function numericField(body: Record<string, unknown>, key: string): number {
 
 for (const locale of ["en", "ja"] as const) {
     test(`an unsent campaign reports preparation without claiming delivery (${locale}) @mobile`, async ({ page }, testInfo) => {
-        const fixture = runFixture(testInfo.project.name);
-        const csrf = await csrfBootstrap(page.request);
-        const seed = seeder(page.request, fixture.workspaceId, csrf);
-        const headers = { "X-Workspace-Id": String(fixture.workspaceId), [csrf.headerName]: csrf.token };
         const key = randomUUID();
+        await registerUser(page.request, {
+            username: `campaign_${key.replaceAll("-", "")}`,
+            password: `Campaign!${key}A1`,
+            email: `campaign-${key}@example.invalid`,
+        });
+        const workspaceId = await activeWorkspaceId(page.request);
+        expect(workspaceId).not.toBe(runFixture(testInfo.project.name).workspaceId);
+        const csrf = await csrfBootstrap(page.request);
+        const seed = seeder(page.request, workspaceId, csrf);
+        const headers = { "X-Workspace-Id": String(workspaceId), [csrf.headerName]: csrf.token };
+        const company = await seed.post("/api/companies", { name: `Campaign company ${key}` });
         const name = `Campaign metrics ${key}`;
         await seed.post("/api/persons", {
             name,
             email: `campaign-${key}@example.invalid`,
-            companyId: fixture.companies.primary.id,
+            companyId: numericField(company, "id"),
         });
         const campaign = await seed.post("/api/campaigns", { name, type: "email" });
         const campaignId = numericField(campaign, "id");
