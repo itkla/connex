@@ -101,5 +101,7 @@ with the original provider timestamp, then verifies queues, counts, groups and d
 The deal reporting-date, lifecycle and editor tests exercise the stored Tokyo-midnight timestamp
 under Tokyo and New York profiles; `test/e2e/import-deal-dates.spec.ts` covers import, revenue
 buckets, detail, editor, table and peek with that same reporting calendar.
+Its isolated administrator completes passkey enrollment before setting the workspace reporting
+timezone; password registration alone does not satisfy the endpoint's recent-authentication gate.
 `test/e2e/profile-timezone.spec.ts` exercises EN/JA desktop/phone with a Tokyo profile and a
 Los Angeles browser, then changes the profile to UTC and verifies the due day stays fixed.
