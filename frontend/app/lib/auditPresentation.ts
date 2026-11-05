@@ -270,11 +270,11 @@ function metadataRows(
     });
 }
 
-function fixedMetadata(entry: Pick<AuditLogEntry, 'entityType' | 'entityId' | 'targetLabel' | 'outcome'>) {
+function fixedMetadata(entry: Pick<AuditLogEntry, 'entityType' | 'entityId' | 'targetLabel' | 'outcome'>): AuditMetadataRow[] {
     const target = entry.targetLabel
         ?? (entry.entityType && entry.entityId != null ? `${entry.entityType} #${entry.entityId}` : null);
     return [
-        { key: 'result', labelKey: 'metaResult' as const, value: entry.outcome, mono: false },
+        { key: 'result', labelKey: 'metaResult' as const, value: entry.outcome ?? null, mono: false },
         { key: 'target', labelKey: 'metaTarget' as const, value: target, mono: false },
     ];
 }
@@ -305,7 +305,7 @@ export function auditOutcome(
     if (isSecretEntry(entry)) {
         return entry.outcome === 'success' || entry.outcome === 'failure' ? entry.outcome : null;
     }
-    if (!isAiEntry(entry)) return entry.outcome;
+    if (!isAiEntry(entry)) return entry.outcome ?? null;
     const metadataOutcome = knownString(AI_OUTCOMES)(entry.changes?.outcome);
     if (typeof metadataOutcome === 'string') return metadataOutcome;
     return entry.outcome != null && AI_OUTCOMES.has(entry.outcome) ? entry.outcome : null;
@@ -314,7 +314,7 @@ export function auditOutcome(
 /** Returns the target label that may be rendered for an audit row. */
 export function auditTargetLabel(
     entry: Pick<AuditLogEntry, 'action' | 'entityType' | 'targetLabel' | 'changes'>,
-): string | null {
+): string | null | undefined {
     if (isSecretEntry(entry)) {
         const purpose = knownString(SECRET_PURPOSES)(entry.changes?.purpose);
         if (typeof purpose === 'string') return purpose;
@@ -339,7 +339,7 @@ export function auditTargetLabel(
 export function auditSummary(
     entry: Pick<AuditLogEntry, 'action' | 'entityType' | 'summary'>,
 ): string | null {
-    return isSensitiveAuditEntry(entry) ? null : entry.summary;
+    return isSensitiveAuditEntry(entry) ? null : entry.summary ?? null;
 }
 
 /** Returns a controlled error category for sensitive audit rows. */
