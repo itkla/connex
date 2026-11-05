@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import type { APIRequestContext } from "@playwright/test";
+import type { APIRequestContext, APIResponse } from "@playwright/test";
 import { expect } from "@playwright/test";
 
 import { runFixturePath, type E2ETenantScope } from "../../../playwright.config";
@@ -44,17 +44,28 @@ export type RunFixture = {
 
 type CsrfBootstrap = { token: string; headerName: string };
 
+type RegistrationApi = {
+    get: (...args: Parameters<APIRequestContext["get"]>) => Promise<Pick<APIResponse, "status">>;
+    post: (...args: Parameters<APIRequestContext["post"]>) => Promise<Pick<APIResponse, "status" | "text">>;
+};
+
 /**
  * Registers a throwaway user against the dev backend. Under the dev profile the register
  * endpoint also logs the session in, creates a default workspace, and sets the
  * JSESSIONID + connex_workspace cookies on the response — one call yields a full tenant.
  * The default workspace is named after the display name, so a spec that registers two users and
  * must tell their workspaces apart passes distinct display names.
+ * Requires an unauthenticated context: registering through shared project storage state would
+ * replace that session and sign out every other test that inherited it.
  */
 export async function registerUser(
-    api: APIRequestContext,
+    api: RegistrationApi,
     credentials: { username: string; password: string; email: string; displayName?: string },
 ): Promise<void> {
+    const session = await api.get("/api/auth/me", { timeout: 120_000 });
+    if (session.status() !== 401) {
+        throw new Error("Registration requires a fresh unauthenticated context; use empty storageState or a new context");
+    }
     const response = await api.post("/api/auth/register", {
         timeout: 120_000,
         data: {

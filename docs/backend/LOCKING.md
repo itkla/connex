@@ -2564,7 +2564,7 @@ socket write takes publication S, freshly checks control authority in a separate
 transaction and retains publication S through the write. Broker enqueue validation alone does not
 authorize a buffered frame after organization invalidation.
 
-## Deal manual-value fallback (V242)
+## Deal manual-value fallback (V243)
 
 Line preview and write paths retain their existing parent-deal-first lock order. Preview takes
 the parent lock for an exact value/line snapshot and performs no writes. Fallback capture and

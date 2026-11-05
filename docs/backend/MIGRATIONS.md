@@ -83,4 +83,5 @@ V237 appends immutable organization provenance with historical default 0, versio
 scopes and adds object obligations. Separate explicit INSTANT column operations and INPLACE index
 operations must fail if unsupported; no retained-content UPDATE backfill, COPY fallback or disabled
 FK validation is authorized. Scope triggers precede replacement of affected legacy work checks.
-The incompatible serving-binary rollback floor is tenant V237.
+The historical privacy component floor is tenant V237; the current release-wide floor is
+tenant V243, as documented in [UPGRADING.md](../UPGRADING.md#deal-line-value-takeover-tenant-v243).

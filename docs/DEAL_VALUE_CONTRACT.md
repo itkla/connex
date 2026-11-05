@@ -52,7 +52,7 @@ Drafts capture their workspace when composed. Preview, persistence, confirmation
 retries carry that explicit workspace pin. Workspace selection, account revocation, route changes,
 and unmount invalidate the pending write chain before any later request or stale UI update.
 
-From V242 onward, the manual amount (including zero) is stored prospectively in
+From V243 onward, the manual amount (including zero) is stored prospectively in
 `deal.prior_manual_value` when line items take over. Deleting the **last** line automatically
 restores that amount, sets `value_source` to `manual`, and clears the fallback in the same transaction.
 The UI explains restoration before removal. This deliberately replaces the former last-derived-total
@@ -69,7 +69,7 @@ pins the previewed manual amount and currency instead. Fallback writes correctly
 parent's version through that trigger without making the confirmation request stale.
 Only current booking value changes; the existing realized-value resolver and win-time freeze remain
 unchanged. Old clients can read the additive response fields but cannot take over a nonzero manual
-value without the new flag. Earlier serving binaries bypass that guard and restoration, so V242 is
+value without the new flag. Earlier serving binaries bypass that guard and restoration, so V243 is
 the serving rollback floor; leave the nullable column in place and roll forward with a compatible
 binary rather than rolling back to an unsafe writer.
 

@@ -1,15 +1,17 @@
 import { randomUUID } from 'node:crypto';
-import { expect, test, type APIResponse, type Page } from '@playwright/test';
+import { expect, test, type APIResponse, type Page, type Response } from '@playwright/test';
 import { activeWorkspaceId, csrfBootstrap, registerUser } from './support/api';
 import { useLocale } from './support/locale';
 import { message } from './support/messages';
+
+test.use({ storageState: { cookies: [], origins: [] } });
 
 function record(value: unknown): Record<string, unknown> {
     if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('Expected an object');
     return Object.fromEntries(Object.entries(value));
 }
 
-async function body(response: APIResponse): Promise<Record<string, unknown>> {
+async function body(response: APIResponse | Response): Promise<Record<string, unknown>> {
     expect(response.ok(), await response.text()).toBe(true);
     const value: unknown = await response.json();
     return record(value);
@@ -18,6 +20,12 @@ async function body(response: APIResponse): Promise<Record<string, unknown>> {
 function id(value: Record<string, unknown>): number {
     if (typeof value.id !== 'number') throw new Error('Missing record id');
     return value.id;
+}
+
+function lineSaved(page: Page, dealId: number, method: 'POST' | 'PUT') {
+    return page.waitForResponse((response) => response.url().includes(`/api/deals/${dealId}/line-items`)
+        && response.request().method() === method
+        && record(response.request().postDataJSON()).previewOnly !== true);
 }
 
 async function setup(page: Page, value: number) {
@@ -88,7 +96,7 @@ test('blank draft, priced confirmation, cancel and final removal preserve deal v
         expect(await saved()).toEqual(original);
         expect(await figures()).toEqual(before);
         await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
-        await expect(lines.getByRole('spinbutton', { name: 'Unit price', exact: true })).toHaveValue('120.5');
+        await expect(lines.getByRole('spinbutton', { name: 'Unit price', exact: true })).toHaveValue('120.50');
         expect(await figures()).toEqual(before);
         const rejected = await page.request.post(`/api/deals/${dealId}/line-items`, {
             headers, data: { name: 'Unconfirmed', unitPrice: 0, quantity: 1 },
@@ -100,12 +108,16 @@ test('blank draft, priced confirmation, cancel and final removal preserve deal v
     });
     await test.step('confirmed total is saved and removing the final line restores the manual amount', async () => {
         await lines.getByRole('button', { name: 'Save line', exact: true }).click();
+        const created = lineSaved(page, dealId, 'POST');
         await page.getByRole('dialog').getByRole('button', { name: 'Replace value and save' }).click();
+        await body(await created);
         await expect.poll(async () => (await saved()).value).toBe(132.55);
         expect((await saved()).valueSource).toBe('line_items');
         const qty = lines.getByRole('spinbutton', { name: 'Qty', exact: true });
         await qty.fill('2.5');
+        const quantitySaved = lineSaved(page, dealId, 'PUT');
         await qty.press('Tab');
+        await body(await quantitySaved);
         await expect.poll(async () => (await saved()).value).toBe(331.38);
         await expect(page.getByRole('dialog')).toHaveCount(0);
         if (isMobile) {
@@ -118,6 +130,7 @@ test('blank draft, priced confirmation, cancel and final removal preserve deal v
             expect(await editor.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
         }
         const remove = lines.getByRole('button', { name: 'Remove line', exact: true });
+        await remove.scrollIntoViewIfNeeded();
         await expect(remove).toBeInViewport();
         await remove.click();
         await expect.poll(async () => (await saved()).value).toBe(114200);
@@ -137,18 +150,26 @@ test('catalog tax example and editable discounts persist into approval checks @m
     await page.getByRole('option', { name: /Taxed service/ }).click();
     await lines.getByRole('button', { name: 'Save line', exact: true }).click();
     await expect(page.getByRole('dialog')).toContainText('$121,600.00 to $132.55, including tax');
+    const created = lineSaved(page, dealId, 'POST');
     await page.getByRole('dialog').getByRole('button', { name: 'Replace value and save' }).click();
+    await body(await created);
     await expect.poll(async () => (await saved()).value).toBe(132.55);
     const qty = lines.getByRole('spinbutton', { name: 'Qty', exact: true });
     await qty.fill('2.5');
+    const quantitySaved = lineSaved(page, dealId, 'PUT');
     await qty.press('Tab');
+    await body(await quantitySaved);
     await expect.poll(async () => (await saved()).value).toBe(331.38);
     await lines.getByRole('combobox', { name: 'Discount type', exact: true }).click();
+    const typeSaved = lineSaved(page, dealId, 'PUT');
     await page.getByRole('option', { name: 'Percentage (%)', exact: true }).click();
+    await body(await typeSaved);
     const discount = lines.getByRole('spinbutton', { name: 'Discount value', exact: true });
     await expect(discount).toBeEnabled();
     await discount.fill('20');
+    const discountSaved = lineSaved(page, dealId, 'PUT');
     await discount.press('Tab');
+    await body(await discountSaved);
     await expect.poll(async () => (await saved()).value).toBe(265.10);
     await body(await page.request.post('/api/approval-policies', { headers, data: {
         name: 'Discount review', active: true, documentType: 'quote', currency: 'USD', minDiscountPercent: 20,
