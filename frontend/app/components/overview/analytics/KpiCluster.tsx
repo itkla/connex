@@ -8,62 +8,7 @@ import { formatCompactCurrency } from '@/app/lib/utils';
 import { type DealKpis } from '@/app/lib/types';
 import { type Kpi } from '@/app/components/overview/analytics/metrics';
 import InfoTip from '@/app/components/overview/analytics/InfoTip';
-
-const pctChange = (current: number, previous: number): number | null =>
-    previous === 0 ? (current === 0 ? 0 : null) : (current - previous) / previous;
-
-/**
- * Maps the server-computed {@link DealKpis} DTO onto the four presentational KPI tiles
- * (won revenue, new pipeline, win rate, average cycle). Deltas come from the DTO's
- * {@code *Prev} baselines — a null baseline yields a null delta, rendered as "no baseline".
- */
-function toTiles(kpis: DealKpis): Kpi[] {
-    const closedCount = kpis.wonCount + kpis.lostCount;
-    const winRate = closedCount > 0 ? kpis.wonCount / closedCount : 0;
-    let winRatePrev: number | null = null;
-    if (kpis.wonCountPrev != null && kpis.lostCountPrev != null) {
-        const prevClosed = kpis.wonCountPrev + kpis.lostCountPrev;
-        if (prevClosed > 0) winRatePrev = kpis.wonCountPrev / prevClosed;
-    }
-    return [
-        {
-            key: 'wonRevenue',
-            format: 'currency',
-            value: kpis.wonRevenue,
-            delta: kpis.wonRevenuePrev != null ? pctChange(kpis.wonRevenue, kpis.wonRevenuePrev) : null,
-            deltaKind: 'pct',
-            goodWhenUp: true,
-            series: kpis.wonSeries,
-        },
-        {
-            key: 'newPipeline',
-            format: 'currency',
-            value: kpis.newPipeline,
-            delta: kpis.newPipelinePrev != null ? pctChange(kpis.newPipeline, kpis.newPipelinePrev) : null,
-            deltaKind: 'pct',
-            goodWhenUp: true,
-            series: kpis.newPipelineSeries,
-        },
-        {
-            key: 'winRate',
-            format: 'percent',
-            value: winRate,
-            delta: winRatePrev != null && closedCount > 0 ? winRate - winRatePrev : null,
-            deltaKind: 'pp',
-            goodWhenUp: true,
-            series: kpis.winRateSeries,
-        },
-        {
-            key: 'avgCycle',
-            format: 'days',
-            value: kpis.avgCycleDays,
-            delta: kpis.avgCycleDaysPrev != null ? pctChange(kpis.avgCycleDays, kpis.avgCycleDaysPrev) : null,
-            deltaKind: 'pct',
-            goodWhenUp: false,
-            series: kpis.avgCycleSeries,
-        },
-    ];
-}
+import { toTiles } from '@/app/components/overview/analytics/currencyScope';
 
 function Sparkline({ series, positive }: { series: number[]; positive: boolean }) {
     const w = 80;
