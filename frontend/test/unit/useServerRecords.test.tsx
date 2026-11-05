@@ -180,3 +180,31 @@ describe('useServerRecords failures and recovery', () => {
         expect(result.current.loading).toBe(false);
     });
 });
+
+
+describe('complete write snapshots', () => {
+    it('replaces the row including optional fields omitted by a write response', async () => {
+        type Versioned = Record & { version: number; companyId?: number };
+        const saved: Versioned = { id: 1, name: 'Edited contact', version: 5 };
+        const fetcher = vi.fn(async (): Promise<Page<Versioned>> => ({
+            items: [{ id: 1, name: 'Contact', version: 4, companyId: 2 }], total: 1,
+        }));
+        const { result } = renderHook(() => useServerRecords(fetcher));
+        await waitFor(() => expect(result.current.loading).toBe(false));
+        act(() => result.current.replaceItem(1, saved));
+        expect(result.current.items[0]).toBe(saved);
+        expect(result.current.items[0]?.companyId).toBeUndefined();
+    });
+
+    it('refuses a response callback retained from the previous workspace', async () => {
+        const fetcher = vi.fn(async (): Promise<Page<Record>> => firstPage);
+        const { result, rerender } = renderHook(() => useServerRecords(fetcher));
+        await waitFor(() => expect(result.current.loading).toBe(false));
+        const oldReplace = result.current.replaceItem;
+        workspace.activeWorkspaceId = 8;
+        rerender();
+        await waitFor(() => expect(result.current.loading).toBe(false));
+        act(() => oldReplace(1, { id: 1, name: 'Old workspace write' }));
+        expect(result.current.items).toEqual(firstPage.items);
+    });
+});

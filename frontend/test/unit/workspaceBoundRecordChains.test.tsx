@@ -35,7 +35,8 @@ import type QuickEditDealSheet from "@/app/components/records/deals/QuickEditDea
 import type QuickEditPipelineSheet from "@/app/components/records/pipelines/QuickEditPipelineSheet";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { bindRenderedWorkspace, releaseRenderedWorkspace, workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
-import type { BusinessCardImportDraft, Deal, DealLineItem } from "@/app/lib/types";
+import type { RecordMenuModel } from "@/app/components/records/types";
+import type { BusinessCardImportDraft, Contact, Deal, DealLineItem } from "@/app/lib/types";
 import { company, contact, deal, deferred, image, json, ORIGIN, pipeline, shell, stage, stubBackend, switchWorkspace } from "./helpers/workspaceChainBackend";
 
 const captured = vi.hoisted<{
@@ -68,7 +69,7 @@ const browser = vi.hoisted(() => ({
     refresh: vi.fn(),
     selectedIds: new Set([41]),
     filterState: {},
-    items: [],
+    items: new Array<Contact>(),
     search: new URLSearchParams(),
     showSelectionActions: false,
 }));
@@ -100,15 +101,23 @@ vi.mock("@/app/hooks/useServerRecords", () => ({
         items: browser.items, total: 0, loading: false, page: 1, size: 25, query: "",
         sortKey: null, sortDirection: "asc", revision: 0,
         setPage: browser.noop, setSize: browser.noop, setQuery: browser.noop, applyQuery: browser.noop,
-        onSortChange: browser.noop, applySort: browser.noop, reload: browser.noop, patchItem: browser.noop,
+        onSortChange: browser.noop, applySort: browser.noop, reload: browser.noop, patchItem: browser.noop, replaceItem: browser.noop,
     }),
+}));
+vi.mock("@/app/components/records/RecordActionMenu", () => ({
+    RecordContextMenu: ({ children }: { children?: ReactNode }) => <>{children}</>,
+    RecordActionMenuTrigger: ({ model }: { model: RecordMenuModel }) => <button onClick={model.onQuickEdit}>quickEdit</button>,
 }));
 vi.mock("@/app/components/records/useRecordPeekController", () => ({ useRecordPeekController: () => ({ activeId: null, drawer: null }) }));
 vi.mock("@/app/components/records/CustomFieldColumns", () => ({ useCustomFieldColumns: () => ({ columns: [], addColumnSlot: null }) }));
 vi.mock("@/app/components/PageShell", () => ({ PageShell: ({ children }: { children?: ReactNode }) => <>{children}</> }));
 vi.mock("@/app/components/motion/Rise", () => ({
-    default: ({ children }: { children?: ReactNode }) => browser.showSelectionActions && isValidElement<{ selectionActions?: ReactNode }>(children)
-        ? <>{children.props.selectionActions}</> : null,
+    default: ({ children }: { children?: ReactNode }) => {
+        if (!browser.showSelectionActions || !isValidElement<{ selectionActions?: ReactNode; children?: ReactNode }>(children)) return null;
+        const nested = children.props.children;
+        const actions = children.props.selectionActions ?? (isValidElement<{ selectionActions?: ReactNode }>(nested) ? nested.props.selectionActions : null);
+        return <>{actions}</>;
+    },
 }));
 vi.mock("@/components/ui/segmented-control", () => ({ SegmentedControl: () => null }));
 vi.mock("@/components/ui/dialog-status-cover", async (importOriginal) => ({ ...await importOriginal<typeof import("@/components/ui/dialog-status-cover")>(), DialogStatusCover: () => null }));
@@ -161,6 +170,7 @@ beforeEach(() => {
     for (const key of Object.keys(captured)) Reflect.set(captured, key, null);
     browser.selectedIds = new Set([41]);
     browser.showSelectionActions = false;
+    browser.items = [];
     bindRenderedWorkspace(shell, ORIGIN);
     document.cookie = "connex_workspace=" + ORIGIN + "; path=/";
 });
@@ -226,6 +236,63 @@ describe("deal edit origins", () => {
             await act(async () => get("dealConflict").onReload(snapshot));
             expect(get("dealSheet").drafts[41]).toMatchObject({ expectedVersion: 2, name: current.name });
         }
+    });
+});
+
+describe("in-flight contact batches", () => {
+    it("retains newer input through both responses and retries only the remaining contact draft", async () => {
+        const first = { ...contact, version: 1 };
+        const second = { ...contact, id: 42, version: 5, name: "Other contact" };
+        const firstSaved = { ...first, version: 2, name: "First submitted" };
+        const secondSaved = { ...second, version: 6, name: "Second submitted" };
+        const backend = stubBackend("/api/persons/41", (path, method) => {
+            if (path === "/api/persons/41" && method === "GET") return json(first);
+            if (path === "/api/persons/42" && method === "GET") return json(second);
+            if (path === "/api/persons/41" && method === "PUT") return json({ ...firstSaved, version: 3, name: "Newest first input" });
+            if (path === "/api/persons/42" && method === "PUT") return json(secondSaved);
+            return undefined;
+        });
+        const secondStarted = deferred<void>();
+        const secondResponse = deferred<Response>();
+        const transport = vi.mocked(fetch);
+        const original = transport.getMockImplementation();
+        if (!original) throw new Error("Expected the stub transport");
+        transport.mockImplementation((input, init = {}) => {
+            const response = original(input, init);
+            if (String(input).endsWith("/api/persons/42") && init.method === "PUT") {
+                secondStarted.resolve();
+                return secondResponse.promise;
+            }
+            return response;
+        });
+        browser.items = [first, second];
+        browser.selectedIds = new Set([41, 42]);
+        browser.showSelectionActions = true;
+        await render(<ContactsBrowser savedViews={[]} defaultView={null} />);
+        const edit = [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "quickEdit");
+        if (!edit) throw new Error("Expected the multi-contact Quick edit action");
+        await act(async () => edit.click());
+        await act(async () => {
+            get("contactSheet").updateDraft(41, { name: "First submitted" });
+            get("contactSheet").updateDraft(42, { name: " Second submitted " });
+        });
+        let pending: unknown;
+        await act(async () => { pending = get("contactSheet").saveEdits(); await backend.started.promise; });
+        expect(backend.requests).toHaveLength(1);
+        await act(async () => get("contactSheet").updateDraft(41, { name: "Newer first input" }));
+        await act(async () => { backend.held.resolve(json(firstSaved)); await secondStarted.promise; });
+        expect(get("contactSheet").drafts[41]).toMatchObject({ name: "Newer first input", expectedVersion: 2 });
+        await act(async () => get("contactSheet").updateDraft(41, { name: "Newest first input" }));
+        await act(async () => { secondResponse.resolve(json(secondSaved)); await pending; });
+        expect(get("contactSheet").editSheetOpen).toBe(true);
+        expect(get("contactSheet").drafts[41]).toMatchObject({ name: "Newest first input", expectedVersion: 2 });
+        expect(get("contactSheet").drafts[42]).toMatchObject({ name: "Second submitted", expectedVersion: 6 });
+        await act(async () => get("contactSheet").saveEdits());
+        expectWrites(backend, ["/api/persons/41", "/api/persons/42", "/api/persons/41"]);
+        const retryBody = backend.requests[2]?.init.body;
+        if (typeof retryBody !== "string") throw new Error("Expected the retried contact payload");
+        expect(JSON.parse(retryBody)).toMatchObject({ expectedVersion: 2, name: "Newest first input" });
+        expect(get("contactSheet").editSheetOpen).toBe(false);
     });
 });
 
@@ -478,11 +545,16 @@ describe("record edit chains preserve one origin", () => {
         const fieldPath = entityPath + "/custom-fields";
         const picturePath = entityPath + (surface === "company" ? "/logo" : "/profile-picture");
         const heldPath = hold === "first" ? entityPath : fieldPath;
-        const backend = stubBackend(heldPath);
+        const backend = stubBackend(heldPath, (path, method) => surface === "card" && path === entityPath && method === "GET" ? json(contact) : undefined);
         await render(surface === "card" ? <ContactCard id={41} workspaceId={ORIGIN} name={contact.name} />
             : surface === "contact" ? <EditContactSheet contact={contact} open onOpenChange={browser.noop} />
                 : surface === "company" ? <EditCompanySheet company={company} open onOpenChange={browser.noop} />
                     : <EditDealSheet deal={deal} timezone="UTC" open onOpenChange={browser.noop} pipelines={[pipeline]} stagesByPipeline={{ 41: [stage] }} />);
+        if (surface === "card") {
+            const edit = [...document.querySelectorAll("button")].find((button) => button.textContent === "quickEdit");
+            if (!edit) throw new Error("Expected the card Quick edit action");
+            await act(async () => edit.click());
+        }
         await act(async () => {
             if (surface === "company") { get("companySheet").updateDraft(41, { name: "Updated company" }); get("companySheet").updateLogoFile?.(41, image); }
             else if (surface === "deal") get("dealSheet").updateDraft(41, { name: "Updated deal" });

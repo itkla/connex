@@ -3911,10 +3911,14 @@ export function updateContact(id: number, payload: Types.UpdateContactPayload, i
 }
 
 export async function uploadContactPicture(contactId: number, file: File, init: RequestInit = {}) {
+    return (await uploadContactPictureRecord(contactId, file, init)).imageUrl;
+}
+
+/** Returns the complete post-upload snapshot, including the database-owned edit version. */
+export function uploadContactPictureRecord(contactId: number, file: File, init: RequestInit = {}) {
     const formData = new FormData();
     formData.append("file", file);
-    const contact = await requestMultipart<Types.Contact>(`/api/persons/${contactId}/profile-picture`, "PUT", formData, init);
-    return contact.imageUrl;
+    return requestMultipart<Types.Contact>(`/api/persons/${contactId}/profile-picture`, "PUT", formData, init);
 }
 
 export function updateContactEvaluation(id: number, payload: Types.UpdateContactEvaluationPayload) {

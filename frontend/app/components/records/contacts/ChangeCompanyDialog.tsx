@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type WheelEvent } from 'react';
+import { useEffect, useRef, useState, type WheelEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { toastError, toastSuccess } from '@/app/lib/toast';
@@ -29,7 +29,11 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { DialogStatusCover, resolveDialogStatus } from '@/components/ui/dialog-status-cover';
-import { updateContact } from '@/app/lib/api';
+import { getContactById } from '@/app/lib/api';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
+import { useRecordEditConflict } from '@/app/hooks/useRecordEditConflict';
+import ContactEditConflictDialog from './ContactEditConflictDialog';
+import { submitContactCompanyUpdate } from './contactEditConflict';
 import { type Company, type Contact } from '@/app/lib/types';
 import { useCompanySearch } from '@/app/hooks/useCompanySearch';
 
@@ -38,14 +42,35 @@ type Props = {
     onOpenChange: (open: boolean) => void;
     contacts: Contact[];
     onSuccess?: () => void;
+    removeCompany?: boolean;
 };
 
-export default function ChangeCompanyDialog({ open, onOpenChange, contacts, onSuccess }: Props) {
+export default function ChangeCompanyDialog({ open, onOpenChange, contacts, onSuccess, removeCompany = false }: Props) {
     const router = useRouter();
     const t = useTranslations('ContactsChangeCompanyDialog');
     const reportApiError = useApiErrorToast('ContactsChangeCompanyDialog');
-    const defaultCompanyId = contacts.length === 1
-        ? contacts[0].companyId ?? contacts[0].company?.id ?? null
+    const [bases, setBases] = useState<Contact[]>([]);
+    const [isPreparing, setIsPreparing] = useState(open);
+    const originWorkspaceRef = useRef(renderedWorkspaceId());
+    const { conflict, captureConflict, clearConflict } = useRecordEditConflict(getContactById);
+    const idsKey = contacts.map((contact) => contact.id).join(',');
+    useEffect(() => {
+        if (!open) return;
+        let cancelled = false;
+        const originWorkspaceId = renderedWorkspaceId();
+        originWorkspaceRef.current = originWorkspaceId;
+        Promise.all(idsKey.split(',').filter(Boolean).map((id) => getContactById(Number(id), workspacePinnedRequest(originWorkspaceId))))
+            .then((loaded) => {
+                if (!cancelled && renderedWorkspaceId() === originWorkspaceId) setBases(loaded);
+            })
+            .catch((error: unknown) => {
+                if (!cancelled) reportApiError(error, 'toastFailedLoadContact');
+            })
+            .finally(() => { if (!cancelled) setIsPreparing(false); });
+        return () => { cancelled = true; };
+    }, [open, idsKey, reportApiError]);
+    const defaultCompanyId = bases.length === 1
+        ? bases[0].companyId ?? bases[0].company?.id ?? null
         : null;
     const selectionScope = `${contacts.map((contact) => contact.id).join(',')}:${defaultCompanyId ?? ''}`;
     const [selection, setSelection] = useState<{ scope: string; companyId: number | null }>({
@@ -58,7 +83,8 @@ export default function ChangeCompanyDialog({ open, onOpenChange, contacts, onSu
     const [isSaving, setIsSaving] = useState(false);
     const [succeeded, setSucceeded] = useState(false);
     const [prevOpen, setPrevOpen] = useState(open);
-    const currentCompany = contacts.length === 1 ? contacts[0].company ?? null : null;
+    const [previousIds, setPreviousIds] = useState(idsKey);
+    const currentCompany = bases.length === 1 ? bases[0].company ?? null : null;
     const companySearch = useCompanySearch(
         open,
         [defaultCompanyId, selectedCompanyId],
@@ -68,8 +94,12 @@ export default function ChangeCompanyDialog({ open, onOpenChange, contacts, onSu
         (company) => company.id === selectedCompanyId,
     ) ?? (currentCompany?.id === selectedCompanyId ? currentCompany : null);
 
-    if (open !== prevOpen) {
+    if (open !== prevOpen || idsKey !== previousIds) {
         setPrevOpen(open);
+        setPreviousIds(idsKey);
+        setIsPreparing(open);
+        if (open) setBases([]);
+        clearConflict();
         if (open) {
             setSucceeded(false);
             setSelection({ scope: selectionScope, companyId: defaultCompanyId });
@@ -87,23 +117,28 @@ export default function ChangeCompanyDialog({ open, onOpenChange, contacts, onSu
     };
 
     const handleSave = async () => {
-        if (!selected) {
+        if (!removeCompany && !selected) {
             toastError(t('toastPickCompany'));
             return;
         }
         setIsSaving(true);
         try {
-            await Promise.all(contacts.map((c) => updateContact(c.id, {
-                name: c.name,
-                email: c.email || undefined,
-                phone: c.phone || undefined,
-                title: c.title || undefined,
-                companyId: selected.id,
-            })));
+            const origin = workspacePinnedRequest(originWorkspaceRef.current);
+            for (const base of bases) {
+                const targetCompanyId = removeCompany ? null : selected?.id ?? null;
+                if ((base.companyId ?? base.company?.id ?? null) === targetCompanyId) continue;
+                try {
+                    const saved = await submitContactCompanyUpdate(base, targetCompanyId, origin);
+                    setBases((current) => current.map((item) => item.id === saved.id ? saved : item));
+                } catch (error) {
+                    if (!await captureConflict(error, base, origin)) reportApiError(error, 'toastFailedUpdate');
+                    return;
+                }
+            }
             toastSuccess(
-                contacts.length === 1
-                    ? t('toastAssociatedSingle', { contactName: contacts[0].name, companyName: selected.name })
-                    : t('toastAssociatedMultiple', { count: contacts.length, companyName: selected.name }),
+                removeCompany ? t('toastRemoved', { count: bases.length }) : bases.length === 1
+                    ? t('toastAssociatedSingle', { contactName: bases[0].name, companyName: selected?.name ?? '' })
+                    : t('toastAssociatedMultiple', { count: bases.length, companyName: selected?.name ?? '' }),
             );
             setIsSaving(false);
             setSucceeded(true);
@@ -124,7 +159,8 @@ export default function ChangeCompanyDialog({ open, onOpenChange, contacts, onSu
     const status = resolveDialogStatus({ isLoading: isSaving, isSuccess: succeeded });
 
     const handleOpenChange = (next: boolean) => {
-        if (!next && isSaving) return;
+        if (!next && (isSaving || isPreparing)) return;
+        if (!next) clearConflict();
         if (!next) {
             setSucceeded(false);
             setSelection({ scope: selectionScope, companyId: defaultCompanyId });
@@ -133,6 +169,7 @@ export default function ChangeCompanyDialog({ open, onOpenChange, contacts, onSu
     };
 
     return (
+        <>
         <Dialog open={open} onOpenChange={handleOpenChange}>
             <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
                 <DialogStatusCover status={status} />
@@ -140,10 +177,10 @@ export default function ChangeCompanyDialog({ open, onOpenChange, contacts, onSu
                 <div className="px-6 pb-6">
                     <DialogHeader className="ncd-rise -mt-12 mb-5" style={{ animationDelay: '40ms' }}>
                         <DialogTitle className="text-xl font-semibold tracking-tight">
-                            {contacts.length === 1 ? t('titleSingle') : t('titleMultiple', { count: contacts.length })}
+                            {removeCompany ? t('removeTitle') : contacts.length === 1 ? t('titleSingle') : t('titleMultiple', { count: contacts.length })}
                         </DialogTitle>
                         <DialogDescription>
-                            {contacts.length === 1
+                            {removeCompany ? t('removeDescription') : contacts.length === 1
                                 ? t('descriptionSingle', { name: contacts[0].name })
                                 : t('descriptionMultiple')}
                         </DialogDescription>
@@ -156,10 +193,11 @@ export default function ChangeCompanyDialog({ open, onOpenChange, contacts, onSu
                             handleSave();
                         }}
                     >
-                        <div className="ncd-rise grid gap-2" style={{ animationDelay: '90ms' }}>
+                        {!removeCompany && <div className="ncd-rise grid gap-2" style={{ animationDelay: '90ms' }}>
                             <Label htmlFor="company">{t('companyLabel')}</Label>
                             <Combobox
                                 items={companySearch.options}
+                                disabled={isSaving || isPreparing}
                                 serverSearch={companySearch.serverSearch}
                                 autoHighlight
                                 itemToStringLabel={(c: Company) => c.name}
@@ -167,7 +205,7 @@ export default function ChangeCompanyDialog({ open, onOpenChange, contacts, onSu
                                 onInputValueChange={companySearch.onInputValueChange}
                                 onValueChange={(c) => setSelection({
                                     scope: selectionScope,
-                                    companyId: (c as Company | null)?.id ?? null,
+                                    companyId: c?.id ?? null,
                                 })}
                             >
                                 <ComboboxInput
@@ -190,7 +228,7 @@ export default function ChangeCompanyDialog({ open, onOpenChange, contacts, onSu
                                     </ComboboxList>
                                 </ComboboxContent>
                             </Combobox>
-                        </div>
+                        </div>}
 
                         <DialogFooter className="ncd-rise mt-5" style={{ animationDelay: '140ms' }}>
                             <DialogClose asChild>
@@ -199,7 +237,7 @@ export default function ChangeCompanyDialog({ open, onOpenChange, contacts, onSu
                             <Button
                                 type="submit"
                                 variant="brand"
-                                disabled={isSaving || succeeded || !selected}
+                                disabled={isSaving || isPreparing || succeeded || bases.length === 0 || (!removeCompany && !selected)}
                                 className="min-w-24 shadow-sm transition hover:shadow-md"
                             >
                                 {isSaving ? <Loader2Icon className="size-4 animate-spin" /> : t('save')}
@@ -209,5 +247,15 @@ export default function ChangeCompanyDialog({ open, onOpenChange, contacts, onSu
                 </div>
             </DialogContent>
         </Dialog>
+        {open && conflict && <ContactEditConflictDialog
+            conflict={conflict}
+            onKeepEditing={clearConflict}
+            onReload={(current) => {
+                setBases((previous) => previous.map((base) => base.id === current.id ? current : base));
+                setSelection({ scope: selectionScope, companyId: current.companyId ?? current.company?.id ?? null });
+                clearConflict();
+            }}
+        />}
+        </>
     );
 }
