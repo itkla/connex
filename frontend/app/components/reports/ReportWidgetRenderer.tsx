@@ -38,20 +38,27 @@ const CHART_COLORS = [
     'var(--chart-5)',
 ];
 
-export function formatReportValue(value: number | null, unit: string | null, locale: string): string {
+/** Formats report money at its stored two-decimal precision; chart axes may request compact notation. */
+export function formatReportValue(
+    value: number | null,
+    unit: string | null,
+    locale: string,
+    notation: 'standard' | 'compact' = 'standard',
+): string {
     if (value == null) return '-';
     if (unit && /^[A-Z]{3}$/.test(unit)) {
         return new Intl.NumberFormat(locale, {
             style: 'currency',
             currency: unit,
-            maximumFractionDigits: 0,
-            notation: Math.abs(value) >= 10000 ? 'compact' : 'standard',
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 2,
+            notation: notation === 'compact' && Math.abs(value) >= 10000 ? 'compact' : 'standard',
         }).format(value);
     }
     if (unit && /^[A-Z]{4,8}$/.test(unit)) {
         const formatted = new Intl.NumberFormat(locale, {
-            maximumFractionDigits: 1,
-            notation: Math.abs(value) >= 10000 ? 'compact' : 'standard',
+            maximumFractionDigits: 2,
+            notation: notation === 'compact' && Math.abs(value) >= 10000 ? 'compact' : 'standard',
         }).format(value);
         return `${formatted} ${unit}`;
     }
@@ -168,6 +175,11 @@ export default function ReportWidgetRenderer({ widget }: { widget: ReportWidgetD
         return (
             <div className="overflow-x-auto">
                 <table className="w-full text-left text-sm">
+                    {widget.unit === 'mixed' && widget.chartType !== 'table' ? (
+                        <caption className="mb-3 text-left text-sm leading-relaxed text-muted-foreground">
+                            {t('document.mixedCurrencyChartUnavailable')}
+                        </caption>
+                    ) : null}
                     <thead className="border-b border-border text-xs uppercase tracking-[0.12em] text-muted-foreground">
                         <tr>
                             <th className="px-3 py-2 font-medium">{t('document.dimension')}</th>
@@ -257,7 +269,7 @@ export default function ReportWidgetRenderer({ widget }: { widget: ReportWidgetD
                 <AreaChart data={data} margin={{ top: 12, right: 8, left: -8, bottom: 0 }} accessibilityLayer>
                     <CartesianGrid vertical={false} stroke="var(--chart-grid)" strokeDasharray="3 3" />
                     <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={10} />
-                    <YAxis tickLine={false} axisLine={false} tickFormatter={(value: number) => formatReportValue(value, widget.unit, locale)} />
+                    <YAxis tickLine={false} axisLine={false} tickFormatter={(value: number) => formatReportValue(value, widget.unit, locale, 'compact')} />
                     <ChartTooltip content={<ChartTooltipContent />} />
                     <Area dataKey="prior" type="monotone" stroke="var(--chart-2)" fill="var(--chart-2)" fillOpacity={0.08} strokeWidth={1.5} />
                     <Area dataKey="current" type="monotone" stroke="var(--chart-1)" fill="var(--chart-1)" fillOpacity={0.18} strokeWidth={2} />
@@ -271,7 +283,7 @@ export default function ReportWidgetRenderer({ widget }: { widget: ReportWidgetD
             <BarChart data={data} margin={{ top: 12, right: 8, left: -8, bottom: 0 }} accessibilityLayer>
                 <CartesianGrid vertical={false} stroke="var(--chart-grid)" strokeDasharray="3 3" />
                 <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={10} />
-                <YAxis tickLine={false} axisLine={false} tickFormatter={(value: number) => formatReportValue(value, widget.unit, locale)} />
+                <YAxis tickLine={false} axisLine={false} tickFormatter={(value: number) => formatReportValue(value, widget.unit, locale, 'compact')} />
                 <ChartTooltip content={<ChartTooltipContent />} />
                 {isAttainment ? <ChartLegend content={<ChartLegendContent />} /> : null}
                 {isAttainment ? <Bar dataKey="prior" fill="var(--chart-2)" radius={[6, 6, 0, 0]} /> : null}
