@@ -59,7 +59,7 @@
     "passwordPlaceholder": "8〜72文字",
     "breachedPassword": "このパスワードは既知の情報漏えいで確認されています。他のサービスで使用していない別のパスワードを選んでください。",
     "passwordScreeningUnavailable": "パスワードの漏えい確認を一時的に利用できません。しばらくしてからもう一度お試しください。",
-    "passwordTooLong": "パスワードは8〜72文字で入力してください。",
+    "passwordTooLong": "8〜72文字、合計72バイト以内で入力してください。一部の文字は1文字で複数バイトになります。",
     "cancel": "キャンセル",
     "create": "作成",
     "toastCreated": "ユーザーを作成しました",
