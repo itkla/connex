@@ -422,4 +422,13 @@ public interface NotificationMapper {
     int deleteOwnershipOffer(@Param("workspaceId") int workspaceId,
         @Param("recipientId") int recipientId, @Param("offerId") String offerId);
 
+    /** Returns the last successful warmth notification model for this workspace. */
+    String getWarmthModelVersion(@Param("workspaceId") int workspaceId);
+
+    /** Records a successful model baseline under the existing organization reconciliation mutex. */
+    int setWarmthModelVersion(@Param("workspaceId") int workspaceId, @Param("modelVersion") String modelVersion);
+
+    /** Removes only obsolete relationship-derived baselines during the model cutover. */
+    int deletePreviousWarmthBaselines(@Param("workspaceId") int workspaceId, @Param("modelVersion") String modelVersion);
+
 }

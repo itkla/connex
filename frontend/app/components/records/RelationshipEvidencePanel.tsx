@@ -229,7 +229,6 @@ export default function RelationshipEvidencePanel({
                     <ClockIcon className="mt-0.5 size-3.5 shrink-0" aria-hidden />
                     {t('asOf', {
                         date: formatDateTime(evidence.asOf, locale),
-                        version: temperature.modelVersion ?? t('unknownModel'),
                     })}
                 </p>
             </div>

@@ -543,8 +543,22 @@ field mapping and data ownership up front.
 
 Relationship warmth is **computed on read** from logged interactions. There is no scheduled scoring
 job to wait for and no backfill to trigger — but equally, **nothing appears until interactions
-exist**. The model (`warmth-v1`) is a recency-decayed, intent-weighted sum of touches, weighted
+exist**. The model (`warmth-v2`) is a recency-decayed, intent-weighted sum of touches, weighted
 meeting > call > email > note > task, with a **30-day half-life**, squashed to 0–100.
+
+Only completed tasks with a recorded `completed_at` contribute, dated at completion at the same whole-second precision as other task dates. Planned tasks,
+future completion timestamps and undated historical completions do not affect the current reading.
+Reopening clears the completion instant; completing again records a new instant. V240 does not infer
+completion from `updated_at`, so scores that depended on older tasks can fall. No scoring backfill job
+is needed. The scoring change can be reverted; notes retain their existing weight.
+
+The first successful warmth notification sweep after the model change quietly baselines all current
+relationship cooling, introduction and deal-risk expectations, independently of recipient preferences.
+It commits the workspace model marker together with those baselines. A failed score-dependent pass
+leaves the cutover pending. Later persisted source changes release suppression normally. New
+workspaces start on the current model without suppressing their first live expectations. Radar rebases
+only actor dismissals and follow-up links matching each signal's previous source hash at its model
+transition; later evidence changes retain their usual resurfacing behavior.
 
 | Surface | What the tester must do first |
 |---|---|
