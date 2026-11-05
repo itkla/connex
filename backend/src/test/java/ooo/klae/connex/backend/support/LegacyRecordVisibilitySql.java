@@ -17,9 +17,10 @@ import org.apache.ibatis.session.SqlSessionFactoryBuilder;
 import org.apache.ibatis.transaction.jdbc.JdbcTransactionFactory;
 
 /**
- * Frozen pre-#485 statement text used only as a semantic-parity oracle. These statements retain
+ * Frozen pre-#485 visibility SQL used only as a semantic-parity oracle. These statements retain
  * their original control-table joins and may execute only on the migrated single catalog,
  * never on a scratch tenant catalog. No production mapper loads these copies.
+ * Deliberate financial changes are mirrored here so the oracle continues to isolate visibility.
  */
 public final class LegacyRecordVisibilitySql {
     private final SqlSessionFactory sessions;
@@ -2914,8 +2915,8 @@ public final class LegacyRecordVisibilitySql {
                    COUNT(CASE WHEN d.won IS NULL THEN 1 END) AS open_count,
                    COALESCE(SUM(CASE WHEN d.won IS NULL THEN d.value END), 0) AS open_value,
                    COUNT(CASE WHEN d.won IS NOT NULL THEN 1 END) AS closed_count,
-                   COALESCE(SUM(CASE WHEN d.won IS NOT NULL THEN d.value END), 0) AS closed_forecast,
-                   COALESCE(SUM(CASE WHEN d.won IS NOT NULL THEN d.actual_value END), 0) AS closed_revenue,
+                   COALESCE(SUM(CASE WHEN d.won = TRUE THEN d.value END), 0) AS closed_forecast,
+                   COALESCE(SUM(CASE WHEN d.won = TRUE THEN d.actual_value END), 0) AS closed_revenue,
                    COUNT(CASE WHEN d.won = TRUE THEN 1 END) AS won_count,
                    COUNT(CASE WHEN d.won = FALSE THEN 1 END) AS lost_count
             FROM deal d
