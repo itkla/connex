@@ -880,7 +880,7 @@
                     },
                     {
                         "type": "prose",
-                        "text": "Mark a deal won or lost to record its outcome and close date. On a fresh win, the actual value comes from line items, or from the deal value if you do not enter an amount. An amount you enter, including zero, is kept for deals without line items. Reopening clears the outcome, close date and reason while keeping the last actual value; winning again records a fresh amount. Existing wins recorded at zero are not automatically corrected. For closed deals, Connex shows how the actual value compares with the projected value."
+                        "text": "Mark a deal won or lost to record its outcome and close date. On a fresh win, the actual value comes from line items, or from the deal value if you do not enter an amount. An amount you enter, including zero, is kept for deals without line items. Reopening clears the outcome, close date and reason while keeping the last actual value; winning again records a fresh amount. Existing wins recorded at zero are not automatically corrected. For closed deals, Connex shows how the actual value compares with the projected value. Status labels show whether a deal is open, won or lost at a glance."
                     },
                     {
                         "type": "featureList",

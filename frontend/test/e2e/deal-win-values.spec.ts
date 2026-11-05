@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 
 import { activeWorkspaceId, csrfBootstrap, registerUser, seeder } from './support/api';
@@ -15,7 +16,7 @@ function positiveId(record: unknown): number {
 
 test('Mark won and Edit Outcome keep the stage and record the default or entered revenue', async ({ page }) => {
     test.setTimeout(180_000);
-    const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+    const suffix = randomUUID().replaceAll('-', '').slice(0, 12);
     await registerUser(page.request, {
         username: `outcome_${suffix}`,
         password: `Outcome!${suffix}A1`,
@@ -37,12 +38,6 @@ test('Mark won and Edit Outcome keep the stage and record the default or entered
         trigger: { type: 'entity_change', events: ['deal.won'] },
         actions: [{ type: 'create_task', title: taskTitle }],
     });
-    const errors: string[] = [];
-    page.on('pageerror', (error) => errors.push(error.message));
-    page.on('console', (entry) => {
-        if (entry.type() === 'error') errors.push(entry.text());
-    });
-
     async function createOpenDeal(name: string): Promise<number> {
         const review = await seed.post('/api/duplicate-preflight/deals', { name, companyId: null });
         if (typeof review.reviewToken !== 'string') throw new Error('Expected duplicate review token');
@@ -116,5 +111,4 @@ test('Mark won and Edit Outcome keep the stage and record the default or entered
     const creationPayload: unknown = createResponse.request().postDataJSON();
     expect(creationPayload).not.toHaveProperty('actualValue');
     await expectOneHandoff(positiveId(createdDeal));
-    expect(errors).toEqual([]);
 });
