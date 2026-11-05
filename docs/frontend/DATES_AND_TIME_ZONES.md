@@ -44,6 +44,9 @@ civil input once at submission. My Work evidence uses its calendar `date` when p
 Each formatter family uses a bounded LRU of 512 entries. Display helpers and call sites share it,
 including zone validation and civil-input conversion, so a long list reuses formatters instead of
 constructing them for each row. Values being formatted are never cached.
+Cache entries contain no user or workspace identity: equal locale/zone/options may share a formatter,
+while switching the profile or workspace zone selects a different key. Previously returned formatters
+retain their own zone even when a caller reuses and changes its options object.
 
 ## API-bound datetime-local inventory
 

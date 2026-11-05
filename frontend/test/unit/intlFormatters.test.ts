@@ -20,6 +20,28 @@ describe('shared Intl formatters', () => {
         expect(getDateTimeFormatter('ja', { timeZone: 'UTC', dateStyle: 'medium' })).not.toBe(utc);
     });
 
+    it('preserves each zone when users or workspaces switch and reuse an options object', () => {
+        const timestamp = Date.parse('2026-11-04T23:30:00Z');
+        const options: Intl.DateTimeFormatOptions = { timeZone: 'Asia/Tokyo', dateStyle: 'medium', timeStyle: 'short' };
+        const tokyo = getDateTimeFormatter('en-US', options);
+        options.timeZone = 'America/Los_Angeles';
+        const losAngeles = getDateTimeFormatter('en-US', options);
+        options.timeZone = 'UTC';
+        const utc = getDateTimeFormatter('en-US', options);
+        const japanese = getDateTimeFormatter('ja', options);
+        expect(losAngeles).not.toBe(tokyo);
+        expect(utc).not.toBe(tokyo);
+        expect(japanese).not.toBe(utc);
+        expect(losAngeles.format(timestamp)).toBe('Nov 4, 2026, 3:30 PM');
+        expect(utc.format(timestamp)).toBe('Nov 4, 2026, 11:30 PM');
+        expect(japanese.resolvedOptions().locale).toBe('ja');
+        expect(japanese.resolvedOptions().timeZone).toBe('UTC');
+        options.timeZone = 'Asia/Tokyo';
+        expect(getDateTimeFormatter('en-US', options)).toBe(tokyo);
+        expect(tokyo.format(timestamp)).toBe('Nov 5, 2026, 8:30 AM');
+        expect(losAngeles.format(timestamp)).toBe('Nov 4, 2026, 3:30 PM');
+    });
+
     it('constructs one formatter for a long list of identical cells', () => {
         const NativeDateTimeFormat = Intl.DateTimeFormat;
         const constructor = vi.spyOn(Intl, 'DateTimeFormat').mockImplementation(function (locale, options) {

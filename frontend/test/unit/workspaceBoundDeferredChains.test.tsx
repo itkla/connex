@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import CalendarShell from "@/app/components/calendar/CalendarShell";
 import type MonthView from "@/app/components/calendar/MonthView";
 import UpcomingTasks from "@/app/components/dashboard/UpcomingTasks";
+import { NowProvider } from "@/app/hooks/useNow";
 import { bindRenderedWorkspace, releaseRenderedWorkspace } from "@/app/lib/renderedWorkspace";
 import { toastSuccess } from "@/app/lib/toast";
 import type { Task } from "@/app/lib/types";
@@ -21,7 +22,6 @@ vi.mock("motion/react", () => ({
     motion: { div: ({ children }: { children?: ReactNode }) => <div>{children}</div>, span: ({ children }: { children?: ReactNode }) => <span>{children}</span> },
 }));
 vi.mock("@/app/lib/toast", () => ({ toastSuccess: vi.fn(), toastError: vi.fn() }));
-vi.mock("@/app/hooks/useNow", () => ({ useNow: () => Date.parse("2026-10-19T12:00:00Z") }));
 vi.mock("@/app/components/calendar/MonthView", () => ({ default: (props: ComponentProps<typeof MonthView>) => { boundary.month = props; return null; } }));
 vi.mock("@/app/components/calendar/EventDetailSheet", () => ({ default: () => null }));
 vi.mock("@/app/components/calendar/EventPeekPopover", () => ({ default: () => null }));
@@ -30,9 +30,11 @@ vi.mock("@/app/components/motion/Rise", () => ({ default: ({ children }: { child
 vi.mock("@/app/components/PageShell", () => ({ PageShell: ({ children }: { children?: ReactNode }) => children }));
 vi.mock("@/app/components/PageHeader", () => ({ PageHeader: () => null }));
 
+const NOW = Date.parse("2026-10-19T12:00:00Z");
 const task: Task = { id: 41, workspaceId: ORIGIN, description: "Origin task", completed: false, status: "todo", position: 0, assignedToId: 7, dueDate: "2026-10-19", createdAt: "", updatedAt: "" };
 let root: Root;
 beforeEach(() => {
+    vi.spyOn(Date, "now").mockReturnValue(NOW);
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     vi.stubGlobal("matchMedia", (media: string) => ({ media, matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
     const container = document.createElement("div");
@@ -50,6 +52,7 @@ afterEach(async () => {
     document.cookie = "connex_workspace=; path=/; max-age=0";
     vi.unstubAllGlobals();
     vi.clearAllMocks();
+    vi.restoreAllMocks();
 });
 
 async function undo(): Promise<void> {
@@ -61,7 +64,7 @@ async function undo(): Promise<void> {
 describe("deferred Undo writes retain the original action workspace", () => {
     it("completes in A and undoes in A after explicitly switching to B", async () => {
         const backend = stubBackend();
-        await act(async () => root.render(<UpcomingTasks tasks={[task]} locale="en" />));
+        await act(async () => root.render(<NowProvider value={NOW}><UpcomingTasks tasks={[task]} locale="en" /></NowProvider>));
         const checkbox = document.querySelector<HTMLButtonElement>("[role=checkbox]");
         if (checkbox === null) throw new Error("The task checkbox did not render");
         await act(async () => checkbox.click());
@@ -77,7 +80,7 @@ describe("deferred Undo writes retain the original action workspace", () => {
 
     it.each(["task", "deal"] as const)("reschedules a %s in A and undoes in A after explicitly switching to B", async (kind) => {
         const backend = stubBackend();
-        await act(async () => root.render(<CalendarShell currentUserId={7} tasks={kind === "task" ? [task] : []} deals={kind === "deal" ? [{ ...deal, expectedCloseDate: "2026-10-19" }] : []} />));
+        await act(async () => root.render(<NowProvider value={NOW}><CalendarShell currentUserId={7} tasks={kind === "task" ? [task] : []} deals={kind === "deal" ? [{ ...deal, expectedCloseDate: "2026-10-19" }] : []} /></NowProvider>));
         const month = boundary.month;
         if (month === null) throw new Error("The calendar month did not render");
         const event = [...month.eventsByDay.values()].flat().find((event) => event.kind === kind);
