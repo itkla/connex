@@ -200,7 +200,7 @@ function makeChip(type: NoteReferenceType, id: number, label: string): HTMLSpanE
     chip.dataset.label = label;
     chip.contentEditable = 'false';
     if (type === 'user') {
-        chip.className = 'rounded-sm bg-brand-light/50 px-0.5 font-medium text-brand-dark';
+        chip.className = 'rounded-sm bg-brand-light/50 px-0.5 font-medium text-brand-text';
         chip.textContent = `@${label}`;
     } else {
         chip.className = 'rounded-sm bg-muted px-1 font-medium text-foreground';
@@ -968,7 +968,7 @@ export default function MentionEditor({
                                               className={cn(
                                                   'flex w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors duration-100',
                                                   index === boundedIndex
-                                                      ? 'bg-brand-light/50 text-brand-dark'
+                                                      ? 'bg-brand-light/50 text-brand-text'
                                                       : 'text-foreground',
                                               )}
                                           >
@@ -999,7 +999,7 @@ export default function MentionEditor({
                                                   }
                                               }}
                                               onClick={retrySearch}
-                                              className="flex w-full cursor-pointer items-center gap-2 rounded-sm bg-brand-light/50 px-2 py-2 text-left text-sm text-brand-dark"
+                                              className="flex w-full cursor-pointer items-center gap-2 rounded-sm bg-brand-light/50 px-2 py-2 text-left text-sm text-brand-text"
                                           >
                                               <span className="min-w-0 flex-1 truncate">{stageBStateLabel}</span>
                                               <span className="shrink-0 font-medium text-foreground">
@@ -1039,7 +1039,7 @@ export default function MentionEditor({
                                                 className={cn(
                                                     'flex w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors duration-100',
                                                     index === boundedIndex
-                                                        ? 'bg-brand-light/50 text-brand-dark'
+                                                        ? 'bg-brand-light/50 text-brand-text'
                                                         : 'text-foreground',
                                                 )}
                                             >

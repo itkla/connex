@@ -240,7 +240,7 @@ export default function NotesBrowser({ persons, deals, users, currentUserId }: P
                         </div>
                     ) : notes.length === 0 ? (
                         <div className="rounded-2xl border border-border bg-card px-6 py-20 text-center">
-                            <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-brand-light text-brand-dark">
+                            <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-brand-light text-brand-text">
                                 <PencilSquareIcon className="size-7" />
                             </div>
                             <p className="mx-auto mt-5 max-w-sm text-sm font-medium text-foreground">

@@ -67,7 +67,7 @@ export default function DealRiskPanel({
                                         contact.personId == null ? label : (
                                             <Link
                                                 href={`/records/contacts/${contact.personId}`}
-                                                className="font-medium underline-offset-4 transition-colors hover:text-brand-hover hover:underline"
+                                                className="font-medium underline-offset-4 transition-colors hover:text-brand-text hover:underline"
                                             >
                                                 {label}
                                             </Link>

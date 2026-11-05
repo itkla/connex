@@ -35,8 +35,8 @@ type Props = {
 const DIMENSIONS: QualificationDimension[] = ['FIT', 'ENGAGEMENT'];
 
 const STAGE_TONE: Record<ContactLifecycleStage, string> = {
-    NEW: 'border-brand/30 bg-brand-light text-brand-dark',
-    WORKING: 'border-brand/30 bg-brand-light text-brand-dark',
+    NEW: 'border-brand/30 bg-brand-light text-brand-text',
+    WORKING: 'border-brand/30 bg-brand-light text-brand-text',
     NURTURING: 'border-border bg-muted text-muted-foreground',
     QUALIFIED: 'border-chart-won/30 bg-chart-won/10 text-chart-won',
     DISQUALIFIED: 'border-destructive/30 bg-destructive/10 text-destructive',

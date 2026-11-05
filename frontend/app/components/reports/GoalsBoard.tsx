@@ -94,7 +94,7 @@ export default function GoalsBoard({
             <div className="flex w-full flex-col gap-8">
                 <header className="flex flex-wrap items-end justify-between gap-5">
                     <div>
-                        <p className="mb-2 text-xs font-medium uppercase tracking-[0.12em] text-brand-dark">
+                        <p className="mb-2 text-xs font-medium uppercase tracking-[0.12em] text-brand-text">
                             {t('goals.eyebrow')}
                         </p>
                         <h1 className="text-4xl font-extrabold tracking-tight text-foreground">{t('goals.title')}</h1>

@@ -224,6 +224,23 @@ Motion follows `docs/frontend/MOTION.md`. Repeated chrome such as `PageShell` an
 
 Use semantic design tokens for color. Relationship warmth, charts, success/warning/destructive, ranking, and other semantic palettes communicate meaning consistently. Never rely on color alone.
 
+Brand fills and decorative marks keep `brand`. Green text, links, active navigation, and labels use
+`brand-text`, which adapts to light and dark surfaces; `brand-dark` remains a palette shade, not a text
+contrast guarantee. Muted labels must also meet 4.5:1 on their surface, including filled inputs.
+Forced-light and print surfaces set the light `brand-text` value even under a dark theme.
+`test/unit/colorContrast.test.ts` calculates WCAG AA ratios from the shipped tokens for both themes.
+Feedback uses paired surface/foreground tokens, and Sonner descriptions inherit the toast foreground.
+The feedback aliases are static theme variables because inline styles consume them without utilities.
+
+The authenticated shell puts a localized skip link first. After route changes, it focuses main
+without scrolling only when focus is on the body or a removed element; destination autofocus wins.
+Its closed mobile sidebar is inert; opening it moves focus into the drawer and makes the page inert,
+and dismissing it restores the opener (or the toolbar trigger when the bottom-bar opener unmounts).
+Settings and organization row menus share `rowActionTrigger` from `SettingsListPrimitives`: hover
+reveals actions on mouse devices, while `(hover: none)` or `(any-pointer: coarse)` shows them
+without interaction on touch, including hybrid devices that also support hover.
+
+
 ## New page/redesign checklist
 
 - Uses the correct shell; no accidental page-level width cap or duplicate gutter/rhythm.

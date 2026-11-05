@@ -876,7 +876,8 @@ class WorkflowActivationIntegrationTest {
             assertNotNull(committed);
             assertNotNull(committed.getActiveVersionId());
             assertFalse(committed.isEnabled());
-            assertEquals("canonical", committed.getRuntimeOwner());
+            assertEquals("legacy", committed.getRuntimeOwner());
+            assertNotNull(committed.getLegacyRuleId());
             Workflow activated = workflowMapper.getById(workspace.getId(), enabledWorkflow.getId());
             assertNotNull(activated);
             assertTrue(activated.isEnabled());

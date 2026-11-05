@@ -153,7 +153,7 @@ export default function PipelineChart({
                                             <span
                                                 className={cn(
                                                     'text-xl leading-none font-semibold tabular-nums',
-                                                    isActive ? 'text-brand-dark' : 'text-foreground',
+                                                    isActive ? 'text-brand-text' : 'text-foreground',
                                                 )}
                                             >
                                                 {formatCompactCurrency(totals[key], currency, locale)}

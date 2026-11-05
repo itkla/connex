@@ -217,7 +217,7 @@ function RoleForm({
                                 <button
                                     type="button"
                                     onClick={() => setSelected(allSelected ? new Set() : new Set(allPermissions))}
-                                    className="font-medium text-brand transition hover:text-brand-hover"
+                                    className="font-medium text-brand-text transition hover:text-brand-text"
                                 >
                                     {allSelected ? t('clearAll') : t('selectAll')}
                                 </button>
@@ -238,7 +238,7 @@ function RoleForm({
                                             <button
                                                 type="button"
                                                 onClick={() => setGroup(keys, !groupAll)}
-                                                className="text-[11px] font-medium text-muted-foreground transition hover:text-brand"
+                                                className="text-[11px] font-medium text-muted-foreground transition hover:text-brand-text"
                                             >
                                                 {groupAll ? t('clearAll') : t('selectAll')}
                                             </button>

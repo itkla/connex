@@ -35,7 +35,7 @@ export default function FilterMenu({
                     aria-label={srLabel}
                     className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium ring-1 transition ${
                         active
-                            ? 'bg-brand-light text-brand-dark ring-brand-light'
+                            ? 'bg-brand-light text-brand-text ring-brand-light'
                             : 'bg-muted text-muted-foreground ring-border hover:text-foreground'
                     }`}
                 >

@@ -642,7 +642,7 @@ function FilterButton({
             aria-current={active ? 'page' : undefined}
             className={cn(
                 'relative flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors',
-                active ? 'text-brand-dark' : 'text-foreground hover:bg-muted',
+                active ? 'text-brand-text' : 'text-foreground hover:bg-muted',
             )}
         >
             {active && (
@@ -656,7 +656,7 @@ function FilterButton({
                 <Icon className={cn('size-4 shrink-0', iconColor ?? (active ? 'text-brand-dark' : 'text-muted-foreground'))} />
                 <span className={cn('truncate', active && 'font-medium')}>{label}</span>
             </span>
-            <span className={cn('relative z-10 shrink-0 text-xs tabular-nums', active ? 'text-brand-dark/70' : 'text-muted-foreground')}>
+            <span className={cn('relative z-10 shrink-0 text-xs tabular-nums', active ? 'text-brand-text/70' : 'text-muted-foreground')}>
                 {count}
             </span>
         </button>
@@ -810,7 +810,7 @@ function TimelineRow({
                             <Link
                                 href={`/records/contacts/${person.id}`}
                                 onClick={(e) => e.stopPropagation()}
-                                className="inline-flex max-w-48 items-center gap-1 rounded-full bg-brand-light/50 px-2 py-0.5 text-xs font-medium text-brand-dark ring-1 ring-inset ring-brand-dark/10 transition hover:bg-brand-light"
+                                className="inline-flex max-w-48 items-center gap-1 rounded-full bg-brand-light/50 px-2 py-0.5 text-xs font-medium text-brand-text ring-1 ring-inset ring-brand-dark/10 transition hover:bg-brand-light"
                                 title={person.name}
                             >
                                 <UserIcon className="size-3 shrink-0" />
@@ -899,7 +899,7 @@ function ActivityEmptyState({ filtered, message }: { filtered: boolean; message:
     const Icon = filtered ? MagnifyingGlassIcon : InboxStackIcon;
     return (
         <div className="rounded-2xl border border-border bg-card px-6 py-20 text-center">
-            <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-brand-light text-brand-dark">
+            <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-brand-light text-brand-text">
                 <Icon className="size-7" strokeWidth={1.75} />
             </div>
             <p className="mx-auto mt-5 max-w-sm text-sm font-medium text-foreground">{message}</p>

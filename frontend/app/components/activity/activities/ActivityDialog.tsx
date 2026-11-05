@@ -428,7 +428,7 @@ export function ActivityDialogForm({
             <div className="px-6 pb-6">
                 <div className="ncd-rise -mt-12 flex flex-col gap-2" style={{ animationDelay: '40ms' }}>
                     <div className="flex items-start gap-3">
-                        <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand-light text-brand-dark">
+                        <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand-light text-brand-text">
                             <ChatBubbleLeftRightIcon className="size-5" />
                         </span>
                         <div className="space-y-1">
@@ -597,7 +597,7 @@ export function ActivityDialogForm({
                             <button
                                 type="button"
                                 onClick={enableFollowUp}
-                                className="flex w-full items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2.5 text-sm text-muted-foreground transition-colors hover:border-brand hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                                className="flex w-full items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2.5 text-sm text-muted-foreground transition-colors hover:border-brand hover:text-brand-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                             >
                                 <CheckCircleIcon className="size-4" />
                                 {t('followUpAdd')}
@@ -645,7 +645,7 @@ export function ActivityDialogForm({
                                                     aria-pressed={active}
                                                     className={cn(
                                                         'rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand',
-                                                        active ? 'bg-brand-light text-brand-dark ring-brand-dark/20' : 'bg-card text-muted-foreground ring-border hover:text-foreground',
+                                                        active ? 'bg-brand-light text-brand-text ring-brand-dark/20' : 'bg-card text-muted-foreground ring-border hover:text-foreground',
                                                     )}
                                                 >
                                                     {t(`followUp_${preset.key}` as 'followUp_today')}

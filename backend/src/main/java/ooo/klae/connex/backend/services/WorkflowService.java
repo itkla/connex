@@ -325,7 +325,7 @@ public class WorkflowService {
     private WorkflowDto publish(
             int id,
             WorkflowPublishRequest request,
-            boolean canonicalFirstPublication) {
+            boolean recipeFirstPublication) {
         if (request == null || request.getExpectedRevision() == null) {
             throw new BadRequestException("Expected revision is required");
         }
@@ -362,11 +362,11 @@ public class WorkflowService {
             draft.recordType(),
             draft.executionMode(),
             definition);
-        if (canonicalFirstPublication
+        if (recipeFirstPublication
                 && (workflow.getActiveVersionId() != null || workflow.getLegacyRuleId() != null)) {
             throw inconsistentWorkflow();
         }
-        boolean canonicalPublication = canonicalPublicationOwner(workflow) || canonicalFirstPublication;
+        boolean canonicalPublication = canonicalPublicationOwner(workflow);
         Rule projection = canonicalPublication
             ? versionProjection.project(workflow, draft, compiled)
             : project(workflow, draft);
@@ -576,6 +576,9 @@ public class WorkflowService {
                 workflow, versions.active(), linkedRule, principalMatchPolicy);
         if (enabled) {
             requireActivationPermissions(state.version(), principals);
+            if (!executionAvailable(workflow.getRuntimeOwner())) {
+                throw new ConflictException("Workflow cannot run in this environment");
+            }
             if (!workflow.isEnabled() && workflow.getIntakePausedAt() == null) {
                 requireTriggerCapacity(workflow, state.version());
             }
@@ -873,6 +876,8 @@ public class WorkflowService {
         try {
             project(workflow, draft);
             return null;
+        } catch (WorkflowDefinitionValidationException exception) {
+            return exception.diagnostic();
         } catch (BadRequestException exception) {
             return new WorkflowDiagnosticDto(
                 WorkflowDiagnosticCode.LEGACY_PROJECTION_UNSUPPORTED,
@@ -1215,6 +1220,8 @@ public class WorkflowService {
             draft.description(),
             workflow.isEnabled(),
             workflow.getRuntimeOwner(),
+            executionAvailable(workflow.getRuntimeOwner()),
+            executionAvailable(workflow.getRuntimeOwner()) ? null : "execution_unavailable",
             workflow.getArchivedAt(),
             workflow.getIntakePausedAt(),
             workflow.getIntakePausedById(),
@@ -1249,6 +1256,8 @@ public class WorkflowService {
             workflow.getDescription(),
             workflow.isEnabled(),
             workflow.getRuntimeOwner(),
+            executionAvailable(workflow.getRuntimeOwner()),
+            executionAvailable(workflow.getRuntimeOwner()) ? null : "execution_unavailable",
             workflow.getArchivedAt(),
             workflow.getIntakePausedAt(),
             workflow.getIntakePausedById(),
@@ -1356,6 +1365,10 @@ public class WorkflowService {
         if (workflow.getArchivedAt() != null) {
             throw new ConflictException("Archived workflow cannot be changed");
         }
+    }
+
+    private boolean executionAvailable(String runtimeOwner) {
+        return runtimeProperties.enabled() || "legacy".equals(runtimeOwner);
     }
 
     private boolean canonicalPublicationOwner(Workflow workflow) {
