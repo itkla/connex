@@ -2563,3 +2563,12 @@ encoded-frame provenance and concurrent-session delegate as ordinary assistant f
 socket write takes publication S, freshly checks control authority in a separate READ COMMITTED
 transaction and retains publication S through the write. Broker enqueue validation alone does not
 authorize a buffered frame after organization invalidation.
+
+## Conditional record edit versions (V241)
+
+Deal full-record UPDATEs condition on the optional client snapshot version in the tenant-scoped
+WHERE clause, before dependent value writes. The database BEFORE UPDATE counter covers every
+writer. The BEFORE DELETE company trigger detaches exact deal references before the FK's existing
+SET NULL action, retaining its parent company → child deal order while advancing the counter.
+No new application lock hierarchy or isolation change is introduced. See
+[Conditional record edits](RECORD_EDIT_CONCURRENCY.md) for the transport, writer inventory and tests.

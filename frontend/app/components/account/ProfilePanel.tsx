@@ -1,5 +1,7 @@
 "use client";
 
+import { useTimeZoneSearch } from "@/app/hooks/useTimeZoneSearch";
+
 import {
     type Dispatch,
     type FormEvent,
@@ -11,7 +13,6 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import { useTimeZone, useLocale, useTranslations } from "next-intl";
-import { timeZoneLabel } from "@/app/lib/timeZone";
 import { CameraIcon } from "@heroicons/react/24/outline";
 import { Loader2Icon } from "lucide-react";
 
@@ -282,11 +283,8 @@ function ProfileForm({
     onSubmit,
     onChangeEmail,
 }: ProfileFormProps) {
+    const timeZoneSearch = useTimeZoneSearch(timeZones);
     const t = useTranslations("AccountProfile");
-    const locale = useLocale();
-    const timezoneLabel = (value: string) => value === "Asia/Tokyo"
-        ? `${value} · ${t("timezoneTokyo")}`
-        : value === "UTC" ? `${value} · ${t("timezoneUtc")}` : timeZoneLabel(value, locale);
     const { displayName, username, timezone, preferredLocale } = draft;
 
     return (
@@ -372,7 +370,7 @@ function ProfileForm({
                                 field: "timezone",
                                 value: value ?? confirmedUser.timezone,
                             })}
-                            itemToStringLabel={timezoneLabel}
+                            {...timeZoneSearch}
                         >
                             <ComboboxInput
                                 id="account-timezone"
@@ -382,9 +380,9 @@ function ProfileForm({
                             <ComboboxContent className="pointer-events-auto">
                                 <ComboboxEmpty>{t("timezoneEmpty")}</ComboboxEmpty>
                                 <ComboboxList>
-                                    {(tz: string) => (
+                                    {(tz: (typeof timeZones)[number]) => (
                                         <ComboboxItem key={tz} value={tz}>
-                                            {timezoneLabel(tz)}
+                                            {timeZoneSearch.itemToStringLabel(tz)}
                                         </ComboboxItem>
                                     )}
                                 </ComboboxList>

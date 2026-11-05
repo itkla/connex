@@ -1,5 +1,6 @@
 'use client';
 
+import { createServerPickerSearch } from '@/lib/server-picker-search';
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useFormatter, useTranslations } from 'next-intl';
 import { motion, useReducedMotion } from 'motion/react';
@@ -1060,7 +1061,7 @@ function RowLinker({
             value={null}
             inputValue={query}
             open
-            filter={null}
+            serverSearch={createServerPickerSearch(query, currentSearch || !queryReady ? { query, items: options } : null)}
             autoHighlight
             itemToStringLabel={(item: RowLinkOption) => item.label}
             onOpenChange={(next, details) => {
@@ -1108,7 +1109,7 @@ function RowLinker({
                     </p>
                 )}
                 <ComboboxList>
-                    {options.map((item) => (
+                    {(item: (typeof options)[number]) => (
                         <ComboboxItem
                             key={item.id}
                             value={item}
@@ -1123,7 +1124,7 @@ function RowLinker({
                                 <span className="truncate">{item.label}</span>
                             )}
                         </ComboboxItem>
-                    ))}
+                    )}
                 </ComboboxList>
             </ComboboxContent>
         </Combobox>

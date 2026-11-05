@@ -113,7 +113,10 @@ export function DocumentEditorToolbar({ editor }: Props) {
                         {t('insertField')}
                     </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
+                <DropdownMenuContent align="end" onCloseAutoFocus={(event) => {
+                    event.preventDefault();
+                    editor.commands.focus();
+                }}>
                     {MERGE_FIELDS.map((field) => (
                         <DropdownMenuItem key={field.token} onSelect={() => insertField(field.token)}>
                             {t(field.labelKey)}

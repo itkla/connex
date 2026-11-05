@@ -1524,6 +1524,8 @@ export type DataSubjectRequestBody = {
 
 export type Deal = {
     id: number;
+    /** Database-owned token for conditional edits. */
+    version?: number;
     name: string;
     value: number;
     actualValue: number;
@@ -1591,6 +1593,8 @@ export type CreateDealPayload = {
 };
 
 export type UpdateDealPayload = {
+    /** Token from the form's base snapshot; omission retains legacy write behavior. */
+    expectedVersion?: number;
     name: string;
     value: number;
     actualValue?: number;

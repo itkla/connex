@@ -1,5 +1,7 @@
 'use client';
 
+import { useTimeZoneSearch } from '@/app/hooks/useTimeZoneSearch';
+
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useTimeZone, useLocale, useTranslations } from 'next-intl';
@@ -135,6 +137,7 @@ export default function AskConnexCommandCenter() {
     const [pendingDeletion, setPendingDeletion] = useState<AiWatch | null>(null);
     const storedZone = state?.schedule.timeZone ?? 'UTC';
     const timeZones = useMemo(() => supportedTimeZones(storedZone), [storedZone]);
+    const timeZoneSearch = useTimeZoneSearch(timeZones);
 
     useEffect(() => {
         let live = true;
@@ -393,7 +396,7 @@ export default function AskConnexCommandCenter() {
                                 void saveSchedule({ ...scheduleBase, timeZone: value });
                             }
                         }}
-                        itemToStringLabel={(value: string) => value}
+                        {...timeZoneSearch}
                     >
                         <ComboboxInput
                             id="ask-connex-brief-zone"
@@ -401,11 +404,11 @@ export default function AskConnexCommandCenter() {
                             disabled={savingSchedule}
                         />
                         <ComboboxContent className="pointer-events-auto">
+                            <ComboboxEmpty>{t('scheduleZoneEmpty')}</ComboboxEmpty>
                             <ComboboxList>
-                                <ComboboxEmpty>{t('scheduleZoneEmpty')}</ComboboxEmpty>
-                                {timeZones.map((zone) => (
-                                    <ComboboxItem key={zone} value={zone}>{zone}</ComboboxItem>
-                                ))}
+                                {(zone: (typeof timeZones)[number]) => (
+                                    <ComboboxItem key={zone} value={zone}>{timeZoneSearch.itemToStringLabel(zone)}</ComboboxItem>
+                                )}
                             </ComboboxList>
                         </ComboboxContent>
                     </Combobox>

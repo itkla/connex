@@ -293,6 +293,7 @@ export default function EditActivitySheet({
                                     imageUrl: person.imageUrl,
                                 }))}
                                 onInputValueChange={personSearch.onInputValueChange}
+                                serverSearch={personSearch.serverSearch}
                                 emptyLabel={
                                     personSearch.loading
                                         ? t('searching')
@@ -319,6 +320,7 @@ export default function EditActivitySheet({
                                     label: deal.name,
                                 }))}
                                 onInputValueChange={dealSearch.onInputValueChange}
+                                serverSearch={dealSearch.serverSearch}
                                 emptyLabel={
                                     dealSearch.loading
                                         ? t('searching')

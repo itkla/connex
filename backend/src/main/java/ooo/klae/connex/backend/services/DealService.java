@@ -79,6 +79,7 @@ import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.dto.UserDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.StaleRecordException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
@@ -1249,15 +1250,15 @@ public class DealService {
         String orgWorkspaceIdsJson = scope.workspaceIdsJson();
         duplicateDecisionLockService.lockCurrentOrganization();
         Deal before = requireDealForUpdate(workspaceId, id);
+        if (deal.getExpectedVersion() != null && deal.getExpectedVersion() != before.getVersion()) {
+            throw new StaleRecordException(before.getVersion());
+        }
         boolean currencyChanged = deal.getCurrency() != null
             && !deal.getCurrency().equalsIgnoreCase(before.getCurrency());
         boolean valueChanged = before.getValue().compareTo(deal.getValue()) != 0;
         if (currencyChanged && dealLineItemMapper.countByDealId(workspaceId, id) > 0) {
             throw new BadRequestException(
                 "Cannot change the deal currency while it has line items; remove the line items first");
-        }
-        if (valueChanged) {
-            deal.setValue(dealValueService.setManualValue(workspaceId, before, deal.getValue()));
         }
         Boolean previousOutcome = before.getWon();
         BigDecimal requestedActualValue = deal.getActualValue();
@@ -1275,6 +1276,9 @@ public class DealService {
             : before.getPosition());
         DealOutcomeWriter.OutcomeChange outcomeChange =
             dealOutcomeWriter.write(workspaceId, deal, previousOutcome, requestedActualValue, scope);
+        if (valueChanged) {
+            deal.setValue(dealValueService.setManualValue(workspaceId, before, deal.getValue()));
+        }
         boolean reopened = previousOutcome != null && deal.getWon() == null;
         if ((stageChanged || reopened) && newStage != null) {
             dealStageHistoryService.recordTransition(
@@ -1290,7 +1294,7 @@ public class DealService {
             ruleTriggers.publish(workspaceId, "deal", id, "deal.value_changed");
         }
         syncClosedReasonMentions(workspaceId, deal);
-        return hydrateReferences(workspaceId, deal);
+        return hydrateReferences(workspaceId, requireDeal(workspaceId, id));
     }
 
     /**
@@ -1475,7 +1479,7 @@ public class DealService {
         notificationChanges.publish(workspaceId, "deal", id);
         dealOutcomeWriter.publish(outcomeChange);
         syncClosedReasonMentions(workspaceId, deal);
-        return hydrateReferences(workspaceId, deal);
+        return hydrateReferences(workspaceId, requireDeal(workspaceId, id));
     }
 
     /**
@@ -1529,7 +1533,7 @@ public class DealService {
         notificationChanges.publish(workspaceId, "deal", id);
         dealOutcomeWriter.publish(outcomeChange);
         syncClosedReasonMentions(workspaceId, deal);
-        return hydrateReferences(workspaceId, deal);
+        return hydrateReferences(workspaceId, requireDeal(workspaceId, id));
     }
 
     /**

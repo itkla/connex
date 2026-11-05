@@ -470,7 +470,9 @@ export default function TimelineRow({
                     currentUserId={currentUserId}
                     onPersonQueryChange={personSearch.onInputValueChange}
                     onDealQueryChange={dealSearch.onInputValueChange}
+                    personServerSearch={personSearch.serverSearch}
                     personOptionsLoading={personSearch.loading}
+                    dealServerSearch={dealSearch.serverSearch}
                     dealOptionsLoading={dealSearch.loading}
                 />
             )}

@@ -123,8 +123,8 @@ export default function NewDealDialog({
                         requestInit={requestInit}
                     />
                 </ResponsiveDialogContent>
+                <ConfirmDiscardDialog open={guard.confirm.open} onKeepEditing={guard.confirm.onKeepEditing} onDiscard={guard.confirm.onDiscard} />
             </ResponsiveDialog>
-            <ConfirmDiscardDialog open={guard.confirm.open} onKeepEditing={guard.confirm.onKeepEditing} onDiscard={guard.confirm.onDiscard} />
         </>
     );
 }
@@ -312,13 +312,13 @@ function NewDealFields({
                             </InputGroupAddon>
                         </ComboboxInput>
                         <ComboboxContent className="pointer-events-auto">
+                            <ComboboxEmpty>{t('noPipelinesFound')}</ComboboxEmpty>
                             <ComboboxList onWheel={handleListWheel}>
-                                <ComboboxEmpty>{t('noPipelinesFound')}</ComboboxEmpty>
-                                {pipelines.map((pipeline) => (
+                                {(pipeline: (typeof pipelines)[number]) => (
                                     <ComboboxItem key={pipeline.id} value={pipeline}>
                                         {pipeline.name}
                                     </ComboboxItem>
-                                ))}
+                                )}
                             </ComboboxList>
                         </ComboboxContent>
                     </Combobox>
@@ -353,13 +353,13 @@ function NewDealFields({
                             </InputGroupAddon>
                         </ComboboxInput>
                         <ComboboxContent className="pointer-events-auto">
+                            <ComboboxEmpty>{t('noStages')}</ComboboxEmpty>
                             <ComboboxList onWheel={handleListWheel}>
-                                <ComboboxEmpty>{t('noStages')}</ComboboxEmpty>
-                                {stages.map((stage) => (
+                                {(stage: (typeof stages)[number]) => (
                                     <ComboboxItem key={stage.id} value={stage}>
                                         {stage.name}
                                     </ComboboxItem>
-                                ))}
+                                )}
                             </ComboboxList>
                         </ComboboxContent>
                     </Combobox>
@@ -372,8 +372,9 @@ function NewDealFields({
             <div className="ncd-rise grid gap-1.5" style={{ animationDelay: '240ms' }}>
                 <Label htmlFor="deal-company">{t('company')}</Label>
                 <Combobox
-                    items={companySearch.companies}
-                    filter={null}
+                    items={companySearch.options}
+                    serverSearch={companySearch.serverSearch}
+                    autoHighlight
                     itemToStringLabel={(company: Company) => company.name}
                     value={selectedCompany}
                     onInputValueChange={companySearch.onInputValueChange}
@@ -393,13 +394,13 @@ function NewDealFields({
                         </InputGroupAddon>
                     </ComboboxInput>
                     <ComboboxContent className="pointer-events-auto">
+                        <ComboboxEmpty>{companySearch.error ? t('companySearchFailed') : t('noCompaniesFound')}</ComboboxEmpty>
                         <ComboboxList onWheel={handleListWheel}>
-                            <ComboboxEmpty>{t('noCompaniesFound')}</ComboboxEmpty>
-                            {companySearch.companies.map((company) => (
+                            {(company: (typeof companySearch.companies)[number]) => (
                                 <ComboboxItem key={company.id} value={company}>
                                     {company.name}
                                 </ComboboxItem>
-                            ))}
+                            )}
                         </ComboboxList>
                     </ComboboxContent>
                 </Combobox>

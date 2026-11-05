@@ -695,12 +695,12 @@ export default function MyWorkQueue({ userId, initial }: Props) {
                         </Button>
                     </div>
                 </ResponsiveDialogContent>
+                <ConfirmDiscardDialog
+                    open={rejectGuard.confirm.open}
+                    onKeepEditing={rejectGuard.confirm.onKeepEditing}
+                    onDiscard={rejectGuard.confirm.onDiscard}
+                />
             </ResponsiveDialog>
-            <ConfirmDiscardDialog
-                open={rejectGuard.confirm.open}
-                onKeepEditing={rejectGuard.confirm.onKeepEditing}
-                onDiscard={rejectGuard.confirm.onDiscard}
-            />
 
             <Drawer
                 open={detail != null}
