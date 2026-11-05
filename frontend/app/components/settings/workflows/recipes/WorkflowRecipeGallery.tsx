@@ -17,6 +17,7 @@ import { PageHeader } from "@/app/components/PageHeader";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { CrumbLabel } from "@/app/hooks/useNavTrail";
 import { WorkflowSimulationEvidence } from "@/app/components/settings/workflows/WorkflowSimulationDialog";
+import { workflowIsReadyToPublish } from "@/app/components/settings/workflows/workflowValidation";
 import {
     ApiError,
     getUsers,
@@ -218,7 +219,7 @@ export function WorkflowRecipeDetail({ recipeKey }: { recipeKey: string }) {
     const messageKey = recipeMessageKey(recipe.recipeKey);
     const canInstall = preview?.writesCreated === false
         && preview.unresolvedParameters.length === 0
-        && preview.validation.canPublish;
+        && workflowIsReadyToPublish(preview.validation);
 
     return (
         <div className="space-y-8">
@@ -312,6 +313,19 @@ export function WorkflowRecipeDetail({ recipeKey }: { recipeKey: string }) {
                             ) : null}
                             {!preview.validation.canPublish ? (
                                 <p className="text-sm text-destructive">{t("recipes.validationBlocked")}</p>
+                            ) : null}
+                            {preview.validation.errors.length > 0 ? (
+                                <ul className="space-y-1 text-sm text-destructive">
+                                    {preview.validation.errors.map((diagnostic, index) => (
+                                        <li key={`${diagnostic.code}:${diagnostic.nodeId ?? index}`}>
+                                            {recipe.recipeKey === "cooling-company-review" && diagnostic.code === "action_record_type_unsupported"
+                                                ? t("recipes.coolingUnavailable")
+                                                : tw.has(`diagnostics.${diagnostic.code}`)
+                                                    ? tw(`diagnostics.${diagnostic.code}`, diagnostic.params)
+                                                    : tw("diagnosticFallback")}
+                                        </li>
+                                    ))}
+                                </ul>
                             ) : null}
                         </div>
                     ) : null}

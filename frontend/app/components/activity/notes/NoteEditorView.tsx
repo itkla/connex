@@ -369,7 +369,7 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
                     {note ? null : (
                         <RecordReturnLink
                             href={returnPath}
-                            className="inline-flex w-fit items-center gap-2 text-sm text-brand transition-colors hover:text-brand-hover"
+                            className="inline-flex w-fit items-center gap-2 text-sm text-brand-text transition-colors hover:text-brand-text"
                         >
                             <ArrowLeftIcon className="h-4 w-4" />
                             {t("back")}

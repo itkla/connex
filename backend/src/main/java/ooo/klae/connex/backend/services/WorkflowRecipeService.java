@@ -38,9 +38,11 @@ import ooo.klae.connex.backend.dto.WorkflowRecipeInstallRequest;
 import ooo.klae.connex.backend.dto.WorkflowRecipePreviewDto;
 import ooo.klae.connex.backend.dto.WorkflowRecipePreviewRequest;
 import ooo.klae.connex.backend.dto.WorkflowValidationDto;
+import ooo.klae.connex.backend.dto.WorkflowDiagnosticDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.exceptions.WorkflowDefinitionValidationException;
 import ooo.klae.connex.backend.mappers.WorkflowOperationsMapper;
 import ooo.klae.connex.backend.services.WorkflowDraftCanonicalizer.CanonicalDraft;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -155,8 +157,16 @@ public class WorkflowRecipeService {
             "user",
             material.definition(),
             material.canvas());
-        Set<Permission> required = definitionValidator.validateForMutation(
-            material.recordType(), "user", material.definition());
+        Set<Permission> required;
+        List<WorkflowDiagnosticDto> errors;
+        try {
+            required = definitionValidator.validateForMutation(
+                material.recordType(), "user", material.definition());
+            errors = List.of();
+        } catch (WorkflowDefinitionValidationException exception) {
+            required = Set.of();
+            errors = List.of(exception.diagnostic());
+        }
         List<String> requiredPermissions = required.stream()
             .map(Enum::name)
             .sorted()
@@ -177,15 +187,15 @@ public class WorkflowRecipeService {
         if (!actorAvailable && !missing.contains("actorUserId")) {
             missing.add("actorUserId");
         }
-        boolean canPublish = missing.isEmpty() && missingPermissions.isEmpty();
+        boolean canPublish = errors.isEmpty() && missing.isEmpty() && missingPermissions.isEmpty();
         WorkflowValidationDto validation = new WorkflowValidationDto(
             0,
-            true,
+            errors.isEmpty(),
             canPublish,
             false,
             requiredPermissions,
             missingPermissions,
-            List.of());
+            errors);
         List<WorkflowRecipePreviewDto.PlannedAction> actions = material.definition().nodes().stream()
             .filter(WorkflowNode.Action.class::isInstance)
             .map(WorkflowNode.Action.class::cast)
@@ -194,7 +204,7 @@ public class WorkflowRecipeService {
                 node.config().getType(),
                 retryPolicy.safety(node.config()).value()))
             .toList();
-        var exampleResult = exampleRecordId == null
+        var exampleResult = exampleRecordId == null || !errors.isEmpty()
             ? null
             : simulationService.simulateDraft(
                 canonical,

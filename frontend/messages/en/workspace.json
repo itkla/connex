@@ -534,6 +534,17 @@
             "additional": "an additional workspace permission"
         },
         "validationReady": "All checks passed. This saved draft is ready to publish.",
+        "validationBlocked": "This draft can't be published yet. Review its permissions and setup.",
+        "publicationReason": {
+            "delay": "Delays can't run here yet. Remove the Delay step before publishing.",
+            "multiple_conditions": "This workflow can have one Condition step here. Combine the checks in that step before publishing.",
+            "no_branch_actions": "The No branch must end without actions here. Move those actions to the Yes branch or remove them.",
+            "action_limit": "This workflow can run up to 16 actions here. Remove extra actions before publishing.",
+            "condition_position": "The Condition step must come before all actions here. Move it directly after the trigger.",
+            "unsupported_structure": "These branches can't run here yet. Use one Condition step followed by a single sequence of actions."
+        },
+        "unavailableBadge": "Unavailable",
+        "executionUnavailable": "This workflow can't run here. Ask your administrator for help.",
         "validationErrorTitle": "Fix {count, plural, one {# issue} other {# issues}} before publishing",
         "authoringModeLabel": "Authoring view",
         "authoringMode": {
@@ -784,7 +795,7 @@
             "delay_duration_below_minimum": "A wait must be at least one minute.",
             "delay_duration_above_maximum": "A single wait cannot exceed 30 days.",
             "cumulative_delay_above_maximum": "The waits on this path cannot exceed 90 days in total.",
-            "legacy_projection_unsupported": "The automation behind this workflow can't run these steps yet. Simplify the branches, or ask support to move it over.",
+            "legacy_projection_unsupported": "These steps can't run here. Simplify the branches before publishing.",
             "actor_unavailable": "The configured workflow actor is no longer available.",
             "record_unavailable": "The selected record is unavailable or not visible.",
             "trigger_filter_not_matched": "The selected record does not match the trigger filter.",

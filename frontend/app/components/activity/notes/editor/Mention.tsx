@@ -33,7 +33,7 @@ function MentionView({ node }: NodeViewProps) {
                 data-ref-id={node.attrs.refId as number}
                 className={
                     isUser
-                        ? "rounded-sm bg-brand-light/50 px-0.5 font-medium text-brand-dark"
+                        ? "rounded-sm bg-brand-light/50 px-0.5 font-medium text-brand-text"
                         : "rounded-sm bg-muted px-1 font-medium text-foreground"
                 }
             >

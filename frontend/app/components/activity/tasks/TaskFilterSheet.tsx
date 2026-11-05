@@ -104,7 +104,7 @@ export default function TaskFilterSheet({
                                             className={cn(
                                                 'h-auto min-h-11 w-full justify-start text-left font-normal',
                                                 selected &&
-                                                    'bg-brand-light/60 font-medium text-brand-dark hover:bg-brand-light/70',
+                                                    'bg-brand-light/60 font-medium text-brand-text hover:bg-brand-light/70',
                                             )}
                                         >
                                             <span className="min-w-0 flex-1 truncate">{option.label}</span>
@@ -113,7 +113,7 @@ export default function TaskFilterSheet({
                                             </span>
                                             <CheckIcon
                                                 className={cn(
-                                                    'size-4 shrink-0 text-brand-dark',
+                                                    'size-4 shrink-0 text-brand-text',
                                                     !selected && 'invisible',
                                                 )}
                                                 aria-hidden

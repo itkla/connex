@@ -289,7 +289,7 @@ function DecisionPanel({
             <div aria-live="polite">
                 <Icon
                     aria-hidden="true"
-                    className={accepted ? "size-9 text-brand-dark" : "size-9 text-destructive"}
+                    className={accepted ? "size-9 text-brand-text" : "size-9 text-destructive"}
                 />
                 <h2 className="mt-4 text-lg font-semibold text-foreground">
                     {accepted ? t("acceptedTitle") : t("declinedTitle")}

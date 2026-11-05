@@ -162,7 +162,7 @@ export default function DealBriefPanel({
                                                     <Link
                                                         key={`${segment.sourceId}-${i}`}
                                                         href={segment.href}
-                                                        className="align-super text-[0.7em] font-semibold text-brand-dark transition-colors hover:underline"
+                                                        className="align-super text-[0.7em] font-semibold text-brand-text transition-colors hover:underline"
                                                     >
                                                         [{segment.index}]
                                                     </Link>

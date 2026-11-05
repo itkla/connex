@@ -118,7 +118,7 @@ export default function FileDetailSheet({
                                     {meta && a.entityId ? (
                                         <Link
                                             href={meta.href(a.entityId)}
-                                            className="inline-flex items-center gap-1.5 text-foreground transition-colors hover:text-brand"
+                                            className="inline-flex items-center gap-1.5 text-foreground transition-colors hover:text-brand-text"
                                         >
                                             <meta.Icon className="size-4" />
                                             <span className="truncate">{recordLabel}</span>

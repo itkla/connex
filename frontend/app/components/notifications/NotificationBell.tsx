@@ -200,7 +200,7 @@ export default function NotificationBell() {
                             <button
                                 type="button"
                                 onClick={() => void readAll()}
-                                className="inline-flex items-center gap-1 text-xs font-medium text-brand hover:text-brand-dark"
+                                className="inline-flex items-center gap-1 text-xs font-medium text-brand-text hover:text-brand-text"
                             >
                                 <CheckCheck className="size-3.5" />
                                 {t("markAllRead")}
@@ -288,7 +288,7 @@ export default function NotificationBell() {
                                                     type="button"
                                                     aria-label={t("markRead")}
                                                     onClick={() => void resolve(item)}
-                                                    className="rounded p-1 text-muted-foreground transition-colors hover:bg-background hover:text-brand"
+                                                    className="rounded p-1 text-muted-foreground transition-colors hover:bg-background hover:text-brand-text"
                                                 >
                                                     <CheckIcon className="size-4" />
                                                 </button>
@@ -312,7 +312,7 @@ export default function NotificationBell() {
                         <DropdownMenu.Item asChild>
                             <Link
                                 href="/notifications"
-                                className="flex items-center justify-center gap-2 rounded-md py-2 text-sm font-medium text-brand outline-none transition-colors hover:bg-muted"
+                                className="flex items-center justify-center gap-2 rounded-md py-2 text-sm font-medium text-brand-text outline-none transition-colors hover:bg-muted"
                             >
                                 <EyeIcon className="size-4" />
                                 {t("viewAll")}

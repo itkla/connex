@@ -6,7 +6,7 @@ export default function FirstRun() {
     const t = useTranslations('AnalyticsPage');
     return (
         <div className="flex flex-col items-center justify-center rounded-2xl bg-card px-6 py-20 text-center ring-1 ring-border">
-            <span className="flex size-14 items-center justify-center rounded-2xl bg-brand-light text-brand-dark">
+            <span className="flex size-14 items-center justify-center rounded-2xl bg-brand-light text-brand-text">
                 <PresentationChartLineIcon className="size-7" />
             </span>
             <h2 className="mt-6 text-xl font-semibold text-foreground">{t('emptyTitle')}</h2>
