@@ -19,7 +19,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.TreeMap;
 import java.util.TreeSet;
 
 import org.springframework.stereotype.Service;
@@ -647,29 +646,9 @@ public class DealService {
             ? List.of()
             : dealMapper.revenueClosedByBoundaries(workspaceId, currency, boundaries, memberScope);
         return new DealRevenueSeriesDto(
-            revenueClosedByMonth(
-                dealMapper.revenueScheduledClosedByMonth(workspaceId, currency, memberScope),
-                timezoneBucketed),
+            publicMonthTotals(timezoneBucketed),
             publicMonthTotals(dealMapper.revenueProjectedByMonth(workspaceId, currency, memberScope, openOnly))
         );
-    }
-
-    static List<DealMonthTotalDto> revenueClosedByMonth(
-            List<DealMonthDecimalTotalDto> scheduled,
-            List<DealMonthDecimalTotalDto> timezoneBucketed) {
-        Map<YearMonth, BigDecimal> totals = new TreeMap<>();
-        for (DealMonthDecimalTotalDto month : scheduled) {
-            totals.merge(
-                YearMonth.of(month.year(), month.month()), month.total(), BigDecimal::add);
-        }
-        for (DealMonthDecimalTotalDto month : timezoneBucketed) {
-            totals.merge(
-                YearMonth.of(month.year(), month.month()), month.total(), BigDecimal::add);
-        }
-        return totals.entrySet().stream()
-            .map(entry -> new DealMonthTotalDto(
-                entry.getKey().getYear(), entry.getKey().getMonthValue(), entry.getValue()))
-            .toList();
     }
 
     private static List<DealMonthTotalDto> publicMonthTotals(
@@ -825,12 +804,10 @@ public class DealService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         List<DealPeriodDecimalTotalDto> closed = dealMapper.revenueClosedByPeriods(
             workspaceId, currency, window.startUtc(), window.endUtc(), periods, memberScope);
-        List<DealPeriodDecimalTotalDto> scheduled = dealMapper.revenueScheduledClosedByPeriods(
-            workspaceId, currency, window.fromDate(), window.endDate(), periods, memberScope);
         List<DealPeriodDecimalTotalDto> projected = dealMapper.revenueProjectedByPeriods(
             workspaceId, currency, window.fromDate(), window.endDate(), periods, memberScope);
         return new DealRevenuePeriodSeriesDto(
-            publicPeriodTotals(periods, closed, scheduled),
+            publicPeriodTotals(periods, closed),
             publicPeriodTotals(periods, projected));
     }
 

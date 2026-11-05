@@ -1784,6 +1784,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
 
                 <QuickEditDealSheet
                     key={editReloadRevision}
+                    timezone={timezone}
                     open={editSheetOpen}
                     onOpenChange={(open) => { setEditSheetOpen(open); if (!open) clearConflict(); }}
                     selectedIds={selectedIds}

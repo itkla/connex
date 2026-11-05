@@ -123,6 +123,43 @@ redirecting imported values.
 
 Do not add a dependency-first lock pass; it reverses the interactive mutation order and creates a deadlock cycle.
 
+## Deal history dates
+
+Deal CSV mapping supports `closedAt` (Closed at) and `createdAt` (Created at), separately from
+`expectedCloseDate`. Both accept strict `yyyy-MM-dd`, `yyyy/MM/dd`, and ISO instants with an
+explicit offset. Date-only values mean the start of that day in the active workspace analytics
+reporting timezone (workspace override, then actor timezone, then UTC). They are converted to UTC
+before storing in the existing DATETIME columns, at second precision. Thus Tokyo's March 1 belongs
+to March's local revenue period even though its stored UTC timestamp begins on February 28.
+Unparseable or out-of-range dates are row errors in preview and commit; they never become today.
+
+The existing duplicate action governs both history targets: Fill empty retains stored dates,
+Overwrite uses supplied dates, and Skip changes nothing. A missing Created at on a new deal keeps
+the database's current-time default. Historical creation dates are written only by CSV import;
+ordinary creation and edits retain their existing semantics.
+
+Review exposes the effective dates and timezone for each writable row. Closed deals with no
+effective close date carry a non-blocking warning; the client names the affected source-row count
+and explains that import time will be used. Future close dates also carry a row warning. Open
+deals retain the outcome writer's existing behavior of clearing close dates. Closed dates supplied
+to that writer are preserved; missing dates still use current UTC time.
+
+Raw rows and mapping targets remain bound to the one-use proof. The rendered decision fingerprint
+also binds effective dates, warning flags, reporting timezone, effective stage, and outcome,
+including coalesced rows and matched-record merge semantics. A timezone, stage, or stored-date
+change that alters the reviewed result requires a fresh preview. Matched dates are rechecked under
+the existing target locks before dependencies or writes. Period revenue and cycle calculations
+continue to read the canonical `closed_at` and `created_at` columns. Realized revenue charts use
+won deals' `actual_value` and reporting-timezone buckets of `closed_at`, including wins that also
+have an expected close date. Projected series keep their expected-close date basis. Deal CSV
+exports append `closedAt` and `createdAt` after the existing columns, including custom fields and
+`tags`, preserving their positions. These timestamps are UTC ISO instants with an explicit `Z`, so
+exporting and reimporting the history targets preserves the same instants. Deal close-date displays and
+editors parse these timestamps as UTC and use the reporting timezone; they do not rely on the
+browser/server host timezone. Editor conversion preserves an unchanged repeated-hour instant,
+chooses the earlier occurrence for a new repeated-hour value, and rejects missing civil times.
+Generic date helpers and date-only expected-close display semantics remain unchanged.
+
 ## Interaction-history imports
 
 The Settings → Data interaction-history wizard imports one historical person participant per activity, note, or task.

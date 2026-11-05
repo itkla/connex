@@ -200,7 +200,7 @@ describe("deal edit origins", () => {
         const backend = stubBackend(path, (requestPath, method) => requestPath === path && method === "GET"
             ? result === "current" ? json(current) : json({ code: "FORBIDDEN", message: `Not a member of workspace ${ORIGIN}` }, 403)
             : undefined);
-        await render(<EditDealSheet deal={{ ...deal, version: 1 }} open onOpenChange={browser.noop} pipelines={[pipeline]} stagesByPipeline={{ 41: [stage] }} />);
+        await render(<EditDealSheet deal={{ ...deal, version: 1 }} timezone="Asia/Tokyo" open onOpenChange={browser.noop} pipelines={[pipeline]} stagesByPipeline={{ 41: [stage] }} />);
         await act(async () => get("dealSheet").updateDraft(41, { name: "My unsaved draft" }));
         let pending: unknown;
         await act(async () => {
@@ -300,13 +300,14 @@ describe("in-flight deal drafts", () => {
         const backend = stubBackend("/api/deals/41", (path, method) => path === "/api/deals/41" && method === "PUT"
             ? json({ ...firstSaved, version: 3, name: "Newer detail input" }) : undefined);
         const onOpenChange = vi.fn();
-        await render(<EditDealSheet deal={{ ...deal, version: 1 }} open onOpenChange={onOpenChange} pipelines={[pipeline]} stagesByPipeline={{ 41: [stage] }} />);
+        await render(<EditDealSheet deal={{ ...deal, version: 1 }} timezone="Asia/Tokyo" open onOpenChange={onOpenChange} pipelines={[pipeline]} stagesByPipeline={{ 41: [stage] }} />);
         await act(async () => get("dealSheet").updateDraft(41, { name: "Submitted detail" }));
         let pending: unknown;
         await act(async () => { pending = get("dealSheet").saveEdits(); await backend.started.promise; });
         await act(async () => get("dealSheet").updateDraft(41, { name: "Newer detail input" }));
         await act(async () => { backend.held.resolve(json(firstSaved)); await pending; });
         expect(get("dealSheet").drafts[41]).toMatchObject({ name: "Newer detail input", expectedVersion: 2 });
+        expect(get("dealSheet").timezone).toBe("Asia/Tokyo");
         expect(get("dealSheet").selectedDeals[0]).toMatchObject(firstSaved);
         expect(get("dealSheet").isSaving).toBe(false);
         expect(onOpenChange).not.toHaveBeenCalled();
@@ -353,7 +354,7 @@ describe("detail edit snapshots", () => {
             }, []);
             return <>
                 <output>{pageDeal.version}</output>
-                <DealActionsMenu deal={pageDeal} pipelines={[pipeline]} stagesByPipeline={{ 41: [stage] }} currentUserId={7} />
+                <DealActionsMenu deal={pageDeal} timezone="Asia/Tokyo" pipelines={[pipeline]} stagesByPipeline={{ 41: [stage] }} currentUserId={7} />
                 <DealLineItems dealId={deal.id} dealCurrency="USD" initial={lines} />
             </>;
         }
@@ -375,6 +376,7 @@ describe("detail edit snapshots", () => {
         expect(reads).toHaveLength(1);
         expect(new Headers(reads[0]?.[1]?.headers).get("X-Workspace-Id")).toBe(String(ORIGIN));
         expect(get("dealSheet").drafts[41].expectedVersion).toBe(2);
+        expect(get("dealSheet").timezone).toBe("Asia/Tokyo");
         await act(async () => get("dealSheet").updateDraft(41, { name: "Edited after line rename" }));
         await act(async () => get("dealSheet").saveEdits());
         expectWrites(backend, ["/api/deals/41/line-items/11", "/api/deals/41"]);
@@ -404,7 +406,7 @@ describe("detail edit snapshots", () => {
             }
             return original(input, init);
         });
-        await render(<DealActionsMenu deal={{ ...deal, version: 1 }} pipelines={[pipeline]} stagesByPipeline={{ 41: [stage] }} currentUserId={7} />);
+        await render(<DealActionsMenu deal={{ ...deal, version: 1 }} timezone="Asia/Tokyo" pipelines={[pipeline]} stagesByPipeline={{ 41: [stage] }} currentUserId={7} />);
         const edit = [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "edit");
         if (!edit) throw new Error("Expected the detail Edit action");
         await act(async () => { edit.click(); await started.promise; });
@@ -480,7 +482,7 @@ describe("record edit chains preserve one origin", () => {
         await render(surface === "card" ? <ContactCard id={41} workspaceId={ORIGIN} name={contact.name} />
             : surface === "contact" ? <EditContactSheet contact={contact} open onOpenChange={browser.noop} />
                 : surface === "company" ? <EditCompanySheet company={company} open onOpenChange={browser.noop} />
-                    : <EditDealSheet deal={deal} open onOpenChange={browser.noop} pipelines={[pipeline]} stagesByPipeline={{ 41: [stage] }} />);
+                    : <EditDealSheet deal={deal} timezone="UTC" open onOpenChange={browser.noop} pipelines={[pipeline]} stagesByPipeline={{ 41: [stage] }} />);
         await act(async () => {
             if (surface === "company") { get("companySheet").updateDraft(41, { name: "Updated company" }); get("companySheet").updateLogoFile?.(41, image); }
             else if (surface === "deal") get("dealSheet").updateDraft(41, { name: "Updated deal" });

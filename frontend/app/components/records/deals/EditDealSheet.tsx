@@ -19,6 +19,7 @@ import { type Deal, type Pipeline, type Stage } from '@/app/lib/types';
 
 export default function EditDealSheet({
     deal,
+    timezone,
     open,
     onOpenChange,
     pipelines,
@@ -26,6 +27,7 @@ export default function EditDealSheet({
     onDealUpdated,
 }: {
     deal: Deal;
+    timezone: string;
     open: boolean;
     onOpenChange: (open: boolean) => void;
     pipelines: Pipeline[];
@@ -146,6 +148,7 @@ export default function EditDealSheet({
         <>
             <QuickEditDealSheet
                 key={reloadRevision}
+                timezone={timezone}
                 open={open}
                 onOpenChange={onOpenChange}
                 selectedIds={new Set([base.id])}

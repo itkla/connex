@@ -227,6 +227,7 @@ function findFailureStageSelector(root: unknown): (stage: Stage) => unknown {
 function createOutcomeDraftHarness() {
     let draft: DealDraft = { ...WON_LINE_ITEM_DRAFT };
     const props = {
+        timezone: "UTC",
         open: true,
         onOpenChange: () => undefined,
         selectedIds: new Set([WON_LINE_ITEM_DEAL.id]),
@@ -291,6 +292,7 @@ describe("deal edit versions", () => {
 describe("lost-deal actual value", () => {
     function renderActualValueInput(won: boolean, actualValue: number) {
         const html = renderToStaticMarkup(createElement(QuickEditDealSheet, {
+            timezone: "UTC",
             open: true,
             onOpenChange: () => undefined,
             selectedIds: new Set([LOST_DEAL.id]),
@@ -356,14 +358,16 @@ describe("lost-deal actual value", () => {
         expect(requestedActualValue(true, 0, true)).toBe(0);
     });
 
-    it("shows the deal value when an open deal is freshly won without an amount edit", () => {
+    it.each([false, true])("keeps the reporting-zone close date and fresh-win amount when edited=%s", (edited) => {
         const html = renderToStaticMarkup(createElement(QuickEditDealSheet, {
+            timezone: "Asia/Tokyo",
             open: true,
             onOpenChange: () => undefined,
             selectedIds: new Set([LOST_DEAL.id]),
             selectedDeals: [{ ...LOST_DEAL, won: null, actualValue: 0 }],
             drafts: { [LOST_DEAL.id]: {
-                ...LOST_DRAFT, won: true, actualValue: 0, actualValueEdited: false,
+                ...LOST_DRAFT, won: true, actualValue: 0, actualValueEdited: edited,
+                closedAt: "2025-02-28 15:00:00",
             } },
             updateDraft: () => undefined,
             pipelines: [],
@@ -372,7 +376,9 @@ describe("lost-deal actual value", () => {
             saveEdits: () => undefined,
         }));
         const input = html.match(/<input\b[^>]*id="deal-actual-value-7"[^>]*>/)?.[0];
-        expect(input).toContain('value="500"');
+        const closedAt = html.match(/<input\b[^>]*id="deal-closed-at-7"[^>]*>/)?.[0];
+        expect(input).toContain(`value="${edited ? 0 : 500}"`);
+        expect(closedAt).toContain('value="2025-03-01T00:00"');
     });
 
     it("preserves realized value when a won deal is toggled through lost back to won before submit", async () => {
