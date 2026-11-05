@@ -34,6 +34,7 @@ import {
 import NewNoteDialog from '@/app/components/activity/notes/NoteDialog';
 
 import { archiveContact, restoreContact, getActiveWorkspaceMembers, updateContact, updatePersonOwner } from '@/app/lib/api';
+import type { RelationshipMapAvailability } from '@/app/lib/api';
 import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
 import { type WorkspaceMember } from '@/app/lib/types';
 import { type Contact, type Deal } from '@/app/lib/types';
@@ -47,10 +48,12 @@ import {
 export default function ContactActionsMenu({
     contact,
     currentUserId,
+    mapAvailability = 'unknown',
     dealSeeds = [],
 }: {
     contact: Contact;
     currentUserId: number;
+    mapAvailability?: RelationshipMapAvailability;
     dealSeeds?: Deal[];
 }) {
     const router = useRouter();
@@ -133,14 +136,16 @@ export default function ContactActionsMenu({
                         <PencilSquareIcon className="size-4" />
                         {t('edit')}
                     </Button>
-                    <Button
-                        variant="outline"
-                        size="toolbar"
-                        onClick={() => router.push(`/intelligence/map?contactId=${contact.id}`)}
-                    >
-                        <EyeIcon className="size-4" />
-                        {t('viewInMap')}
-                    </Button>
+                    {mapAvailability !== 'overCapacity' && (
+                        <Button
+                            variant="outline"
+                            size="toolbar"
+                            onClick={() => router.push(`/intelligence/map?contactId=${contact.id}`)}
+                        >
+                            <EyeIcon className="size-4" />
+                            {t('viewInMap')}
+                        </Button>
+                    )}
                 </ButtonGroup>
                 <ButtonGroup orientation="horizontal">
                     {/* // add attachments, files, pictures, business cards etc */}

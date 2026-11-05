@@ -21,6 +21,7 @@ import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
+import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Task;
@@ -37,6 +38,7 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
+import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 import ooo.klae.connex.backend.work.WorkItemStateHash;
@@ -53,8 +55,8 @@ import lombok.RequiredArgsConstructor;
  * Business logic for {@code Task} operations.
  * Handles mapping between {@code TaskDto} and {@code Task} bean.
  * Delegates persistence to {@code TaskMapper}, resolves inline @/# references in
- * the task description via {@code ReferenceService}, and dispatches member-mention
- * notifications.
+ * the task description via {@code ReferenceService}, and dispatches assignment and
+ * member-mention notifications.
  */
 
 @Service
@@ -71,6 +73,8 @@ public class TaskService {
     private final NotificationChangePublisher notificationChanges;
     private final ReferenceService referenceService;
     private final NotificationDelivery notificationDelivery;
+    private final NotificationMapper notificationMapper;
+    private final NotificationStateVersionService notificationStateVersions;
     private final NotificationPreferenceService notificationPreferenceService;
     private final RuleTriggerPublisher ruleTriggers;
     private final ObjectMapper objectMapper;
@@ -86,6 +90,7 @@ public class TaskService {
         Set.of("description", "completed", "status", "dueDate");
 
     private static final String MENTION_TYPE = "task.mention";
+    private static final String ASSIGNED_TYPE = "task.assigned";
     private static final String MENTION_CATEGORY = "task";
     private static final String MENTION_SEVERITY = "info";
     private static final String IN_APP = "in_app";
@@ -212,6 +217,7 @@ public class TaskService {
         List<Integer> mentioned =
             referenceService.syncReferences(workspaceId, ReferenceService.SOURCE_TASK, task.getId(), task.getDescription());
         if (actor != null) {
+            notifyAssignment(workspaceId, task, actor);
             notifyMentions(workspaceId, task, mentioned, actor);
         }
         return hydrate(workspaceId, task);
@@ -264,7 +270,17 @@ public class TaskService {
         }
         List<Integer> mentioned =
             referenceService.syncReferences(workspaceId, ReferenceService.SOURCE_TASK, id, task.getDescription());
+        boolean reassigned = before.getAssignedTo() == null
+            || before.getAssignedTo().getId() != requireAssigneeId(task);
+        if (reassigned && before.getAssignedTo() != null
+                && notificationMapper.resolveTaskAssignment(workspaceId, before.getAssignedTo().getId(), id,
+                    LocalDateTime.now(ZoneOffset.UTC).format(TS)) > 0) {
+            notificationStateVersions.markChanged(before.getAssignedTo().getId());
+        }
         if (actor != null) {
+            if (reassigned) {
+                notifyAssignment(workspaceId, task, actor);
+            }
             notifyMentions(workspaceId, task, mentioned, actor);
         }
         return hydrate(workspaceId, task);
@@ -684,7 +700,16 @@ public class TaskService {
         }
     }
 
+    private void notifyAssignment(int workspaceId, Task task, User actor) {
+        notifyTaskRecipients(workspaceId, task, List.of(requireAssigneeId(task)), actor, ASSIGNED_TYPE);
+    }
+
     private void notifyMentions(int workspaceId, Task task, List<Integer> recipientIds, User actor) {
+        notifyTaskRecipients(workspaceId, task, recipientIds, actor, MENTION_TYPE);
+    }
+
+    private void notifyTaskRecipients(
+            int workspaceId, Task task, List<Integer> recipientIds, User actor, String type) {
         if (recipientIds.isEmpty()) {
             return;
         }
@@ -694,11 +719,11 @@ public class TaskService {
         String contextType = null;
         Integer contextId = null;
         String actionUrl = "/activity/tasks" + taskAnchor;
-        if (task.getDeal() != null && task.getDeal().getId() > 0) {
+        if (!ASSIGNED_TYPE.equals(type) && task.getDeal() != null && task.getDeal().getId() > 0) {
             contextType = "deal";
             contextId = task.getDeal().getId();
             actionUrl = "/records/deals/" + contextId + taskAnchor;
-        } else if (task.getPerson() != null && task.getPerson().getId() > 0) {
+        } else if (!ASSIGNED_TYPE.equals(type) && task.getPerson() != null && task.getPerson().getId() > 0) {
             contextType = "person";
             contextId = task.getPerson().getId();
             actionUrl = "/records/contacts/" + contextId + taskAnchor;
@@ -707,19 +732,20 @@ public class TaskService {
             if (recipientId == actor.getId()) {
                 continue;
             }
-            if (!notificationPreferenceService.isEnabled(recipientId, MENTION_TYPE, IN_APP)) {
+            if (!notificationPreferenceService.isEnabled(recipientId, type, IN_APP)) {
                 continue;
             }
             try {
                 Notification notification = new Notification();
                 notification.setWorkspaceId(workspaceId);
                 notification.setRecipientId(recipientId);
-                notification.setType(MENTION_TYPE);
+                notification.setType(type);
                 notification.setCategory(MENTION_CATEGORY);
                 notification.setSeverity(MENTION_SEVERITY);
                 notification.setTemplateVersion(1);
-                notification.setTitle("New mention");
-                notification.setBody(actor.getDisplayName() + " mentioned you in a task");
+                notification.setTitle(ASSIGNED_TYPE.equals(type) ? "Task assigned to you" : "New mention");
+                notification.setBody(actor.getDisplayName()
+                    + (ASSIGNED_TYPE.equals(type) ? " assigned you a task" : " mentioned you in a task"));
                 notification.setActorId(actor.getId());
                 notification.setActorLabel(actor.getDisplayName());
                 notification.setSourceType("task");
@@ -728,9 +754,12 @@ public class TaskService {
                 notification.setContextType(contextType);
                 notification.setContextId(contextId);
                 notification.setActionUrl(actionUrl);
-                notification.setDedupeKey(MENTION_TYPE + ":" + task.getId() + ":" + recipientId);
+                notification.setDedupeKey(type + ":" + task.getId() + ":" + recipientId);
                 notification.setTriggeredAt(triggeredAt);
                 notification.setData(json(Map.of("taskId", task.getId())));
+                if (ASSIGNED_TYPE.equals(type)) {
+                    notificationMapper.resolveTaskAssignment(workspaceId, recipientId, task.getId(), triggeredAt);
+                }
                 notificationDelivery.deliver(notification);
             } catch (RuntimeException ignored) {
             }
