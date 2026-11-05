@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 
 import { registerUser } from "./support/api";
@@ -47,11 +48,17 @@ test("a default member's first load has no refused background requests or red to
 });
 
 test("a sole owner's passkey step stays quiet and explains client navigation @mobile", async ({ page }, testInfo) => {
-    const suffix = `gates${Date.now().toString(36)}${testInfo.workerIndex}`;
+    const suffix = `gates${randomUUID().replaceAll("-", "").slice(0, 16)}${testInfo.workerIndex}`;
     await registerUser(page.request, {
         username: suffix, email: `${suffix}@example.com`, password: `Gates!${suffix}A1`,
     });
     await useLocale(page, "en");
+    await page.route("**/api/capabilities", async (route) => {
+        const response = await route.fetch();
+        const body: unknown = await response.json();
+        if (typeof body !== "object" || body === null || Array.isArray(body)) throw new Error("Expected capability posture");
+        await route.fulfill({ response, json: { ...body, privilegedMfaEnforced: true } });
+    });
     await page.route("**/api/auth/webauthn/register/requirements", async (route) => {
         const response = await route.fetch();
         const body: unknown = await response.json();
@@ -84,7 +91,7 @@ test("a sole owner's passkey step stays quiet and explains client navigation @mo
 });
 
 test("an unconfigured assistant explains availability before accepting a question", async ({ page }) => {
-    const suffix = `gatesai${Date.now().toString(36)}`;
+    const suffix = `gatesai${randomUUID().replaceAll("-", "").slice(0, 16)}`;
     await registerUser(page.request, {
         username: suffix, email: `${suffix}@example.com`, password: `Gates!${suffix}A1`,
     });

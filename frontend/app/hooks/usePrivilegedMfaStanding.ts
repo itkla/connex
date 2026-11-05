@@ -90,14 +90,13 @@ export function usePrivilegedMfaStanding(): PrivilegedMfaStandingState {
         };
     }, [refresh]);
 
-    const standing = requirements?.standing;
     return {
         requirements,
         status: requirements === null
             ? lastFailure === "none" ? "loading" : "failed"
             : lastFailure === "ceremony" ? "failed" : "ready",
         fresh: lastFailure === "none",
-        confined: reason !== null || standing === "ENROLLMENT_REQUIRED" || standing === "ATTESTATION_REQUIRED",
+        confined: reason !== null,
         reason,
         refresh,
     };

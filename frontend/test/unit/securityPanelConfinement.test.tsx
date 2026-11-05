@@ -20,6 +20,7 @@ const backend = vi.hoisted(() => ({
     approve: null as ((orgId: number) => void) | null,
     reason: null as "enrollment" | "attestation" | null,
     failed: false,
+    enforced: true,
     leaveWorkspace: vi.fn<(id: number) => Promise<{ activeWorkspaceId: number | null; standing: "applied" | "failed" | null }>>(),
     readSelection: vi.fn<() => Promise<{ activeWorkspaceId: number | null; workspaces: [] }>>(),
     settle: vi.fn<(settlement: string) => Promise<"applied" | "failed">>(),
@@ -46,9 +47,9 @@ vi.mock("@/app/hooks/usePrivilegedMfaStanding", () => ({
         requirements: backend.requirements,
         status: backend.requirements ? "ready" : backend.failed ? "failed" : "loading",
         fresh: !backend.failed,
-        confined: backend.reason !== null
+        confined: backend.enforced && (backend.reason !== null
             || backend.requirements?.standing === "ATTESTATION_REQUIRED"
-            || backend.requirements?.standing === "ENROLLMENT_REQUIRED",
+            || backend.requirements?.standing === "ENROLLMENT_REQUIRED"),
         reason: backend.reason,
         refresh: backend.refresh,
     }),
@@ -139,6 +140,7 @@ async function renderPanel() {
 }
 
 beforeEach(() => {
+    backend.enforced = true;
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
@@ -160,6 +162,27 @@ afterEach(async () => {
 });
 
 describe("the Security page while a privileged account is confined", () => {
+    it("does not show confinement when enforcement is off despite enrollment metadata", async () => {
+        backend.enforced = false;
+        backend.requirements = { currentPasswordRequired: true, emailConfirmationRequired: false,
+            emailConfirmationSatisfied: false, standing: "ENROLLMENT_REQUIRED" };
+        await renderPanel();
+        expect(container.textContent).not.toContain(enAccount.AccountSecurity.enrollmentNeededTitle);
+        expect(container.textContent).toContain(enAccount.AccountSecurity.add);
+    });
+
+    it("keeps credential approval gates and code entry when whole-app enforcement is off", async () => {
+        backend.enforced = false;
+        backend.passkeys = [passkey("cred-laptop", "Laptop", null)];
+        backend.requirements = requirementsFor("ATTESTATION_REQUIRED");
+        await renderPanel();
+        expect(container.textContent).not.toContain(enAccount.AccountSecurity.approvalNeededTitle);
+        expect(container.textContent).not.toContain(enAccount.AccountSecurity.add);
+        expect(container.querySelector(`[aria-label="${enAccount.AccountSecurity.passkeyActions.replace("{label}", "Laptop")}"]`)).toBeNull();
+        expect(container.textContent).toContain(enAccount.AccountSecurity.approvalTitle);
+        expect(container.textContent).toContain(enAccount.AccountSecurity.approvalEnter);
+    });
+
     it("puts the approval step first and names the passkey every code should approve", async () => {
         backend.passkeys = [passkey("cred-laptop", "Laptop", "2026-10-10T00:00:00Z"), passkey("cred-phone", "Phone", null)];
         backend.requirements = requirementsFor("ATTESTATION_REQUIRED", [

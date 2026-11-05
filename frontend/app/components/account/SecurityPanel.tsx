@@ -96,6 +96,7 @@ export default function SecurityPanel() {
         requirements,
         status: standingStatus,
         reason: confinementReason,
+        confined,
         refresh: refreshStanding,
     } = usePrivilegedMfaStanding();
 
@@ -265,7 +266,7 @@ export default function SecurityPanel() {
         }, () => undefined);
     };
 
-    const cardReason = approvalPending
+    const cardReason = !confined ? null : approvalPending
         ? "attestation"
         : standing === "ENROLLMENT_REQUIRED" || confinementReason === "enrollment" ? "enrollment" : null;
 
@@ -434,7 +435,7 @@ export default function SecurityPanel() {
                         </ul>
                     ))}
 
-                {supported && !loading && !error && passkeys.length > 0 && !approvalPending && (
+                {supported && !loading && !error && passkeys.length > 0 && cardReason !== "attestation" && (
                     <div className="rounded-2xl border border-border bg-card px-5 py-4">
                         <h3 className="text-sm font-medium text-foreground">{t("approvalTitle")}</h3>
                         <p className="mt-1 max-w-prose text-sm text-muted-foreground">

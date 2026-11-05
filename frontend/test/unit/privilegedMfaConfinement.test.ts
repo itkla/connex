@@ -63,7 +63,9 @@ function stubBackend(route: Route): Recorded[] {
         if (url.endsWith("/api/auth/csrf")) {
             return json({ token: "csrf-token", headerName: "X-XSRF-TOKEN", requestIdentity: "request-identity" });
         }
-        return (await route(url, method)) ?? json({ message: "Unexpected request" }, 500);
+        return (await route(url, method))
+            ?? (url.endsWith("/api/capabilities") ? json({ privilegedMfaEnforced: true }) : null)
+            ?? json({ message: "Unexpected request" }, 500);
     }));
     return requests;
 }
@@ -116,6 +118,20 @@ describe("privileged MFA confinement in the browser", () => {
         expect(requests).toHaveLength(0);
         await api.settlePrivilegedMfaStanding("check");
         expect(api.privilegedMfaConfinementReason()).toBeNull();
+    });
+
+    it("keeps a server refusal confined when the enforcement lookup is unknown", async () => {
+        stubBrowser("/dashboard");
+        stubBackend((url) => {
+            if (url.endsWith("/api/rules")) return refusal(ATTESTATION);
+            if (url.endsWith("/api/capabilities")) return json({});
+            if (url.endsWith(REQUIREMENTS)) return requirements("SATISFIED");
+            return null;
+        });
+        const api = await import("@/app/lib/api");
+        await expect(api.getRules()).rejects.toMatchObject({ code: ATTESTATION });
+        await expect(api.settlePrivilegedMfaStanding("check")).resolves.toBe("failed");
+        expect(api.privilegedMfaConfinementReason()).toBe("attestation");
     });
 
     it("confines on an approval refusal, routes to the approval step and raises later refusals itself", async () => {

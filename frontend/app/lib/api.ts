@@ -820,12 +820,12 @@ function isPrivilegedMembership(value: unknown): value is Types.PrivilegedMember
             && "workspaceName" in workspace && typeof workspace.workspaceName === "string");
 }
 
-function applyPrivilegedMfaStanding(requirements: Types.PasskeyRegistrationRequirements, sequence: number) {
+function applyPrivilegedMfaStanding(requirements: Types.PasskeyRegistrationRequirements, sequence: number, enforced: boolean) {
     privilegedMfaAppliedSequence = sequence;
     privilegedMfaRequirements = requirements;
     const standing = requirements.standing;
     if (standing !== undefined) privilegedMfaCeremonyEpoch = null;
-    if (standing === "SATISFIED" || standing === "UNPRIVILEGED") {
+    if (!enforced || standing === "SATISFIED" || standing === "UNPRIVILEGED") {
         releasePrivilegedMfaConfinement();
     } else if (standing === "ENROLLMENT_REQUIRED") {
         confinePrivilegedMfa("enrollment");
@@ -843,8 +843,9 @@ function applyPrivilegedMfaStanding(requirements: Types.PasskeyRegistrationRequi
 
 /**
  * Re-reads the account's own standing from the allowlisted requirements endpoint and settles
- * browser-local confinement on it (#1534). SATISFIED and UNPRIVILEGED release it; ENROLLMENT_REQUIRED
- * and ATTESTATION_REQUIRED confine for that reason and move the Security step to match.
+ * browser-local confinement on it (#1534). With master enforcement enabled, SATISFIED and
+ * UNPRIVILEGED release it; ENROLLMENT_REQUIRED and ATTESTATION_REQUIRED confine for that reason
+ * and move the Security step to match.
  *
  * Reads are ordered: one that started before the newest decisive read ends superseded and changes
  * nothing, and one that a server refusal, an identity change or an accepted ceremony overtook is
@@ -855,7 +856,9 @@ function applyPrivilegedMfaStanding(requirements: Types.PasskeyRegistrationRequi
  * after a ceremony the server accepted — an enrollment or a redemption — whichever decisive read
  * follows it, until a refusal or an identity change intervenes, and never once passkey approval has
  * been required in this page. The decisive requirements are available from
- * {@link currentPrivilegedMfaRequirements}.
+ * {@link currentPrivilegedMfaRequirements}. The public master-enforcement flag is read alongside
+ * requirements: when it is false, enrollment/approval metadata does not confine the account. An
+ * unknown enforcement posture fails the read and preserves any already-known confinement.
  *
  * @param settlement what prompted the check; a ceremony is one the server has just accepted
  * @returns whether this read decided the standing, a newer one had, or the read failed
@@ -876,15 +879,22 @@ export async function settlePrivilegedMfaStanding(
         privilegedMfaReadSequence += 1;
         sequence = privilegedMfaReadSequence;
         let response: unknown;
+        let enforced: boolean;
         try {
-            response = await getPasskeyRegistrationRequirements();
+            const [requirements, capabilities] = await Promise.all([
+                getPasskeyRegistrationRequirements(),
+                getCapabilities(),
+            ]);
+            response = requirements;
+            if (typeof capabilities.privilegedMfaEnforced !== "boolean") return failedUnlessOvertaken(sequence);
+            enforced = capabilities.privilegedMfaEnforced;
         } catch {
             return failedUnlessOvertaken(sequence);
         }
         if (!isPasskeyRegistrationRequirements(response)) return failedUnlessOvertaken(sequence);
         if (sequence < privilegedMfaAppliedSequence) return "superseded";
         if (epoch !== privilegedMfaEventEpoch) continue;
-        applyPrivilegedMfaStanding(response, sequence);
+        applyPrivilegedMfaStanding(response, sequence, enforced);
         return "applied";
     }
     return failedUnlessOvertaken(sequence);

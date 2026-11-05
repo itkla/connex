@@ -749,10 +749,19 @@ step-up counts only when the session's stamp is bound to one of its own **suffic
   passkeys. The first passkey is the exception, and operator recovery leads back to it.
 
 `GET /api/auth/webauthn/register/requirements` stays reachable while confined. It reports the
-account's enforced `standing`, and `approvalGaps`: for each of the account's own passkeys without
+account's passkey `standing`, and `approvalGaps`: for each of the account's own passkeys without
 `BREAK_GLASS` assurance, every organization where the account is privileged and that passkey is not yet
 approved (`credentialId` in the base64url form the passkey list uses, `orgId`, `orgName`). A client
-re-reads it after each ceremony, and releases confinement only on `SATISFIED` or `UNPRIVILEGED`.
+re-reads it after each ceremony. With master enforcement enabled, only `SATISFIED` or
+`UNPRIVILEGED` releases confinement.
+
+The requirements endpoint still reports privilege/passkey standing when the master MFA switch is
+explicitly disabled. The browser therefore reads `GET /api/capabilities` alongside requirements and
+honors `privilegedMfaEnforced: false` before turning enrollment or approval metadata into confinement.
+Raw requirements remain available for passkey management, but they are not proof that access is
+paused. Missing standing metadata also does not establish confinement. A failed posture/requirements
+read preserves an already-known server refusal or step URL; it does not block an ordinary page that
+has no confinement reason.
 
 The same self-only response always includes `privilegedMemberships` (#1534 slice 4b-1),
 independent of both enforcement switches. An unprivileged account receives `[]`. Each entry is
