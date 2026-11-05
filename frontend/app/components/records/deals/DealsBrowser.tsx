@@ -54,6 +54,7 @@ import { usePermission } from '@/app/hooks/usePermissions';
 import { MAX_URL_PAGE_SIZE, parseListInt, writeListStateToUrl } from '@/app/hooks/listStateUrl';
 import { FILTER_EMPTY, type ColumnDef, type ColumnFilterFacet, type FilterState, type SelectionId, facetChips, countActiveFilters } from '@/app/components/records/types';
 import DealCard from '@/app/components/records/deals/DealCard';
+import { formatDealClosedAt } from '@/app/components/records/deals/dealDates';
 import DealListRow from '@/app/components/records/deals/DealListRow';
 import CommentIndicatorChip from '@/app/components/records/comments/CommentIndicatorChip';
 import { useCommentIndicators } from '@/app/hooks/useCommentIndicators';
@@ -1131,6 +1132,12 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             filter: { getValue: (d) => (d.stage != null ? stageById.get(d.stage)?.name ?? null : null) },
         },
         {
+            key: 'closedAt',
+            label: t('columnClosedAt'),
+            sortable: false,
+            render: (d) => isDealClosed(d) ? formatDealClosedAt(d.closedAt, locale, timezone) : '—',
+        },
+        {
             key: 'expectedCloseDate',
             label: t('columnExpectedClose'),
             getSortValue: (d) => (d.expectedCloseDate ? parseCalendarDate(d.expectedCloseDate) : null),
@@ -1202,7 +1209,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             getSortValue: (d) => (d.updatedAt ? Date.parse(d.updatedAt) : null),
             render: (d) => formatDateTime(d.updatedAt, locale, timeZone),
         },
-    ], [companyById, pipelineById, stageById, riskByDealId, toggleDealStatus, levelLabel, t, locale, timeZone, inlineEdit, commentCounts]);
+    ], [companyById, pipelineById, stageById, riskByDealId, toggleDealStatus, levelLabel, t, locale, timeZone, timezone, inlineEdit, commentCounts]);
 
     const visibleDeals = deals;
 
@@ -1694,6 +1701,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                 <Rise delay={0.3}>
                     {renderedDisplayMode === 'kanban' ? (
                         <DealsKanban
+                            timezone={timezone}
                             deals={visibleDeals}
                             pipelines={pipelines}
                             stagesByPipeline={stagesByPipeline}
@@ -1725,6 +1733,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                             addColumnSlot={addColumnSlot}
                             renderCard={(item, { onQuickEdit, onDelete, menu }) => (
                                 <DealCard
+                                    timezone={timezone}
                                     deal={item}
                                     company={item.company != null ? companyById.get(item.company) : undefined}
                                     pipeline={item.pipeline != null ? pipelineById.get(item.pipeline) : undefined}
@@ -1739,6 +1748,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                             cardOwnsRecordMenu
                             renderListRow={(item) => (
                                 <DealListRow
+                                    timezone={timezone}
                                     deal={item}
                                     company={item.company != null ? companyById.get(item.company) : undefined}
                                     stage={item.stage != null ? stageById.get(item.stage) : undefined}

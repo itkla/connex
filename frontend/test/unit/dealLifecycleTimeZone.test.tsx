@@ -21,11 +21,12 @@ beforeEach(() => { profile.zone = 'UTC'; });
 
 describe('deal lifecycle close-date display', () => {
     it.each([
-        { zone: 'Asia/Tokyo', workspace: 'America/New_York', expected: 'March 1, 2025' },
-        { zone: 'UTC', workspace: 'Asia/Tokyo', expected: 'February 28, 2025' },
+        { zone: 'Asia/Tokyo', workspace: 'America/New_York', expected: 'February 28, 2025' },
+        { zone: 'Asia/Tokyo', workspace: 'Asia/Tokyo', expected: 'March 1, 2025' },
+        { zone: 'America/New_York', workspace: 'Asia/Tokyo', expected: 'March 1, 2025' },
         { zone: undefined, workspace: 'UTC+9', expected: 'March 1, 2025' },
         { zone: 'invalid', workspace: 'invalid', expected: 'February 28, 2025' },
-    ])('uses profile $zone before workspace $workspace for imported instants', async ({ zone, workspace, expected }) => {
+    ])('uses reporting workspace $workspace despite profile $zone for imported instants', async ({ zone, workspace, expected }) => {
         profile.zone = zone;
         const html = renderToStaticMarkup(await DealLifecycleProgress({
             stages: [], timezone: workspace, currentStageId: null, outcome: 'won',
@@ -43,10 +44,20 @@ describe('deal lifecycle close-date display', () => {
         expect(html).toContain('>March 1, 2025</span>');
     });
 
-    it('compares the displayed close day with its calendar-only expected day east of UTC', async () => {
-        profile.zone = 'Pacific/Kiritimati';
+    it('keeps creation instants in the profile zone alongside the reporting close day', async () => {
+        profile.zone = 'America/New_York';
         const html = renderToStaticMarkup(await DealLifecycleProgress({
-            stages: [], timezone: 'UTC', currentStageId: null, outcome: 'won',
+            stages: [], timezone: 'Asia/Tokyo', currentStageId: null, outcome: 'won',
+            createdAt: '2025-01-01 00:00:00', closedAt: '2025-02-28 15:00:00',
+        }));
+        expect(html).toContain('>December 31, 2024</span>');
+        expect(html).toContain('>March 1, 2025</span>');
+    });
+
+    it('compares the displayed close day with its calendar-only expected day east of UTC', async () => {
+        profile.zone = 'America/New_York';
+        const html = renderToStaticMarkup(await DealLifecycleProgress({
+            stages: [], timezone: 'Pacific/Kiritimati', currentStageId: null, outcome: 'won',
             createdAt: '2025-01-01 00:00:00', closedAt: '2025-02-28 10:00:00', expectedCloseDate: '2025-03-01',
         }));
         expect(html).toContain('>March 1, 2025</span>');

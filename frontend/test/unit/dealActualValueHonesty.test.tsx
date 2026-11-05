@@ -233,10 +233,10 @@ function findFailureStageSelector(root: unknown): (stage: Stage) => unknown {
     return (stage) => onValueChange(stage);
 }
 
-function createOutcomeDraftHarness() {
+function createOutcomeDraftHarness(timezone = "UTC") {
     let draft: DealDraft = { ...WON_LINE_ITEM_DRAFT };
     const props = {
-        timezone: "UTC",
+        timezone,
         open: true,
         onOpenChange: () => undefined,
         selectedIds: new Set([WON_LINE_ITEM_DEAL.id]),
@@ -283,8 +283,8 @@ beforeEach(() => {
 
 describe("lost-deal actual value", () => {
     it("rejects a missing DST time without throwing from the close-date editor", () => {
-        displayZone.value = "America/New_York";
-        const harness = createOutcomeDraftHarness();
+        displayZone.value = "Asia/Tokyo";
+        const harness = createOutcomeDraftHarness("America/New_York");
         const previous = harness.getDraft().closedAt;
         expect(() => harness.changeClosedAt("2026-03-08T02:30")).not.toThrow();
         expect(harness.getDraft().closedAt).toBe(previous);
@@ -385,12 +385,12 @@ describe("lost-deal actual value", () => {
     });
 
     it.each([
-        { profile: "UTC", workspace: "Asia/Tokyo", expected: "2025-02-28T15:00" },
-        { profile: "Asia/Tokyo", workspace: "America/New_York", expected: "2025-03-01T00:00" },
+        { profile: "UTC", workspace: "Asia/Tokyo", expected: "2025-03-01T00:00" },
+        { profile: "Asia/Tokyo", workspace: "America/New_York", expected: "2025-02-28T10:00" },
         { profile: undefined, workspace: "Asia/Tokyo", expected: "2025-03-01T00:00" },
         { profile: "invalid", workspace: "UTC+9", expected: "2025-03-01T00:00" },
         { profile: undefined, workspace: "invalid", expected: "2025-02-28T15:00" },
-    ])("uses profile $profile before workspace $workspace in the close editor", ({ profile, workspace, expected }) => {
+    ])("uses reporting workspace $workspace despite profile $profile in the close editor", ({ profile, workspace, expected }) => {
         displayZone.value = profile;
         const html = renderToStaticMarkup(createElement(QuickEditDealSheet, {
             timezone: workspace,
@@ -407,6 +407,13 @@ describe("lost-deal actual value", () => {
         }));
         const closedAt = html.match(/<input\b[^>]*id="deal-closed-at-7"[^>]*>/)?.[0];
         expect(closedAt).toContain(`value="${expected}"`);
+    });
+
+    it.each(["Asia/Tokyo", "America/New_York"])("saves Tokyo reporting midnight as the same UTC instant under %s profile", (zone) => {
+        displayZone.value = zone;
+        const harness = createOutcomeDraftHarness("Asia/Tokyo");
+        harness.changeClosedAt("2025-03-01T00:00");
+        expect(harness.getDraft().closedAt).toBe("2025-02-28 15:00:00");
     });
 
     it("preserves realized value when a won deal is toggled through lost back to won before submit", async () => {

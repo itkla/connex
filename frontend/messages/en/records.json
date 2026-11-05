@@ -438,6 +438,7 @@
     "evaluationHeading": "What Radar watches here"
   },
   "RecordPeek": {
+    "closedAt": "Closed at",
     "type_company": "Company",
     "type_person": "Contact",
     "type_deal": "Deal",

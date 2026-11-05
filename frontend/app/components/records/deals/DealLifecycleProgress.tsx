@@ -1,5 +1,5 @@
 import { Fragment, type CSSProperties } from 'react';
-import { calendarDayInTimeZone, resolveDisplayTimeZone } from '@/app/lib/timeZone';
+import { calendarDayInTimeZone } from '@/app/lib/timeZone';
 import { requestNow } from '@/app/lib/requestClock';
 import { CheckIcon, XMarkIcon, CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/solid';
 import { getTimeZone, getLocale, getTranslations } from 'next-intl/server';
@@ -38,7 +38,8 @@ export default async function DealLifecycleProgress({
     references?: NoteReference[];
     stageHistory?: DealStageHistory[];
 }) {
-    const timeZone = resolveDisplayTimeZone(await getTimeZone(), timezone);
+    const timeZone = await getTimeZone();
+    const closeTimeZone = timezone || 'UTC';
     const t = await getTranslations('DealsLifecycleProgress');
     const locale = await getLocale();
 
@@ -61,7 +62,7 @@ export default async function DealLifecycleProgress({
 
     const startMs = parseMysqlDateTime(createdAt);
     const expectedMs = expectedCloseDate ? parseCalendarDateUtc(expectedCloseDate) : NaN;
-    const closedDayMs = closedAt ? parseCalendarDateUtc(toDatetimeLocalValue(closedAt, timeZone).slice(0, 10)) : NaN;
+    const closedDayMs = closedAt ? parseCalendarDateUtc(toDatetimeLocalValue(closedAt, closeTimeZone).slice(0, 10)) : NaN;
     const nowMs = requestNow();
     const todayStart = parseCalendarDateUtc(calendarDayInTimeZone(nowMs, timeZone));
 
@@ -284,7 +285,7 @@ export default async function DealLifecycleProgress({
                                 {isClosed ? t('closed') : t('expectedClose')}
                             </span>
                             <span>
-                                {isClosed && closedAt ? formatDealClosedAt(closedAt, locale, timeZone) : formatDate(expectedCloseDate, locale, timeZone)}
+                                {isClosed && closedAt ? formatDealClosedAt(closedAt, locale, closeTimeZone) : formatDate(expectedCloseDate, locale, timeZone)}
                             </span>
 
                         </div>

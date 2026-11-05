@@ -31,6 +31,20 @@ for (const locale of ['en', 'ja'] as const) {
             data: { timezone: 'Asia/Tokyo' },
         });
         expect(timezoneResponse.status()).toBe(200);
+        const membershipsResponse = await page.request.get('/api/workspaces');
+        expect(membershipsResponse.status()).toBe(200);
+        const memberships: unknown = await membershipsResponse.json();
+        if (!isRecord(memberships) || !Array.isArray(memberships.workspaces)) throw new Error('Workspace list missing');
+        const workspaces: unknown[] = memberships.workspaces;
+        const workspace = workspaces.find((entry) => isRecord(entry) && entry.id === workspaceId);
+        if (!isRecord(workspace) || typeof workspace.name !== 'string' || typeof workspace.identityVersion !== 'number'
+            || (workspace.timezone != null && typeof workspace.timezone !== 'string')) throw new Error('Workspace identity missing');
+        const reportingResponse = await page.request.patch(`/api/workspaces/${workspaceId}`, {
+            headers: { 'X-Workspace-Id': String(workspaceId), [csrf.headerName]: csrf.token },
+            data: { name: workspace.name, timezone: 'Asia/Tokyo', expectedName: workspace.name,
+                expectedTimezone: workspace.timezone ?? null, expectedIdentityVersion: workspace.identityVersion },
+        });
+        expect(reportingResponse.status()).toBe(200);
         const seed = seeder(page.request, workspaceId, csrf);
         const pipeline = await seed.post('/api/pipelines', { name: 'Historical pipeline' });
         if (typeof pipeline.id !== 'number') throw new Error('Pipeline id is missing');
@@ -122,14 +136,28 @@ for (const locale of ['en', 'ja'] as const) {
         expect(revenue.status()).toBe(200);
         const chart: unknown = await revenue.json();
         expect(chart).toMatchObject({ closed: expect.arrayContaining([{ year: 2025, month: 3, total: 300 }]) });
-        await page.goto(`/records/deals/${historical.id}`);
         const closeDate = new Intl.DateTimeFormat(locale, { dateStyle: 'long', timeZone: 'Asia/Tokyo' })
             .format(new Date('2025-02-28T15:00:00Z'));
-        await expect(page.getByText(closeDate, { exact: true })).toHaveCount(3);
-        await expect(page.getByText(closeDate, { exact: true }).first()).toBeVisible();
-        await page.getByRole('button', { name: message(locale, 'deals', 'DealsActionsMenu.edit'), exact: true }).click();
-        await expect(page.getByLabel(message(locale, 'deals', 'DealsQuickEditSheet.closedAt'), { exact: true }))
-            .toHaveValue('2025-03-01T00:00');
+        for (const profileTimezone of ['Asia/Tokyo', 'America/New_York']) {
+            const profileResponse = await page.request.patch('/api/users/me', {
+                headers: { [csrf.headerName]: csrf.token }, data: { timezone: profileTimezone },
+            });
+            expect(profileResponse.status()).toBe(200);
+            await page.goto(`/records/deals/${historical.id}`);
+            await expect(page.getByText(closeDate, { exact: true })).toHaveCount(3);
+            await expect(page.getByText(closeDate, { exact: true }).filter({ visible: true }).first()).toBeVisible();
+            await page.getByRole('button', { name: message(locale, 'deals', 'DealsActionsMenu.edit'), exact: true }).click();
+            await expect(page.getByLabel(message(locale, 'deals', 'DealsQuickEditSheet.closedAt'), { exact: true }))
+                .toHaveValue('2025-03-01T00:00');
+            await page.goto('/records/deals?view=table&q=Historic%20won');
+            const record = page.locator(`[data-record-row-id="${historical.id}"]`);
+            await expect(record.getByRole('cell', { name: closeDate, exact: true })).toBeVisible();
+            await record.getByRole('cell', { name: 'Historic won', exact: true }).click();
+            const peek = page.locator('[data-record-peek]');
+            await expect(peek).toBeVisible();
+            const closeFact = peek.getByText(message(locale, 'records', 'RecordPeek.closedAt'), { exact: true }).locator('..');
+            await expect(closeFact.getByText(closeDate, { exact: true })).toBeVisible();
+        }
         expect(pageErrors).toEqual([]);
     });
 }

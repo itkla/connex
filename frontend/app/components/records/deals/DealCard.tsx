@@ -12,6 +12,7 @@ import { formatCompactCurrency, formatShortDate } from '@/app/lib/utils';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import { type Company, type Deal, type DealRisk, type Pipeline, type Stage } from '@/app/lib/types';
 import { isDealClosed } from './dealOutcome';
+import DealCloseDate from './DealCloseDate';
 import DealRiskPill from './DealRiskPill';
 import { Suspense, type KeyboardEvent } from 'react';
 import {
@@ -24,6 +25,7 @@ import { usePermission } from '@/app/hooks/usePermissions';
 
 interface DealCardProps {
     deal: Deal;
+    timezone: string;
     company?: Company;
     pipeline?: Pipeline;
     stage?: Stage;
@@ -40,6 +42,7 @@ function dealStatus(deal: Deal): 'open' | 'closed' {
 
 export default function DealCard({
     deal,
+    timezone,
     company,
     pipeline,
     stage,
@@ -135,6 +138,7 @@ export default function DealCard({
                         </span>
                     )}
                 </div>
+                <DealCloseDate deal={deal} timezone={timezone} />
             </div>
 
             <div className="text-right">

@@ -120,6 +120,7 @@
         "total": "合計"
     },
     "DealsCard": {
+        "closedOn": "決着日：{date}",
         "dealActions": "案件アクション",
         "view": "表示",
         "quickEdit": "クイック編集",
@@ -186,6 +187,7 @@
         "a11yCancelled": "案件「{name}」の移動をキャンセルしました。"
     },
     "DealsBrowser": {
+        "columnClosedAt": "決着日",
         "title": "案件",
         "addDeal": "案件を追加",
         "newButton": "新規",
@@ -321,7 +323,7 @@
         "create": "作成"
     },
     "DealsQuickEditSheet": {
-        "closedAtInvalid": "このタイムゾーンでは指定できない時刻です。別の時刻を選んでください。",
+        "closedAtInvalid": "下に表示された集計タイムゾーンでは存在しない時刻です。別の時刻を選んでください。",
         "companySearchFailed": "会社を検索できませんでした。もう一度お試しください。",
         "titleSingle": "案件をクイック編集",
         "titleMulti": "{count} 件の案件をクイック編集",

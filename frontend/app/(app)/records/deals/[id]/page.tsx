@@ -355,7 +355,7 @@ export default async function DealPage({ params }: DealPageProps) {
                                         <InfoRow label={t('company')} value={company?.name ?? '—'} />
                                         <InfoRow label={t('currency')} value={deal.currency ?? '—'} />
                                         <InfoRow label={t('expectedClose')} value={formatDate(deal.expectedCloseDate, locale, timeZone)} />
-                                        <InfoRow label={t('closedAt')} value={closed ? formatDealClosedAt(deal.closedAt, locale, timeZone) : '—'} />
+                                        <InfoRow label={t('closedAt')} value={closed ? formatDealClosedAt(deal.closedAt, locale, timezone) : '—'} />
                                         <InfoRow label={t('created')} value={formatDate(deal.createdAt, locale, timeZone)} />
                                         <InfoRow label={t('updated')} value={formatDateTime(deal.updatedAt, locale, timeZone)} />
                                         <CustomFieldRows entityType="deal" entityId={deal.id} initialEntries={customFields} />
@@ -503,7 +503,7 @@ export default async function DealPage({ params }: DealPageProps) {
                                         />
                                         <SummaryTile
                                             label={closed ? t('closed') : t('expectedClose')}
-                                            value={closed ? formatDealClosedAt(deal.closedAt, locale, timeZone) : formatDate(deal.expectedCloseDate, locale, timeZone)}
+                                            value={closed ? formatDealClosedAt(deal.closedAt, locale, timezone) : formatDate(deal.expectedCloseDate, locale, timeZone)}
                                         />
                                     </div>
                                 </div>

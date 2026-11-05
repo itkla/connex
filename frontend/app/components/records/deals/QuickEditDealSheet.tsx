@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, type ReactNode, type WheelEvent } from 'react';
-import { useTimeZone, useTranslations } from 'next-intl';
+import { useTranslations } from 'next-intl';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { BanknotesIcon } from '@heroicons/react/24/outline';
 
@@ -12,7 +12,6 @@ import { Combobox, ComboboxItem, ComboboxList, ComboboxContent, ComboboxEmpty, C
 import { type Company, type Deal, type Pipeline, type Stage } from '@/app/lib/types';
 import { type SelectionId } from '@/app/components/records/types';
 import { cn } from '@/lib/utils';
-import { resolveDisplayTimeZone } from '@/app/lib/timeZone';
 import { toMysqlDateTime } from '@/app/lib/utils';
 import {
     EASE_OUT,
@@ -83,7 +82,7 @@ export default function QuickEditDealSheet({
     customFieldsDirty,
     customFieldsSlot,
 }: Props) {
-    const timeZone = resolveDisplayTimeZone(useTimeZone(), timezone);
+    const closeTimeZone = timezone || 'UTC';
     const t = useTranslations('DealsQuickEditSheet');
     const reduce = useReducedMotion() ?? false;
     const total = selectedDeals.length;
@@ -130,7 +129,7 @@ export default function QuickEditDealSheet({
                 const stages = draft.pipeline ? stagesByPipeline[draft.pipeline] ?? [] : [];
                 const selectedStage = stages.find((s) => s.id === draft.stage) ?? null;
                 const expectedCloseDate = draft.expectedCloseDate ? draft.expectedCloseDate.slice(0, 10) : '';
-                const closedAt = dealClosedAtInput(draft.closedAt, timeZone);
+                const closedAt = dealClosedAtInput(draft.closedAt, closeTimeZone);
                 const actualValue = actualValueForOutcome(draft.won,
                     draft.actualValueEdited === false && d.won !== true ? draft.value : draft.actualValue);
                 const isLost = draft.won === false;
@@ -340,7 +339,7 @@ export default function QuickEditDealSheet({
                                                 aria-describedby={`deal-closed-at-zone-${d.id}`}
                                                 onChange={(e) => {
                                                     const value = e.target.value;
-                                                    const parsed = value ? dealClosedAtFromInput(value, timeZone, draft.closedAt) : null;
+                                                    const parsed = value ? dealClosedAtFromInput(value, closeTimeZone, draft.closedAt) : null;
                                                     if (value && parsed === null) {
                                                         toastError(t('closedAtInvalid'));
                                                         return;
@@ -348,7 +347,7 @@ export default function QuickEditDealSheet({
                                                     updateDraft(d.id, { closedAt: parsed });
                                                 }}
                                             />
-                                            <p id={`deal-closed-at-zone-${d.id}`} className="text-xs text-muted-foreground">{timeZone}</p>
+                                            <p id={`deal-closed-at-zone-${d.id}`} className="text-xs text-muted-foreground">{closeTimeZone}</p>
                                         </QuickEditField>
                                         <QuickEditField label={t('actualValue')} htmlFor={`deal-actual-value-${d.id}`}>
                                             <Input

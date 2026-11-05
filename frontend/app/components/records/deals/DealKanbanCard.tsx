@@ -21,6 +21,7 @@ import { cn } from '@/lib/utils';
 import { formatCompactCurrency, formatShortDate } from '@/app/lib/utils';
 import { type Company, type Deal, type DealRisk } from '@/app/lib/types';
 import { isDealClosed } from './dealOutcome';
+import DealCloseDate from './DealCloseDate';
 import DealRiskPill from './DealRiskPill';
 import {
     recordDetailNavigationPath,
@@ -29,6 +30,7 @@ import {
 
 interface DealKanbanCardProps {
     deal: Deal;
+    timezone: string;
     company?: Company;
     risk?: DealRisk | null;
     onQuickEdit?: () => void;
@@ -44,6 +46,7 @@ interface DealKanbanCardProps {
  */
 export default function DealKanbanCard({
     deal,
+    timezone,
     company,
     risk,
     onQuickEdit,
@@ -130,6 +133,7 @@ export default function DealKanbanCard({
                 </div>
             )}
 
+            <DealCloseDate deal={deal} timezone={timezone} />
             <div className="flex items-center justify-between gap-2">
                 <span className="text-sm font-semibold tabular-nums text-foreground">
                     {formatCompactCurrency(deal.value, deal.currency || 'USD', locale)}

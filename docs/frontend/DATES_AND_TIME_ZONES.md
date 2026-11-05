@@ -36,17 +36,24 @@ request clock. Japanese greetings retain the complete display name.
 Datetime-local editors use `toDatetimeLocalValue(value, zone)` and
 `toMysqlDateTime(input, zone, previous)`. Missing DST times are rejected, an unchanged repeated time
 keeps its original instant, and a changed repeated time chooses the earlier occurrence. API formats
-and stored data are unchanged. Reporting windows and revenue buckets retain their separately
-specified workspace reporting calendar; displaying an individual instant follows the profile rule.
+and stored data are unchanged. Reporting windows and revenue buckets use the workspace reporting
+calendar. Deal close dates follow that same calendar as described below; other individual instants
+follow the profile rule.
 
 Deal close-date adapters in `dealDates.ts` delegate parsing, formatting and civil-input conversion
-to these same shared helpers. Close-date displays and editors use the profile zone first; a reporting
-zone prop is only a workspace fallback. Imported Tokyo midnight instants still display as the imported
-day for a Tokyo profile, and bare imported calendar dates never shift. Legacy minute-offset zones such
-as `UTC+9` normalize once in the shared resolver. The shared fixed-offset formatting adapter also
-preserves second offsets across midnight. Import interpretation and revenue buckets retain their
-explicit workspace reporting calendar. Deal validation still rejects years before 1000 and invalid
-civil inputs; unchanged repeated-hour instants and timestamp seconds survive unrelated edits.
+to these same shared helpers. A deal's `closedAt` is a reporting fact: every close-date display and
+editor uses the workspace reporting timezone, matching Analytics and Dashboard realized-revenue
+buckets. Resolve that reporting timezone through the existing `resolveWorkspaceTimezone` policy
+(workspace override, then account timezone, then UTC); do not override it with the viewer's profile
+zone at a call site. For a Tokyo reporting calendar, stored UTC `2025-02-28 15:00:00` displays as
+March 1 under both Tokyo and New York profiles, and its editor reads and saves March 1 at 00:00 in
+Tokyo. This applies to detail facts, lifecycle close labels and comparisons, table, cards, board,
+mobile rows and peek drawers. Created/updated timestamps, stage activity, notes and task due instants
+still use the profile display zone. Bare imported calendar dates and expected close dates never shift.
+Legacy minute-offset zones such as `UTC+9` normalize once in the shared resolver. The shared
+fixed-offset formatting adapter also preserves second offsets across midnight. Deal validation still
+rejects years before 1000 and invalid civil inputs; unchanged repeated-hour instants and timestamp
+seconds survive unrelated edits.
 
 Calendar slot creation carries the selected `yyyy-MM-dd` and minutes as a civil input string through
 `calendarSlotInputValue`. It must not use `Date.setHours` or epoch milliseconds in the browser zone:
@@ -71,7 +78,7 @@ receive UTC values and never reinterpret them as civil inputs.
 | --- | --- | --- |
 | `ActivityDialogForm` | `when` | Profile-zone input → UTC MySQL string on create; no original instant |
 | `EditActivitySheet` | `timestamp` | Zoned input ↔ UTC; passes `activity.timestamp` as previous |
-| `QuickEditDealSheet` | `closedAt` | Zoned input → UTC draft once in `onChange`; passes the current UTC `draft.closedAt`; parent sends the UTC draft directly |
+| `QuickEditDealSheet` | `closedAt` | Reporting-zone input → UTC draft once in `onChange`; passes the current UTC `draft.closedAt`; parent sends the UTC draft directly |
 | `EditCampaignSheet` via `CampaignDetail` | `startAt` | Zoned input ↔ UTC ISO civil shape; unchanged values retain `current.startAt` |
 | `EditCampaignSheet` via `CampaignDetail` | `endAt` | Zoned input ↔ UTC ISO civil shape; unchanged values retain `current.endAt` |
 | `DataRequestDialog` | `receivedAt` | Zoned input ↔ UTC ISO civil shape; passes `editing.receivedAt` |
@@ -89,5 +96,10 @@ controls. Date-only controls and report schedule hour/day rules retain their sep
 
 `test/unit/timeZoneDisplay.test.tsx` covers Tokyo/UTC, east/west calendar dates, DST, fallbacks,
 greetings and hydration. `test/unit/requestTimeZone.test.ts` covers request preference resolution.
+`test/unit/tasksBrowserClock.test.tsx` navigates to the actual Tasks browser after Tokyo midnight
+with the original provider timestamp, then verifies queues, counts, groups and due labels.
+The deal reporting-date, lifecycle and editor tests exercise the stored Tokyo-midnight timestamp
+under Tokyo and New York profiles; `test/e2e/import-deal-dates.spec.ts` covers import, revenue
+buckets, detail, editor, table and peek with that same reporting calendar.
 `test/e2e/profile-timezone.spec.ts` exercises EN/JA desktop/phone with a Tokyo profile and a
 Los Angeles browser, then changes the profile to UTC and verifies the due day stays fixed.
