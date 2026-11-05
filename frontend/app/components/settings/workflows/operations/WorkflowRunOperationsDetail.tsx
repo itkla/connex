@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useReducer } from "react";
 import Link from "next/link";
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
 import {
     ArrowPathIcon,
     BoltIcon,
@@ -141,6 +141,7 @@ function operationsDetailReducer(
 
 /** One run's recorded path, the workflow's operational state, and bounded intervention controls. */
 export default function WorkflowRunOperationsDetail({ workflowId, runKey }: { workflowId: number; runKey: string }) {
+    const timeZone = useTimeZone();
     const t = useTranslations("WorkflowOperations");
     const tw = useTranslations("WorkspaceWorkflows");
     const locale = useLocale();
@@ -237,7 +238,7 @@ export default function WorkflowRunOperationsDetail({ workflowId, runKey }: { wo
                         </div>
                         <h1 className="text-3xl font-bold tracking-tight text-foreground">{workflow.name}</h1>
                         <p className="text-sm text-muted-foreground">
-                            {t("detail.started", { date: formatWorkflowRunDateTime(run.startedAt, locale) })}
+                            {t("detail.started", { date: formatWorkflowRunDateTime(run.startedAt, locale, timeZone) })}
                         </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -476,6 +477,7 @@ function WorkflowHealth({ operations }: { operations: WorkflowOperationsDetail }
 }
 
 function Backlog({ operations, locale }: { operations: WorkflowOperationsDetail; locale: string }) {
+    const timeZone = useTimeZone();
     const t = useTranslations("WorkflowOperations");
     const backlog = operations.backlog;
     return (
@@ -489,12 +491,12 @@ function Backlog({ operations, locale }: { operations: WorkflowOperationsDetail;
             </dl>
             {backlog.nextResumeAt ? (
                 <p className="text-xs text-muted-foreground">
-                    {t("backlog.nextResume", { date: formatWorkflowRunDateTime(backlog.nextResumeAt, locale) })}
+                    {t("backlog.nextResume", { date: formatWorkflowRunDateTime(backlog.nextResumeAt, locale, timeZone) })}
                 </p>
             ) : null}
             {backlog.oldestQueuedAt ? (
                 <p className="text-xs text-muted-foreground">
-                    {t("backlog.oldestQueued", { date: formatWorkflowRunDateTime(backlog.oldestQueuedAt, locale) })}
+                    {t("backlog.oldestQueued", { date: formatWorkflowRunDateTime(backlog.oldestQueuedAt, locale, timeZone) })}
                 </p>
             ) : null}
             <p className="text-xs text-muted-foreground">
@@ -514,6 +516,7 @@ function Metric({ label, value }: { label: string; value: number }) {
 }
 
 function DefinitionChanges({ operations, locale }: { operations: WorkflowOperationsDetail; locale: string }) {
+    const timeZone = useTimeZone();
     const t = useTranslations("WorkflowOperations");
     return (
         <section className="space-y-3">
@@ -534,7 +537,7 @@ function DefinitionChanges({ operations, locale }: { operations: WorkflowOperati
                                         : t("changes.version", { from: change.fromVersion, to: change.toVersion })}
                                 </p>
                                 <time className="text-xs text-muted-foreground" dateTime={normalizeWorkflowRunDateTime(change.publishedAt)}>
-                                    {formatWorkflowRunDateTime(change.publishedAt, locale)}
+                                    {formatWorkflowRunDateTime(change.publishedAt, locale, timeZone)}
                                 </time>
                             </div>
                             <p className="text-xs text-muted-foreground">

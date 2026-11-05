@@ -8,7 +8,7 @@ import { loadRecord } from "@/app/lib/recordAccess";
 import { CrumbLabel } from "@/app/hooks/useNavTrail";
 import RecentRecordBridge from "@/app/components/actions/RecentRecordBridge";
 import ActionRecordBridge from "@/app/components/actions/ActionRecordBridge";
-import { getLocale, getTranslations } from "next-intl/server";
+import { getTimeZone, getLocale, getTranslations } from "next-intl/server";
 import { UserIcon } from "@heroicons/react/24/outline";
 import PipelineCard from "@/app/components/records/PipelineCard";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -60,6 +60,7 @@ type CompanyPageProps = {
 };
 
 export default async function CompanyPage({ params }: CompanyPageProps) {
+    const timeZone = await getTimeZone();
     const { id } = await params;
     const cookie = (await cookies()).toString();
     const init = { headers: { cookie } } as const;
@@ -225,8 +226,8 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
                                         ? relatedUsers.find((user) => user.id === company.ownerId)?.displayName ?? ''
                                         : t("ownerUnassigned")}
                                 />
-                                <InfoRow label={t("added")} value={formatDate(company.createdAt, locale)} />
-                                <InfoRow label={t("updated")} value={formatDateTime(company.updatedAt, locale)} />
+                                <InfoRow label={t("added")} value={formatDate(company.createdAt, locale, timeZone)} />
+                                <InfoRow label={t("updated")} value={formatDateTime(company.updatedAt, locale, timeZone)} />
                                 <CustomFieldRows entityType="company" entityId={company.id} initialEntries={customFields} />
                             </dl>
                         </RecordDetailSection>

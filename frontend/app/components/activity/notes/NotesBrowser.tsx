@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import { PlusIcon } from '@heroicons/react/24/solid';
 import {
     ArrowUpRightIcon,
@@ -387,6 +387,7 @@ function NoteRow({
     onEdit: () => void;
     onDelete: () => void;
 }) {
+    const timeZone = useTimeZone();
     const title = deriveNoteTitle(note, labels.untitled);
     const snippet = noteSnippet(note.content);
     const authorName = author ? author.displayName || author.username : null;
@@ -430,7 +431,7 @@ function NoteRow({
                             <span className="max-w-[12rem] truncate">{recordLabel}</span>
                         </span>
                     ) : null}
-                    <span>{formatDate(note.updatedAt ?? note.createdAt, locale)}</span>
+                    <span>{formatDate(note.updatedAt ?? note.createdAt, locale, timeZone)}</span>
                 </span>
             </Link>
             <DropdownMenu>

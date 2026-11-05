@@ -18,6 +18,13 @@ describe('deal close dates in the reporting timezone', () => {
         },
     );
 
+    it.each(['Asia/Tokyo', 'America/Los_Angeles', 'Pacific/Kiritimati', 'UTC'])(
+        'preserves a bare imported close day in %s', (zone) => {
+            expect(formatDealClosedAt('2025-03-01', 'en', zone)).toBe('March 1, 2025');
+            expect(dealClosedAtInput('2025-03-01', zone)).toBe('2025-03-01T00:00');
+        },
+    );
+
     it('applies the reporting calendar west of UTC too', () => {
         expect(formatDealClosedAt('2025-03-01 04:30:00', 'en', 'America/New_York')).toBe('February 28, 2025');
     });
@@ -30,6 +37,14 @@ describe('deal close dates in the reporting timezone', () => {
     it.each([null, undefined, '', 'invalid'])('does not invent a date for %s', (value) => {
         expect(formatDealClosedAt(value, 'en', 'Asia/Tokyo')).toBe('—');
         expect(dealClosedAtInput(value, 'Asia/Tokyo')).toBe('');
+    });
+
+    it('preserves legacy second offsets across midnight through the shared helpers', () => {
+        const zone = 'UTC+00:44:30';
+        expect(formatDealClosedAt('2025-03-01 23:30:00', 'en', zone)).toBe('March 2, 2025');
+        expect(dealClosedAtInput('2025-03-01 23:30:00', zone)).toBe('2025-03-02T00:14');
+        expect(dealClosedAtFromInput('2025-03-02T00:14', zone)).toBe('2025-03-01 23:29:30');
+        expect(dealClosedAtFromInput('2025-03-02T00:14', zone, '2025-03-01 23:30:00')).toBe('2025-03-01 23:30:00');
     });
 
     it('saves edited reporting wall time as UTC rather than browser local time', () => {

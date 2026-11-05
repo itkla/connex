@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import { ArrowLongRightIcon, CheckIcon } from '@heroicons/react/24/outline';
 
 import { useLiveNow } from '@/app/hooks/useNow';
@@ -17,6 +17,7 @@ import PartyAvatar from './PartyAvatar';
  * when, by whom, and the note (issue #43).
  */
 export default function IntroLineageList({ items }: { items: IntroductionRecord[] }) {
+    const timeZone = useTimeZone();
     const t = useTranslations('Introductions');
     const locale = useLocale();
     const now = useLiveNow();
@@ -75,7 +76,7 @@ export default function IntroLineageList({ items }: { items: IntroductionRecord[
                                     </Link>
                                 </span>
                                 <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">
-                                    {formatRelativeTime(item.introducedAt, locale, now)}
+                                    {formatRelativeTime(item.introducedAt, locale, now, timeZone)}
                                 </span>
                             </div>
                             {byline ? (

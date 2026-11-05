@@ -30,7 +30,7 @@ import type {
 
 vi.mock("next-intl", () => ({
     useTranslations: (namespace: string) => (key: string) => `${namespace}.${key}`,
-    useLocale: () => "en",
+    useTimeZone: () => "UTC", useLocale: () => "en",
 }));
 
 function source(file: string): string {

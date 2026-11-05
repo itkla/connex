@@ -4,7 +4,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import {
     ArrowDownTrayIcon,
     ArrowTopRightOnSquareIcon,
@@ -46,6 +46,7 @@ export default function FileDetailSheet({
     onDelete,
     onTagsChanged,
 }: Props) {
+    const timeZone = useTimeZone();
     const t = useTranslations('LibraryFiles');
     const locale = useLocale();
 
@@ -128,7 +129,7 @@ export default function FileDetailSheet({
                                     )}
                                 </MetaRow>
                                 <MetaRow label={t('detailUploadedBy')}>{a.uploadedByName || t('unknownUser')}</MetaRow>
-                                <MetaRow label={t('detailAdded')}>{formatDateTime(a.createdAt, locale)}</MetaRow>
+                                <MetaRow label={t('detailAdded')}>{formatDateTime(a.createdAt, locale, timeZone)}</MetaRow>
                             </dl>
 
                             <div className="space-y-2">

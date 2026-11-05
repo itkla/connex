@@ -10,7 +10,7 @@ import ActionRecordBridge from '@/app/components/actions/ActionRecordBridge';
 import type { ReactNode } from 'react';
 import { BuildingOffice2Icon, CalendarIcon, InformationCircleIcon } from '@heroicons/react/24/outline';
 import { CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/solid';
-import { getLocale, getTranslations } from 'next-intl/server';
+import { getTimeZone, getLocale, getTranslations } from 'next-intl/server';
 
 import {
     getActivitiesForDeal,
@@ -102,6 +102,7 @@ type DealPageProps = {
 };
 
 export default async function DealPage({ params }: DealPageProps) {
+    const timeZone = await getTimeZone();
     const { id: rawId } = await params;
     const id = Number(rawId);
     if (!Number.isInteger(id) || id < 1) notFound();
@@ -300,7 +301,7 @@ export default async function DealPage({ params }: DealPageProps) {
                                     {deal.expectedCloseDate ? (
                                         <span className="inline-flex items-center gap-1">
                                             <CalendarIcon className="size-3.5" />
-                                            {t('closeBy', { date: formatDate(deal.expectedCloseDate, locale) })}
+                                            {t('closeBy', { date: formatDate(deal.expectedCloseDate, locale, timeZone) })}
                                         </span>
                                     ) : null}
                                 </h3>
@@ -353,10 +354,10 @@ export default async function DealPage({ params }: DealPageProps) {
                                         <InfoRow label={t('stage')} value={currentStage?.name ?? '—'} />
                                         <InfoRow label={t('company')} value={company?.name ?? '—'} />
                                         <InfoRow label={t('currency')} value={deal.currency ?? '—'} />
-                                        <InfoRow label={t('expectedClose')} value={formatDate(deal.expectedCloseDate, locale)} />
+                                        <InfoRow label={t('expectedClose')} value={formatDate(deal.expectedCloseDate, locale, timeZone)} />
                                         <InfoRow label={t('closedAt')} value={closed ? formatDealClosedAt(deal.closedAt, locale, timezone) : '—'} />
-                                        <InfoRow label={t('created')} value={formatDate(deal.createdAt, locale)} />
-                                        <InfoRow label={t('updated')} value={formatDateTime(deal.updatedAt, locale)} />
+                                        <InfoRow label={t('created')} value={formatDate(deal.createdAt, locale, timeZone)} />
+                                        <InfoRow label={t('updated')} value={formatDateTime(deal.updatedAt, locale, timeZone)} />
                                         <CustomFieldRows entityType="deal" entityId={deal.id} initialEntries={customFields} />
                                     </dl>
                                 </div>
@@ -502,7 +503,7 @@ export default async function DealPage({ params }: DealPageProps) {
                                         />
                                         <SummaryTile
                                             label={closed ? t('closed') : t('expectedClose')}
-                                            value={closed ? formatDealClosedAt(deal.closedAt, locale, timezone) : formatDate(deal.expectedCloseDate, locale)}
+                                            value={closed ? formatDealClosedAt(deal.closedAt, locale, timezone) : formatDate(deal.expectedCloseDate, locale, timeZone)}
                                         />
                                     </div>
                                 </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
 
 import type { DiagnosticsWorkspaceProviders, TenantDiagnostics } from "@/app/lib/types";
 import { formatUtcDateTime } from "@/app/lib/utils";
@@ -88,6 +88,7 @@ function WorkspaceProviders({
     locale: string;
     showHeading: boolean;
 }) {
+    const timeZone = useTimeZone();
     const t = useTranslations("TenantDiagnostics");
 
     return (
@@ -153,7 +154,7 @@ function WorkspaceProviders({
                                 })}
                                 {stream.lastSuccessAt
                                     ? ` · ${t("lastSuccess", {
-                                          when: formatUtcDateTime(stream.lastSuccessAt, locale),
+                                          when: formatUtcDateTime(stream.lastSuccessAt, locale, undefined, timeZone),
                                       })}`
                                     : ""}
                             </p>

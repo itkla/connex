@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import { UsersIcon } from '@heroicons/react/24/outline';
 import { Loader2Icon } from 'lucide-react';
 
@@ -105,6 +105,7 @@ export default function CampaignRecipientsDialog({
     open: boolean;
     onOpenChange: (next: boolean) => void;
 }) {
+    const timeZone = useTimeZone();
     const t = useTranslations('CampaignRecipients');
     const router = useRouter();
     const showApiError = useApiErrorToast('CampaignRecipients');
@@ -238,7 +239,7 @@ export default function CampaignRecipientsDialog({
                                         </span>
                                         {recipient.updatedAt ?? recipient.createdAt ? (
                                             <span className="text-xs text-muted-foreground">
-                                                {formatDateTime(recipient.updatedAt ?? recipient.createdAt, locale)}
+                                                {formatDateTime(recipient.updatedAt ?? recipient.createdAt, locale, timeZone)}
                                             </span>
                                         ) : null}
                                     </div>

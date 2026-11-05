@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, type DragEvent } from 'react';
-import { useTranslations, useLocale } from 'next-intl';
+import { useTimeZone, useTranslations, useLocale } from 'next-intl';
 import { LoaderCircle } from 'lucide-react';
 import {
     ArrowDownTrayIcon,
@@ -33,6 +33,7 @@ function iconFor(contentType?: string) {
 }
 
 export default function Attachments({ entityType, entityId, initialAttachments, className }: Props) {
+    const timeZone = useTimeZone();
     const t = useTranslations('Attachments');
     const locale = useLocale();
     const inputRef = useRef<HTMLInputElement>(null);
@@ -184,7 +185,7 @@ export default function Attachments({ entityType, entityId, initialAttachments, 
                                             {' · '}
                                             {t('by', { name: attachment.uploadedByName || t('unknownUser') })}
                                             {' · '}
-                                            {formatDate(attachment.createdAt, locale)}
+                                            {formatDate(attachment.createdAt, locale, timeZone)}
                                         </p>
                                     </div>
                                     <a

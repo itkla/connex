@@ -22,7 +22,7 @@ vi.mock('@/app/hooks/usePrivilegedMfaConfinement', async (importOriginal) => ({
     usePrivilegedMfaReadiness: () => 'ready',
 }));
 vi.mock("next/navigation", () => ({ useParams: () => boundary.params, usePathname: () => boundary.params.sessionId ? "/ask-connex/4" : "/ask-connex", useSearchParams: () => boundary.search, useRouter: () => ({ push: boundary.noop, replace: boundary.noop, refresh: boundary.noop }) }));
-vi.mock("next-intl", () => ({ useLocale: () => "en", useTranslations: () => translate }));
+vi.mock("next-intl", () => ({ useTimeZone: () => "UTC", useLocale: () => "en", useTranslations: () => translate }));
 vi.mock("motion/react", () => ({ useReducedMotion: () => true }));
 vi.mock("@/app/components/ask-connex/AskConnexDrawer", () => ({ default: (props: ComponentProps<typeof AskConnexDrawer>) => { boundary.drawer = props; return <>{props.missionComposerAction}</>; } }));
 vi.mock("@/app/components/ask-connex/AskConnexMissionCreate", () => ({ default: (props: ComponentProps<typeof AskConnexMissionCreate>) => { boundary.missionCreate = props; return null; } }));

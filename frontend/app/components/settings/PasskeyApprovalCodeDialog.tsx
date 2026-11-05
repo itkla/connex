@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
 import { Loader2Icon } from "lucide-react";
 import { CheckIcon, ClipboardDocumentIcon } from "@heroicons/react/24/outline";
 
@@ -60,6 +60,7 @@ export default function PasskeyApprovalCodeDialog({
     issue: (userId: number) => Promise<MfaAttestationCode>;
     revoke: (userId: number) => Promise<void>;
 }) {
+    const timeZone = useTimeZone();
     const t = useTranslations("PasskeyApprovalCode");
     const locale = useLocale();
     const showApiError = useApiErrorToast("PasskeyApprovalCode");
@@ -165,7 +166,7 @@ export default function PasskeyApprovalCodeDialog({
                             </Button>
                         </div>
                         <p className="text-sm text-muted-foreground">
-                            {t("expires", { date: formatDateTime(issued.expiresAt, locale) })}
+                            {t("expires", { date: formatDateTime(issued.expiresAt, locale, timeZone) })}
                         </p>
                         <DialogFooter>
                             <Button type="button" variant="brand" onClick={close}>

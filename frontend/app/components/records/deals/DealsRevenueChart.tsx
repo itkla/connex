@@ -1,5 +1,6 @@
 'use client';
 
+import { getDateTimeFormatter } from '@/app/lib/intlFormatters';
 import * as React from 'react';
 import { CartesianGrid, Line, LineChart, ReferenceLine, XAxis, YAxis, Tooltip as RechartsTooltip } from 'recharts';
 import { useLocale, useTranslations } from 'next-intl';
@@ -23,8 +24,8 @@ function buildBuckets(series: DealRevenueSeries, now: number, locale: string, ti
     const currentIndex = current.year * 12 + current.month - 1;
     const startIndex = currentIndex - MONTHS_BACK;
 
-    const monthLabel = new Intl.DateTimeFormat(locale, { month: 'short', timeZone: 'UTC' });
-    const monthYearLabel = new Intl.DateTimeFormat(locale, { month: 'short', year: '2-digit', timeZone: 'UTC' });
+    const monthLabel = getDateTimeFormatter(locale, { month: 'short', timeZone: 'UTC' });
+    const monthYearLabel = getDateTimeFormatter(locale, { month: 'short', year: '2-digit', timeZone: 'UTC' });
     const buckets: Bucket[] = [];
     const keyToIndex = new Map<string, number>();
 

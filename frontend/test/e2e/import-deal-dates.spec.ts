@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { createTranslator } from 'next-intl';
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
+import type { Locale } from '@/i18n/config';
 
 import en from '@/messages/en/importExport.json';
 import ja from '@/messages/ja/importExport.json';
@@ -16,12 +17,39 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null;
 }
 
+/** Completes the normal passkey ceremony required to change the reporting timezone. */
+async function enrolReportingAdministrator(page: Page, password: string, locale: Locale): Promise<void> {
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('WebAuthn.enable');
+    try {
+        const { authenticatorId } = await cdp.send('WebAuthn.addVirtualAuthenticator', { options: {
+            protocol: 'ctap2', ctap2Version: 'ctap2_1', transport: 'internal',
+            hasResidentKey: true, hasUserVerification: true, isUserVerified: true,
+            automaticPresenceSimulation: true,
+        } });
+        try {
+            await page.goto('/settings/personal/security');
+            await page.getByRole('button', { name: message(locale, 'account', 'AccountSecurity.add'), exact: true }).first().click();
+            const dialog = page.getByRole('dialog', { name: message(locale, 'account', 'AccountSecurity.passwordTitle') });
+            await dialog.getByLabel(message(locale, 'account', 'AccountSecurity.passwordLabel')).fill(password);
+            await dialog.getByRole('button', { name: message(locale, 'account', 'AccountSecurity.continue'), exact: true }).click();
+            await expect(page.getByText(message(locale, 'account', 'AccountSecurity.added'), { exact: true })).toBeVisible();
+        } finally {
+            await cdp.send('WebAuthn.removeVirtualAuthenticator', { authenticatorId });
+        }
+    } finally {
+        await cdp.send('WebAuthn.disable');
+        await cdp.detach();
+    }
+}
+
 for (const locale of ['en', 'ja'] as const) {
     test(`reviews missing close dates and imports mapped deal history in ${locale}`, async ({ page }) => {
         const key = `dates${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+        const password = `DatesHarness!${key}A1`;
         await registerUser(page.request, {
             username: key,
-            password: `DatesHarness!${key}A1`,
+            password,
             email: `${key}@example.invalid`,
         });
         const workspaceId = await activeWorkspaceId(page.request);
@@ -31,7 +59,32 @@ for (const locale of ['en', 'ja'] as const) {
             data: { timezone: 'Asia/Tokyo' },
         });
         expect(timezoneResponse.status()).toBe(200);
-        const seed = seeder(page.request, workspaceId, csrf);
+        const membershipsResponse = await page.request.get('/api/workspaces');
+        expect(membershipsResponse.status()).toBe(200);
+        const memberships: unknown = await membershipsResponse.json();
+        if (!isRecord(memberships) || !Array.isArray(memberships.workspaces)) throw new Error('Workspace list missing');
+        const workspaces: unknown[] = memberships.workspaces;
+        const workspace = workspaces.find((entry) => isRecord(entry) && entry.id === workspaceId);
+        if (!isRecord(workspace) || typeof workspace.name !== 'string' || typeof workspace.identityVersion !== 'number'
+            || (workspace.timezone != null && typeof workspace.timezone !== 'string')) throw new Error('Workspace identity missing');
+        const reportingPayload = { name: workspace.name, timezone: 'Asia/Tokyo', expectedName: workspace.name,
+            expectedTimezone: workspace.timezone ?? null, expectedIdentityVersion: workspace.identityVersion };
+        const refused = await page.request.patch(`/api/workspaces/${workspaceId}`, {
+            headers: { 'X-Workspace-Id': String(workspaceId), [csrf.headerName]: csrf.token },
+            data: reportingPayload,
+        });
+        expect(refused.status()).toBe(403);
+        expect(await refused.json()).toMatchObject({ code: 'RECENT_AUTHENTICATION_REQUIRED' });
+        await useLocale(page, locale);
+        await enrolReportingAdministrator(page, password, locale);
+        const steppedUpCsrf = await csrfBootstrap(page.request);
+        const reportingResponse = await page.request.patch(`/api/workspaces/${workspaceId}`, {
+            headers: { 'X-Workspace-Id': String(workspaceId), [steppedUpCsrf.headerName]: steppedUpCsrf.token },
+            data: reportingPayload,
+        });
+        expect(reportingResponse.status()).toBe(200);
+        expect(await reportingResponse.json()).toMatchObject({ id: workspaceId, timezone: 'Asia/Tokyo' });
+        const seed = seeder(page.request, workspaceId, steppedUpCsrf);
         const pipeline = await seed.post('/api/pipelines', { name: 'Historical pipeline' });
         if (typeof pipeline.id !== 'number') throw new Error('Pipeline id is missing');
         await seed.post(`/api/pipelines/${pipeline.id}/stages`, {
@@ -45,7 +98,6 @@ for (const locale of ['en', 'ja'] as const) {
         });
         const pageErrors: string[] = [];
         page.on('pageerror', (error) => pageErrors.push(error.message));
-        await useLocale(page, locale);
         await page.goto('/records/deals?view=table');
         await page.getByRole('button', { name: t('moreActions'), exact: true }).click();
         await page.getByRole('menuitem', { name: t('openImport'), exact: true }).click();
@@ -122,14 +174,28 @@ for (const locale of ['en', 'ja'] as const) {
         expect(revenue.status()).toBe(200);
         const chart: unknown = await revenue.json();
         expect(chart).toMatchObject({ closed: expect.arrayContaining([{ year: 2025, month: 3, total: 300 }]) });
-        await page.goto(`/records/deals/${historical.id}`);
         const closeDate = new Intl.DateTimeFormat(locale, { dateStyle: 'long', timeZone: 'Asia/Tokyo' })
             .format(new Date('2025-02-28T15:00:00Z'));
-        await expect(page.getByText(closeDate, { exact: true })).toHaveCount(3);
-        await expect(page.getByText(closeDate, { exact: true }).first()).toBeVisible();
-        await page.getByRole('button', { name: message(locale, 'deals', 'DealsActionsMenu.edit'), exact: true }).click();
-        await expect(page.getByLabel(message(locale, 'deals', 'DealsQuickEditSheet.closedAt'), { exact: true }))
-            .toHaveValue('2025-03-01T00:00');
+        for (const profileTimezone of ['Asia/Tokyo', 'America/New_York']) {
+            const profileResponse = await page.request.patch('/api/users/me', {
+                headers: { [steppedUpCsrf.headerName]: steppedUpCsrf.token }, data: { timezone: profileTimezone },
+            });
+            expect(profileResponse.status()).toBe(200);
+            await page.goto(`/records/deals/${historical.id}`);
+            await expect(page.getByText(closeDate, { exact: true })).toHaveCount(3);
+            await expect(page.getByText(closeDate, { exact: true }).filter({ visible: true }).first()).toBeVisible();
+            await page.getByRole('button', { name: message(locale, 'deals', 'DealsActionsMenu.edit'), exact: true }).click();
+            await expect(page.getByLabel(message(locale, 'deals', 'DealsQuickEditSheet.closedAt'), { exact: true }))
+                .toHaveValue('2025-03-01T00:00');
+            await page.goto('/records/deals?view=table&q=Historic%20won');
+            const record = page.locator(`[data-record-row-id="${historical.id}"]`);
+            await expect(record.getByRole('cell', { name: closeDate, exact: true })).toBeVisible();
+            await record.getByRole('cell', { name: 'Historic won', exact: true }).click();
+            const peek = page.locator('[data-record-peek]');
+            await expect(peek).toBeVisible();
+            const closeFact = peek.getByText(message(locale, 'records', 'RecordPeek.closedAt'), { exact: true }).locator('..');
+            await expect(closeFact.getByText(closeDate, { exact: true })).toBeVisible();
+        }
         expect(pageErrors).toEqual([]);
     });
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import { ArrowPathIcon, LightBulbIcon } from '@heroicons/react/24/outline';
 
 import { generateDealRationale } from '@/app/lib/api';
@@ -40,6 +40,7 @@ type DealRationaleState = RationaleState & { dealId: number };
  * blocks the deterministic signals shown above.
  */
 export default function DealRationalePanel({ dealId, className }: { dealId: number; className?: string }) {
+    const timeZone = useTimeZone();
     const t = useTranslations('DealRationale');
     const locale = useLocale();
     const [storedState, setStoredState] = useState<DealRationaleState>({ dealId, status: 'loading' });
@@ -197,7 +198,7 @@ export default function DealRationalePanel({ dealId, className }: { dealId: numb
                     <div className="flex items-center justify-between gap-3">
                         <p className="text-xs text-muted-foreground">
                             {t('attribution', {
-                                time: formatDateTime(state.rationale.generatedAt ?? undefined, locale),
+                                time: formatDateTime(state.rationale.generatedAt ?? undefined, locale, timeZone),
                             })}
                             {state.rationale.warnings > 0 ? <> · {t('integrityWarning')}</> : null}
                         </p>

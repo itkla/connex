@@ -155,10 +155,13 @@ have an expected close date. Projected series keep their expected-close date bas
 exports append `closedAt` and `createdAt` after the existing columns, including custom fields and
 `tags`, preserving their positions. These timestamps are UTC ISO instants with an explicit `Z`, so
 exporting and reimporting the history targets preserves the same instants. Deal close-date displays and
-editors parse these timestamps as UTC and use the reporting timezone; they do not rely on the
-browser/server host timezone. Editor conversion preserves an unchanged repeated-hour instant,
-chooses the earlier occurrence for a new repeated-hour value, and rejects missing civil times.
-Generic date helpers and date-only expected-close display semantics remain unchanged.
+editors delegate to the shared frontend UTC parser and civil-input helpers, using the workspace
+reporting timezone above so the displayed close day matches its realized-revenue bucket regardless
+of the viewer's profile timezone. They do not use the browser/server host timezone. Other timestamp
+displays retain the profile timezone. Editor conversion preserves an
+unchanged repeated-hour instant and seconds, chooses the earlier occurrence for a new repeated-hour
+value, and rejects missing civil times. Bare calendar-only close and expected-close dates never shift.
+See [the frontend date/time contract](../frontend/DATES_AND_TIME_ZONES.md).
 
 ## Interaction-history imports
 

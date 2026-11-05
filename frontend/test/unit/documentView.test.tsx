@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 import { renderToStaticMarkup } from "react-dom/server";
 import { NextIntlClientProvider } from "next-intl";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import DocumentView from "@/app/components/records/documents/DocumentView";
 import DocumentPaper from "@/app/components/records/deals/DocumentPaper";
@@ -69,6 +69,8 @@ function expectFrozenTotal(document: Document) {
     expect(stacked[0].querySelector("dl:last-child > div:last-child dd")?.textContent).toBe(expected);
 }
 
+afterEach(() => { vi.unstubAllEnvs(); });
+
 describe("DocumentView authoritative monetary content", () => {
     it.each([
         { uiLocale: "en", documentLocale: "ja", expected: "￥220" },
@@ -131,6 +133,44 @@ describe("DocumentView authoritative monetary content", () => {
                     '[data-testid="document-line-items-table"] tbody tr td:last-child',
                 )?.textContent).toBe(expected);
             }
+        }
+    });
+
+    it.each([
+        { uiLocale: "en", documentLocale: "ja", timeZone: "Asia/Tokyo", expected: "2026/09/02 8:30" },
+        { uiLocale: "ja", documentLocale: "en", timeZone: "Asia/Tokyo", expected: "Sep 2, 2026, 8:30 AM" },
+        { uiLocale: "en", documentLocale: "ja", timeZone: "UTC", expected: "2026/09/01 23:30" },
+        { uiLocale: "ja", documentLocale: "en", timeZone: "UTC", expected: "Sep 1, 2026, 11:30 PM" },
+    ])("uses frozen $documentLocale dates with $timeZone under $uiLocale UI in every renderer", ({
+        uiLocale, documentLocale, timeZone, expected,
+    }) => {
+        vi.stubEnv("TZ", "America/Los_Angeles");
+        const content: DocumentContent = { ...frozenContent, generatedAt: "2026-09-01T23:30:00" };
+        const document: DealDocument = {
+            id: 1, dealId: 1, type: "quote", locale: documentLocale, status: "draft",
+            version: 1, currency: "USD", generatedAt: content.generatedAt, createdBy: null,
+            content, requiresApproval: false,
+        };
+        const preview: DocumentAcceptancePreview = {
+            flowId: "frozen-flow", content, dealName: "Quote", workspaceName: "Workspace",
+            recipientEmail: "recipient", deliveryStatus: "sent", recipientStatus: "pending",
+            actionable: false, documentType: "quote", documentVersion: 1, documentLocale,
+        };
+        const messages = uiLocale === "ja"
+            ? { ...jaDealsMessages, ...jaAcceptanceMessages }
+            : { ...dealsMessages, ...acceptanceMessages };
+        for (const view of [
+            <DocumentView key="view" type="quote" content={content} documentLocale={documentLocale} generatedAt={content.generatedAt} />,
+            <DocumentPaper key="print" document={document} />,
+            <DocumentAcceptance key="acceptance" initialPreview={preview} />,
+        ]) {
+            const markup = renderToStaticMarkup(
+                <NextIntlClientProvider locale={uiLocale} timeZone={timeZone} messages={messages}>
+                    {view}
+                </NextIntlClientProvider>,
+            );
+            const rendered = new DOMParser().parseFromString(markup, "text/html");
+            expect(rendered.body.textContent).toContain(expected);
         }
     });
 

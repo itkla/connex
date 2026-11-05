@@ -59,7 +59,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("next-intl", () => ({
-    useLocale: () => "en",
+    useTimeZone: () => "UTC", useLocale: () => "en",
     useTranslations: (namespace: string) => (key: string) => `${namespace}.${key}`,
 }));
 

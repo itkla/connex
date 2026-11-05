@@ -77,7 +77,7 @@ vi.mock("next/navigation", () => ({
     useRouter: () => ({ refresh: browser.refresh, push: browser.noop, replace: browser.noop }),
     usePathname: () => "/records/pipelines", useSearchParams: () => browser.search,
 }));
-vi.mock("next-intl", () => ({ useTranslations: () => translate, useLocale: () => "en" }));
+vi.mock("next-intl", () => ({ useTranslations: () => translate, useTimeZone: () => "UTC", useLocale: () => "en" }));
 vi.mock("motion/react", () => ({ useReducedMotion: () => true }));
 vi.mock("@/app/lib/toast", () => ({ toastError: vi.fn(), toastInfo: vi.fn(), toastSuccess: vi.fn(), toastWarn: vi.fn(), toastDismiss: vi.fn() }));
 vi.mock("@/app/hooks/useWorkspace", () => ({ useWorkspace: () => ({ activeWorkspaceId: 9, workspaces: [] }) }));

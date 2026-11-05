@@ -1,24 +1,20 @@
-import { getLocale, getTranslations } from 'next-intl/server';
+import { getLocale, getTimeZone, getTranslations } from 'next-intl/server';
+import { getDateTimeFormatter } from '@/app/lib/intlFormatters';
 import { BellAlertIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline';
 
 import { type User } from '@/app/lib/types';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { greetingKey } from '@/app/components/me/meData';
+import { greetingName } from '@/app/lib/timeZone';
+import { requestNow } from '@/app/lib/requestClock';
 
-function timeOfDayGreetingKey(): 'workingLate' | 'goodMorning' | 'goodAfternoon' | 'goodEvening' {
-    const h = new Date().getHours();
-    if (h < 5) return 'workingLate';
-    if (h < 12) return 'goodMorning';
-    if (h < 17) return 'goodAfternoon';
-    if (h < 21) return 'goodEvening';
-    return 'workingLate';
-}
-
-function todayLabel(locale: string): string {
-    return new Intl.DateTimeFormat(locale, {
+function todayLabel(locale: string, timeZone: string, now: number): string {
+    return getDateTimeFormatter(locale, {
         weekday: 'long',
         month: 'long',
         day: 'numeric',
-    }).format(new Date());
+        timeZone,
+    }).format(now);
 }
 
 export default async function Greeting({
@@ -45,7 +41,12 @@ export default async function Greeting({
 }) {
     const t = await getTranslations('DashboardGreeting');
     const locale = await getLocale();
-    const firstName = user.displayName?.split(' ')[0] ?? user.displayName;
+    const timeZone = await getTimeZone();
+    const now = requestNow();
+    const name = greetingName(user.displayName || user.username, locale);
+    const greeting = {
+        morning: 'goodMorning', afternoon: 'goodAfternoon', evening: 'goodEvening', night: 'workingLate',
+    } as const;
 
     const parts: string[] = [];
     if (dueSoon > 0) parts.push(t('tasksDue', { count: dueSoon }));
@@ -82,14 +83,14 @@ export default async function Greeting({
             <div className="min-w-0">
                 <h1 className="leading-tight tracking-tight">
                     <span className="block text-2xl font-medium text-muted-foreground">
-                        {t(timeOfDayGreetingKey())}
+                        {t(greeting[greetingKey(timeZone, now)])}
                     </span>
                     <span className="mt-1 block text-4xl font-extrabold tracking-tight text-foreground md:text-5xl">
-                        {firstName}
+                        {name}
                     </span>
                 </h1>
                 <span className="mt-3 block text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
-                    {todayLabel(locale)}
+                    {todayLabel(locale, timeZone, now)}
                 </span>
             </div>
             <div className="flex shrink-0 flex-col items-start gap-4 md:items-end">

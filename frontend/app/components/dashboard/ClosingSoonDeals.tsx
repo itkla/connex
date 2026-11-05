@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import { BuildingOffice2Icon } from '@heroicons/react/24/outline';
 
 import type { Company, Deal } from '@/app/lib/types';
@@ -16,6 +16,7 @@ export type ClosingSoonItem = { deal: Deal; company?: Company };
  * the deal.
  */
 export default function ClosingSoonDeals({ items }: { items: ClosingSoonItem[] }) {
+    const timeZone = useTimeZone();
     const t = useTranslations('ClosingSoonDeals');
     const locale = useLocale();
 
@@ -43,7 +44,7 @@ export default function ClosingSoonDeals({ items }: { items: ClosingSoonItem[] }
                                 <p className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{deal.name}</p>
                             </Link>
                             <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                                {formatShortDate(deal.expectedCloseDate, locale)}
+                                {formatShortDate(deal.expectedCloseDate, locale, timeZone)}
                             </span>
                         </li>
                     ))}

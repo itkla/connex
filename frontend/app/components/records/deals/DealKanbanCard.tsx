@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import {
     DropdownMenu,
     DropdownMenuTrigger,
@@ -21,6 +21,7 @@ import { cn } from '@/lib/utils';
 import { formatCompactCurrency, formatShortDate } from '@/app/lib/utils';
 import { type Company, type Deal, type DealRisk } from '@/app/lib/types';
 import { isDealClosed } from './dealOutcome';
+import DealCloseDate from './DealCloseDate';
 import DealRiskPill from './DealRiskPill';
 import {
     recordDetailNavigationPath,
@@ -29,6 +30,7 @@ import {
 
 interface DealKanbanCardProps {
     deal: Deal;
+    timezone: string;
     company?: Company;
     risk?: DealRisk | null;
     onQuickEdit?: () => void;
@@ -44,12 +46,14 @@ interface DealKanbanCardProps {
  */
 export default function DealKanbanCard({
     deal,
+    timezone,
     company,
     risk,
     onQuickEdit,
     onDelete,
     returnSelection,
 }: DealKanbanCardProps) {
+    const timeZone = useTimeZone();
     const router = useRouter();
     const t = useTranslations('DealsCard');
     const locale = useLocale();
@@ -123,12 +127,13 @@ export default function DealKanbanCard({
                     {deal.expectedCloseDate && (
                         <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground ring-1 ring-inset ring-border">
                             <CalendarIcon className="size-3 shrink-0" />
-                            <span className="tabular-nums">{formatShortDate(deal.expectedCloseDate, locale)}</span>
+                            <span className="tabular-nums">{formatShortDate(deal.expectedCloseDate, locale, timeZone)}</span>
                         </span>
                     )}
                 </div>
             )}
 
+            <DealCloseDate deal={deal} timezone={timezone} />
             <div className="flex items-center justify-between gap-2">
                 <span className="text-sm font-semibold tabular-nums text-foreground">
                     {formatCompactCurrency(deal.value, deal.currency || 'USD', locale)}

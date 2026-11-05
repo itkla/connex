@@ -2,7 +2,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { Cog6ToothIcon } from "@heroicons/react/24/outline";
-import { getLocale, getTranslations } from "next-intl/server";
+import { getTimeZone, getLocale, getTranslations } from "next-intl/server";
 
 import {
     getContactTemperaturesFromCookie,
@@ -25,6 +25,7 @@ import type { Activity, Contact, DealRisk, Note, RelationshipTemperature, Task, 
 import { formatDate, formatDateTime } from "@/app/lib/utils";
 import { settingsDestination } from "@/app/lib/settingsEntryPoints";
 import { resolveWorkspaceTimezone } from "@/app/lib/workspaceSnapshot";
+import { requestNow } from "@/app/lib/requestClock";
 
 import Rise from "@/app/components/motion/Rise";
 import { PageShell } from "@/app/components/PageShell";
@@ -45,6 +46,7 @@ import {
 } from "@/app/components/me/meData";
 
 export default async function MePage() {
+    const timeZone = await getTimeZone();
     const t = await getTranslations("MePage");
     const locale = await getLocale();
     const cookie = (await headers()).get("cookie");
@@ -87,7 +89,7 @@ export default async function MePage() {
     const risks = riskItems(dealRisks, myDeals, 6);
     const pulse = noteActivityResult.ok ? activityPulse(activities, tasks, noteActivityResult.data, 84) : null;
     const coolingCount = temps.filter((temp) => temp.trend === "cooling").length;
-    const greeting = t(`greeting_${greetingKey(user.timezone)}`);
+    const greeting = t(`greeting_${greetingKey(timeZone, requestNow())}`);
     const hasWork = tasks.length + activities.length + notes.length > 0;
 
     return (
@@ -148,8 +150,8 @@ export default async function MePage() {
 
                 <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-6 text-sm text-muted-foreground">
                     <div className="flex flex-wrap gap-x-6 gap-y-1">
-                        <span>{t("memberSince", { date: formatDate(user.createdAt, locale) })}</span>
-                        <span>{t("lastActive", { date: formatDateTime(user.lastLoginAt, locale) })}</span>
+                        <span>{t("memberSince", { date: formatDate(user.createdAt, locale, timeZone) })}</span>
+                        <span>{t("lastActive", { date: formatDateTime(user.lastLoginAt, locale, timeZone) })}</span>
                     </div>
                     <Link
                         href={settingsDestination("account.home").href}

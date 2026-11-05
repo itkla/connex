@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { BoltIcon, CheckCircleIcon, ExclamationTriangleIcon } from "@heroicons/react/24/outline";
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
 
 import {
     cancelWorkflowManualRun,
@@ -309,6 +309,7 @@ export default function WorkflowManualRunLauncher({
 }
 
 function PreparationSummary({ preparation }: { preparation: WorkflowManualPreparation }) {
+    const timeZone = useTimeZone();
     const t = useTranslations("WorkflowOperations");
     const locale = useLocale();
     const normalizedExpiresAt = useMemo(
@@ -321,8 +322,8 @@ function PreparationSummary({ preparation }: { preparation: WorkflowManualPrepar
         getServerHydrationSnapshot,
     );
     const expiresAtLabel = useMemo(
-        () => hydrated ? formatWorkflowRunDateTime(preparation.expiresAt, locale) : normalizedExpiresAt,
-        [hydrated, locale, normalizedExpiresAt, preparation.expiresAt],
+        () => hydrated ? formatWorkflowRunDateTime(preparation.expiresAt, locale, timeZone) : normalizedExpiresAt,
+        [hydrated, locale, normalizedExpiresAt, preparation.expiresAt, timeZone],
     );
     const expectedSkips = [
         ["permission", preparation.expectedSkips.permission],

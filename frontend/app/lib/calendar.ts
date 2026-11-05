@@ -1,6 +1,8 @@
 import type { Task, Activity, Deal, Note, Contact } from '@/app/lib/types';
+import { getDateTimeFormatter } from '@/app/lib/intlFormatters';
 import { NOTE_URL_KEY, TASK_URL_KEY } from '@/app/hooks/listStateUrl';
-import { parseMysqlDateTime } from '@/app/lib/utils';
+import { parseCalendarDateUtc, parseMysqlDateTime } from '@/app/lib/utils';
+import { calendarDayInTimeZone, hourInTimeZone } from '@/app/lib/timeZone';
 import { isDealClosed } from '@/app/components/records/deals/dealOutcome';
 import { noteContentToPlainText } from '@/app/lib/references';
 
@@ -17,7 +19,8 @@ const KIND_PRIORITY: Record<CalendarEventKind, number> = { deal: 0, task: 1, act
 
 /**
  * Shared shape of a record projected onto the calendar. `startMs` drives ordering
- * and timeline placement; `allDay` distinguishes date-only records (tasks, deals)
+ * and timeline placement; all-day records use UTC calendar anchors rather than instants.
+ * `allDay` distinguishes date-only records (tasks, deals)
  * from timed ones (activities, notes). `draggable` marks the two kinds whose date
  * is reschedulable by drag: any task, and any open deal.
  */
@@ -64,6 +67,12 @@ export function dayKeyOf(d: Date): string {
     return `${y}-${m}-${day}`;
 }
 
+/** Carries a selected calendar slot without normalizing it through browser DST. */
+export function calendarSlotInputValue(dayKey: string, minutes: number): string {
+    const pad = (value: number) => String(value).padStart(2, '0');
+    return `${dayKey}T${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}`;
+}
+
 /** Local calendar-day key for a millisecond timestamp. */
 export function dayKeyFromMs(ms: number): string {
     return dayKeyOf(new Date(ms));
@@ -108,10 +117,10 @@ export function sameDay(a: Date, b: Date): boolean {
     );
 }
 
-/** Minutes elapsed since local midnight — used to place timed events on the hour timeline. */
-export function minutesSinceMidnight(ms: number): number {
-    const d = new Date(ms);
-    return d.getHours() * 60 + d.getMinutes();
+/** Civil minutes since midnight in the display zone, used to place timed events on the hour timeline. */
+export function minutesSinceMidnight(ms: number, timeZone = 'UTC'): number {
+    const minute = getDateTimeFormatter('en', { minute: 'numeric', timeZone }).format(ms);
+    return hourInTimeZone(ms, timeZone) * 60 + Number(minute);
 }
 
 /** The day cells of a month grid (4–6 week rows as the month requires), starting at {@link startOfGrid}. */
@@ -143,17 +152,29 @@ export function compareEvents(a: CalendarEvent, b: CalendarEvent): number {
     return a.title.localeCompare(b.title);
 }
 
+/** Selects by display calendar day, with timed events before the same day's all-day deadlines. */
+export function nextCalendarEvent(events: CalendarEvent[], now: number, timeZone: string): CalendarEvent | null {
+    const today = calendarDayInTimeZone(now, timeZone);
+    return events.filter((event) => event.allDay ? event.dayKey >= today : event.startMs >= now)
+        .sort((left, right) => {
+            const day = left.dayKey.localeCompare(right.dayKey);
+            if (day !== 0) return day;
+            if (left.allDay !== right.allDay) return left.allDay ? 1 : -1;
+            return compareEvents(left, right);
+        })[0] ?? null;
+}
+
 /**
  * Projects raw records into calendar events. Records with no usable date are
  * dropped. Note labels are prefixed with the linked contact's name when present.
  */
-export function buildEvents(data: CalendarData): CalendarEvent[] {
+export function buildEvents(data: CalendarData, timeZone = 'UTC'): CalendarEvent[] {
     const events: CalendarEvent[] = [];
     const personById = new Map<number, Contact>();
     for (const p of data.persons ?? []) personById.set(p.id, p);
 
     for (const task of data.tasks ?? []) {
-        const ms = parseMysqlDateTime(task.dueDate);
+        const ms = parseCalendarDateUtc(task.dueDate ?? '');
         if (Number.isNaN(ms)) continue;
         events.push({
             id: `task-${task.id}`,
@@ -162,7 +183,7 @@ export function buildEvents(data: CalendarData): CalendarEvent[] {
             title: noteContentToPlainText(task.description),
             startMs: ms,
             allDay: true,
-            dayKey: dayKeyFromMs(ms),
+            dayKey: task.dueDate ?? '',
             href: `/activity/tasks?${TASK_URL_KEY}=${task.id}`,
             draggable: true,
             raw: task,
@@ -179,7 +200,7 @@ export function buildEvents(data: CalendarData): CalendarEvent[] {
             title: activity.subject || activity.type,
             startMs: ms,
             allDay: false,
-            dayKey: dayKeyFromMs(ms),
+            dayKey: calendarDayInTimeZone(ms, timeZone),
             href: `/activity/activities/${activity.id}`,
             draggable: false,
             raw: activity,
@@ -187,7 +208,7 @@ export function buildEvents(data: CalendarData): CalendarEvent[] {
     }
 
     for (const deal of data.deals ?? []) {
-        const ms = parseMysqlDateTime(deal.expectedCloseDate);
+        const ms = parseCalendarDateUtc(deal.expectedCloseDate ?? '');
         if (Number.isNaN(ms)) continue;
         events.push({
             id: `deal-${deal.id}`,
@@ -196,7 +217,7 @@ export function buildEvents(data: CalendarData): CalendarEvent[] {
             title: deal.name,
             startMs: ms,
             allDay: true,
-            dayKey: dayKeyFromMs(ms),
+            dayKey: deal.expectedCloseDate ?? '',
             href: `/records/deals/${deal.id}`,
             draggable: !isDealClosed(deal),
             raw: deal,
@@ -216,7 +237,7 @@ export function buildEvents(data: CalendarData): CalendarEvent[] {
             title: contact ? `${contact.name}: ${preview}` : preview,
             startMs: ms,
             allDay: false,
-            dayKey: dayKeyFromMs(ms),
+            dayKey: calendarDayInTimeZone(ms, timeZone),
             href: `/activity/notes?${NOTE_URL_KEY}=${note.id}`,
             draggable: false,
             raw: note,
@@ -226,7 +247,7 @@ export function buildEvents(data: CalendarData): CalendarEvent[] {
     return events;
 }
 
-/** Groups events by local day key, each bucket ordered by {@link compareEvents}. */
+/** Groups events by their preserved calendar keys, each bucket ordered by {@link compareEvents}. */
 export function groupByDay(events: CalendarEvent[]): Map<string, CalendarEvent[]> {
     const map = new Map<string, CalendarEvent[]>();
     for (const e of events) {
@@ -260,12 +281,12 @@ export interface TimedPlacement {
  * interval-graph coloring, with `laneCount` set per connected overlap cluster so each
  * event knows how wide it can be. All-day events are ignored.
  */
-export function layoutTimedEvents(events: CalendarEvent[], blockMinutes = 50): TimedPlacement[] {
+export function layoutTimedEvents(events: CalendarEvent[], blockMinutes = 50, timeZone = 'UTC'): TimedPlacement[] {
     const placements: TimedPlacement[] = events
         .filter((e) => !e.allDay)
         .sort((a, b) => a.startMs - b.startMs)
         .map((event) => {
-            const startMin = minutesSinceMidnight(event.startMs);
+            const startMin = minutesSinceMidnight(event.startMs, timeZone);
             return { event, startMin, endMin: Math.min(startMin + blockMinutes, 24 * 60), lane: 0, laneCount: 1 };
         });
 

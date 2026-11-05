@@ -159,6 +159,11 @@ describe("projectionWindow", () => {
 });
 
 describe("buildTimeBuckets", () => {
+    it("displays rolling instant labels in the selected profile zone", () => {
+        const now = Date.UTC(2026, 10, 5, 0, 30);
+        expect(buildTimeBuckets("30d", now, "en-US", "Asia/Tokyo")[0].label).toBe("Oct 6");
+        expect(buildTimeBuckets("30d", now, "en-US", "America/Los_Angeles")[0].label).toBe("Oct 5");
+    });
     it("builds 12 contiguous month buckets for 12m", () => {
         const buckets = buildTimeBuckets("12m", NOW, "en-US");
         expect(buckets).toHaveLength(12);
@@ -166,8 +171,8 @@ describe("buildTimeBuckets", () => {
             expect(buckets[i].start).toBe(buckets[i - 1].end);
         }
         const last = new Date(buckets[11].start);
-        expect(last.getMonth()).toBe(6);
-        expect(last.getFullYear()).toBe(2026);
+        expect(last.getUTCMonth()).toBe(6);
+        expect(last.getUTCFullYear()).toBe(2026);
     });
 
     it("builds 6 equal buckets for 30d and 9 for 90d", () => {
