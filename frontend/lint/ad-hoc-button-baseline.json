@@ -82,7 +82,6 @@
     "app/components/organization/DataRequestsPanel.tsx": 2,
     "app/components/organization/OrgAiProviderPanel.tsx": 1,
     "app/components/organization/OrganizationLayoutPanel.tsx": 7,
-    "app/components/overview/analytics/AnalyticsBoard.tsx": 1,
     "app/components/overview/analytics/CustomRangePopover.tsx": 2,
     "app/components/overview/analytics/FirstRun.tsx": 2,
     "app/components/overview/analytics/PipelineValue.tsx": 1,

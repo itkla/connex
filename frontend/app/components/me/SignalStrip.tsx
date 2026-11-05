@@ -110,6 +110,9 @@ export default function SignalStrip({ kpis, currency }: { kpis: Kpi[]; currency:
                             <div className="text-2xl font-semibold leading-none tabular-nums text-foreground">
                                 {renderValue(kpi)}
                             </div>
+                            {kpi.format === "currency" && (
+                                <div className="mt-1 text-xs text-muted-foreground">{t("currencyScope", { currency })}</div>
+                            )}
                             <div className="mt-2 flex items-center justify-between gap-2">
                                 <span className="text-xs font-medium uppercase tracking-[0.1em] text-muted-foreground">
                                     {t(`kpi_${kpi.key}`)}

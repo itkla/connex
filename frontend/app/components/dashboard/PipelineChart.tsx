@@ -75,17 +75,17 @@ function buildBuckets(series: DealRevenueSeries, now: number, locale: string, ra
 }
 
 /**
- * Active-pipeline trend — realized profit (won-by-close-month) vs projected value
- * (by expected-close-month) — from the server-computed {@link DealRevenueSeries}. The series is
- * aggregated server-side over all deals in the dashboard's currency; {@code range} only sizes the
- * historical window shown.
+ * Realized revenue and open deal value by expected close month in the dashboard currency.
+ * The projection headline includes every open deal; range only sizes the chart window.
  */
 export default function PipelineChart({
     series,
+    openValue,
     currency,
     range,
 }: {
     series: DealRevenueSeries;
+    openValue: number;
     currency: string;
     range: RollingRangeKey;
 }) {
@@ -106,9 +106,9 @@ export default function PipelineChart({
     const totals = React.useMemo(
         () => ({
             profit: data.reduce((sum, b) => sum + b.profit, 0),
-            projections: data.reduce((sum, b) => sum + b.projections, 0),
+            projections: openValue,
         }),
-        [data],
+        [data, openValue],
     );
 
     const chartConfig = {
