@@ -20,6 +20,7 @@ import DealsBrowser from "@/app/components/records/deals/DealsBrowser";
 import DealActionsMenu from "@/app/components/records/deals/DealActionsMenu";
 import DealLineItems from "@/app/components/records/deals/DealLineItems";
 import { submitDealDraftUpdates, toDealDraft } from "@/app/components/records/deals/dealEditConflict";
+import type ContactEditConflictDialog from "@/app/components/records/contacts/ContactEditConflictDialog";
 import type DealEditConflictDialog from "@/app/components/records/deals/DealEditConflictDialog";
 import EditPipelineSheet from "@/app/components/records/pipelines/EditPipelineSheet";
 import PipelinesBrowser from "@/app/components/records/pipelines/PipelinesBrowser";
@@ -35,7 +36,7 @@ import type QuickEditDealSheet from "@/app/components/records/deals/QuickEditDea
 import type QuickEditPipelineSheet from "@/app/components/records/pipelines/QuickEditPipelineSheet";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { bindRenderedWorkspace, releaseRenderedWorkspace, workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
-import type { RecordMenuModel } from "@/app/components/records/types";
+import type { ColumnDef, RecordMenuModel } from "@/app/components/records/types";
 import type { BusinessCardImportDraft, Contact, Deal, DealLineItem } from "@/app/lib/types";
 import { company, contact, deal, deferred, image, json, ORIGIN, pipeline, shell, stage, stubBackend, switchWorkspace } from "./helpers/workspaceChainBackend";
 
@@ -47,6 +48,10 @@ const captured = vi.hoisted<{
     deal: ComponentProps<typeof NewDealDialog> | null;
     pipeline: ComponentProps<typeof NewPipelineDialog> | null;
     contactSheet: ComponentProps<typeof QuickEditSheet> | null;
+    contactConflict: ComponentProps<typeof ContactEditConflictDialog> | null;
+    contactDismiss: ((open: boolean) => void) | null;
+    contactConfirm: { open: boolean; onKeepEditing: () => void; onDiscard: () => void } | null;
+    contactColumns: ColumnDef<Contact>[] | null;
     companySheet: ComponentProps<typeof QuickEditCompanySheet> | null;
     dealSheet: ComponentProps<typeof QuickEditDealSheet> | null;
     dealConflict: ComponentProps<typeof DealEditConflictDialog> | null;
@@ -59,6 +64,10 @@ const captured = vi.hoisted<{
     deal: null,
     pipeline: null,
     contactSheet: null,
+    contactConflict: null,
+    contactDismiss: null,
+    contactConfirm: null,
+    contactColumns: null,
     companySheet: null,
     dealSheet: null,
     dealConflict: null,
@@ -72,6 +81,13 @@ const browser = vi.hoisted(() => ({
     items: new Array<Contact>(),
     search: new URLSearchParams(),
     showSelectionActions: false,
+    renderContactGuard: false,
+    patchItem: vi.fn((id: number, patch: Partial<Contact>) => {
+        browser.items = browser.items.map((item) => item.id === id ? { ...item, ...patch } : item);
+    }),
+    replaceItem: vi.fn((id: number, saved: Contact) => {
+        browser.items = browser.items.map((item) => item.id === id ? saved : item);
+    }),
 }));
 const translate = vi.hoisted(() => Object.assign((key: string) => key, { has: () => false }));
 vi.mock("next/navigation", () => ({
@@ -79,7 +95,7 @@ vi.mock("next/navigation", () => ({
     usePathname: () => "/records/pipelines", useSearchParams: () => browser.search,
 }));
 vi.mock("next-intl", () => ({ useTranslations: () => translate, useLocale: () => "en" }));
-vi.mock("motion/react", () => ({ useReducedMotion: () => true }));
+vi.mock("motion/react", () => ({ useReducedMotion: () => true, motion: { div: ({ children }: { children?: ReactNode }) => <div>{children}</div> } }));
 vi.mock("@/app/lib/toast", () => ({ toastError: vi.fn(), toastInfo: vi.fn(), toastSuccess: vi.fn(), toastWarn: vi.fn(), toastDismiss: vi.fn() }));
 vi.mock("@/app/hooks/useWorkspace", () => ({ useWorkspace: () => ({ activeWorkspaceId: 9, workspaces: [] }) }));
 vi.mock("@/app/hooks/usePermissions", () => ({ usePermission: () => true }));
@@ -101,7 +117,7 @@ vi.mock("@/app/hooks/useServerRecords", () => ({
         items: browser.items, total: 0, loading: false, page: 1, size: 25, query: "",
         sortKey: null, sortDirection: "asc", revision: 0,
         setPage: browser.noop, setSize: browser.noop, setQuery: browser.noop, applyQuery: browser.noop,
-        onSortChange: browser.noop, applySort: browser.noop, reload: browser.noop, patchItem: browser.noop, replaceItem: browser.noop,
+        onSortChange: browser.noop, applySort: browser.noop, reload: browser.noop, patchItem: browser.patchItem, replaceItem: browser.replaceItem,
     }),
 }));
 vi.mock("@/app/components/records/RecordActionMenu", () => ({
@@ -115,6 +131,9 @@ vi.mock("@/app/components/motion/Rise", () => ({
     default: ({ children }: { children?: ReactNode }) => {
         if (!browser.showSelectionActions || !isValidElement<{ selectionActions?: ReactNode; children?: ReactNode }>(children)) return null;
         const nested = children.props.children;
+        if (isValidElement<{ columns?: ColumnDef<Contact>[]; entityLabel?: string }>(nested) && nested.props.entityLabel === "contact") {
+            captured.contactColumns = nested.props.columns ?? null;
+        }
         const actions = children.props.selectionActions ?? (isValidElement<{ selectionActions?: ReactNode }>(nested) ? nested.props.selectionActions : null);
         return <>{actions}</>;
     },
@@ -130,7 +149,31 @@ vi.mock("@/app/components/records/deals/NewDealDialog", async (importOriginal) =
 vi.mock("@/app/components/records/pipelines/NewPipelineDialog", () => ({ default: (props: ComponentProps<typeof NewPipelineDialog>) => { captured.pipeline = props; return null; } }));
 vi.mock("@/app/components/activity/tasks/TaskDialog", () => ({ default: (props: ComponentProps<typeof TaskDialog>) => { captured.task = props; return null; } }));
 vi.mock("@/app/components/activity/activities/ActivityDialog", () => ({ default: (props: ComponentProps<typeof ActivityDialog>) => { captured.activity = props; return null; } }));
-vi.mock("@/app/components/records/contacts/QuickEditSheet", () => ({ default: (props: ComponentProps<typeof QuickEditSheet>) => { captured.contactSheet = props; return <>{props.customFieldsSlot}</>; } }));
+vi.mock("@/app/components/records/contacts/QuickEditSheet", async (importOriginal) => {
+    const { default: ActualQuickEditSheet } = await importOriginal<typeof import("@/app/components/records/contacts/QuickEditSheet")>();
+    return { default: (props: ComponentProps<typeof QuickEditSheet>) => {
+        captured.contactSheet = props;
+        return browser.renderContactGuard ? <ActualQuickEditSheet {...props} /> : <>{props.customFieldsSlot}</>;
+    } };
+});
+vi.mock("@/app/components/records/contacts/ContactEditConflictDialog", () => ({ default: (props: ComponentProps<typeof ContactEditConflictDialog>) => { captured.contactConflict = props; return null; } }));
+vi.mock("@/app/components/ConfirmDiscardDialog", () => ({
+    default: (props: { open: boolean; onKeepEditing: () => void; onDiscard: () => void }) => {
+        captured.contactConfirm = props;
+        return null;
+    },
+}));
+vi.mock("@/components/ui/drawer", () => {
+    const Pass = ({ children }: { children?: ReactNode }) => <>{children}</>;
+    return {
+        Drawer: ({ children, onOpenChange }: { children?: ReactNode; onOpenChange: (open: boolean) => void }) => {
+            captured.contactDismiss = onOpenChange;
+            return <>{children}</>;
+        },
+        DrawerClose: ({ children }: { children?: ReactNode }) => <button onClick={() => captured.contactDismiss?.(false)}>{children}</button>,
+        DrawerContent: Pass, DrawerDescription: Pass, DrawerFooter: Pass, DrawerHeader: Pass, DrawerTitle: Pass,
+    };
+});
 vi.mock("@/app/components/records/companies/QuickEditCompanySheet", () => ({ default: (props: ComponentProps<typeof QuickEditCompanySheet>) => { captured.companySheet = props; return <>{props.customFieldsSlot}</>; } }));
 vi.mock("@/app/components/records/deals/QuickEditDealSheet", () => ({ default: (props: ComponentProps<typeof QuickEditDealSheet>) => { captured.dealSheet = props; return <>{props.customFieldsSlot}</>; } }));
 vi.mock("@/app/components/records/deals/DealEditConflictDialog", () => ({ default: (props: ComponentProps<typeof DealEditConflictDialog>) => { captured.dealConflict = props; return null; } }));
@@ -170,6 +213,7 @@ beforeEach(() => {
     for (const key of Object.keys(captured)) Reflect.set(captured, key, null);
     browser.selectedIds = new Set([41]);
     browser.showSelectionActions = false;
+    browser.renderContactGuard = false;
     browser.items = [];
     bindRenderedWorkspace(shell, ORIGIN);
     document.cookie = "connex_workspace=" + ORIGIN + "; path=/";
@@ -236,6 +280,82 @@ describe("deal edit origins", () => {
             await act(async () => get("dealConflict").onReload(snapshot));
             expect(get("dealSheet").drafts[41]).toMatchObject({ expectedVersion: 2, name: current.name });
         }
+    });
+});
+
+describe("contact conflict drafts", () => {
+    it.each([true, false])("reloads only the conflicted draft and protects other dirty contacts: %s", async (otherDirty) => {
+        const first = { ...contact, version: 1, title: "Original title" };
+        const second = { ...contact, id: 42, version: 5, name: "Other contact" };
+        const latest = { ...first, version: 2, title: "New title" };
+        let refused = false;
+        stubBackend(undefined, (path, method) => {
+            if (path === "/api/persons/41" && method === "GET") return json(refused ? latest : first);
+            if (path === "/api/persons/42" && method === "GET") return json(second);
+            if (path === "/api/persons/41" && method === "PUT") {
+                refused = true;
+                return json({ code: "STALE_RECORD", currentVersion: 2 }, 409);
+            }
+            return undefined;
+        });
+        browser.items = [first, second];
+        browser.selectedIds = new Set([41, 42]);
+        browser.showSelectionActions = true;
+        browser.renderContactGuard = true;
+        await render(<ContactsBrowser savedViews={[]} defaultView={null} />);
+        const edit = [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "quickEdit");
+        if (!edit) throw new Error("Expected the contact Quick edit action");
+        await act(async () => edit.click());
+        await act(async () => {
+            get("contactSheet").updateDraft(41, { phone: "Refused phone" });
+            if (otherDirty) get("contactSheet").updateDraft(42, { title: "Other unsaved title" });
+        });
+        await act(async () => get("contactSheet").saveEdits());
+        expect(get("contactConflict").conflict.current).toEqual(latest);
+        await act(async () => get("contactConflict").onReload(latest));
+        expect(get("contactSheet").drafts[41]).toMatchObject({ expectedVersion: 2, phone: latest.phone });
+        expect(get("contactSheet").drafts[42].title).toBe(otherDirty ? "Other unsaved title" : second.title);
+        const cancel = [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "cancel");
+        if (!cancel) throw new Error("Expected the sheet Cancel button");
+        await act(async () => cancel.click());
+        if (!otherDirty) {
+            expect(get("contactConfirm").open).toBe(false);
+            expect(get("contactSheet").editSheetOpen).toBe(false);
+            return;
+        }
+        expect(get("contactConfirm").open).toBe(true);
+        expect(get("contactSheet").editSheetOpen).toBe(true);
+        await act(async () => get("contactConfirm").onKeepEditing());
+        await act(async () => get("contactDismiss")(false));
+        expect(get("contactConfirm").open).toBe(true);
+        expect(get("contactSheet").drafts[42].title).toBe("Other unsaved title");
+        await act(async () => get("contactConfirm").onDiscard());
+        expect(get("contactSheet").editSheetOpen).toBe(false);
+    });
+
+    it("restores the table snapshot while retaining a refused inline title only in the conflict draft", async () => {
+        const first = { ...contact, version: 1, title: "Original title", phone: "Original phone" };
+        const latest = { ...first, version: 2, phone: "New phone" };
+        stubBackend(undefined, (path, method) => {
+            if (path === "/api/persons/41" && method === "GET") return json(latest);
+            if (path === "/api/persons/41" && method === "PUT") return json({ code: "STALE_RECORD", currentVersion: 2 }, 409);
+            return undefined;
+        });
+        browser.items = [first];
+        browser.showSelectionActions = true;
+        browser.renderContactGuard = true;
+        await render(<ContactsBrowser savedViews={[]} defaultView={null} />);
+        const inline = get("contactColumns").find((column) => column.key === "title")?.editable;
+        if (!inline) throw new Error("Expected the title inline editor");
+        await act(async () => inline.save(first, "Refused title"));
+        expect(get("contactConflict").conflict.current).toEqual(latest);
+        await act(async () => get("contactConflict").onKeepEditing());
+        expect(get("contactSheet").drafts[41].title).toBe("Refused title");
+        expect(browser.items[0]).toEqual(first);
+        await act(async () => get("contactDismiss")(false));
+        if (get("contactConfirm").open) await act(async () => get("contactConfirm").onDiscard());
+        expect(get("contactSheet").editSheetOpen).toBe(false);
+        expect(browser.items[0]?.title).toBe("Original title");
     });
 });
 

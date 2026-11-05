@@ -7,7 +7,7 @@ import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { useRecordEditConflict } from '@/app/hooks/useRecordEditConflict';
 import { toastError, toastInfo, toastSuccess } from '@/app/lib/toast';
-import QuickEditSheet, { type ContactDraft } from './QuickEditSheet';
+import QuickEditSheet, { type ContactDraft } from '@/app/components/records/contacts/QuickEditSheet';
 import ContactEditConflictDialog from './ContactEditConflictDialog';
 import { contactDraftChanged, reconcileSavedContactDraft, submitContactDraftUpdate, toContactDraft } from './contactEditConflict';
 import { CustomFieldsEditSection, type CustomFieldsEditHandle } from '@/app/components/records/CustomFieldsEditSection';

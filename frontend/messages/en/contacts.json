@@ -132,7 +132,7 @@
         "toastContactsRestoreFailed": "Couldn't restore {failed} contacts",
         "toastFailedRestore": "Couldn't restore the selected contacts",
         "entityLabelPlural": "contacts",
-        "toastFailedLoadContact": "Failed to load contact",
+        "toastFailedLoadContact": "Couldn't load the contact",
         "inlineSavePending": "Wait for the current contact save to finish."
     },
     "ContactsCard": {
@@ -151,7 +151,7 @@
         "toastFailedCopyPhone": "Couldn't copy the phone number",
         "toastCompanyChanged": "Company changed",
         "ownerLabel": "Owner: {name}",
-        "toastFailedLoadContact": "Failed to load contact"
+        "toastFailedLoadContact": "Couldn't load the contact"
     },
     "ContactsActionsMenu": {
         "edit": "Edit",
@@ -180,7 +180,7 @@
         "toastFailedArchive": "Couldn't archive the contact",
         "toastFailedRestore": "Couldn't restore the contact",
         "entityLabelPlural": "contacts",
-        "toastFailedLoadContact": "Failed to load contact"
+        "toastFailedLoadContact": "Couldn't load the contact"
     },
     "ContactsStatCard": {
         "viewAllTitle": "View all {label}",
@@ -201,7 +201,7 @@
         "toastAssociatedSingle": "{contactName} associated with {companyName}",
         "toastAssociatedMultiple": "{count} contacts associated with {companyName}",
         "toastFailedUpdate": "Couldn't change the company",
-        "toastFailedLoadContact": "Failed to load contact",
+        "toastFailedLoadContact": "Couldn't load the contact",
         "removeTitle": "Remove company association",
         "toastRemoved": "Removed {count, plural, one {contact} other {contacts}} from companies",
         "removeDescription": "Remove the company association for the selected contacts."

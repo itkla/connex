@@ -698,6 +698,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
         } catch (error) {
             if (!isStaleRecordError(error)) throw error;
             if (renderedWorkspaceId() !== originWorkspaceId) return;
+            replaceItem(base.id, base);
             clearConflict();
             editWorkspaceRef.current = originWorkspaceId;
             setEditBases([base]);
@@ -1165,10 +1166,14 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
                     conflict={conflict}
                     onKeepEditing={clearConflict}
                     onReload={(current) => {
+                        const otherDraftsRemain = editBases.some((base) => {
+                            const draft = drafts[base.id];
+                            return base.id !== current.id && draft && contactDraftChanged(toDraft(base), draft);
+                        });
                         setEditBases((previous) => previous.map((base) => base.id === current.id ? current : base));
                         setDrafts((previous) => ({ ...previous, [current.id]: toDraft(current) }));
                         replaceItem(current.id, current);
-                        setEditReloadRevision((revision) => revision + 1);
+                        if (!otherDraftsRemain) setEditReloadRevision((revision) => revision + 1);
                         clearConflict();
                     }}
                 />}

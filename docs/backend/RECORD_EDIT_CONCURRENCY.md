@@ -155,14 +155,16 @@ profiles fetch current records with the rendered workspace pin before opening. T
 reuses `EditContactSheet`. Forms freeze their base/token and the opening workspace; background list
 or route refreshes never rebase an existing draft. Email/phone/title inline saves condition on the
 row token and replace the complete row through `useServerRecords.replaceItem`, including removal
-of nullable fields omitted from JSON. A stale inline draft opens in the same quick-edit sheet;
-the entire inline request and conflict read block another editor from replacing it.
+of nullable fields omitted from JSON. A stale inline refusal restores the row's last server snapshot
+and keeps the refused value only in the quick-edit draft. The entire inline request and conflict
+read block another editor from replacing it.
 
 `contactEditConflict.ts` owns contact submission, reconciliation and field comparison; the sheets
 reuse `useRecordEditConflict` and the same explicit discard-confirmation dialog pattern as deals.
 Selected-contact batches save sequentially and stop on the first refusal. Each success replaces its
-base/token; later input keeps its text and advances only to the acknowledged version. Retrying skips
-unchanged acknowledged rows. Custom fields and photos save only after the conditional core write.
+base/token; later input keeps its text and advances only to the acknowledged version. Reloading one
+conflicted contact replaces only that draft; it resets the sheet's discard baseline only when no
+other changed drafts remain. Retrying skips unchanged acknowledged rows. Custom fields and photos save only after the conditional core write.
 Photo responses advance the draft token only when they are exactly one database update after that
 core write. Any intervening writer leaves the core token in place and opens a conflict check, so a
 photo cannot bless stale text with someone else's newer token.

@@ -131,7 +131,7 @@ export default function ChangeCompanyDialog({ open, onOpenChange, contacts, onSu
                     const saved = await submitContactCompanyUpdate(base, targetCompanyId, origin);
                     setBases((current) => current.map((item) => item.id === saved.id ? saved : item));
                 } catch (error) {
-                    if (!await captureConflict(error, base, origin)) reportApiError(error, 'toastFailedUpdate');
+                    if (!await captureConflict(error, base, origin)) throw error;
                     return;
                 }
             }

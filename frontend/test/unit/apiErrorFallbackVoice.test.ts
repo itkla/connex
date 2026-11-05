@@ -53,9 +53,15 @@ const fallbackTitles = [
     },
     {
         catalog: "contacts",
-        key: "ContactsCard.toastFailedSave",
-        en: "Couldn't save the contact",
-        ja: "連絡先を保存できませんでした",
+        key: "ContactsChangeCompanyDialog.toastFailedLoadContact",
+        en: "Couldn't load the contact",
+        ja: "連絡先を読み込めませんでした",
+    },
+    {
+        catalog: "contacts",
+        key: "ContactsCard.toastFailedLoadContact",
+        en: "Couldn't load the contact",
+        ja: "連絡先を読み込めませんでした",
     },
     {
         catalog: "deals",
@@ -179,7 +185,7 @@ describe("API error fallback titles", () => {
         const approved = fallbackTitles.map(({ key }) => key).sort();
         const derived = scopedComponents.flatMap(fallbackKeysFor).sort();
 
-        expect(fallbackTitles).toHaveLength(14);
+        expect(fallbackTitles).toHaveLength(15);
         expect(approved).toEqual([...new Set(approved)]);
         expect(derived).toEqual(approved);
     });
