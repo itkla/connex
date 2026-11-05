@@ -644,7 +644,9 @@ class ImportServiceTest extends AbstractServiceTest {
 
         assertEquals(0, result.getInvalid());
         assertEquals(2, result.getToCreate());
-        assertEquals(List.of(0, 1, 1), result.getRows().stream()
+        assertNull(result.getRows().getFirst().getCanonicalRowIndex());
+        assertNull(result.getRows().getFirst().getMergedRowCount());
+        assertEquals(List.of(1, 1), result.getRows().subList(1, 3).stream()
             .map(row -> row.getCanonicalRowIndex()).toList());
     }
 

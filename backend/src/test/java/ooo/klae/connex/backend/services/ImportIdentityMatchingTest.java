@@ -20,6 +20,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 import ooo.klae.connex.backend.beans.CustomFieldDefinition;
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.ColumnMapping;
 import ooo.klae.connex.backend.dto.DuplicateMatchKind;
@@ -54,7 +55,10 @@ class ImportIdentityMatchingTest extends AbstractServiceTest {
 
             assertEquals(2, preview.getToCreate());
             assertEquals(0, preview.getInvalid());
-            assertTrue(preview.getRows().stream().allMatch(row -> row.getMergedRowCount() == 1));
+            for (var row : preview.getRows()) {
+                assertNull(row.getMergedRowCount());
+                assertNull(row.getCanonicalRowIndex());
+            }
             ImportResult result = commit(request, preview);
             assertEquals(2, result.getCreated());
             assertTrue(result.getFailed().isEmpty());
@@ -136,6 +140,7 @@ class ImportIdentityMatchingTest extends AbstractServiceTest {
         assertEquals(2, created.getCreated());
         assertTrue(created.getFailed().isEmpty());
 
+        authenticateReplayActor();
         ImportPreviewResult replay = importService.previewPersons(request);
         assertEquals(0, replay.getInvalid());
         assertEquals(2, replay.getToUpdate());
@@ -222,6 +227,7 @@ class ImportIdentityMatchingTest extends AbstractServiceTest {
             WHERE workspace_id = ? AND person_id = ? AND kind = 'phone'
               AND normalized_value = '+81355550009' AND superseded_at IS NULL
             """, Integer.class, workspace.getId(), target.getId()));
+        authenticateReplayActor();
         assertEquals(0, commit(request, importService.previewPersons(request)).getUpdated());
     }
 
@@ -249,7 +255,7 @@ class ImportIdentityMatchingTest extends AbstractServiceTest {
         ImportPreviewResult preview = importService.previewPersons(request);
 
         assertEquals(1, preview.getToCreate());
-        assertTrue(preview.getRows().getFirst().getCandidates().isEmpty());
+        assertNull(preview.getRows().getFirst().getCandidates());
         ImportResult result = commit(request, preview);
         assertEquals(1, result.getCreated());
         assertTrue(result.getFailed().isEmpty());
@@ -283,6 +289,7 @@ class ImportIdentityMatchingTest extends AbstractServiceTest {
             assertEquals(request.getRows().getFirst().get(definition.getLabel()), values.get(definition.getId()));
         }
 
+        authenticateReplayActor();
         assertEquals(0, commit(request, importService.previewPersons(request)).getUpdated());
         assertEquals(definitions.stream().map(CustomFieldDefinition::getId).toList(),
             definitionMapper.getByEntityType(workspace.getId(), "person").stream().map(CustomFieldDefinition::getId).toList());
@@ -328,6 +335,7 @@ class ImportIdentityMatchingTest extends AbstractServiceTest {
                 .findFirst().orElseThrow();
             assertNotEquals(collision.getFieldKey(), created.getFieldKey());
             assertEquals("Separate value", values.get(created.getId()));
+            authenticateReplayActor();
             assertEquals(0, commit(request, importService.previewPersons(request)).getUpdated());
         }
     }
@@ -369,6 +377,7 @@ class ImportIdentityMatchingTest extends AbstractServiceTest {
         assertEquals(2, definitions.size());
         assertNotEquals(definitions.getFirst().getFieldKey(), definitions.getLast().getFieldKey());
         assertTrue(definitions.stream().allMatch(def -> def.getFieldKey().length() == 64));
+        authenticateReplayActor();
         assertEquals(0, commit(request, importService.previewPersons(request)).getUpdated());
         assertEquals(2, definitionMapper.getByEntityType(workspace.getId(), "person").size());
     }
@@ -404,12 +413,25 @@ class ImportIdentityMatchingTest extends AbstractServiceTest {
             .filter(def -> "A B".equals(def.getLabel())).findFirst().orElseThrow();
         alternative.setLabel("Unrelated field");
         definitionMapper.update(alternative);
+        authenticateReplayActor();
 
         BadRequestException exception = assertThrows(BadRequestException.class,
             () -> importService.previewPersons(request));
 
         assertTrue(exception.getMessage().contains("choose a different label or map to an existing field"));
         assertEquals(2, definitionMapper.getByEntityType(workspace.getId(), "person").size());
+    }
+
+    /**
+     * Changes importer for an identical replay inside the rolled-back test transaction, whose
+     * previous commit admission remains active until rollback. Same-importer committed cycles are
+     * exercised by {@link ImportPersistenceReplayTest}.
+     */
+    private void authenticateReplayActor() {
+        User importer = newUser();
+        workspaceMapper.updateMemberRole(workspace.getId(), importer.getId(), "owner");
+        authenticateAs(importer, workspace.getId());
+        approveForStepUp(importer);
     }
 
     private CustomFieldDefinition definition(String key, String label, String type, boolean archived, int workspaceId) {
