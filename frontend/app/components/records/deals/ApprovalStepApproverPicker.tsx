@@ -157,10 +157,10 @@ export default function ApprovalStepApproverPicker({
                                 </ComboboxValue>
                             </ComboboxChips>
                             <ComboboxContent anchor={memberAnchor} className="pointer-events-auto">
+                                <ComboboxEmpty>{t(members.length === 0
+                                    ? 'approvalCandidatesEmpty' : 'approvalCandidatesNoMatches')}</ComboboxEmpty>
                                 <ComboboxList>
-                                    <ComboboxEmpty>{t(members.length === 0
-                                        ? 'approvalCandidatesEmpty' : 'approvalCandidatesNoMatches')}</ComboboxEmpty>
-                                    {members.map((member) => (
+                                    {(member: (typeof members)[number]) => (
                                         <ComboboxItem
                                             key={member.id}
                                             value={member}
@@ -175,7 +175,7 @@ export default function ApprovalStepApproverPicker({
                                                 </span>
                                             </span>
                                         </ComboboxItem>
-                                    ))}
+                                    )}
                                 </ComboboxList>
                             </ComboboxContent>
                         </Combobox>

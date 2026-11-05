@@ -179,13 +179,13 @@ export default function ChangeCompanyDialog({ open, onOpenChange, contacts, onSu
                                     </InputGroupAddon>
                                 </ComboboxInput>
                                 <ComboboxContent className="pointer-events-auto">
+                                    <ComboboxEmpty>{t('noCompaniesFound')}</ComboboxEmpty>
                                     <ComboboxList onWheel={handleListWheel}>
-                                        <ComboboxEmpty>{t('noCompaniesFound')}</ComboboxEmpty>
-                                        {companySearch.companies.map((company) => (
+                                        {(company: (typeof companySearch.companies)[number]) => (
                                             <ComboboxItem key={company.id} value={company}>
                                                 {company.name}
                                             </ComboboxItem>
-                                        ))}
+                                        )}
                                     </ComboboxList>
                                 </ComboboxContent>
                             </Combobox>

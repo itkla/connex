@@ -208,8 +208,8 @@ export default function NewContactDialog({
                     requestInit={requestInit}
                 />
             </ResponsiveDialogContent>
+            <ConfirmDiscardDialog open={guard.confirm.open} onKeepEditing={guard.confirm.onKeepEditing} onDiscard={guard.confirm.onDiscard} />
         </ResponsiveDialog>
-        <ConfirmDiscardDialog open={guard.confirm.open} onKeepEditing={guard.confirm.onKeepEditing} onDiscard={guard.confirm.onDiscard} />
         </>
     );
 }
@@ -1081,7 +1081,6 @@ function ContactDetailsFields({
                 <Combobox
                     items={companySearch.companies}
                     disabled={disabled}
-                    filter={null}
                     itemToStringLabel={(company: Company) => company.name}
                     value={resolvedCompany}
                     onInputValueChange={companySearch.onInputValueChange}
@@ -1098,13 +1097,13 @@ function ContactDetailsFields({
                         </InputGroupAddon>
                     </ComboboxInput>
                     <ComboboxContent className="pointer-events-auto">
+                        <ComboboxEmpty>{t('noCompaniesFound')}</ComboboxEmpty>
                         <ComboboxList onWheel={onListWheel}>
-                            <ComboboxEmpty>{t('noCompaniesFound')}</ComboboxEmpty>
-                            {companySearch.companies.map((company) => (
+                            {(company: (typeof companySearch.companies)[number]) => (
                                 <ComboboxItem key={company.id} value={company}>
                                     {company.name}
                                 </ComboboxItem>
-                            ))}
+                            )}
                         </ComboboxList>
                     </ComboboxContent>
                 </Combobox>

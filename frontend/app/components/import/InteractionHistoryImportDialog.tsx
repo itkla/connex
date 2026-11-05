@@ -974,11 +974,11 @@ function ContactLinker({
             <ComboboxContent className="w-56 min-w-56">
                 <ComboboxEmpty className="justify-start px-2 py-2 text-xs">{status}</ComboboxEmpty>
                 <ComboboxList>
-                    {options.map((option) => (
+                    {(option: (typeof options)[number]) => (
                         <ComboboxItem key={option.id} value={option} className="text-xs">
                             {option.label}
                         </ComboboxItem>
-                    ))}
+                    )}
                 </ComboboxList>
             </ComboboxContent>
         </Combobox>

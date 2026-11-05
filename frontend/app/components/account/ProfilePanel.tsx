@@ -1,5 +1,7 @@
 "use client";
 
+import { useTimeZoneSearch } from "@/app/hooks/useTimeZoneSearch";
+
 import {
     type Dispatch,
     type FormEvent,
@@ -280,6 +282,7 @@ function ProfileForm({
     onSubmit,
     onChangeEmail,
 }: ProfileFormProps) {
+    const timeZoneSearch = useTimeZoneSearch(timeZones);
     const t = useTranslations("AccountProfile");
     const { displayName, username, timezone, preferredLocale } = draft;
 
@@ -366,7 +369,7 @@ function ProfileForm({
                                 field: "timezone",
                                 value: value ?? confirmedUser.timezone,
                             })}
-                            itemToStringLabel={(tz: string) => tz}
+                            {...timeZoneSearch}
                         >
                             <ComboboxInput
                                 id="account-timezone"
@@ -374,13 +377,13 @@ function ProfileForm({
                                 className={comboboxInputClass}
                             />
                             <ComboboxContent className="pointer-events-auto">
+                                <ComboboxEmpty>{t("timezoneEmpty")}</ComboboxEmpty>
                                 <ComboboxList>
-                                    <ComboboxEmpty>{t("timezoneEmpty")}</ComboboxEmpty>
-                                    {timeZones.map((tz) => (
+                                    {(tz: (typeof timeZones)[number]) => (
                                         <ComboboxItem key={tz} value={tz}>
-                                            {tz}
+                                            {timeZoneSearch.itemToStringLabel(tz)}
                                         </ComboboxItem>
-                                    ))}
+                                    )}
                                 </ComboboxList>
                             </ComboboxContent>
                         </Combobox>

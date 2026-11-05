@@ -13,7 +13,64 @@ import {
 } from "@/components/ui/input-group"
 import { ChevronDownIcon, XIcon, CheckIcon } from "lucide-react"
 
-const Combobox = ComboboxPrimitive.Root
+const PickerInputContext = React.createContext<React.RefObject<boolean> | null>(null)
+
+/** Highlights matches and bounds rendered results while preserving Base UI's selection and filtering. */
+function Combobox<Value, Multiple extends boolean | undefined = false>(
+  { onInputValueChange, onValueChange, ...props }: ComboboxPrimitive.Root.Props<Value, Multiple>
+) {
+  const pendingInput = React.useRef(false)
+  return (
+    <PickerInputContext.Provider value={pendingInput}>
+      <ComboboxPrimitive.Root
+        autoHighlight
+        limit={100}
+        {...props}
+        onInputValueChange={(value, details) => {
+          if (details.reason === "input-change") pendingInput.current = value.trim() !== ""
+          if (details.reason === "item-press" || value === "") pendingInput.current = false
+          onInputValueChange?.(value, details)
+        }}
+        onValueChange={(value, details) => {
+          pendingInput.current = false
+          onValueChange?.(value, details)
+        }}
+      />
+    </PickerInputContext.Provider>
+  )
+}
+
+function usePickerInput({ onKeyDown, onCompositionStart, onCompositionEnd, ...props }: ComboboxPrimitive.Input.Props) {
+  const composing = React.useRef(false)
+  const pendingInput = React.useContext(PickerInputContext)
+  return {
+    ...props,
+    onCompositionStart(event) {
+      composing.current = true
+      onCompositionStart?.(event)
+    },
+    onCompositionEnd(event) {
+      composing.current = false
+      onCompositionEnd?.(event)
+    },
+    onKeyDown(event) {
+      if (event.key === "Enter") {
+        const isComposing = composing.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229
+        if (isComposing) {
+          event.preventDefault()
+          event.stopPropagation()
+          event.preventBaseUIHandler()
+          return
+        }
+        if (event.currentTarget.getAttribute("aria-expanded") === "true" || pendingInput?.current) {
+          event.preventDefault()
+          if (!event.currentTarget.getAttribute("aria-activedescendant")) event.preventBaseUIHandler()
+        }
+      }
+      onKeyDown?.(event)
+    },
+  } satisfies ComboboxPrimitive.Input.Props
+}
 
 function ComboboxValue({ ...props }: ComboboxPrimitive.Value.Props) {
   return <ComboboxPrimitive.Value data-slot="combobox-value" {...props} />
@@ -60,11 +117,12 @@ function ComboboxInput({
   showTrigger?: boolean
   showClear?: boolean
 }) {
+  const inputProps = usePickerInput(props)
   return (
     <InputGroup className={cn("w-auto", className)}>
       <ComboboxPrimitive.Input
         render={<InputGroupInput disabled={disabled} />}
-        {...props}
+        {...inputProps}
       />
       <InputGroupAddon align="inline-end">
         {showTrigger && (
@@ -120,7 +178,10 @@ function ComboboxContent({
   )
 }
 
-function ComboboxList({ className, ...props }: ComboboxPrimitive.List.Props) {
+/** Requires the collection renderer so static children cannot bypass Base UI's filtered items. */
+function ComboboxList<Value>({ className, ...props }: Omit<ComboboxPrimitive.List.Props, "children"> & {
+  children: (item: Value, index: number) => React.ReactNode
+}) {
   return (
     <ComboboxPrimitive.List
       data-slot="combobox-list"
@@ -269,11 +330,12 @@ function ComboboxChipsInput({
   className,
   ...props
 }: ComboboxPrimitive.Input.Props) {
+  const inputProps = usePickerInput(props)
   return (
     <ComboboxPrimitive.Input
       data-slot="combobox-chip-input"
       className={cn("min-w-16 flex-1 outline-none", className)}
-      {...props}
+      {...inputProps}
     />
   )
 }

@@ -1,4 +1,7 @@
 {
+  "UI": {
+    "close": "Close"
+  },
   "AppMetadata": {
     "title": "Connex",
     "description": "Connex keeps companies, contacts, deals, and follow-ups in one workspace your whole team can work from."

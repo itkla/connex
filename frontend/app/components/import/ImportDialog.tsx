@@ -1077,7 +1077,7 @@ function RowLinker({
                     </p>
                 )}
                 <ComboboxList>
-                    {options.map((item) => (
+                    {(item: (typeof options)[number]) => (
                         <ComboboxItem
                             key={item.id}
                             value={item}
@@ -1092,7 +1092,7 @@ function RowLinker({
                                 <span className="truncate">{item.label}</span>
                             )}
                         </ComboboxItem>
-                    ))}
+                    )}
                 </ComboboxList>
             </ComboboxContent>
         </Combobox>

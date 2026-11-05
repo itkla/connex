@@ -198,15 +198,15 @@ export default function ActivityDialog({
                         onClose={() => onOpenChange(false)}
                     />
                 </ResponsiveDialogContent>
+                <ConfirmDiscardDialog
+                    open={guard.confirm.open}
+                    onKeepEditing={guard.confirm.onKeepEditing}
+                    onDiscard={() => {
+                        draft.clear();
+                        guard.confirm.onDiscard();
+                    }}
+                />
             </ResponsiveDialog>
-            <ConfirmDiscardDialog
-                open={guard.confirm.open}
-                onKeepEditing={guard.confirm.onKeepEditing}
-                onDiscard={() => {
-                    draft.clear();
-                    guard.confirm.onDiscard();
-                }}
-            />
         </>
     );
 }
@@ -540,13 +540,13 @@ export function ActivityDialogForm({
                                     </InputGroupAddon>
                                 </ComboboxInput>
                                 <ComboboxContent className="pointer-events-auto">
+                                    <ComboboxEmpty>{personEmptyMessage ?? t('noPersonFound')}</ComboboxEmpty>
                                     <ComboboxList onWheel={handleListWheel}>
-                                        <ComboboxEmpty>{personEmptyMessage ?? t('noPersonFound')}</ComboboxEmpty>
-                                        {persons.map((p) => (
+                                        {(p: (typeof persons)[number]) => (
                                             <ComboboxItem key={p.id} value={p}>
                                                 {p.name}
                                             </ComboboxItem>
-                                        ))}
+                                        )}
                                     </ComboboxList>
                                 </ComboboxContent>
                             </Combobox>
@@ -574,13 +574,13 @@ export function ActivityDialogForm({
                                     </InputGroupAddon>
                                 </ComboboxInput>
                                 <ComboboxContent className="pointer-events-auto">
+                                    <ComboboxEmpty>{dealEmptyMessage ?? t('noDealFound')}</ComboboxEmpty>
                                     <ComboboxList onWheel={handleListWheel}>
-                                        <ComboboxEmpty>{dealEmptyMessage ?? t('noDealFound')}</ComboboxEmpty>
-                                        {deals.map((d) => (
+                                        {(d: (typeof deals)[number]) => (
                                             <ComboboxItem key={d.id} value={d}>
                                                 {d.name}
                                             </ComboboxItem>
-                                        ))}
+                                        )}
                                     </ComboboxList>
                                 </ComboboxContent>
                             </Combobox>

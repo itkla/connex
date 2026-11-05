@@ -285,15 +285,15 @@ function ScopedNoteDialog({
                         />
                     </div>
                 </DrawerContent>
+                <ConfirmDiscardDialog
+                    open={guard.confirm.open}
+                    onKeepEditing={guard.confirm.onKeepEditing}
+                    onDiscard={() => {
+                        if (isCreate) draft.clear();
+                        guard.confirm.onDiscard();
+                    }}
+                />
             </Drawer>
-            <ConfirmDiscardDialog
-                open={guard.confirm.open}
-                onKeepEditing={guard.confirm.onKeepEditing}
-                onDiscard={() => {
-                    if (isCreate) draft.clear();
-                    guard.confirm.onDiscard();
-                }}
-            />
         </>
     );
 }
@@ -403,11 +403,11 @@ function NoteLinkFields({
                         </InputGroupAddon>
                     </ComboboxInput>
                     <ComboboxContent className="pointer-events-auto">
+                        <ComboboxEmpty>{personOptionsLoading ? t('searching') : t('noPersonFound')}</ComboboxEmpty>
                         <ComboboxList onWheel={handleListWheel}>
-                            <ComboboxEmpty>{personOptionsLoading ? t('searching') : t('noPersonFound')}</ComboboxEmpty>
-                            {filteredPersons.map((person) => (
+                            {(person: (typeof filteredPersons)[number]) => (
                                 <ComboboxItem key={person.id} value={person}>{person.name}</ComboboxItem>
-                            ))}
+                            )}
                         </ComboboxList>
                     </ComboboxContent>
                 </Combobox>
@@ -436,11 +436,11 @@ function NoteLinkFields({
                         </InputGroupAddon>
                     </ComboboxInput>
                     <ComboboxContent className="pointer-events-auto">
+                        <ComboboxEmpty>{dealOptionsLoading ? t('searching') : t('noDealFound')}</ComboboxEmpty>
                         <ComboboxList onWheel={handleListWheel}>
-                            <ComboboxEmpty>{dealOptionsLoading ? t('searching') : t('noDealFound')}</ComboboxEmpty>
-                            {filteredDeals.map((deal) => (
+                            {(deal: (typeof filteredDeals)[number]) => (
                                 <ComboboxItem key={deal.id} value={deal}>{deal.name}</ComboboxItem>
-                            ))}
+                            )}
                         </ComboboxList>
                     </ComboboxContent>
                 </Combobox>

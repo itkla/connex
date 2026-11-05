@@ -76,9 +76,9 @@ export default function RecordSelect({
                 className={className}
             />
             <ComboboxContent className="pointer-events-auto">
+                <ComboboxEmpty>{emptyLabel ?? placeholder}</ComboboxEmpty>
                 <ComboboxList>
-                    <ComboboxEmpty>{emptyLabel ?? placeholder}</ComboboxEmpty>
-                    {items.map((item) => (
+                    {(item: (typeof items)[number]) => (
                         <ComboboxItem key={item.id} value={item}>
                             {!item.isNone ? (
                                 <Avatar>
@@ -90,7 +90,7 @@ export default function RecordSelect({
                             ) : null}
                             {item.label}
                         </ComboboxItem>
-                    ))}
+                    )}
                 </ComboboxList>
             </ComboboxContent>
         </Combobox>

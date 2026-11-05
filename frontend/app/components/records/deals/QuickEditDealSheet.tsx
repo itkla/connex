@@ -200,13 +200,13 @@ export default function QuickEditDealSheet({
                                 >
                                     <ComboboxInput id={`deal-pipeline-${d.id}`} placeholder={t('selectPipeline')} />
                                     <ComboboxContent className="pointer-events-auto">
+                                        <ComboboxEmpty>{t('noPipelines')}</ComboboxEmpty>
                                         <ComboboxList onWheel={handleListWheel}>
-                                            <ComboboxEmpty>{t('noPipelines')}</ComboboxEmpty>
-                                            {pipelines.map((p) => (
+                                            {(p: (typeof pipelines)[number]) => (
                                                 <ComboboxItem key={p.id} value={p}>
                                                     {p.name}
                                                 </ComboboxItem>
-                                            ))}
+                                            )}
                                         </ComboboxList>
                                     </ComboboxContent>
                                 </Combobox>
@@ -238,13 +238,13 @@ export default function QuickEditDealSheet({
                                         disabled={!draft.pipeline}
                                     />
                                     <ComboboxContent className="pointer-events-auto">
+                                        <ComboboxEmpty>{t('noStages')}</ComboboxEmpty>
                                         <ComboboxList onWheel={handleListWheel}>
-                                            <ComboboxEmpty>{t('noStages')}</ComboboxEmpty>
-                                            {stages.map((s) => (
+                                            {(s: (typeof stages)[number]) => (
                                                 <ComboboxItem key={s.id} value={s}>
                                                     {s.name}
                                                 </ComboboxItem>
-                                            ))}
+                                            )}
                                         </ComboboxList>
                                     </ComboboxContent>
                                 </Combobox>
@@ -262,13 +262,13 @@ export default function QuickEditDealSheet({
                             >
                                 <ComboboxInput id={`deal-company-${d.id}`} placeholder={t('selectCompany')} showClear />
                                 <ComboboxContent className="pointer-events-auto">
+                                    <ComboboxEmpty>{t('noCompanies')}</ComboboxEmpty>
                                     <ComboboxList onWheel={handleListWheel}>
-                                        <ComboboxEmpty>{t('noCompanies')}</ComboboxEmpty>
-                                        {companySearch.companies.map((c) => (
+                                        {(c: (typeof companySearch.companies)[number]) => (
                                             <ComboboxItem key={c.id} value={c}>
                                                 {c.name}
                                             </ComboboxItem>
-                                        ))}
+                                        )}
                                     </ComboboxList>
                                 </ComboboxContent>
                             </Combobox>
