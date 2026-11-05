@@ -2091,8 +2091,8 @@ function ConversationSurface({
                                 <MessageScrollerItem messageId="empty">
                                     <EmptyState
                                         icon={SparklesIcon}
-                                        title={labels.emptyTitle}
-                                        body={labels.emptyBody}
+                                        title={unavailable?.title ?? labels.emptyTitle}
+                                        body={unavailable?.body ?? labels.emptyBody}
                                         tone="brand"
                                         className="border-0 bg-transparent px-4 py-12"
                                         action={(
@@ -2102,7 +2102,7 @@ function ConversationSurface({
                                                     workspace ? 'max-w-xl' : 'max-w-sm',
                                                 )}
                                             >
-                                                {jobs.map((job) => (
+                                                {(unavailable ? [] : jobs).map((job) => (
                                                     <Button
                                                         key={job.id}
                                                         type="button"
@@ -2113,9 +2113,9 @@ function ConversationSurface({
                                                         {job.label}
                                                     </Button>
                                                 ))}
-                                                <p className="pt-3 text-xs leading-relaxed text-muted-foreground">
+                                                {!unavailable ? <p className="pt-3 text-xs leading-relaxed text-muted-foreground">
                                                     {labels.disclosureCreation}
-                                                </p>
+                                                </p> : null}
                                                 {workspace ? (
                                                     <>
                                                         <Separator className="my-4" />

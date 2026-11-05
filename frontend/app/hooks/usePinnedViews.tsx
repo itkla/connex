@@ -5,6 +5,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { SavedView } from "@/app/lib/types";
 import { getSavedViewPins } from "@/app/lib/api";
 import { subscribeToSavedViewMutations } from "@/app/lib/saved-view-events";
+import { usePrivilegedMfaConfinement } from "@/app/hooks/usePrivilegedMfaConfinement";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 
 type PinnedViewsContextValue = {
@@ -27,7 +28,9 @@ const EMPTY_PINS: SavedView[] = [];
  * navigation actions from the same data.
  */
 export function PinnedViewsProvider({ children }: { children: ReactNode }) {
-    const { activeWorkspaceId } = useWorkspace();
+    const { activeWorkspaceId, switching } = useWorkspace();
+    const confined = usePrivilegedMfaConfinement();
+    const enabled = !confined && !switching && activeWorkspaceId !== null;
     const [state, setState] = useState<{
         workspaceId: number | null;
         pins: SavedView[];
@@ -37,6 +40,7 @@ export function PinnedViewsProvider({ children }: { children: ReactNode }) {
 
     const load = useCallback((): Promise<void> => {
         const generation = ++loadGenerationRef.current;
+        if (!enabled) return Promise.resolve();
         return getSavedViewPins().then((views) => {
             if (loadGenerationRef.current !== generation) return;
             setState({ workspaceId: activeWorkspaceId, pins: views, status: "ready" });
@@ -48,7 +52,7 @@ export function PinnedViewsProvider({ children }: { children: ReactNode }) {
                 status: "unavailable",
             }));
         });
-    }, [activeWorkspaceId]);
+    }, [activeWorkspaceId, enabled]);
 
     useEffect(() => {
         void load();
@@ -57,8 +61,8 @@ export function PinnedViewsProvider({ children }: { children: ReactNode }) {
 
     useEffect(() => subscribeToSavedViewMutations(() => { void load(); }), [load]);
 
-    const pins = state.workspaceId === activeWorkspaceId ? state.pins : EMPTY_PINS;
-    const status = state.workspaceId === activeWorkspaceId ? state.status : "loading";
+    const pins = enabled && state.workspaceId === activeWorkspaceId ? state.pins : EMPTY_PINS;
+    const status = !enabled ? "ready" : state.workspaceId === activeWorkspaceId ? state.status : "loading";
     const value = useMemo<PinnedViewsContextValue>(
         () => ({ pins, status, reload: load }),
         [pins, status, load],

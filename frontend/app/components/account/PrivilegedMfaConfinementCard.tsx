@@ -76,17 +76,21 @@ export default function PrivilegedMfaConfinementCard({
     const passkeyName = (label: string | null) => label ?? t("approvalUnnamedPasskey");
     const organizations = (names: string[]) => format.list(names, { type: "conjunction" });
     const targets: ConfinementExitTarget[] = (requirements?.privilegedMemberships ?? []).flatMap((membership) => [
-        ...(membership.orgRole !== null
+        ...(membership.orgRole !== null && membership.lastOwner !== true
             ? [{ kind: "organization" as const, orgId: membership.orgId, name: membership.orgName }]
             : []),
         ...(canLeaveWorkspaces
-            ? membership.workspaces.map((workspace) => ({
+            ? membership.workspaces.filter((workspace) => workspace.lastOwner !== true).map((workspace) => ({
                 kind: "workspace" as const,
                 workspaceId: workspace.workspaceId,
                 name: workspace.workspaceName,
             }))
             : []),
     ]);
+
+    const lastWorkspaceOwner = requirements?.privilegedMemberships?.some((membership) =>
+        membership.workspaces.some((workspace) => workspace.lastOwner === true)) ?? false;
+    const lastOrganizationOwner = requirements?.privilegedMemberships?.some((membership) => membership.lastOwner === true) ?? false;
 
     const confirmLeave = async () => {
         if (!confirming) return;
@@ -139,6 +143,12 @@ export default function PrivilegedMfaConfinementCard({
             )}
 
             {action && <div className="mt-3 flex flex-wrap items-center gap-2">{action}</div>}
+
+            {(lastWorkspaceOwner || lastOrganizationOwner) && (
+                <p className="mt-3 max-w-prose text-sm text-muted-foreground">
+                    {t(lastWorkspaceOwner ? "exitRefusedWorkspaceLastOwner" : "exitRefusedOrgLastOwner")}
+                </p>
+            )}
 
             {targets.length > 0 && (
                 <div className="mt-4 border-t border-warning/30 pt-3">

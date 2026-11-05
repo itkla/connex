@@ -216,7 +216,7 @@ class WebAuthnControllerTest {
         when(privilegedAccountService.enforcedStanding(7)).thenReturn(PrivilegedMfaStanding.ATTESTATION_REQUIRED);
         when(privilegedAccountService.passkeyApprovalGaps(7)).thenReturn(gaps);
         var memberships = List.of(new ooo.klae.connex.backend.dto.PrivilegedMembershipDto(
-            3, "Acme", "admin", List.of()));
+            3, "Acme", "admin", false, List.of()));
         when(privilegedAccountService.privilegedMemberships(7)).thenReturn(memberships);
 
         PasskeyRegistrationRequirementsDto requirements =

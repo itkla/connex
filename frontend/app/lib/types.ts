@@ -876,7 +876,8 @@ export type PrivilegedMembership = {
     orgId: number;
     orgName: string;
     orgRole: OrgRole | null;
-    workspaces: Array<{ workspaceId: number; workspaceName: string }>;
+    lastOwner?: boolean;
+    workspaces: Array<{ workspaceId: number; workspaceName: string; lastOwner?: boolean }>;
 };
 
 export type PasskeyRegistrationRequirements = {
@@ -6284,6 +6285,8 @@ export type AiWatchPayload = {
 
 /** Everything the Ask Connex command centre renders, in one authorized read. */
 export type AiCommandCenter = {
+    /** Full ASSISTANT_CHAT readiness, independent of the brief skill catalog. */
+    chatAvailable: boolean;
     schedule: AiBriefSchedule;
     latestBriefSessionId: number | null;
     latestBriefKind: AiBriefKind | null;

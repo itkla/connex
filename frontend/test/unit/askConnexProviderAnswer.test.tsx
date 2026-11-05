@@ -56,6 +56,14 @@ vi.mock('@/app/lib/realtime', () => ({
 }));
 vi.mock('@/app/lib/api', async (importOriginal) => ({
     ...await importOriginal<typeof import('@/app/lib/api')>(),
+    getAiCommandCenter: vi.fn().mockResolvedValue({
+        chatAvailable: true, watchesAvailable: true, briefSkillAvailable: true, watches: [], watchLimit: 20,
+        latestBriefSessionId: null, latestBriefKind: null, latestBriefDeliveredAt: null,
+        schedule: {
+            timeZone: 'UTC', dailyEnabled: false, dailyHour: 8, weeklyEnabled: false, weeklyWeekday: 1,
+            weeklyHour: 8, pendingKind: null, lastDeliveredAt: null, lastFailureAt: null, lastFailureReason: null,
+        },
+    }),
     getAiChatSessions: vi.fn().mockResolvedValue({ items: [], total: 0 }),
     getAiChatInvitations: vi.fn().mockResolvedValue({ items: [], total: 0 }),
     getAiChatAttachments: vi.fn().mockResolvedValue([]),

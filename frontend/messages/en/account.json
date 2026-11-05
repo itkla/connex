@@ -104,8 +104,8 @@
         "approvalUnnamedPasskey": "an unlisted passkey",
         "exitsTitle": "Or leave what gives you administrator access",
         "exitsDescription": "Leaving ends your administrator access there. To come back, someone will need to invite you again.",
-        "exitLeaveOrganization": "Leave {name}",
-        "exitLeaveWorkspace": "Leave {name}",
+        "exitLeaveOrganization": "Leave organization: {name}",
+        "exitLeaveWorkspace": "Leave workspace: {name}",
         "exitConfirmTitle": "Leave {name}?",
         "exitConfirmOrganization": "You'll lose your role in this organization. Your workspace memberships stay as they are.",
         "exitConfirm": "Leave",
@@ -121,7 +121,8 @@
         "addedRefreshFailed": "Couldn't update the page",
         "approvalRefreshFailedDescription": "Your passkey was approved, but this page may not show it yet. Check again in a moment.",
         "exitRefreshFailedDescription": "You've left, but this page may still show your earlier access. Check again in a moment.",
-        "addedRefreshFailedDescription": "Your passkey was added, but this page may not show it yet. Check again in a moment."
+        "addedRefreshFailedDescription": "Your passkey was added, but this page may not show it yet. Check again in a moment.",
+        "returnToSecurity": "Finish securing your account"
     },
     "AccountConnections": {
         "title": "Connected accounts",

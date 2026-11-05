@@ -30,6 +30,10 @@ vi.mock("@/app/hooks/useIsMobile", () => ({ useIsMobile: () => false }));
 vi.mock("@/app/hooks/useNow", () => ({ useLiveNow: () => Date.parse("2026-10-19T12:00:00Z"), useNow: () => Date.parse("2026-10-19T12:00:00Z") }));
 vi.mock("@/app/hooks/useAccountStorageGeneration", () => ({ useAccountStorageGeneration: () => boundary.canPersist }));
 vi.mock("@/app/lib/realtime", () => ({ createAiChatSocket: () => ({ activate: boundary.noop, deactivate: boundary.noop }) }));
+vi.mock("@/app/lib/api", async (importOriginal) => ({
+    ...await importOriginal<typeof import("@/app/lib/api")>(),
+    getAiCommandCenter: vi.fn().mockResolvedValue({ chatAvailable: true, watchesAvailable: true }),
+}));
 vi.mock("@/app/lib/toast", () => ({ toastError: vi.fn(), toastInfo: vi.fn(), toastSuccess: vi.fn(), toastDismiss: vi.fn() }));
 vi.mock("@/app/lib/managed-image", async (importOriginal) => ({ ...await importOriginal<typeof import("@/app/lib/managed-image")>(), isInlineManagedImageFile: vi.fn(async () => true) }));
 vi.mock("@/app/components/activity/notes/MentionEditor", () => ({ default: ({ value, onChange }: { value: string; onChange: (value: string) => void }) => <textarea value={value} onChange={(event) => onChange(event.target.value)} /> }));

@@ -104,6 +104,20 @@ describe("privileged MFA confinement in the browser", () => {
         vi.clearAllMocks();
     });
 
+    it("keeps a known setup step confined when navigation beats the first standing response", async () => {
+        const { location } = stubBrowser(SECURITY, "?mfa=enroll");
+        const requests = stubBackend((url) => url.endsWith(REQUIREMENTS) ? requirements("SATISFIED") : null);
+        const api = await import("@/app/lib/api");
+        api.observePrivilegedMfaConfinementDestination();
+        location.pathname = "/records/contacts";
+        location.search = "";
+        expect(api.privilegedMfaConfinementReason()).toBe("enrollment");
+        await expect(api.getSavedViewPins()).rejects.toMatchObject({ code: ENROLLMENT });
+        expect(requests).toHaveLength(0);
+        await api.settlePrivilegedMfaStanding("check");
+        expect(api.privilegedMfaConfinementReason()).toBeNull();
+    });
+
     it("confines on an approval refusal, routes to the approval step and raises later refusals itself", async () => {
         const { location } = stubBrowser("/dashboard");
         const requests = stubBackend((url) => {

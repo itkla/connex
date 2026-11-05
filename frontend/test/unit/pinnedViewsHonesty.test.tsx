@@ -5,12 +5,16 @@ import { PinnedViewsProvider, usePinnedViews } from '@/app/hooks/usePinnedViews'
 import { installInteractiveDocument } from '@/test/unit/helpers/interactiveDocument';
 
 const { activeWorkspace, getSavedViewPins } = vi.hoisted(() => ({
-    activeWorkspace: { current: 7 },
+    activeWorkspace: { current: 7, confined: false },
     getSavedViewPins: vi.fn<() => Promise<unknown[]>>(),
 }));
 
 vi.mock('@/app/hooks/useWorkspace', () => ({
     useWorkspace: () => ({ activeWorkspaceId: activeWorkspace.current }),
+}));
+
+vi.mock('@/app/hooks/usePrivilegedMfaConfinement', () => ({
+    usePrivilegedMfaConfinement: () => activeWorkspace.confined,
 }));
 
 vi.mock('@/app/lib/api', () => ({
@@ -79,6 +83,7 @@ function pin(id: number, workspaceId: number): { id: number; workspaceId: number
 
 beforeEach(() => {
     activeWorkspace.current = 7;
+    activeWorkspace.confined = false;
     getSavedViewPins.mockReset();
 });
 
@@ -88,6 +93,21 @@ afterEach(async () => {
 });
 
 describe('pinned-view load honesty', () => {
+    it('skips a confined sole owner and reloads automatically when the passkey step is complete', async () => {
+        activeWorkspace.confined = true;
+        const mounted = await mountProvider();
+        expect(getSavedViewPins).not.toHaveBeenCalled();
+        expect(mounted.current().status).toBe('ready');
+        await act(async () => mounted.current().reload());
+        expect(getSavedViewPins).not.toHaveBeenCalled();
+        getSavedViewPins.mockResolvedValueOnce([pin(12, 7)]);
+        activeWorkspace.confined = false;
+        await mounted.rerender();
+        expect(getSavedViewPins).toHaveBeenCalledOnce();
+        expect(mounted.current().status).toBe('ready');
+        expect(mounted.current().pins).toEqual([pin(12, 7)]);
+    });
+
     it('surfaces a failed load and lets retry replace it with a ready result', async () => {
         const failedRead = deferred<unknown[]>();
         getSavedViewPins.mockReturnValueOnce(failedRead.promise.then(() => {

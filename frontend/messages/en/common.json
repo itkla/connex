@@ -966,9 +966,15 @@
       "lookupTitle": "Permission status unavailable",
       "lookupBody": "Connex could not confirm whether your role can use the assistant. Try again after permissions reload.",
       "featureTitle": "Ask Connex is unavailable",
-      "featureBody": "The assistant can't be used in this workspace right now. Ask a workspace admin if you need access.",
+      "featureBody": "AI is switched off or hasn't been set up for this workspace. Organization administrators can review AI & data governance in Settings.",
       "uncertainTitle": "We're not sure this answer went through",
-      "uncertainBody": "Connex didn't get a clear response back, so sending again is blocked to avoid a duplicate. Start a new chat or refresh this one."
+      "uncertainBody": "Connex didn't get a clear response back, so sending again is blocked to avoid a duplicate. Start a new chat or refresh this one.",
+      "checkingTitle": "Checking Ask Connex availability",
+      "checkingBody": "Please wait while Connex checks whether the assistant can be used here.",
+      "setupTitle": "Finish securing your account",
+      "setupBody": "Complete the passkey step in Settings → Security before using Ask Connex.",
+      "checkFailedTitle": "Couldn't check Ask Connex availability",
+      "checkFailedBody": "Try loading the chat again, or return to this tab in a moment."
     },
     "toast": {
       "archived": "Chat archived",

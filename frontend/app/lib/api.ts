@@ -1,3 +1,4 @@
+import { publishAiAvailabilityChange } from "@/app/lib/aiAvailabilityEvents";
 const API_BASE =
     typeof window === "undefined"
         ? process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080"
@@ -687,6 +688,15 @@ export function privilegedMfaConfinementReason(): PrivilegedMfaConfinementReason
     return activePrivilegedMfaConfinement();
 }
 
+/** Keeps a step URL's known confinement across navigation until a decisive standing releases it. */
+export function observePrivilegedMfaConfinementDestination(): void {
+    if (privilegedMfaConfinement !== null || privilegedMfaConfinementReleased) return;
+    const reason = privilegedMfaDestinationReason();
+    if (reason === null) return;
+    confinePrivilegedMfa(reason);
+    notifyPrivilegedMfaListeners();
+}
+
 /**
  * Whether privileged-MFA confinement is in force, for a route the caller observed rather than the
  * one `window.location` currently holds.
@@ -801,10 +811,12 @@ function isPrivilegedMembership(value: unknown): value is Types.PrivilegedMember
         && "orgId" in value && isPositiveId(value.orgId)
         && "orgName" in value && typeof value.orgName === "string"
         && "orgRole" in value && (value.orgRole === null || value.orgRole === "owner" || value.orgRole === "admin")
+        && (!("lastOwner" in value) || typeof value.lastOwner === "boolean")
         && "workspaces" in value && Array.isArray(value.workspaces)
         && value.workspaces.every((workspace: unknown) =>
             typeof workspace === "object" && workspace !== null
             && "workspaceId" in workspace && isPositiveId(workspace.workspaceId)
+            && (!("lastOwner" in workspace) || typeof workspace.lastOwner === "boolean")
             && "workspaceName" in workspace && typeof workspace.workspaceName === "string");
 }
 
@@ -4396,11 +4408,16 @@ export function getAiProviderConfig(workspaceId: number, init: RequestInit = {})
 }
 
 export function saveAiProviderConfig(workspaceId: number, request: Types.AiProviderConfigRequest) {
-    return putJson<Types.AiProviderConfig>(`/api/ai/provider?workspaceId=${workspaceId}`, request);
+    return putJson<Types.AiProviderConfig>(`/api/ai/provider?workspaceId=${workspaceId}`, request).then((result) => {
+        publishAiAvailabilityChange();
+        return result;
+    });
 }
 
 export function revokeAiProviderConfig(workspaceId: number) {
-    return deleteJson<void>(`/api/ai/provider?workspaceId=${workspaceId}`);
+    return deleteJson<void>(`/api/ai/provider?workspaceId=${workspaceId}`).then(() => {
+        publishAiAvailabilityChange();
+    });
 }
 
 export function createDeal(payload: Types.CreateDealPayload, init: RequestInit = {}) {
@@ -6515,7 +6532,10 @@ export function saveAiWorkspaceGovernance(
         `/api/ai/governance?workspaceId=${workspaceId}`,
         governance,
         init,
-    );
+    ).then((result) => {
+        publishAiAvailabilityChange();
+        return result;
+    });
 }
 
 export function getAiChatInvitations(

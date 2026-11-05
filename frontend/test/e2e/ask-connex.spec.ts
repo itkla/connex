@@ -55,6 +55,15 @@ async function openDrawer(page: Page, locale: "en" | "ja" = "en") {
 }
 
 test.describe("Ask Connex dual surface", () => {
+    test.beforeEach(async ({ page }) => {
+        await page.route("**/api/ai/assistant/command-center", async (route) => {
+            const response = await route.fetch();
+            const body: unknown = await response.json();
+            if (typeof body !== "object" || body === null || Array.isArray(body)) throw new Error("Expected assistant readiness");
+            await route.fulfill({ response, json: { ...body, chatAvailable: true } });
+        });
+    });
+
     test("the workspace route is protected and returns the visitor after signing in", async ({ browser }, testInfo) => {
         const baseURL = testInfo.project.use.baseURL;
         if (typeof baseURL !== "string") throw new Error("The E2E project requires a base URL");

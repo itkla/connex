@@ -756,13 +756,23 @@ re-reads it after each ceremony, and releases confinement only on `SATISFIED` or
 
 The same self-only response always includes `privilegedMemberships` (#1534 slice 4b-1),
 independent of both enforcement switches. An unprivileged account receives `[]`. Each entry is
-`{orgId, orgName, orgRole, workspaces:[{workspaceId, workspaceName}]}`. `orgRole` is explicitly
+`{orgId, orgName, orgRole, lastOwner, workspaces:[{workspaceId, workspaceName, lastOwner}]}`. `orgRole` is explicitly
 `null` without an organization membership. Entries and workspaces are ordered by id. Sources are
 exactly the shared standing privilege branches: active organizations, active workspaces and active
 workspace memberships; built-in owner/admin only when `role_id IS NULL`; custom roles with the
 management permission list above; and organization authority from `org_member`. Permission joins
 are deduplicated, so each workspace appears once. Only the signed-in account's memberships are
 returned, including custom-role workspace exits and org-only privilege with no workspace exits.
+The advisory `lastOwner` flags identify sole organization owners and sole active workspace owners.
+The passkey card hides those impossible leave actions and labels remaining actions by scope;
+locked server leave checks remain authoritative and may still refuse for other safeguards.
+
+The browser shell skips pinned views, assistant reads, and mobile task counts while confinement is
+known. These reads resume when the shared standing releases confinement. Client navigation to other
+app pages shows the required passkey step with a link to Security before mounting page data readers.
+Assistant initialization failures remain inline, so a background refusal cannot produce an unrelated
+global error toast. Explicit user-action refusals still use the shared error toast, with confinement
+codes mapped to the passkey guidance rather than the generic workspace-permission message.
 
 The startup event's inventory also records `attestationRequiredCount`: the privileged accounts
 holding passkeys of which none is sufficient. These are the accounts that enforcement confines.

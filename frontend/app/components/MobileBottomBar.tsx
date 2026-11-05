@@ -17,6 +17,7 @@ import {
 import { cn } from '@/lib/utils';
 import { springJiggle, springSnappy, springSmooth, easeOut, instant } from '@/app/lib/motion';
 import { ApiError, getTaskSummary } from '@/app/lib/api';
+import { usePrivilegedMfaConfinement } from '@/app/hooks/usePrivilegedMfaConfinement';
 import { useIsMobile } from '@/app/hooks/useIsMobile';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { useAskConnex } from '@/app/components/ask-connex/AskConnexProvider';
@@ -296,6 +297,7 @@ export default function MobileBottomBar({ onOpenMore }: { onOpenMore: () => void
     const t = useTranslations('MobileNav');
     const tAskConnex = useTranslations('AskConnex');
     const askConnex = useAskConnex();
+    const confined = usePrivilegedMfaConfinement();
 
     const barRef = useRef<HTMLDivElement>(null);
     const [displacementMap, setDisplacementMap] = useState('');
@@ -422,14 +424,14 @@ export default function MobileBottomBar({ onOpenMore }: { onOpenMore: () => void
                     onClick={openSearch}
                     reduce={reduce}
                 />
-                <BarButton
+                {askConnex.canAsk ? <BarButton
                     label={tAskConnex('title')}
                     caption={tAskConnex('mobileLabel')}
                     Icon={SparklesIcon}
                     onClick={() => askConnex.openDrawer()}
                     reduce={reduce}
                     working={askConnex.working}
-                />
+                /> : null}
 
                 <motion.button
                     type="button"
@@ -447,7 +449,7 @@ export default function MobileBottomBar({ onOpenMore }: { onOpenMore: () => void
 
                 <TaskBarLink
                     workspaceId={activeWorkspaceId}
-                    enabled={isMobile && !switching}
+                    enabled={isMobile && !switching && !confined}
                     pathname={pathname}
                     label={tNav('navTasks')}
                     active={onTasks}

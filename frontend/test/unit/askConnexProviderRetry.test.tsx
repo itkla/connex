@@ -15,9 +15,11 @@ import {
     getAiChatPresence,
     getAiChatSession,
     getAiChatSessions,
+    getAiCommandCenter,
     getAiChatTurn,
     startAiChatTurn,
 } from '@/app/lib/api';
+import { publishAiAvailabilityChange } from '@/app/lib/aiAvailabilityEvents';
 import { askConnexSessionStorageKey } from '@/app/lib/askConnex';
 import type { AiAssistantToolCall, AiChatMetadataFrame, AiChatSessionDetail, AiChatTurn, AiChatTurnToolCall } from '@/app/lib/types';
 import type { AiChatSocketHandlers } from '@/app/lib/realtime';
@@ -33,6 +35,11 @@ const boundary = vi.hoisted(() => {
     return {
         drawer,
         socket,
+        permission: "granted",
+        confined: false,
+        chatAvailable: true,
+        watchesAvailable: true,
+        refreshAvailability: null as (() => void) | null,
         canPersist: () => true,
         translate: (key: string) => key,
         showApiError: vi.fn(),
@@ -60,8 +67,16 @@ vi.mock('@/app/hooks/useActions', () => ({
 }));
 vi.mock('@/app/hooks/useWorkspace', () => ({ useWorkspace: () => boundary.workspace }));
 vi.mock('@/app/hooks/usePermissions', () => ({
-    usePermissionCheck: (permission: string) => permission === 'AI_USE' ? 'granted' : 'denied',
+    usePermissionCheck: (permission: string) => permission === 'AI_USE' ? boundary.permission : 'denied',
 }));
+vi.mock('@/app/lib/aiAvailabilityEvents', () => ({
+    publishAiAvailabilityChange: () => boundary.refreshAvailability?.(),
+    subscribeAiAvailabilityChange: (listener: () => void) => {
+        boundary.refreshAvailability = listener;
+        return () => { boundary.refreshAvailability = null; };
+    },
+}));
+vi.mock('@/app/hooks/usePrivilegedMfaConfinement', () => ({ usePrivilegedMfaConfinement: () => boundary.confined }));
 vi.mock('@/app/hooks/useAskConnexSkills', () => ({ useAskConnexSkills: () => [] }));
 vi.mock('@/app/hooks/useIsMobile', () => ({ useIsMobile: () => false }));
 vi.mock('@/app/hooks/useNow', () => ({ useLiveNow: () => Date.parse('2026-10-18T12:00:00Z'), useNow: () => Date.parse('2026-10-18T12:00:00Z') }));
@@ -75,6 +90,7 @@ vi.mock('@/app/lib/realtime', () => ({
 }));
 vi.mock('@/app/lib/api', async (importOriginal) => ({
     ...await importOriginal<typeof import('@/app/lib/api')>(),
+    getAiCommandCenter: vi.fn().mockImplementation(async () => ({ chatAvailable: boundary.chatAvailable, watchesAvailable: boundary.watchesAvailable })),
     getAiChatSessions: vi.fn().mockResolvedValue({ items: [], total: 0 }),
     getAiChatInvitations: vi.fn().mockResolvedValue({ items: [], total: 0 }),
     getAiChatAttachments: vi.fn().mockResolvedValue([]),
@@ -213,6 +229,12 @@ function approvableProposal(): AiAssistantToolCall {
 
 describe('the provider guards the Retry callback', () => {
     beforeEach(() => {
+        boundary.socket.current = null;
+        boundary.permission = 'granted';
+        boundary.confined = false;
+        boundary.chatAvailable = true;
+        boundary.watchesAvailable = true;
+        vi.mocked(getAiChatSessions).mockReset().mockResolvedValue({ items: [], total: 0 });
         vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
         boundary.drawer.current = null;
         boundary.socket.current = null;
@@ -234,6 +256,125 @@ describe('the provider guards the Retry callback', () => {
         vi.useRealTimers();
         vi.clearAllMocks();
         vi.unstubAllGlobals();
+    });
+
+    it.each(['member', 'sole owner'] as const)('does not fetch refused background data or toast for a %s', async (persona) => {
+        boundary.permission = persona === 'member' ? 'denied' : 'granted';
+        boundary.confined = persona === 'sole owner';
+        const root = await mountProvider();
+        try {
+            await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+            expect(getAiChatSessions).not.toHaveBeenCalled();
+            expect(getAiChatInvitations).not.toHaveBeenCalled();
+            expect(getAiCommandCenter).not.toHaveBeenCalled();
+            expect(boundary.socket.current).toBeNull();
+            expect(boundary.showApiError).not.toHaveBeenCalled();
+        } finally {
+            await act(async () => root.unmount());
+        }
+    });
+
+    it('explains unavailable AI before accepting a question', async () => {
+        boundary.chatAvailable = false;
+        const root = await mountProvider();
+        try {
+            expect(drawer().unavailable?.title).toBe('unavailable.featureTitle');
+            await act(async () => drawer().onSend(QUESTION));
+            expect(startAiChatTurn).not.toHaveBeenCalled();
+            expect(boundary.showApiError).not.toHaveBeenCalled();
+        } finally {
+            await act(async () => root.unmount());
+        }
+    });
+
+    it('distinguishes a readiness lookup failure from disabled AI', async () => {
+        vi.mocked(getAiCommandCenter).mockRejectedValueOnce(new ApiError('Unavailable', 503));
+        const root = await mountProvider();
+        try {
+            expect(drawer().loadState).toBe('error');
+            expect(drawer().unavailable?.title).toBe('unavailable.checkFailedTitle');
+            expect(boundary.showApiError).not.toHaveBeenCalled();
+        } finally {
+            await act(async () => root.unmount());
+        }
+    });
+
+    it('rechecks availability after a governance change without discarding the draft', async () => {
+        const root = await mountProvider();
+        try {
+            await act(async () => drawer().onComposerChange(QUESTION));
+            boundary.chatAvailable = false;
+            await act(async () => publishAiAvailabilityChange());
+            expect(drawer().unavailable?.title).toBe('unavailable.featureTitle');
+            expect(drawer().composer).toBe(QUESTION);
+        } finally {
+            await act(async () => root.unmount());
+        }
+    });
+
+    it('withholds questions while a configuration change rechecks readiness', async () => {
+        const root = await mountProvider();
+        try {
+            await act(async () => drawer().onComposerChange(QUESTION));
+            vi.mocked(getAiCommandCenter).mockReturnValueOnce(new Promise(() => undefined));
+            await act(async () => publishAiAvailabilityChange());
+            expect(drawer().unavailable?.title).toBe('unavailable.checkingTitle');
+            await act(async () => drawer().onSend());
+            expect(startAiChatTurn).not.toHaveBeenCalled();
+            expect(drawer().composer).toBe(QUESTION);
+        } finally {
+            await act(async () => root.unmount());
+        }
+    });
+
+    it('does not let slow initialization overwrite a newer disabled readiness', async () => {
+        let finishSessions: ((value: { items: never[]; total: number }) => void) | null = null;
+        vi.mocked(getAiChatSessions).mockReturnValueOnce(new Promise((resolve) => { finishSessions = resolve; }));
+        const root = await mountProvider();
+        try {
+            boundary.chatAvailable = false;
+            await act(async () => publishAiAvailabilityChange());
+            expect(drawer().unavailable?.title).toBe('unavailable.featureTitle');
+            await act(async () => {
+                if (!finishSessions) throw new Error('The session read did not start');
+                finishSessions({ items: [], total: 0 });
+            });
+            expect(drawer().unavailable?.title).toBe('unavailable.featureTitle');
+            await act(async () => drawer().onSend(QUESTION));
+            expect(startAiChatTurn).not.toHaveBeenCalled();
+        } finally {
+            await act(async () => root.unmount());
+        }
+    });
+
+    it('keeps an unexpected background refusal inline without a global toast', async () => {
+        vi.mocked(getAiChatSessions).mockRejectedValueOnce(new ApiError('Forbidden', 403, 'FORBIDDEN'));
+        const root = await mountProvider();
+        try {
+            await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+            expect(drawer().loadState).toBe('forbidden');
+            expect(drawer().unavailable).not.toBeNull();
+            expect(boundary.showApiError).not.toHaveBeenCalled();
+        } finally {
+            await act(async () => root.unmount());
+        }
+    });
+
+    it('keeps a user-initiated refusal visible and preserves the question without an internal failure', async () => {
+        const refusal = new ApiError('AI features are not available', 403, 'FORBIDDEN');
+        vi.mocked(startAiChatTurn).mockRejectedValueOnce(refusal);
+        const root = await mountProvider();
+        try {
+            await act(async () => drawer().onComposerChange(QUESTION));
+            await act(async () => drawer().onSend());
+            expect(startAiChatTurn).toHaveBeenCalledOnce();
+            expect(boundary.showApiError).toHaveBeenCalledWith(refusal, 'toast.requestFailed');
+            expect(drawer().composer).toBe(QUESTION);
+            expect(drawer().turn.phase).toBe('idle');
+            expect(drawer().unavailable?.title).toBe('unavailable.featureTitle');
+        } finally {
+            await act(async () => root.unmount());
+        }
     });
 
     const proposedTurn: AiChatTurn = {

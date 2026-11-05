@@ -21,6 +21,13 @@ Ask Connex (`ASSISTANT_CHAT`) additionally requires a model whose context window
 
 Provider credentials remain envelope-encrypted with the existing AI-provider secret purpose. Provider configuration changes remain organization-admin plus recent-authentication/step-up gated.
 
+The member-authorized command-centre read exposes `chatAvailable` from the unchanged full
+`AiFeatureGate.isAiUsable(ASSISTANT_CHAT)` decision so the client can withhold questions before a
+known refusal. This is an availability hint, not admission: starting an answer retains every server
+gate. It is independent of `briefSkillAvailable`, which also requires the brief skill, and
+`watchesAvailable`, which needs governance but no provider. A failed availability read must not be
+displayed as AI being switched off.
+
 ## Invocation choke point
 
 Every model call goes through `AiInvocationService`. Do not call `AiProvider`, a provider client, or a raw HTTP client directly from a feature.
