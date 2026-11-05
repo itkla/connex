@@ -41,7 +41,7 @@ export default function OverviewCard({
             )}
         >
             <div className="flex items-center justify-between">
-                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-light text-brand-dark transition-transform duration-200 group-hover:scale-105">
+                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-light text-brand-text transition-transform duration-200 group-hover:scale-105">
                     <Icon className="size-4" />
                 </span>
                 {href ? (

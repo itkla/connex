@@ -146,7 +146,7 @@ function BarLink({
                 href={href}
                 aria-label={badge != null && badge > 0 && badgeLabel ? `${label}, ${badgeLabel}` : label}
                 aria-current={active ? 'page' : undefined}
-                className={cn(slotBase, active ? 'text-brand-dark dark:text-brand' : 'hover:text-foreground')}
+                className={cn(slotBase, active ? 'text-brand-text dark:text-brand-text' : 'hover:text-foreground')}
             >
                 <AnimatePresence>{active && <ActiveLens key="lens" reduce={reduce} />}</AnimatePresence>
                 <span className={indicatorWrap}>

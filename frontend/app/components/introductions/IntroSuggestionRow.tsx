@@ -50,7 +50,7 @@ function RowParty({
                 <span className="flex items-center gap-1.5">
                     <Link
                         href={`/records/contacts/${id}`}
-                        className="truncate text-sm font-medium text-foreground transition-colors hover:text-brand-hover"
+                        className="truncate text-sm font-medium text-foreground transition-colors hover:text-brand-text"
                     >
                         {name}
                     </Link>

@@ -31,7 +31,7 @@ export type EmptyStateProps = {
 };
 
 const toneTile: Record<EmptyStateTone, string> = {
-    brand: "bg-brand-light text-brand-dark",
+    brand: "bg-brand-light text-brand-text",
     muted: "bg-muted text-muted-foreground",
 };
 

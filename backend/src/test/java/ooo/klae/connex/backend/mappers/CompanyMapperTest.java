@@ -614,7 +614,8 @@ class CompanyMapperTest extends AbstractMapperTest {
         Task task = new Task();
         task.setWorkspaceId(workspace.getId());
         task.setDescription("Scoring task");
-        task.setStatus("todo");
+        task.setCompleted(true);
+        task.setStatus("done");
         task.setAssignedTo(user);
         task.setPerson(person);
         task.setDeal(deal);
@@ -635,7 +636,7 @@ class CompanyMapperTest extends AbstractMapperTest {
         privateNote.setDeal(deal);
         noteMapper.insert(privateNote);
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
-        jdbc.update("UPDATE task SET created_at = ? WHERE id = ?",
+        jdbc.update("UPDATE task SET completed_at = ? WHERE id = ?",
             Timestamp.valueOf("2026-07-10 00:00:00"), task.getId());
         jdbc.update("UPDATE note SET created_at = ? WHERE id IN (?, ?)",
             Timestamp.valueOf("2026-07-10 00:00:00"), visible.getId(), privateNote.getId());

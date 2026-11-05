@@ -43,7 +43,12 @@ public class RelationshipSignalWriteService {
             return;
         }
         for (RelationshipSignal candidate : candidates) {
+            RelationshipSignal previous = signalMapper.lockByDedupeKey(workspaceId, candidate.getDedupeKey());
             signalMapper.upsertSignal(candidate);
+            if (previous != null && !candidate.getSourceModelVersion().equals(previous.getSourceModelVersion())) {
+                signalMapper.rebaseModelState(workspaceId, previous.getId(), previous.getSourceStateHash(),
+                    candidate.getSourceStateHash());
+            }
         }
         signalMapper.resolveMissing(
             workspaceId, family, generationToken, normalizedAttemptedAt);

@@ -405,7 +405,7 @@ export default async function DealPage({ params }: DealPageProps) {
                                                             </div>
                                                         </div>
                                                         {role ? (
-                                                            <span className="max-w-[6rem] truncate rounded-full bg-brand-light px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-brand-dark">
+                                                            <span className="max-w-[6rem] truncate rounded-full bg-brand-light px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-brand-text">
                                                                 {role}
                                                             </span>
                                                         ) : null}
@@ -628,7 +628,7 @@ function SectionLabelWithTooltip({ title, tooltip }: { title: string; tooltip: R
 function StatusPill({ outcome, t }: { outcome: DealOutcome; t: (key: string) => string }) {
     if (outcome === 'won') {
         return (
-            <span className="inline-flex items-center gap-1 rounded-full bg-brand-light px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-brand-dark">
+            <span className="inline-flex items-center gap-1 rounded-full bg-brand-light px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-brand-text">
                 <CheckCircleIcon className="size-3" /> {t('statusWon')}
             </span>
         );

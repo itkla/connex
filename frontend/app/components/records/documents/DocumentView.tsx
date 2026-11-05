@@ -327,7 +327,7 @@ function applyMarks(text: string, marks: DocumentBodyMark[] | undefined): ReactN
             case 'link': {
                 const raw = typeof mark.attrs?.href === 'string' ? mark.attrs.href : '';
                 const href = /^(https?:|mailto:|tel:|\/)/i.test(raw) ? raw : undefined;
-                return <a href={href} className="text-brand underline underline-offset-2">{acc}</a>;
+                return <a href={href} className="text-brand-text underline underline-offset-2">{acc}</a>;
             }
             default:
                 return acc;

@@ -32,15 +32,13 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
+import { rowActionTrigger } from "@/app/components/settings/SettingsListPrimitives";
 import DeleteRecordDialog from "@/app/components/records/DeleteRecordDialog";
 import Rise from "@/app/components/motion/Rise";
 import { SettingsSection } from "@/app/components/settings/SettingsSection";
 import CustomFieldDialog from "./CustomFieldDialog";
 
 const ENTITY_TYPES: CustomFieldEntityType[] = ["company", "person", "deal"];
-
-const rowActionTrigger =
-    "flex size-7 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted/70 hover:text-foreground group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100";
 
 /**
  * Where the panel is rendering, so one component serves both of its homes while #1340 migrates the

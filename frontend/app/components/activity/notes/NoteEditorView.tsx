@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
@@ -100,6 +100,19 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
     const [originWorkspaceId] = useState(activeWorkspaceId);
     const [originNavigationVersion] = useState(renderedWorkspaceNavigationVersion);
     const [noteId, setNoteId] = useState<number | null>(note?.id ?? null);
+    const [linkState, setLinkState] = useState({
+        source: note,
+        revision: 0,
+        links: { person: note?.person ?? null, deal: note?.deal ?? null },
+    });
+    if (linkState.source !== note) {
+        setLinkState({
+            source: note,
+            revision: linkState.revision + 1,
+            links: { person: note?.person ?? null, deal: note?.deal ?? null },
+        });
+    }
+    const { links, revision: linkRevision } = linkState;
     const editorDraftScope = noteId === null ? "new" : `note:${noteId}`;
     const editorDraftParts = useMemo<DraftKeyParts>(() => ({
         userId: currentUserId,
@@ -127,11 +140,11 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
     const savingRef = useRef(false);
     const mountedRef = useRef(true);
     const saveRef = useRef<() => void>(() => {});
-    const stateRef = useRef({ noteId, title, content, visibility });
+    const stateRef = useRef({ noteId, title, content, visibility, ...links, linkRevision });
 
-    useEffect(() => {
-        stateRef.current = { noteId, title, content, visibility };
-    }, [noteId, title, content, visibility]);
+    useLayoutEffect(() => {
+        stateRef.current = { noteId, title, content, visibility, ...links, linkRevision };
+    }, [noteId, title, content, visibility, links, linkRevision]);
 
     useEffect(() => {
         mountedRef.current = true;
@@ -185,8 +198,8 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
         return true;
     }, [keepRefusedText, showApiError]);
 
-    const person = note?.person ? persons.find((item) => item.id === note.person) ?? null : null;
-    const deal = note?.deal ? deals.find((item) => item.id === note.deal) ?? null : null;
+    const person = links.person ? persons.find((item) => item.id === links.person) ?? null : null;
+    const deal = links.deal ? deals.find((item) => item.id === links.deal) ?? null : null;
     const author = users.find((item) => item.id === (note?.author ?? currentUserId)) ?? null;
 
     const save = useCallback(() => {
@@ -220,9 +233,19 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
                     { content: body, title: nextTitle, visibility: snapshot.visibility, author: currentUserId },
                     pinned,
                 )
-                : updateNote(snapshot.noteId, { content: body, title: nextTitle, visibility: snapshot.visibility }, pinned);
+                : updateNote(snapshot.noteId, {
+                    content: body, title: nextTitle, visibility: snapshot.visibility,
+                    person: snapshot.person, deal: snapshot.deal,
+                }, pinned);
         request
             .then((saved) => {
+                const savedLinks = { person: saved.person ?? null, deal: saved.deal ?? null };
+                if (stateRef.current.linkRevision === snapshot.linkRevision) {
+                    stateRef.current = { ...stateRef.current, ...savedLinks };
+                    setLinkState((current) => current.revision === snapshot.linkRevision
+                        ? { ...current, links: savedLinks }
+                        : current);
+                }
                 if (snapshot.noteId == null && saved?.id) {
                     rekeyEditorDraft(`note:${saved.id}`);
                     stateRef.current = { ...stateRef.current, noteId: saved.id };
@@ -279,6 +302,13 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
                 author: currentUserId,
             }, workspacePinnedRequest(originWorkspaceId));
             if (!saved?.id) throw new Error("missing-note-id");
+            const savedLinks = { person: saved.person ?? null, deal: saved.deal ?? null };
+            if (stateRef.current.linkRevision === snapshot.linkRevision) {
+                stateRef.current = { ...stateRef.current, ...savedLinks };
+                setLinkState((current) => current.revision === snapshot.linkRevision
+                    ? { ...current, links: savedLinks }
+                    : current);
+            }
             rekeyEditorDraft(`note:${saved.id}`);
             stateRef.current = { ...stateRef.current, noteId: saved.id };
             setNoteId(saved.id);
@@ -339,7 +369,7 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
                     {note ? null : (
                         <RecordReturnLink
                             href={returnPath}
-                            className="inline-flex w-fit items-center gap-2 text-sm text-brand transition-colors hover:text-brand-hover"
+                            className="inline-flex w-fit items-center gap-2 text-sm text-brand-text transition-colors hover:text-brand-text"
                         >
                             <ArrowLeftIcon className="h-4 w-4" />
                             {t("back")}

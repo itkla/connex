@@ -137,7 +137,7 @@ class SegmentVisibilityMapperTest {
         Map<String, Object> parameters = fixture.segmentParameters();
         parameters.put("candidateIds", companies(0));
         for (int owner : List.of(0, 1, 2, 3, 4)) {
-            for (String source : List.of("activity", "note", "task", "private", "other_note", "other_activity", "other_task")) {
+            for (String source : List.of("activity", "note", "task", "open_task", "future_task", "private", "other_note", "other_activity", "other_task")) {
                 clearEvidence();
                 int engaged = fixture.personIds.get(owner);
                 engagement(source, engaged);
@@ -377,7 +377,11 @@ class SegmentVisibilityMapperTest {
         if (source.endsWith("activity")) {
             fixture.addActivity(workspace, fixture.otherUserId, person, null, "2999-01-01 00:00:00");
         } else if (source.endsWith("task")) {
-            controlJdbc.update("INSERT INTO task (workspace_id, description, person_id) VALUES (?, 'Engagement', ?)", workspace, person);
+            boolean completed = !"open_task".equals(source);
+            String at = "future_task".equals(source) ? "2999-01-01 00:00:00" : "2026-09-01 00:00:00";
+            controlJdbc.update("INSERT INTO task (workspace_id, description, person_id, completed, status, completed_at) "
+                + "VALUES (?, 'Engagement', ?, ?, ?, ?)", workspace, person, completed,
+                completed ? "done" : "todo", completed ? at : null);
         } else {
             fixture.addNote(workspace, fixture.userId, person, null, "private".equals(source) ? "private" : "workspace",
                 "Engagement", "Evidence", "2026-09-01 00:00:00");
