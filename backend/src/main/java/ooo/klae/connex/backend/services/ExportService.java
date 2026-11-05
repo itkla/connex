@@ -260,9 +260,12 @@ public class ExportService {
         }
 
         StringBuilder sb = new StringBuilder();
-        writeRow(sb, headers(
-            List.of("id", "name", "value", "currency", "company", "pipeline", "stage", "expectedCloseDate", "closedAt", "createdAt", "status"),
-            defs));
+        List<String> columnHeaders = headers(
+            List.of("id", "name", "value", "currency", "company", "pipeline", "stage", "expectedCloseDate", "status"),
+            defs);
+        columnHeaders.add("closedAt");
+        columnHeaders.add("createdAt");
+        writeRow(sb, columnHeaders);
         for (Deal d : deals) {
             List<String> row = new ArrayList<>();
             row.add(Integer.toString(d.getId()));
@@ -273,11 +276,11 @@ public class ExportService {
             row.add(d.getPipelineId() != null ? pipelineNames.get(d.getPipelineId()) : null);
             row.add(d.getStageId() != null ? stageNames.get(d.getStageId()) : null);
             row.add(d.getExpectedCloseDate());
-            row.add(exportInstant(d.getClosedAt()));
-            row.add(exportInstant(d.getCreatedAt()));
             row.add(dealStatus(d.getWon()));
             appendCustom(row, defs, custom.get(d.getId()));
             row.add(joinTags(tags.get(d.getId())));
+            row.add(exportInstant(d.getClosedAt()));
+            row.add(exportInstant(d.getCreatedAt()));
             writeRow(sb, row);
         }
         return sb.toString();

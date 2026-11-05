@@ -152,8 +152,9 @@ the existing target locks before dependencies or writes. Period revenue and cycl
 continue to read the canonical `closed_at` and `created_at` columns. Realized revenue charts use
 won deals' `actual_value` and reporting-timezone buckets of `closed_at`, including wins that also
 have an expected close date. Projected series keep their expected-close date basis. Deal CSV
-exports include `closedAt` and `createdAt` as UTC ISO instants with an explicit `Z`, so exporting
-and reimporting the history targets preserves the same instants. Deal close-date displays and
+exports append `closedAt` and `createdAt` after the existing columns, including custom fields and
+`tags`, preserving their positions. These timestamps are UTC ISO instants with an explicit `Z`, so
+exporting and reimporting the history targets preserves the same instants. Deal close-date displays and
 editors parse these timestamps as UTC and use the reporting timezone; they do not rely on the
 browser/server host timezone. Editor conversion preserves an unchanged repeated-hour instant,
 chooses the earlier occurrence for a new repeated-hour value, and rejects missing civil times.

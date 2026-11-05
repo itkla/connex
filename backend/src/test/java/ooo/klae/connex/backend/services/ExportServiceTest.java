@@ -31,8 +31,12 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
+import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.CustomFieldDefinition;
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Product;
+import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.config.SessionSecurityProperties;
@@ -157,10 +161,75 @@ class ExportServiceTest {
             List.of(), List.of(), null);
 
         assertEquals(
-            "id,name,value,currency,company,pipeline,stage,expectedCloseDate,closedAt,createdAt,status,tags\r\n"
+            "id,name,value,currency,company,pipeline,stage,expectedCloseDate,status,tags,closedAt,createdAt\r\n"
                 + (withHistory
-                    ? "7,Renewal,1000,USD,,,,,2025-02-28T15:00:00Z,2025-01-31T15:00:00Z,won,\r\n"
-                    : "7,Renewal,1000,USD,,,,,,,open,\r\n"),
+                    ? "7,Renewal,1000,USD,,,,,won,,2025-02-28T15:00:00Z,2025-01-31T15:00:00Z\r\n"
+                    : "7,Renewal,1000,USD,,,,,open,,,\r\n"),
+            csv);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void dealExportsAppendHistoryAfterExistingCustomAndTagColumns(boolean segment) {
+        Deal deal = new Deal();
+        deal.setId(7);
+        deal.setName("Renewal");
+        deal.setValue(new BigDecimal("1000.00"));
+        deal.setCurrency("USD");
+        deal.setCompanyId(10);
+        deal.setPipelineId(20);
+        deal.setStageId(30);
+        deal.setExpectedCloseDate("2026-11-01");
+        deal.setWon(true);
+        deal.setClosedAt("2025-02-28 15:00:00");
+        deal.setCreatedAt("2025-01-31 15:00:00");
+        Company company = new Company();
+        company.setId(10);
+        company.setName("Acme");
+        Pipeline pipeline = new Pipeline();
+        pipeline.setId(20);
+        pipeline.setName("Sales");
+        Stage stage = new Stage();
+        stage.setId(30);
+        stage.setName("Closed");
+        CustomFieldDefinition tier = new CustomFieldDefinition();
+        tier.setId(21);
+        tier.setLabel("Contract tier");
+        tier.setPosition(1);
+        CustomFieldDefinition reference = new CustomFieldDefinition();
+        reference.setId(22);
+        reference.setLabel("Reference");
+        reference.setPosition(2);
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(42);
+        if (segment) {
+            when(dealService.querySegmentDealsForExport(
+                null, null, null, List.of(), List.of(), List.of(), List.of(), false,
+                List.of(), List.of(), null)).thenReturn(List.of(deal));
+        } else {
+            when(dealService.queryDealsForExport(
+                null, null, List.of(), List.of(), List.of(), List.of(), false,
+                List.of(), List.of(), null)).thenReturn(List.of(deal));
+        }
+        when(customFieldDefinitionMapper.getByEntityType(42, "deal")).thenReturn(List.of(reference, tier));
+        when(customFieldValueService.getForEntities("deal", List.of(7)))
+            .thenReturn(Map.of(7, Map.of(21, "Gold", 22, "REF-7")));
+        when(tagMapper.getDealTagNames(42)).thenReturn(List.of(
+            Map.of("entityId", 7, "name", "Priority"), Map.of("entityId", 7, "name", "Partner")));
+        when(companyMapper.getCompaniesForDedup(42)).thenReturn(List.of(company));
+        when(recordVisibilityScopeControlAccess.getForWorkspace(42)).thenReturn(
+            new RecordVisibilityScopeControlAccess.RecordVisibilityScope(90, List.of(7, 8, 9)));
+        when(pipelineMapper.getAllPipelines(42, "[7,8,9]")).thenReturn(List.of(pipeline));
+        when(pipelineMapper.getStagesByPipelineId(42, "[7,8,9]", 20)).thenReturn(List.of(stage));
+
+        String csv = segment
+            ? exportService.exportSegmentDeals(null, null, null, List.of(), List.of(), List.of(),
+                List.of(), false, List.of(), List.of(), null)
+            : exportService.exportDeals(null, null, List.of(), List.of(), List.of(), List.of(),
+                false, List.of(), List.of(), null);
+
+        assertEquals(
+            "id,name,value,currency,company,pipeline,stage,expectedCloseDate,status,Contract tier,Reference,tags,closedAt,createdAt\r\n"
+                + "7,Renewal,1000,USD,Acme,Sales,Closed,2026-11-01,won,Gold,REF-7,\"Priority, Partner\",2025-02-28T15:00:00Z,2025-01-31T15:00:00Z\r\n",
             csv);
     }
 
