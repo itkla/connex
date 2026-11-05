@@ -17,7 +17,7 @@ const pctChange = (current: number, previous: number): number | null =>
  * (won revenue, new pipeline, win rate, average cycle). Deltas come from the DTO's
  * {@code *Prev} baselines — a null baseline yields a null delta, rendered as "no baseline".
  */
-function toTiles(kpis: DealKpis): Kpi[] {
+export function toTiles(kpis: DealKpis): Kpi[] {
     const closedCount = kpis.wonCount + kpis.lostCount;
     const winRate = closedCount > 0 ? kpis.wonCount / closedCount : 0;
     let winRatePrev: number | null = null;

@@ -6,7 +6,9 @@ import Timeline from "@/app/components/me/Timeline";
 import PulseStrip from "@/app/components/me/PulseStrip";
 import SectionUnavailable from "@/app/components/SectionUnavailable";
 import StatCard from "@/app/components/me/StatCard";
-import { getUserNotesFromCookie, getUserNoteActivityResultFromCookie } from "@/app/lib/api";
+import PersonalDealSignals from "@/app/components/me/PersonalDealSignals";
+import SignalStrip from "@/app/components/me/SignalStrip";
+import { getDealMetricsFromCookie, getDealsFromCookie, getUserNotesFromCookie, getUserNoteActivityResultFromCookie } from "@/app/lib/api";
 
 const fixture = vi.hoisted(() => ({
     user: { id: 51, displayName: "Member", username: "member", timezone: "UTC", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" },
@@ -28,7 +30,9 @@ vi.mock("@/app/lib/api", () => ({
     getContacts: async () => [],
     getContactsFromCookie: async () => [],
     getDeals: async () => [],
-    getDealsFromCookie: async () => [],
+    getDealsFromCookie: vi.fn(async () => []),
+    getDealMetricsFromCookie: vi.fn(async () => ({ byCurrency: [], totalCount: 0 })),
+    getMyWorkspacesFromCookie: async () => ({ activeWorkspaceId: null, workspaces: [] }),
     getUsers: async () => [],
     getAttachmentsFromCookie: async () => [],
     getContactTemperaturesFromCookie: async () => [],
@@ -50,6 +54,36 @@ function findByType(node: ReactNode, type: unknown): ReactElement[] {
 afterEach(() => vi.useRealTimers());
 
 describe("authored note timeline pages", () => {
+    it("uses personal currency aggregates instead of summing a mixed-currency deal set", async () => {
+        vi.mocked(getDealsFromCookie).mockResolvedValueOnce([
+            { id: 1, name: "Yen deal", ownerId: 51, currency: "JPY", value: 45_450_000, actualValue: 1_200_000, pipeline: null, stage: null, position: 0, company: null, createdAt: "2026-07-01T00:00:00Z", updatedAt: "2026-07-01T00:00:00Z", closedAt: "2026-07-02T00:00:00Z", won: true },
+            { id: 2, name: "Dollar deal", ownerId: 51, currency: "USD", value: 735_000, actualValue: 35_400, pipeline: null, stage: null, position: 0, company: null, createdAt: "2026-07-01T00:00:00Z", updatedAt: "2026-07-01T00:00:00Z", closedAt: "2026-07-02T00:00:00Z", won: true },
+        ]);
+        const byCurrency = [
+            { currency: "JPY", openCount: 0, closedCount: 1, openValue: 0, closedForecast: 45_450_000, closedRevenue: 1_200_000, wonCount: 1, lostCount: 0 },
+            { currency: "USD", openCount: 0, closedCount: 1, openValue: 0, closedForecast: 735_000, closedRevenue: 35_400, wonCount: 1, lostCount: 0 },
+        ];
+        vi.mocked(getDealMetricsFromCookie).mockResolvedValueOnce({ byCurrency, totalCount: 2 });
+        const page = await MePage();
+        expect(getDealMetricsFromCookie).toHaveBeenCalledWith("connex_workspace=7", { scope: "me" });
+        expect(findByType(page, PersonalDealSignals)[0]?.props).toMatchObject({
+            dealMetrics: { byCurrency, totalCount: 2 }, timezone: "UTC",
+        });
+        expect(findByType(page, PersonalDealSignals)[0]?.props).toHaveProperty("deals", expect.arrayContaining([
+            expect.objectContaining({ currency: "JPY", value: 45_450_000 }),
+            expect.objectContaining({ currency: "USD", value: 735_000 }),
+        ]));
+        expect(findByType(page, SignalStrip)).toHaveLength(0);
+    });
+
+    it("shows unavailable deal signals when currency aggregates cannot be loaded", async () => {
+        vi.mocked(getDealMetricsFromCookie).mockRejectedValueOnce(new Error("Unavailable"));
+        const page = await MePage();
+        expect(findByType(page, PersonalDealSignals)).toHaveLength(0);
+        expect(findByType(page, SignalStrip)).toHaveLength(0);
+        expect(findByType(page, SectionUnavailable)).toHaveLength(1);
+    });
+
     it("shows the complete visible profile total while rendering only the first bounded page", async () => {
         const page = await UserPage({ params: { id: 51 } });
         expect(findByType(page, StatCard).map((element) => element.props)).toContainEqual({ label: "notes", value: 105 });
