@@ -22,6 +22,7 @@ import {
     askConnexCreatedRecordHref,
     askConnexTemplateDefaultsText,
     askConnexReasoningSurvives,
+    askConnexMessageAuthor,
     askConnexMessageNarration,
     askConnexCitationHref,
     askConnexCitations,
@@ -1769,5 +1770,39 @@ describe('a reviewed first-response deadline', () => {
         expect(askConnexChangeValueText(
             'owner', '2026-08-13T09:30:15', 'current', 'en', responseDueInHours('en')))
             .toBe('2026-08-13T09:30:15');
+    });
+});
+
+
+describe('retained message author labels', () => {
+    const labels = {
+        assistantAuthor: 'Connex',
+        formerMember: 'Former member',
+        memberAuthor: (id: number) => `Member ${id}`,
+    };
+
+    it('uses the former member fallback when erased author fields are absent', () => {
+        expect(askConnexMessageAuthor({ authorKind: 'user' }, labels)).toBe('Former member');
+        expect(askConnexMessageAuthor({ authorKind: 'user', authorUserId: null }, labels)).toBe('Former member');
+    });
+
+    it('groups absent and null erased author IDs under the same local identity', () => {
+        const message = {
+            id: 1, sessionId: 4, seq: 1, authorKind: 'user',
+            content: 'Retained message', createdAt: '2026-11-04T08:00:00Z',
+        };
+        const groups = groupAskConnexMessages([
+            message,
+            { ...message, id: 2, seq: 2, authorUserId: null },
+        ]);
+        expect(groups).toHaveLength(1);
+        expect(groups[0].authorUserId).toBeNull();
+        expect(groups[0].messages.map((entry) => entry.id)).toEqual([1, 2]);
+    });
+
+    it('keeps known user and assistant labels', () => {
+        expect(askConnexMessageAuthor({ authorKind: 'user', authorUserId: 7 }, labels)).toBe('Member 7');
+        expect(askConnexMessageAuthor({ authorKind: 'user', authorDisplayName: 'Operator' }, labels)).toBe('Operator');
+        expect(askConnexMessageAuthor({ authorKind: 'assistant' }, labels)).toBe('Connex');
     });
 });

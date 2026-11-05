@@ -633,7 +633,12 @@ public class DealService {
         return dealMapper.getDealBoard(workspaceId, pipelineId);
     }
 
-    public DealRevenueSeriesDto getRevenueTimeseries(String currency, String timezone, MemberScope memberScope) {
+    /**
+     * Returns realized revenue and expected-close values in the requested currency and member scope.
+     * openOnly restricts the projected series to open deals; realized revenue is unchanged.
+     */
+    public DealRevenueSeriesDto getRevenueTimeseries(
+            String currency, String timezone, MemberScope memberScope, boolean openOnly) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         ZoneId zone = ZoneId.of(TimezoneSupport.validate(timezone, "UTC"));
         DealRevenueRangeDto range = dealMapper.revenueClosedEventRange(workspaceId, currency, memberScope);
@@ -645,7 +650,7 @@ public class DealService {
             revenueClosedByMonth(
                 dealMapper.revenueScheduledClosedByMonth(workspaceId, currency, memberScope),
                 timezoneBucketed),
-            publicMonthTotals(dealMapper.revenueProjectedByMonth(workspaceId, currency, memberScope))
+            publicMonthTotals(dealMapper.revenueProjectedByMonth(workspaceId, currency, memberScope, openOnly))
         );
     }
 

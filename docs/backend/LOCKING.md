@@ -1776,7 +1776,9 @@ For interactive person/company/deal mutation, sharing, imports, OCR, and identit
    synchronization root, not dependency creation. After the set lock is held, recompute the
    set of absent definition keys and fail closed with a review conflict if it differs in
    either direction from the pre-lock reading, so a definition created or removed concurrently
-   under `READ_COMMITTED` cannot be silently adopted or created twice.
+   under `READ_COMMITTED` cannot be silently adopted or created twice. Recompute resolved
+   import definition keys too: a label, type or archive-state change must not redirect a
+   mapping to a different key after its creation-permission check.
 9. Lock writable record targets ascending by record id.
 10. Lock canonical identity groups in deterministic kind/value order.
 11. Requery/revalidate current identities while locks are held.
