@@ -51,12 +51,14 @@ export async function submitDealDraftUpdate(dealId: number, draft: DealDraft, in
 
 export default function EditDealSheet({
     deal,
+    timezone,
     open,
     onOpenChange,
     pipelines,
     stagesByPipeline,
 }: {
     deal: Deal;
+    timezone: string;
     open: boolean;
     onOpenChange: (open: boolean) => void;
     pipelines: Pipeline[];
@@ -161,6 +163,7 @@ export default function EditDealSheet({
 
     return (
         <QuickEditDealSheet
+            timezone={timezone}
             open={open}
             onOpenChange={onOpenChange}
             selectedIds={new Set([deal.id])}
