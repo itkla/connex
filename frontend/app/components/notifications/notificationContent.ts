@@ -39,6 +39,15 @@ const DEAL_RISK_FACTOR_KEYS: Record<string, string> = {
  */
 export function notificationContent(notification: Notification, t: Translator, locale: string) {
     const data = notification.data ?? {};
+    if (notification.type === "task.assigned") {
+        return {
+            title: t("taskAssignedTitle"),
+            body: t("taskAssignedBody", {
+                actor: notification.actorLabel ?? "",
+                task: notification.sourceLabel ?? "",
+            }),
+        };
+    }
     if (notification.type === "task.due") {
         return {
             title: t(notification.severity === "critical" ? "taskOverdueTitle" : "taskDueTitle"),
