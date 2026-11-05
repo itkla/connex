@@ -85,6 +85,9 @@ async function renderAuthForm(mode: "login" | "register"): Promise<Rendered> {
         root.render(<AuthForm mode={mode} redirectUrl={null} />);
     });
 
+    if (mode === "register") {
+        await fillInput(interactive.elements, "register-password", "Aa12345#");
+    }
     const form = interactive.elements.find((element) => element.tagName === "FORM");
     if (!form) throw new Error("Auth form did not render");
 
@@ -98,6 +101,20 @@ async function renderAuthForm(mode: "login" | "register"): Promise<Rendered> {
             await act(async () => root.unmount());
         },
     };
+}
+
+
+async function fillInput(elements: readonly InteractiveElement[], id: string, value: string) {
+    const input = elements.find((element) => element.attributes.get("id") === id && element.parentNode !== null);
+    if (!input) throw new Error(`Missing input ${id}`);
+    await act(async () => {
+        const key = Reflect.ownKeys(input).find((key) => typeof key === "string" && key.startsWith("__reactProps$"));
+        const props: unknown = key === undefined ? null : Reflect.get(input, key);
+        if (typeof props !== "object" || props === null || !("onChange" in props) || typeof props.onChange !== "function") {
+            throw new Error("Missing change handler");
+        }
+        Reflect.apply(props.onChange, undefined, [{ target: { value } }]);
+    });
 }
 
 function alertText(elements: readonly InteractiveElement[]): string {
@@ -223,7 +240,7 @@ describe("new password length", () => {
         expect(passwordInput?.attributes.get("maxLength")).toBe("72");
         expect(passwordInput?.attributes.get("aria-describedby")).toBe("register-password-hint");
         const hint = rendered.elements.find((element) => element.attributes.get("id") === "register-password-hint");
-        expect(hint?.textContent).toBe("AuthForm.passwordLengthHint");
+        expect(hint?.textContent).toContain("PasswordPolicy.specialCharacter");
         await rendered.unmount();
     });
 
@@ -248,10 +265,10 @@ describe("new password length", () => {
         );
         expect(fieldError?.textContent).toBe("AuthForm.passwordTooLong");
         expect(inputById(rendered.elements, "register-password")?.attributes.get("aria-describedby"))
-            .toBe("register-password-error");
+            .toBe("register-password-error register-password-hint");
         expect(rendered.elements.some((element) =>
             element.attributes.get("id") === "register-password-hint" && element.parentNode !== null,
-        )).toBe(false);
+        )).toBe(true);
         expect(toastErrorMock).not.toHaveBeenCalled();
         await rendered.unmount();
     });

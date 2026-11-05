@@ -46,7 +46,6 @@ function emptyDealPayload(companyId: number): CreateDealPayload {
     return {
         name: '',
         value: 0,
-        actualValue: 0,
         currency: 'USD',
         pipeline: 0,
         stage: 0,
@@ -249,7 +248,7 @@ export default function CompanyActionsMenu({
                 ...newDealPayload,
                 name: newDealPayload.name.trim(),
                 value: Number.isFinite(newDealPayload.value) ? newDealPayload.value : 0,
-                actualValue: Number.isFinite(newDealPayload.actualValue) ? newDealPayload.actualValue : 0,
+                actualValue: Number.isFinite(newDealPayload.actualValue) ? newDealPayload.actualValue : undefined,
                 currency: newDealPayload.currency.trim() || 'USD',
                 pipeline: newDealPayload.pipeline || null,
                 stage: newDealPayload.stage || null,

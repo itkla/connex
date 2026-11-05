@@ -45,6 +45,7 @@ import { deriveNoteTitle, noteSnippet } from '@/app/lib/noteText';
 import { recordDetailNavigationPath } from '@/app/lib/recordReturnPath';
 import { useRecordReturnScroll } from '@/app/hooks/useRecordReturnSelection';
 import { useServerRecords } from '@/app/hooks/useServerRecords';
+import { RecordListState } from '@/app/components/records/RecordListState';
 import type { Contact, Deal, Note, NotesPageParams, User } from '@/app/lib/types';
 
 type Props = {
@@ -87,6 +88,7 @@ export default function NotesBrowser({ persons, deals, users, currentUserId }: P
         items: notes,
         total,
         loading,
+        error,
         page,
         setPage,
         size,
@@ -105,7 +107,7 @@ export default function NotesBrowser({ persons, deals, users, currentUserId }: P
     const dealById = useMemo(() => new Map(deals.map((d) => [d.id, d])), [deals]);
     const userById = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
 
-    const returnSnapshot = useRecordReturnScroll('notes', !loading);
+    const returnSnapshot = useRecordReturnScroll('notes', !loading && !error);
 
     const groups = useMemo<NoteGroup[]>(() => {
         if (groupBy === 'none') {
@@ -232,102 +234,104 @@ export default function NotesBrowser({ persons, deals, users, currentUserId }: P
                 </Rise>
 
                 <Rise delay={0.12}>
-                    {loading && notes.length === 0 ? (
-                        <div className="space-y-3" role="status" aria-label={t('loading')}>
-                            {Array.from({ length: 5 }, (_, index) => (
-                                <Skeleton key={index} className="h-24 rounded-2xl" />
-                            ))}
-                        </div>
-                    ) : notes.length === 0 ? (
-                        <div className="rounded-2xl border border-border bg-card px-6 py-20 text-center">
-                            <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-brand-light text-brand-text">
-                                <PencilSquareIcon className="size-7" />
+                    <RecordListState error={error} loading={loading} hasRecords={notes.length > 0} onRetry={reload}>
+                        {loading && notes.length === 0 ? (
+                            <div className="space-y-3" role="status" aria-label={t('loading')}>
+                                {Array.from({ length: 5 }, (_, index) => (
+                                    <Skeleton key={index} className="h-24 rounded-2xl" />
+                                ))}
                             </div>
-                            <p className="mx-auto mt-5 max-w-sm text-sm font-medium text-foreground">
-                                {query.trim() ? t('emptyFiltered') : t('empty')}
-                            </p>
-                            {!query.trim() && (
-                                <Button
-                                    onClick={() => setDialogNote(null)}
-                                    variant="brand"
-                                    className="mt-6"
-                                >
-                                    <PlusIcon strokeWidth={2.5} />
-                                    {t('new')}
-                                </Button>
-                            )}
-                        </div>
-                    ) : (
-                        <div className="space-y-8">
-                            {groups.map((group) => (
-                                <section key={group.id}>
-                                    {group.label && (
-                                        <SectionHeader title={group.label} />
-                                    )}
-                                    <ul className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
-                                        {group.notes.map((note) => (
-                                            <NoteRow
-                                                key={note.id}
-                                                note={note}
-                                                author={userById.get(note.author)}
-                                                recordLabel={
-                                                    note.person
-                                                        ? personById.get(note.person)?.name ?? null
-                                                        : note.deal
-                                                          ? dealById.get(note.deal)?.name ?? null
-                                                          : null
-                                                }
-                                                recordKind={note.person ? 'person' : note.deal ? 'deal' : null}
-                                                locale={locale}
-                                                labels={{
-                                                    untitled: t('untitled'),
-                                                    actionsAria: t('actionsAria'),
-                                                    open: t('open'),
-                                                    edit: t('edit'),
-                                                    delete: t('delete'),
-                                                }}
-                                                onOpen={() => router.push(
-                                                    recordDetailNavigationPath('notes', note.id, returnSnapshot),
-                                                )}
-                                                onEdit={() => setDialogNote(note)}
-                                                onDelete={() => setDeleteTarget(note)}
-                                            />
-                                        ))}
-                                    </ul>
-                                </section>
-                            ))}
-                            <div className="flex flex-col items-center gap-3">
-                                <p className="text-xs text-muted-foreground">
-                                    {t('showingCount', { shown: notes.length, total })}
+                        ) : notes.length === 0 ? (
+                            <div className="rounded-2xl border border-border bg-card px-6 py-20 text-center">
+                                <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-brand-light text-brand-text">
+                                    <PencilSquareIcon className="size-7" />
+                                </div>
+                                <p className="mx-auto mt-5 max-w-sm text-sm font-medium text-foreground">
+                                    {query.trim() ? t('emptyFiltered') : t('empty')}
                                 </p>
-                                {pageCount > 1 ? (
-                                    <Pagination aria-label={t('paginationLabel')}>
-                                        <PaginationContent>
-                                            <PaginationItem>
-                                                <PaginationPrevious
-                                                    aria-label={t('previousPage')}
-                                                    disabled={page <= 1 || loading}
-                                                    onClick={() => setPage(page - 1)}
-                                                />
-                                            </PaginationItem>
-                                            <PaginationItem>
-                                                <span className="px-3 text-xs tabular-nums text-muted-foreground">
-                                                    {t('pageStatus', { page, total: pageCount })}
-                                                </span>
-                                            </PaginationItem>
-                                            <PaginationItem>
-                                                <PaginationNext
-                                                    aria-label={t('nextPage')}
-                                                    disabled={page >= pageCount || loading}
-                                                    onClick={() => setPage(page + 1)}
-                                                />
-                                            </PaginationItem>
-                                        </PaginationContent>
-                                    </Pagination>
-                                ) : null}
+                                {!query.trim() && (
+                                    <Button
+                                        onClick={() => setDialogNote(null)}
+                                        variant="brand"
+                                        className="mt-6"
+                                    >
+                                        <PlusIcon strokeWidth={2.5} />
+                                        {t('new')}
+                                    </Button>
+                                )}
                             </div>
-                        </div>
-                    )}
+                        ) : (
+                            <div className="space-y-8">
+                                {groups.map((group) => (
+                                    <section key={group.id}>
+                                        {group.label && (
+                                            <SectionHeader title={group.label} />
+                                        )}
+                                        <ul className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
+                                            {group.notes.map((note) => (
+                                                <NoteRow
+                                                    key={note.id}
+                                                    note={note}
+                                                    author={userById.get(note.author)}
+                                                    recordLabel={
+                                                        note.person
+                                                            ? personById.get(note.person)?.name ?? null
+                                                            : note.deal
+                                                              ? dealById.get(note.deal)?.name ?? null
+                                                              : null
+                                                    }
+                                                    recordKind={note.person ? 'person' : note.deal ? 'deal' : null}
+                                                    locale={locale}
+                                                    labels={{
+                                                        untitled: t('untitled'),
+                                                        actionsAria: t('actionsAria'),
+                                                        open: t('open'),
+                                                        edit: t('edit'),
+                                                        delete: t('delete'),
+                                                    }}
+                                                    onOpen={() => router.push(
+                                                        recordDetailNavigationPath('notes', note.id, returnSnapshot),
+                                                    )}
+                                                    onEdit={() => setDialogNote(note)}
+                                                    onDelete={() => setDeleteTarget(note)}
+                                                />
+                                            ))}
+                                        </ul>
+                                    </section>
+                                ))}
+                                <div className="flex flex-col items-center gap-3">
+                                    <p className="text-xs text-muted-foreground">
+                                        {t('showingCount', { shown: notes.length, total })}
+                                    </p>
+                                    {pageCount > 1 ? (
+                                        <Pagination aria-label={t('paginationLabel')}>
+                                            <PaginationContent>
+                                                <PaginationItem>
+                                                    <PaginationPrevious
+                                                        aria-label={t('previousPage')}
+                                                        disabled={page <= 1 || loading}
+                                                        onClick={() => setPage(page - 1)}
+                                                    />
+                                                </PaginationItem>
+                                                <PaginationItem>
+                                                    <span className="px-3 text-xs tabular-nums text-muted-foreground">
+                                                        {t('pageStatus', { page, total: pageCount })}
+                                                    </span>
+                                                </PaginationItem>
+                                                <PaginationItem>
+                                                    <PaginationNext
+                                                        aria-label={t('nextPage')}
+                                                        disabled={page >= pageCount || loading}
+                                                        onClick={() => setPage(page + 1)}
+                                                    />
+                                                </PaginationItem>
+                                            </PaginationContent>
+                                        </Pagination>
+                                    ) : null}
+                                </div>
+                            </div>
+                        )}
+                    </RecordListState>
                 </Rise>
             </PageShell>
 

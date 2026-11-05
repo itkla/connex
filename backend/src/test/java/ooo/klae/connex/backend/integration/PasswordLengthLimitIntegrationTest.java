@@ -17,6 +17,8 @@ import jakarta.servlet.http.Cookie;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -135,6 +137,33 @@ class PasswordLengthLimitIntegrationTest {
         String hash = storedHash();
         assertTrue(passwordEncoder.matches(password, hash));
         assertFalse(passwordEncoder.matches(password.substring(0, 71) + "b", hash));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"#", "-", "_", " "})
+    void registrationAndResetStoreEachNewSymbolUnchanged(String symbol) throws Exception {
+        String candidate = "Aa12345" + symbol;
+        String username = "symbol_register_" + UUID.randomUUID().toString().substring(0, 8);
+        mockMvc.perform(post("/api/auth/register")
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"username\":\"" + username + "\",\"displayName\":\"Symbol Register\","
+                    + "\"email\":\"" + username + "@example.com\",\"password\":\"" + candidate + "\"}"))
+            .andExpect(status().isOk());
+        User registered = userMapper.getUserByUsername(username);
+        assertNotNull(registered);
+        assertTrue(passwordEncoder.matches(candidate, registered.getPasswordHash()));
+
+        reset("Abcdefg1")
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.fieldErrors.newPassword")
+                .value("Password must contain at least one symbol or space"));
+        assertTrue(passwordEncoder.matches(OLD_PASSWORD, storedHash()));
+        reset(candidate).andExpect(status().isOk());
+        assertTrue(passwordEncoder.matches(candidate, storedHash()));
+        if (symbol.equals(" ")) {
+            assertFalse(passwordEncoder.matches(candidate.strip(), storedHash()));
+        }
     }
 
     private ResultActions reset(String password) throws Exception {

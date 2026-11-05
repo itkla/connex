@@ -59,7 +59,7 @@
     "passwordPlaceholder": "8–72 characters",
     "breachedPassword": "This password appeared in a known data breach. Choose a different password that you don't use anywhere else.",
     "passwordScreeningUnavailable": "Password breach screening is temporarily unavailable. Please try again.",
-    "passwordTooLong": "Password must be 8–72 characters.",
+    "passwordTooLong": "Use 8–72 characters and at most 72 bytes. Some characters use several bytes.",
     "cancel": "Cancel",
     "create": "Create",
     "toastCreated": "User created",
