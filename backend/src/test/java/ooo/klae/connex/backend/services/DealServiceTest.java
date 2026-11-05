@@ -2082,7 +2082,7 @@ class DealServiceTest extends AbstractServiceTest {
 
         Deal after = dealMapper.getDealById(workspace.getId(), deal.getId());
         assertEquals(Boolean.TRUE, after.getWon());
-        assertEquals(0, BigDecimal.ZERO.compareTo(after.getActualValue()));
+        assertEquals(0, deal.getValue().compareTo(after.getActualValue()));
     }
 
     @Test

@@ -1568,7 +1568,7 @@ export type UpdateDealEvaluationPayload = {
 export type CreateDealPayload = {
     name: string;
     value: number;
-    actualValue: number;
+    actualValue?: number;
     currency: string;
     pipeline: number | null;
     stage: number | null;
@@ -1584,7 +1584,7 @@ export type CreateDealPayload = {
 export type UpdateDealPayload = {
     name: string;
     value: number;
-    actualValue: number;
+    actualValue?: number;
     currency: string;
     pipeline: number;
     stage: number;

@@ -3,6 +3,18 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="ooo.klae.connex.backend.mappers.CompanyMapper">
 
+  <resultMap id="CompanyEngagementCountsResult"
+             type="ooo.klae.connex.backend.dto.CompanyEngagementCountsDto">
+    <constructor>
+      <arg name="personCount" column="person_count" javaType="_long"/>
+      <arg name="numDeals" column="num_deals" javaType="_long"/>
+      <arg name="numTasks" column="num_tasks" javaType="_long"/>
+      <arg name="openTasks" column="open_tasks" javaType="_long"/>
+      <arg name="numActivities" column="num_activities" javaType="_long"/>
+      <arg name="numNotes" column="num_notes" javaType="_long"/>
+    </constructor>
+  </resultMap>
+
   <sql id="companyColumns">
     id, workspace_id, owner_id, name, website, industry, phone, address, created_at, updated_at,
     logo_url, archived_at
@@ -639,7 +651,7 @@
   </select>
 
   <select id="getCompanyEngagementCounts"
-          resultType="ooo.klae.connex.backend.dto.CompanyEngagementCountsDto">
+          resultMap="CompanyEngagementCountsResult">
     SELECT
       (SELECT COUNT(*) FROM person p
        WHERE p.workspace_id = #{workspaceId} AND p.company_id = #{companyId}
