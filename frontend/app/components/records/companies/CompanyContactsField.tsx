@@ -47,7 +47,7 @@ function StagedAvatar({ contact }: { contact: PendingContact }) {
         return <img src={src} alt="" className="size-9 shrink-0 rounded-full object-cover ring-1 ring-inset ring-border" />;
     }
     return (
-        <span className="flex size-9 shrink-0 select-none items-center justify-center rounded-full bg-brand/10 text-xs font-semibold text-brand ring-1 ring-inset ring-brand/15">
+        <span className="flex size-9 shrink-0 select-none items-center justify-center rounded-full bg-brand/10 text-xs font-semibold text-brand-text ring-1 ring-inset ring-brand/15">
             {initials(contact.name)}
         </span>
     );

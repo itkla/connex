@@ -1112,7 +1112,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             key: 'company',
             label: t('columnCompany'),
             getSortValue: (d) => (d.company != null ? companyById.get(d.company)?.name ?? null : null),
-            render: (d) => (d.company != null ? <Link href={`/records/companies/${d.company}`} onClick={(e) => e.stopPropagation()} className="text-brand hover:text-brand-dark hover:underline transition-colors transition-duration-300 transition-ease-in-out">{companyById.get(d.company)?.name}</Link> : ''),
+            render: (d) => (d.company != null ? <Link href={`/records/companies/${d.company}`} onClick={(e) => e.stopPropagation()} className="text-brand-text hover:text-brand-text hover:underline transition-colors transition-duration-300 transition-ease-in-out">{companyById.get(d.company)?.name}</Link> : ''),
             filter: { getValue: (d) => (d.company != null ? companyById.get(d.company)?.name ?? null : null), emptyLabel: t('freelancer') },
         },
         {
@@ -1660,7 +1660,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                             {allMatchingSelected ? (
                                 <>
                                     <span>{t('allMatchingSelected', { total })}</span>
-                                    <button type="button" onClick={clearSelection} className="font-medium text-brand transition hover:underline">
+                                    <button type="button" onClick={clearSelection} className="font-medium text-brand-text transition hover:underline">
                                         {t('clearSelection')}
                                     </button>
                                 </>
@@ -1671,7 +1671,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                                         type="button"
                                         onClick={selectAllMatching}
                                         disabled={selectingAll || loadingPage}
-                                        className="font-medium text-brand transition hover:underline disabled:opacity-50"
+                                        className="font-medium text-brand-text transition hover:underline disabled:opacity-50"
                                     >
                                         {selectingAll ? t('selecting') : t('selectAllMatching', { total })}
                                     </button>

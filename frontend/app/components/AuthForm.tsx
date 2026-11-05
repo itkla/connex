@@ -302,7 +302,7 @@ export function AuthForm({
     const hasFieldErrors = Object.keys(fieldErrors).length > 0;
 
     return (
-        <div className="min-h-[100dvh] w-full bg-background lg:grid lg:h-[100dvh] lg:grid-cols-[1fr_1.05fr] lg:grid-rows-[100dvh] lg:overflow-hidden">
+        <main className="min-h-[100dvh] w-full bg-background lg:grid lg:h-[100dvh] lg:grid-cols-[1fr_1.05fr] lg:grid-rows-[100dvh] lg:overflow-hidden">
             <div className="relative flex min-h-[100dvh] flex-col px-6 py-10 sm:px-10 lg:h-full lg:min-h-0 lg:overflow-y-auto lg:px-14 lg:py-12">
                 <Link
                     href="/"
@@ -588,6 +588,6 @@ export function AuthForm({
             </div>
 
             <AuthBrandPanel className="hidden lg:block lg:h-full" />
-        </div>
+        </main>
     );
 }

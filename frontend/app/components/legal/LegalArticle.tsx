@@ -70,7 +70,7 @@ export default function LegalArticle({ title, updated, lede, notice, tocLabel, s
                                     href={`#${section.id}`}
                                     className="inline-flex gap-3 text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
                                 >
-                                    <span className="tabular-nums text-brand-dark">
+                                    <span className="tabular-nums text-brand-text">
                                         {String(index + 1).padStart(2, "0")}
                                     </span>
                                     {section.heading}

@@ -729,7 +729,7 @@ function FileCard({
                     type="button"
                     onClick={onOpen}
                     title={attachment.fileName}
-                    className="min-w-0 flex-1 cursor-pointer truncate text-left text-sm font-medium text-foreground transition-colors hover:text-brand"
+                    className="min-w-0 flex-1 cursor-pointer truncate text-left text-sm font-medium text-foreground transition-colors hover:text-brand-text"
                 >
                     {attachment.fileName}
                 </button>

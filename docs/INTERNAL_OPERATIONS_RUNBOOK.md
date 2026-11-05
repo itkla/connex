@@ -948,7 +948,7 @@ category, severity, title, body, actor label `Automation`, source type, and sour
 | WHEN not matched | `skipped` | `succeeded` after Condition → no → End |
 | Partial execution | `partial` | No equivalent; the run fails or becomes `intervention_required` |
 | User history | Exposed as stable `legacy-<id>` keys | Exposed as stable `canonical-<id>` keys; both histories are merged |
-| Operations telemetry | Not included in workflow operations summaries | Included in summaries, interventions, failures, and overdue counts |
+| Operations telemetry | Included through linked rule executions; failures and partial outcomes need attention | Included in summaries, interventions, failures, and overdue counts |
 
 #### Idempotency and ownership
 

@@ -100,7 +100,7 @@ export default function AskConnexComposer() {
                         <div className="flex size-11 items-center justify-center rounded-xl bg-brand text-brand-foreground">
                             <SparklesIcon className="size-5" />
                         </div>
-                        <p className="mt-5 text-xs font-medium uppercase tracking-[0.12em] text-brand-dark">
+                        <p className="mt-5 text-xs font-medium uppercase tracking-[0.12em] text-brand-text">
                             {t('eyebrow')}
                         </p>
                         <h2 id="ask-connex-title" className="mt-2 text-2xl font-bold tracking-tight text-foreground">

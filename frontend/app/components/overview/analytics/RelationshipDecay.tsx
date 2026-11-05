@@ -75,7 +75,7 @@ export default function RelationshipDecay({ decay }: { decay: WarmthDecayCounts 
                 <p className="mt-1.5 text-sm text-muted-foreground">{t('summary')}</p>
                 <Link
                     href={href}
-                    className="mt-2 inline-block text-sm text-brand underline-offset-4 transition-colors hover:text-brand-hover hover:underline"
+                    className="mt-2 inline-block text-sm text-brand-text underline-offset-4 transition-colors hover:text-brand-text hover:underline"
                 >
                     {t('openCoolingInRadar')}
                 </Link>

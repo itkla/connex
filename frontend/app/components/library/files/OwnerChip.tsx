@@ -32,7 +32,7 @@ export default function OwnerChip({ attachment, t, className = '' }: { attachmen
             href={meta.href(attachment.entityId)}
             title={t('viewRecord', { label })}
             aria-label={t('viewRecord', { label })}
-            className={`inline-flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-brand ${className}`}
+            className={`inline-flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-brand-text ${className}`}
         >
             {inner}
         </Link>
