@@ -37,7 +37,7 @@ for (const locale of ['en', 'ja'] as const) {
             await write.post('/api/tasks', { description: taskTitle, assignedToId: userId, dueDate });
             const activityTitle = `Timezone activity ${unique}`;
             const activity = await write.post('/api/activities', {
-                type: 'Call', subject: activityTitle, createdById: userId, timestamp: '2026-06-01T23:30:00',
+                type: 'Call', subject: activityTitle, createdById: userId, timestamp: '2026-06-01 23:30:00',
             });
             const activityId = idFrom(activity);
             const page = await context.newPage();
