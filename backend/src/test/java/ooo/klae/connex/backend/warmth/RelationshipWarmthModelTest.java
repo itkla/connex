@@ -19,7 +19,7 @@ class RelationshipWarmthModelTest {
         assertEquals("hot", model.band(model.score(rawWeight)));
         assertEquals("rising", model.trend(1.0, 0.0, 0));
         assertEquals(78L, Math.round(model.daysToCold(rawWeight).orElseThrow()));
-        assertEquals("warmth-v1", model.version());
+        assertEquals("warmth-v2", model.version());
     }
 
     @Test

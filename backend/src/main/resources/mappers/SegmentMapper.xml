@@ -245,6 +245,9 @@
             SELECT 1 FROM task engaged_task
             WHERE engaged_task.workspace_id = #{workspaceId}
               AND engaged_task.person_id = engaged.id
+              AND engaged_task.completed = TRUE
+              AND engaged_task.completed_at IS NOT NULL
+              AND engaged_task.completed_at &lt;= UTC_TIMESTAMP(6)
           )
           AND NOT EXISTS (
             SELECT 1 FROM activity user_activity

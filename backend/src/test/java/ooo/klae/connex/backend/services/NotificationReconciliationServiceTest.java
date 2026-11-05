@@ -55,6 +55,72 @@ import tools.jackson.databind.ObjectMapper;
 class NotificationReconciliationServiceTest {
     private static final RecordVisibilityScope RECORD_SCOPE = new RecordVisibilityScope(1, List.of(7));
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void modelCutoverQuietlyBaselinesUntilALiveSourceChangeEvenWithDisabledPreference(boolean disabled) {
+        ReconciliationFixture fixture = ReconciliationFixture.mockedDelivery();
+        var mapper = fixture.notificationMapper;
+        var baselines = new java.util.ArrayList<HistoricalNotificationBaseline>();
+        var version = new java.util.concurrent.atomic.AtomicReference<>("warmth-v1");
+        when(mapper.getWarmthModelVersion(7)).thenAnswer(invocation -> version.get());
+        when(mapper.setWarmthModelVersion(eq(7), anyString())).thenAnswer(invocation -> {
+            version.set(invocation.getArgument(1));
+            return 1;
+        });
+        when(mapper.findHistoricalNotificationBaselines(7)).thenAnswer(invocation -> List.copyOf(baselines));
+        when(mapper.insertHistoricalNotificationBaselines(eq(7), anyList())).thenAnswer(invocation -> {
+            List<HistoricalNotificationBaseline> rows = invocation.getArgument(1);
+            baselines.addAll(rows);
+            return rows.size();
+        });
+        when(mapper.deleteHistoricalNotificationBaselines(eq(7), anyList())).thenAnswer(invocation -> {
+            List<HistoricalNotificationBaseline> rows = invocation.getArgument(1);
+            baselines.removeAll(rows);
+            return rows.size();
+        });
+        when(mapper.findRelationshipNudgeCandidates(7)).thenReturn(List.of(nudgeCandidate()));
+        var temperature = new RelationshipTemperatureDto(9, 12, "cold", "cooling",
+            "2026-05-10 09:00:00", 44, 0, null, null, "warmth-v2", fixture.clock.instant());
+        when(fixture.scoringService.scoreContacts(eq(7), any(Instant.class))).thenReturn(List.of(temperature));
+        when(fixture.scoringService.scoreContactsExcludingHistoryImports(eq(7), any(), any(), any(), any()))
+            .thenReturn(List.of(temperature));
+        when(fixture.scoringService.contactSourceStateHashes(eq(7), any(), any(), any()))
+            .thenReturn(Map.of(9, "a".repeat(64)));
+        NotificationPreference preference = new NotificationPreference();
+        preference.setUserId(42);
+        preference.setType(NotificationReconciliationService.RELATIONSHIP_TYPE);
+        preference.setEnabled(false);
+        if (disabled) when(fixture.preferenceMapper.findByWorkspaceAndChannel(7, "in_app"))
+            .thenReturn(List.of(preference));
+
+        var service = fixture.service();
+        service.reconcileWorkspace(7, true);
+        assertEquals("warmth-v2", version.get());
+        assertEquals(1, baselines.size());
+        assertEquals("warmth-v2", baselines.getFirst().getModelVersion());
+        verify(fixture.notificationDelivery, never()).deliver(any());
+        when(fixture.preferenceMapper.findByWorkspaceAndChannel(7, "in_app")).thenReturn(List.of());
+        service.reconcileWorkspace(7, true);
+        verify(fixture.notificationDelivery, never()).deliver(any());
+        when(fixture.scoringService.contactSourceStateHashes(eq(7), any(), any(), any()))
+            .thenReturn(Map.of(9, "b".repeat(64)));
+        service.reconcileWorkspace(7, true);
+        assertTrue(baselines.isEmpty());
+        verify(fixture.notificationDelivery).deliver(any());
+    }
+
+    @Test
+    void failedModelSnapshotRetriesWithoutAdvancingTheMarkerOrSendingRelationshipNotifications() {
+        ReconciliationFixture fixture = ReconciliationFixture.mockedDelivery();
+        when(fixture.notificationMapper.getWarmthModelVersion(7)).thenReturn("warmth-v1");
+        when(fixture.scoringService.scoreContactsExcludingHistoryImports(eq(7), any(), any(), any(), any()))
+            .thenThrow(new IllegalStateException("Scoring unavailable"));
+        fixture.service().reconcileWorkspace(7, true);
+        verify(fixture.notificationMapper, never()).setWarmthModelVersion(anyInt(), anyString());
+        verify(fixture.notificationMapper, never()).deletePreviousWarmthBaselines(anyInt(), anyString());
+        verify(fixture.notificationDelivery, never()).deliver(any());
+    }
+
     @Test
     void missingPreparedScopeCannotDegradeIntoASkippedIntroPass() {
         ReconciliationFixture fixture = ReconciliationFixture.withDispatcher();
