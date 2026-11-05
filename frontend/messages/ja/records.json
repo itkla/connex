@@ -1,4 +1,14 @@
 {
+  "RecordListState": {
+    "title": "一覧を読み込めませんでした",
+    "body": "保存済みのデータは変更されていません。もう一度お試しください。",
+    "refreshBody": "前回読み込んだ内容を表示しています。最新の内容を読み込むには、もう一度お試しください。",
+    "deniedTitle": "この一覧を表示する権限がありません",
+    "deniedBody": "ワークスペースの管理者にアクセス権を依頼してから、もう一度お試しください。",
+    "retry": "再試行",
+    "retrying": "再試行中…",
+    "reference": "参照番号: {id}"
+  },
   "EngineEvaluation": {
     "title": "インサイト",
     "contactRiskLabel": "リスク・関係低下シグナル",

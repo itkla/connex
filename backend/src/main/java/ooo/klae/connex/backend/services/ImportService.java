@@ -1137,6 +1137,7 @@ public class ImportService {
             List<PlanRow> toCreate = new ArrayList<>();
             List<Deal> beans = new ArrayList<>();
             List<DealOutcomeWriter.NewDeal> newDeals = new ArrayList<>();
+            List<DealOutcomeWriter.OutcomeChange> outcomeChanges = new ArrayList<>();
             int updated = 0;
             int skipped = 0;
 
@@ -1154,6 +1155,7 @@ public class ImportService {
                             tagByName,
                             companyByName,
                             personByEmail,
+                            outcomeChanges,
                             lockedTargets, scope)) {
                         updated++;
                     }
@@ -1172,13 +1174,13 @@ public class ImportService {
                 bean.setPipelineId(row.resolvedPipelineId);
                 bean.setStageId(row.resolvedStageId);
                 bean.setCompanyId(companyId(row, companyByName));
-                newDeals.add(new DealOutcomeWriter.NewDeal(bean, bean.getValue(), row.reviewedOutcome));
+                newDeals.add(new DealOutcomeWriter.NewDeal(bean, null, row.reviewedOutcome));
                 beans.add(bean);
                 toCreate.add(row);
             }
 
             if (!beans.isEmpty()) {
-                dealOutcomeWriter.createBatch(newDeals);
+                outcomeChanges.addAll(dealOutcomeWriter.createBatch(newDeals));
                 for (int i = 0; i < beans.size(); i++) {
                     Deal bean = beans.get(i);
                     PlanRow row = toCreate.get(i);
@@ -1207,6 +1209,7 @@ public class ImportService {
                 skipped,
                 failed.size(),
                 allRowsFailedBecauseTargetsVanished(plan));
+            outcomeChanges.forEach(dealOutcomeWriter::publish);
             return new ImportResult(created, updated, skipped, failed);
         });
     }
@@ -1424,6 +1427,7 @@ public class ImportService {
             Map<String, Integer> tagByName,
             Map<String, Integer> companyByName,
             Map<String, Integer> personByEmail,
+            List<DealOutcomeWriter.OutcomeChange> outcomeChanges,
             Map<Integer, Deal> lockedTargets, RecordVisibilityScope scope) {
         Deal existing = Objects.requireNonNull(lockedTargets.get(row.matchedId));
         Integer beforeStageId = existing.getStageId();
@@ -1473,7 +1477,7 @@ public class ImportService {
                 || !Objects.equals(beforeClosedReason, existing.getClosedReason())
                 || !Objects.equals(beforeOutcome, existing.getWon());
         if (parentChanged) {
-            dealOutcomeWriter.write(workspaceId, existing, beforeOutcome, null, outcome);
+            outcomeChanges.add(dealOutcomeWriter.write(workspaceId, existing, beforeOutcome, null, outcome));
         }
         if (createdAtChanged) {
             dealMapper.updateImportedCreatedAt(workspaceId, existing.getId(), importedCreatedAt);

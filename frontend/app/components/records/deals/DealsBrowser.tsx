@@ -130,7 +130,7 @@ import {
     type Tag,
     type WorkspaceMember,
 } from '@/app/lib/types';
-import { actualValueForOutcome, isDealClosed } from './dealOutcome';
+import { requestedActualValue, isDealClosed } from './dealOutcome';
 import { DEAL_COMPANY_FILTER_KEY, DEAL_CONTACT_FILTER_KEY, DEAL_PIPELINE_FILTER_KEY } from './dealLinks';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import ContactAvatar from '../contacts/ContactAvatar';
@@ -152,6 +152,7 @@ function toDraft(d: Deal): DealDraft {
         name: d.name ?? '',
         value: d.value ?? 0,
         actualValue: d.actualValue ?? 0,
+        actualValueEdited: false,
         currency: d.currency ?? 'USD',
         pipeline: d.pipeline ?? 0,
         stage: d.stage ?? 0,
@@ -190,7 +191,7 @@ export async function submitDealDraftUpdates(updates: ReadonlyArray<DealDraftUpd
         const payload: UpdateDealPayload = {
             name: draft.name.trim(),
             value: draft.value,
-            actualValue: actualValueForOutcome(draft.won, draft.actualValue),
+            actualValue: requestedActualValue(draft.won, draft.actualValue, draft.actualValueEdited),
             currency: draft.currency.trim(),
             pipeline: draft.pipeline,
             stage: draft.stage,
@@ -224,7 +225,6 @@ const EMPTY_DEAL_METRICS: DealMetrics = { byCurrency: [], totalCount: 0 };
 const EMPTY_DEAL_DRAFT: CreateDealPayload = {
     name: '',
     value: 0,
-    actualValue: 0,
     currency: 'USD',
     pipeline: 0,
     stage: 0,
@@ -872,7 +872,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                 ...newPayload,
                 name: newPayload.name.trim(),
                 value: Number.isFinite(newPayload.value) ? newPayload.value : 0,
-                actualValue: Number.isFinite(newPayload.actualValue) ? newPayload.actualValue : 0,
+                actualValue: Number.isFinite(newPayload.actualValue) ? newPayload.actualValue : undefined,
                 currency: newPayload.currency.trim() || 'USD',
                 pipeline: newPayload.pipeline || null,
                 stage: newPayload.stage || null,

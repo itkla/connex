@@ -11,11 +11,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { submitDealDraftUpdates } from "@/app/components/records/deals/DealsBrowser";
 import { submitDealDraftUpdate } from "@/app/components/records/deals/EditDealSheet";
 import QuickEditDealSheet, { type DealDraft } from "@/app/components/records/deals/QuickEditDealSheet";
-import { actualValueForOutcome } from "@/app/components/records/deals/dealOutcome";
-import type { Deal, Pipeline, Stage } from "@/app/lib/types";
+import { actualValueForOutcome, requestedActualValue } from "@/app/components/records/deals/dealOutcome";
+import type { Deal, Pipeline, Stage, UpdateDealPayload } from "@/app/lib/types";
 
 const { updateDealMock } = vi.hoisted(() => ({
-    updateDealMock: vi.fn(),
+    updateDealMock: vi.fn<(id: number, payload: UpdateDealPayload, init?: RequestInit) => Promise<Deal>>(),
 }));
 
 vi.mock("react", async () => {
@@ -309,6 +309,53 @@ describe("lost-deal actual value", () => {
         expect(actualValueForOutcome(false, 275)).toBe(0);
         expect(actualValueForOutcome(true, 275)).toBe(275);
         expect(actualValueForOutcome(null, 275)).toBe(275);
+    });
+
+    it("omits an untouched amount on each edit entry point and preserves an entered zero", async () => {
+        const draft: DealDraft = {
+            ...LOST_DRAFT,
+            actualValue: 0,
+            actualValueEdited: false,
+            won: true,
+        };
+        await submitDealDraftUpdate(LOST_DEAL.id, draft);
+        await submitDealDraftUpdates([{ dealId: LOST_DEAL.id, draft }]);
+        for (const call of updateDealMock.mock.calls) {
+            expect(JSON.stringify(call[1])).not.toContain('"actualValue"');
+        }
+
+        updateDealMock.mockClear();
+        draft.actualValueEdited = true;
+        await submitDealDraftUpdate(LOST_DEAL.id, draft);
+        await submitDealDraftUpdates([{ dealId: LOST_DEAL.id, draft }]);
+        for (const call of updateDealMock.mock.calls) {
+            expect(call[1]).toMatchObject({ actualValue: 0 });
+        }
+        expect(requestedActualValue(true, 0, false)).toBeUndefined();
+        expect(requestedActualValue(true, 0, true)).toBe(0);
+    });
+
+    it.each([false, true])("keeps the reporting-zone close date and fresh-win amount when edited=%s", (edited) => {
+        const html = renderToStaticMarkup(createElement(QuickEditDealSheet, {
+            timezone: "Asia/Tokyo",
+            open: true,
+            onOpenChange: () => undefined,
+            selectedIds: new Set([LOST_DEAL.id]),
+            selectedDeals: [{ ...LOST_DEAL, won: null, actualValue: 0 }],
+            drafts: { [LOST_DEAL.id]: {
+                ...LOST_DRAFT, won: true, actualValue: 0, actualValueEdited: edited,
+                closedAt: "2025-02-28 15:00:00",
+            } },
+            updateDraft: () => undefined,
+            pipelines: [],
+            stagesByPipeline: {},
+            isSaving: false,
+            saveEdits: () => undefined,
+        }));
+        const input = html.match(/<input\b[^>]*id="deal-actual-value-7"[^>]*>/)?.[0];
+        const closedAt = html.match(/<input\b[^>]*id="deal-closed-at-7"[^>]*>/)?.[0];
+        expect(input).toContain(`value="${edited ? 0 : 500}"`);
+        expect(closedAt).toContain('value="2025-03-01T00:00"');
     });
 
     it("preserves realized value when a won deal is toggled through lost back to won before submit", async () => {

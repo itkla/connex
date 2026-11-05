@@ -29,6 +29,7 @@ export type DealDraft = {
     name: string;
     value: number;
     actualValue: number;
+    actualValueEdited?: boolean;
     currency: string;
     pipeline: number;
     stage: number;
@@ -128,7 +129,8 @@ export default function QuickEditDealSheet({
                 const selectedStage = stages.find((s) => s.id === draft.stage) ?? null;
                 const expectedCloseDate = draft.expectedCloseDate ? draft.expectedCloseDate.slice(0, 10) : '';
                 const closedAt = dealClosedAtInput(draft.closedAt, timezone);
-                const actualValue = actualValueForOutcome(draft.won, draft.actualValue ?? 0);
+                const actualValue = actualValueForOutcome(draft.won,
+                    draft.actualValueEdited === false && d.won !== true ? draft.value : draft.actualValue);
                 const isLost = draft.won === false;
 
                 return (
@@ -355,7 +357,10 @@ export default function QuickEditDealSheet({
                                                 value={actualValue}
                                                 disabled={isLost}
                                                 aria-describedby={isLost ? `deal-actual-value-hint-${d.id}` : undefined}
-                                                onChange={(e) => updateDraft(d.id, { actualValue: Number(e.target.value) })}
+                                                onChange={(e) => updateDraft(d.id, {
+                                                    actualValue: Number(e.target.value),
+                                                    actualValueEdited: true,
+                                                })}
                                             />
                                             {isLost ? (
                                                 <p

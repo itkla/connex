@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.inOrder;
@@ -18,6 +19,7 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
@@ -101,7 +103,8 @@ class ImportDealVisibilityScopeTest {
             PipelineMapper pipelines = mock(PipelineMapper.class);
             DealStageHistoryService history = mock(DealStageHistoryService.class);
             DealValueService values = mock(DealValueService.class);
-            DealOutcomeWriter outcomes = new DealOutcomeWriter(deals, values);
+            RuleTriggerPublisher ruleTriggers = mock(RuleTriggerPublisher.class);
+            DealOutcomeWriter outcomes = new DealOutcomeWriter(deals, values, ruleTriggers);
             DuplicatePreflightService preflight = mock(DuplicatePreflightService.class);
             AuditService audit = mock(AuditService.class);
             ImportService service = new ImportService(
@@ -140,7 +143,7 @@ class ImportDealVisibilityScopeTest {
             when(deals.addPersonIfAbsent(eq(7), eq("[7,17]"), anyInt(), anyInt())).thenReturn(1);
             when(deals.update(any(Deal.class))).thenReturn(1);
             when(deals.updateImportedCreatedAt(eq(7), anyInt(), anyString())).thenReturn(1);
-            when(values.resolveRealizedValueForNewDeal(eq(true), any(BigDecimal.class)))
+            when(values.resolveRealizedValueForNewDeal(eq(true), any(BigDecimal.class), isNull()))
                 .thenReturn(BigDecimal.ZERO.setScale(2));
             List<Deal> existing = new ArrayList<>();
             for (int id : List.of(41, 42, 43)) {
@@ -189,6 +192,7 @@ class ImportDealVisibilityScopeTest {
             }
             var fingerprint = ArgumentCaptor.forClass(String.class);
             verify(preflight).completeImportPreview(same(previewSession), fingerprint.capture());
+            verifyNoInteractions(ruleTriggers);
             clearInvocations(scopes, fixture.control, workspace, pipelines, deals);
             request.setDuplicateReviewProof(preview.getDuplicateReviewProof());
 
@@ -240,8 +244,14 @@ class ImportDealVisibilityScopeTest {
                 verify(deals).addPersonIfAbsent(7, "[7,17]", id, 12);
             }
             verify(deals, times(skipping ? 6 : 12)).addPersonIfAbsent(eq(7), eq("[7,17]"), anyInt(), anyInt());
-            verify(audit).record(eq("import.deal"), eq("deal"), eq(null), eq("CSV import"), anyString(),
+            verify(values, times(3)).resolveRealizedValueForNewDeal(eq(true), any(BigDecimal.class), isNull());
+            var publications = inOrder(audit, ruleTriggers);
+            publications.verify(audit).record(eq("import.deal"), eq("deal"), eq(null), eq("CSV import"), anyString(),
                 eq(Map.of("created", 3, "updated", skipping ? 0 : 3, "skipped", skipping ? 3 : 0, "failed", 0)));
+            for (int id : skipping ? List.of(51, 52, 53) : List.of(41, 42, 43, 51, 52, 53)) {
+                publications.verify(ruleTriggers).publish(7, "deal", id, "deal.won");
+            }
+            verifyNoMoreInteractions(ruleTriggers);
             var order = inOrder(preflight, scopes, fixture.control, workspace, locks, deals);
             order.verify(preflight).claimImportCommit(eq("review-proof"), anyString());
             order.verify(scopes).getForWorkspace(7);
