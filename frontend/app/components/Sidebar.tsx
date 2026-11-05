@@ -403,7 +403,7 @@ function NavLink({ item, active, rail }: { item: NavItem; active: boolean; rail:
                     className={cn(
                         "relative flex size-9 items-center justify-center rounded-lg transition-colors",
                         active
-                            ? "text-brand-dark"
+                            ? "text-brand-text"
                             : "text-muted-foreground group-hover:bg-sidebar-accent group-hover:text-sidebar-accent-foreground",
                     )}
                 >
@@ -446,7 +446,7 @@ function NavLink({ item, active, rail }: { item: NavItem; active: boolean; rail:
                     "group relative flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
                     item.nested && "ml-6",
                     active
-                        ? "font-medium text-brand-dark"
+                        ? "font-medium text-brand-text"
                         : "font-light text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
                 )}
             >
@@ -458,7 +458,7 @@ function NavLink({ item, active, rail }: { item: NavItem; active: boolean; rail:
                     />
                 )}
                 <Icon
-                    className={`relative z-10 size-4 shrink-0 ${active ? "text-brand-dark" : "text-muted-foreground group-hover:text-current"
+                    className={`relative z-10 size-4 shrink-0 ${active ? "text-brand-text" : "text-muted-foreground group-hover:text-current"
                         }`}
                 />
                 <span className="relative z-10">{item.label}</span>
@@ -584,7 +584,7 @@ function UserMenuLink({
         <DropdownMenu.Item asChild>
             <Link
                 href={href}
-                className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-brand-light data-[highlighted]:text-brand-dark"
+                className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-brand-light data-[highlighted]:text-brand-text"
             >
                 <Icon className="size-4" />
                 {label}

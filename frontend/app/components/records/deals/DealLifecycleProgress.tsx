@@ -306,7 +306,7 @@ export default async function DealLifecycleProgress({
                     <div className="flex min-w-0 flex-col gap-0.5">
                         <span
                             className={`text-[11px] font-semibold uppercase tracking-[0.08em] ${
-                                isWon ? 'text-brand-dark' : 'text-red-700 dark:text-red-300'
+                                isWon ? 'text-brand-text' : 'text-red-700 dark:text-red-300'
                             }`}
                         >
                             {isWon ? t('closedReasonWonTitle') : t('closedReasonLostTitle')}

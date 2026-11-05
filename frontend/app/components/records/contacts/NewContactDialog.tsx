@@ -679,7 +679,7 @@ export function NewContactForm({
                             {visibleImagePreview ? (
                                 <Image src={visibleImagePreview} alt="" fill sizes="80px" unoptimized className="object-cover" />
                             ) : contactInitial ? (
-                                <div className="flex size-full select-none items-center justify-center bg-brand-light text-2xl font-semibold text-brand-dark">
+                                <div className="flex size-full select-none items-center justify-center bg-brand-light text-2xl font-semibold text-brand-text">
                                     {contactInitial}
                                 </div>
                             ) : (

@@ -554,7 +554,7 @@ function UploadStep({
                     'flex w-full cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed px-4 py-12 text-sm transition-colors',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                     dragActive
-                        ? 'border-brand bg-brand/5 text-brand'
+                        ? 'border-brand bg-brand/5 text-brand-text'
                         : 'border-border text-muted-foreground hover:border-muted-foreground/40 hover:bg-muted/60',
                     'disabled:pointer-events-none disabled:opacity-60',
                 )}
@@ -726,7 +726,7 @@ function ReviewStep({
             </div>
 
             <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
-                <Count label={t('countNew')} value={preview.toCreate} className="text-brand" />
+                <Count label={t('countNew')} value={preview.toCreate} className="text-brand-text" />
                 <Count label={t('countUpdate')} value={preview.toUpdate} className="text-foreground" />
                 <Count label={t('countSkip')} value={preview.toSkip} className="text-muted-foreground" />
                 <Count label={t('countInvalid')} value={preview.invalid} className="text-destructive" />

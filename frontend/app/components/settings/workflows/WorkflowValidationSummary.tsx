@@ -5,6 +5,7 @@ import { ExclamationTriangleIcon } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 
 import type { WorkflowDiagnostic, WorkflowValidation } from "@/app/lib/types";
+import { workflowIsReadyToPublish } from "@/app/components/settings/workflows/workflowValidation";
 import { Button } from "@/components/ui/button";
 
 /** Accessible authoritative validation summary with focus navigation into node fields. */
@@ -18,7 +19,7 @@ export default function WorkflowValidationSummary({
     onSelectDiagnostic: (diagnostic: WorkflowDiagnostic) => void;
 }) {
     const t = useTranslations("WorkspaceWorkflows");
-    if (validation.valid) {
+    if (workflowIsReadyToPublish(validation)) {
         return (
             <div role="status" className="border-b border-border bg-secondary px-4 py-2 text-sm text-secondary-foreground">
                 {t("validationReady")}
@@ -31,7 +32,9 @@ export default function WorkflowValidationSummary({
                 <ExclamationTriangleIcon aria-hidden className="mt-0.5 size-4 shrink-0 text-destructive" />
                 <div className="min-w-0">
                     <h2 id="workflow-validation-title" className="text-sm font-semibold text-foreground">
-                        {t("validationErrorTitle", { count: validation.errors.length })}
+                        {validation.errors.length > 0
+                            ? t("validationErrorTitle", { count: validation.errors.length })
+                            : t("validationBlocked")}
                     </h2>
                     <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
                         {validation.errors.map((diagnostic) => (

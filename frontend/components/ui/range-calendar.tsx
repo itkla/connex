@@ -778,7 +778,7 @@ export function RangeCalendar({
                                         <button
                                             type="button"
                                             aria-label={labels.zoomMonths}
-                                            className="-mx-1 rounded-md px-1 text-[0.9375rem] font-semibold tracking-tight text-foreground transition-colors duration-(--motion-micro) hover:text-brand-dark focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none dark:hover:text-brand"
+                                            className="-mx-1 rounded-md px-1 text-[0.9375rem] font-semibold tracking-tight text-foreground transition-colors duration-(--motion-micro) hover:text-brand-text focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none dark:hover:text-brand-text"
                                             onClick={() => changeZoom('month', anchorMonth, true)}
                                         >
                                             {panel.caption}
@@ -788,7 +788,7 @@ export function RangeCalendar({
                                         type="button"
                                         aria-label={labels.zoomYears}
                                         disabled={zoom === 'year'}
-                                        className="-mx-1 rounded-md px-1 text-[0.9375rem] tracking-tight text-muted-foreground tabular-nums transition-colors duration-(--motion-micro) hover:text-brand-dark focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none dark:hover:text-brand"
+                                        className="-mx-1 rounded-md px-1 text-[0.9375rem] tracking-tight text-muted-foreground tabular-nums transition-colors duration-(--motion-micro) hover:text-brand-text focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none dark:hover:text-brand-text"
                                         onClick={() => changeZoom('year', anchorMonth, true)}
                                     >
                                         {panel.year}
@@ -910,9 +910,9 @@ function CellGrid({
                                                     : cell.muted
                                                         ? 'text-muted-foreground/40'
                                                         : cell.today
-                                                            ? 'font-semibold text-brand-dark dark:text-brand'
+                                                            ? 'font-semibold text-brand-text dark:text-brand-text'
                                                             : 'text-foreground',
-                                                cell.selectable && !cell.endpoint && 'group-hover:text-brand-dark dark:group-hover:text-brand',
+                                                cell.selectable && !cell.endpoint && 'group-hover:text-brand-text dark:group-hover:text-brand-text',
                                             )}
                                         >
                                             {cell.label}

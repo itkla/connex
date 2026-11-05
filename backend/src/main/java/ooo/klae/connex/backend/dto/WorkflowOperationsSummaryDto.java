@@ -6,6 +6,7 @@ import java.util.List;
 public record WorkflowOperationsSummaryDto(
     int workflowCount,
     int healthyCount,
+    int unavailableCount,
     int pausedCount,
     int disabledCount,
     int interventionRequiredCount,
