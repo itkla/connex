@@ -3,9 +3,13 @@ package ooo.klae.connex.backend.services;
 import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.text.NumberFormat;
 import java.time.LocalDateTime;
+import java.util.Currency;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -225,7 +229,7 @@ public class DealDocumentService {
         tokens.put("owner.name", owner == null ? "" : nz(owner.getDisplayName()));
         tokens.put("date", LocalDateTime.now().toLocalDate().toString());
         tokens.put("total", totals.grandTotal() == null
-            ? "" : currency + " " + totals.grandTotal().toPlainString());
+            ? "" : formatMoney(totals.grandTotal(), currency, template.getLocale()));
 
         DocumentContent.Sections sections = new DocumentContent.Sections(
             resolve(template.getTitle(), tokens),
@@ -431,6 +435,26 @@ public class DealDocumentService {
                 }
             }
         }
+    }
+
+    /** Matches the document renderer's currency precision, rounding and letter-symbol spacing. */
+    private String formatMoney(BigDecimal amount, String currency, String localeTag) {
+        Currency unit;
+        try {
+            unit = Currency.getInstance(currency.toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException unsupportedCurrency) {
+            return currency + " " + amount.toPlainString();
+        }
+        Locale locale = localeTag == null || localeTag.isBlank()
+            ? Locale.ENGLISH : Locale.forLanguageTag(localeTag);
+        NumberFormat format = NumberFormat.getCurrencyInstance(locale);
+        format.setCurrency(unit);
+        int fractionDigits = unit.getDefaultFractionDigits();
+        if (fractionDigits < 0) fractionDigits = 2;
+        format.setMinimumFractionDigits(fractionDigits);
+        format.setMaximumFractionDigits(fractionDigits);
+        format.setRoundingMode(RoundingMode.HALF_UP);
+        return format.format(amount).replaceAll("(?<=\\p{L})(?=\\p{Nd})", "\u00a0");
     }
 
     private String resolve(String template, Map<String, String> tokens) {

@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 
@@ -16,6 +17,7 @@ import ooo.klae.connex.backend.dto.CampaignEngagementDto;
 import ooo.klae.connex.backend.dto.CampaignSendEngagementDto;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.CampaignEngagementMapper;
+import ooo.klae.connex.backend.mappers.CampaignDeliveryMapper;
 import ooo.klae.connex.backend.mappers.CampaignMapper;
 import ooo.klae.connex.backend.mappers.CampaignSendMapper;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -37,6 +39,7 @@ public class CampaignEngagementService {
     private final CampaignMapper campaignMapper;
     private final CampaignSendMapper campaignSendMapper;
     private final CampaignEngagementMapper campaignEngagementMapper;
+    private final CampaignDeliveryMapper campaignDeliveryMapper;
     private final WorkspaceService workspaceService;
 
     /** Aggregates engagement across every send of a campaign, plus a per-send breakdown. */
@@ -50,21 +53,30 @@ public class CampaignEngagementService {
                 toMap(campaignEngagementMapper.skipReasonCountsForCampaign(workspaceId, campaignId));
         Map<String, Integer> eventCounts =
                 toMap(campaignEngagementMapper.eventTypeCountsForCampaign(workspaceId, campaignId));
-        List<CampaignChannelStatDto> channels =
-                campaignEngagementMapper.channelSplit(workspaceId, campaignId).stream()
-                        .map(row -> new CampaignChannelStatDto(row.keyValue(), row.countValue()))
-                        .toList();
         List<CampaignSend> sends = campaignSendMapper.getSendsByCampaign(workspaceId, campaignId);
         List<CampaignSendEngagementDto> sendRollups = sends.stream()
                 .map(send -> sendEngagement(workspaceId, send))
                 .toList();
-        int totalRecipients = sends.stream().mapToInt(CampaignSend::getTotalRecipients).sum();
-        DeliveryMetrics metrics = metrics(statusCounts, eventCounts);
+        int preparedRecipients = sends.stream().mapToInt(CampaignSend::getTotalRecipients).sum();
+        DeliveryMetrics metrics = metrics(statusCounts, eventCounts, submittedCount(workspaceId, campaignId, null));
         return new CampaignEngagementDto(
-                campaignId, totalRecipients, metrics.dispatched(), metrics.delivered(), metrics.bounced(),
+                campaignId, preparedRecipients, metrics.dispatched(), metrics.delivered(), metrics.bounced(),
                 metrics.complained(), metrics.unsubscribed(), metrics.failed(), metrics.skipped(),
-                skipReasons, eventCounts, channels, metrics.deliveryReceiptsAvailable(),
+                skipReasons, eventCounts, channelStats(sendRollups), metrics.deliveryReceiptsAvailable(),
                 metrics.deliveryRate(), metrics.bounceRate(), metrics.complaintRate(), sendRollups);
+    }
+
+    private static List<CampaignChannelStatDto> channelStats(List<CampaignSendEngagementDto> sends) {
+        Map<String, List<CampaignSendEngagementDto>> byChannel = sends.stream().collect(
+                Collectors.groupingBy(CampaignSendEngagementDto::channel, LinkedHashMap::new, Collectors.toList()));
+        return byChannel.entrySet().stream()
+                .map(entry -> new CampaignChannelStatDto(
+                        entry.getKey(),
+                        entry.getValue().stream().mapToInt(CampaignSendEngagementDto::preparedRecipients).sum(),
+                        entry.getValue().stream().mapToInt(CampaignSendEngagementDto::dispatched).sum(),
+                        entry.getValue().stream().mapToInt(CampaignSendEngagementDto::delivered).sum(),
+                        entry.getValue().stream().anyMatch(CampaignSendEngagementDto::deliveryReceiptsAvailable)))
+                .toList();
     }
 
     /** Returns the engagement rollup for a single send of a campaign. */
@@ -82,7 +94,8 @@ public class CampaignEngagementService {
                 toMap(campaignEngagementMapper.skipReasonCountsForSend(workspaceId, send.getId()));
         Map<String, Integer> eventCounts =
                 toMap(campaignEngagementMapper.eventTypeCountsForSend(workspaceId, send.getId()));
-        DeliveryMetrics metrics = metrics(statusCounts, eventCounts);
+        DeliveryMetrics metrics = metrics(statusCounts, eventCounts,
+                submittedCount(workspaceId, send.getCampaignId(), send.getId()));
         return new CampaignSendEngagementDto(
                 send.getId(), send.getStatus(), send.getChannel(), send.getTotalRecipients(),
                 metrics.dispatched(), metrics.delivered(), metrics.bounced(), metrics.complained(),
@@ -91,16 +104,23 @@ public class CampaignEngagementService {
                 metrics.complaintRate());
     }
 
+    private int submittedCount(int workspaceId, int campaignId, Integer sendId) {
+        return Math.toIntExact(campaignDeliveryMapper.countRecipients(
+                workspaceId, campaignId, sendId, null, null, true));
+    }
+
     /**
      * Derives the named engagement counts and rates. Delivered, bounced, and complained are
      * read from the current delivery status; {@code unsubscribed} is read from events, as it
-     * is never a delivery status. Receipts are considered available only when a provider
+     * is never a delivery status. Dispatched counts persisted submission facts, including
+     * provider receipts and operator-confirmed acceptance without a dispatch event. Receipts are
+     * considered available only when a provider
      * emitted a delivery, bounce, or complaint event — the plain SMTP path emits none, so its
      * outcome counts stay zero by absence of measurement and the rates are left {@code null}
      * rather than presented as a measured 0%.
      */
-    private static DeliveryMetrics metrics(Map<String, Integer> statusCounts, Map<String, Integer> eventCounts) {
-        int dispatched = statusCounts.getOrDefault("dispatched", 0);
+    private static DeliveryMetrics metrics(
+            Map<String, Integer> statusCounts, Map<String, Integer> eventCounts, int dispatched) {
         int delivered = statusCounts.getOrDefault("delivered", 0);
         int bounced = statusCounts.getOrDefault("bounced", 0);
         int complained = statusCounts.getOrDefault("complained", 0);
@@ -110,7 +130,7 @@ public class CampaignEngagementService {
         boolean receiptsAvailable = eventCounts.getOrDefault("delivered", 0) > 0
                 || eventCounts.getOrDefault("bounced", 0) > 0
                 || eventCounts.getOrDefault("complained", 0) > 0;
-        int handedOff = dispatched + delivered + bounced + complained;
+        int handedOff = dispatched;
         Double deliveryRate = rate(receiptsAvailable, delivered, handedOff);
         Double bounceRate = rate(receiptsAvailable, bounced, handedOff);
         Double complaintRate = rate(receiptsAvailable, complained, handedOff);

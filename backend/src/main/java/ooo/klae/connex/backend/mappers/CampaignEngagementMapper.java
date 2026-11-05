@@ -39,7 +39,4 @@ public interface CampaignEngagementMapper {
             @Param("workspaceId") int workspaceId,
             @Param("campaignId") int campaignId);
 
-    List<CampaignEngagementCountRow> channelSplit(
-            @Param("workspaceId") int workspaceId,
-            @Param("campaignId") int campaignId);
 }

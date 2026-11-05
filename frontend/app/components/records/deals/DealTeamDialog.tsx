@@ -176,15 +176,15 @@ export default function DealTeamDialog({
                                     </InputGroupAddon>
                                 </ComboboxInput>
                                 <ComboboxContent className="pointer-events-auto">
+                                    <ComboboxEmpty>
+                                        {membersLoading ? t('loadingMembers') : t('noUsers')}
+                                    </ComboboxEmpty>
                                     <ComboboxList onWheel={handleListWheel}>
-                                        <ComboboxEmpty>
-                                            {membersLoading ? t('loadingMembers') : t('noUsers')}
-                                        </ComboboxEmpty>
-                                        {members.map((u) => (
+                                        {(u: (typeof members)[number]) => (
                                             <ComboboxItem key={u.id} value={u}>
                                                 {u.displayName}
                                             </ComboboxItem>
-                                        ))}
+                                        )}
                                     </ComboboxList>
                                 </ComboboxContent>
                             </Combobox>

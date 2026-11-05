@@ -1,4 +1,8 @@
 {
+  "UI": {
+    "searching": "検索中…",
+    "close": "閉じる"
+  },
   "AppMetadata": {
     "title": "Connex",
     "description": "Connexは、会社、連絡先、案件、フォローアップをひとつのワークスペースにまとめ、チーム全員が同じ情報をもとに仕事を進められるようにします。"

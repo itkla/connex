@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, type ComponentProps } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import {
     Area,
@@ -38,20 +38,28 @@ const CHART_COLORS = [
     'var(--chart-5)',
 ];
 
-export function formatReportValue(value: number | null, unit: string | null, locale: string): string {
+/** Uses currency minor units for report money; chart axes may request compact decimal precision. */
+export function formatReportValue(
+    value: number | null,
+    unit: string | null,
+    locale: string,
+    notation: 'standard' | 'compact' = 'standard',
+): string {
     if (value == null) return '-';
     if (unit && /^[A-Z]{3}$/.test(unit)) {
+        const displayNotation = notation === 'compact' && Math.abs(value) >= 10000 ? 'compact' : 'standard';
         return new Intl.NumberFormat(locale, {
             style: 'currency',
             currency: unit,
-            maximumFractionDigits: 0,
-            notation: Math.abs(value) >= 10000 ? 'compact' : 'standard',
+            minimumFractionDigits: 0,
+            maximumFractionDigits: displayNotation === 'compact' ? 2 : undefined,
+            notation: displayNotation,
         }).format(value);
     }
     if (unit && /^[A-Z]{4,8}$/.test(unit)) {
         const formatted = new Intl.NumberFormat(locale, {
-            maximumFractionDigits: 1,
-            notation: Math.abs(value) >= 10000 ? 'compact' : 'standard',
+            maximumFractionDigits: 2,
+            notation: notation === 'compact' && Math.abs(value) >= 10000 ? 'compact' : 'standard',
         }).format(value);
         return `${formatted} ${unit}`;
     }
@@ -96,6 +104,27 @@ export default function ReportWidgetRenderer({ widget }: { widget: ReportWidgetD
         },
         prior: { label: isAttainment ? t('document.target') : t('document.priorPeriod'), color: 'var(--chart-2)' },
     } satisfies ChartConfig;
+    const tooltipFormatter: NonNullable<ComponentProps<typeof ChartTooltipContent>['formatter']> = (value, name, item) => {
+        const payload: unknown = item.payload;
+        const indicatorColor = typeof payload === 'object' && payload !== null && 'fill' in payload
+            && typeof payload.fill === 'string' ? payload.fill : item.color;
+        const formattedValue = typeof value === 'number' && (widget.unit == null || widget.unit === 'count')
+            ? new Intl.NumberFormat(locale).format(value)
+            : formatReportValue(typeof value === 'number' ? value : null, widget.unit, locale);
+        return (
+            <>
+                <span className="size-2.5 shrink-0 rounded-[2px]" style={{ backgroundColor: indicatorColor }} />
+                <div className="flex flex-1 items-center justify-between gap-4 leading-none">
+                    <span className="text-muted-foreground">
+                        {name === 'current' ? config.current.label : name === 'prior' ? config.prior.label : name}
+                    </span>
+                    <span className="font-mono font-medium text-foreground tabular-nums">
+                        {formattedValue}
+                    </span>
+                </div>
+            </>
+        );
+    };
 
     if (isAttainment && data.length === 0) {
         return <div className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">{t('document.noData')}</div>;
@@ -168,6 +197,11 @@ export default function ReportWidgetRenderer({ widget }: { widget: ReportWidgetD
         return (
             <div className="overflow-x-auto">
                 <table className="w-full text-left text-sm">
+                    {widget.unit === 'mixed' && widget.chartType !== 'table' ? (
+                        <caption className="mb-3 text-left text-sm leading-relaxed text-muted-foreground">
+                            {t('document.mixedCurrencyChartUnavailable')}
+                        </caption>
+                    ) : null}
                     <thead className="border-b border-border text-xs uppercase tracking-[0.12em] text-muted-foreground">
                         <tr>
                             <th className="px-3 py-2 font-medium">{t('document.dimension')}</th>
@@ -208,7 +242,7 @@ export default function ReportWidgetRenderer({ widget }: { widget: ReportWidgetD
             <div>
                 <ChartContainer config={config} className="mx-auto aspect-square h-56 max-h-56">
                     <PieChart accessibilityLayer>
-                        <ChartTooltip content={<ChartTooltipContent hideLabel />} />
+                        <ChartTooltip content={<ChartTooltipContent hideLabel formatter={tooltipFormatter} />} />
                         <Pie data={data} dataKey="current" nameKey="label" innerRadius="52%" outerRadius="78%" paddingAngle={2}>
                             {data.map((point, index) => (
                                 <Cell key={point.key} fill={CHART_COLORS[index % CHART_COLORS.length]} />
@@ -239,7 +273,7 @@ export default function ReportWidgetRenderer({ widget }: { widget: ReportWidgetD
         return (
             <ChartContainer config={config} className="aspect-auto h-64 w-full">
                 <FunnelChart accessibilityLayer>
-                    <ChartTooltip content={<ChartTooltipContent />} />
+                    <ChartTooltip content={<ChartTooltipContent formatter={tooltipFormatter} />} />
                     <Funnel data={data} dataKey="current" nameKey="label" stroke="var(--card)">
                         {data.map((point, index) => (
                             <Cell key={point.key} fill={CHART_COLORS[index % CHART_COLORS.length]} />
@@ -257,8 +291,8 @@ export default function ReportWidgetRenderer({ widget }: { widget: ReportWidgetD
                 <AreaChart data={data} margin={{ top: 12, right: 8, left: -8, bottom: 0 }} accessibilityLayer>
                     <CartesianGrid vertical={false} stroke="var(--chart-grid)" strokeDasharray="3 3" />
                     <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={10} />
-                    <YAxis tickLine={false} axisLine={false} tickFormatter={(value: number) => formatReportValue(value, widget.unit, locale)} />
-                    <ChartTooltip content={<ChartTooltipContent />} />
+                    <YAxis tickLine={false} axisLine={false} tickFormatter={(value: number) => formatReportValue(value, widget.unit, locale, 'compact')} />
+                    <ChartTooltip content={<ChartTooltipContent formatter={tooltipFormatter} />} />
                     <Area dataKey="prior" type="monotone" stroke="var(--chart-2)" fill="var(--chart-2)" fillOpacity={0.08} strokeWidth={1.5} />
                     <Area dataKey="current" type="monotone" stroke="var(--chart-1)" fill="var(--chart-1)" fillOpacity={0.18} strokeWidth={2} />
                 </AreaChart>
@@ -271,8 +305,8 @@ export default function ReportWidgetRenderer({ widget }: { widget: ReportWidgetD
             <BarChart data={data} margin={{ top: 12, right: 8, left: -8, bottom: 0 }} accessibilityLayer>
                 <CartesianGrid vertical={false} stroke="var(--chart-grid)" strokeDasharray="3 3" />
                 <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={10} />
-                <YAxis tickLine={false} axisLine={false} tickFormatter={(value: number) => formatReportValue(value, widget.unit, locale)} />
-                <ChartTooltip content={<ChartTooltipContent />} />
+                <YAxis tickLine={false} axisLine={false} tickFormatter={(value: number) => formatReportValue(value, widget.unit, locale, 'compact')} />
+                <ChartTooltip content={<ChartTooltipContent formatter={tooltipFormatter} />} />
                 {isAttainment ? <ChartLegend content={<ChartLegendContent />} /> : null}
                 {isAttainment ? <Bar dataKey="prior" fill="var(--chart-2)" radius={[6, 6, 0, 0]} /> : null}
                 <Bar dataKey="current" fill="var(--chart-1)" radius={[6, 6, 0, 0]} />

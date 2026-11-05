@@ -79,9 +79,8 @@ type PendingReconciliation = {
 };
 
 /**
- * The contacts behind one campaign engagement count. A count is only ever a promise about people,
- * so this opens the population it measured and lands each row on the contact record it reached —
- * the delivery's own id is never the interesting thing.
+ * Message entries behind one campaign engagement count. Each row identifies its send and links
+ * to its contact; a contact can appear once for each send, so totals are not unique contact counts.
  *
  * Rendered only for a caller with consent access, because the server guards a per-contact roster
  * that way; a caller without it sees plain counts and never this list.
@@ -216,6 +215,14 @@ export default function CampaignRecipientsDialog({
                         <ul className="divide-y divide-border">
                             {items.map((recipient) => (
                                 <li key={recipient.deliveryId} className="py-3">
+                                    <p className="mb-1 text-xs text-muted-foreground">
+                                        {recipient.sendNumber != null
+                                            ? t('sendLabel', {
+                                                number: recipient.sendNumber,
+                                                message: recipient.messageName ?? t('messageUnnamed'),
+                                            })
+                                            : t('sendDetailsUnavailable')}
+                                    </p>
                                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                                         <span className="min-w-0 flex-1 truncate text-sm text-foreground">
                                             {recipient.personId != null ? (

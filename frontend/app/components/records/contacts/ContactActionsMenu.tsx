@@ -304,7 +304,9 @@ export default function ContactActionsMenu({
                     onOpenChange={setNoteOpen}
                     onPersonQueryChange={contactSearch.onInputValueChange}
                     onDealQueryChange={dealSearch.onInputValueChange}
+                    personServerSearch={contactSearch.serverSearch}
                     personOptionsLoading={contactSearch.loading}
+                    dealServerSearch={dealSearch.serverSearch}
                     dealOptionsLoading={dealSearch.loading}
                 />
 
