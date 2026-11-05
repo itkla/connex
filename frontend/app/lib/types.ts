@@ -4957,6 +4957,8 @@ export type WorkflowDto = {
     description?: string | null;
     enabled: boolean;
     runtimeOwner: WorkflowRuntimeOwner;
+    executionAvailable: boolean;
+    executionUnavailableReason?: string | null;
     archivedAt?: string | null;
     intakePausedAt?: string | null;
     intakePausedById?: number | null;
@@ -5249,6 +5251,7 @@ export type WorkflowIntervention = {
 export type WorkflowOperationsSummary = {
     workflowCount: number;
     healthyCount: number;
+    unavailableCount: number;
     pausedCount: number;
     disabledCount: number;
     interventionRequiredCount: number;

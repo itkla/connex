@@ -534,6 +534,17 @@
             "additional": "追加のワークスペース権限"
         },
         "validationReady": "確認が完了しました。この下書きは公開できます。",
+        "validationBlocked": "この下書きはまだ公開できません。必要な権限と設定を確認してください。",
+        "publicationReason": {
+            "delay": "この環境では待機ステップを実行できません。待機ステップを削除してから公開してください。",
+            "multiple_conditions": "この環境では条件ステップを1つにまとめる必要があります。確認項目をそのステップにまとめてから公開してください。",
+            "no_branch_actions": "「いいえ」の分岐は、操作を行わずに終了する必要があります。操作を「はい」の分岐に移すか、削除してください。",
+            "action_limit": "この環境では操作を16件まで実行できます。超過分を削除してから公開してください。",
+            "condition_position": "条件ステップはすべての操作より前に配置する必要があります。開始条件の直後に移してください。",
+            "unsupported_structure": "この環境ではこの分岐を実行できません。条件ステップを1つにして、その後に操作を順番に並べてください。"
+        },
+        "unavailableBadge": "実行できません",
+        "executionUnavailable": "この環境ではこのワークフローを実行できません。管理者にご相談ください。",
         "validationErrorTitle": "公開前に問題を {count} 件修正してください",
         "authoringModeLabel": "編集表示",
         "authoringMode": {
@@ -784,7 +795,7 @@
             "delay_duration_below_minimum": "待機時間は1分以上にしてください。",
             "delay_duration_above_maximum": "1回の待機は30日を超えることができません。",
             "cumulative_delay_above_maximum": "この経路の待機時間は合計90日を超えることができません。",
-            "legacy_projection_unsupported": "このワークフローを動かしている自動化では、これらのステップをまだ実行できません。分岐を簡素にするか、移行についてサポートにご相談ください。",
+            "legacy_projection_unsupported": "この環境ではこれらのステップを実行できません。分岐を簡素にしてから公開してください。",
             "actor_unavailable": "設定されたワークフロー実行者を利用できません。",
             "record_unavailable": "選択したレコードを利用できないか、表示権限がありません。",
             "trigger_filter_not_matched": "選択したレコードはトリガーフィルターに一致しません。",

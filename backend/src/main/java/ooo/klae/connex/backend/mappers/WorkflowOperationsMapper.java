@@ -11,6 +11,7 @@ import ooo.klae.connex.backend.beans.WorkflowInvocation;
 import ooo.klae.connex.backend.beans.WorkflowInvocationDispatch;
 import ooo.klae.connex.backend.beans.WorkflowInvocationRecord;
 import ooo.klae.connex.backend.beans.WorkflowOperationsRunView;
+import ooo.klae.connex.backend.beans.WorkflowOperationsLegacyRunView;
 import ooo.klae.connex.backend.beans.WorkflowOperationsSummaryView;
 import ooo.klae.connex.backend.beans.WorkflowRecipeOrigin;
 import ooo.klae.connex.backend.beans.WorkflowTriggerDiagnosticView;
@@ -18,7 +19,9 @@ import ooo.klae.connex.backend.beans.WorkflowTriggerDiagnosticView;
 /** Tenant-scoped persistence for workflow operations, recipes, and exact invocations. */
 public interface WorkflowOperationsMapper {
 
-    WorkflowOperationsSummaryView getSummary(@Param("workspaceId") int workspaceId);
+    WorkflowOperationsSummaryView getSummary(
+        @Param("workspaceId") int workspaceId,
+        @Param("runtimeEnabled") boolean runtimeEnabled);
 
     List<WorkflowTriggerDiagnosticView> getDeadTriggerDiagnostics(
         @Param("workspaceId") int workspaceId,
@@ -29,6 +32,15 @@ public interface WorkflowOperationsMapper {
         @Param("workflowId") int workflowId);
 
     List<WorkflowOperationsRunView> getOperationsRuns(
+        @Param("workspaceId") int workspaceId,
+        @Param("status") String status,
+        @Param("failureCategory") String failureCategory,
+        @Param("ownerId") Integer ownerId,
+        @Param("beforeStartedAt") LocalDateTime beforeStartedAt,
+        @Param("beforeId") Long beforeId,
+        @Param("limit") int limit);
+
+    List<WorkflowOperationsLegacyRunView> getLegacyOperationsRuns(
         @Param("workspaceId") int workspaceId,
         @Param("status") String status,
         @Param("failureCategory") String failureCategory,

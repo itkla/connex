@@ -314,7 +314,7 @@ export default function WorkflowsPanel() {
                                     <Switch
                                         checked={workflow.enabled}
                                         onCheckedChange={() => void toggleEnabled(workflow)}
-                                        disabled={archived || busy || (workflow.executionMode === "system" && !canRunAsSystem)}
+                                        disabled={archived || busy || (!workflow.enabled && workflow.executionAvailable === false) || (workflow.executionMode === "system" && !canRunAsSystem)}
                                         aria-label={t("toggleEnabled", { name: workflow.name })}
                                     />
                                     <button
@@ -334,6 +334,9 @@ export default function WorkflowsPanel() {
                                             </Badge>
                                             {!workflow.enabled && !archived ? (
                                                 <Badge variant="outline" className="text-muted-foreground">{t("disabledBadge")}</Badge>
+                                            ) : null}
+                                            {workflow.executionAvailable === false && !archived ? (
+                                                <Badge variant="outline" className="text-destructive">{t("unavailableBadge")}</Badge>
                                             ) : null}
                                             {workflow.intakePausedAt && !archived ? (
                                                 <Badge variant="outline" className="border-risk-low/40 bg-risk-low/10 text-foreground">
@@ -355,6 +358,9 @@ export default function WorkflowsPanel() {
                                                 actions: workflow.actionCount,
                                             })}
                                         </span>
+                                        {workflow.executionAvailable === false && !archived ? (
+                                            <span className="block text-xs text-destructive">{t("executionUnavailable")}</span>
+                                        ) : null}
                                         <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
                                             {workflow.latestRun && latestStatus ? (
                                                 <>
