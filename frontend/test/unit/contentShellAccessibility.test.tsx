@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import type { PropsWithChildren } from "react";
+import type { PropsWithChildren, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const navigation = vi.hoisted(() => ({ pathname: "/dashboard" }));
@@ -44,8 +44,8 @@ class TestMediaQueryList extends EventTarget {
     get matches() { return desktop; }
 }
 
-function shell() {
-    return <ContentShell sidebar={<a href="#contacts">Contacts</a>}><button>Page action</button></ContentShell>;
+function shell(children: ReactNode = <button>Page action</button>) {
+    return <ContentShell sidebar={<a href="#contacts">Contacts</a>}>{children}</ContentShell>;
 }
 
 beforeEach(() => {
@@ -101,16 +101,35 @@ describe("shell keyboard access", () => {
         expect(container.querySelector("#app-sidebar")?.hasAttribute("inert")).toBe(false);
     });
 
-    it("offers the skip link first and focuses main on skip and route changes", () => {
-        const { container, rerender } = render(shell());
+    it("offers the skip link first and focuses main on skip", () => {
+        const { container } = render(shell());
         const skip = screen.getByRole("link", { name: "skipToContent" });
         expect(container.querySelector("a,button,input")).toBe(skip);
         fireEvent.click(skip);
         expect(document.activeElement).toBe(screen.getByRole("main"));
-        fireEvent.click(screen.getByRole("button", { name: "showSidebar" }));
-        navigation.pathname = "/records/contacts";
-        rerender(shell());
-        expect(document.activeElement).toBe(screen.getByRole("main"));
-        expect(container.querySelector("#app-sidebar")?.hasAttribute("inert")).toBe(true);
     });
+
+    it.each([false, true])("keeps destination autofocus when navigating with the mobile drawer open: %s", (mobileOpen) => {
+        desktop = !mobileOpen;
+        const { container, rerender } = render(shell());
+        if (mobileOpen) fireEvent.click(screen.getByRole("button", { name: "showSidebar" }));
+        navigation.pathname = "/library/documents/new";
+        rerender(shell(<input id="tpl-name" aria-label="Document template name" autoFocus />));
+        expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Document template name" }));
+        expect(container.querySelector("#app-sidebar")?.hasAttribute("inert")).toBe(mobileOpen);
+    });
+
+    it.each([false, true])("focuses main without scrolling when the previous control was removed: %s", (removeFocusedControl) => {
+        const { rerender } = render(shell());
+        const previousControl = screen.getByRole("button", { name: "Page action" });
+        if (removeFocusedControl) previousControl.focus();
+        const main = screen.getByRole("main");
+        const focus = vi.spyOn(main, "focus");
+        navigation.pathname = "/records/contacts";
+        rerender(shell(<p>Destination</p>));
+        expect(previousControl.isConnected).toBe(false);
+        expect(document.activeElement).toBe(main);
+        expect(focus).toHaveBeenCalledExactlyOnceWith({ preventScroll: true });
+    });
+
 });

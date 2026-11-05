@@ -79,3 +79,23 @@ test("passkey row actions are visible and usable without hover @mobile-only", as
         await context.close();
     }
 });
+
+test("a cached document-template route keeps its autofocus field", async ({ page }) => {
+    await page.goto("/library/documents/new");
+    await expect(page.locator("#tpl-name")).toBeVisible();
+    await page.getByRole("main").getByRole("button", {
+        name: message("en", "document-templates", "DocumentTemplateBuilder.back"), exact: true,
+    }).click();
+    await expect(page).toHaveURL(/\/library\/documents$/);
+    await page.getByRole("button", {
+        name: message("en", "document-templates", "DocumentsLibrary.viewTemplates"), exact: true,
+    }).click();
+    await page.getByRole("button", {
+        name: message("en", "document-templates", "DocumentsLibrary.newTemplate"), exact: true,
+    }).first().click();
+    await expect(page).toHaveURL(/\/library\/documents\/new$/);
+    const name = page.locator("#tpl-name");
+    await expect(name).toBeFocused();
+    await page.keyboard.type("Navigation focus");
+    await expect(name).toHaveValue("Navigation focus");
+});

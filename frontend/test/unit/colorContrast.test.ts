@@ -105,3 +105,23 @@ it("emits feedback variables even when no utility consumes their colors", async 
         expect(output).toContain(`${token}:`);
     }
 });
+
+for (const theme of ["light", "dark"] as const) {
+    for (const paper of ["report-paper", "document-paper"]) {
+        it(`${paper} uses readable light green text when printing from ${theme} mode`, () => {
+            const overrides = css.match(new RegExp(`\\.${paper} \\{([^}]+)\\}`))?.[1];
+            if (!overrides) throw new Error(`Missing ${paper} print surface`);
+            const tokens = { ...themeTokens(theme), ...declarations(overrides) };
+            expect(tokens["--brand-text"]).toBe(themeTokens("light")["--brand-text"]);
+            expect(contrast(color(tokens, "--color-brand-text"), color(tokens, "--card"))).toBeGreaterThanOrEqual(4.5);
+        });
+    }
+
+    it(`the forced-light onboarding surface keeps readable green text inside ${theme} mode`, () => {
+        const overrides = css.match(/:root,\s*\.light-surface \{([^}]+)\}/)?.[1];
+        if (!overrides) throw new Error("Missing forced-light surface");
+        const tokens = { ...themeTokens(theme), ...declarations(overrides) };
+        expect(tokens["--brand-text"]).toBe(themeTokens("light")["--brand-text"]);
+        expect(contrast(color(tokens, "--color-brand-text"), color(tokens, "--background"))).toBeGreaterThanOrEqual(4.5);
+    });
+}

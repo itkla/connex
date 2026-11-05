@@ -66,7 +66,7 @@ export default function QuickCreateTypeSelector({
                         transition={reduceMotion ? instant : springJiggle}
                         className="group flex items-center gap-3 rounded-xl px-2.5 py-2.5 text-left transition-colors duration-(--motion-micro) hover:bg-muted focus-visible:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                     >
-                        <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground ring-1 ring-border transition-colors group-hover:bg-brand-light group-hover:text-brand-text group-hover:ring-transparent group-focus-visible:bg-brand-light group-focus-visible:text-brand-text">
+                        <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground ring-1 ring-border transition-colors group-hover:bg-brand-light group-hover:text-brand-dark group-hover:ring-transparent group-focus-visible:bg-brand-light group-focus-visible:text-brand-dark">
                             {Icon ? <Icon className="size-4" /> : null}
                         </span>
                         <span className="flex-1 text-sm font-medium text-foreground">

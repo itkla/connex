@@ -90,7 +90,10 @@ export default function ContentShell({
     useEffect(() => {
         if (lastFocusedPathname.current === pathname) return;
         lastFocusedPathname.current = pathname;
-        mainRef.current?.focus();
+        const focused = document.activeElement;
+        if (!focused || focused === document.body || !focused.isConnected) {
+            mainRef.current?.focus({ preventScroll: true });
+        }
     }, [pathname]);
 
     useEffect(() => {
@@ -118,6 +121,8 @@ export default function ContentShell({
             document.removeEventListener("keydown", onKeyDown);
             document.body.style.overflow = previousOverflow;
             if (window.matchMedia(DESKTOP_SIDEBAR_QUERY).matches) return;
+            const focused = document.activeElement;
+            if (focused && focused !== document.body && focused.isConnected && !sidebar?.contains(focused)) return;
             if (opener instanceof HTMLElement && opener !== document.body && opener.isConnected) opener.focus();
             else toolbarTrigger?.focus();
         };
