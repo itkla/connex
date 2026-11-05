@@ -1,5 +1,6 @@
 "use client";
 
+import { parseMysqlDateTime } from '@/app/lib/utils';
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useFormatter, useTranslations } from "next-intl";
@@ -132,7 +133,7 @@ export default function MembershipPanel() {
                         {offers.map((offer) => {
                             const busy = busyOfferId === offer.id;
                             const scope = scopeLabel(offer);
-                            const expires = format.dateTime(new Date(offer.expiresAt), { dateStyle: "medium" });
+                            const expires = format.dateTime(new Date(parseMysqlDateTime(offer.expiresAt)), { dateStyle: "medium" });
                             return (
                                 <li key={offer.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
                                     <Avatar>

@@ -1,3 +1,4 @@
+import { publishAiAvailabilityChange } from "@/app/lib/aiAvailabilityEvents";
 const API_BASE =
     typeof window === "undefined"
         ? process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080"
@@ -240,6 +241,7 @@ if (typeof window !== "undefined") {
         else if (action === "account") invalidateAccountStorage();
         else if (action === "refresh") reconcileBrowserAccount();
         if (action === "logout" || action === "account") resetPrivilegedMfaState();
+        else if (action === "refresh") resetPrivilegedMfaReadiness();
         abandonPendingPinnedWrites();
         invalidateClientRequestIdentity();
         if (action === "logout") {
@@ -312,11 +314,13 @@ export async function csrfHeader(forceRefresh = false): Promise<Record<string, s
     return csrfTokenCache ? { [csrfTokenCache.headerName]: csrfTokenCache.token } : {};
 }
 
+/** Invalidates request caches while retaining account policy during workspace/CSRF revalidation. */
 function invalidateClientRequestIdentity() {
     csrfTokenCache = null;
     csrfTokenRequest = null;
     clientRequestIdentityEpoch += 1;
     privilegedMfaEventEpoch += 1;
+    privilegedMfaReadinessSequence = privilegedMfaReadSequence;
     for (const mutation of inFlightAiMutations.values()) {
         mutation.controller.abort();
     }
@@ -388,6 +392,7 @@ function signalClientRequestIdentityTransition(action: ClientIdentityTransition)
     if (action === "account") invalidateAccountStorage();
     if (action === "logout") resetBrowserAccount();
     if (action === "account" || action === "logout") resetPrivilegedMfaState();
+    else if (action === "refresh") resetPrivilegedMfaReadiness();
     abandonPendingPinnedWrites();
     invalidateClientRequestIdentity();
     broadcastClientRequestIdentityTransition(action);
@@ -422,6 +427,7 @@ async function resolveClientRequestIdentity(): Promise<ResolvedClientRequestIden
         || previousCsrf.requestIdentity !== currentCsrf.requestIdentity
     )) {
         const serverIdentityChanged = previousCsrf.requestIdentity !== currentCsrf.requestIdentity;
+        if (serverIdentityChanged) resetPrivilegedMfaReadiness();
         invalidateClientRequestIdentity();
         if (serverIdentityChanged) {
             broadcastClientRequestIdentityTransition("refresh");
@@ -640,6 +646,9 @@ const PRIVILEGED_MFA_CONFINEMENT_MESSAGES: Record<PrivilegedMfaConfinementReason
 /** How a standing check ended: it decided confinement, a newer read already had, or it failed. */
 export type PrivilegedMfaSettleOutcome = "applied" | "superseded" | "failed";
 
+/** Whether ordinary client reads can rely on a resolved privileged-MFA policy. */
+export type PrivilegedMfaReadiness = "loading" | "ready" | "failed";
+
 const PRIVILEGED_MFA_READ_ATTEMPTS = 3;
 const PRIVILEGED_MFA_STANDINGS: ReadonlySet<unknown> = new Set<Types.PrivilegedMfaStanding>([
     "UNPRIVILEGED",
@@ -655,6 +664,9 @@ let privilegedMfaEventEpoch = 0;
 let privilegedMfaReadSequence = 0;
 let privilegedMfaAppliedSequence = 0;
 let privilegedMfaRequirements: Types.PasskeyRegistrationRequirements | null = null;
+let privilegedMfaReadiness: PrivilegedMfaReadiness = "loading";
+let privilegedMfaReadinessSequence = 0;
+let privilegedMfaPolicyEnforced: boolean | null = null;
 const privilegedMfaListeners = new Set<() => void>();
 
 function privilegedMfaReasonForStep(mfaParam: string | null): PrivilegedMfaConfinementReason | null {
@@ -687,6 +699,15 @@ export function privilegedMfaConfinementReason(): PrivilegedMfaConfinementReason
     return activePrivilegedMfaConfinement();
 }
 
+/** Keeps a step URL's known confinement across navigation until a decisive standing releases it. */
+export function observePrivilegedMfaConfinementDestination(): void {
+    if (privilegedMfaConfinement !== null || privilegedMfaConfinementReleased) return;
+    const reason = privilegedMfaDestinationReason();
+    if (reason === null) return;
+    confinePrivilegedMfa(reason);
+    notifyPrivilegedMfaListeners();
+}
+
 /**
  * Whether privileged-MFA confinement is in force, for a route the caller observed rather than the
  * one `window.location` currently holds.
@@ -715,6 +736,11 @@ export function currentPrivilegedMfaRequirements(): Types.PasskeyRegistrationReq
     return privilegedMfaRequirements;
 }
 
+/** Shared policy readiness; unresolved policy never establishes permission for background reads. */
+export function currentPrivilegedMfaReadiness(): PrivilegedMfaReadiness {
+    return privilegedMfaReadiness;
+}
+
 /** Subscribes to browser-local privileged MFA confinement and standing changes. */
 export function subscribePrivilegedMfaConfinement(listener: () => void): () => void {
     privilegedMfaListeners.add(listener);
@@ -723,6 +749,14 @@ export function subscribePrivilegedMfaConfinement(listener: () => void): () => v
 
 function notifyPrivilegedMfaListeners() {
     for (const listener of [...privilegedMfaListeners]) listener();
+}
+
+function publishPrivilegedMfaReadiness(status: PrivilegedMfaReadiness, sequence: number, epoch: number, enforced?: boolean) {
+    if (epoch !== privilegedMfaEventEpoch || sequence < privilegedMfaReadinessSequence) return;
+    privilegedMfaReadinessSequence = sequence;
+    privilegedMfaReadiness = status;
+    if (enforced !== undefined) privilegedMfaPolicyEnforced = enforced;
+    notifyPrivilegedMfaListeners();
 }
 
 /** Moves the Security step parameter to the reason in force, without navigating. */
@@ -751,7 +785,17 @@ function releasePrivilegedMfaConfinement() {
 /** Records the server refusing a request for a confinement reason, which overtakes reads in flight. */
 function notePrivilegedMfaRefusal(reason: PrivilegedMfaConfinementReason) {
     privilegedMfaEventEpoch += 1;
+    privilegedMfaReadiness = "loading";
+    privilegedMfaPolicyEnforced = null;
     confinePrivilegedMfa(reason);
+    notifyPrivilegedMfaListeners();
+}
+
+/** Rechecks session policy without discarding a known confinement or approval requirement. */
+function resetPrivilegedMfaReadiness() {
+    privilegedMfaReadiness = "loading";
+    privilegedMfaReadinessSequence = privilegedMfaReadSequence;
+    privilegedMfaPolicyEnforced = null;
     notifyPrivilegedMfaListeners();
 }
 
@@ -764,7 +808,7 @@ function resetPrivilegedMfaState() {
     privilegedMfaEventEpoch += 1;
     privilegedMfaAppliedSequence = privilegedMfaReadSequence;
     privilegedMfaRequirements = null;
-    notifyPrivilegedMfaListeners();
+    resetPrivilegedMfaReadiness();
 }
 
 /**
@@ -801,19 +845,21 @@ function isPrivilegedMembership(value: unknown): value is Types.PrivilegedMember
         && "orgId" in value && isPositiveId(value.orgId)
         && "orgName" in value && typeof value.orgName === "string"
         && "orgRole" in value && (value.orgRole === null || value.orgRole === "owner" || value.orgRole === "admin")
+        && (!("lastOwner" in value) || typeof value.lastOwner === "boolean")
         && "workspaces" in value && Array.isArray(value.workspaces)
         && value.workspaces.every((workspace: unknown) =>
             typeof workspace === "object" && workspace !== null
             && "workspaceId" in workspace && isPositiveId(workspace.workspaceId)
+            && (!("lastOwner" in workspace) || typeof workspace.lastOwner === "boolean")
             && "workspaceName" in workspace && typeof workspace.workspaceName === "string");
 }
 
-function applyPrivilegedMfaStanding(requirements: Types.PasskeyRegistrationRequirements, sequence: number) {
+function applyPrivilegedMfaStanding(requirements: Types.PasskeyRegistrationRequirements, sequence: number, enforced: boolean) {
     privilegedMfaAppliedSequence = sequence;
     privilegedMfaRequirements = requirements;
     const standing = requirements.standing;
     if (standing !== undefined) privilegedMfaCeremonyEpoch = null;
-    if (standing === "SATISFIED" || standing === "UNPRIVILEGED") {
+    if (!enforced || standing === "SATISFIED" || standing === "UNPRIVILEGED") {
         releasePrivilegedMfaConfinement();
     } else if (standing === "ENROLLMENT_REQUIRED") {
         confinePrivilegedMfa("enrollment");
@@ -831,8 +877,9 @@ function applyPrivilegedMfaStanding(requirements: Types.PasskeyRegistrationRequi
 
 /**
  * Re-reads the account's own standing from the allowlisted requirements endpoint and settles
- * browser-local confinement on it (#1534). SATISFIED and UNPRIVILEGED release it; ENROLLMENT_REQUIRED
- * and ATTESTATION_REQUIRED confine for that reason and move the Security step to match.
+ * browser-local confinement on it (#1534). With master enforcement enabled, SATISFIED and
+ * UNPRIVILEGED release it; ENROLLMENT_REQUIRED and ATTESTATION_REQUIRED confine for that reason
+ * and move the Security step to match.
  *
  * Reads are ordered: one that started before the newest decisive read ends superseded and changes
  * nothing, and one that a server refusal, an identity change or an accepted ceremony overtook is
@@ -843,7 +890,12 @@ function applyPrivilegedMfaStanding(requirements: Types.PasskeyRegistrationRequi
  * after a ceremony the server accepted — an enrollment or a redemption — whichever decisive read
  * follows it, until a refusal or an identity change intervenes, and never once passkey approval has
  * been required in this page. The decisive requirements are available from
- * {@link currentPrivilegedMfaRequirements}.
+ * {@link currentPrivilegedMfaRequirements}. The public master-enforcement flag is read alongside
+ * requirements: when it is false, enrollment/approval metadata does not confine the account. An
+ * unknown enforcement posture fails the read and preserves any already-known confinement.
+ * A validated master-off response releases ordinary reads before requirements finish. Readiness
+ * failures have their own publication order, so a newer failed check still holds readers even if
+ * an older standing later settles. Pending background checks retain a valid readiness snapshot.
  *
  * @param settlement what prompted the check; a ceremony is one the server has just accepted
  * @returns whether this read decided the standing, a newer one had, or the read failed
@@ -856,26 +908,64 @@ export async function settlePrivilegedMfaStanding(
         privilegedMfaEventEpoch += 1;
         privilegedMfaCeremonyEpoch = privilegedMfaEventEpoch;
     }
-    const failedUnlessOvertaken = (sequence: number): PrivilegedMfaSettleOutcome =>
-        sequence < privilegedMfaAppliedSequence ? "superseded" : "failed";
+    const failedUnlessOvertaken = (sequence: number, epoch: number, disabled = false): PrivilegedMfaSettleOutcome => {
+        if (sequence < privilegedMfaAppliedSequence) return "superseded";
+        if (!disabled) publishPrivilegedMfaReadiness("failed", sequence, epoch);
+        return "failed";
+    };
     let sequence = privilegedMfaReadSequence;
+    let readEpoch = privilegedMfaEventEpoch;
     for (let attempt = 0; attempt < PRIVILEGED_MFA_READ_ATTEMPTS; attempt += 1) {
         const epoch = privilegedMfaEventEpoch;
         privilegedMfaReadSequence += 1;
         sequence = privilegedMfaReadSequence;
+        const readSequence = sequence;
+        readEpoch = epoch;
+        if (privilegedMfaReadiness !== "ready") publishPrivilegedMfaReadiness("loading", sequence, epoch);
         let response: unknown;
+        let enforced: boolean;
+        let disabled = false;
+        let readFailed = false;
         try {
-            response = await getPasskeyRegistrationRequirements();
+            const [requirements, capabilities] = await Promise.all([
+                getPasskeyRegistrationRequirements(),
+                getCapabilities().then((capabilities) => {
+                    if (typeof capabilities.privilegedMfaEnforced !== "boolean") throw new Error("Unknown MFA policy");
+                    if (epoch === privilegedMfaEventEpoch && readSequence >= privilegedMfaAppliedSequence) {
+                        if (!capabilities.privilegedMfaEnforced) {
+                            disabled = true;
+                            privilegedMfaAppliedSequence = readSequence;
+                            releasePrivilegedMfaConfinement();
+                            publishPrivilegedMfaReadiness("ready", readSequence, epoch, false);
+                        } else if (!readFailed && privilegedMfaPolicyEnforced === false) {
+                            publishPrivilegedMfaReadiness("loading", readSequence, epoch, true);
+                        }
+                    }
+                    return capabilities;
+                }),
+            ]);
+            response = requirements;
+            enforced = capabilities.privilegedMfaEnforced;
         } catch {
-            return failedUnlessOvertaken(sequence);
+            readFailed = true;
+            return failedUnlessOvertaken(sequence, epoch, disabled);
         }
-        if (!isPasskeyRegistrationRequirements(response)) return failedUnlessOvertaken(sequence);
+        if (!isPasskeyRegistrationRequirements(response)) return failedUnlessOvertaken(sequence, epoch, disabled);
         if (sequence < privilegedMfaAppliedSequence) return "superseded";
         if (epoch !== privilegedMfaEventEpoch) continue;
-        applyPrivilegedMfaStanding(response, sequence);
+        const legacyRelease = response.standing === undefined
+            && privilegedMfaCeremonyEpoch === privilegedMfaEventEpoch
+            && !privilegedMfaAttestationObserved
+            && privilegedMfaDestinationReason() !== "attestation";
+        applyPrivilegedMfaStanding(response, sequence, enforced);
+        publishPrivilegedMfaReadiness(
+            !enforced || response.standing !== undefined || activePrivilegedMfaConfinement() !== null
+                || legacyRelease ? "ready" : "failed",
+            sequence, epoch, enforced,
+        );
         return "applied";
     }
-    return failedUnlessOvertaken(sequence);
+    return failedUnlessOvertaken(sequence, readEpoch);
 }
 
 /**
@@ -4439,11 +4529,16 @@ export function getAiProviderConfig(workspaceId: number, init: RequestInit = {})
 }
 
 export function saveAiProviderConfig(workspaceId: number, request: Types.AiProviderConfigRequest) {
-    return putJson<Types.AiProviderConfig>(`/api/ai/provider?workspaceId=${workspaceId}`, request);
+    return putJson<Types.AiProviderConfig>(`/api/ai/provider?workspaceId=${workspaceId}`, request).then((result) => {
+        publishAiAvailabilityChange();
+        return result;
+    });
 }
 
 export function revokeAiProviderConfig(workspaceId: number) {
-    return deleteJson<void>(`/api/ai/provider?workspaceId=${workspaceId}`);
+    return deleteJson<void>(`/api/ai/provider?workspaceId=${workspaceId}`).then(() => {
+        publishAiAvailabilityChange();
+    });
 }
 
 export function createDeal(payload: Types.CreateDealPayload, init: RequestInit = {}) {
@@ -6558,7 +6653,10 @@ export function saveAiWorkspaceGovernance(
         `/api/ai/governance?workspaceId=${workspaceId}`,
         governance,
         init,
-    );
+    ).then((result) => {
+        publishAiAvailabilityChange();
+        return result;
+    });
 }
 
 export function getAiChatInvitations(

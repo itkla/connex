@@ -22,7 +22,7 @@ vi.mock("@/app/hooks/useRecordTargetSearch", () => ({
     useContactTargetSearch: () => ({ contacts: [] }),
     useDealTargetSearch: () => ({ deals: [] }),
 }));
-vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key, useLocale: () => "en" }));
+vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key, useTimeZone: () => "UTC", useLocale: () => "en" }));
 vi.mock("next/navigation", () => ({
     usePathname: () => "/records/contacts/31", useRouter: () => ({ refresh: api.refresh }),
     useSearchParams: () => new URLSearchParams(),

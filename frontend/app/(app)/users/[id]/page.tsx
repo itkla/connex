@@ -1,7 +1,7 @@
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { CrumbLabel } from "@/app/hooks/useNavTrail";
-import { getLocale, getTranslations } from "next-intl/server";
+import { getTimeZone, getLocale, getTranslations } from "next-intl/server";
 import { ClockIcon } from "@heroicons/react/24/outline";
 
 import {
@@ -31,6 +31,7 @@ import SectionHeader from "@/app/components/dashboard/SectionHeader";
 import UserPerformance from "@/app/components/users/UserPerformance";
 
 export default async function UserPage({ params }: { params: { id: number } }) {
+    const timeZone = await getTimeZone();
     const { id } = await params;
     const cookie = (await headers()).get("cookie");
     const init = { headers: { cookie: cookie ?? "" } } as const;
@@ -96,10 +97,10 @@ export default async function UserPage({ params }: { params: { id: number } }) {
                                 <InfoRow label={t("email")} value={user.email ?? ""} />
                                 <InfoRow
                                     label={t("lastLogin")}
-                                    value={user.lastLoginAt ? formatDateTime(user.lastLoginAt, locale) : t("neverLoggedIn")}
+                                    value={user.lastLoginAt ? formatDateTime(user.lastLoginAt, locale, timeZone) : t("neverLoggedIn")}
                                 />
-                                <InfoRow label={t("memberSince")} value={formatDate(user.createdAt, locale)} />
-                                <InfoRow label={t("updated")} value={formatDateTime(user.updatedAt, locale)} />
+                                <InfoRow label={t("memberSince")} value={formatDate(user.createdAt, locale, timeZone)} />
+                                <InfoRow label={t("updated")} value={formatDateTime(user.updatedAt, locale, timeZone)} />
                             </dl>
 
                             <Attachments

@@ -1,5 +1,6 @@
 'use client';
 
+import { getDateTimeFormatter } from '@/app/lib/intlFormatters';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { CalendarDaysIcon } from '@heroicons/react/16/solid';
 
@@ -89,8 +90,8 @@ export default function CustomRangePopover({
     const requestRef = useRef<AbortController | null>(null);
 
     const formatters = useMemo(() => ({
-        compact: new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', timeZone: 'UTC' }),
-        full: new Intl.DateTimeFormat(locale, {
+        compact: getDateTimeFormatter(locale, { month: 'short', day: 'numeric', timeZone: 'UTC' }),
+        full: getDateTimeFormatter(locale, {
             year: 'numeric',
             month: 'short',
             day: 'numeric',

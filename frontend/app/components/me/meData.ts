@@ -11,6 +11,7 @@ import type {
 import type { ConstellationNode } from "@/app/components/me/MeHero";
 import type { CoolingItem, RiskItem } from "@/app/components/me/NeedsYou";
 import type { PulseDay } from "@/app/components/me/PulseStrip";
+import { hourInTimeZone } from "@/app/lib/timeZone";
 
 const BANDS: TemperatureBand[] = ["hot", "warm", "cool", "cold"];
 const RISK_ORDER = { high: 3, medium: 2, low: 1 } as const;
@@ -134,20 +135,8 @@ export function activityPulse(
 }
 
 /** Time-of-day greeting key resolved in the user's timezone. */
-export function greetingKey(timezone: string | undefined): "morning" | "afternoon" | "evening" | "night" {
-    let hour = new Date().getHours();
-    if (timezone) {
-        try {
-            const parsed = Number(
-                new Intl.DateTimeFormat("en-US", { hour: "2-digit", hour12: false, timeZone: timezone }).format(
-                    new Date(),
-                ),
-            );
-            if (Number.isFinite(parsed)) hour = parsed % 24;
-        } catch {
-            /* Unrecognized IANA zone (e.g. a legacy DB value) — fall back to the server-local hour. */
-        }
-    }
+export function greetingKey(timezone: string | undefined, now: number): "morning" | "afternoon" | "evening" | "night" {
+    const hour = hourInTimeZone(now, timezone);
     if (hour < 5) return "night";
     if (hour < 12) return "morning";
     if (hour < 18) return "afternoon";

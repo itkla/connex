@@ -155,7 +155,9 @@ profiles fetch current records with the rendered workspace pin before opening. T
 reuses `EditContactSheet`. Forms freeze their base/token and the opening workspace; background list
 or route refreshes never rebase an existing draft. Email/phone/title inline saves condition on the
 row token and replace the complete row through `useServerRecords.replaceItem`, including removal
-of nullable fields omitted from JSON. A stale inline refusal restores the row's last server snapshot
+of nullable fields omitted from JSON. Draft submissions retain explicit empty strings for cleared
+email, phone and title values. Omission/null means no change for those mapper columns; an empty
+string means clear, for both inline edits and sheets. A stale inline refusal restores the row's last server snapshot
 and keeps the refused value only in the quick-edit draft. The entire inline request and conflict
 read block another editor from replacing it.
 

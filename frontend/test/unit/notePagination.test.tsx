@@ -23,7 +23,7 @@ vi.mock("@/app/lib/api", () => ({
 }));
 vi.mock("@/app/hooks/useWorkspace", () => ({ useWorkspace: () => ({ activeWorkspaceId: scope.workspaceId, switching: scope.switching }) }));
 vi.mock("@/app/hooks/useApiErrorToast", () => ({ useApiErrorToast: () => api.report }));
-vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }));
+vi.mock("next-intl", () => ({ useTimeZone: () => "UTC", useTranslations: () => (key: string) => key }));
 vi.mock("@/app/components/me/TimelineDeepLinkFallback", () => ({ default: () => null }));
 vi.mock("@/app/components/me/TimelineRow", () => ({
     default: (props: { entry: TimelineEntry; persons: unknown[]; deals: unknown[] }) => {

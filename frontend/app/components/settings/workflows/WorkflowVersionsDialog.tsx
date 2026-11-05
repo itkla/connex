@@ -1,6 +1,6 @@
 "use client";
 
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
 import { RectangleStackIcon } from "@heroicons/react/24/outline";
 
 import type { WorkflowVersion } from "@/app/lib/types";
@@ -34,6 +34,7 @@ export default function WorkflowVersionsDialog({
     onOpenChange: (open: boolean) => void;
     onInspect: (version: WorkflowVersion) => void;
 }) {
+    const timeZone = useTimeZone();
     const t = useTranslations("WorkspaceWorkflows");
     const locale = useLocale();
     return (
@@ -68,7 +69,7 @@ export default function WorkflowVersionsDialog({
                                             className="mt-1 block text-xs text-muted-foreground"
                                             dateTime={normalizeWorkflowRunDateTime(version.publishedAt)}
                                         >
-                                            {formatWorkflowRunDateTime(version.publishedAt, locale)}
+                                            {formatWorkflowRunDateTime(version.publishedAt, locale, timeZone)}
                                         </time>
                                     </div>
                                     <Button variant="outline" size="sm" onClick={() => onInspect(version)}>{t("versions.inspect")}</Button>

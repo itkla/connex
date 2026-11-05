@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import { LightBulbIcon } from '@heroicons/react/24/outline';
 
 import { generateIntroRationale } from '@/app/lib/api';
@@ -35,6 +35,7 @@ export default function IntroRationaleLine({
     personAId: number;
     personBId: number;
 }) {
+    const timeZone = useTimeZone();
     const t = useTranslations('IntroRationale');
     const locale = useLocale();
     const pairKey = `${Math.min(personAId, personBId)}:${Math.max(personAId, personBId)}`;
@@ -105,7 +106,7 @@ export default function IntroRationaleLine({
                 <span className="text-muted-foreground/70">
                     {' · '}
                     {t('attribution', {
-                        time: formatDateTime(state.rationale.generatedAt ?? undefined, locale),
+                        time: formatDateTime(state.rationale.generatedAt ?? undefined, locale, timeZone),
                     })}
                 </span>
                 {state.rationale.warnings > 0 ? (

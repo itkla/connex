@@ -1,5 +1,6 @@
 'use client';
 
+import { getDateTimeFormatter, getNumberFormatter } from '@/app/lib/intlFormatters';
 import { useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
@@ -240,7 +241,7 @@ export default function GoalsBoard({
 }
 
 function formatTargetValue(value: number, locale: string): string {
-    return new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }).format(value);
+    return getNumberFormatter(locale, { maximumFractionDigits: 2 }).format(value);
 }
 
 function formatGoalPeriod(
@@ -253,7 +254,7 @@ function formatGoalPeriod(
         const quarter = Math.floor(date.getUTCMonth() / 3) + 1;
         return quarterLabel(quarter, date.getUTCFullYear());
     }
-    return new Intl.DateTimeFormat(locale, {
+    return getDateTimeFormatter(locale, {
         year: 'numeric',
         month: 'long',
         timeZone: 'UTC',

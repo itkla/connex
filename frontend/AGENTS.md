@@ -23,7 +23,7 @@ Next.js 16 App Router/RSC · React 19 · strict TypeScript · Tailwind v4 · sha
 
 ## Task routing
 
-Read the relevant contract before editing that area:
+Before editing, read:
 
 | Work | Required reading |
 |---|---|
@@ -31,6 +31,7 @@ Read the relevant contract before editing that area:
 | New page, redesign, cross-surface UI pattern | `../docs/frontend/PRODUCT_GRAMMAR.md` |
 | Motion or animated interaction | `../docs/frontend/MOTION.md` |
 | Frontend testing/browser verification | `../docs/FRONTEND_TESTING.md` |
+| Dates | `../docs/frontend/DATES_AND_TIME_ZONES.md` |
 | Production build/image/release asset gate | `../docs/frontend/BUILD_ASSET_GATE.md` |
 | Deployment/staging/build pipeline | `../docs/DEPLOYMENT.md`, `../docs/STAGING_DEPLOY.md` |
 

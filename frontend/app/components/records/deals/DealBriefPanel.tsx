@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import { ArrowPathIcon, SparklesIcon } from '@heroicons/react/24/outline';
 
 import { generateDealBrief } from '@/app/lib/api';
@@ -47,6 +47,7 @@ export default function DealBriefPanel({
     className?: string;
     citationTitles?: ReadonlyMap<string, string>;
 }) {
+    const timeZone = useTimeZone();
     const t = useTranslations('DealBrief');
     const locale = useLocale();
     const [storedState, setStoredState] = useState<DealBriefState>({ dealId, status: 'loading' });
@@ -203,7 +204,7 @@ export default function DealBriefPanel({
                     <div className="flex items-center justify-between gap-3">
                         <p className="text-xs text-muted-foreground">
                             {t('attribution', {
-                                time: formatDateTime(state.brief.generatedAt ?? undefined, locale),
+                                time: formatDateTime(state.brief.generatedAt ?? undefined, locale, timeZone),
                             })}
                             {state.brief.warnings > 0 ? <> · {t('integrityWarning')}</> : null}
                         </p>

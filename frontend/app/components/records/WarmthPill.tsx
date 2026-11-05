@@ -1,6 +1,6 @@
 'use client';
 
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
@@ -21,6 +21,7 @@ type WarmthPillProps = {
  * records tables, dashboard cooling feed, and contact-detail evidence entry points.
  */
 export default function WarmthPill({ temp, withTooltip = true }: WarmthPillProps) {
+    const timeZone = useTimeZone();
     const t = useTranslations('Temperature');
     const locale = useLocale();
     const now = useLiveNow();
@@ -43,7 +44,7 @@ export default function WarmthPill({ temp, withTooltip = true }: WarmthPillProps
         );
     }
 
-    const lastTouch = formatRelativeTime(temp.lastTouchAt, locale, now);
+    const lastTouch = formatRelativeTime(temp.lastTouchAt, locale, now, timeZone);
     const surface = (
         <span
             className={cn(
@@ -65,7 +66,7 @@ export default function WarmthPill({ temp, withTooltip = true }: WarmthPillProps
                 <div>{t('tooltip', { score: temp.score, lastTouch })}</div>
                 {temp.daysUntilCold != null && temp.goesColdAt ? (
                     <div className="opacity-80">
-                        {t('goesCold', { when: formatRelativeTime(temp.goesColdAt, locale, now) })}
+                        {t('goesCold', { when: formatRelativeTime(temp.goesColdAt, locale, now, timeZone) })}
                     </div>
                 ) : null}
             </TooltipContent>

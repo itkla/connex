@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import { motion, useReducedMotion } from 'motion/react';
 import {
     ArrowDownTrayIcon,
@@ -114,6 +114,7 @@ function normalizeSort(v: string | null): SortKey {
 }
 
 export default function FilesBrowser() {
+    const timeZone = useTimeZone();
     const t = useTranslations('LibraryFiles');
     const tf = useTranslations('Filters');
     const locale = useLocale();
@@ -358,7 +359,7 @@ export default function FilesBrowser() {
             {
                 key: 'modified',
                 label: t('detailAdded'),
-                render: (a) => <span className="text-muted-foreground">{formatDate(a.createdAt, locale)}</span>,
+                render: (a) => <span className="text-muted-foreground">{formatDate(a.createdAt, locale, timeZone)}</span>,
                 widthClass: 'w-32',
             },
             {
@@ -393,7 +394,7 @@ export default function FilesBrowser() {
                 widthClass: 'w-28',
             },
         ],
-        [t, locale],
+        [t, locale, timeZone],
     );
 
     const selectionActions = (
@@ -699,6 +700,7 @@ function FileCard({
     onOpen: () => void;
     onDelete: () => void;
 }) {
+    const timeZone = useTimeZone();
     const Icon = KIND_ICON[kind];
     const isImage = kind === 'image';
 
@@ -768,7 +770,7 @@ function FileCard({
 
             <div className="mt-auto flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
                 <OwnerChip attachment={attachment} t={t} className="min-w-0 flex-1" />
-                <span className="shrink-0">{formatDate(attachment.createdAt, locale)}</span>
+                <span className="shrink-0">{formatDate(attachment.createdAt, locale, timeZone)}</span>
             </div>
         </motion.div>
     );

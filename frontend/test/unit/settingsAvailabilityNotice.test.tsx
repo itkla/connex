@@ -10,7 +10,7 @@ import type { SettingsAvailabilityState } from "@/app/lib/settingsManifest";
 const { locale } = vi.hoisted(() => ({ locale: { current: "en" } }));
 
 vi.mock("next-intl", () => ({
-    useTranslations: (namespace: string) => (key: string) => message(locale.current, `${namespace}.${key}`),
+    useTimeZone: () => "UTC", useTranslations: (namespace: string) => (key: string) => message(locale.current, `${namespace}.${key}`),
 }));
 
 vi.mock("next/navigation", () => ({

@@ -47,8 +47,8 @@ export function WorkflowRunStatusIcon({ status, className }: { status: WorkflowR
 }
 
 /** Formats a UTC MySQL workflow timestamp as a localized absolute time. */
-export function formatWorkflowRunDateTime(value: string, locale: string): string {
-    return formatDateTime(normalizeWorkflowRunDateTime(value), locale);
+export function formatWorkflowRunDateTime(value: string, locale: string, timeZone = 'UTC'): string {
+    return formatDateTime(normalizeWorkflowRunDateTime(value), locale, timeZone);
 }
 
 /** Normalizes a UTC MySQL workflow timestamp for machine-readable datetime attributes. */

@@ -23,7 +23,7 @@ describe('contact edit snapshots', () => {
         api.update.mockResolvedValueOnce(saved);
         expect(await submitContactDraftUpdate(base, draft, origin)).toBe(saved);
         expect(api.update).toHaveBeenLastCalledWith(7, {
-            expectedVersion: 4, name: 'Contact', email: undefined, phone: '222', title: 'Director', companyId: 2,
+            expectedVersion: 4, name: 'Contact', email: '', phone: '222', title: 'Director', companyId: 2,
         }, origin);
     });
 

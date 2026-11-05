@@ -39,8 +39,8 @@ export function reconcileSavedContactDraft(current: ContactDraft, submitted: Con
 export function submitContactDraftUpdate(base: Contact, draft: ContactDraft, init: RequestInit): Promise<Contact> {
     const payload: UpdateContactPayload = {
         expectedVersion: draft.expectedVersion,
-        name: draft.name.trim(), email: draft.email.trim() || undefined,
-        phone: draft.phone.trim() || undefined, title: draft.title.trim() || undefined,
+        name: draft.name.trim(), email: draft.email.trim(),
+        phone: draft.phone.trim(), title: draft.title.trim(),
         companyId: base.companyId ?? base.company?.id ?? null,
     };
     return updateContact(base.id, payload, init);

@@ -252,6 +252,7 @@ async function renderDealKanban(permissions: readonly string[], options: {
 
     await renderCard(
         <DealsKanban
+                timezone="UTC"
             deals={[boardDeal]}
             pipelines={[pipeline]}
             stagesByPipeline={{ [pipeline.id]: stages }}
@@ -316,7 +317,7 @@ describe('real record card action menus', () => {
         },
         {
             name: 'deal',
-            card: <DealCard deal={deal(16)} />,
+            card: <DealCard timezone="UTC" deal={deal(16)} />,
         },
     ])('opens a $name from the whole card with Enter', async ({ card }) => {
         await renderCard(card);
@@ -338,7 +339,7 @@ describe('real record card action menus', () => {
         },
         {
             name: 'deal',
-            card: <DealCard deal={deal(29)} returnSelection={{ userId: user.id, workspaceId: workspace.id, ids: [29, 30], visibleCount: 40 }} />,
+            card: <DealCard timezone="UTC" deal={deal(29)} returnSelection={{ userId: user.id, workspaceId: workspace.id, ids: [29, 30], visibleCount: 40 }} />,
             collection: 'deals',
         },
     ])('retains the $name list selection when Open record is selected', async ({ card, collection }) => {
@@ -451,7 +452,7 @@ describe('real record card action menus', () => {
         { permissions: ['DEAL_DELETE'], present: ['Delete'], absent: ['Quick edit'] },
     ])('gates deal mutations on their distinct effective permissions: $permissions', async ({ permissions, present, absent }) => {
         await renderCard(
-            <DealCard deal={deal()} onQuickEdit={() => undefined} onDelete={() => undefined} />,
+            <DealCard timezone="UTC" deal={deal()} onQuickEdit={() => undefined} onDelete={() => undefined} />,
             permissions,
         );
 

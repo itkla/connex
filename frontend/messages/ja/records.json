@@ -438,6 +438,7 @@
     "evaluationHeading": "レーダーの監視設定"
   },
   "RecordPeek": {
+    "closedAt": "決着日",
     "type_company": "会社",
     "type_person": "連絡先",
     "type_deal": "案件",

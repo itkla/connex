@@ -61,8 +61,9 @@ reading or generating another version never reformats a previously generated sna
 non-ISO currency codes retain their existing code-and-amount representation.
 
 Document tables, including the print and recipient views, format money with the frozen document
-locale independently of the viewer's UI language. Reconciliation of independently rounded rows and
-totals is a separate accounting decision tracked in [#2288](https://github.com/itkla/connex/issues/2288).
+locale independently of the viewer's UI language. Generated-date values use that same frozen locale
+with the shared display-zone rules in [the date/time contract](frontend/DATES_AND_TIME_ZONES.md).
+Reconciliation of independently rounded rows and totals is a separate accounting decision tracked in [#2288](https://github.com/itkla/connex/issues/2288).
 
 Documents generated without line items persist zero totals in that locked parent deal's currency.
 Before draft or approved finalization, the frozen deal, every line, and totals must agree with the

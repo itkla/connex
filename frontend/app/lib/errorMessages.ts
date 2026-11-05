@@ -41,6 +41,8 @@ const WORKSPACE_UNAVAILABLE_NAMED_KEY = "ApiErrors.workspaceUnavailableNamed";
  * rules rather than surfacing anything the backend wrote (#1337).
  */
 const CODE_MESSAGE_KEYS = new Map<string, string>([
+    ["PRIVILEGED_MFA_ENROLLMENT_REQUIRED", "AccountSecurity.enrollmentNeededDescription"],
+    ["PRIVILEGED_MFA_ATTESTATION_REQUIRED", "AccountSecurity.approvalNeededDescription"],
     ["IDENTITY_COLLISION_REPORT_TIMEOUT", "ApiErrors.identityCollisionReportTimeout"],
     ["SHARE_BLOCKED_PRIVACY_HOLD", "ApiErrors.sharePrivacyHold"],
     ["STALE_RECORD", "ApiErrors.staleRecord"],

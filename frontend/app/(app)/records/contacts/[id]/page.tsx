@@ -10,7 +10,7 @@ import { type Tag, type Contact, type IntroPath, type PersonCampaignTouch, type 
 import { cookies } from "next/headers";
 import Link from "next/link";
 import { UserIcon } from "@heroicons/react/24/outline";
-import { getLocale, getTranslations } from "next-intl/server";
+import { getTimeZone, getLocale, getTranslations } from "next-intl/server";
 
 import Rise from "@/app/components/motion/Rise";
 import { PageShell } from "@/app/components/PageShell";
@@ -47,6 +47,7 @@ type ContactPageProps = {
 };
 
 export default async function ContactPage({ params }: ContactPageProps) {
+    const timeZone = await getTimeZone();
     const { id } = await params;
     const cookieStore = await cookies();
     const cookie = cookieStore.toString();
@@ -279,8 +280,8 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                         label={t("owner")}
                                         value={contact.ownerId != null ? owner?.displayName ?? '' : t("ownerUnassigned")}
                                     />
-                                    <InfoRow label={t("added")} value={formatDate(contact.createdAt, locale)} />
-                                    <InfoRow label={t("updated")} value={formatDateTime(contact.updatedAt, locale)} />
+                                    <InfoRow label={t("added")} value={formatDate(contact.createdAt, locale, timeZone)} />
+                                    <InfoRow label={t("updated")} value={formatDateTime(contact.updatedAt, locale, timeZone)} />
                                     <CustomFieldRows entityType="person" entityId={contact.id} initialEntries={customFields} />
                                 </dl>
                             </div>
@@ -314,7 +315,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                                     <p className="mt-0.5 text-xs text-muted-foreground">{stint.title}</p>
                                                 ) : null}
                                                 <p className="mt-1 text-xs tabular-nums text-muted-foreground">
-                                                    {formatShortDate(stint.startedAt ?? undefined, locale)} – {stint.endedAt ? formatShortDate(stint.endedAt, locale) : t("present")}
+                                                    {formatShortDate(stint.startedAt ?? undefined, locale, timeZone)} – {stint.endedAt ? formatShortDate(stint.endedAt, locale, timeZone) : t("present")}
                                                 </p>
                                             </li>
                                         ))}

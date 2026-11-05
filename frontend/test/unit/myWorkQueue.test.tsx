@@ -35,7 +35,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("next-intl", () => ({
-    useTranslations: () => {
+    useTimeZone: () => "UTC", useTranslations: () => {
         const translate = (key: string, values?: Record<string, unknown>) =>
             values ? `${key}:${JSON.stringify(values)}` : key;
         return translate;

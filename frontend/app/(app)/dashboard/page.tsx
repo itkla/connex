@@ -528,7 +528,7 @@ export default async function Dashboard() {
             </div>
         ),
         pipeline: currencyKnown && openRevenueSeriesResult.ok
-            ? <PipelineChart series={openRevenueSeries} openValue={openValue} currency={currency} range={DASHBOARD_RANGE} />
+            ? <PipelineChart timezone={timezone} series={openRevenueSeries} openValue={openValue} currency={currency} range={DASHBOARD_RANGE} />
             : <SectionUnavailable />,
         tasks: taskSummaryResult.ok && upcomingTasksResult.ok
             ? <TaskSummary summary={taskSummary} upcoming={upcomingTasks} />

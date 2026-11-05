@@ -94,7 +94,7 @@ vi.mock("next/navigation", () => ({
     useRouter: () => ({ refresh: browser.refresh, push: browser.noop, replace: browser.noop }),
     usePathname: () => "/records/pipelines", useSearchParams: () => browser.search,
 }));
-vi.mock("next-intl", () => ({ useTranslations: () => translate, useLocale: () => "en" }));
+vi.mock("next-intl", () => ({ useTranslations: () => translate, useTimeZone: () => "UTC", useLocale: () => "en" }));
 vi.mock("motion/react", () => ({ useReducedMotion: () => true, motion: { div: ({ children }: { children?: ReactNode }) => <div>{children}</div> } }));
 vi.mock("@/app/lib/toast", () => ({ toastError: vi.fn(), toastInfo: vi.fn(), toastSuccess: vi.fn(), toastWarn: vi.fn(), toastDismiss: vi.fn() }));
 vi.mock("@/app/hooks/useWorkspace", () => ({ useWorkspace: () => ({ activeWorkspaceId: 9, workspaces: [] }) }));
@@ -356,6 +356,26 @@ describe("contact conflict drafts", () => {
         if (get("contactConfirm").open) await act(async () => get("contactConfirm").onDiscard());
         expect(get("contactSheet").editSheetOpen).toBe(false);
         expect(browser.items[0]?.title).toBe("Original title");
+    });
+});
+
+describe("clearing contact inline fields", () => {
+    it.each(["email", "phone", "title"] as const)("clears existing %s with an explicit empty value and adopts the cleared response", async (field) => {
+        const first = { ...contact, version: 1, email: "contact@example.test", phone: "123456", title: "Director" };
+        const saved = { ...first, version: 2, [field]: "" };
+        const backend = stubBackend(undefined, (path, method) => path === "/api/persons/41" && method === "PUT" ? json(saved) : undefined);
+        browser.items = [first];
+        browser.showSelectionActions = true;
+        await render(<ContactsBrowser savedViews={[]} defaultView={null} />);
+        const inline = get("contactColumns").find((column) => column.key === field)?.editable;
+        if (!inline) throw new Error("Expected the contact inline editor");
+        await act(async () => inline.save(first, ""));
+        expectWrites(backend, ["/api/persons/41"]);
+        const body = backend.requests[0]?.init.body;
+        if (typeof body !== "string") throw new Error("Expected the serialized contact update");
+        expect(JSON.parse(body)).toMatchObject({ expectedVersion: 1, [field]: "" });
+        expect(browser.items[0]).toEqual(saved);
+        expect(browser.items[0]?.[field]).toBe("");
     });
 });
 

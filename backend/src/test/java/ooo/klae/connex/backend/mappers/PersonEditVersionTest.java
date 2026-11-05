@@ -42,6 +42,34 @@ class PersonEditVersionTest {
     }
 
     @Test
+    void explicitEmptyContactFieldsRemainBoundUpdatesWhileOmittedFieldsStayUntouched() throws Exception {
+        var mapper = tools.jackson.databind.json.JsonMapper.builder().build();
+        PersonDto request = mapper.readValue(
+            "{\"name\":\"Contact\",\"email\":\"\",\"phone\":\"\",\"title\":\"\",\"expectedVersion\":5}", PersonDto.class);
+        try (var factory = jakarta.validation.Validation.buildDefaultValidatorFactory()) {
+            assertTrue(factory.getValidator().validate(request).isEmpty());
+        }
+        Person edit = request.toBean();
+        edit.setWorkspaceId(7);
+        edit.setId(13);
+        Configuration configuration = configuration();
+        var statement = configuration.getMappedStatement(PersonMapper.class.getName() + ".update");
+        BoundSql bound = statement.getBoundSql(edit);
+        String sql = bound.getSql().replaceAll("\\s+", " ").trim();
+        for (String field : new String[] {"email", "phone", "title"}) {
+            assertTrue(sql.contains(field + " = ?"));
+            assertTrue(bound.getParameterMappings().stream().anyMatch(parameter -> field.equals(parameter.getProperty())));
+            assertEquals("", configuration.newMetaObject(edit).getValue(field));
+        }
+        Person omitted = mapper.readValue("{\"name\":\"Contact\"}", PersonDto.class).toBean();
+        String omittedSql = statement.getBoundSql(omitted).getSql().replaceAll("\\s+", " ").trim();
+        for (String field : new String[] {"email", "phone", "title"}) {
+            assertNull(configuration.newMetaObject(omitted).getValue(field));
+            assertFalse(omittedSql.contains(field + " = ?"));
+        }
+    }
+
+    @Test
     void databaseCounterIncludesWritersThatPreserveTheTimestamp() throws Exception {
         String migration = resource("db/migration/tenant/V242__person_edit_version.sql");
         assertTrue(migration.contains("ADD COLUMN version BIGINT NOT NULL DEFAULT 0"));

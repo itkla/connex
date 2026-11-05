@@ -1,8 +1,9 @@
 'use client';
 
+import { getDateTimeFormatter, getNumberFormatter } from '@/app/lib/intlFormatters';
 import Link from 'next/link';
 import { useCallback, useEffect, useReducer, useRef, useState, type RefObject, useMemo } from 'react';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import {
     ArchiveBoxArrowDownIcon,
     ArrowDownTrayIcon,
@@ -20,6 +21,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 import ReportWidgetRenderer, { formatReportValue } from '@/app/components/reports/ReportWidgetRenderer';
+import { formatDateTime, parseMysqlDateTime } from '@/app/lib/utils';
 import { reportFigureBasisKey } from '@/app/components/reports/reportFigureBasis';
 import { CURRENT_STATE_REPORT_MEASURES } from '@/app/components/reports/reportConfig';
 import { useReportLabels } from '@/app/components/reports/reportLabels';
@@ -170,7 +172,8 @@ export default function ReportDocumentBoard({
     const t = useTranslations('Reports');
     const showApiError = useApiErrorToast('Reports');
     const locale = useLocale();
-    const snapshotDateFormatter = useMemo(() => new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }), [locale]);
+    const timeZone = useTimeZone();
+    const snapshotDateFormatter = useMemo(() => getDateTimeFormatter(locale, { dateStyle: 'medium', timeZone }), [locale, timeZone]);
     const { activeWorkspace } = useWorkspace();
     const [reportState, dispatchReport] = useReducer(liveReportReducer, { status: 'loading' });
     const [snapshots, setSnapshots] = useState<ReportSnapshotSummary[]>(initialSnapshots);
@@ -515,8 +518,8 @@ export default function ReportDocumentBoard({
                         </Button>
                         {snapshots.map((snapshot) => {
                             const active = activeSnapshotId === snapshot.id;
-                            const dateLabel = new Intl.DateTimeFormat(locale, { dateStyle: 'medium' })
-                                .format(new Date(snapshot.generatedAt));
+                            const dateLabel = getDateTimeFormatter(locale, { dateStyle: 'medium', timeZone })
+                                .format(new Date(parseMysqlDateTime(snapshot.generatedAt)));
                             const deletable = canDeleteReports
                                 && canDeleteOwnedRecord(snapshot.generatedBy, currentUserId, activeWorkspace?.role);
                             return (
@@ -606,7 +609,7 @@ export default function ReportDocumentBoard({
                 selectedItems={snapshotPendingDelete !== null ? [snapshotPendingDelete] : []}
                 entityLabel={t('document.snapshotEntityLabel')}
                 getDisplayName={(snapshot) => t('document.snapshotNamed', {
-                    date: snapshotDateFormatter.format(new Date(snapshot.generatedAt)),
+                    date: snapshotDateFormatter.format(new Date(parseMysqlDateTime(snapshot.generatedAt))),
                 })}
                 isDeleting={deletingSnapshotId !== null}
                 confirmDelete={confirmDeleteSnapshot}
@@ -630,6 +633,7 @@ function ReportPaper({
 }) {
     const t = useTranslations('Reports');
     const locale = useLocale();
+    const timeZone = useTimeZone();
     const { localizeLabel } = useReportLabels();
     const citationIndex = new Map(document.citations.map((citation, index) => [citation.sourceId, index + 1]));
     const layoutById = new Map(document.definition.config.layout.map((item) => [item.widgetId, item]));
@@ -689,13 +693,13 @@ function ReportPaper({
                                 <dt className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
                                     {t('document.currentStateAsOf')}
                                 </dt>
-                                <dd className="mt-1 text-foreground">{formatDateTime(document.generatedAt, locale)}</dd>
+                                <dd className="mt-1 text-foreground">{formatDateTime(document.generatedAt, locale, timeZone)}</dd>
                             </div>
                         ) : null}
                         {snapshot ? (
                             <div>
                                 <dt className="text-xs uppercase tracking-[0.12em] text-muted-foreground">{t('document.snapshot')}</dt>
-                                <dd className="mt-1 text-foreground">{formatDateTime(snapshot.generatedAt, locale)}</dd>
+                                <dd className="mt-1 text-foreground">{formatDateTime(snapshot.generatedAt, locale, timeZone)}</dd>
                             </div>
                         ) : null}
                     </dl>
@@ -809,10 +813,10 @@ function ReportPaper({
                                             <p className="text-xs tabular-nums text-muted-foreground">
                                                 {widget.measure === 'attainment'
                                                     ? t('document.attainmentValue', {
-                                                        value: new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(widget.changePercent),
+                                                        value: getNumberFormatter(locale, { maximumFractionDigits: 1 }).format(widget.changePercent),
                                                     })
                                                     : t('document.changeValue', {
-                                                        value: new Intl.NumberFormat(locale, { maximumFractionDigits: 1, signDisplay: 'always' }).format(widget.changePercent),
+                                                        value: getNumberFormatter(locale, { maximumFractionDigits: 1, signDisplay: 'always' }).format(widget.changePercent),
                                                     })}
                                             </p>
                                         ) : null}
@@ -902,7 +906,7 @@ function ReportPaper({
 
             <footer className="mt-10 flex flex-wrap justify-between gap-3 border-t border-border pt-5 text-xs text-muted-foreground">
                 <span>{t('document.generatedBy')}</span>
-                <span>{formatDateTime(document.generatedAt, locale)}</span>
+                <span>{formatDateTime(document.generatedAt, locale, timeZone)}</span>
             </footer>
         </article>
     );
@@ -971,13 +975,10 @@ function SectionHeading({ id, title }: { id: string; title: string }) {
 }
 
 function formatRange(start: string, end: string, locale: string): string {
-    const formatter = new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeZone: 'UTC' });
+    const formatter = getDateTimeFormatter(locale, { dateStyle: 'medium', timeZone: 'UTC' });
     return `${formatter.format(new Date(`${start}T00:00:00Z`))} - ${formatter.format(new Date(`${end}T00:00:00Z`))}`;
 }
 
-function formatDateTime(value: string, locale: string): string {
-    return new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
-}
 
 function sourceDisplayLabel(label: string, measureLabel: string | undefined): string {
     if (!measureLabel) return label;

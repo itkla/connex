@@ -61,6 +61,27 @@ class PersonEditVersionMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void explicitEmptyFieldsClearExistingContactValuesAndReturnAnAdvancedVersion() {
+        Person person = newPerson(newCompany());
+        person.setEmail("clear-fields@example.test");
+        person.setPhone("123456");
+        person.setTitle("Director");
+        assertEquals(1, personMapper.update(person));
+        Person edit = current(person);
+        long before = edit.getVersion();
+        edit.setExpectedVersion(before);
+        edit.setEmail("");
+        edit.setPhone("");
+        edit.setTitle("");
+        assertEquals(1, personMapper.update(edit));
+        Person saved = current(person);
+        assertEquals("", saved.getEmail());
+        assertEquals("", saved.getPhone());
+        assertEquals("", saved.getTitle());
+        assertEquals(before + 1, saved.getVersion());
+    }
+
+    @Test
     void maintenanceCannotResetTheCounterEvenWhenItPreservesTheTimestamp() {
         Person person = newPerson(newCompany());
         Person before = current(person);

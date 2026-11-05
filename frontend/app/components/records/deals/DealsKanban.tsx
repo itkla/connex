@@ -19,6 +19,7 @@ import type { Company, Deal, DealFilterParams, DealRisk, Pipeline, Stage } from 
 import type { RecordReturnSelectionSnapshot } from '@/app/lib/recordReturnPath';
 
 interface DealsKanbanProps {
+    timezone: string;
     deals: Deal[];
     pipelines: Pipeline[];
     stagesByPipeline: Record<number, Stage[]>;
@@ -70,6 +71,7 @@ function dealPosition(deal: Deal): number {
 }
 
 export default function DealsKanban({
+    timezone,
     deals,
     pipelines,
     stagesByPipeline,
@@ -302,6 +304,7 @@ export default function DealsKanban({
     const renderCard = useCallback(
         (deal: Deal) => (
             <DealKanbanCard
+                timezone={timezone}
                 deal={deal}
                 company={deal.company != null ? resolvedCompanyById.get(deal.company) : undefined}
                 risk={boardRisks.get(deal.id)}
@@ -310,7 +313,7 @@ export default function DealsKanban({
                 returnSelection={returnSelection}
             />
         ),
-        [boardRisks, onQuickEdit, prepareQuickEdit, onDelete, resolvedCompanyById, returnSelection],
+        [boardRisks, onQuickEdit, prepareQuickEdit, onDelete, resolvedCompanyById, returnSelection, timezone],
     );
 
     const onMove = useCallback(

@@ -10,7 +10,7 @@ import {
     ExclamationTriangleIcon,
     PauseCircleIcon,
 } from "@heroicons/react/24/outline";
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
 
 import AccessDenied from "@/app/components/AccessDenied";
 import { EmptyState } from "@/app/components/EmptyState";
@@ -266,6 +266,7 @@ function TriggerDiagnostics({
     diagnostics: WorkflowTriggerDiagnostic[];
     locale: string;
 }) {
+    const timeZone = useTimeZone();
     const t = useTranslations("WorkflowOperations");
     return (
         <section className="space-y-3" aria-labelledby="trigger-diagnostics-heading">
@@ -302,7 +303,7 @@ function TriggerDiagnostics({
                             className="text-xs text-muted-foreground"
                             dateTime={normalizeWorkflowRunDateTime(diagnostic.failedAt)}
                         >
-                            {formatWorkflowRunDateTime(diagnostic.failedAt, locale)}
+                            {formatWorkflowRunDateTime(diagnostic.failedAt, locale, timeZone)}
                         </time>
                     </li>
                 ))}
@@ -344,6 +345,7 @@ function SummaryStrip({ summary }: { summary: WorkflowOperationsSummary }) {
 }
 
 function RunRow({ item, locale }: { item: WorkflowOperationsRunItem; locale: string }) {
+    const timeZone = useTimeZone();
     const t = useTranslations("WorkflowOperations");
     const tw = useTranslations("WorkspaceWorkflows");
     const status = normalizeWorkflowRunStatus(item.run.status);
@@ -384,7 +386,7 @@ function RunRow({ item, locale }: { item: WorkflowOperationsRunItem; locale: str
                     className="text-xs text-muted-foreground"
                     dateTime={normalizeWorkflowRunDateTime(item.run.startedAt)}
                 >
-                    {formatWorkflowRunDateTime(item.run.startedAt, locale)}
+                    {formatWorkflowRunDateTime(item.run.startedAt, locale, timeZone)}
                 </time>
             </Link>
         </li>

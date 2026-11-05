@@ -5,8 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const navigation = vi.hoisted(() => ({ pathname: "/dashboard" }));
 vi.mock("next/navigation", () => ({ usePathname: () => navigation.pathname }));
-vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }));
+vi.mock("next-intl", () => ({ useTimeZone: () => "UTC", useTranslations: () => (key: string) => key }));
 vi.mock("@/app/components/GlobalSearch", () => ({ default: () => <input aria-label="Search" /> }));
+vi.mock("@/app/components/account/PrivilegedMfaRouteGate", () => ({
+    default: ({ children }: PropsWithChildren) => <>{children}</>,
+}));
 vi.mock("@/app/components/NavBreadcrumb", () => ({ default: () => null }));
 vi.mock("@/app/components/MobileBottomBar", () => ({
     default: ({ onOpenMore }: { onOpenMore: () => void }) => <button onClick={onOpenMore}>More</button>,

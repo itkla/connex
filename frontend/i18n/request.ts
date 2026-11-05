@@ -2,6 +2,8 @@ import { cookies } from "next/headers";
 import { getRequestConfig } from "next-intl/server";
 
 import { LOCALE_COOKIE, resolveLocale, type Locale } from "@/i18n/config";
+import { requestTimeZone } from "@/app/lib/requestTimeZone";
+import { requestNow } from "@/app/lib/requestClock";
 
 export { defaultLocale, locales, LOCALE_COOKIE, type Locale } from "@/i18n/config";
 
@@ -76,6 +78,8 @@ export default getRequestConfig(async ({ locale: explicitLocale, requestLocale }
 
     return {
         locale,
+        timeZone: await requestTimeZone(),
+        now: new Date(requestNow()),
         messages: await loadMessages(locale),
     };
 });

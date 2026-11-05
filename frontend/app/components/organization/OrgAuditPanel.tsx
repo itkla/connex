@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useLocale, useMessages, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useMessages, useTranslations } from "next-intl";
 import { Loader2Icon } from "lucide-react";
 
+import { formatRelativeTime } from "@/app/lib/utils";
 import type { AuditLogEntry } from "@/app/lib/types";
 import { ApiError, getOrgAudit } from "@/app/lib/api";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
@@ -21,17 +22,6 @@ import { NoAccessCard, EmptyRow, ListCard } from "@/app/components/organization/
 
 const PAGE_SIZE = 30;
 
-function relativeTime(iso: string, locale: string, now: number) {
-    const then = new Date(iso.includes("T") ? iso : iso.replace(" ", "T") + "Z").getTime();
-    if (Number.isNaN(then)) return iso;
-    const mins = Math.round((now - then) / 60000);
-    const rtf = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
-    if (mins < 1) return rtf.format(0, "second");
-    if (mins < 60) return rtf.format(-mins, "minute");
-    const hours = Math.round(mins / 60);
-    if (hours < 24) return rtf.format(-hours, "hour");
-    return new Date(then).toLocaleDateString(locale);
-}
 
 /**
  * The organization's own audit log: the governance events that happen above any single workspace.
@@ -50,6 +40,7 @@ export default function OrgAuditPanel({
     const showApiError = useApiErrorToast("OrgAudit");
     const messages = useMessages();
     const locale = useLocale();
+    const timeZone = useTimeZone();
     const now = useLiveNow();
     const { activeWorkspace } = useWorkspace();
     const orgId = activeWorkspace?.orgId ?? null;
@@ -151,7 +142,7 @@ export default function OrgAuditPanel({
                                         dateTime={entry.createdAt}
                                         title={entry.createdAt}
                                     >
-                                        {relativeTime(entry.createdAt, locale, now)}
+                                        {formatRelativeTime(entry.createdAt, locale, now, timeZone)}
                                     </time>
                                 </li>
                             );

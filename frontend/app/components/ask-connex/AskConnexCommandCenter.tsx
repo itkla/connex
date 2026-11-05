@@ -4,7 +4,7 @@ import { useTimeZoneSearch } from '@/app/hooks/useTimeZoneSearch';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import {
     BellAlertIcon,
     EllipsisHorizontalIcon,
@@ -125,6 +125,7 @@ function supportedTimeZones(current: string): string[] {
  * calendar, with briefs arriving at the wrong hour and no way to correct them.
  */
 export default function AskConnexCommandCenter() {
+    const timeZone = useTimeZone();
     const t = useTranslations('AskConnex.commandCenter');
     const locale = useLocale();
     const showApiError = useApiErrorToast('AskConnex.commandCenter');
@@ -431,7 +432,7 @@ export default function AskConnexCommandCenter() {
                     <ul className="space-y-1">
                         {watches.map((watch) => {
                             const limits = askConnexWatchLimitsText(
-                                watch, t, (isoDate) => formatDate(isoDate, locale),
+                                watch, t, (isoDate) => formatDate(isoDate, locale, timeZone),
                             );
                             return (
                             <li
@@ -465,7 +466,7 @@ export default function AskConnexCommandCenter() {
                                                 ? t('neverFired')
                                                 : t('lastFired', {
                                                     date: formatUtcDateTime(
-                                                        watch.lastFiredAt, locale,
+                                                        watch.lastFiredAt, locale, undefined, timeZone,
                                                     ),
                                                 })}
                                         </span>

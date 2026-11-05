@@ -83,6 +83,7 @@ export default function QuickEditDealSheet({
     customFieldsDirty,
     customFieldsSlot,
 }: Props) {
+    const closeTimeZone = timezone || 'UTC';
     const t = useTranslations('DealsQuickEditSheet');
     const reduce = useReducedMotion() ?? false;
     const total = selectedDeals.length;
@@ -130,7 +131,7 @@ export default function QuickEditDealSheet({
                 const stages = draft.pipeline ? stagesByPipeline[draft.pipeline] ?? [] : [];
                 const selectedStage = stages.find((s) => s.id === draft.stage) ?? null;
                 const expectedCloseDate = draft.expectedCloseDate ? draft.expectedCloseDate.slice(0, 10) : '';
-                const closedAt = dealClosedAtInput(draft.closedAt, timezone);
+                const closedAt = dealClosedAtInput(draft.closedAt, closeTimeZone);
                 const actualValue = actualValueForOutcome(draft.won,
                     draft.actualValueEdited === false && d.won !== true ? draft.value : draft.actualValue);
                 const isLost = draft.won === false;
@@ -341,15 +342,15 @@ export default function QuickEditDealSheet({
                                                 aria-describedby={`deal-closed-at-zone-${d.id}`}
                                                 onChange={(e) => {
                                                     const value = e.target.value;
-                                                    const parsed = value ? dealClosedAtFromInput(value, timezone, draft.closedAt) : null;
+                                                    const parsed = value ? dealClosedAtFromInput(value, closeTimeZone, draft.closedAt) : null;
                                                     if (value && parsed === null) {
-                                                        toastError(t('invalidClosedAt'));
+                                                        toastError(t('closedAtInvalid'));
                                                         return;
                                                     }
                                                     updateDraft(d.id, { closedAt: parsed });
                                                 }}
                                             />
-                                            <p id={`deal-closed-at-zone-${d.id}`} className="text-xs text-muted-foreground">{timezone}</p>
+                                            <p id={`deal-closed-at-zone-${d.id}`} className="text-xs text-muted-foreground">{closeTimeZone}</p>
                                         </QuickEditField>
                                         <QuickEditField label={t('actualValue')} htmlFor={`deal-actual-value-${d.id}`}>
                                             <Input

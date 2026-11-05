@@ -1,10 +1,11 @@
 import { headers } from "next/headers";
+import { requestNow } from '@/app/lib/requestClock';
 import { notFound, redirect } from "next/navigation";
 import AccessDeniedPage from "@/app/components/AccessDeniedPage";
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
 import { loadRecord } from "@/app/lib/recordAccess";
 import Link from "next/link";
-import { getLocale, getTranslations } from "next-intl/server";
+import { getTimeZone, getLocale, getTranslations } from "next-intl/server";
 import {
     BriefcaseIcon,
     CheckCircleIcon,
@@ -47,6 +48,7 @@ function MetaRow({ label, children }: { label: string; children: React.ReactNode
 }
 
 export default async function TaskDetailPage({ params }: { params: Promise<{ id: string }> }) {
+    const timeZone = await getTimeZone();
     const { id } = await params;
     const cookie = (await headers()).get("cookie");
     const userResult = await getCurrentUserResultFromCookie(cookie);
@@ -85,7 +87,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
     const person = task.personId ? persons.find((p) => p.id === task.personId) ?? null : null;
     const deal = task.dealId ? deals.find((d) => d.id === task.dealId) ?? null : null;
     const assignee = users.find((u) => u.id === task.assignedToId) ?? null;
-    const due = formatDue(task.dueDate, tTasks, locale);
+    const due = formatDue(task.dueDate, tTasks, locale, requestNow(), timeZone);
     const statusLabel = tTasks(
         task.status === "done"
             ? "statusDone"
@@ -188,7 +190,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
                         ) : null}
 
                         <MetaRow label={t("created")}>
-                            <span className="tabular-nums">{formatDate(task.createdAt, locale)}</span>
+                            <span className="tabular-nums">{formatDate(task.createdAt, locale, timeZone)}</span>
                         </MetaRow>
                     </dl>
                 </Rise>

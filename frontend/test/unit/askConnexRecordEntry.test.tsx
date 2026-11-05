@@ -80,11 +80,11 @@ vi.mock("@/app/components/ask-connex/AskConnexWatchDialog", async () => {
 });
 
 vi.mock("next-intl", () => ({
-    useTranslations: () => (key: string) => key,
+    useTimeZone: () => "UTC", useTranslations: () => (key: string) => key,
 }));
 
 vi.mock("@/app/components/ask-connex/AskConnexProvider", () => ({
-    useAskConnex: () => ({ openWithPrompt: () => undefined }),
+    useAskConnex: () => ({ openWithPrompt: () => undefined, canAsk: true, canWatch: true }),
 }));
 
 vi.mock("@/app/hooks/useAskConnexSkills", () => ({
