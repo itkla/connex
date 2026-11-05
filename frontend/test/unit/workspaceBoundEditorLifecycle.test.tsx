@@ -1,14 +1,16 @@
 /** @vitest-environment jsdom */
 import { act, type ReactNode, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import NoteEditorView from "@/app/components/activity/notes/NoteEditorView";
+import PrivilegedMfaRouteGate from "@/app/components/account/PrivilegedMfaRouteGate";
 import DashboardGrid from "@/app/components/dashboard/customize/DashboardGrid";
 import NewWorkspaceDialog from "@/app/components/NewWorkspaceDialog";
 import { useNotificationWorkspaceActions } from "@/app/components/notifications/useNotificationWorkspaceActions";
 import { useWorkspace, WorkspaceProvider } from "@/app/hooks/useWorkspace";
-import { WorkspaceSelectionUnavailableError } from "@/app/lib/api";
+import { currentPrivilegedMfaReadiness, forgetPrivilegedMfaStanding, WorkspaceSelectionUnavailableError } from "@/app/lib/api";
 import { draftKey, listFreshDrafts, readDraft, writeDraft } from "@/app/lib/formDrafts";
 import { renderedWorkspaceId } from "@/app/lib/renderedWorkspace";
 import { toastError, toastInfo } from "@/app/lib/toast";
@@ -29,6 +31,8 @@ const replace = vi.hoisted(() => vi.fn());
 
 vi.mock("next/navigation", () => ({
     useRouter: () => ({ refresh: vi.fn(), replace, push: vi.fn() }),
+    usePathname: () => "/activity/notes/new",
+    useSearchParams: () => new URLSearchParams(),
 }));
 
 vi.mock("next-intl", () => ({
@@ -140,7 +144,10 @@ function json(body: unknown, status = 200): Response {
 }
 
 /** Answers the switch, and refuses or accepts each content write the way a revoked or live origin would. */
-function stubBackend(originRevoked: boolean | (() => boolean), noteResponse?: Promise<Response>): Recorded[] {
+function stubBackend(originRevoked: boolean | (() => boolean), noteResponse?: Promise<Response>, policyReads?: {
+    capabilities: () => Promise<Response>;
+    requirements: () => Promise<Response>;
+}): Recorded[] {
     const requests: Recorded[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
         const url = new URL(input instanceof Request ? input.url : String(input), "http://localhost");
@@ -148,6 +155,8 @@ function stubBackend(originRevoked: boolean | (() => boolean), noteResponse?: Pr
         if (url.pathname === "/api/auth/csrf") {
             return json({ token: "csrf-token", headerName: "X-XSRF-TOKEN", requestIdentity: "identity" });
         }
+        if (policyReads && url.pathname === "/api/capabilities") return (await policyReads.capabilities()).clone();
+        if (policyReads && url.pathname === "/api/auth/webauthn/register/requirements") return (await policyReads.requirements()).clone();
         const workspaceHeader = new Headers(init?.headers).get("X-Workspace-Id");
         const revoked = typeof originRevoked === "function" ? originRevoked() : originRevoked;
         requests.push({
@@ -248,6 +257,7 @@ beforeEach(() => {
     editor.value = null;
     captured = null;
     notificationActions = null;
+    forgetPrivilegedMfaStanding();
 });
 
 afterEach(async () => {
@@ -256,11 +266,67 @@ afterEach(async () => {
     document.body.innerHTML = "";
     document.cookie = "connex_workspace=; path=/; max-age=0";
     window.sessionStorage.clear();
+    forgetPrivilegedMfaStanding();
     vi.unstubAllGlobals();
     vi.clearAllMocks();
 });
 
 describe("a note composed in one workspace and flushed after a switch to another", () => {
+    it.each([true, false])("keeps a pending autosave mounted while workspace policy %s revalidates", async (enforced) => {
+        const held = deferred<Response>();
+        const policy = deferred<Response>();
+        const standing = deferred<Response>();
+        const requirements = { currentPasswordRequired: false, emailConfirmationRequired: false, emailConfirmationSatisfied: false,
+            ...(enforced ? { standing: "SATISFIED" } : {}) };
+        let rechecking = false;
+        const capabilities = vi.fn(() => rechecking ? policy.promise : Promise.resolve(json({ privilegedMfaEnforced: enforced })));
+        const requests = stubBackend(false, held.promise, {
+            capabilities,
+            requirements: () => rechecking ? standing.promise : Promise.resolve(json(requirements)),
+        });
+        const urlWrite = vi.spyOn(window.history, "replaceState");
+        try {
+            await renderInShell(<PrivilegedMfaRouteGate>
+                <NoteEditorView note={null} currentUserId={USER} persons={[]} deals={[]} users={[]} returnPath="/activity/notes" />
+            </PrivilegedMfaRouteGate>);
+            await waitFor(() => expect(document.querySelector("#note-title")).not.toBeNull());
+            const title = document.querySelector("#note-title");
+            await act(async () => editor.onChange?.(DRAFT));
+            await waitFor(() => expect(writesTo(requests, "/api/notes")).toHaveLength(1), { timeout: 3000 });
+            expect(writesTo(requests, "/api/notes")[0].workspace).toBe(String(ORIGIN));
+            expect(screen.getByText("saving", { exact: true })).toBeTruthy();
+            const readsBeforeSwitch = capabilities.mock.calls.length;
+            rechecking = true;
+            await healAndSwitch();
+            expect(replace).toHaveBeenCalledWith("/dashboard");
+            expect(capabilities.mock.calls.length).toBeGreaterThan(readsBeforeSwitch);
+            expect(currentPrivilegedMfaReadiness()).toBe("ready");
+            expect(document.querySelector("#note-title")).toBe(title);
+            expect(editor.value).toBe(DRAFT);
+            urlWrite.mockClear();
+            await act(async () => held.resolve(json({ id: 41 })));
+            expect(screen.getByText("saved", { exact: true })).toBeTruthy();
+            expect(urlWrite).not.toHaveBeenCalled();
+            expect(document.querySelector("#note-title")).toBe(title);
+            await act(async () => policy.resolve(json({ privilegedMfaEnforced: enforced })));
+            expect(currentPrivilegedMfaReadiness()).toBe("ready");
+            expect(document.querySelector("#note-title")).toBe(title);
+            await act(async () => standing.resolve(json(requirements)));
+            expect(screen.getByText("saved", { exact: true })).toBeTruthy();
+            expect(document.querySelector("#note-title")).toBe(title);
+            expect(editor.value).toBe(DRAFT);
+            expect(writesTo(requests, "/api/notes")).toHaveLength(1);
+            expect(urlWrite).not.toHaveBeenCalled();
+        } finally {
+            await act(async () => {
+                held.resolve(json({ id: 41 }));
+                policy.resolve(json({ privilegedMfaEnforced: enforced }));
+                standing.resolve(json(requirements));
+            });
+            urlWrite.mockRestore();
+        }
+    });
+
     it("does not replace the recovery URL when a first save settles before the unavailable selection unmounts it", async () => {
         const held = deferred<Response>();
         const requests = stubBackend(false, held.promise);

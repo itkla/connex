@@ -466,7 +466,21 @@
 
   <select id="privilegedMemberships" resultType="ooo.klae.connex.backend.beans.PrivilegedMembershipRow">
     SELECT DISTINCT org_id AS orgId, org_name AS orgName, org_role AS orgRole,
-           workspace_id AS workspaceId, workspace_name AS workspaceName
+           (EXISTS (SELECT 1 FROM org_member self_owner
+                    WHERE self_owner.org_id = memberships.org_id
+                      AND self_owner.user_id = #{userId} AND self_owner.org_role = 'owner')
+            AND NOT EXISTS (SELECT 1 FROM org_member other_owner
+                            WHERE other_owner.org_id = memberships.org_id
+                              AND other_owner.user_id != #{userId} AND other_owner.org_role = 'owner')) AS orgLastOwner,
+           workspace_id AS workspaceId, workspace_name AS workspaceName,
+           (EXISTS (SELECT 1 FROM workspace_member self_owner
+                    WHERE self_owner.workspace_id = memberships.workspace_id
+                      AND self_owner.user_id = #{userId} AND self_owner.role = 'owner'
+                      AND self_owner.status = 'active')
+            AND NOT EXISTS (SELECT 1 FROM workspace_member other_owner
+                            WHERE other_owner.workspace_id = memberships.workspace_id
+                              AND other_owner.user_id != #{userId} AND other_owner.role = 'owner'
+                              AND other_owner.status = 'active')) AS workspaceLastOwner
     FROM (
       <include refid="privilegedOrgBranches">
         <property name="privilegedUserId" value="#{userId}"/>
