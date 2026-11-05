@@ -8,8 +8,7 @@ import {
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { submitDealDraftUpdates } from "@/app/components/records/deals/DealsBrowser";
-import { submitDealDraftUpdate } from "@/app/components/records/deals/EditDealSheet";
+import { submitDealDraftUpdate, submitDealDraftUpdates } from "@/app/components/records/deals/dealEditConflict";
 import QuickEditDealSheet, { type DealDraft } from "@/app/components/records/deals/QuickEditDealSheet";
 import { actualValueForOutcome, requestedActualValue } from "@/app/components/records/deals/dealOutcome";
 import type { Deal, Pipeline, Stage, UpdateDealPayload } from "@/app/lib/types";
@@ -266,6 +265,30 @@ beforeEach(() => {
     updateDealMock.mockReset().mockResolvedValue(WON_LINE_ITEM_DEAL);
 });
 
+describe("deal edit versions", () => {
+    it("sends the snapshot version from both full-record sheet save paths", async () => {
+        const draft: DealDraft = {
+            expectedVersion: 17, name: "Draft", value: 100, actualValue: 0, currency: "JPY",
+            pipeline: 2, stage: 3, company: null, expectedCloseDate: "", closedAt: null,
+            closedReason: null, won: null,
+        };
+        await submitDealDraftUpdate(7, draft);
+        expect(updateDealMock).toHaveBeenLastCalledWith(7, expect.objectContaining({ expectedVersion: 17 }), {});
+        await submitDealDraftUpdates([{ dealId: 7, draft }]);
+        expect(updateDealMock).toHaveBeenLastCalledWith(7, expect.objectContaining({ expectedVersion: 17 }), {});
+    });
+
+    it("stops a batch on the first refused record before sending later drafts", async () => {
+        updateDealMock.mockResolvedValueOnce(WON_LINE_ITEM_DEAL).mockRejectedValueOnce(new Error('Refused'));
+        await expect(submitDealDraftUpdates([
+            { dealId: 1, draft: WON_LINE_ITEM_DRAFT },
+            { dealId: 2, draft: WON_LINE_ITEM_DRAFT },
+            { dealId: 3, draft: WON_LINE_ITEM_DRAFT },
+        ])).rejects.toThrow('Refused');
+        expect(updateDealMock).toHaveBeenCalledTimes(2);
+    });
+});
+
 describe("lost-deal actual value", () => {
     function renderActualValueInput(won: boolean, actualValue: number) {
         const html = renderToStaticMarkup(createElement(QuickEditDealSheet, {
@@ -384,6 +407,7 @@ describe("lost-deal actual value", () => {
         expect(updateDealMock).toHaveBeenCalledWith(
             WON_LINE_ITEM_DEAL.id,
             expect.objectContaining({ actualValue: WON_LINE_ITEM_DEAL.actualValue }),
+            {},
         );
     });
 
@@ -405,6 +429,7 @@ describe("lost-deal actual value", () => {
             2,
             WON_LINE_ITEM_DEAL.id,
             expect.objectContaining({ actualValue: 0 }),
+            {},
         );
     });
 

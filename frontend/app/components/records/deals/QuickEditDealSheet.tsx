@@ -26,6 +26,7 @@ import { dealClosedAtInput, dealClosedAtFromInput } from './dealDates';
 import { actualValueForOutcome } from '@/app/components/records/deals/dealOutcome';
 
 export type DealDraft = {
+    expectedVersion?: number;
     name: string;
     value: number;
     actualValue: number;
@@ -115,6 +116,7 @@ export default function QuickEditDealSheet({
             description={t('subtitle')}
             count={total}
             isSaving={isSaving}
+            interactionPending={isSaving}
             onSave={saveEdits}
             saveLabel={t('save')}
             cancelLabel={t('cancel')}

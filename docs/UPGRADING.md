@@ -79,6 +79,24 @@ still applies, including when missions are disabled. Production set activation a
 privacy admission require a later semantic cutover; V233 alone authorizes neither. See the
 [storage contract](backend/AI_SECURITY.md#dormant-chat-proposal-set-storage-tenant-v233).
 
+## Conditional deal edits (tenant V241)
+
+V241 adds the non-null deal version counter with `ALGORITHM=INSTANT, LOCK=DEFAULT`. This must fail
+instead of rebuilding the core deal table, including when `old_alter_table=ON`. Do not remove the
+algorithm/lock guards or permit COPY fallback. No data backfill or new index is required.
+
+INSTANT still acquires metadata locks. Both CREATE TRIGGER statements also need metadata locks on
+their target tables; the company deletion trigger references deal. Deploy during a bounded maintenance window outside long-running
+transactions on company/deal and monitor metadata-lock waits. Resolve blocking transactions before retrying rather than weakening the DDL guards.
+
+MySQL DDL commits independently. If migration execution stops, inspect the column and both trigger
+definitions plus Flyway's history before recovery. Keep the serving release that uses conditional
+versions stopped until both counter and company-detach triggers exist. An earlier serving binary
+remains schema-compatible. A partially applied column/trigger prefix must not be blindly rerun:
+reconcile the catalog to the exact reviewed V241 definitions and the deployment's Flyway recovery
+procedure, then rerun validation before enabling the new release. Do not reset versions, alter an
+applied migration, or drop/recreate active triggers under traffic to conceal a failed migration.
+
 ## AI identifier lookup keys (tenant V230)
 
 V230 adds four nullable derived columns to each of person, company and deal. Each ALTER explicitly

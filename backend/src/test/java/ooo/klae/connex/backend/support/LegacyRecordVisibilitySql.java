@@ -19,9 +19,10 @@ import org.apache.ibatis.transaction.jdbc.JdbcTransactionFactory;
 /**
  * Frozen pre-#485 visibility SQL used only as a semantic-parity oracle. These statements retain
  * their original control-table joins and may execute only on the migrated single catalog,
- * never on a scratch tenant catalog. No production mapper loads these copies. Task touch
- * eligibility follows warmth-v2; the original visibility joins remain frozen.
- * Deliberate financial changes are mirrored here so the oracle continues to isolate visibility.
+ * never on a scratch tenant catalog. No production mapper loads these copies.
+ * Task touch eligibility follows warmth-v2. Financial and representation changes are mirrored
+ * here so the oracle isolates visibility; its original control-table joins and visibility
+ * assertions remain frozen.
  */
 public final class LegacyRecordVisibilitySql {
     private final SqlSessionFactory sessions;
@@ -2599,6 +2600,7 @@ public final class LegacyRecordVisibilitySql {
             <result property="riskExcluded" column="risk_excluded"/>
             <result property="createdAt" column="created_at"/>
             <result property="updatedAt" column="updated_at"/>
+            <result property="version" column="version"/>
           </resultMap>
 
           <resultMap id="DealPersonResult" type="DealPerson">
@@ -2652,7 +2654,7 @@ public final class LegacyRecordVisibilitySql {
           <sql id="qualifiedDealColumns">
             d.id, d.workspace_id, d.owner_id, d.name, d.value, d.actual_value, d.value_source, d.currency,
             d.pipeline_id, d.stage_id, d.position, d.company_id, d.expected_close_date, d.closed_at,
-            d.closed_reason, d.won, d.risk_excluded, d.created_at, d.updated_at
+            d.closed_reason, d.won, d.risk_excluded, d.created_at, d.updated_at, d.version
           </sql>
 
           <sql id="visibleCompanyJoin">
