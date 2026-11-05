@@ -50,6 +50,7 @@ import {
 } from '@/app/hooks/useRecordTargetSearch';
 
 import { closeDeal, deleteDeal, reopenDeal } from '@/app/lib/api';
+import type { RelationshipMapAvailability } from '@/app/lib/api';
 import { type Contact, type Deal, type Pipeline, type Stage, type User } from '@/app/lib/types';
 import { isDealClosed } from './dealOutcome';
 
@@ -70,7 +71,7 @@ export default function DealActionsMenu({
     pipelines,
     stagesByPipeline,
     currentUserId,
-    mapAvailable = false,
+    mapAvailability = 'unknown',
     personSeeds = EMPTY_CONTACTS,
     dealSeeds = EMPTY_DEALS,
     collaborators = EMPTY_USERS,
@@ -79,7 +80,7 @@ export default function DealActionsMenu({
     pipelines: Pipeline[];
     stagesByPipeline: Record<number, Stage[]>;
     currentUserId: number;
-    mapAvailable?: boolean;
+    mapAvailability?: RelationshipMapAvailability;
     personSeeds?: Contact[];
     dealSeeds?: Deal[];
     collaborators?: User[];
@@ -150,7 +151,7 @@ export default function DealActionsMenu({
                         {t('edit')}
                     </Button>
                 )}
-                {mapAvailable && deal.company != null && (
+                {mapAvailability !== 'overCapacity' && deal.company != null && (
                     <Button
                         variant="outline"
                         size="toolbar"

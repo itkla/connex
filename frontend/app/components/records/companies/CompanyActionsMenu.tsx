@@ -27,6 +27,7 @@ import NewContactDialog from '@/app/components/records/contacts/NewContactDialog
 import NewDealDialog from '@/app/components/records/deals/NewDealDialog';
 
 import { archiveCompany, restoreCompany, createContact, createDeal, getActiveWorkspaceMembers, getPipelines, getStagesByPipelineId, importBusinessCard, isFieldError, updateCompanyOwner, uploadContactPicture } from '@/app/lib/api';
+import type { RelationshipMapAvailability } from '@/app/lib/api';
 import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { type BusinessCardImportDraft, CreateContactPayload, type Company, type CreateDealPayload, type Pipeline, type Stage, type WorkspaceMember } from '@/app/lib/types';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
@@ -57,10 +58,10 @@ function emptyDealPayload(companyId: number): CreateDealPayload {
 
 export default function CompanyActionsMenu({
     company,
-    mapAvailable = false,
+    mapAvailability = 'unknown',
 }: {
     company: Company;
-    mapAvailable?: boolean;
+    mapAvailability?: RelationshipMapAvailability;
 }) {
     const router = useRouter();
     const t = useTranslations('CompaniesActionsMenu');
@@ -283,7 +284,7 @@ export default function CompanyActionsMenu({
                     <PencilSquareIcon className="size-4" />
                     {t('edit')}
                 </Button>
-                {mapAvailable && (
+                {mapAvailability !== 'overCapacity' && (
                     <Button
                         variant="outline"
                         size="toolbar"

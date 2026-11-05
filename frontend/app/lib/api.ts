@@ -1598,13 +1598,16 @@ function assertRelationshipMapCapacity({ companies, contacts, deals, activities,
     }
 }
 
-/** Checks map capacity with one item per source; unavailable reads withhold focused map actions. */
-export async function isRelationshipMapAvailable(init: RequestInit = {}): Promise<boolean> {
+/** A failed capacity check remains distinct from a confirmed rendering limit. */
+export type RelationshipMapAvailability = 'available' | 'overCapacity' | 'unknown';
+
+/** Checks map capacity with one item per source; failed reads leave navigation available for retry. */
+export async function getRelationshipMapAvailability(init: RequestInit = {}): Promise<RelationshipMapAvailability> {
     try {
         assertRelationshipMapCapacity(await getRelationshipMapFirstPages(1, init));
-        return true;
-    } catch {
-        return false;
+        return 'available';
+    } catch (error: unknown) {
+        return error instanceof RelationshipMapCapacityError ? 'overCapacity' : 'unknown';
     }
 }
 

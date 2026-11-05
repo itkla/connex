@@ -74,9 +74,10 @@ The relationship map loads the workspace as a whole, including when a record is 
 2,000 combined contacts/companies/deals and 4,000 combined activities/tasks/notes limits. A capacity
 refusal explains both limits and links to the ordinary record lists; a valid focused-record link also
 offers that record's detail page. Fetch failures use the shared segment error and retry state.
-Record action bars offer focused-map navigation only after bounded first-page totals confirm capacity;
-unavailable reads withhold the action. The bounded neighbourhood map and scalable rendering remain
-deferred under [#2262](https://github.com/itkla/connex/issues/2262).
+Record action bars preserve available, over-capacity and unknown results from bounded first-page reads.
+Only confirmed capacity limits hide focused-map navigation. Failed checks keep navigation available;
+the map page handles any continuing fetch failure through its error boundary and retry. The bounded
+neighbourhood map and scalable rendering remain deferred under [#2262](https://github.com/itkla/connex/issues/2262).
 
 ### Campaigns
 

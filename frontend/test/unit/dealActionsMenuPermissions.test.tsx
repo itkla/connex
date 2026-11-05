@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import DealActionsMenu from '@/app/components/records/deals/DealActionsMenu';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import type { Deal } from '@/app/lib/types';
+import type { RelationshipMapAvailability } from '@/app/lib/api';
 import enDeals from '@/messages/en/deals.json';
 
 declare global {
@@ -14,7 +15,8 @@ declare global {
 }
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }) }));
+const navigation = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
+vi.mock('next/navigation', () => ({ useRouter: () => navigation }));
 vi.mock('@/app/components/attachments/useAttachmentUploader', () => ({
     useAttachmentUploader: () => ({
         inputRef: { current: null }, uploading: false, openPicker: vi.fn(), onFilesSelected: vi.fn(),
@@ -54,10 +56,11 @@ const deal = { id: 5, name: 'Renewal', company: 3, stageId: 2, pipelineId: 1, va
 
 let container: HTMLDivElement;
 let root: Root;
-let mapAvailable: boolean;
+let mapAvailability: RelationshipMapAvailability;
 
 beforeEach(() => {
-    mapAvailable = true;
+    navigation.push.mockClear();
+    mapAvailability = 'available';
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -80,7 +83,7 @@ async function renderMenu(...permissions: string[]) {
                 pipelines={[]}
                 stagesByPipeline={{}}
                 currentUserId={11}
-                mapAvailable={mapAvailable}
+                mapAvailability={mapAvailability}
             />
             </TooltipProvider>
         </NextIntlClientProvider>,
@@ -98,11 +101,21 @@ function offers(label: string): boolean {
 }
 
 describe('the deal detail actions follow the member\'s live effective permissions', () => {
-    it('withholds a focused map action when the map is unavailable', async () => {
-        mapAvailable = false;
+    it('withholds a focused map action only when capacity is exceeded', async () => {
+        mapAvailability = 'overCapacity';
         await renderMenu(...ALL);
         expect(offers(t.viewInMap)).toBe(false);
         expect(offers(t.edit)).toBe(true);
+    });
+
+    it('keeps focused navigation available when the capacity check failed', async () => {
+        mapAvailability = 'unknown';
+        await renderMenu(...ALL);
+        expect(offers(t.viewInMap)).toBe(true);
+        const button = [...container.querySelectorAll('button')].find((element) => element.textContent?.trim() === t.viewInMap);
+        if (!button) throw new Error('The focused map action is missing');
+        await act(async () => button.click());
+        expect(navigation.push).toHaveBeenCalledWith('/intelligence/map?companyId=3');
     });
 
     it('offers no mutation to a read-only member, and drops the empty menus', async () => {
