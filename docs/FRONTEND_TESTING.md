@@ -179,7 +179,12 @@ Ask Connex coverage splits by tenant, because provider readiness is per organiza
 
 Known scope cut: evidence peek and write-tool approval are still not driven from a browser. Extend the scripted fixture for them rather than faking a provider client-side, because the masking and citation behaviour under test *is* the server round trip.
 
-Known scope cut: the notifications flow asserts the inbox/read-state surface but does not exercise *mark as read on a real notification* — generating one deterministically requires a second workspace member (mention flow), which is deferred until the volume-seeder workstream lands. Documented here so nobody mistakes it for coverage.
+`note-persistence.spec.ts` covers contact mentions in both note editors after typing and on
+an immediate save, saved link preservation, response-driven header links, explicit removal
+through the dialog selectors, and unchanged body bytes during metadata edits. Its notification
+case registers two isolated accounts, completes the owner's passkey step-up, adds and accepts
+the second workspace member, then verifies a real `note.mention` notification after saving a
+member mention. The ordinary notifications spec still does not mark a real notification as read.
 
 The document-acceptance spec creates frozen documents both without and with a real deal line item,
 then sends their deliveries with the authenticated request context. CI configures the backend's

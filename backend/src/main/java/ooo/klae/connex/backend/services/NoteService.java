@@ -242,6 +242,8 @@ public class NoteService {
         note.setWorkspaceId(workspaceId);
         note.setAuthor(before.getAuthor());
         note.setVisibility(normalizeVisibility(note.getVisibility(), before.getVisibility()));
+        if (!note.isPersonSpecified()) note.setPerson(before.getPerson());
+        if (!note.isDealSpecified()) note.setDeal(before.getDeal());
         requireLinkedRecordsVisible(workspaceId, note, personWorkspaceIdsJson);
         if (noteMapper.update(note) != 1) {
             throw new ResourceNotFoundException("Note not found with id: " + id);

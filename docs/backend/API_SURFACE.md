@@ -77,6 +77,20 @@ non-CORS requests. This is not an end-to-end token, tenant-interceptor, provider
 SSO ceremony test. `/api/v1` and framework protocol routes retain their dedicated tests and are not
 counted by this sentinel test. No alternate port, proxy deployment, or production traffic is tested.
 
+## Note link updates
+
+`PUT /api/notes/{id}` distinguishes an omitted `person` or `deal` property from explicit
+JSON `null`. Omission preserves that link; `null` removes it; an ID replaces it after the
+existing workspace and record-visibility checks. Each link is handled independently.
+The returned note includes the resulting links. The full-page editor sends its held links
+and reconciles its header with that response; the dialog removes a link when its selector
+is emptied and sends explicit `null`.
+
+Standard note audit diffs retain content, title and visibility (visibility alone for private
+notes), not the person/deal relationship fields. Inline references in audited content do not
+establish which relationships were set, so those diffs cannot reliably reconstruct detached
+links. No automatic data repair is attempted.
+
 ## Global search group selection
 
 `GET /api/search?query=...` accepts optional `types` as repeated parameters, comma-separated
