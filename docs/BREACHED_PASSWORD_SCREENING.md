@@ -46,12 +46,34 @@ row, which would wait on that lock when the redeemer is signed in as the account
 ## Length limit
 
 The password encoder is BCrypt, which reads at most 72 bytes of input. New passwords are therefore
-limited to 8–72 characters at the API boundary (the complexity pattern is ASCII-only, so characters
-and bytes coincide), and `PasswordCredentialService` rejects any candidate over 72 UTF-8 bytes with
-a `PASSWORD_TOO_LONG` field error before screening, so the screened bytes are always the stored
+limited to 8–72 characters at the API boundary, and `PasswordCredentialService` rejects any
+candidate over 72 UTF-8 bytes with a `PASSWORD_TOO_LONG` field error before screening, so the screened bytes are always the stored
 bytes. Sign-in keeps accepting up to 255 characters so credentials stored before the limit keep
 working. The bootstrap owner path skips request validation; an over-long
 `connex.bootstrap.password` is logged with the limit, never the value, and provisioning is skipped.
+
+## New-password character requirements
+
+Registration, permission-gated account creation, and reset redemption use the same
+`ValidPasswordCharacters` constraint. They require ASCII lowercase (`a-z`), uppercase (`A-Z`),
+a digit (`0-9`), and a printable symbol or space. Every printable Unicode punctuation or symbol
+and Unicode space separator counts as special, including `#`, `-`, `_`, and ordinary space.
+Printable letters, combining marks, and numbers are allowed, but do not replace the required
+ASCII classes. Controls, formatting characters, unpaired surrogates, unassigned/private-use
+characters, and line/paragraph separators are refused. Passwords are never trimmed or normalized.
+
+`backend/src/main/resources/password-policy.json` is the canonical character policy. Its
+byte-identical browser copy is `frontend/app/lib/password-policy.json`; after editing the canonical
+file, copy it to that path. `passwordPolicy.test.ts` rejects drift. The shared browser helper and
+requirements checklist serve registration, reset, and account creation in English and Japanese;
+specific field errors name the first unmet requirement, and the checklist remains visible.
+The printable expression has an explicit end guard because Java and JavaScript `$` can match
+before a final newline.
+
+The existing 8–72 character limit counts UTF-16 code units in both Java and JavaScript. Printable
+Unicode can use multiple UTF-8 bytes, so the browser also checks the unchanged 72-byte encoder
+limit. The credential boundary remains authoritative for that byte cap and breach screening.
+Login keeps its existing validation, and bootstrap keeps its existing credential-boundary checks.
 
 ## Offline source for restricted egress
 
