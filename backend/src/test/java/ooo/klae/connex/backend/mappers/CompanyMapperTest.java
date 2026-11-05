@@ -507,6 +507,89 @@ class CompanyMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void companyEngagementCountsMapDistinctSourceTotalsToNamedComponents() {
+        Company company = newCompany();
+        Person person = newPerson(company);
+        for (int i = 0; i < 5; i++) {
+            newPerson(company);
+        }
+        Person archived = newPerson(company);
+        personMapper.archive(workspace.getId(), archived.getId());
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, company);
+        for (int i = 0; i < 4; i++) {
+            newDeal(pipeline, stage, company);
+        }
+        User actor = newUser();
+        for (int i = 0; i < 3; i++) {
+            Activity activity = new Activity();
+            activity.setWorkspaceId(workspace.getId());
+            activity.setType("call");
+            activity.setSubject("Counted activity");
+            activity.setTimestamp("2026-01-01 12:00:00");
+            activity.setCreatedBy(actor);
+            activity.setPerson(person);
+            activity.setDeal(deal);
+            activityMapper.insert(activity);
+        }
+        for (int i = 0; i < 4; i++) {
+            Task task = new Task();
+            task.setWorkspaceId(workspace.getId());
+            task.setDescription("Counted task");
+            task.setAssignedTo(actor);
+            task.setPerson(person);
+            task.setDeal(deal);
+            task.setCompleted(i > 0);
+            task.setStatus(i > 0 ? "done" : "todo");
+            taskMapper.insert(task);
+        }
+        for (int i = 0; i < 3; i++) {
+            Note note = new Note();
+            note.setWorkspaceId(workspace.getId());
+            note.setContent("Counted note");
+            note.setAuthor(actor);
+            note.setPerson(person);
+            note.setDeal(deal);
+            note.setVisibility(i == 2 ? "private" : "workspace");
+            noteMapper.insert(note);
+        }
+        Workspace foreign = newWorkspace();
+        Task foreignTask = new Task();
+        foreignTask.setWorkspaceId(foreign.getId());
+        foreignTask.setDescription("Foreign overlay");
+        foreignTask.setAssignedTo(actor);
+        foreignTask.setPerson(person);
+        foreignTask.setStatus("todo");
+        taskMapper.insert(foreignTask);
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+
+        CompanyEngagementCountsDto counts = companyMapper.getCompanyEngagementCounts(
+            workspace.getId(), company.getId());
+
+        assertEquals(new CompanyEngagementCountsDto(6, 5, 4, 1, 3, 2), counts);
+        assertEquals(jdbc.queryForObject(
+            "SELECT COUNT(*) FROM person WHERE company_id = ? AND archived_at IS NULL", Long.class,
+            company.getId()), counts.personCount());
+        assertEquals(jdbc.queryForObject(
+            "SELECT COUNT(*) FROM deal WHERE company_id = ?", Long.class, company.getId()), counts.numDeals());
+        assertEquals(jdbc.queryForObject(
+            "SELECT COUNT(*) FROM task WHERE workspace_id = ? AND person_id = ?", Long.class,
+            workspace.getId(), person.getId()), counts.numTasks());
+        assertEquals(jdbc.queryForObject(
+            "SELECT COUNT(*) FROM task WHERE workspace_id = ? AND person_id = ? AND completed = FALSE", Long.class,
+            workspace.getId(), person.getId()), counts.openTasks());
+        assertEquals(jdbc.queryForObject(
+            "SELECT COUNT(*) FROM activity WHERE workspace_id = ? AND person_id = ?", Long.class,
+            workspace.getId(), person.getId()), counts.numActivities());
+        assertEquals(jdbc.queryForObject(
+            "SELECT COUNT(*) FROM note WHERE workspace_id = ? AND person_id = ? AND visibility = 'workspace'", Long.class,
+            workspace.getId(), person.getId()), counts.numNotes());
+        assertEquals(new CompanyEngagementCountsDto(0, 0, 0, 0, 0, 0),
+            companyMapper.getCompanyEngagementCounts(foreign.getId(), company.getId()));
+    }
+
+    @Test
     void companyEngagementAggregatesExcludePrivateNotes() {
         Company company = newCompany();
         Person person = newPerson(company);

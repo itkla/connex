@@ -929,6 +929,16 @@
     WHERE recipient_id = #{recipientId}
   </delete>
 
+  <update id="resolveTaskAssignment">
+    UPDATE notification
+    SET resolved_at = #{resolvedAt}, snoozed_until = NULL, snooze_timezone = NULL
+    WHERE workspace_id = #{workspaceId}
+      AND recipient_id = #{recipientId}
+      AND type = 'task.assigned'
+      AND source_type = 'task' AND source_id = #{taskId}
+      AND resolved_at IS NULL
+  </update>
+
   <update id="resolveReminder">
     UPDATE notification
     SET resolved_at = #{resolvedAt}

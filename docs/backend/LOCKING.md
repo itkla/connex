@@ -802,6 +802,12 @@ After the board root is held, discover workspace task ids without locks, add the
 
 Do not replace this with an ordered range `FOR UPDATE` scan or return to non-locking board reads after waiting for exact locks. Compact affected status columns to contiguous zero-based positions before commit.
 
+Task assignment notices reuse the requested active membership retained before the board root.
+After a full update changes the assignee, resolve only the old recipient's workspace/task-scoped
+`task.assigned` notice, then deliver to the new assignee through `NotificationDelivery`. No old
+recipient membership lock is acquired after the board. Notification state versions retain their
+existing deferred before-commit order after domain rows.
+
 ## AI assistant chat
 
 Assistant-chat mutations run at `READ_COMMITTED`.

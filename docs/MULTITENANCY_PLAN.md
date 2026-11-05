@@ -97,6 +97,13 @@ The inbox/bell is **recipient-scoped across every workspace the user belongs to*
 nothing is missed while viewing another workspace; each notification is labeled with its source
 workspace. Delivery prefs stay per-user-global. (The reminder *generation* jobs still run per-workspace.)
 
+Task creation and reassignment emit `task.assigned` through the existing preference and delivery
+machinery, only to the locked active assignee in that workspace and never to the acting user.
+Unchanged assignments emit nothing. Like mentions, the dedupe key identifies one task and recipient;
+reassignment resolves the prior notice and returning to that recipient revives the same inbox row
+unread. Secondary-channel delivery retains its first-occurrence behavior. Personal notification
+settings expose a separate task-assignment preference in both languages.
+
 > **✅ Implemented (2026-06-24):** inbox reads/mutations are recipient-scoped across all memberships
 > (`inboxScope`, no `workspace_id` filter); `findPage`/`findById` join `workspace` for a `workspace_name`
 > label surfaced on `NotificationDto`. Reconciliation/reminder queries are untouched (still per-workspace,
