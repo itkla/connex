@@ -99,6 +99,16 @@ async function flush() {
     for (let i = 0; i < 10; i += 1) await Promise.resolve();
 }
 
+function nextPolicyDecision(api: typeof import("@/app/lib/api")): Promise<void> {
+    return new Promise((resolve) => {
+        const unsubscribe = api.subscribePrivilegedMfaConfinement(() => {
+            if (api.currentPrivilegedMfaReadiness() === "loading") return;
+            unsubscribe();
+            resolve();
+        });
+    });
+}
+
 describe("privileged MFA confinement in the browser", () => {
     afterEach(() => {
         vi.resetModules();
@@ -164,8 +174,9 @@ describe("privileged MFA confinement in the browser", () => {
         const api = await import("@/app/lib/api");
         const older = api.settlePrivilegedMfaStanding("check");
         await flush();
+        const decision = nextPolicyDecision(api);
         const newer = api.settlePrivilegedMfaStanding("check");
-        await flush();
+        await decision;
         expect(api.currentPrivilegedMfaReadiness()).toBe("ready");
         reads.release(0, requirements("ENROLLMENT_REQUIRED"));
         await expect(older).resolves.toBe("superseded");
@@ -173,6 +184,35 @@ describe("privileged MFA confinement in the browser", () => {
         reads.release(1, requirements("ENROLLMENT_REQUIRED"));
         await expect(newer).resolves.toBe("applied");
         expect(api.currentPrivilegedMfaReadiness()).toBe("ready");
+    });
+
+    it("ignores an older enforced capability delivered after the newer master-off decision", async () => {
+        stubBrowser("/dashboard");
+        const reads = standingReads();
+        const olderPolicy = Promise.withResolvers<Response>();
+        let policies = 0;
+        stubBackend((url) => {
+            if (url.endsWith(REQUIREMENTS)) return reads.next();
+            if (url.endsWith("/api/capabilities")) return ++policies === 1
+                ? olderPolicy.promise : json({ privilegedMfaEnforced: false });
+            return null;
+        });
+        const api = await import("@/app/lib/api");
+        const older = api.settlePrivilegedMfaStanding("check");
+        await flush();
+        const decision = nextPolicyDecision(api);
+        const newer = api.settlePrivilegedMfaStanding("check");
+        await decision;
+        expect(api.currentPrivilegedMfaReadiness()).toBe("ready");
+        olderPolicy.resolve(json({ privilegedMfaEnforced: true }));
+        reads.release(0, requirements("ENROLLMENT_REQUIRED"));
+        await expect(older).resolves.toBe("superseded");
+        expect(api.currentPrivilegedMfaReadiness()).toBe("ready");
+        expect(api.privilegedMfaConfinementReason()).toBeNull();
+        reads.release(1, requirements("ENROLLMENT_REQUIRED"));
+        await expect(newer).resolves.toBe("applied");
+        expect(api.currentPrivilegedMfaReadiness()).toBe("ready");
+        expect(api.privilegedMfaConfinementReason()).toBeNull();
     });
 
     it.each([true, false])("reconciles an enrollment refusal against master enforcement %s", async (enforced) => {
