@@ -82,7 +82,7 @@ class TaskPlaneRoutingIntegrationTest {
                 + "id INT PRIMARY KEY, workspace_id INT NOT NULL, description VARCHAR(255) NOT NULL, "
                 + "completed BOOLEAN NOT NULL, status VARCHAR(32) NOT NULL, position INT NOT NULL, "
                 + "due_date DATE NULL, assigned_to_id INT NULL, person_id INT NULL, deal_id INT NULL, "
-                + "created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL)");
+                + "created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL, completed_at DATETIME NULL)");
             insertFixtures(connection);
         }
 
