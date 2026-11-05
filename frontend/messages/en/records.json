@@ -1,4 +1,14 @@
 {
+  "RecordListState": {
+    "title": "Couldn't load the list",
+    "body": "Your records haven't been changed. Try again.",
+    "refreshBody": "Showing the last loaded records. Try again to refresh the list.",
+    "deniedTitle": "You don't have permission to view this list",
+    "deniedBody": "Ask a workspace admin for access, then try again.",
+    "retry": "Retry",
+    "retrying": "Retrying…",
+    "reference": "Reference: {id}"
+  },
   "EngineEvaluation": {
     "title": "Insights",
     "contactRiskLabel": "Risk & cooling signals",

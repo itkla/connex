@@ -35,6 +35,8 @@ Do not turn record details into dense multi-panel consoles or promote aggregate 
 
 ## Loading, empty, error, and permission states
 
+Client collections using `useServerRecords` wrap their list content in `RecordListState`. Failed loads show the shared alert and Retry, suppress empty and onboarding copy, and preserve the last successful rows only within the same workspace. A pending retry keeps its error visible with a disabled busy control; success clears the error. Permission refusals use access guidance, and API support references appear when available.
+
 Every collection/list surface distinguishes all four states:
 
 - Loading: shape-matched `loading.tsx` skeletons, not a centered spinner over content.
