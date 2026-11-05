@@ -1,5 +1,7 @@
 'use client';
 
+import { useTimeZoneSearch } from '@/app/hooks/useTimeZoneSearch';
+
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import {
@@ -142,12 +144,12 @@ export default function ScheduleDialog({
                         )
                     ) : null}
                 </ResponsiveDialogContent>
+                <ConfirmDiscardDialog
+                    open={guard.confirm.open}
+                    onKeepEditing={guard.confirm.onKeepEditing}
+                    onDiscard={guard.confirm.onDiscard}
+                />
             </ResponsiveDialog>
-            <ConfirmDiscardDialog
-                open={guard.confirm.open}
-                onKeepEditing={guard.confirm.onKeepEditing}
-                onDiscard={guard.confirm.onDiscard}
-            />
         </>
     );
 }
@@ -239,6 +241,8 @@ function ScheduleForm({
             enabled,
         }).catch(() => undefined);
     };
+
+    const timeZoneSearch = useTimeZoneSearch(timezones);
 
     return (
         <form
@@ -340,9 +344,9 @@ function ScheduleForm({
                             </ComboboxValue>
                         </ComboboxChips>
                         <ComboboxContent anchor={recipientAnchor} className="pointer-events-auto">
+                            <ComboboxEmpty>{t('schedule.recipientsEmpty')}</ComboboxEmpty>
                             <ComboboxList>
-                                <ComboboxEmpty>{t('schedule.recipientsEmpty')}</ComboboxEmpty>
-                                {members.map((member) => (
+                                {(member: (typeof members)[number]) => (
                                     <ComboboxItem key={member.id} value={member}>
                                         <span className="min-w-0">
                                             <span className="block truncate font-medium text-foreground">
@@ -353,7 +357,7 @@ function ScheduleForm({
                                             </span>
                                         </span>
                                     </ComboboxItem>
-                                ))}
+                                )}
                             </ComboboxList>
                         </ComboboxContent>
                     </Combobox>
@@ -375,7 +379,7 @@ function ScheduleForm({
                         onValueChange={(value) => {
                             if (typeof value === 'string') setTimezone(value);
                         }}
-                        itemToStringLabel={(value) => value}
+                        {...timeZoneSearch}
                         disabled={saving}
                     >
                         <ComboboxInput
@@ -387,11 +391,11 @@ function ScheduleForm({
                             aria-describedby={error?.fieldId === 'schedule-timezone' ? 'schedule-form-error' : undefined}
                         />
                         <ComboboxContent className="pointer-events-auto">
+                            <ComboboxEmpty>{t('schedule.timezoneEmpty')}</ComboboxEmpty>
                             <ComboboxList>
-                                <ComboboxEmpty>{t('schedule.timezoneEmpty')}</ComboboxEmpty>
-                                {timezones.map((value) => (
-                                    <ComboboxItem key={value} value={value}>{value}</ComboboxItem>
-                                ))}
+                                {(value: (typeof timezones)[number]) => (
+                                    <ComboboxItem key={value} value={value}>{timeZoneSearch.itemToStringLabel(value)}</ComboboxItem>
+                                )}
                             </ComboboxList>
                         </ComboboxContent>
                     </Combobox>

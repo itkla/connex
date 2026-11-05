@@ -172,12 +172,12 @@ export default function ContactProvenanceDialog({
                                     <Label htmlFor="contact-provenance-referrer">{t('referrerLabel')}</Label>
                                     <Combobox
                                         items={referrerOptions}
-                                        filter={null}
+                                        serverSearch={referrerSearch.serverSearch}
                                         itemToStringLabel={(contact: Contact) => contact.name}
                                         value={selectedReferrer}
-                                        onInputValueChange={(value) => {
+                                        onInputValueChange={(value, details) => {
                                             setReferrerQuery(value);
-                                            referrerSearch.onInputValueChange(value);
+                                            referrerSearch.onInputValueChange(value, details);
                                         }}
                                         onValueChange={(contact) => setReferrerId(contact?.id ?? null)}
                                     >

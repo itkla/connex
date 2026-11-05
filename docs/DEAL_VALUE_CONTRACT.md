@@ -245,6 +245,17 @@ the same data. Those differences are **declared**, not accidental:
 posture, sharing posture, period basis and owner basis, and `FigureReconciliationArchTest`
 re-derives every claim from the mapper SQL, failing loudly when SQL and declaration drift apart.
 
+### Report display precision
+
+Report tables, totals, legends, chart tooltips, the data appendix, and source citations show monetary
+amounts in standard notation, using the currency's minor-unit precision from `Intl.NumberFormat`
+(whole yen for JPY) and omitting trailing zeros. Monetary chart axes use compact notation with up to
+two decimal places. PNG and print/PDF exports use the same rendered document; CSV retains the
+underlying amounts and currency codes. A mixed-currency chart
+remains a currency-partitioned table with an explanation, without conversion or a combined axis.
+Count tooltips use standard locale-aware number notation so nearby counts remain distinguishable,
+even when chart axes abbreviate them.
+
 ### Declared divergences — do not "fix" these
 
 1. **Archived accounts.** The deal browser buckets a deal whose company is archived as

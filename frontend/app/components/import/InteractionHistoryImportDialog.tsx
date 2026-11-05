@@ -1,5 +1,6 @@
 "use client";
 
+import { createServerPickerSearch } from '@/lib/server-picker-search';
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import {
@@ -937,7 +938,7 @@ function ContactLinker({
             value={null}
             inputValue={query}
             open
-            filter={null}
+            serverSearch={createServerPickerSearch(query, current || queryText.length < 2 ? { query, items: options } : null)}
             itemToStringLabel={(item: ContactOption) => item.label}
             onOpenChange={(next) => {
                 setOpen(next);
@@ -974,11 +975,11 @@ function ContactLinker({
             <ComboboxContent className="w-56 min-w-56">
                 <ComboboxEmpty className="justify-start px-2 py-2 text-xs">{status}</ComboboxEmpty>
                 <ComboboxList>
-                    {options.map((option) => (
+                    {(option: (typeof options)[number]) => (
                         <ComboboxItem key={option.id} value={option} className="text-xs">
                             {option.label}
                         </ComboboxItem>
-                    ))}
+                    )}
                 </ComboboxList>
             </ComboboxContent>
         </Combobox>

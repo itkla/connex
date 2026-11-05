@@ -259,6 +259,7 @@
       "changeValue": "前期比 {value}%",
       "attainmentValue": "達成率 {value}%",
       "dimension": "区分",
+      "mixedCurrencyChartUnavailable": "このブロックには複数の通貨が含まれているため、グラフを表示できません。金額は換算せず、通貨別に表で表示しています。",
       "noData": "この期間のデータはありません",
       "noCurrentStateData": "現在状態のデータはありません",
       "source": "出典",

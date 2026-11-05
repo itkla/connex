@@ -774,8 +774,8 @@ export default function NewCompanyDialog({
                     {announcement}
                 </p>
             </ResponsiveDialogContent>
+            <ConfirmDiscardDialog open={guard.confirm.open} onKeepEditing={guard.confirm.onKeepEditing} onDiscard={guard.confirm.onDiscard} />
         </ResponsiveDialog>
-        <ConfirmDiscardDialog open={guard.confirm.open} onKeepEditing={guard.confirm.onKeepEditing} onDiscard={guard.confirm.onDiscard} />
         </>
     );
 }

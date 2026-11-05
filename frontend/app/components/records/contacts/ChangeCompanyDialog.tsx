@@ -159,8 +159,9 @@ export default function ChangeCompanyDialog({ open, onOpenChange, contacts, onSu
                         <div className="ncd-rise grid gap-2" style={{ animationDelay: '90ms' }}>
                             <Label htmlFor="company">{t('companyLabel')}</Label>
                             <Combobox
-                                items={companySearch.companies}
-                                filter={null}
+                                items={companySearch.options}
+                                serverSearch={companySearch.serverSearch}
+                                autoHighlight
                                 itemToStringLabel={(c: Company) => c.name}
                                 value={selected}
                                 onInputValueChange={companySearch.onInputValueChange}
@@ -179,13 +180,13 @@ export default function ChangeCompanyDialog({ open, onOpenChange, contacts, onSu
                                     </InputGroupAddon>
                                 </ComboboxInput>
                                 <ComboboxContent className="pointer-events-auto">
+                                    <ComboboxEmpty>{companySearch.error ? t('companySearchFailed') : t('noCompaniesFound')}</ComboboxEmpty>
                                     <ComboboxList onWheel={handleListWheel}>
-                                        <ComboboxEmpty>{t('noCompaniesFound')}</ComboboxEmpty>
-                                        {companySearch.companies.map((company) => (
+                                        {(company: (typeof companySearch.companies)[number]) => (
                                             <ComboboxItem key={company.id} value={company}>
                                                 {company.name}
                                             </ComboboxItem>
-                                        ))}
+                                        )}
                                     </ComboboxList>
                                 </ComboboxContent>
                             </Combobox>

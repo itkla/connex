@@ -230,6 +230,7 @@ export default function EditTaskSheet({
                                     label: deal.name,
                                 }))}
                                 onInputValueChange={dealSearch.onInputValueChange}
+                                serverSearch={dealSearch.serverSearch}
                                 emptyLabel={dealSearch.loading ? t('searching') : t('noDealFound')}
                             />
                         </div>
@@ -283,12 +284,12 @@ export default function EditTaskSheet({
                     </Button>
                 </DrawerFooter>
             </DrawerContent>
+            <ConfirmDiscardDialog
+                open={guard.confirm.open}
+                onKeepEditing={guard.confirm.onKeepEditing}
+                onDiscard={guard.confirm.onDiscard}
+            />
         </Drawer>
-        <ConfirmDiscardDialog
-            open={guard.confirm.open}
-            onKeepEditing={guard.confirm.onKeepEditing}
-            onDiscard={guard.confirm.onDiscard}
-        />
         </>
     );
 }

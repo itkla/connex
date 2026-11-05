@@ -3,6 +3,7 @@
 import * as React from "react"
 import { Drawer as DrawerPrimitive } from "@base-ui/react/drawer"
 import { XIcon } from "lucide-react"
+import { useTranslations } from "next-intl"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -116,6 +117,7 @@ function DrawerContent({
 }: DrawerPrimitive.Popup.Props & {
   showCloseButton?: boolean
 }) {
+  const t = useTranslations("UI")
   const { modal, showSwipeHandle, swipeDirection, hasSnapPoints, motionClassName } =
     useDrawerContext()
   const swipeAxis =
@@ -190,7 +192,7 @@ function DrawerContent({
               }
             >
               <XIcon />
-              <span className="sr-only">Close</span>
+              <span className="sr-only">{t("close")}</span>
             </DrawerPrimitive.Close>
           )}
         </DrawerPrimitive.Popup>

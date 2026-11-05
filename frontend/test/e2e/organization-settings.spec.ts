@@ -268,7 +268,7 @@ test.describe("workspace and organization identity", () => {
             await expect(page.getByRole("heading", { name: "Workspace identity" })).toBeVisible();
             await page.getByLabel("Workspace name").fill(workspaceName);
             await page.getByLabel("Reporting timezone").fill("Asia/Tokyo");
-            await page.getByRole("option", { name: "Asia/Tokyo", exact: true }).click();
+            await page.getByRole("option", { name: /Japan.*UTC\+09:00.*Asia\/Tokyo/ }).click();
             await page.getByRole("button", { name: "Save changes" }).click();
             await expect(page.getByText("Workspace settings updated.")).toBeVisible();
             await expect(page.getByRole("button", { name: "Switch workspace" })).toContainText(workspaceName);
