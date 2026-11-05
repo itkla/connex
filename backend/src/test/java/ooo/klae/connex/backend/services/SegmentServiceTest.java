@@ -221,6 +221,20 @@ class SegmentServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void warmIntroRequiresCompletedTaskEngagement() {
+        Company target = newCompany();
+        Person contact = newPerson(target);
+        Person engaged = newPerson(newCompany());
+        strongEdge(contact, engaged);
+        Task task = taskFor(engaged, null, false, null);
+        assertFalse(evaluate(def("all", predicate("warm_intro_available"))).contains(target.getId()));
+        taskMapper.complete(workspace.getId(), task.getId(), currentUser.getId(), 0);
+        assertTrue(evaluate(def("all", predicate("warm_intro_available"))).contains(target.getId()));
+        taskMapper.moveTask(workspace.getId(), task.getId(), "todo", false, 0);
+        assertFalse(evaluate(def("all", predicate("warm_intro_available"))).contains(target.getId()));
+    }
+
+    @Test
     void warmIntro_matchesTeamConnectedCompany() {
         Company target = newCompany();
         Person contact = newPerson(target);

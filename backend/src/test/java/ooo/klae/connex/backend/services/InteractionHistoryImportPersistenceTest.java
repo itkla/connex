@@ -170,7 +170,7 @@ class InteractionHistoryImportPersistenceTest extends AbstractServiceTest {
         assertTrue(afterFirst.artifacts().tags() >= 2);
         assertTrue(afterFirst.artifacts().relationships() >= 1);
         assertTrue(afterFirst.artifacts().notifications() >= 1);
-        assertEquals(3, afterFirst.artifacts().relationshipEvidenceEvents());
+        assertEquals(2, afterFirst.artifacts().relationshipEvidenceEvents());
         assertEquals(afterFirst, afterSecond);
         assertEquals(afterFirst, replayState(person.getId()));
     }
@@ -283,7 +283,7 @@ class InteractionHistoryImportPersistenceTest extends AbstractServiceTest {
                 workspace.getId(),
                 personId),
             jdbcTemplate.queryForList(
-                "SELECT id, workspace_id, description, completed, status, position, due_date, "
+                "SELECT id, workspace_id, description, completed, completed_at, status, position, due_date, "
                     + "assigned_to_id, person_id, deal_id, created_at, updated_at, "
                     + "history_import_key, history_payload_hash, history_source_system, "
                     + "history_source_id, history_source_row_ref, history_imported_at FROM task "

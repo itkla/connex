@@ -233,12 +233,12 @@ public class ScoringService {
             Integer personId = personId(task.getPerson());
             if (personId != null
                     && !excludedTaskIds.contains(task.getId())
-                    && epoch(task.getCreatedAt()) != null) {
+                    && task.isCompleted() && epoch(task.getCompletedAt()) != null) {
                 touches.computeIfAbsent(personId, key -> new ArrayList<>()).add(
                     new SourceTouch(
                         "task",
                         task.getId(),
-                        task.getCreatedAt(),
+                        task.getCompletedAt(),
                         Double.toString(WARMTH_MODEL.taskWeight())));
             }
         }
@@ -286,14 +286,14 @@ public class ScoringService {
             }
         }
         for (Task task : taskMapper.getAllTasks(workspaceId)) {
-            if (epoch(task.getCreatedAt()) != null) {
+            if (task.isCompleted() && epoch(task.getCompletedAt()) != null) {
                 addCompanySourceTouch(
                     task.getPerson(),
                     task.getDeal(),
                     new SourceTouch(
                         "task",
                         task.getId(),
-                        task.getCreatedAt(),
+                        task.getCompletedAt(),
                         Double.toString(WARMTH_MODEL.taskWeight())),
                     personCompany,
                     processablePersonIds,
@@ -739,7 +739,8 @@ public class ScoringService {
                 processablePersonIds, dealCompany, byPerson, companyTouches);
         }
         for (Task t : taskMapper.getAllTasks(workspaceId)) {
-            collectTouch(epoch(t.getCreatedAt()), WARMTH_MODEL.taskWeight(), t.getPerson(), t.getDeal(),
+            if (!t.isCompleted()) continue;
+            collectTouch(epoch(t.getCompletedAt()), WARMTH_MODEL.taskWeight(), t.getPerson(), t.getDeal(),
                 processablePersonIds, dealCompany, byPerson, companyTouches);
         }
 

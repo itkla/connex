@@ -810,6 +810,19 @@ unread and publishes the update through its established resolved-row path. No ol
 recipient membership lock is acquired after the board. Notification state versions retain their
 existing deferred before-commit order after domain rows.
 
+## Warmth model transitions
+
+Notification model baselines use the existing background organization duplicate-decision mutex and
+notification transaction. The tenant `warmth_notification_model_state` marker advances atomically
+with preference-independent relationship baselines only after a successful complete warmth snapshot.
+No mutation-only reconciliation advances it. Scoring and snapshot failure preserve pending state.
+
+Radar replacement retains its family root, then locks each exact `(workspace_id, dedupe_key)` signal
+before its actor state. At a signal model change, only dismissed/follow-up hashes equal to that signal's
+previous persisted hash are rebased; mismatched historical hashes stay stale. This preserves the
+interactive signal → actor-state order. Task completion timestamps are written in the existing task
+statements under their established board/task locks; no new task lock order is introduced.
+
 ## AI assistant chat
 
 Assistant-chat mutations run at `READ_COMMITTED`.

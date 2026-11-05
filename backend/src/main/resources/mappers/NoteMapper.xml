@@ -527,20 +527,26 @@
 
   <update id="update">
     UPDATE note
-    SET content = #{content},
+    <set>
+        content = #{content},
         title = #{title},
         <if test="visibility != null">visibility = #{visibility},</if>
         author_id = #{author.id},
+        <if test="personSpecified">
         person_id =
           <choose>
             <when test="person != null">#{person.id}</when>
             <otherwise>NULL</otherwise>
           </choose>,
+        </if>
+        <if test="dealSpecified">
         deal_id =
           <choose>
             <when test="deal != null">#{deal.id}</when>
             <otherwise>NULL</otherwise>
-          </choose>
+          </choose>,
+        </if>
+    </set>
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
 
