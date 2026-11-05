@@ -9,7 +9,7 @@ import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import QuickEditDealSheet, { type DealDraft } from '@/app/components/records/deals/QuickEditDealSheet';
 import { CustomFieldsEditSection, type CustomFieldsEditHandle } from '@/app/components/records/CustomFieldsEditSection';
-import { actualValueForOutcome } from '@/app/components/records/deals/dealOutcome';
+import { requestedActualValue } from '@/app/components/records/deals/dealOutcome';
 import { getPipelines, getStagesByPipelineId, updateDeal } from '@/app/lib/api';
 import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { type Deal, type Pipeline, type Stage, type UpdateDealPayload } from '@/app/lib/types';
@@ -19,6 +19,7 @@ function toDraft(d: Deal): DealDraft {
         name: d.name ?? '',
         value: d.value ?? 0,
         actualValue: d.actualValue ?? 0,
+        actualValueEdited: false,
         currency: d.currency ?? 'USD',
         pipeline: d.pipeline ?? 0,
         stage: d.stage ?? 0,
@@ -35,7 +36,7 @@ export async function submitDealDraftUpdate(dealId: number, draft: DealDraft, in
     const payload: UpdateDealPayload = {
         name: draft.name.trim(),
         value: draft.value,
-        actualValue: actualValueForOutcome(draft.won, draft.actualValue),
+        actualValue: requestedActualValue(draft.won, draft.actualValue, draft.actualValueEdited),
         currency: draft.currency.trim() || 'USD',
         pipeline: draft.pipeline,
         stage: draft.stage,
