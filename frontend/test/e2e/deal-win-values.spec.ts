@@ -92,7 +92,7 @@ test('Mark won and Edit Outcome keep the stage and record the default or entered
     }
 
     await page.goto('/records/deals');
-    await page.getByRole('main').getByRole('button', { name: 'New', exact: true }).click();
+    await page.getByRole('main').getByRole('button', { name: 'Add deal', exact: true }).click();
     const createDialog = page.getByRole('dialog', { name: 'New deal', exact: true });
     await createDialog.getByLabel('Name', { exact: true }).fill(`Created won ${suffix}`);
     await createDialog.getByLabel('Value', { exact: true }).fill('25400');
