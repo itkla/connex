@@ -1,13 +1,17 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.same;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -15,6 +19,7 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
@@ -22,12 +27,14 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 import org.apache.hc.client5.http.psl.PublicSuffixMatcherLoader;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.google.i18n.phonenumbers.PhoneNumberUtil;
@@ -53,7 +60,7 @@ import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.Recor
 import ooo.klae.connex.backend.support.RecordVisibilityOperationFixture;
 import ooo.klae.connex.backend.tenant.Permission;
 
-/** Pins scope reuse through the import's existing outcome cache and participant deduplication. */
+/** Pins scope reuse and per-pass outcome caching through reviewed imports and participant linking. */
 class ImportDealVisibilityScopeTest {
     @Test
     void outcomeCacheAndParticipantLoopUseTheSuppliedScopeWithoutAnotherBoundaryLookup() {
@@ -96,7 +103,8 @@ class ImportDealVisibilityScopeTest {
             PipelineMapper pipelines = mock(PipelineMapper.class);
             DealStageHistoryService history = mock(DealStageHistoryService.class);
             DealValueService values = mock(DealValueService.class);
-            DealOutcomeWriter outcomes = new DealOutcomeWriter(deals, values, mock(RuleTriggerPublisher.class));
+            RuleTriggerPublisher ruleTriggers = mock(RuleTriggerPublisher.class);
+            DealOutcomeWriter outcomes = new DealOutcomeWriter(deals, values, ruleTriggers);
             DuplicatePreflightService preflight = mock(DuplicatePreflightService.class);
             AuditService audit = mock(AuditService.class);
             ImportService service = new ImportService(
@@ -109,11 +117,16 @@ class ImportDealVisibilityScopeTest {
                     PhoneNumberUtil.getInstance(), PublicSuffixMatcherLoader.getDefault()), preflight);
             when(workspace.getCurrentWorkspaceId()).thenReturn(7);
             when(workspace.getCurrentUserId()).thenReturn(17);
+            when(workspace.getCurrentAnalyticsTimezone()).thenReturn("Asia/Tokyo");
             User actor = new User();
             actor.setId(17);
             when(auth.getCurrentUser()).thenReturn(actor);
             var admission = mock(DuplicatePreflightService.ImportCommitAdmission.class);
             var session = mock(DuplicatePreflightService.ImportCommitSession.class);
+            var previewSession = mock(DuplicatePreflightService.ImportPreviewSession.class);
+            when(preflight.beginImportPreview(eq(List.of()), eq(List.of()), anyString())).thenReturn(previewSession);
+            when(previewSession.responses()).thenReturn(List.of());
+            when(previewSession.reviewProof()).thenReturn("review-proof");
             when(preflight.claimImportCommit(eq("review-proof"), anyString())).thenReturn(admission);
             when(preflight.beginImportCommit(eq(List.of()), eq(List.of()), anyString(), same(admission)))
                 .thenReturn(session);
@@ -123,11 +136,15 @@ class ImportDealVisibilityScopeTest {
             when(pipelines.getAllPipelines(7, "[7,17]")).thenReturn(List.of(primary, secondary));
             when(pipelines.getStagesByPipelineId(7, "[7,17]", 10)).thenReturn(List.of(stage(13, "Review")));
             when(pipelines.getStagesByPipelineId(7, "[7,17]", 20)).thenReturn(List.of(stage(24, "Review")));
-            when(deals.getStageOutcome(7, "[7,17]", 13)).thenReturn("normal");
-            when(deals.getStageOutcome(7, "[7,17]", 24)).thenReturn("normal");
+            when(deals.getStageOutcome(7, "[7,17]", 13)).thenReturn("won");
+            when(deals.getStageOutcome(7, "[7,17]", 24)).thenReturn("won");
             when(identities.findCurrentPersonIdentityMatches(7, "email", List.of("first@example.com", "second@example.com")))
                 .thenReturn(List.of(person(11, "first@example.com"), person(12, "second@example.com")));
             when(deals.addPersonIfAbsent(eq(7), eq("[7,17]"), anyInt(), anyInt())).thenReturn(1);
+            when(deals.update(any(Deal.class))).thenReturn(1);
+            when(deals.updateImportedCreatedAt(eq(7), anyInt(), anyString())).thenReturn(1);
+            when(values.resolveRealizedValueForNewDeal(eq(true), any(BigDecimal.class), isNull()))
+                .thenReturn(BigDecimal.ZERO.setScale(2));
             List<Deal> existing = new ArrayList<>();
             for (int id : List.of(41, 42, 43)) {
                 Deal deal = new Deal();
@@ -138,7 +155,9 @@ class ImportDealVisibilityScopeTest {
                 deal.setValue(BigDecimal.ZERO);
                 deal.setPipelineId(10);
                 deal.setStageId(11);
+                deal.setCreatedAt("2024-01-01 00:00:00");
                 existing.add(deal);
+                when(deals.getDealById(7, id)).thenReturn(deal);
                 when(deals.getDealByIdForUpdate(7, id)).thenReturn(deal);
             }
             when(deals.getDealsForDedup(7)).thenReturn(existing);
@@ -154,40 +173,70 @@ class ImportDealVisibilityScopeTest {
                     row("Created 2", "Primary"), row("Existing 42", "Primary"),
                     row("Created 3", "Secondary"), row("Existing 43", "Secondary")),
                 List.of(mapping("Name", "name"), mapping("Pipeline", "pipeline"),
-                    mapping("Stage", "stage"), mapping("People", "people")), action, null);
-            request.setDuplicateReviewProof("review-proof");
+                    mapping("Stage", "stage"), mapping("People", "people"),
+                    mapping("Closed", "closedAt"), mapping("Created", "createdAt")), action, null);
+            boolean skipping = "skip".equals(action);
+            var preview = service.previewDeals(request);
+            assertEquals(3, preview.getToCreate());
+            assertEquals(skipping ? 0 : 3, preview.getToUpdate());
+            assertEquals(skipping ? 3 : 0, preview.getToSkip());
+            for (var row : preview.getRows()) {
+                if ("skip".equals(row.getStatus())) {
+                    assertNull(row.getDealDates());
+                } else {
+                    var dates = Objects.requireNonNull(row.getDealDates());
+                    assertEquals("2025-02-28T15:00:00Z", dates.closedAt());
+                    assertEquals("2025-01-31T15:00:00Z", dates.createdAt());
+                    assertEquals("Asia/Tokyo", dates.timezone());
+                }
+            }
+            var fingerprint = ArgumentCaptor.forClass(String.class);
+            verify(preflight).completeImportPreview(same(previewSession), fingerprint.capture());
+            verifyNoInteractions(ruleTriggers);
+            clearInvocations(scopes, fixture.control, workspace, pipelines, deals);
+            request.setDuplicateReviewProof(preview.getDuplicateReviewProof());
 
             ImportResult result = service.commitDeals(request);
 
-            boolean skipping = "skip".equals(action);
+            verify(preflight).completeImportCommit(same(session), eq(fingerprint.getValue()));
             assertEquals(3, result.getCreated());
             assertEquals(skipping ? 0 : 3, result.getUpdated());
             assertEquals(skipping ? 3 : 0, result.getSkipped());
             assertEquals(List.of(), result.getFailed());
             verify(scopes).getForWorkspace(7);
             verify(fixture.control).findOrganizationWorkspacesForShare(7);
-            verify(deals).getStageOutcome(7, "[7,17]", 13);
-            verify(deals).getStageOutcome(7, "[7,17]", 24);
+            verify(deals, times(2)).getStageOutcome(7, "[7,17]", 13);
+            verify(deals, times(2)).getStageOutcome(7, "[7,17]", 24);
             verify(pipelines).getAllPipelines(7, "[7,17]");
             verify(pipelines).getStagesByPipelineId(7, "[7,17]", 10);
             verify(pipelines).getStagesByPipelineId(7, "[7,17]", 20);
             verify(deals).insertBatch(argThat(inserted ->
-                inserted.stream().map(Deal::getName).toList().equals(List.of("Created 1", "Created 2", "Created 3"))));
+                inserted.stream().map(Deal::getName).toList().equals(List.of("Created 1", "Created 2", "Created 3"))
+                    && inserted.stream().allMatch(deal -> "2025-02-28 15:00:00".equals(deal.getClosedAt())
+                        && "2025-01-31 15:00:00".equals(deal.getCreatedAt()) && Boolean.TRUE.equals(deal.getWon()))));
             RecordVisibilityScope expected = new RecordVisibilityScope(90, List.of(7, 17));
             for (int id : List.of(51, 52, 53)) {
                 int stageId = id == 53 ? 24 : 13;
-                verify(history).recordInitial(7, id, stageId, null, expected);
+                verify(history).recordInitial(7, id, stageId, true, expected);
             }
             for (int id : List.of(41, 42, 43)) {
                 int stageId = id == 43 ? 24 : 13;
                 if (skipping) {
                     verify(deals, never()).getDealByIdForUpdate(7, id);
                     verify(deals, never()).update(existing.get(id - 41));
+                    verify(deals, never()).updateImportedCreatedAt(eq(7), eq(id), anyString());
+                    assertEquals(11, existing.get(id - 41).getStageId());
+                    assertEquals("2024-01-01 00:00:00", existing.get(id - 41).getCreatedAt());
+                    assertNull(existing.get(id - 41).getClosedAt());
+                    assertNull(existing.get(id - 41).getWon());
                 } else {
                     verify(deals).getDealByIdForUpdate(7, id);
                     verify(deals).update(existing.get(id - 41));
                     assertEquals(stageId, existing.get(id - 41).getStageId());
-                    verify(history).recordTransition(7, id, stageId, null, null, expected);
+                    assertEquals("2025-02-28 15:00:00", existing.get(id - 41).getClosedAt());
+                    assertEquals(Boolean.TRUE, existing.get(id - 41).getWon());
+                    verify(deals).updateImportedCreatedAt(7, id, "2025-01-31 15:00:00");
+                    verify(history).recordTransition(7, id, stageId, null, true, expected);
                 }
             }
             for (int id : skipping ? List.of(51, 52, 53) : List.of(41, 42, 43, 51, 52, 53)) {
@@ -195,8 +244,14 @@ class ImportDealVisibilityScopeTest {
                 verify(deals).addPersonIfAbsent(7, "[7,17]", id, 12);
             }
             verify(deals, times(skipping ? 6 : 12)).addPersonIfAbsent(eq(7), eq("[7,17]"), anyInt(), anyInt());
-            verify(audit).record(eq("import.deal"), eq("deal"), eq(null), eq("CSV import"), anyString(),
+            verify(values, times(3)).resolveRealizedValueForNewDeal(eq(true), any(BigDecimal.class), isNull());
+            var publications = inOrder(audit, ruleTriggers);
+            publications.verify(audit).record(eq("import.deal"), eq("deal"), eq(null), eq("CSV import"), anyString(),
                 eq(Map.of("created", 3, "updated", skipping ? 0 : 3, "skipped", skipping ? 3 : 0, "failed", 0)));
+            for (int id : skipping ? List.of(51, 52, 53) : List.of(41, 42, 43, 51, 52, 53)) {
+                publications.verify(ruleTriggers).publish(7, "deal", id, "deal.won");
+            }
+            verifyNoMoreInteractions(ruleTriggers);
             var order = inOrder(preflight, scopes, fixture.control, workspace, locks, deals);
             order.verify(preflight).claimImportCommit(eq("review-proof"), anyString());
             order.verify(scopes).getForWorkspace(7);
@@ -208,7 +263,8 @@ class ImportDealVisibilityScopeTest {
 
     private static Map<String, String> row(String name, String pipeline) {
         return Map.of("Name", name, "Pipeline", pipeline, "Stage", "Review",
-            "People", "first@example.com;second@example.com;first@example.com");
+            "People", "first@example.com;second@example.com;first@example.com",
+            "Closed", "2025-03-01", "Created", "2025/02/01");
     }
 
     private static ColumnMapping mapping(String column, String field) {

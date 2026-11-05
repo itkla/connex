@@ -58,7 +58,7 @@ export function resolveColumnTarget(
 export const STANDARD_FIELDS: Record<ImportEntity, readonly string[]> = {
     persons: ['name', 'email', 'phone', 'title', 'company'],
     companies: ['name', 'website', 'industry', 'phone', 'address'],
-    deals: ['name', 'value', 'currency', 'pipeline', 'stage', 'company', 'expectedCloseDate', 'people'],
+    deals: ['name', 'value', 'currency', 'pipeline', 'stage', 'company', 'expectedCloseDate', 'closedAt', 'createdAt', 'people'],
 };
 
 const SYNONYMS: Record<string, readonly string[]> = {
@@ -76,6 +76,8 @@ const SYNONYMS: Record<string, readonly string[]> = {
     pipeline: ['pipeline'],
     stage: ['stage', 'status'],
     expectedCloseDate: ['expectedclosedate', 'closedate', 'closingdate', 'expectedclose'],
+    closedAt: ['closedat', 'actualclosedate', 'closeddate'],
+    createdAt: ['createdat', 'createddate', 'creationdate'],
     people: ['people', 'contacts', 'attendees', 'participants'],
 };
 

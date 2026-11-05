@@ -22,16 +22,17 @@ export type EngagementCounter = (typeof ENGAGEMENT_COUNTERS)[number];
 /**
  * The recipient population behind one engagement counter.
  *
- * Named counters are read from a delivery's current status, so they select by `status`; an
- * unsubscribe is never a delivery status and exists only as a lifecycle event, so it selects by
- * `event` instead. `recipients` is every delivery the campaign materialized and therefore selects
- * nothing. Mirrors the server's `CampaignRecipientService`, so a tile always opens exactly the set
- * it counted.
+ * Sent selects persisted confirmed submissions, regardless of later delivery or failure status.
+ * Outcome counters select their current status; unsubscribes select their event.
+ * `recipients` is every delivery the campaign prepared, including drafts and repeat contacts
+ * across sends, and selects nothing.
+ * Mirrors the server's `CampaignRecipientService`, so a tile opens exactly the set it counted.
  *
  * @param counter - the counter whose population to select
  */
 export function recipientFilterFor(counter: EngagementCounter): CampaignRecipientsPageParams {
     if (counter === 'recipients') return {};
+    if (counter === 'dispatched') return { submitted: true };
     if (counter === 'unsubscribed') return { event: 'unsubscribed' };
     return { status: [counter] };
 }

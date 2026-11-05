@@ -321,6 +321,7 @@
         "create": "作成"
     },
     "DealsQuickEditSheet": {
+        "invalidClosedAt": "ワークスペースの集計タイムゾーンで存在する決着日時を指定してください。",
         "companySearchFailed": "会社を検索できませんでした。もう一度お試しください。",
         "titleSingle": "案件をクイック編集",
         "titleMulti": "{count} 件の案件をクイック編集",

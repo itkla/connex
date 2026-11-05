@@ -599,7 +599,7 @@ class DealServiceTest extends AbstractServiceTest {
         DealRevenueSeriesDto filteredSeries = dealService.getRevenueTimeseries("JPY", null, MemberScope.allTeam(), false);
         List<DealStageDistributionDto> filteredDistribution = dealService.getStageDistribution("JPY", MemberScope.allTeam());
 
-        assertEquals(Map.of("2026-2", 180.0, "2026-3", 25.0, "2026-4", 550.0),
+        assertEquals(Map.of("2026-1", 180.0, "2026-4", 550.0),
             monthTotals(series.closed()));
         assertEquals(Map.of("2026-2", 300.0, "2026-3", 50.0, "2026-4", 400.0),
             monthTotals(series.projected()));
@@ -614,7 +614,7 @@ class DealServiceTest extends AbstractServiceTest {
         assertEquals(500.0, stageTotals.openValue(), 0.0001);
         assertEquals(3, stageTotals.closedCount());
         assertEquals(780.0, stageTotals.closedValue(), 0.0001);
-        assertEquals(Map.of("2026-2", 180.0, "2026-3", 25.0),
+        assertEquals(Map.of("2026-1", 180.0),
             monthTotals(filteredSeries.closed()));
         assertEquals(Map.of("2026-2", 300.0, "2026-3", 50.0),
             monthTotals(filteredSeries.projected()));
@@ -637,7 +637,7 @@ class DealServiceTest extends AbstractServiceTest {
         updateChartDeal(newDeal(pipeline, stage, company),
             100.0, 90.0, "USD", true, null, "2026-01-01 04:30:00");
         updateChartDeal(newDeal(pipeline, stage, company),
-            20.0, 10.0, "USD", false, "2026-07-15", "2026-07-01 03:30:00");
+            20.0, 10.0, "USD", true, "2026-11-15", "2026-07-01 03:30:00");
 
         DealRevenueSeriesDto utc = dealService.getRevenueTimeseries("USD", "UTC", MemberScope.allTeam(), false);
         DealRevenueSeriesDto newYork = dealService.getRevenueTimeseries("USD", "America/New_York", MemberScope.allTeam(), false);
@@ -852,7 +852,7 @@ class DealServiceTest extends AbstractServiceTest {
                 "2027-03-08", "2027-03-09", "2027-03-10"),
             revenue.realized().stream().map(total -> total.periodStart()).toList());
         assertEquals(
-            List.of(0.0, 0.0, 80.0, 25.0, 0.0, 90.0),
+            List.of(0.0, 80.0, 0.0, 0.0, 0.0, 90.0),
             revenue.realized().stream().map(total -> total.total()).toList());
         assertEquals(
             List.of(0.0, 0.0, 100.0, 0.0, 30.0, 0.0),
