@@ -94,17 +94,25 @@ not at all — no partial column writes. Import never silently drops a `value` c
 ### Winning or losing a deal — every path
 
 Realized value (`actual_value`) is resolved the same way on **every** outcome transition, not just
-the close dialog. `DealValueService.reconcileRealizedValue` is the single owner of that resolution,
-and every route calls it immediately after the broad update statement:
+the close action. `DealValueService.reconcileRealizedValue` is the single owner of that resolution,
+and every existing-deal route calls it through `DealOutcomeWriter` immediately after the row update:
 
 | Route | Entry point |
 | --- | --- |
-| Close dialog | `POST /api/deals/{id}/close` → `DealService.close` |
+| Mark won/lost | `POST /api/deals/{id}/close` → `DealService.close` |
 | Form edit | `PUT /api/deals/{id}` → `DealService.update` |
 | Kanban drag | `POST /api/deals/{id}/move` → `DealService.moveInternal` |
 | Bulk stage change | `POST /api/deals/bulk/stage` → `BulkOperationService.changeStageForDeals` |
 | Rule action | workflow `change_stage` → `RuleActionExecutor` |
-| CSV import | `POST /api/import/deals` → `ImportService.applyDealUpdate` |
+| Create (quick create, calendar, company and mobile) | legacy `POST /api/deals` → `DealService.createReviewed` |
+| Guided create | guided-cutover `POST /api/deals` → `GuidedRecordCreationService.createDeal` → `DealService.createReviewed` |
+| Assistant create/stage change | reviewed create → `DealService.createReviewed`; prepared stage change → `DealService.changeStage(LockedStageChange)` |
+| CSV create/update | `POST /api/import/deals` → `ImportService.commitDeals` → `DealOutcomeWriter.createBatch` / `ImportService.applyDealUpdate` |
+| Explicit reopen | `POST /api/deals/{id}/reopen` → `DealService.reopen` → outcome-only writer |
+
+Outcomes remain stage-independent. Mark won/lost keeps the current stage. Moving onto a terminal
+stage forces its outcome; moving away does not clear it. Reopening is an explicit operation with
+the existing reopen semantics.
 
 The reconciliation resolves these cases:
 
@@ -113,18 +121,20 @@ The reconciliation resolves these cases:
   lost stage still lands on zero instead of failing. `CloseDealRequest.actualValue` additionally
   rejects negatives.
 - **Freshly won deals with line items:** `actual_value` is derived from the line-item total on
-  whichever path wins the deal. Through the close dialog, supplying a value that differs from the
-  derived total is rejected (`LINE_ITEM_VALUE_CONFLICT`, HTTP 409); the drag, edit, bulk, rule and
-  import paths carry no value input and simply take the derived total. So the same ¥5M line-item
+  whichever path wins the deal. Supplying a value that differs from the derived total and is not an echo of the
+  stored realized value is rejected (`LINE_ITEM_VALUE_CONFLICT`, HTTP 409); the drag, bulk, rule and import paths carry no amount input.
+  Edit forms omit untouched amounts and derive the total, while retaining the existing echo rule for
+  clients that submit the whole record. So the same ¥5M line-item
   deal reports ¥5M realized however it was won — the figure never depends on the route.
-- **Freshly won deals without line items:** realized value keeps the amount entered in the close
-  dialog, or the deal's existing `actual_value` (zero for a deal that was open) when none is given.
+- **Freshly won deals without line items:** realized value records an explicitly submitted amount,
+  including **zero**, or defaults to the current `deal.value` when the amount is omitted. It never
+  inherits a previous win's realized amount. A submitted zero is not treated as omission.
 - **Already-won and still-open deals:** realized value stays frozen (see below) and only an explicit
   operator edit moves it.
 
 A deal **created** already closed goes through `resolveRealizedValueForNewDeal` instead, because it
-has no line items yet: created won it keeps the supplied amount, created lost or open it records
-zero. A client therefore cannot seed reported revenue by posting `actualValue` alongside a lost
+has no line items yet: created won it keeps an explicitly supplied amount (including zero) or defaults to
+`deal.value` when omitted; created lost or open it records zero. A client therefore cannot seed reported revenue by posting `actualValue` alongside a lost
 stage.
 
 A lost deal records zero realized revenue; its booking value remains visible through `deal.value`
@@ -133,10 +143,32 @@ projected value on **won deals only**, respectively. Their ratio is forecast acc
 contribute to neither amount, including historical lost rows with nonzero actual value. The
 `closed_count` field still counts both won and lost deals.
 
-Two architecture tests keep this closed. `updateActualValue` is callable only from `DealMapper` and
-`DealValueService`, and any main-source file that writes a deal outcome through the broad
-`dealMapper.update` statement must also call `reconcileRealizedValue` — so a new route cannot
-silently opt out of the contract.
+`DealDto.actualValue` and `CloseDealRequest.actualValue` are nullable `BigDecimal`, so absent/null
+and explicit zero are distinguishable at the API boundary. A bean carrying zero is treated as an
+explicit amount; adapters with no amount input must preserve null. Create forms carry no actual-value input
+and omit it. `GuidedDealRecordDto.toBean` also explicitly preserves omission as null rather than
+using the deal bean's default zero; this covers guided and assistant-created deals. Edit forms omit an untouched amount, show the deal value for a fresh win, and submit
+zero only when it is entered explicitly (or the outcome is lost). This avoids mistaking an open
+deal's echoed zero for the operator's chosen revenue.
+
+`DealOutcomeWriter` captures an immutable outcome transition alongside reconciliation. Callers
+publish it through the writer after domain and audit writes, in the same transaction, preserving
+the existing audit-before-workflow-intake order. It publishes `deal.won` / `deal.lost` only when the
+outcome changes into that state. This includes creation in a terminal state and CSV
+batch creation. Repeated closes, reorders and edits of an already-won deal emit no further won event;
+reopening and winning again emits one new event. An edit that changes both stage and outcome also emits
+`deal.stage_changed`, but never a second outcome event. The existing `AutomationScope` guard still
+suppresses recursive workflow intake during workflow execution.
+
+**Existing wins at zero are not automatically backfilled.** Some zeros are intentional, and a
+revenue rewrite is not reversible. Operators may review candidates in one authorized workspace:
+`SELECT id, currency, value, actual_value FROM deal WHERE workspace_id = :workspace_id AND won = TRUE AND actual_value = 0 AND value > 0;`
+Only individually confirmed amounts should be corrected. No migration accompanies this change.
+
+Architecture tests keep the write boundary closed. Only `DealValueService` can write canonical or
+realized amounts, and only `DealOutcomeWriter` can insert/update outcome rows (apart from the
+explicitly checked demo seeder). A new route cannot bypass reconciliation. `DealOutcomeRoutesTest`
+checks each route's stored value and outcome-event count.
 
 ### Realized value is frozen at the win
 

@@ -25,18 +25,20 @@ import { useOneTimeLinkEntry } from "@/app/hooks/useOneTimeLinkEntry";
 import { toastSuccess } from "@/app/lib/toast";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { useFieldErrors } from "@/app/hooks/useFieldErrors";
+import { MAX_NEW_PASSWORD_LENGTH, missingPasswordRequirements } from "@/app/lib/passwordPolicy";
+import { PasswordRequirements } from "@/app/components/auth/PasswordRequirements";
 import AuthBrandPanel from "@/app/components/auth/AuthBrandPanel";
 
 type Status = "validating" | "invalid" | "ready";
 const BREACHED_PASSWORD_CODE = "BREACHED_PASSWORD";
 const BREACHED_PASSWORD_CHECK_UNAVAILABLE_CODE = "BREACHED_PASSWORD_CHECK_UNAVAILABLE";
 const PASSWORD_TOO_LONG_CODE = "PASSWORD_TOO_LONG";
-const MAX_NEW_PASSWORD_LENGTH = 72;
 
 /** Runs the fragment exchange and renders the existing token-free password-reset form. */
 export function ResetPasswordForm() {
     const router = useRouter();
     const tForm = useTranslations("AuthForm");
+    const tPassword = useTranslations("PasswordPolicy");
     const t = useTranslations("AuthResetPassword");
     const showApiError = useApiErrorToast("AuthResetPassword");
 
@@ -85,6 +87,11 @@ export function ResetPasswordForm() {
 
         setMismatch(false);
         reset();
+        const missing = missingPasswordRequirements(password)[0];
+        if (missing) {
+            setFieldErrors({ newPassword: tPassword(missing) });
+            return;
+        }
         setSubmitting(true);
 
         try {
@@ -188,7 +195,7 @@ export function ResetPasswordForm() {
                                                 maxLength={MAX_NEW_PASSWORD_LENGTH}
                                                 required
                                                 aria-invalid={Boolean(fieldErrors.newPassword)}
-                                                aria-describedby={fieldErrors.newPassword ? "reset-password-error" : "reset-password-hint"}
+                                                aria-describedby={fieldErrors.newPassword ? "reset-password-error reset-password-hint" : "reset-password-hint"}
                                                 className={`peer h-14 w-full rounded-xl border bg-input px-4 pr-12 pt-5 pb-1.5 text-base text-foreground outline-none transition-[border-color,box-shadow,background-color] duration-150 ease-out placeholder:text-transparent focus:bg-background focus:ring-4 ${
                                                     fieldErrors.newPassword
                                                         ? "border-destructive focus:border-destructive focus:ring-destructive/15"
@@ -215,15 +222,12 @@ export function ResetPasswordForm() {
                                                 {showPassword ? <EyeSlashIcon className="size-5" /> : <EyeIcon className="size-5" />}
                                             </button>
                                         </div>
-                                        {fieldErrors.newPassword ? (
+                                        {fieldErrors.newPassword && (
                                             <p id="reset-password-error" className="mt-1.5 px-1 text-sm text-destructive">
                                                 {fieldErrors.newPassword}
                                             </p>
-                                        ) : (
-                                            <p id="reset-password-hint" className="mt-1.5 px-1 text-sm text-muted-foreground">
-                                                {t("passwordLengthHint")}
-                                            </p>
                                         )}
+                                        <PasswordRequirements id="reset-password-hint" password={password} />
                                     </div>
 
                                     <div className="connex-rise" style={{ animationDelay: "180ms" }}>
