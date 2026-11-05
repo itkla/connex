@@ -15,6 +15,26 @@ This document is authoritative for person/company/deal identity matching, duplic
 
 Direct responses remain bounded to the established candidate ceiling; CSV responses retain their per-row and whole-request bounds. A truncated result is not acknowledgeable proof of completeness.
 
+### Person CSV identity decisions
+
+Person CSV imports use exact normalized email as their automatic matching and in-file combining
+key. A phone number, even alongside an exact name, is review evidence only: office numbers can
+belong to several people. Different emails or phone-only rows remain separate unless the importer
+explicitly links them to an owned contact. A phone candidate never automatically merges source
+rows, selects an update target, or prevents another person from being created.
+
+Repeated rows with the same email combine under the selected duplicate action, retaining the
+existing first-value/fill-empty or last-value/overwrite precedence and unioned references. Shared
+or changed phones cannot connect different email groups. Conflicting explicit targets for one
+email still fail closed; they are never resolved by row order.
+
+Both email and phone groups retain deterministic locks and current-state rechecks. Only email
+ownership authorizes or rejects an automatic person CSV decision; phone ownership is nonexclusive.
+An automatic target that loses its email before the locked recheck fails even if its phone still
+matches. Missing current phone evidence is checked per target, so another contact's phone identity
+does not suppress the selected contact's provenance backfill. Candidate visibility, truncation
+limits and one-use review proofs remain unchanged.
+
 ## Review proofs
 
 Preview admission stores only the established hashes/fingerprints plus a random expiring one-use rendered-review proof. Do not persist normalized PII merely to recreate matching later.
@@ -64,8 +84,9 @@ Follow `docs/backend/LOCKING.md` for the exact organization/workspace/membership
 While locks are held:
 
 - requery current canonical identities;
-- automatic match targets must remain the unique owner of supplied identities;
-- creates must still have no owned match;
+- automatic match targets must remain the unique owner of supplied automatic matching identities
+  (email for person CSV imports);
+- creates must still have no owned automatic match;
 - locked final state, not preview state, authorizes the write.
 
 ## CSV dependency resolution
@@ -86,6 +107,19 @@ At commit:
 An import that uses an auto-create custom-field mapping locks the affected record-creation template
 set before writable record targets, as defined in `docs/backend/LOCKING.md`. This is a schema fence;
 the definition itself remains uncreated until target and identity revalidation succeeds.
+
+Auto-created custom fields use stable SHA-256-derived suffixes for non-ASCII labels, empty ASCII
+projections and labels whose keys would otherwise be truncated. Mixed Japanese/ASCII labels retain
+the complete label in the suffix input. An existing definition is reusable only in the active
+workspace and entity type, with the exact trimmed label, requested field type and active status.
+An unrelated, differently typed or archived definition at the preferred key instead selects a
+stable label/type-derived alternate key, which is subject to the same reuse checks. Creation still
+requires custom-field management permission. Existing legacy keys are not renamed or migrated.
+
+Preview and commit use the same key resolution and reject multiple columns targeting the same
+auto-created definition before a review is accepted. The template-set fence rechecks resolved keys
+and their presence before target locks, preventing a concurrent catalog change from silently
+redirecting imported values.
 
 Do not add a dependency-first lock pass; it reverses the interactive mutation order and creates a deadlock cycle.
 
