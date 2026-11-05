@@ -18,7 +18,7 @@ import { deferred, image, json, ORIGIN, shell, stubBackend, switchWorkspace } fr
 const boundary = vi.hoisted<{ drawer: ComponentProps<typeof AskConnexDrawer> | null; missionCreate: ComponentProps<typeof AskConnexMissionCreate> | null; params: { sessionId?: string }; noop: () => void; canPersist: () => boolean; search: URLSearchParams; context: { user: { id: number; displayName: string }; record: ActiveRecordRef | null; selection: null } }>(() => ({ drawer: null, missionCreate: null, params: { sessionId: "4" }, noop: () => undefined, canPersist: () => true, search: new URLSearchParams(), context: { user: { id: 7, displayName: "Origin member" }, record: null, selection: null } }));
 const translate = vi.hoisted(() => Object.assign((key: string) => key, { has: () => false }));
 vi.mock("next/navigation", () => ({ useParams: () => boundary.params, usePathname: () => boundary.params.sessionId ? "/ask-connex/4" : "/ask-connex", useSearchParams: () => boundary.search, useRouter: () => ({ push: boundary.noop, replace: boundary.noop, refresh: boundary.noop }) }));
-vi.mock("next-intl", () => ({ useLocale: () => "en", useTranslations: () => translate }));
+vi.mock("next-intl", () => ({ useTimeZone: () => "UTC", useLocale: () => "en", useTranslations: () => translate }));
 vi.mock("motion/react", () => ({ useReducedMotion: () => true }));
 vi.mock("@/app/components/ask-connex/AskConnexDrawer", () => ({ default: (props: ComponentProps<typeof AskConnexDrawer>) => { boundary.drawer = props; return <>{props.missionComposerAction}</>; } }));
 vi.mock("@/app/components/ask-connex/AskConnexMissionCreate", () => ({ default: (props: ComponentProps<typeof AskConnexMissionCreate>) => { boundary.missionCreate = props; return null; } }));

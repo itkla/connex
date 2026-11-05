@@ -3,7 +3,7 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import RecordsActions from '@/app/components/import/RecordsActions';
 import { ButtonGroup } from '@/components/ui/button-group';
@@ -360,6 +360,7 @@ function dealSegmentChipCondition(
 }
 
 export default function DealsBrowser({ deals: initialDeals, total: initialTotal, metrics: initialMetrics, serverFacets: initialFacets, savedViews, defaultView, savedViewsUnavailable, timezone, currentUserId }: { deals: Deal[]; total: number; metrics: DealMetrics; serverFacets: DealFacets; savedViews: SavedView[]; defaultView: SavedView | null; savedViewsUnavailable?: boolean; timezone: string; currentUserId: number }) {
+    const timeZone = useTimeZone();
     const router = useRouter();
     const t = useTranslations('DealsBrowser');
     const tf = useTranslations('Filters');
@@ -1133,7 +1134,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             key: 'expectedCloseDate',
             label: t('columnExpectedClose'),
             getSortValue: (d) => (d.expectedCloseDate ? parseCalendarDate(d.expectedCloseDate) : null),
-            render: (d) => formatDate(d.expectedCloseDate, locale),
+            render: (d) => formatDate(d.expectedCloseDate, locale, timeZone),
         },
         {
             key: 'risk',
@@ -1199,9 +1200,9 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             key: 'updatedAt',
             label: t('columnUpdated'),
             getSortValue: (d) => (d.updatedAt ? Date.parse(d.updatedAt) : null),
-            render: (d) => formatDateTime(d.updatedAt, locale),
+            render: (d) => formatDateTime(d.updatedAt, locale, timeZone),
         },
-    ], [companyById, pipelineById, stageById, riskByDealId, toggleDealStatus, levelLabel, t, locale, inlineEdit, commentCounts]);
+    ], [companyById, pipelineById, stageById, riskByDealId, toggleDealStatus, levelLabel, t, locale, timeZone, inlineEdit, commentCounts]);
 
     const visibleDeals = deals;
 

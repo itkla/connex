@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import {
     DropdownMenu,
     DropdownMenuTrigger,
@@ -50,6 +50,7 @@ export default function DealKanbanCard({
     onDelete,
     returnSelection,
 }: DealKanbanCardProps) {
+    const timeZone = useTimeZone();
     const router = useRouter();
     const t = useTranslations('DealsCard');
     const locale = useLocale();
@@ -123,7 +124,7 @@ export default function DealKanbanCard({
                     {deal.expectedCloseDate && (
                         <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground ring-1 ring-inset ring-border">
                             <CalendarIcon className="size-3 shrink-0" />
-                            <span className="tabular-nums">{formatShortDate(deal.expectedCloseDate, locale)}</span>
+                            <span className="tabular-nums">{formatShortDate(deal.expectedCloseDate, locale, timeZone)}</span>
                         </span>
                     )}
                 </div>

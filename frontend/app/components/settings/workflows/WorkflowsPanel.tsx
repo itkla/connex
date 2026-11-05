@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useReducer, useRef } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import {
     ArchiveBoxIcon,
@@ -90,6 +90,7 @@ function workflowsPanelReducer(state: WorkflowsPanelState, action: WorkflowsPane
 
 /** The workflow list, with lifecycle, archive, duplication, and each workflow's latest run. */
 export default function WorkflowsPanel() {
+    const timeZone = useTimeZone();
     const t = useTranslations("WorkspaceWorkflows");
     const tr = useTranslations("WorkflowAuthoring");
     const locale = useLocale();
@@ -373,10 +374,10 @@ export default function WorkflowsPanel() {
                                                     </Badge>
                                                     <time
                                                         dateTime={normalizeWorkflowRunDateTime(workflow.latestRun.startedAt)}
-                                                        title={formatWorkflowRunDateTime(workflow.latestRun.startedAt, locale)}
+                                                        title={formatWorkflowRunDateTime(workflow.latestRun.startedAt, locale, timeZone)}
                                                     >
                                                         {t("runs.latest", {
-                                                            time: formatRelativeTime(workflow.latestRun.startedAt, locale, now),
+                                                            time: formatRelativeTime(workflow.latestRun.startedAt, locale, now, timeZone),
                                                         })}
                                                     </time>
                                                 </>

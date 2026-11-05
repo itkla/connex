@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import {
     CalendarIcon,
     BuildingOffice2Icon,
@@ -49,6 +49,7 @@ export default function DealCard({
     menu,
     returnSelection,
 }: DealCardProps) {
+    const timeZone = useTimeZone();
     const router = useRouter();
     const canUpdate = usePermission('DEAL_UPDATE');
     const canDelete = usePermission('DEAL_DELETE');
@@ -130,7 +131,7 @@ export default function DealCard({
                     {deal.expectedCloseDate && (
                         <span className="inline-flex items-center gap-1">
                             <CalendarIcon className="size-3.5" />
-                            {formatShortDate(deal.expectedCloseDate, locale)}
+                            {formatShortDate(deal.expectedCloseDate, locale, timeZone)}
                         </span>
                     )}
                 </div>

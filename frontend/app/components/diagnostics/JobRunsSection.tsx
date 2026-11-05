@@ -1,6 +1,6 @@
 "use client";
 
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
 
 import type { DiagnosticsJob, DiagnosticsJobRun, JobRunStatus, TenantDiagnostics } from "@/app/lib/types";
 import { formatUtcDateTime } from "@/app/lib/utils";
@@ -54,6 +54,7 @@ export function JobRunsSection({
 }
 
 function JobRow({ job }: { job: DiagnosticsJob }) {
+    const timeZone = useTimeZone();
     const t = useTranslations("TenantDiagnostics");
     const locale = useLocale();
     const last = job.last;
@@ -85,13 +86,13 @@ function JobRow({ job }: { job: DiagnosticsJob }) {
                 <dl className="mt-1.5 grid gap-x-6 gap-y-0.5 text-xs text-muted-foreground sm:grid-cols-3">
                     <div className="flex gap-1.5">
                         <dt>{t("jobLastRun")}</dt>
-                        <dd className="text-foreground">{formatUtcDateTime(last.startedAt, locale)}</dd>
+                        <dd className="text-foreground">{formatUtcDateTime(last.startedAt, locale, undefined, timeZone)}</dd>
                     </div>
                     <div className="flex gap-1.5">
                         <dt>{t("jobLastSuccess")}</dt>
                         <dd>
                             {job.lastSuccess
-                                ? formatUtcDateTime(job.lastSuccess.startedAt, locale)
+                                ? formatUtcDateTime(job.lastSuccess.startedAt, locale, undefined, timeZone)
                                 : t("never")}
                         </dd>
                     </div>
@@ -99,7 +100,7 @@ function JobRow({ job }: { job: DiagnosticsJob }) {
                         <dt>{t("jobLastFailure")}</dt>
                         <dd>
                             {job.lastFailure
-                                ? formatUtcDateTime(job.lastFailure.startedAt, locale)
+                                ? formatUtcDateTime(job.lastFailure.startedAt, locale, undefined, timeZone)
                                 : t("never")}
                         </dd>
                     </div>

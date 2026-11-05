@@ -13,6 +13,14 @@ import { submitDealDraftUpdate } from "@/app/components/records/deals/EditDealSh
 import QuickEditDealSheet, { type DealDraft } from "@/app/components/records/deals/QuickEditDealSheet";
 import { actualValueForOutcome } from "@/app/components/records/deals/dealOutcome";
 import type { Deal, Pipeline, Stage } from "@/app/lib/types";
+import { toastError } from "@/app/lib/toast";
+
+const displayZone = vi.hoisted(() => ({ value: "UTC" }));
+
+vi.mock("@/app/lib/toast", async () => ({
+    ...await vi.importActual<typeof import("@/app/lib/toast")>("@/app/lib/toast"),
+    toastError: vi.fn(),
+}));
 
 const { updateDealMock } = vi.hoisted(() => ({
     updateDealMock: vi.fn(),
@@ -35,7 +43,7 @@ vi.mock("@/app/lib/api", async () => {
 });
 
 vi.mock("next-intl", () => ({
-    useTranslations: () => (key: string) => key,
+    useTimeZone: () => displayZone.value, useTranslations: () => (key: string) => key,
 }));
 
 vi.mock("motion/react", async () => {
@@ -244,6 +252,11 @@ function createOutcomeDraftHarness() {
 
     return {
         getDraft: () => draft,
+        changeClosedAt: (value: string) => {
+            const tree = QuickEditDealSheet({ ...props, drafts: { [WON_LINE_ITEM_DEAL.id]: draft } });
+            findElementFunction(tree, (_type, inputProps) => inputProps.id === `deal-closed-at-${WON_LINE_ITEM_DEAL.id}`,
+                "onChange", "Close date input was not rendered")({ target: { value } });
+        },
         selectOutcome: (outcome: "Open" | "Won" | "Lost") => {
             const tree = QuickEditDealSheet({
                 ...props,
@@ -262,10 +275,22 @@ function createOutcomeDraftHarness() {
 }
 
 beforeEach(() => {
+    displayZone.value = "UTC";
+    vi.mocked(toastError).mockClear();
     updateDealMock.mockReset().mockResolvedValue(WON_LINE_ITEM_DEAL);
 });
 
 describe("lost-deal actual value", () => {
+    it("rejects a missing DST time without throwing from the close-date editor", () => {
+        displayZone.value = "America/New_York";
+        const harness = createOutcomeDraftHarness();
+        const previous = harness.getDraft().closedAt;
+        expect(() => harness.changeClosedAt("2026-03-08T02:30")).not.toThrow();
+        expect(harness.getDraft().closedAt).toBe(previous);
+        expect(toastError).toHaveBeenCalledWith("closedAtInvalid");
+        harness.changeClosedAt("2026-03-08T03:30");
+        expect(harness.getDraft().closedAt).toBe("2026-03-08 07:30:00");
+    });
     function renderActualValueInput(won: boolean, actualValue: number) {
         const html = renderToStaticMarkup(createElement(QuickEditDealSheet, {
             open: true,

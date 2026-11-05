@@ -1,8 +1,10 @@
 'use client';
 
+import { calendarDayInTimeZone } from '@/app/lib/timeZone';
+import { parseCalendarDate, parseCalendarDateUtc } from '@/app/lib/utils';
 import { useMemo } from 'react';
 import Link from 'next/link';
-import { useTranslations } from 'next-intl';
+import { useTimeZone, useTranslations } from 'next-intl';
 import { ArrowUpRightIcon, UserIcon, BriefcaseIcon, CheckCircleIcon } from '@heroicons/react/24/outline';
 import { Loader2Icon } from 'lucide-react';
 
@@ -19,7 +21,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import type { Contact, Deal, RelationshipTemperature } from '@/app/lib/types';
 import { useNow } from '@/app/hooks/useNow';
-import { addDays, dayKeyOf, startOfDay, type CalendarEvent } from '@/app/lib/calendar';
+import { addDays, dayKeyOf, type CalendarEvent } from '@/app/lib/calendar';
 import { KIND_ICON, KIND_LABEL_KEY } from './constants';
 import { linkedIds } from './eventLinks';
 import { useMediaQuery } from './useMediaQuery';
@@ -62,6 +64,7 @@ export default function EventDetailSheet({
     rescheduling?: boolean;
 }) {
     const t = useTranslations('Calendar');
+    const timeZone = useTimeZone() ?? 'UTC';
     const sharedNow = useNow();
     const isNarrow = !useMediaQuery('(min-width: 768px)');
 
@@ -69,10 +72,10 @@ export default function EventDetailSheet({
         if (!event) return '';
         const fmt = new Intl.DateTimeFormat(
             locale,
-            event.allDay ? { dateStyle: 'full' } : { dateStyle: 'full', timeStyle: 'short' },
+            event.allDay ? { dateStyle: 'full', timeZone: 'UTC' } : { dateStyle: 'full', timeStyle: 'short', timeZone },
         );
-        return fmt.format(event.startMs);
-    }, [event, locale]);
+        return fmt.format(event.allDay ? parseCalendarDateUtc(event.dayKey) : event.startMs);
+    }, [event, locale, timeZone]);
 
     if (!event) return null;
 
@@ -95,7 +98,7 @@ export default function EventDetailSheet({
         return t('goesColdIn', { count: temperature.daysUntilCold });
     })();
 
-    const now = startOfDay(new Date(sharedNow));
+    const now = new Date(parseCalendarDate(calendarDayInTimeZone(sharedNow, timeZone)));
     const rescheduleChips = [
         { label: t('chipToday'), key: dayKeyOf(now) },
         { label: t('chipTomorrow'), key: dayKeyOf(addDays(now, 1)) },

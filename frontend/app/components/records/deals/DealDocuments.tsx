@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState, useSyncExternalStore } from 'react';
 import { useRouter } from 'next/navigation';
 import { useReducedMotion } from 'motion/react';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import {
     ArrowDownTrayIcon,
     CheckCircleIcon,
@@ -258,6 +258,7 @@ export default function DealDocuments({
     canDeleteDocuments,
     currentUserId,
 }: Props) {
+    const timeZone = useTimeZone();
     const t = useTranslations('DealsDocuments');
     const showApiError = useApiErrorToast('DealsDocuments');
     const locale = useLocale();
@@ -714,7 +715,7 @@ export default function DealDocuments({
                                         {formatCurrency(doc.content.totals.grandTotal, doc.currency, locale)}
                                     </td>
                                     <td className="hidden px-4 py-3 text-muted-foreground md:table-cell">
-                                        {formatDateTime(doc.generatedAt, locale)}
+                                        {formatDateTime(doc.generatedAt, locale, timeZone)}
                                     </td>
                                     <td className="px-2 py-3">
                                         <div className="flex items-center justify-end gap-1">

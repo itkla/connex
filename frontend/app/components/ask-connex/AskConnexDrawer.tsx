@@ -192,6 +192,7 @@ import {
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { parseMysqlDateTime } from '@/app/lib/utils';
 import { cn } from '@/lib/utils';
 import AskConnexCommandCenter from '@/app/components/ask-connex/AskConnexCommandCenter';
 
@@ -859,7 +860,7 @@ function TranscriptMessage({
     const narration = useMemo(() => askConnexMessageNarration(message), [message]);
     const todos = useMemo(() => askConnexMessageTodos(message), [message]);
     const animateEntrance = fresh && !user;
-    const createdAt = new Date(message.createdAt);
+    const createdAt = new Date(parseMysqlDateTime(message.createdAt));
     const timestamp = Number.isNaN(createdAt.getTime())
         ? null
         : format.dateTime(createdAt, { hour: 'numeric', minute: '2-digit' });
@@ -1791,13 +1792,13 @@ function ConversationSurface({
         excludedToolCallIds: excludedProposals,
         labels: labels.proposalReview,
         formatDeadline: (instant: string) => {
-            const deadline = new Date(instant);
+            const deadline = new Date(parseMysqlDateTime(instant));
             return Number.isNaN(deadline.getTime())
                 ? instant
                 : surfaceFormat.dateTime(deadline, { hour: 'numeric', minute: '2-digit' });
         },
         formatRemaining: (instant: string) => {
-            const deadline = new Date(instant);
+            const deadline = new Date(parseMysqlDateTime(instant));
             return Number.isNaN(deadline.getTime())
                 ? instant
                 : surfaceFormat.relativeTime(deadline, now);

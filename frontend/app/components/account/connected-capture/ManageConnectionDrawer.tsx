@@ -11,7 +11,7 @@ import {
     ShieldCheckIcon,
     TrashIcon,
 } from '@heroicons/react/24/outline';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 
 import CaptureHealth from '@/app/components/account/connected-capture/CaptureHealth';
 import { useLiveNow } from '@/app/hooks/useNow';
@@ -158,6 +158,7 @@ export default function ManageConnectionDrawer({
     onPurge: () => void;
     onRetryCapture: () => void;
 }) {
+    const timeZone = useTimeZone();
     const t = useTranslations('AccountManageConnection');
     const tConnections = useTranslations('AccountConnections');
     const tCapture = useTranslations('AccountCaptureProvider');
@@ -215,7 +216,7 @@ export default function ManageConnectionDrawer({
                                 </dt>
                                 <dd className="text-sm font-medium text-foreground">
                                     {lastSuccess
-                                        ? formatRelativeTime(lastSuccess, locale, now)
+                                        ? formatRelativeTime(lastSuccess, locale, now, timeZone)
                                         : tConnections('lastSyncNever')}
                                 </dd>
                             </div>

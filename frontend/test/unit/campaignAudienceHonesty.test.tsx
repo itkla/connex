@@ -42,7 +42,7 @@ vi.mock("next-intl", async () => {
     ]);
     const catalogs = { en, ja };
     return {
-        useLocale: () => localeState.locale,
+        useTimeZone: () => "UTC", useLocale: () => localeState.locale,
         useTranslations: (namespace: string) => (
             key: string,
             values?: Record<string, string | number>,

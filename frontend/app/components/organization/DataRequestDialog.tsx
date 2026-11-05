@@ -1,7 +1,8 @@
 "use client";
 
+import { toDatetimeLocalValue, toMysqlDateTime } from '@/app/lib/utils';
 import { useEffect, useRef, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useTimeZone, useTranslations } from "next-intl";
 import { UserIcon, EnvelopeIcon, InboxArrowDownIcon, MagnifyingGlassIcon, XMarkIcon } from "@heroicons/react/24/outline";
 
 import {
@@ -62,20 +63,8 @@ type Props = {
     onSaved: (saved: DataSubjectRequest) => void;
 };
 
-function toInputValue(iso: string | null | undefined) {
-    if (!iso) return "";
-    return iso.replace(" ", "T").slice(0, 16);
-}
-
-function nowInputValue() {
-    const now = new Date();
-    const offset = now.getTimezoneOffset() * 60000;
-    return new Date(now.getTime() - offset).toISOString().slice(0, 16);
-}
-
-function toApiValue(input: string) {
-    if (!input) return undefined;
-    return input.length === 16 ? `${input}:00` : input;
+function toApiValue(input: string, timeZone: string | undefined) {
+    return input ? toMysqlDateTime(input, timeZone).replace(' ', 'T') : undefined;
 }
 
 /**
@@ -145,6 +134,7 @@ function RequestForm({
     onSubmit: (body: DataSubjectRequestBody) => Promise<void>;
 }) {
     const t = useTranslations("OrgDataRequests");
+    const timeZone = useTimeZone();
     const showApiError = useApiErrorToast("OrgDataRequests");
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
 
@@ -154,11 +144,11 @@ function RequestForm({
     const [subjectName, setSubjectName] = useState(editing?.subjectName ?? "");
     const [subjectEmail, setSubjectEmail] = useState(editing?.subjectEmail ?? "");
     const [channel, setChannel] = useState(editing?.channel ?? "");
-    const [receivedAt, setReceivedAt] = useState(toInputValue(editing?.receivedAt) || nowInputValue());
-    const [identityVerifiedAt, setIdentityVerifiedAt] = useState(toInputValue(editing?.identityVerifiedAt));
-    const [dueAt, setDueAt] = useState(toInputValue(editing?.dueAt));
-    const [respondedAt, setRespondedAt] = useState(toInputValue(editing?.respondedAt));
-    const [closedAt, setClosedAt] = useState(toInputValue(editing?.closedAt));
+    const [receivedAt, setReceivedAt] = useState(toDatetimeLocalValue(editing?.receivedAt, timeZone) || toDatetimeLocalValue(new Date().toISOString(), timeZone));
+    const [identityVerifiedAt, setIdentityVerifiedAt] = useState(toDatetimeLocalValue(editing?.identityVerifiedAt, timeZone));
+    const [dueAt, setDueAt] = useState(toDatetimeLocalValue(editing?.dueAt, timeZone));
+    const [respondedAt, setRespondedAt] = useState(toDatetimeLocalValue(editing?.respondedAt, timeZone));
+    const [closedAt, setClosedAt] = useState(toDatetimeLocalValue(editing?.closedAt, timeZone));
     const [summary, setSummary] = useState(editing?.summary ?? "");
     const [resolution, setResolution] = useState(editing?.resolution ?? "");
     const [requesterError, setRequesterError] = useState<string | null>(null);
@@ -204,11 +194,11 @@ function RequestForm({
                 channel: channel.trim() || undefined,
                 subjectWorkspaceId: subjectLink?.workspaceId,
                 subjectPersonId: subjectLink?.personId,
-                receivedAt: toApiValue(receivedAt),
-                identityVerifiedAt: toApiValue(identityVerifiedAt),
-                dueAt: toApiValue(dueAt),
-                respondedAt: toApiValue(respondedAt),
-                closedAt: toApiValue(closedAt),
+                receivedAt: toApiValue(receivedAt, timeZone),
+                identityVerifiedAt: toApiValue(identityVerifiedAt, timeZone),
+                dueAt: toApiValue(dueAt, timeZone),
+                respondedAt: toApiValue(respondedAt, timeZone),
+                closedAt: toApiValue(closedAt, timeZone),
                 summary: summary.trim() || undefined,
                 resolution: resolution.trim() || undefined,
             });

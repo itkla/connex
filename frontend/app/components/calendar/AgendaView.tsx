@@ -1,7 +1,8 @@
 'use client';
 
+import { parseCalendarDateUtc } from '@/app/lib/utils';
 import { useMemo, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useTimeZone, useTranslations } from 'next-intl';
 import { ChevronDownIcon, CalendarDaysIcon } from '@heroicons/react/24/outline';
 
 import { cn } from '@/lib/utils';
@@ -19,7 +20,7 @@ interface DayGroup {
 function toGroups(byDay: Map<string, CalendarEvent[]>, keys: string[]): DayGroup[] {
     return keys.map((key) => {
         const events = byDay.get(key) ?? [];
-        return { key, date: new Date(events[0]?.startMs ?? Date.parse(key)), events };
+        return { key, date: new Date(parseCalendarDateUtc(key)), events };
     });
 }
 
@@ -42,15 +43,16 @@ export default function AgendaView({
     onOpenEvent: (event: CalendarEvent, anchor: HTMLElement | null) => void;
 }) {
     const t = useTranslations('Calendar');
+    const timeZone = useTimeZone() ?? 'UTC';
     const [pastOpen, setPastOpen] = useState(false);
 
     const dateFmt = useMemo(
-        () => new Intl.DateTimeFormat(locale, { weekday: 'long', month: 'long', day: 'numeric' }),
+        () => new Intl.DateTimeFormat(locale, { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' }),
         [locale],
     );
     const timeFmt = useMemo(
-        () => new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit' }),
-        [locale],
+        () => new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit', timeZone }),
+        [locale, timeZone],
     );
 
     const { upcoming, past } = useMemo(() => {

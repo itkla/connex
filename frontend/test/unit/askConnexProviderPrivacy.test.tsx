@@ -33,7 +33,7 @@ const harness = vi.hoisted(() => ({
 vi.mock('@/app/components/ask-connex/AskConnexDrawer', () => ({ default: harness.drawer }));
 vi.mock('@/app/components/ask-connex/AskConnexMissionCreate', () => ({ default: () => null }));
 vi.mock('@/app/components/ask-connex/AskConnexMissionProgress', () => ({ default: () => null }));
-vi.mock('next-intl', () => ({ useLocale: () => 'en', useTranslations: () => harness.translate }));
+vi.mock('next-intl', () => ({ useTimeZone: () => "UTC", useLocale: () => 'en', useTranslations: () => harness.translate }));
 vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams(), useParams: () => ({ sessionId: harness.sessionId }), usePathname: () => `/ask-connex/${harness.sessionId}`, useRouter: () => harness.router }));
 vi.mock('@/app/hooks/useActions', () => ({ useActions: () => ({ context: harness.context }), useRegisterActions: () => {} }));
 vi.mock('@/app/hooks/useWorkspace', () => ({ useWorkspace: () => harness.workspace }));

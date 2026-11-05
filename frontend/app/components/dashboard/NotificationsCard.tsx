@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import { useCallback, useEffect, useState } from 'react';
 
 import { useNotificationWorkspaceActions } from '@/app/components/notifications/useNotificationWorkspaceActions';
@@ -110,6 +110,7 @@ export function NotificationsCardView({
     items: Notification[];
     onOpen?: (notification: Notification) => void;
 }) {
+    const timeZone = useTimeZone();
     const t = useTranslations('Notifications');
     const locale = useLocale();
     const now = useLiveNow();
@@ -162,7 +163,7 @@ export function NotificationsCardView({
                                     <div className="flex min-w-0 flex-1 items-center gap-3">{inner}</div>
                                 )}
                                 <time className="shrink-0 text-xs text-muted-foreground">
-                                    {formatRelativeTime(item.triggeredAt, locale, now)}
+                                    {formatRelativeTime(item.triggeredAt, locale, now, timeZone)}
                                 </time>
                             </li>
                         );

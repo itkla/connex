@@ -14,7 +14,7 @@ vi.mock('next/headers', () => ({
 
 vi.mock('next-intl/server', () => ({
     getTranslations: () => Promise.resolve((key: string) => key),
-    getLocale: () => Promise.resolve('en'),
+    getTimeZone: async () => "UTC", getLocale: () => Promise.resolve('en'),
 }));
 
 const CONNECTIONS_PAGE = 'app/(app)/settings/personal/connected-accounts/page.tsx';

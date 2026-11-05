@@ -1,8 +1,9 @@
 'use client';
 
+import { calendarDayInTimeZone } from '@/app/lib/timeZone';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
 import { ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
 
@@ -11,13 +12,12 @@ import { toastError, toastSuccess } from '@/app/lib/toast';
 import { completeTask, rescheduleDeal, rescheduleTask } from '@/app/lib/api';
 import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { useNow } from '@/app/hooks/useNow';
-import { isTypingTarget, parseCalendarDate } from '@/app/lib/utils';
+import { isTypingTarget, parseCalendarDate, parseCalendarDateUtc } from '@/app/lib/utils';
 import type { Activity, Contact, Deal, Note, RelationshipTemperature, Task } from '@/app/lib/types';
 import {
     buildEvents,
     dayKeyOf,
     groupByDay,
-    startOfDay,
     startOfMonth,
     startOfWeek,
     weekDays,
@@ -111,15 +111,16 @@ export default function CalendarShell({
     warmthFailed = false,
 }: CalendarShellProps) {
     const t = useTranslations('Calendar');
+    const timeZone = useTimeZone() ?? 'UTC';
     const locale = useLocale();
-    const cal = useCalendar();
-    const router = useRouter();
+        const router = useRouter();
     const reduce = useReducedMotion() ?? false;
     const coarse = useCoarsePointer();
     const isWide = useMediaQuery('(min-width: 1024px)');
     const swipeRef = useRef<HTMLDivElement>(null);
     const now = useNow();
-    const today = useMemo(() => startOfDay(new Date(now)), [now]);
+    const today = useMemo(() => new Date(parseCalendarDate(calendarDayInTimeZone(now, timeZone))), [now, timeZone]);
+    const cal = useCalendar(today);
     const [openEventId, setOpenEventId] = useState<string | null>(null);
     const [peek, setPeek] = useState<{ eventId: string; anchor: HTMLElement } | null>(null);
     const [overrides, setOverrides] = useState<Map<string, string>>(() => new Map());
@@ -144,8 +145,8 @@ export default function CalendarShell({
     }, [deals]);
 
     const baseEvents = useMemo(
-        () => buildEvents({ tasks, activities, deals, notes, persons }),
-        [tasks, activities, deals, notes, persons],
+        () => buildEvents({ tasks, activities, deals, notes, persons }, timeZone),
+        [tasks, activities, deals, notes, persons, timeZone],
     );
 
     if (overrides.size > 0) {
@@ -165,7 +166,7 @@ export default function CalendarShell({
         return baseEvents.map((e) => {
             const key = overrides.get(e.id);
             if (!key || key === e.dayKey) return e;
-            const ms = parseCalendarDate(key);
+            const ms = parseCalendarDateUtc(key);
             if (Number.isNaN(ms)) return e;
             return { ...e, dayKey: key, startMs: ms };
         });

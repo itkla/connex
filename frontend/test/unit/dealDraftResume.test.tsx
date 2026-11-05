@@ -112,7 +112,7 @@ vi.mock('next/dynamic', async () => {
 });
 
 vi.mock('next-intl', () => ({
-    useTranslations: () => translate,
+    useTimeZone: () => "UTC", useTranslations: () => translate,
 }));
 
 vi.mock('motion/react', async () => {

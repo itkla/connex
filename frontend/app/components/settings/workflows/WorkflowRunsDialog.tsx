@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ClockIcon } from "@heroicons/react/24/outline";
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
 
 import { getWorkflowRun, getWorkflowRuns } from "@/app/lib/api";
 import { toastError } from "@/app/lib/toast";
@@ -49,6 +49,7 @@ export default function WorkflowRunsDialog({
     workspaceId: number;
     onSelectRun?: (run: WorkflowRunDetail) => void;
 }) {
+    const timeZone = useTimeZone();
     const t = useTranslations("WorkspaceWorkflows");
     const tr = useTranslations("WorkflowAuthoring");
     const locale = useLocale();
@@ -185,7 +186,7 @@ export default function WorkflowRunsDialog({
                                             className="text-xs text-muted-foreground"
                                             dateTime={normalizeWorkflowRunDateTime(run.startedAt)}
                                         >
-                                            {formatWorkflowRunDateTime(run.startedAt, locale)}
+                                            {formatWorkflowRunDateTime(run.startedAt, locale, timeZone)}
                                         </time>
                                     </div>
                                     <dl className="grid gap-2 text-xs sm:grid-cols-3">
@@ -247,6 +248,7 @@ function RunDetail({
     locale: string;
     onOverlay?: (run: WorkflowRunDetail) => void;
 }) {
+    const timeZone = useTimeZone();
     const t = useTranslations("WorkspaceWorkflows");
     const normalizedStatus = normalizeWorkflowRunStatus(run.status);
     return (
@@ -258,7 +260,7 @@ function RunDetail({
                 </Badge>
                 {run.version ? <Badge variant="outline">{t("versionShort", { number: run.version.number })}</Badge> : null}
                 <time className="text-xs text-muted-foreground" dateTime={normalizeWorkflowRunDateTime(run.startedAt)}>
-                    {formatWorkflowRunDateTime(run.startedAt, locale)}
+                    {formatWorkflowRunDateTime(run.startedAt, locale, timeZone)}
                 </time>
                 {onOverlay && run.version ? (
                     <Button className="ml-auto" variant="outline" size="sm" onClick={() => onOverlay(run)}>

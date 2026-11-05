@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, type ReactNode, type WheelEvent } from 'react';
-import { useTranslations } from 'next-intl';
+import { useTimeZone, useTranslations } from 'next-intl';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { BanknotesIcon } from '@heroicons/react/24/outline';
 
@@ -78,6 +78,7 @@ export default function QuickEditDealSheet({
     customFieldsDirty,
     customFieldsSlot,
 }: Props) {
+    const timeZone = useTimeZone();
     const t = useTranslations('DealsQuickEditSheet');
     const reduce = useReducedMotion() ?? false;
     const total = selectedDeals.length;
@@ -124,7 +125,7 @@ export default function QuickEditDealSheet({
                 const stages = draft.pipeline ? stagesByPipeline[draft.pipeline] ?? [] : [];
                 const selectedStage = stages.find((s) => s.id === draft.stage) ?? null;
                 const expectedCloseDate = draft.expectedCloseDate ? draft.expectedCloseDate.slice(0, 10) : '';
-                const closedAt = toDatetimeLocalValue(draft.closedAt);
+                const closedAt = toDatetimeLocalValue(draft.closedAt, timeZone);
                 const actualValue = actualValueForOutcome(draft.won, draft.actualValue ?? 0);
                 const isLost = draft.won === false;
 
@@ -330,11 +331,16 @@ export default function QuickEditDealSheet({
                                                 id={`deal-closed-at-${d.id}`}
                                                 type="datetime-local"
                                                 value={closedAt}
-                                                onChange={(e) =>
-                                                    updateDraft(d.id, {
-                                                        closedAt: e.target.value ? toMysqlDateTime(e.target.value) : null,
-                                                    })
-                                                }
+                                                onChange={(e) => {
+                                                    let nextClosedAt: string | null;
+                                                    try {
+                                                        nextClosedAt = e.target.value ? toMysqlDateTime(e.target.value, timeZone, d.closedAt) : null;
+                                                    } catch {
+                                                        toastError(t('closedAtInvalid'));
+                                                        return;
+                                                    }
+                                                    updateDraft(d.id, { closedAt: nextClosedAt });
+                                                }}
                                             />
                                         </QuickEditField>
                                         <QuickEditField label={t('actualValue')} htmlFor={`deal-actual-value-${d.id}`}>

@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import { useReducedMotion } from 'motion/react';
 import { DocumentCheckIcon } from '@heroicons/react/24/outline';
 
@@ -75,6 +75,7 @@ function toggle(values: Set<string>, value: string): Set<string> {
  * @param owners - workspace members, used to name the deal owner a document is scoped by
  */
 export default function GeneratedDocumentsBrowser({ owners }: { owners: User[] }) {
+    const timeZone = useTimeZone();
     const t = useTranslations('GeneratedDocuments');
     const tf = useTranslations('Filters');
     const router = useRouter();
@@ -252,7 +253,7 @@ export default function GeneratedDocumentsBrowser({ owners }: { owners: User[] }
                                                 : t('ownerUnassigned')}
                                         </td>
                                         <td className="hidden px-4 py-3 text-muted-foreground sm:px-6 lg:table-cell">
-                                            {formatDate(document.generatedAt, locale)}
+                                            {formatDate(document.generatedAt, locale, timeZone)}
                                         </td>
                                     </tr>
                                 ))}

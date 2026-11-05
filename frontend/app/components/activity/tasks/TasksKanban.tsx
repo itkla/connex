@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useMemo } from 'react';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import type { UniqueIdentifier } from '@dnd-kit/core';
 import { UserIcon, BriefcaseIcon } from '@heroicons/react/24/outline';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils';
 import KanbanBoard, { type KanbanColumnDef } from '@/app/components/kanban/KanbanBoard';
 import { kanbanAccessibility } from '@/app/components/kanban/kanbanAccessibility';
 import NoteContent from '@/app/components/activity/notes/NoteContent';
+import { useNow } from '@/app/hooks/useNow';
 import { DUE_CHIP, formatDue } from '@/app/components/activity/tasks/taskDue';
 import { moveTask } from '@/app/lib/api';
 import { noteContentToPlainText } from '@/app/lib/references';
@@ -55,6 +56,8 @@ export default function TasksKanban({
     const t = useTranslations('ActivityTasks');
     const showApiError = useApiErrorToast('ActivityTasks');
     const locale = useLocale();
+    const timeZone = useTimeZone() ?? 'UTC';
+    const now = useNow();
 
     const columns: KanbanColumnDef[] = useMemo(
         () => [
@@ -72,7 +75,7 @@ export default function TasksKanban({
             const person = task.personId != null ? personById.get(task.personId) : undefined;
             const deal = task.dealId != null ? dealById.get(task.dealId) : undefined;
             const assignee = userById.get(task.assignedToId);
-            const due = task.status === 'done' ? null : formatDue(task.dueDate, t, locale);
+            const due = task.status === 'done' ? null : formatDue(task.dueDate, t, locale, now, timeZone);
             return (
                 <div
                     onClick={() => onOpen(task)}
@@ -123,7 +126,7 @@ export default function TasksKanban({
                 </div>
             );
         },
-        [personById, dealById, userById, locale, onOpen, t],
+        [personById, dealById, userById, locale, onOpen, t, now, timeZone],
     );
 
     const onMove = useCallback(

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, type Ref } from 'react';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import { CheckCircleIcon as CheckCircleSolidIcon } from '@heroicons/react/24/solid';
 import { ChevronDownIcon } from '@heroicons/react/24/outline';
 
@@ -81,6 +81,7 @@ export default function CommentThread({
     onResolve,
     onReopen,
 }: Props) {
+    const timeZone = useTimeZone();
     const t = useTranslations('Comments');
     const locale = useLocale();
     const now = useLiveNow();
@@ -273,7 +274,7 @@ export default function CommentThread({
                                 ? t('resolvedByLabel', { name: resolver })
                                 : t('resolvedLabel')}
                             {thread.resolvedAt
-                                ? ` · ${formatRelativeTime(thread.resolvedAt, locale, now)}`
+                                ? ` · ${formatRelativeTime(thread.resolvedAt, locale, now, timeZone)}`
                                 : ''}
                         </p>
                         {canComment && (
@@ -285,7 +286,7 @@ export default function CommentThread({
                                 onClick={onReopen}
                                 title={
                                     thread.resolvedAt
-                                        ? formatUtcDateTime(thread.resolvedAt, locale)
+                                        ? formatUtcDateTime(thread.resolvedAt, locale, undefined, timeZone)
                                         : undefined
                                 }
                             >

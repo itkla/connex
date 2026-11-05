@@ -21,7 +21,7 @@ import { company, contact, deal, image, json, NEXT, ORIGIN, pipeline, shell, sta
 const noop = vi.hoisted(() => () => undefined);
 const translate = vi.hoisted(() => Object.assign((key: string) => key, { has: () => false }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: noop, push: noop, replace: noop }) }));
-vi.mock("next-intl", () => ({ useTranslations: () => translate, useLocale: () => "en" }));
+vi.mock("next-intl", () => ({ useTranslations: () => translate, useTimeZone: () => "UTC", useLocale: () => "en" }));
 vi.mock("motion/react", () => ({ AnimatePresence: ({ children }: { children?: ReactNode }) => <>{children}</>, motion: { div: ({ children }: { children?: ReactNode }) => <div>{children}</div>, li: ({ children }: { children?: ReactNode }) => <li>{children}</li> }, useReducedMotion: () => true }));
 vi.mock("@/app/hooks/useWorkspace", () => ({ useWorkspace: () => ({ activeWorkspaceId: 9 }) }));
 vi.mock("@/app/hooks/usePermissions", () => ({ usePermission: () => true }));

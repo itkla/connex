@@ -30,7 +30,7 @@ vi.mock('next-intl', async () => {
         PasskeyStepUp: createTranslator({ locale: 'en', messages: en, namespace: 'PasskeyStepUp' }),
     };
     return {
-        useTranslations: (namespace: keyof typeof translators) => translators[namespace],
+        useTimeZone: () => "UTC", useTranslations: (namespace: keyof typeof translators) => translators[namespace],
     };
 });
 vi.mock('@/app/lib/api', async (importOriginal) => ({

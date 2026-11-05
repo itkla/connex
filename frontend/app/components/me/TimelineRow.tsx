@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, type ReadonlyURLSearchParams, useRouter, useSearchParams } from 'next/navigation';
 import { useReducedMotion } from 'motion/react';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import { toastSuccess } from '@/app/lib/toast';
 import { CheckIcon, EllipsisVerticalIcon, PencilIcon, TrashIcon, UserIcon } from '@heroicons/react/24/outline';
 
@@ -104,9 +104,9 @@ function commentThreadHref(
     return `${pathname}?${params.toString()}`;
 }
 
-function entryDate(entry: TimelineEntry, locale: string): string {
+function entryDate(entry: TimelineEntry, locale: string, timeZone: string | undefined): string {
     return entry.sortAt
-        ? formatShortDate(new Date(entry.sortAt).toISOString(), locale)
+        ? formatShortDate(new Date(entry.sortAt).toISOString(), locale, timeZone)
         : '';
 }
 
@@ -134,6 +134,7 @@ export default function TimelineRow({
     companyId: number | null;
     originWorkspaceId: number | null;
 }) {
+    const timeZone = useTimeZone();
     const t = useTranslations('MeTimeline');
     const tl = useTranslations('ContactLifecycle');
     const showApiError = useApiErrorToast('MeTimeline');
@@ -211,7 +212,7 @@ export default function TimelineRow({
         }
     };
 
-    const date = entryDate(entry, locale);
+    const date = entryDate(entry, locale, timeZone);
     const chipLabel = t(CHIP_LABEL_KEY[entry.kind]);
     const commentAuthor = entry.kind === 'comment' ? entry.comment.author : null;
     const avatarUrl = commentAuthor?.profilePictureUrl ?? author?.profilePictureUrl;
@@ -237,7 +238,7 @@ export default function TimelineRow({
         } else if (task.dueDate) {
             subtitle = (
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                    {t('due', { date: formatShortDate(task.dueDate, locale) })}
+                    {t('due', { date: formatShortDate(task.dueDate, locale, timeZone) })}
                 </p>
             );
         }

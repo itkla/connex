@@ -38,7 +38,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("next-intl", () => ({
-    useTranslations: (namespace: string) => (key: string, values?: Record<string, unknown>) =>
+    useTimeZone: () => "UTC", useTranslations: (namespace: string) => (key: string, values?: Record<string, unknown>) =>
         values === undefined
             ? `${namespace}.${key}`
             : `${namespace}.${key}(${JSON.stringify(values)})`,

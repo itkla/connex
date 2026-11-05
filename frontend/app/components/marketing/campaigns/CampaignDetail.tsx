@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
 import { PencilSquareIcon, TrashIcon } from "@heroicons/react/24/outline";
 import { Loader2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -150,6 +150,7 @@ export default function CampaignDetail({
     snapshotsRestricted: boolean;
     deliveryAvailability: CapabilityAvailability;
 }) {
+    const timeZone = useTimeZone();
     const t = useTranslations("CampaignDetail");
     const at = useTranslations("CampaignAudience");
     const showApiError = useApiErrorToast("CampaignDetail");
@@ -303,7 +304,7 @@ export default function CampaignDetail({
             : t("noValue");
     const windowText =
         current.startAt || current.endAt
-            ? `${formatDate(current.startAt ?? undefined, locale)} – ${formatDate(current.endAt ?? undefined, locale)}`
+            ? `${formatDate(current.startAt ?? undefined, locale, timeZone)} – ${formatDate(current.endAt ?? undefined, locale, timeZone)}`
             : t("noValue");
     const latestSnapshot = snapshots[0] ?? null;
     const deleteBlockedNote = latestSnapshot !== null
@@ -370,11 +371,11 @@ export default function CampaignDetail({
                                     <InfoRow label={t("window")} value={windowText} />
                                     <InfoRow
                                         label={t("created")}
-                                        value={formatDate(current.createdAt, locale)}
+                                        value={formatDate(current.createdAt, locale, timeZone)}
                                     />
                                     <InfoRow
                                         label={t("updated")}
-                                        value={formatDate(current.updatedAt, locale)}
+                                        value={formatDate(current.updatedAt, locale, timeZone)}
                                     />
                                 </dl>
                             </div>
@@ -623,7 +624,7 @@ export default function CampaignDetail({
                                                         {at("purposeLabel", { purpose: snapshot.purpose })}
                                                     </span>
                                                     <span className="text-sm text-muted-foreground">
-                                                        {formatDate(snapshot.createdAt, locale)}
+                                                        {formatDate(snapshot.createdAt, locale, timeZone)}
                                                     </span>
                                                 </div>
                                                 <div className="flex items-center gap-3 tabular-nums text-sm">

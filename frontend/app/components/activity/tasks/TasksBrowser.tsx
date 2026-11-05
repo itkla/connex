@@ -10,7 +10,7 @@ import {
     type ComponentType,
     type KeyboardEvent,
 } from 'react';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
@@ -50,6 +50,9 @@ import TaskFilterSheet, {
 import TaskDialog from '@/app/components/activity/tasks/TaskDialog';
 import TasksKanban from '@/app/components/activity/tasks/TasksKanban';
 import NoteContent from '@/app/components/activity/notes/NoteContent';
+import { useNow } from '@/app/hooks/useNow';
+import { calendarDayInTimeZone } from '@/app/lib/timeZone';
+import { parseCalendarDateUtc } from '@/app/lib/utils';
 import { type DueTone, DUE_CHIP, formatDue } from '@/app/components/activity/tasks/taskDue';
 import Rise from '@/app/components/motion/Rise';
 import { PageHeader } from '@/app/components/PageHeader';
@@ -90,6 +93,7 @@ const QUEUE_STORAGE_KEY = 'tasks:queue';
 const VIEW_STORAGE_KEY = 'tasks:view';
 const EASE_OUT: [number, number, number, number] = [0.23, 1, 0.32, 1];
 const COMPLETE_LINGER_MS = 230;
+const DAY_MS = 24 * 60 * 60 * 1000;
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 const QUEUE_ICON: Record<Queue, IconType> = {
@@ -109,42 +113,30 @@ function isTaskView(value: unknown): value is TaskView {
     return value === 'list' || value === 'board';
 }
 
-function startOfToday(): number {
-    const d = new Date();
-    d.setHours(0, 0, 0, 0);
-    return d.getTime();
-}
-
-function endOfToday(): number {
-    const d = new Date();
-    d.setHours(23, 59, 59, 999);
-    return d.getTime();
-}
-
 function dueTimestamp(task: Task): number {
-    const ts = parseMysqlDateTime(task.dueDate);
+    const ts = parseCalendarDateUtc(task.dueDate ?? '');
     return Number.isNaN(ts) ? Number.POSITIVE_INFINITY : ts;
 }
 
-function bucketForTask(task: Task): Bucket {
+function bucketForTask(task: Task, today: number): Bucket {
     if (task.completed) return 'completed';
-    const ts = parseMysqlDateTime(task.dueDate);
+    const ts = parseCalendarDateUtc(task.dueDate ?? '');
     if (Number.isNaN(ts)) return 'noDate';
-    if (ts < startOfToday()) return 'overdue';
-    if (ts <= endOfToday()) return 'today';
+    if (ts < today) return 'overdue';
+    if (ts <= today + DAY_MS - 1) return 'today';
     return 'upcoming';
 }
 
-function isInQueue(queue: Queue, task: Task, currentUserId: number): boolean {
-    const ts = parseMysqlDateTime(task.dueDate);
+function isInQueue(queue: Queue, task: Task, currentUserId: number, today: number): boolean {
+    const ts = parseCalendarDateUtc(task.dueDate ?? '');
     const hasDate = !Number.isNaN(ts);
     switch (queue) {
         case 'myOpen':
             return !task.completed && task.assignedToId === currentUserId;
         case 'dueToday':
-            return !task.completed && hasDate && ts >= startOfToday() && ts <= endOfToday();
+            return !task.completed && hasDate && ts >= today && ts <= today + DAY_MS - 1;
         case 'overdue':
-            return !task.completed && hasDate && ts < startOfToday();
+            return !task.completed && hasDate && ts < today;
         case 'unassigned':
             return !task.completed && (!task.assignedToId || task.assignedToId === 0);
         case 'allOpen':
@@ -188,6 +180,7 @@ export default function TasksBrowser({
     const tf = useTranslations('Filters');
     const showApiError = useApiErrorToast('ActivityTasks');
     const locale = useLocale();
+    const timeZone = useTimeZone() ?? 'UTC';
     const router = useRouter();
     const pathname = usePathname() ?? '';
     const reduce = useReducedMotion() ?? false;
@@ -195,7 +188,8 @@ export default function TasksBrowser({
     const isMobile = useIsMobile();
     const [originPathname] = useState(pathname);
 
-    const [now] = useState(() => Date.now());
+    const now = useNow();
+    const today = parseCalendarDateUtc(calendarDayInTimeZone(now, timeZone));
     const [tasks, setTasks] = useState<Task[]>(initialTasks);
     useEffect(() => {
         // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -316,21 +310,21 @@ export default function TasksBrowser({
         };
         for (const task of tasks) {
             for (const q of ALL_QUEUES) {
-                if (isInQueue(q, task, currentUserId)) counts[q]++;
+                if (isInQueue(q, task, currentUserId, today)) counts[q]++;
             }
         }
         return counts;
-    }, [tasks, currentUserId]);
+    }, [tasks, currentUserId, today]);
 
     const todayFocus = useMemo(() => {
-        const start = startOfToday();
-        const end = endOfToday();
+        const start = today;
+        const end = today + DAY_MS - 1;
         let total = 0;
         let done = 0;
         let doneThisWeek = 0;
         const weekAgo = now - WEEK_MS;
         for (const task of tasks) {
-            const ts = parseMysqlDateTime(task.dueDate);
+            const ts = parseCalendarDateUtc(task.dueDate ?? '');
             if (!Number.isNaN(ts) && ts >= start && ts <= end) {
                 total++;
                 if (task.completed) done++;
@@ -341,7 +335,7 @@ export default function TasksBrowser({
             }
         }
         return { total, done, left: total - done, overdue: queueCounts.overdue, doneThisWeek };
-    }, [tasks, queueCounts.overdue, now]);
+    }, [tasks, queueCounts.overdue, now, today]);
 
     const companyIdForTask = useCallback(
         (task: Task) => {
@@ -353,8 +347,8 @@ export default function TasksBrowser({
     );
 
     const queueTasks = useMemo(
-        () => tasks.filter((task) => isInQueue(queue, task, currentUserId) || completing.has(task.id)),
-        [tasks, queue, currentUserId, completing],
+        () => tasks.filter((task) => isInQueue(queue, task, currentUserId, today) || completing.has(task.id)),
+        [tasks, queue, currentUserId, completing, today],
     );
 
     const dimensionOptions = useMemo(() => {
@@ -425,14 +419,14 @@ export default function TasksBrowser({
     const grouped = useMemo(() => {
         const buckets: Record<Bucket, Task[]> = { overdue: [], today: [], upcoming: [], noDate: [], completed: [] };
         for (const task of filtered) {
-            const bucket = completing.has(task.id) ? bucketForTask({ ...task, completed: false }) : bucketForTask(task);
+            const bucket = completing.has(task.id) ? bucketForTask({ ...task, completed: false }, today) : bucketForTask(task, today);
             buckets[bucket].push(task);
         }
         for (const key of [...ACTIVE_BUCKETS, 'completed' as const]) {
             buckets[key].sort((a, c) => dueTimestamp(a) - dueTimestamp(c));
         }
         return buckets;
-    }, [filtered, completing]);
+    }, [filtered, completing, today]);
 
     const visibleBuckets = useMemo(() => ACTIVE_BUCKETS.filter((b) => grouped[b].length > 0), [grouped]);
     const visibleTasks = useMemo(
@@ -792,7 +786,7 @@ export default function TasksBrowser({
                 pending={pendingToggle.has(task.id)}
                 ariaCompleteLabel={t('ariaCompleteTask')}
                 ariaOpenLabel={t('ariaOpenTask', { name: label })}
-                due={formatDue(task.dueDate, t, locale)}
+                due={formatDue(task.dueDate, t, locale, now, timeZone)}
                 menuModel={menuModel}
                 tabIndex={task.id === effectiveRovingTaskId ? 0 : -1}
                 rowRef={(row) => {

@@ -6,7 +6,7 @@ import {
     ClockIcon,
     XCircleIcon,
 } from "@heroicons/react/24/outline";
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
 
 import DocumentView from "@/app/components/records/documents/DocumentView";
 import {
@@ -44,6 +44,7 @@ export default function DocumentAcceptance({
     initialPreview: DocumentAcceptancePreview;
     onSettled?: () => void;
 }) {
+    const timeZone = useTimeZone();
     const t = useTranslations("DocumentAcceptance");
     const locale = useLocale();
     const viewRequested = useRef(false);
@@ -204,7 +205,7 @@ export default function DocumentAcceptance({
                         <Detail
                             label={t("expiresLabel")}
                             value={preview.expiresAt
-                                ? formatDateTime(preview.expiresAt, locale)
+                                ? formatDateTime(preview.expiresAt, locale, timeZone)
                                 : t("noExpiry")}
                         />
                     </dl>

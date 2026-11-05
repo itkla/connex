@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
 import { Squares2X2Icon, TableCellsIcon, UserGroupIcon } from "@heroicons/react/24/outline";
 import { EyeIcon } from "@heroicons/react/24/solid";
 import { useReducedMotion } from "motion/react";
@@ -54,6 +54,7 @@ export default function UsersBrowser({
     users: User[];
     presentation?: UsersBrowserPresentation;
 }) {
+    const timeZone = useTimeZone();
     const router = useRouter();
     const t = useTranslations("UsersBrowser");
     const tf = useTranslations("Filters");
@@ -100,16 +101,16 @@ export default function UsersBrowser({
                 key: "lastLoginAt",
                 label: t("columnLastLogin"),
                 getSortValue: (u) => (u.lastLoginAt ? Date.parse(u.lastLoginAt) : null),
-                render: (u) => (u.lastLoginAt ? formatDateTime(u.lastLoginAt, locale) : t("neverLoggedIn")),
+                render: (u) => (u.lastLoginAt ? formatDateTime(u.lastLoginAt, locale, timeZone) : t("neverLoggedIn")),
             },
             {
                 key: "createdAt",
                 label: t("columnMemberSince"),
                 getSortValue: (u) => (u.createdAt ? Date.parse(u.createdAt) : null),
-                render: (u) => formatDate(u.createdAt, locale),
+                render: (u) => formatDate(u.createdAt, locale, timeZone),
             },
         ],
-        [t, locale],
+        [t, locale, timeZone],
     );
 
     const chips: FilterChipData[] = query.trim()

@@ -3,7 +3,7 @@
 import { memo, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import {
     ArrowTopRightOnSquareIcon,
     BoltIcon,
@@ -324,6 +324,7 @@ function PeekAvatar({ target, data }: { target: PeekTarget | null; data: PeekDat
 }
 
 function PeekBody({ data, locale, t }: { data: PeekData; locale: string; t: ReturnType<typeof useTranslations> }) {
+    const timeZone = useTimeZone();
     const { factorText } = useRiskText();
     if (data.kind === 'person') {
         const openTasks = (data.contact.tasks ?? []).filter((task) => !task.completed);
@@ -366,7 +367,7 @@ function PeekBody({ data, locale, t }: { data: PeekData; locale: string; t: Retu
                     [t('status'), dealStatusLabel(data.summary.status, t)],
                     [t('stage'), data.summary.stageName ?? '—'],
                     [t('value'), formatCurrency(data.summary.value, data.summary.currency, locale)],
-                    [t('expectedClose'), data.summary.expectedCloseDate ? formatShortDate(data.summary.expectedCloseDate, locale) : '—'],
+                    [t('expectedClose'), data.summary.expectedCloseDate ? formatShortDate(data.summary.expectedCloseDate, locale, timeZone) : '—'],
                     [t('company'), data.summary.companyName ?? '—'],
                     [t('owner'), data.summary.ownerName ?? '—'],
                 ]}
@@ -408,7 +409,7 @@ function Facts({ rows }: { rows: [string, string][] }) {
 }
 
 function TaskSection({ tasks, locale, t }: { tasks: Task[]; locale: string; t: ReturnType<typeof useTranslations> }) {
-    const now = useLiveNow();
+    const timeZone = useTimeZone();
     return (
         <section className="space-y-2">
             <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.06em] text-muted-foreground">
@@ -423,7 +424,7 @@ function TaskSection({ tasks, locale, t }: { tasks: Task[]; locale: string; t: R
                         <li key={task.id} className="flex items-center justify-between gap-3 text-sm">
                             <span className="min-w-0 truncate text-foreground">{task.description}</span>
                             {task.dueDate && (
-                                <span className="shrink-0 text-xs text-muted-foreground">{formatRelativeTime(task.dueDate, locale, now)}</span>
+                                <span className="shrink-0 text-xs text-muted-foreground">{formatShortDate(task.dueDate, locale, timeZone)}</span>
                             )}
                         </li>
                     ))}
@@ -434,6 +435,7 @@ function TaskSection({ tasks, locale, t }: { tasks: Task[]; locale: string; t: R
 }
 
 function ActivitySection({ activities, locale, t }: { activities: Activity[]; locale: string; t: ReturnType<typeof useTranslations> }) {
+    const timeZone = useTimeZone();
     const now = useLiveNow();
     return (
         <section className="space-y-2">
@@ -450,7 +452,7 @@ function ActivitySection({ activities, locale, t }: { activities: Activity[]; lo
                             <p className="truncate text-sm text-foreground">{activity.subject}</p>
                             <p className="text-xs text-muted-foreground">
                                 {activity.type}
-                                {activity.timestamp ? ` · ${formatRelativeTime(activity.timestamp, locale, now)}` : ''}
+                                {activity.timestamp ? ` · ${formatRelativeTime(activity.timestamp, locale, now, timeZone)}` : ''}
                             </p>
                         </li>
                     ))}

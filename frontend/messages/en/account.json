@@ -21,6 +21,8 @@
         "timezoneHint": "Dates and times are shown in this timezone.",
         "timezonePlaceholder": "Search timezones",
         "timezoneEmpty": "No timezones found.",
+        "timezoneTokyo": "Tokyo, Japan (JST)",
+        "timezoneUtc": "Coordinated Universal Time (UTC, GMT)",
         "languageLabel": "Language",
         "languageHint": "Connex and scheduled report emails use this language.",
         "languageEnglish": "English",

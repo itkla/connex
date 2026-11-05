@@ -1,7 +1,9 @@
 "use client";
 
+import { calendarDayInTimeZone } from '@/app/lib/timeZone';
+import { parseCalendarDateUtc } from '@/app/lib/utils';
 import { useEffect, useMemo, useState, type ComponentType } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
     ClipboardDocumentListIcon,
@@ -153,14 +155,13 @@ function verbOf(action: string): string {
     return i === -1 ? action : action.slice(i + 1);
 }
 
-function startOfLocalDay(ms: number): number {
-    const d = new Date(ms);
-    return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+function displayDayKey(ms: number, timeZone: string): number {
+    return parseCalendarDateUtc(calendarDayInTimeZone(ms, timeZone));
 }
 
-function rangeCutoff(range: RangeFilter, now: number | null): number {
+function rangeCutoff(range: RangeFilter, now: number | null, timeZone: string): number {
     if (now == null) return -Infinity;
-    if (range === "today") return startOfLocalDay(now);
+    if (range === "today") return displayDayKey(now, timeZone);
     if (range === "7d") return now - 7 * DAY_MS;
     if (range === "30d") return now - 30 * DAY_MS;
     return -Infinity;
@@ -211,6 +212,7 @@ export default function AuditLogBrowser({
 }) {
     const t = useTranslations("AdminAuditLog");
     const locale = useLocale();
+    const timeZone = useTimeZone() ?? 'UTC';
     const reduce = useReducedMotion() ?? false;
 
     const [entries, setEntries] = useState<AuditLogEntry[]>(initialEntries);
@@ -329,11 +331,12 @@ export default function AuditLogBrowser({
                 }
                 if (except !== "range" && filters.range !== "all") {
                     const ms = parseMysqlDateTime(e.createdAt);
-                    if (!Number.isNaN(ms) && ms < rangeCutoff(filters.range, now)) return false;
+                    const value = !Number.isNaN(ms) && filters.range === "today" ? displayDayKey(ms, timeZone) : ms;
+                    if (!Number.isNaN(ms) && value < rangeCutoff(filters.range, now, timeZone)) return false;
                 }
                 return true;
             },
-        [filters, now, actorKeyOf],
+        [filters, now, actorKeyOf, timeZone],
     );
 
     const filtered = useMemo(
@@ -361,7 +364,7 @@ export default function AuditLogBrowser({
     const rangeCounts = useMemo(() => {
         if (now == null) return { all: 0, today: 0, "7d": 0, "30d": 0 };
         const base = now;
-        const today = startOfLocalDay(base);
+        const today = rangeCutoff("today", base, timeZone);
         const d7 = base - 7 * DAY_MS;
         const d30 = base - 30 * DAY_MS;
         const counts = { all: 0, today: 0, "7d": 0, "30d": 0 };
@@ -370,18 +373,18 @@ export default function AuditLogBrowser({
             counts.all++;
             const ms = parseMysqlDateTime(e.createdAt);
             if (Number.isNaN(ms)) continue;
-            if (ms >= today) counts.today++;
+            if (displayDayKey(ms, timeZone) >= today) counts.today++;
             if (ms >= d7) counts["7d"]++;
             if (ms >= d30) counts["30d"]++;
         }
         return counts;
-    }, [matches, entries, now]);
+    }, [matches, entries, now, timeZone]);
 
     const groups = useMemo(() => {
         const map = new Map<number, AuditLogEntry[]>();
         for (const e of filtered) {
             const ms = parseMysqlDateTime(e.createdAt);
-            const key = Number.isNaN(ms) ? 0 : startOfLocalDay(ms);
+            const key = Number.isNaN(ms) ? 0 : displayDayKey(ms, timeZone);
             const bucket = map.get(key);
             if (bucket) bucket.push(e);
             else map.set(key, [e]);
@@ -396,7 +399,7 @@ export default function AuditLogBrowser({
         }));
         arr.sort((a, b) => (sort === "newest" ? b.key - a.key : a.key - b.key));
         return arr;
-    }, [filtered, sort]);
+    }, [filtered, sort, timeZone]);
 
     const feed = useMemo<FeedEntry[]>(() => {
         const out: FeedEntry[] = [];
@@ -404,7 +407,7 @@ export default function AuditLogBrowser({
             out.push({
                 kind: "day",
                 id: `day-${g.key}`,
-                label: dayLabel(g.key, now, locale, t),
+                label: dayLabel(g.key, now, locale, t, timeZone),
                 count: g.items.length,
                 connectUp: false,
                 connectDown: false,
@@ -429,7 +432,7 @@ export default function AuditLogBrowser({
             }
         }
         return out;
-    }, [groups, now, locale, t]);
+    }, [groups, now, locale, t, timeZone]);
 
     const stats = useMemo(() => {
         const failedCount = filtered.reduce((n, e) => (isFailed(e) ? n + 1 : n), 0);
@@ -452,7 +455,7 @@ export default function AuditLogBrowser({
             };
         }
         const base = now;
-        const today = startOfLocalDay(base);
+        const today = displayDayKey(base, timeZone);
         const days = Array.from({ length: PULSE_DAYS }, (_, i) => ({
             key: today - (PULSE_DAYS - 1 - i) * DAY_MS,
             count: 0,
@@ -461,12 +464,12 @@ export default function AuditLogBrowser({
         for (const e of entries) {
             const ms = parseMysqlDateTime(e.createdAt);
             if (Number.isNaN(ms)) continue;
-            const i = idx.get(startOfLocalDay(ms));
+            const i = idx.get(displayDayKey(ms, timeZone));
             if (i != null) days[i].count++;
         }
         const max = Math.max(1, ...days.map((d) => d.count));
         return { days, max, today };
-    }, [entries, now]);
+    }, [entries, now, timeZone]);
 
     const hasActiveFilters =
         filters.query.trim() !== "" ||
@@ -800,20 +803,22 @@ function dayLabel(
     now: number | null,
     locale: string,
     t: ReturnType<typeof useTranslations>,
+    timeZone: string,
 ): string {
     if (key === 0) return "—";
     if (now != null) {
-        const today = startOfLocalDay(now);
+        const today = displayDayKey(now, timeZone);
         if (key === today) return t("groupToday");
         if (key === today - DAY_MS) return t("groupYesterday");
     }
     const d = new Date(key);
-    const currentYear = new Date(now ?? key).getFullYear();
+    const currentYear = new Date(now == null ? key : displayDayKey(now, timeZone)).getUTCFullYear();
     return new Intl.DateTimeFormat(locale, {
         weekday: "long",
         month: "long",
         day: "numeric",
-        year: d.getFullYear() === currentYear ? undefined : "numeric",
+        timeZone: "UTC",
+        year: d.getUTCFullYear() === currentYear ? undefined : "numeric",
     }).format(d);
 }
 
@@ -830,7 +835,8 @@ function StatCluster({
     locale: string;
     t: ReturnType<typeof useTranslations>;
 }) {
-    const last = lastMs == null || now == null ? t("lastEventNever") : formatRelativeTime(new Date(lastMs).toISOString(), locale, now);
+    const timeZone = useTimeZone();
+    const last = lastMs == null || now == null ? t("lastEventNever") : formatRelativeTime(new Date(lastMs).toISOString(), locale, now, timeZone);
     return (
         <div className="flex items-center gap-4 text-sm sm:gap-5">
             <Stat value={stats.total} label={t("statEvents")} />
@@ -874,7 +880,7 @@ function PulseStrip({
     locale: string;
 }) {
     const fmt = useMemo(
-        () => new Intl.DateTimeFormat(locale, { month: "short", day: "numeric" }),
+        () => new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", timeZone: "UTC" }),
         [locale],
     );
     return (
@@ -1006,6 +1012,7 @@ function AuditRow({
     t: Translator;
     reduce: boolean;
 }) {
+    const timeZone = useTimeZone();
     const verb = verbOf(entry.action);
     const meta = VERB_META[verb];
     const failure = isFailed(entry);
@@ -1015,9 +1022,9 @@ function AuditRow({
     const ms = parseMysqlDateTime(entry.createdAt);
     const hasMs = !Number.isNaN(ms);
     const absolute = hasMs
-        ? new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "medium" }).format(ms)
+        ? new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "medium", timeZone }).format(ms)
         : entry.createdAt;
-    const timeLabel = now == null ? formatShortDate(entry.createdAt, locale) : formatRelativeTime(entry.createdAt, locale, now);
+    const timeLabel = now == null ? formatShortDate(entry.createdAt, locale, timeZone) : formatRelativeTime(entry.createdAt, locale, now, timeZone);
 
     const actorName = entry.actorLabel ?? t("actorSystem");
     const verbText = meta ? t(meta.verbKey) : verb;

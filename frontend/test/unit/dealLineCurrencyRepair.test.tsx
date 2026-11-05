@@ -18,7 +18,7 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: api.refresh }) 
 vi.mock('next-intl', async () => {
     const { createTranslator } = await vi.importActual<typeof import('next-intl')>('next-intl');
     return {
-        useLocale: () => state.locale,
+        useTimeZone: () => "UTC", useLocale: () => state.locale,
         useTranslations: () => createTranslator({
             locale: state.locale,
             messages: state.locale === 'ja' ? ja.DealsLineItems : en.DealsLineItems,

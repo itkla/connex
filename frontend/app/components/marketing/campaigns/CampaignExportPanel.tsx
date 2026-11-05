@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
 import { Loader2Icon } from "lucide-react";
 import { InformationCircleIcon } from "@heroicons/react/24/outline";
 import { Button } from "@/components/ui/button";
@@ -63,6 +63,7 @@ export default function CampaignExportPanel({
     access: CampaignAccess;
     deliveryAvailability: CapabilityAvailability;
 }) {
+    const timeZone = useTimeZone();
     const t = useTranslations("CampaignExports");
     const tCapability = useTranslations("CapabilityUnavailable");
     const showApiError = useApiErrorToast("CampaignExports");
@@ -291,7 +292,7 @@ export default function CampaignExportPanel({
                                         )}
                                     </div>
                                     <span className="shrink-0 text-xs text-muted-foreground">
-                                        {formatDate(entry.createdAt, locale)}
+                                        {formatDate(entry.createdAt, locale, timeZone)}
                                     </span>
                                 </div>
 

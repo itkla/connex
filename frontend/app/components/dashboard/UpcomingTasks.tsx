@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useTimeZone, useTranslations } from 'next-intl';
 
 import { Checkbox } from '@/components/ui/checkbox';
 import NoteContent from '@/app/components/activity/notes/NoteContent';
@@ -10,15 +10,18 @@ import { updateTask } from '@/app/lib/api';
 import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { noteContentToPlainText } from '@/app/lib/references';
 import { toastError, toastSuccess } from '@/app/lib/toast';
-import { formatShortDate, startOfLocalDay, timeOf } from '@/app/lib/utils';
+import { useNow } from '@/app/hooks/useNow';
+import { calendarDayInTimeZone } from '@/app/lib/timeZone';
+import { formatShortDate } from '@/app/lib/utils';
 import { type Task } from '@/app/lib/types';
 import { cn } from '@/lib/utils';
 
 export default function UpcomingTasks({ tasks, locale }: { tasks: Task[]; locale: string }) {
+    const timeZone = useTimeZone();
     const router = useRouter();
     const t = useTranslations('DashboardTaskSummary');
-    const [now] = useState(() => new Date().getTime());
-    const todayStart = startOfLocalDay(now);
+    const now = useNow();
+    const today = calendarDayInTimeZone(now, timeZone ?? 'UTC');
     const [doneIds, setDoneIds] = useState<Set<number>>(new Set());
 
     async function complete(task: Task) {
@@ -67,8 +70,7 @@ export default function UpcomingTasks({ tasks, locale }: { tasks: Task[]; locale
     return (
         <ul className="mt-6 divide-y divide-border border-t border-border">
             {visible.map((task) => {
-                const due = timeOf(task.dueDate);
-                const isOverdue = due > 0 && due < todayStart;
+                const isOverdue = Boolean(task.dueDate && task.dueDate < today);
                 return (
                     <li key={task.id} className="flex items-center gap-3 py-3">
                         <Checkbox
@@ -87,7 +89,7 @@ export default function UpcomingTasks({ tasks, locale }: { tasks: Task[]; locale
                                     isOverdue ? 'font-medium text-destructive' : 'text-muted-foreground',
                                 )}
                             >
-                                {formatShortDate(task.dueDate, locale)}
+                                {formatShortDate(task.dueDate, locale, timeZone)}
                             </span>
                         ) : (
                             <span className="shrink-0 text-xs text-muted-foreground">{t('noDate')}</span>

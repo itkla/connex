@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { BriefcaseIcon, BuildingOffice2Icon, EnvelopeIcon, GlobeAltIcon, UserIcon } from "@heroicons/react/24/outline";
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
 
 import { getCompanyById, getContactById, getDealSummary } from "@/app/lib/api";
 import { formatShortDate } from "@/app/lib/utils";
@@ -79,6 +79,7 @@ function ContactPreview({ id }: { id: number }) {
 }
 
 function DealPreview({ id }: { id: number }) {
+    const timeZone = useTimeZone();
     const locale = useLocale();
     const t = useTranslations("ActivityNotesReferencePreview");
     const { data, loading } = useRecord(getDealSummary, id);
@@ -131,7 +132,7 @@ function DealPreview({ id }: { id: number }) {
                     <div className="flex justify-between gap-2">
                         <dt>{t("expectedClose")}</dt>
                         <dd className="font-medium text-foreground">
-                            {formatShortDate(data.expectedCloseDate, locale)}
+                            {formatShortDate(data.expectedCloseDate, locale, timeZone)}
                         </dd>
                     </div>
                 ) : null}

@@ -2,7 +2,7 @@
 
 import { useMemo, type ReactNode } from 'react';
 import Link from 'next/link';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import {
     ArrowTopRightOnSquareIcon,
     BellSnoozeIcon,
@@ -111,11 +111,12 @@ function evidenceKeys(evidence: readonly RadarEvidence[]): string[] {
     });
 }
 
-function freshnessLabels(value: string, anchor: number, locale: string): { absolute: string; relative: string } | null {
+function freshnessLabels(value: string, anchor: number, locale: string, timeZone: string | undefined): { absolute: string; relative: string } | null {
     const timestamp = parseMysqlDateTime(value);
     if (!Number.isFinite(timestamp) || !Number.isFinite(anchor)) return null;
     const difference = timestamp - anchor;
     const absolute = new Intl.DateTimeFormat(locale, {
+        timeZone,
         dateStyle: 'medium',
         timeStyle: 'short',
     }).format(timestamp);
@@ -168,6 +169,7 @@ export default function RadarSignalCard({
 }: RadarSignalCardProps) {
     const t = useTranslations('Radar');
     const locale = useLocale();
+    const timeZone = useTimeZone();
     const taskPermission = usePermissionCheck('TASK_CREATE');
     const personUpdatePermission = usePermissionCheck('PERSON_UPDATE');
     const refreshPermissions = usePermissionsRefresh();
@@ -182,7 +184,7 @@ export default function RadarSignalCard({
     const canCreateTask = taskActionPermission === 'granted';
     const pageTimestamp = parseMysqlDateTime(pageAsOf);
     const stale = signal.stale;
-    const freshness = freshnessLabels(signal.evidenceAsOf, pageTimestamp, locale);
+    const freshness = freshnessLabels(signal.evidenceAsOf, pageTimestamp, locale, timeZone);
     const bridges = radarPathBridges(signal);
     const hasWarmPathBridge = !warmPath || bridges.length > 0;
     const taskDisabled = busy
@@ -210,8 +212,8 @@ export default function RadarSignalCard({
     const dismissed = signal.state === 'dismissed';
     const numberFormat = useMemo(() => new Intl.NumberFormat(locale), [locale]);
     const dateFormat = useMemo(
-        () => new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }),
-        [locale],
+        () => new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeZone }),
+        [locale, timeZone],
     );
     const names = radarSignalNames(displaySignal);
     const evidenceRenderKeys = evidenceKeys(signal.evidence);

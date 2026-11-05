@@ -1,5 +1,6 @@
 "use client";
 
+import { parseMysqlDateTime } from '@/app/lib/utils';
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useFormatter, useTranslations } from "next-intl";
@@ -193,7 +194,7 @@ export default function OnboardingForm() {
                                     {ownershipOffers.offers.map((offer) => {
                                         const busy = ownershipOffers.busyOfferId === offer.id;
                                         const scope = ownershipOffers.scopeLabel(offer);
-                                        const expires = format.dateTime(new Date(offer.expiresAt), { dateStyle: "medium" });
+                                        const expires = format.dateTime(new Date(parseMysqlDateTime(offer.expiresAt)), { dateStyle: "medium" });
                                         return (
                                             <li
                                                 key={offer.id}

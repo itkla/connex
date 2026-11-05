@@ -320,6 +320,7 @@
         "create": "Create"
     },
     "DealsQuickEditSheet": {
+        "closedAtInvalid": "That time doesn't exist in your timezone. Choose another time.",
         "companySearchFailed": "Couldn't search companies. Try again.",
         "titleSingle": "Quick edit deal",
         "titleMulti": "Quick edit {count} deals",

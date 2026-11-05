@@ -10,7 +10,8 @@ import {
     useState,
 } from "react";
 import { useRouter } from "next/navigation";
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
+import { timeZoneLabel } from "@/app/lib/timeZone";
 import { CameraIcon } from "@heroicons/react/24/outline";
 import { Loader2Icon } from "lucide-react";
 
@@ -194,6 +195,7 @@ function ProfilePhotoField({ previewUrl, initial, disabled, onSelect }: ProfileP
 }
 
 function ProfileDetails({ user }: Props) {
+    const timeZone = useTimeZone();
     const t = useTranslations("AccountProfile");
     const locale = useLocale();
 
@@ -203,12 +205,12 @@ function ProfileDetails({ user }: Props) {
             <dl className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
                 <div className="flex items-center justify-between gap-4 px-4 py-3">
                     <dt className="text-sm text-muted-foreground">{t("memberSince")}</dt>
-                    <dd className="text-sm text-foreground">{formatDate(user.createdAt, locale)}</dd>
+                    <dd className="text-sm text-foreground">{formatDate(user.createdAt, locale, timeZone)}</dd>
                 </div>
                 <div className="flex items-center justify-between gap-4 px-4 py-3">
                     <dt className="text-sm text-muted-foreground">{t("lastLogin")}</dt>
                     <dd className="text-sm text-foreground">
-                        {user.lastLoginAt ? formatDateTime(user.lastLoginAt, locale) : t("lastLoginNever")}
+                        {user.lastLoginAt ? formatDateTime(user.lastLoginAt, locale, timeZone) : t("lastLoginNever")}
                     </dd>
                 </div>
             </dl>
@@ -281,6 +283,10 @@ function ProfileForm({
     onChangeEmail,
 }: ProfileFormProps) {
     const t = useTranslations("AccountProfile");
+    const locale = useLocale();
+    const timezoneLabel = (value: string) => value === "Asia/Tokyo"
+        ? `${value} · ${t("timezoneTokyo")}`
+        : value === "UTC" ? `${value} · ${t("timezoneUtc")}` : timeZoneLabel(value, locale);
     const { displayName, username, timezone, preferredLocale } = draft;
 
     return (
@@ -366,7 +372,7 @@ function ProfileForm({
                                 field: "timezone",
                                 value: value ?? confirmedUser.timezone,
                             })}
-                            itemToStringLabel={(tz: string) => tz}
+                            itemToStringLabel={timezoneLabel}
                         >
                             <ComboboxInput
                                 id="account-timezone"
@@ -374,13 +380,13 @@ function ProfileForm({
                                 className={comboboxInputClass}
                             />
                             <ComboboxContent className="pointer-events-auto">
+                                <ComboboxEmpty>{t("timezoneEmpty")}</ComboboxEmpty>
                                 <ComboboxList>
-                                    <ComboboxEmpty>{t("timezoneEmpty")}</ComboboxEmpty>
-                                    {timeZones.map((tz) => (
+                                    {(tz: string) => (
                                         <ComboboxItem key={tz} value={tz}>
-                                            {tz}
+                                            {timezoneLabel(tz)}
                                         </ComboboxItem>
-                                    ))}
+                                    )}
                                 </ComboboxList>
                             </ComboboxContent>
                         </Combobox>
@@ -438,6 +444,7 @@ export default function ProfilePanel({ user }: Props) {
 
     const timeZones = useMemo(() => {
         const zones = supportedTimeZones();
+        if (!zones.includes("UTC")) zones.unshift("UTC");
         if (confirmedUser.timezone && !zones.includes(confirmedUser.timezone)) {
             return [confirmedUser.timezone, ...zones];
         }

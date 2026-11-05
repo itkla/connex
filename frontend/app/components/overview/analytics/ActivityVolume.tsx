@@ -1,8 +1,9 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useNow } from '@/app/hooks/useNow';
+import { useMemo } from 'react';
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 
 import {
     ChartContainer,
@@ -45,7 +46,8 @@ export default function ActivityVolume({
     const t = useTranslations('AnalyticsActivity');
     const tPage = useTranslations('AnalyticsPage');
     const locale = useLocale();
-    const [now] = useState(() => Date.now());
+    const now = useNow();
+    const timeZone = useTimeZone() ?? 'UTC';
 
     const { data, activeTypes, tooltipLabels } = useMemo(() => {
         let rows: Row[];
@@ -66,7 +68,7 @@ export default function ActivityVolume({
                     };
                 });
         } else {
-            const labels = buildTimeBuckets(range ?? '90d', now, locale);
+            const labels = buildTimeBuckets(range ?? '90d', now, locale, timeZone);
             const byIndex = new Map(buckets.map((bucket) => [bucket.bucketIndex, bucket]));
             rows = labels.map((slot, index) => {
                 const bucket = byIndex.get(index);
@@ -88,7 +90,7 @@ export default function ActivityVolume({
             ),
             tooltipLabels: new Map(rows.map((row) => [row.label, row.tooltipLabel])),
         };
-    }, [buckets, granularity, range, now, locale, tPage]);
+    }, [buckets, granularity, range, now, locale, tPage, timeZone]);
 
     const total = useMemo(
         () => data.reduce((sum, row) => sum + ACTIVITY_TYPES.reduce((s, type) => s + row[type], 0), 0),

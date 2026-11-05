@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, type CSSProperties, type ReactNode } from 'react';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 
 import { formatCurrency, formatUtcDateTime } from '@/app/lib/utils';
 import type {
@@ -36,6 +36,7 @@ type Props = {
  * the paper body, not page or print chrome, and never computes money (totals come pre-computed).
  */
 export default function DocumentView({ content, type, title, status, version, generatedAt }: Props) {
+    const timeZone = useTimeZone();
     const t = useTranslations('DealsDocuments');
     const tp = useTranslations('DealsDocuments.print');
     const locale = useLocale();
@@ -157,7 +158,7 @@ export default function DocumentView({ content, type, title, status, version, ge
                         {generatedAt && (
                             <div>
                                 <span className="text-muted-foreground">{tp('generatedOn')} </span>
-                                <span className="font-medium text-foreground">{formatUtcDateTime(generatedAt, locale)}</span>
+                                <span className="font-medium text-foreground">{formatUtcDateTime(generatedAt, locale, undefined, timeZone)}</span>
                             </div>
                         )}
                     </div>

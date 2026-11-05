@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, type WheelEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useTimeZone, useTranslations } from 'next-intl';
 import { toastSuccess } from '@/app/lib/toast';
 import { Loader2Icon } from 'lucide-react';
 import { ChatBubbleLeftRightIcon, PencilSquareIcon, CalendarIcon, Bars3BottomLeftIcon, UserIcon, BriefcaseIcon, CheckCircleIcon, ClockIcon } from '@heroicons/react/24/outline';
@@ -44,7 +44,7 @@ import { createActivity, createTask, isFieldError } from '@/app/lib/api';
 import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
-import { toMysqlDateTime } from '@/app/lib/utils';
+import { toDatetimeLocalValue, toMysqlDateTime } from '@/app/lib/utils';
 import { isSubmitShortcut } from '@/app/lib/submitShortcut';
 import { addDays, startOfDay } from '@/app/lib/calendar';
 import {
@@ -92,11 +92,6 @@ type Props = {
     createRequest?: (payload: CreateActivityPayload, init?: RequestInit) => Promise<unknown>;
 };
 
-function nowLocalValue(): string {
-    const d = new Date();
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
 
 /** Formats a Date as the `YYYY-MM-DD` local calendar value an `<input type="date">` expects. */
 function toDateInputValue(d: Date): string {
@@ -270,12 +265,13 @@ export function ActivityDialogForm({
 }: ActivityDialogFormProps) {
     const router = useRouter();
     const t = useTranslations('ActivityCreateDialog');
+    const timeZone = useTimeZone();
     const showApiError = useApiErrorToast('ActivityCreateDialog');
 
     const [type, setType] = useState<ActivityType>(() => defaultType ?? ACTIVITY_TYPES[0]);
     const [subject, setSubject] = useState(() => defaultSubject);
     const [notes, setNotes] = useState(() => defaultNotes);
-    const [when, setWhen] = useState(() => defaultTimestamp ?? nowLocalValue());
+    const [when, setWhen] = useState(() => defaultTimestamp ?? toDatetimeLocalValue(new Date().toISOString(), timeZone));
     const [selectedPerson, setSelectedPerson] = useState<Contact | null>(() => defaultPerson);
     const [selectedDeal, setSelectedDeal] = useState<Deal | null>(() => defaultDeal);
     const [submitting, setSubmitting] = useState(false);
@@ -362,7 +358,7 @@ export function ActivityDialogForm({
                         subject: subject.trim(),
                         notes: notes.trim() || undefined,
                         createdById: currentUserId,
-                        timestamp: when ? toMysqlDateTime(when) : undefined,
+                        timestamp: when ? toMysqlDateTime(when, timeZone) : undefined,
                         personId: selectedPerson?.id ?? undefined,
                         dealId: selectedDeal?.id ?? undefined,
                     },

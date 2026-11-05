@@ -29,10 +29,11 @@ const api = vi.hoisted(() => ({
     withdrawLifecycle: vi.fn(),
 }));
 const workspace = vi.hoisted(() => ({ activeWorkspaceId: 7 as number | null }));
+const displayZone = vi.hoisted(() => ({ value: "UTC" }));
 const navigation = vi.hoisted(() => ({ refresh: vi.fn() }));
 
 vi.mock('next-intl', () => ({
-    useLocale: () => 'en',
+    useTimeZone: () => displayZone.value, useLocale: () => 'en',
     useTranslations: () => (key: string, values?: { count?: number }) =>
         values?.count === undefined ? key : `${key} (${values.count})`,
 }));
@@ -174,6 +175,7 @@ let container: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
+    displayZone.value = "UTC";
     container = document.createElement('div');
     document.body.append(container);
     root = createRoot(container);
@@ -520,7 +522,8 @@ describe('first-response deadline', () => {
             firstResponseDueAt: stored,
         };
         const previous = process.env.TZ;
-        process.env.TZ = 'Asia/Tokyo';
+        process.env.TZ = 'UTC';
+        displayZone.value = 'Asia/Tokyo';
         try {
             await render(
                 <ContactLeadPanel
@@ -533,7 +536,7 @@ describe('first-response deadline', () => {
                 />,
             );
             const cardText = askConnexChangeValueText(
-                'responseDue', stored, 'current', 'en', (hours) => `${hours}`);
+                'responseDue', stored, 'current', 'en', (hours) => `${hours}`, undefined, 'Asia/Tokyo');
 
             const badge = Array.from(container.querySelectorAll('[title]'))
                 .find((element) => element.textContent === 'response.due');

@@ -1,8 +1,10 @@
 'use client';
 
+import { calendarDayInTimeZone } from '@/app/lib/timeZone';
+import { parseCalendarDateUtc } from '@/app/lib/utils';
 import { useCallback, useEffect, useMemo, useState, type ComponentType } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import {
@@ -87,15 +89,13 @@ function activityTime(a: Activity): number {
     return Number.isNaN(ts) ? -Infinity : ts;
 }
 
-function startOfDayKey(ts: number): number {
-    const d = new Date(ts);
-    d.setHours(0, 0, 0, 0);
-    return d.getTime();
+function startOfDayKey(ts: number, timeZone: string): number {
+    return parseCalendarDateUtc(calendarDayInTimeZone(ts, timeZone));
 }
 
-function isPlanned(a: Activity, now: number): boolean {
+function isPlanned(a: Activity, now: number, timeZone: string): boolean {
     const ts = activityTime(a);
-    return ts !== -Infinity && startOfDayKey(ts) > startOfDayKey(now);
+    return ts !== -Infinity && startOfDayKey(ts, timeZone) > startOfDayKey(now, timeZone);
 }
 
 function bumpOption(map: Map<string, { label: string; count: number }>, key: string, label: string) {
@@ -133,6 +133,7 @@ export default function ActivitiesBrowser({
     const tf = useTranslations('Filters');
     const showApiError = useApiErrorToast('ActivityPage');
     const locale = useLocale();
+    const timeZone = useTimeZone() ?? 'UTC';
     const reduce = useReducedMotion() ?? false;
     const now = useNow();
 
@@ -191,19 +192,19 @@ export default function ActivitiesBrowser({
     }, [activities]);
 
     const weekPulse = useMemo(() => {
-        const today = startOfDayKey(now);
+        const today = startOfDayKey(now, timeZone);
         const days = Array.from({ length: 7 }, (_, i) => ({ key: today - (6 - i) * DAY_MS, count: 0 }));
         const index = new Map(days.map((d, i) => [d.key, i]));
         for (const a of activities) {
             const ts = activityTime(a);
             if (ts === -Infinity) continue;
-            const i = index.get(startOfDayKey(ts));
+            const i = index.get(startOfDayKey(ts, timeZone));
             if (i != null) days[i].count++;
         }
         const total = days.reduce((sum, d) => sum + d.count, 0);
         const max = Math.max(1, ...days.map((d) => d.count));
         return { days, total, max, today };
-    }, [activities, now]);
+    }, [activities, now, timeZone]);
 
     const companyIdForActivity = useCallback(
         (a: Activity) => {
@@ -274,7 +275,7 @@ export default function ActivitiesBrowser({
     }, [typeActivities, query, creatorFilter, personFilter, dealFilter, companyFilter, companyIdForActivity, personById, dealById, userById]);
 
     const groups = useMemo(() => {
-        const today = startOfDayKey(now);
+        const today = startOfDayKey(now, timeZone);
         const map = new Map<string, { id: string; label: string; sortKey: number; items: Activity[] }>();
         for (const a of filtered) {
             const ts = activityTime(a);
@@ -286,7 +287,7 @@ export default function ActivitiesBrowser({
                 label = t('groupNoDate');
                 sortKey = -Infinity;
             } else {
-                const dayKey = startOfDayKey(ts);
+                const dayKey = startOfDayKey(ts, timeZone);
                 id = String(dayKey);
                 sortKey = dayKey;
                 const diffDays = Math.round((today - dayKey) / DAY_MS);
@@ -294,8 +295,9 @@ export default function ActivitiesBrowser({
                 else if (diffDays === 1) label = t('groupYesterday');
                 else if (diffDays === -1) label = t('groupTomorrow');
                 else {
-                    const sameYear = new Date(dayKey).getFullYear() === new Date(now).getFullYear();
+                    const sameYear = calendarDayInTimeZone(ts, timeZone).slice(0, 4) === calendarDayInTimeZone(now, timeZone).slice(0, 4);
                     label = new Intl.DateTimeFormat(locale, {
+                        timeZone: 'UTC',
                         weekday: 'long',
                         month: 'long',
                         day: 'numeric',
@@ -307,7 +309,7 @@ export default function ActivitiesBrowser({
             map.get(id)!.items.push(a);
         }
         return Array.from(map.values()).sort((a, b) => b.sortKey - a.sortKey);
-    }, [filtered, t, locale, now]);
+    }, [filtered, t, locale, now, timeZone]);
 
     const entries = useMemo<FeedEntry[]>(() => {
         const out: FeedEntry[] = [];
@@ -336,7 +338,7 @@ export default function ActivitiesBrowser({
     const formatTime = (a: Activity) => {
         const ts = activityTime(a);
         if (ts === -Infinity) return '';
-        return new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit' }).format(new Date(ts));
+        return new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit', timeZone }).format(new Date(ts));
     };
 
     const isEmpty = filtered.length === 0;
@@ -512,7 +514,7 @@ export default function ActivitiesBrowser({
                                                     creator={userById.get(activity.createdById)}
                                                     time={formatTime(activity)}
                                                     typeLabel={t(`type${normalizeType(activity.type)}` as 'typeCall')}
-                                                    planned={isPlanned(activity, now)}
+                                                    planned={isPlanned(activity, now, timeZone)}
                                                     plannedLabel={t('planned')}
                                                     onOpen={() => {
                                                         if (isProviderOwnedActivity(activity)) {

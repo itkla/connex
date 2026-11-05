@@ -248,7 +248,7 @@ export function EngagementSparkline({ data }: { data: EngagementPoint[] }) {
     const t = useTranslations('CompaniesCard');
     const locale = useLocale();
     const dateFormatter = useMemo(
-        () => new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }),
+        () => new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', timeZone: 'UTC' }),
         [locale],
     );
     const ticks = useMemo(() => {
@@ -343,7 +343,7 @@ function EngagementTooltip({ active, payload }: EngagementTooltipProps) {
     const t = useTranslations('CompaniesCard');
     const locale = useLocale();
     const dateFormatter = useMemo(
-        () => new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }),
+        () => new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', timeZone: 'UTC' }),
         [locale],
     );
     if (!active || !payload?.length) return null;

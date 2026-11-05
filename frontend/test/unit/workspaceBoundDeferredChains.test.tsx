@@ -14,7 +14,7 @@ import { deal, ORIGIN, shell, stubBackend, switchWorkspace } from "./helpers/wor
 const boundary = vi.hoisted<{ month: ComponentProps<typeof MonthView> | null }>(() => ({ month: null }));
 const translate = vi.hoisted(() => Object.assign((key: string) => key, { has: () => false }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
-vi.mock("next-intl", () => ({ useLocale: () => "en", useTranslations: () => translate }));
+vi.mock("next-intl", () => ({ useTimeZone: () => "UTC", useLocale: () => "en", useTranslations: () => translate }));
 vi.mock("motion/react", () => ({
     useReducedMotion: () => true,
     AnimatePresence: ({ children }: { children?: ReactNode }) => children,

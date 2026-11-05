@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useTimeZone, useTranslations } from 'next-intl';
 
 import { cn } from '@/lib/utils';
 import {
@@ -47,18 +47,19 @@ export default function DayTimeline({
     scrollClassName?: string;
 }) {
     const t = useTranslations('Calendar');
+    const timeZone = useTimeZone() ?? 'UTC';
     const scrollRef = useRef<HTMLDivElement>(null);
     const scrolledDayRef = useRef<string | null>(null);
     const [nowMin, setNowMin] = useState<number | null>(null);
 
     const isToday = sameDay(day, today);
     const allDay = useMemo(() => events.filter((e) => e.allDay), [events]);
-    const placements = useMemo(() => layoutTimedEvents(events), [events]);
+    const placements = useMemo(() => layoutTimedEvents(events, 50, timeZone), [events, timeZone]);
 
     const hourFmt = useMemo(() => new Intl.DateTimeFormat(locale, { hour: 'numeric' }), [locale]);
     const timeFmt = useMemo(
-        () => new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit' }),
-        [locale],
+        () => new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit', timeZone }),
+        [locale, timeZone],
     );
     const hourLabels = useMemo(
         () => HOURS.map((h) => hourFmt.format(new Date(2000, 0, 1, h))),
@@ -67,14 +68,14 @@ export default function DayTimeline({
 
     useEffect(() => {
         if (!isToday) return;
-        const tick = () => setNowMin(minutesSinceMidnight(Date.now()));
+        const tick = () => setNowMin(minutesSinceMidnight(Date.now(), timeZone));
         const raf = window.requestAnimationFrame(tick);
         const id = window.setInterval(tick, 60_000);
         return () => {
             window.cancelAnimationFrame(raf);
             window.clearInterval(id);
         };
-    }, [isToday]);
+    }, [isToday, timeZone]);
 
     useEffect(() => {
         const el = scrollRef.current;
