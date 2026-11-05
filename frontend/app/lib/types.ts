@@ -1775,9 +1775,15 @@ export type DealLineItemsResponse = {
     items: DealLineItem[];
     /** Unavailable until every remaining line uses the deal currency. */
     totals: DealLineItemTotals | null;
+    manualValueToReplace?: number | null;
+    restorableManualValue?: number | null;
 };
 
 export type DealLineItemPayload = {
+    previewOnly?: boolean;
+    confirmValueReplacement?: boolean;
+    expectedManualValue?: number;
+    expectedCurrency?: string;
     productId?: number | null;
     name?: string;
     sku?: string | null;

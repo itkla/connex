@@ -17,6 +17,19 @@ import jakarta.validation.Validator;
 import jakarta.validation.ValidatorFactory;
 
 class DealLineItemRequestValidationTest {
+    @Test
+    void jacksonDefaultsOldClientsToUnconfirmedAndReadsExplicitPreviewConsent() throws Exception {
+        tools.jackson.databind.ObjectMapper mapper = new tools.jackson.databind.ObjectMapper();
+        DealLineItemRequest oldClient = mapper.readValue("{\"quantity\":1}", DealLineItemRequest.class);
+        org.junit.jupiter.api.Assertions.assertFalse(oldClient.isConfirmValueReplacement());
+        org.junit.jupiter.api.Assertions.assertFalse(oldClient.isPreviewOnly());
+        DealLineItemRequest confirmed = mapper.readValue(
+            "{\"quantity\":1,\"previewOnly\":true,\"confirmValueReplacement\":true,\"expectedManualValue\":114200}",
+            DealLineItemRequest.class);
+        assertTrue(confirmed.isConfirmValueReplacement());
+        assertTrue(confirmed.isPreviewOnly());
+        assertEquals(0, new BigDecimal("114200").compareTo(confirmed.getExpectedManualValue()));
+    }
     private static final ValidatorFactory FACTORY = Validation.buildDefaultValidatorFactory();
     private static final Validator VALIDATOR = FACTORY.getValidator();
 

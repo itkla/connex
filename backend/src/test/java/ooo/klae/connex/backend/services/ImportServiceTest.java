@@ -2326,6 +2326,7 @@ class ImportServiceTest extends AbstractServiceTest {
 
     private void addLineItem(Deal deal, String unitPrice) {
         DealLineItemRequest lineItem = new DealLineItemRequest();
+        lineItem.setConfirmValueReplacement(true);
         lineItem.setName("Imported deal line " + unique());
         lineItem.setUnitPrice(new BigDecimal(unitPrice));
         lineItem.setQuantity(BigDecimal.ONE);

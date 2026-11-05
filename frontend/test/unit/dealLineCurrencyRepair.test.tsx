@@ -53,6 +53,16 @@ vi.mock('@/components/ui/combobox', () => {
     };
 });
 
+vi.mock('@/components/ui/select', () => {
+    const Container = ({ children }: PropsWithChildren) => <div>{children}</div>;
+    return { Select: Container, SelectContent: Container, SelectItem: Container, SelectTrigger: Container, SelectValue: () => null };
+});
+vi.mock('@/components/ui/dialog', () => ({
+    Dialog: () => null,
+    DialogContent: () => null, DialogDescription: () => null, DialogFooter: () => null,
+    DialogHeader: () => null, DialogTitle: () => null,
+}));
+
 function foreignLine(id: number): DealLineItem {
     return {
         id,
@@ -106,7 +116,7 @@ describe('deal line currency repair', () => {
         expect(text).toContain(messages.totalsUnavailable);
         expect(text).toContain(messages.currencyMismatch.replaceAll('{lineCurrency}', 'JPY').replaceAll('{dealCurrency}', 'USD'));
         expect(text).toContain(new Intl.NumberFormat(locale, { style: 'currency', currency: 'JPY' }).format(100000));
-        expect(text).toContain(new Intl.NumberFormat(locale, { style: 'currency', currency: 'JPY' }).format(20));
+        expect(mounted.elements.some((element) => element.getAttribute('aria-label') === messages.discountValue && element.value === '20')).toBe(true);
         expect(text).not.toContain(new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD' }).format(100000));
         expect(text).not.toContain(new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD' }).format(0));
         expect(mounted.elements.some((element) => element.tagName === 'TFOOT')).toBe(false);

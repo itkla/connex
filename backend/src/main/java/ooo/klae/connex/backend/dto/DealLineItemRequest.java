@@ -21,6 +21,19 @@ import lombok.NoArgsConstructor;
 @Data
 @NoArgsConstructor
 public class DealLineItemRequest {
+    /** Computes the proposed line and totals without persisting any changes. */
+    private boolean previewOnly;
+
+    /** Explicit consent to replace a nonzero manual deal value with line totals. */
+    private boolean confirmValueReplacement;
+
+    @DecimalMin("0")
+    @Digits(integer = 13, fraction = 2)
+    private BigDecimal expectedManualValue;
+
+    @Size(max = 8)
+    private String expectedCurrency;
+
     private Integer productId;
 
     @Size(max = 255)

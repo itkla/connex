@@ -1225,3 +1225,18 @@ constraints in force. Binaries that contain V238 or V239 but lack V240 are refus
 satisfy the older component floors. Recover forward with a compatible binary. A scoring-policy
 change remains possible in a forward release that preserves the V240 task writers and rollback
 floor; deploying a pre-V240 binary is not a supported way to reverse the scoring change.
+
+## Deal line value takeover (tenant V242)
+
+Deploy after #2276's `V241__deal_edit_version.sql`; that migration owns V241.
+
+V242 adds nullable `deal.prior_manual_value` with explicit INSTANT DDL and no historical backfill.
+Existing overwritten amounts remain unknown. New confirmed takeovers store the manual amount,
+and removing the final line automatically restores it. Old clients receive HTTP 409 when they
+omit confirmation for a nonzero manual amount. The line preview mode does not write any data.
+
+The serving rollback floor is V242: earlier binaries still start but bypass consent and restoration.
+Rollback must use a compatible serving binary; retain the additive column and roll forward.
+INSTANT DDL still needs a metadata lock; deploy outside long deal transactions. If execution stops,
+inspect the column and Flyway history before following the deployment recovery procedure.
+Do not edit an applied migration or blindly rerun a partially committed ALTER.

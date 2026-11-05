@@ -64,6 +64,7 @@ class DealDocumentServiceTest extends AbstractServiceTest {
 
     private DealLineItemRequest line(int productId, String quantity) {
         DealLineItemRequest r = new DealLineItemRequest();
+        r.setConfirmValueReplacement(true);
         r.setProductId(productId);
         r.setQuantity(new BigDecimal(quantity));
         return r;

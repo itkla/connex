@@ -31,8 +31,40 @@ close/reopen/move paths cannot clobber a freshly reconciled amount with a stale 
 before touching a line. After every currency-consistent line write the deal value is recomputed and persisted, and
 `value_source` is set to `line_items`.
 
-Deleting the **last** line reverts `value_source` to `manual` and **retains the last derived
-total** — the number does not reset to zero, it simply becomes editable again.
+New ad-hoc and catalog lines start as local, unsaved drafts. Add line alone makes no request and
+changes no persisted figure. Saving a priced draft first uses `previewOnly: true` on the existing
+line create/update endpoint: the server validates and calculates the proposed totals under the
+parent lock without writing lines, deal values, versions, audit records or value-change events.
+The preview includes `manualValueToReplace` when a nonzero manual amount would be replaced.
+The UI names the previous amount and exact new **tax-inclusive** total before seeking consent.
+Cancel leaves both the saved deal and the local draft unchanged.
+
+A write taking over a nonzero manual amount requires `confirmValueReplacement: true`; absent or
+false means HTTP 409, including old clients. `expectedManualValue`, when supplied by the client,
+must still match the locked manual amount and manual source; `expectedCurrency` must match its
+currency, or the write also conflicts. The confirmation UI sends both expected fields. Line-derived edits do not
+require repeated confirmation. The guard runs before line writes and again at reconciliation.
+
+From V242 onward, the manual amount (including zero) is stored prospectively in
+`deal.prior_manual_value` when line items take over. Deleting the **last** line automatically
+restores that amount, sets `value_source` to `manual`, and clears the fallback in the same transaction.
+The UI explains restoration before removal. This deliberately replaces the former last-derived-total
+rule: removing all lines abandons the line-based quote, so the original manual estimate returns
+without a second potentially destructive decision. Intermediate removals retain the fallback.
+Historical deals without a stored fallback retain their last derived total and become editable.
+Previously overwritten manual amounts cannot be reconstructed and are not backfilled.
+
+These writes use the existing parent deal lock and targeted value statements. A deal edit-version
+trigger introduced by #2276 advances on each parent write, including fallback capture/clear; clients must refresh
+after a line mutation and must never replay a broad deal update using a pre-confirmation version.
+The confirmation writes only to the line-item endpoints and carries no parent deal version; it
+pins the previewed manual amount and currency instead. Fallback writes correctly advance the
+parent's version through that trigger without making the confirmation request stale.
+Only current booking value changes; the existing realized-value resolver and win-time freeze remain
+unchanged. Old clients can read the additive response fields but cannot take over a nonzero manual
+value without the new flag. Earlier serving binaries bypass that guard and restoration, so V242 is
+the serving rollback floor; leave the nullable column in place and roll forward with a compatible
+binary rather than rolling back to an unsafe writer.
 
 ### Incremental repair of historical currency mismatches
 
@@ -43,7 +75,8 @@ and `actual_value` stay frozen; no value-change signal is emitted. The line resp
 currency, with an explanation that editing it uses the deal currency without FX conversion.
 
 The final repair resumes normal reconciliation. If lines remain, their consistent total becomes
-the derived value; deleting the final line returns to manual while retaining the frozen value.
+the derived value; deleting the final line restores a stored manual fallback when present, otherwise
+returns to manual while retaining the frozen value.
 Realized value remains the win-time snapshot. Canonical line-value reads, winning, reopening, and
 new document generation refuse mismatches with HTTP 409. Closing lost remains permitted and zeroes
 `actual_value` without deriving a line total.

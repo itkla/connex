@@ -191,6 +191,7 @@ class ImportDealDependencySideEffectTest extends AbstractServiceTest {
 
     private void addLineItem(Deal deal) {
         DealLineItemRequest lineItem = new DealLineItemRequest();
+        lineItem.setConfirmValueReplacement(true);
         lineItem.setName("Import dependency guard " + unique());
         lineItem.setUnitPrice(new BigDecimal("25.00"));
         lineItem.setQuantity(BigDecimal.ONE);

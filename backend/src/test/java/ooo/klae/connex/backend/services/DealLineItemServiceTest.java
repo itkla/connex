@@ -1,10 +1,14 @@
 package ooo.klae.connex.backend.services;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,6 +27,11 @@ import ooo.klae.connex.backend.dto.DealLineItemRequest;
 import ooo.klae.connex.backend.dto.DealLineItemTotalsDto;
 import ooo.klae.connex.backend.dto.DealLineItemsResponse;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.mappers.DealValueMapper;
+import ooo.klae.connex.backend.mappers.ReportMapper;
+import ooo.klae.connex.backend.dto.ReportAggregateQuery;
+import ooo.klae.connex.backend.dto.ReportOffsetSegment;
 
 class DealLineItemServiceTest extends AbstractServiceTest {
 
@@ -31,6 +40,136 @@ class DealLineItemServiceTest extends AbstractServiceTest {
     @Autowired DealService dealService;
     @Autowired DealValueService dealValueService;
     @Autowired PlatformTransactionManager transactionManager;
+    @Autowired DealValueMapper dealValueMapper;
+    @Autowired ReportMapper reportMapper;
+
+    @Test
+    void previewAndCancelPreserveEveryRegisteredRevenueFigure() {
+        Deal deal = jpyDeal();
+        dealMapper.updateExpectedCloseDate(workspace.getId(), deal.getId(), "2026-01-15");
+        List<Object> before = figureSnapshot(deal);
+        DealLineItemRequest request = adHoc("120.50", "2.5");
+        request.setPreviewOnly(true);
+        lineItemService.create(deal.getId(), request);
+        assertEquals(before, figureSnapshot(deal));
+    }
+
+    private List<Object> figureSnapshot(Deal deal) {
+        int workspaceId = workspace.getId();
+        LocalDateTime start = LocalDateTime.of(2026, 1, 1, 0, 0);
+        LocalDateTime end = start.plusYears(1);
+        return List.of(
+            dealMapper.dealMetrics(workspaceId, null, "JPY", null, null, null, null),
+            dealMapper.dealMetricsFiltered(workspaceId, "[]", null, null, "JPY", null, null,
+                null, null, false, null, null, null),
+            dealMapper.getDealBoard(workspaceId, deal.getPipelineId()),
+            dealMapper.dealPipelineValue(workspaceId, "JPY", 30, null),
+            dealMapper.dealPipelineValueWindow(workspaceId, "JPY", start, end, null),
+            reportMapper.aggregateDeals(figureQuery("won_revenue", start, end)),
+            reportMapper.aggregateDeals(figureQuery("open_pipeline_value", start, end)),
+            reportMapper.aggregateForecast(figureQuery("forecast_weighted", start, end)));
+    }
+
+    private ReportAggregateQuery figureQuery(String measure, LocalDateTime start, LocalDateTime end) {
+        return new ReportAggregateQuery(workspace.getId(), measure, "none", "month", start, end,
+            start.toLocalDate(), end.toLocalDate(), null, null, null, null, null,
+            new BigDecimal("0.5"), 10, List.of(new ReportOffsetSegment(start, end, 0)));
+    }
+
+    @Test
+    void blankLineAndPricedPreviewLeaveStoredDealAndFallbackUntouched() {
+        Deal deal = jpyDeal();
+        DealLineItemRequest blank = new DealLineItemRequest();
+        blank.setName("Draft");
+        blank.setQuantity(BigDecimal.ONE);
+        assertThrows(BadRequestException.class, () -> lineItemService.create(deal.getId(), blank));
+
+        DealLineItemRequest draft = adHoc("120.50", "2.5");
+        draft.setDiscountType(null);
+        draft.setDiscountValue(null);
+        draft.setTaxRate(new BigDecimal("10"));
+        draft.setPreviewOnly(true);
+        draft.setConfirmValueReplacement(false);
+        DealLineItemsResponse preview = lineItemService.create(deal.getId(), draft);
+        eq("331.38", preview.totals().grandTotal());
+        eq("1000.00", preview.manualValueToReplace());
+        assertTrue(lineItemService.getForDeal(deal.getId()).items().isEmpty());
+        eq("1000.00", dealMapper.getDealById(workspace.getId(), deal.getId()).getValue());
+        assertNull(dealValueMapper.getPriorManualValue(workspace.getId(), deal.getId()));
+    }
+
+    @Test
+    void missingConsentOrChangedManualAmountConflictsBeforeInsertingALine() {
+        Deal deal = jpyDeal();
+        DealLineItemRequest request = adHoc("120.50", "1");
+        request.setConfirmValueReplacement(false);
+        assertThrows(ConflictException.class, () -> lineItemService.create(deal.getId(), request));
+        request.setConfirmValueReplacement(true);
+        request.setExpectedManualValue(new BigDecimal("999.00"));
+        assertThrows(ConflictException.class, () -> lineItemService.create(deal.getId(), request));
+        assertTrue(lineItemService.getForDeal(deal.getId()).items().isEmpty());
+        eq("1000.00", dealMapper.getDealById(workspace.getId(), deal.getId()).getValue());
+        assertNull(dealValueMapper.getPriorManualValue(workspace.getId(), deal.getId()));
+    }
+
+    @Test
+    void aStaleConfirmationCannotAddASecondLineAfterAnotherClientTakesOver() {
+        Deal deal = jpyDeal();
+        DealLineItemRequest request = adHoc("120.50", "1");
+        request.setExpectedManualValue(new BigDecimal("1000.00"));
+        request.setExpectedCurrency("USD");
+        assertThrows(ConflictException.class, () -> lineItemService.create(deal.getId(), request));
+        request.setExpectedCurrency("JPY");
+        lineItemService.create(deal.getId(), request);
+        assertThrows(ConflictException.class, () -> lineItemService.create(deal.getId(), request));
+        assertEquals(1, lineItemService.getForDeal(deal.getId()).items().size());
+    }
+
+    @Test
+    void catalogTaxExampleRestoresTheOriginalManualAmountAcrossRepeatedQuoteCycles() {
+        Deal deal = jpyDeal();
+        dealService.updateValue(deal.getId(), new BigDecimal("121600.00"));
+        Product product = catalogProduct("JPY", "120.50", "10", "one_time");
+        DealLineItemsResponse added = lineItemService.create(deal.getId(), line(product.getId(), "1"));
+        int itemId = added.items().getFirst().getId();
+        eq("132.55", added.totals().grandTotal());
+        eq("121600.00", added.restorableManualValue());
+        DealLineItemRequest edit = line(product.getId(), "2.5");
+        edit.setConfirmValueReplacement(false);
+        eq("331.38", lineItemService.update(deal.getId(), itemId, edit).totals().grandTotal());
+        lineItemService.delete(deal.getId(), itemId);
+        eq("121600.00", dealMapper.getDealById(workspace.getId(), deal.getId()).getValue());
+        assertNull(dealValueMapper.getPriorManualValue(workspace.getId(), deal.getId()));
+
+        dealService.updateValue(deal.getId(), new BigDecimal("114200.00"));
+        int nextId = lineItemService.create(deal.getId(), line(product.getId(), "1")).items().getFirst().getId();
+        lineItemService.delete(deal.getId(), nextId);
+        eq("114200.00", dealMapper.getDealById(workspace.getId(), deal.getId()).getValue());
+    }
+
+    @Test
+    void fallbackMapperCannotReadOrWriteAnotherWorkspacesDeal() {
+        Deal deal = jpyDeal();
+        int otherWorkspace = workspace.getId() + 100000;
+        assertEquals(0, dealValueMapper.setPriorManualValue(otherWorkspace, deal.getId(), BigDecimal.TEN));
+        assertNull(dealValueMapper.getPriorManualValue(otherWorkspace, deal.getId()));
+        assertNull(dealValueMapper.getPriorManualValueForUpdate(otherWorkspace, deal.getId()));
+        assertNull(dealValueMapper.getPriorManualValue(workspace.getId(), deal.getId()));
+    }
+
+    @Test
+    void postWinLineEditsAndRestorationLeaveRealizedRevenueFrozen() {
+        Deal deal = jpyDeal();
+        Product product = catalogProduct("JPY", "120.50", "10", "one_time");
+        int itemId = lineItemService.create(deal.getId(), line(product.getId(), "1")).items().getFirst().getId();
+        dealService.close(deal.getId(), Boolean.TRUE, null, null);
+        lineItemService.update(deal.getId(), itemId, line(product.getId(), "2.5"));
+        eq("132.55", dealMapper.getDealById(workspace.getId(), deal.getId()).getActualValue());
+        lineItemService.delete(deal.getId(), itemId);
+        Deal restored = dealMapper.getDealById(workspace.getId(), deal.getId());
+        eq("1000.00", restored.getValue());
+        eq("132.55", restored.getActualValue());
+    }
 
     @Test
     void writeMethodsRequireAnExistingTransaction() {
@@ -74,6 +213,7 @@ class DealLineItemServiceTest extends AbstractServiceTest {
 
     private DealLineItemRequest line(Integer productId, String quantity) {
         DealLineItemRequest r = new DealLineItemRequest();
+        r.setConfirmValueReplacement(true);
         r.setProductId(productId);
         r.setQuantity(new BigDecimal(quantity));
         return r;
@@ -81,6 +221,7 @@ class DealLineItemServiceTest extends AbstractServiceTest {
 
     private DealLineItemRequest adHoc(String unitPrice, String quantity) {
         DealLineItemRequest r = new DealLineItemRequest();
+        r.setConfirmValueReplacement(true);
         r.setName("Service " + unique());
         r.setUnitPrice(new BigDecimal(unitPrice));
         r.setQuantity(new BigDecimal(quantity));
@@ -201,6 +342,7 @@ class DealLineItemServiceTest extends AbstractServiceTest {
     void adhocLineRequiresNameAndPrice() {
         Deal deal = jpyDeal();
         DealLineItemRequest r = new DealLineItemRequest();
+        r.setConfirmValueReplacement(true);
         r.setQuantity(BigDecimal.ONE);
 
         assertThrows(BadRequestException.class, () -> lineItemService.create(deal.getId(), r));
@@ -219,6 +361,7 @@ class DealLineItemServiceTest extends AbstractServiceTest {
         productService.update(product.getId(), product);
 
         DealLineItemRequest bare = new DealLineItemRequest();
+        bare.setConfirmValueReplacement(true);
         bare.setProductId(product.getId());
         bare.setQuantity(new BigDecimal("3"));
         DealLineItemDto updated = lineItemService.update(deal.getId(), itemId, bare).items().get(0);
@@ -266,7 +409,7 @@ class DealLineItemServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void deletingLastLineRetainsTotalAndMakesItManuallyEditable() {
+    void deletingLastLineRestoresManualValueAndMakesItEditable() {
         Deal deal = jpyDeal();
         Product product = catalogProduct("JPY", "100.00", null, "one_time");
         DealLineItemsResponse afterAdd = lineItemService.create(
@@ -278,7 +421,7 @@ class DealLineItemServiceTest extends AbstractServiceTest {
         assertEquals(0, afterDelete.items().size());
         eq("0", afterDelete.totals().grandTotal());
         Deal retained = dealMapper.getDealById(workspace.getId(), deal.getId());
-        eq("200.00", retained.getValue());
+        eq("1000.00", retained.getValue());
         assertEquals("manual", retained.getValueSource());
 
         Deal edited = dealService.updateValue(deal.getId(), new BigDecimal("225.00"));
@@ -296,6 +439,7 @@ class DealLineItemServiceTest extends AbstractServiceTest {
         eq("1.00", created.getUnitPrice());
 
         DealLineItemRequest echo = new DealLineItemRequest();
+        echo.setConfirmValueReplacement(true);
         echo.setUnitPrice(created.getUnitPrice());
         echo.setQuantity(created.getQuantity());
         echo.setDiscountType(created.getDiscountType());

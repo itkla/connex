@@ -2555,3 +2555,13 @@ encoded-frame provenance and concurrent-session delegate as ordinary assistant f
 socket write takes publication S, freshly checks control authority in a separate READ COMMITTED
 transaction and retains publication S through the write. Broker enqueue validation alone does not
 authorize a buffered frame after organization invalidation.
+
+## Deal manual-value fallback (V242)
+
+Line preview and write paths retain their existing parent-deal-first lock order. Preview takes
+the parent lock for an exact value/line snapshot and performs no writes. Fallback capture and
+clear update that same parent row after its lock is held. Final-line restoration reads the
+fallback FOR UPDATE under that existing lock, so an older repeatable-read snapshot cannot
+restore a stale amount. No additional aggregate or authorization lock is introduced.
+Fallback capture and clear advance the deal version through #2276's UPDATE trigger. Line-item
+confirmation does not submit a parent version or replay a broad deal update after these writes.

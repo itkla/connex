@@ -127,6 +127,7 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         p.setBillingFrequency("one_time");
         Product product = productService.create(p);
         DealLineItemRequest r = new DealLineItemRequest();
+        r.setConfirmValueReplacement(true);
         r.setProductId(product.getId());
         r.setQuantity(new BigDecimal(quantity));
         lineItemService.create(deal.getId(), r);

@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.ArrayList;
 import java.util.List;
 
 import org.springframework.stereotype.Service;
@@ -113,8 +114,15 @@ public class DealLineItemService {
         item.setDealId(deal.getId());
         applyRequest(workspaceId, deal, item, request, true);
         compute(item);
+        dealValueService.requireConsistentLineCurrency(workspaceId, deal);
+        if (request.isPreviewOnly()) {
+            return previewFor(workspaceId, deal, item, true);
+        }
+        dealValueService.requireConfirmedLineValue(
+            deal, request.isConfirmValueReplacement(), request.getExpectedManualValue(), request.getExpectedCurrency());
         lineItemMapper.insert(item);
-        BigDecimal reconciled = dealValueService.reconcileLineItems(workspaceId, deal);
+        BigDecimal reconciled = dealValueService.reconcileLineItems(
+            workspaceId, deal, request.isConfirmValueReplacement(), request.getExpectedManualValue());
         publishValueChange(workspaceId, deal, reconciled);
         auditService.record("deal.line_item.create", "deal", deal.getId(), deal.getName(),
             "Added line item " + item.getName() + " to " + deal.getName(), null);
@@ -131,8 +139,14 @@ public class DealLineItemService {
         int mismatchesBefore = lineItemMapper.countCurrencyMismatches(workspaceId, dealId, deal.getCurrency());
         applyRequest(workspaceId, deal, item, request, false);
         compute(item);
+        if (request.isPreviewOnly()) {
+            return previewFor(workspaceId, deal, item, false);
+        }
+        dealValueService.requireConfirmedLineValue(
+            deal, request.isConfirmValueReplacement(), request.getExpectedManualValue(), request.getExpectedCurrency());
         lineItemMapper.update(item);
-        reconcileAfterRepair(workspaceId, deal, mismatchesBefore);
+        reconcileAfterRepair(workspaceId, deal, mismatchesBefore,
+            request.isConfirmValueReplacement(), request.getExpectedManualValue());
         auditService.record("deal.line_item.update", "deal", deal.getId(), deal.getName(),
             "Updated line item " + item.getName() + " on " + deal.getName(), null);
         return responseFor(workspaceId, deal);
@@ -147,7 +161,7 @@ public class DealLineItemService {
         DealLineItem item = requireLineItem(workspaceId, deal.getId(), itemId);
         int mismatchesBefore = lineItemMapper.countCurrencyMismatches(workspaceId, dealId, deal.getCurrency());
         lineItemMapper.delete(workspaceId, itemId);
-        reconcileAfterRepair(workspaceId, deal, mismatchesBefore);
+        reconcileAfterRepair(workspaceId, deal, mismatchesBefore, false, null);
         auditService.record("deal.line_item.delete", "deal", deal.getId(), deal.getName(),
             "Removed line item " + item.getName() + " from " + deal.getName(), null);
         return responseFor(workspaceId, deal);
@@ -158,13 +172,15 @@ public class DealLineItemService {
      * Until the last mismatch is removed, stored deal values and value-change signals stay frozen;
      * canonical value, win, and reopen paths continue to refuse the inconsistent line set.
      */
-    private void reconcileAfterRepair(int workspaceId, Deal deal, int mismatchesBefore) {
+    private void reconcileAfterRepair(int workspaceId, Deal deal, int mismatchesBefore,
+            boolean confirmed, BigDecimal expectedManualValue) {
         int mismatchesAfter = lineItemMapper.countCurrencyMismatches(
             workspaceId, deal.getId(), deal.getCurrency());
         if (mismatchesAfter > 0 && mismatchesAfter < mismatchesBefore) {
             return;
         }
-        BigDecimal reconciled = dealValueService.reconcileLineItems(workspaceId, deal);
+        BigDecimal reconciled = dealValueService.reconcileLineItems(
+            workspaceId, deal, confirmed, expectedManualValue);
         publishValueChange(workspaceId, deal, reconciled);
     }
 
@@ -313,11 +329,28 @@ public class DealLineItemService {
 
     private DealLineItemsResponse responseFor(int workspaceId, Deal deal) {
         List<DealLineItem> items = lineItemMapper.getByDealId(workspaceId, deal.getId());
+        return responseFor(workspaceId, deal, items, null);
+    }
+
+    private DealLineItemsResponse previewFor(int workspaceId, Deal deal, DealLineItem proposed, boolean creating) {
+        List<DealLineItem> items = new ArrayList<>(lineItemMapper.getByDealId(workspaceId, deal.getId()));
+        if (!creating) {
+            items.removeIf(item -> item.getId() == proposed.getId());
+        }
+        items.add(proposed);
+        BigDecimal manual = "manual".equals(deal.getValueSource()) && nz(deal.getValue()).signum() != 0
+            ? deal.getValue() : null;
+        return responseFor(workspaceId, deal, items, manual);
+    }
+
+    private DealLineItemsResponse responseFor(
+            int workspaceId, Deal deal, List<DealLineItem> items, BigDecimal manualValueToReplace) {
         List<DealLineItemDto> dtos = items.stream().map(DealLineItemDto::from).toList();
         boolean mismatched = items.stream().anyMatch(item -> deal.getCurrency() == null
             ? item.getCurrency() != null : !deal.getCurrency().equalsIgnoreCase(item.getCurrency()));
         DealLineItemTotalsDto totals = mismatched ? null : totals(items);
-        return new DealLineItemsResponse(dtos, totals);
+        return new DealLineItemsResponse(dtos, totals, manualValueToReplace,
+            dealValueService.priorManualValue(workspaceId, deal.getId()));
     }
 
     private DealLineItemTotalsDto totals(List<DealLineItem> items) {
