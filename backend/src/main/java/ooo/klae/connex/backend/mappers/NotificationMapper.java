@@ -298,7 +298,7 @@ public interface NotificationMapper {
         @Param("dedupeKey") String dedupeKey
     );
 
-    /** Resolves the previous assignee's notice when a task changes hands in its workspace. */
+    /** Marks a task recipient's existing assignment notice resolved within its workspace. */
     int resolveTaskAssignment(
         @Param("workspaceId") int workspaceId,
         @Param("recipientId") int recipientId,

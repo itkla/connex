@@ -77,6 +77,36 @@ class TaskAssignmentNotificationServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void reassignmentRevivesANoticeRestoredAndDismissedFromHistory() {
+        User first = newUser();
+        User second = newUser();
+        Task task = taskService.create(draft(first));
+        Notification original = assigned(task, first);
+        task.setAssignedTo(second);
+        taskService.update(task.getId(), task);
+        assertNotNull(assigned(task, first).getResolvedAt());
+
+        assertEquals(1, notificationMapper.restore(first.getId(), original.getId()));
+        assertEquals(1, notificationMapper.markRead(first.getId(), original.getId()));
+        assertEquals(1, notificationMapper.dismiss(first.getId(), original.getId()));
+        Notification dismissed = assigned(task, first);
+        assertNull(dismissed.getResolvedAt());
+        assertNotNull(dismissed.getReadAt());
+        assertNotNull(dismissed.getDismissedAt());
+
+        task.setAssignedTo(first);
+        taskService.update(task.getId(), task);
+
+        Notification returned = assigned(task, first);
+        assertEquals(original.getId(), returned.getId());
+        assertNull(returned.getResolvedAt());
+        assertNull(returned.getReadAt());
+        assertNull(returned.getDismissedAt());
+        assertNull(returned.getSnoozedUntil());
+        assertEquals(2, assignmentCount(task));
+    }
+
+    @Test
     void repeatedUpdatesDoNotDuplicateOrReviveAnUnchangedAssignment() {
         User assignee = newUser();
         Task task = taskService.create(draft(assignee));
@@ -146,21 +176,33 @@ class TaskAssignmentNotificationServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void linkedAssignmentsOpenTheExactTaskOnTheirRecord() {
+    void assignmentDestinationSurvivesContactAndDealChangesWithoutReassignment() {
         User assignee = newUser();
         var person = newPerson(newCompany());
         Task personDraft = draft(assignee);
         personDraft.setPerson(person);
         Task personTask = taskService.create(personDraft);
-        assertEquals("/records/contacts/" + person.getId() + "?task=" + personTask.getId(),
-            assigned(personTask, assignee).getActionUrl());
+        Notification original = assigned(personTask, assignee);
+        assertEquals("/activity/tasks?task=" + personTask.getId(), original.getActionUrl());
+        assertNull(original.getContextType());
+        assertNull(original.getContextId());
+        notificationMapper.markRead(assignee.getId(), original.getId());
         var pipeline = newPipeline();
         var deal = newDeal(pipeline, newStage(pipeline, 0), newCompany());
-        Task dealDraft = draft(assignee);
-        dealDraft.setDeal(deal);
-        Task dealTask = taskService.create(dealDraft);
-        assertEquals("/records/deals/" + deal.getId() + "?task=" + dealTask.getId(),
-            assigned(dealTask, assignee).getActionUrl());
+        personTask.setPerson(newPerson(newCompany()));
+        personTask.setDeal(deal);
+        taskService.update(personTask.getId(), personTask);
+        personTask.setPerson(null);
+        personTask.setDeal(null);
+        taskService.update(personTask.getId(), personTask);
+
+        Notification unchanged = assigned(personTask, assignee);
+        assertEquals(original.getId(), unchanged.getId());
+        assertEquals("/activity/tasks?task=" + personTask.getId(), unchanged.getActionUrl());
+        assertNull(unchanged.getContextType());
+        assertNull(unchanged.getContextId());
+        assertNotNull(unchanged.getReadAt());
+        assertEquals(1, assignmentCount(personTask));
     }
 
     @Test

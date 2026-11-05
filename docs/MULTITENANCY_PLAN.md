@@ -100,8 +100,10 @@ workspace. Delivery prefs stay per-user-global. (The reminder *generation* jobs 
 Task creation and reassignment emit `task.assigned` through the existing preference and delivery
 machinery, only to the locked active assignee in that workspace and never to the acting user.
 Unchanged assignments emit nothing. Like mentions, the dedupe key identifies one task and recipient;
-reassignment resolves the prior notice and returning to that recipient revives the same inbox row
-unread. Secondary-channel delivery retains its first-occurrence behavior. Personal notification
+reassignment resolves the prior notice. Every genuine assignment transition explicitly revives the
+recipient's row unread, even if they restored and dismissed an old notice from History. Assignment
+links always target `/activity/tasks?task=<id>` so later contact/deal changes cannot strand them;
+mention links retain their record context. Secondary-channel delivery retains its first-occurrence behavior. Personal notification
 settings expose a separate task-assignment preference in both languages.
 
 > **✅ Implemented (2026-06-24):** inbox reads/mutations are recipient-scoped across all memberships

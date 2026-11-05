@@ -804,7 +804,9 @@ Do not replace this with an ordered range `FOR UPDATE` scan or return to non-loc
 
 Task assignment notices reuse the requested active membership retained before the board root.
 After a full update changes the assignee, resolve only the old recipient's workspace/task-scoped
-`task.assigned` notice, then deliver to the new assignee through `NotificationDelivery`. No old
+`task.assigned` notice. Immediately before delivery, mark the new recipient's existing notice resolved
+inside the same transaction, even if History restored it. `NotificationDelivery` then revives it
+unread and publishes the update through its established resolved-row path. No old
 recipient membership lock is acquired after the board. Notification state versions retain their
 existing deferred before-commit order after domain rows.
 

@@ -149,6 +149,7 @@ export default function TimelineRow({
     const [loadingNote, setLoadingNote] = useState(false);
     const noteRequest = useRef<AbortController | null>(null);
     const rowRef = useRef<HTMLLIElement>(null);
+    const actionsRef = useRef<HTMLButtonElement>(null);
     const searchParams = useSearchParams();
     const reduceMotion = useReducedMotion();
     const deepLink = entryDeepLink(entry);
@@ -396,7 +397,7 @@ export default function TimelineRow({
             {!readOnlyEntry && (entry.kind !== 'activity' || !isProviderOwnedActivity(entry.activity)) ? (
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <IconButton variant="ghost" size="icon-inline" label={t('actionsAria')} aria-busy={loadingNote}>
+                        <IconButton ref={actionsRef} variant="ghost" size="icon-inline" label={t('actionsAria')} aria-busy={loadingNote}>
                             <EllipsisVerticalIcon className="text-muted-foreground" />
                         </IconButton>
                     </DropdownMenuTrigger>
@@ -419,6 +420,10 @@ export default function TimelineRow({
                     open={deleteOpen}
                     onOpenChange={(open) => {
                         if (!deleting) setDeleteOpen(open);
+                    }}
+                    onCloseAutoFocus={(event) => {
+                        event.preventDefault();
+                        actionsRef.current?.focus();
                     }}
                     selectedIds={new Set([deepLink.id])}
                     selectedItems={[entry]}

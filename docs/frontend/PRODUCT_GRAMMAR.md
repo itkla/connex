@@ -201,6 +201,8 @@ Any dialog/drawer that accumulates meaningful input participates in the shared u
 
 Use the shared record delete confirmation for ordinary record deletion. Organization-level permanent deletion may use stronger typed confirmation. A surface contributes its object label and consequence details; it does not rewrite the common destructive grammar.
 
+When a row menu opens a delete confirmation, cancellation returns keyboard focus to that row's action button.
+
 ## Buttons and controls
 
 `frontend/components/ui` owns control shape and behavior.

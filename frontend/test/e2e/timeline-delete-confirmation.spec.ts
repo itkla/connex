@@ -9,6 +9,51 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 for (const locale of ["en", "ja"] as const) {
+    test(`deal Open tasks deletion requires confirmation (${locale}) @mobile`, async ({ page, cleanup }, testInfo) => {
+        const fixture = runFixture(testInfo.project.name);
+        const csrf = await csrfBootstrap(page.request);
+        const headers = { "X-Workspace-Id": String(fixture.workspaceId), [csrf.headerName]: csrf.token };
+        const response = await page.request.get("/api/auth/me");
+        expect(response.ok()).toBe(true);
+        const user: unknown = await response.json();
+        if (!isRecord(user) || typeof user.id !== "number") throw new Error("Missing current user");
+        const name = `Deal task deletion ${locale} ${Date.now()}`;
+        const created = await seeder(page.request, fixture.workspaceId, csrf).post("/api/tasks", {
+            description: name, completed: false, assignedToId: user.id, dealId: fixture.deals.primary.id,
+        });
+        if (typeof created.id !== "number") throw new Error("Missing created task id");
+        const path = `/api/tasks/${created.id}`;
+        cleanup.add(async (api) => {
+            const remaining = await api.get(path, { headers });
+            if (remaining.status() === 404) return;
+            expect(remaining.ok()).toBe(true);
+            expect((await api.delete(path, { headers })).ok()).toBe(true);
+        });
+        await useLocale(page, locale);
+        await page.goto(`/records/deals/${fixture.deals.primary.id}`);
+        const section = page.getByRole("heading", { name: message(locale, "deals", "DealsTaskList.openTasks") })
+            .locator("../..");
+        const row = section.getByRole("listitem").filter({ hasText: name });
+        await expect(row).toHaveCount(1);
+        const actions = row.getByRole("button", { expanded: false });
+        await actions.click();
+        const remove = message(locale, "deals", "DealsTaskList.delete");
+        await page.getByRole("menuitem", { name: remove, exact: true }).click();
+        const dialog = page.getByRole("dialog");
+        await expect(dialog).toContainText(name);
+        await expect(row).toHaveCount(1);
+        await dialog.getByRole("button", { name: message(locale, "records", "RecordsDeleteDialog.cancel"), exact: true }).click();
+        await expect(dialog).toBeHidden();
+        await expect(actions).toBeFocused();
+        expect((await page.request.get(path, { headers })).ok()).toBe(true);
+        await actions.click();
+        await page.getByRole("menuitem", { name: remove, exact: true }).click();
+        await dialog.getByRole("button", { name: remove, exact: true }).click();
+        await expect(dialog).toBeHidden();
+        await expect(row).toHaveCount(0);
+        expect((await page.request.get(path, { headers })).status()).toBe(404);
+    });
+
     for (const kind of ["task", "activity", "note"] as const) {
         test(`timeline ${kind} deletion requires confirmation (${locale}) @mobile`, async ({ page, cleanup }, testInfo) => {
             const fixture = runFixture(testInfo.project.name);
@@ -52,6 +97,7 @@ for (const locale of ["en", "ja"] as const) {
             expect(deletes).toBe(0);
             await dialog.getByRole("button", { name: message(locale, "records", "RecordsDeleteDialog.cancel"), exact: true }).click();
             await expect(dialog).toBeHidden();
+            await expect(row.getByRole("button", { name: actions, exact: true })).toBeFocused();
             expect((await page.request.get(path, { headers })).ok()).toBe(true);
             await row.getByRole("button", { name: actions, exact: true }).click();
             await page.getByRole("menuitem", { name: remove, exact: true }).click();

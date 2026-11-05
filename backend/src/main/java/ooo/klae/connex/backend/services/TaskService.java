@@ -719,11 +719,11 @@ public class TaskService {
         String contextType = null;
         Integer contextId = null;
         String actionUrl = "/activity/tasks" + taskAnchor;
-        if (task.getDeal() != null && task.getDeal().getId() > 0) {
+        if (!ASSIGNED_TYPE.equals(type) && task.getDeal() != null && task.getDeal().getId() > 0) {
             contextType = "deal";
             contextId = task.getDeal().getId();
             actionUrl = "/records/deals/" + contextId + taskAnchor;
-        } else if (task.getPerson() != null && task.getPerson().getId() > 0) {
+        } else if (!ASSIGNED_TYPE.equals(type) && task.getPerson() != null && task.getPerson().getId() > 0) {
             contextType = "person";
             contextId = task.getPerson().getId();
             actionUrl = "/records/contacts/" + contextId + taskAnchor;
@@ -757,6 +757,9 @@ public class TaskService {
                 notification.setDedupeKey(type + ":" + task.getId() + ":" + recipientId);
                 notification.setTriggeredAt(triggeredAt);
                 notification.setData(json(Map.of("taskId", task.getId())));
+                if (ASSIGNED_TYPE.equals(type)) {
+                    notificationMapper.resolveTaskAssignment(workspaceId, recipientId, task.getId(), triggeredAt);
+                }
                 notificationDelivery.deliver(notification);
             } catch (RuntimeException ignored) {
             }

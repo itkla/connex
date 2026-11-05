@@ -101,6 +101,7 @@ describe.each(["en", "ja"] as const)("timeline deletion in %s", (locale) => {
             expect(api.note).not.toHaveBeenCalled();
             await click(labels.cancel);
             expect(document.querySelector('[role="dialog"]')).toBeNull();
+            await vi.waitFor(() => expect(document.activeElement).toBe(container.querySelector('button[aria-label]')));
             expect(api.refresh).not.toHaveBeenCalled();
             await click(labels.delete, container);
             const confirmation = document.querySelector('[role="dialog"]');
@@ -113,6 +114,15 @@ describe.each(["en", "ja"] as const)("timeline deletion in %s", (locale) => {
             expect(document.querySelector('[role="dialog"]')).toBeNull();
         },
     );
+});
+
+it("returns focus to the row actions when Escape cancels the confirmation", async () => {
+    await render(entries[0]);
+    await click("Delete", container);
+    await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    await vi.waitFor(() => expect(document.activeElement).toBe(container.querySelector('button[aria-label]')));
+    expect(api.task).not.toHaveBeenCalled();
 });
 
 it("keeps a failed deletion available for a deliberate retry", async () => {
