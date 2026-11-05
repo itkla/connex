@@ -224,7 +224,7 @@ describe("record edit chains preserve one origin", () => {
         await render(surface === "card" ? <ContactCard id={41} workspaceId={ORIGIN} name={contact.name} />
             : surface === "contact" ? <EditContactSheet contact={contact} open onOpenChange={browser.noop} />
                 : surface === "company" ? <EditCompanySheet company={company} open onOpenChange={browser.noop} />
-                    : <EditDealSheet deal={deal} open onOpenChange={browser.noop} pipelines={[pipeline]} stagesByPipeline={{ 41: [stage] }} />);
+                    : <EditDealSheet deal={deal} timezone="UTC" open onOpenChange={browser.noop} pipelines={[pipeline]} stagesByPipeline={{ 41: [stage] }} />);
         await act(async () => {
             if (surface === "company") { get("companySheet").updateDraft(41, { name: "Updated company" }); get("companySheet").updateLogoFile?.(41, image); }
             else if (surface === "deal") get("dealSheet").updateDraft(41, { name: "Updated deal" });
