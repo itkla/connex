@@ -46,7 +46,7 @@ class PasskeyApprovalMetadataTest extends AbstractServiceTest {
         User user = newUser();
         Organization org = org();
         orgMembers.addMember(org.getId(), user.getId(), "admin");
-        assertEquals(List.of(new PrivilegedMembershipDto(org.getId(), org.getName(), "admin", List.of())),
+        assertEquals(List.of(new PrivilegedMembershipDto(org.getId(), org.getName(), "admin", false, List.of())),
                 privileged.privilegedMemberships(user.getId()));
     }
 
@@ -59,8 +59,8 @@ class PasskeyApprovalMetadataTest extends AbstractServiceTest {
         var memberships = privileged.privilegedMemberships(user.getId());
         assertEquals(1, memberships.size());
         assertNull(memberships.getFirst().orgRole());
-        assertEquals(List.of(new PrivilegedMembershipDto.Workspace(admin.getId(), admin.getName()),
-                new PrivilegedMembershipDto.Workspace(owner.getId(), owner.getName())), memberships.getFirst().workspaces());
+        assertEquals(List.of(new PrivilegedMembershipDto.Workspace(admin.getId(), admin.getName(), false),
+                new PrivilegedMembershipDto.Workspace(owner.getId(), owner.getName(), true)), memberships.getFirst().workspaces());
     }
 
     @Test void customPrivilegeDeduplicatesPermissionJoinsAndCombinesOrgMembership() {
@@ -72,7 +72,56 @@ class PasskeyApprovalMetadataTest extends AbstractServiceTest {
         orgMembers.addMember(org.getId(), user.getId(), "owner");
         var membership = privileged.privilegedMemberships(user.getId()).getFirst();
         assertEquals("owner", membership.orgRole());
-        assertEquals(List.of(new PrivilegedMembershipDto.Workspace(custom.getId(), custom.getName())), membership.workspaces());
+        assertEquals(List.of(new PrivilegedMembershipDto.Workspace(custom.getId(), custom.getName(), false)), membership.workspaces());
+        assertTrue(membership.lastOwner());
+    }
+
+    @Test void soleFounderIsReportedAsLastOwnerInBothScopes() {
+        User founder = newUser();
+        Organization org = org();
+        Workspace scope = workspace(org);
+        orgMembers.addMember(org.getId(), founder.getId(), "owner");
+        workspaceMapper.addMember(scope.getId(), founder.getId(), "owner");
+
+        var membership = privileged.privilegedMemberships(founder.getId()).getFirst();
+
+        assertTrue(membership.lastOwner());
+        assertTrue(membership.workspaces().getFirst().lastOwner());
+    }
+
+    @Test void anotherScopesOwnerOrPendingOwnerDoesNotMakeTheFoundersExitPossible() {
+        User founder = newUser(), other = newUser();
+        Organization here = org(), elsewhere = org();
+        Workspace scope = workspace(here), foreign = workspace(elsewhere);
+        orgMembers.addMember(here.getId(), founder.getId(), "owner");
+        orgMembers.addMember(elsewhere.getId(), other.getId(), "owner");
+        workspaceMapper.addMember(scope.getId(), founder.getId(), "owner");
+        workspaceMapper.addMember(foreign.getId(), other.getId(), "owner");
+        workspaceMapper.addPendingMember(scope.getId(), other.getId(), "owner");
+
+        var membership = privileged.privilegedMemberships(founder.getId()).getFirst();
+
+        assertEquals(1, privileged.privilegedMemberships(founder.getId()).size());
+        assertTrue(membership.lastOwner());
+        assertEquals(List.of(new PrivilegedMembershipDto.Workspace(scope.getId(), scope.getName(), true)),
+                membership.workspaces());
+    }
+
+    @Test void anotherActiveOwnerMakesOnlyThatScopesLastOwnerHintFalse() {
+        User founder = newUser(), other = newUser();
+        Organization org = org();
+        Workspace shared = workspace(org), sole = workspace(org);
+        orgMembers.addMember(org.getId(), founder.getId(), "owner");
+        orgMembers.addMember(org.getId(), other.getId(), "owner");
+        workspaceMapper.addMember(shared.getId(), founder.getId(), "owner");
+        workspaceMapper.addMember(shared.getId(), other.getId(), "owner");
+        workspaceMapper.addMember(sole.getId(), founder.getId(), "owner");
+
+        var membership = privileged.privilegedMemberships(founder.getId()).getFirst();
+
+        assertFalse(membership.lastOwner());
+        assertEquals(List.of(new PrivilegedMembershipDto.Workspace(shared.getId(), shared.getName(), false),
+                new PrivilegedMembershipDto.Workspace(sole.getId(), sole.getName(), true)), membership.workspaces());
     }
 
     @Test void nonPrivilegedCustomRoleOverridesAdminAndInactiveMembershipsAndScopesAreExcluded() {
@@ -94,6 +143,8 @@ class PasskeyApprovalMetadataTest extends AbstractServiceTest {
     @Test void unprivilegedAndOtherAccountsHaveNoSelfExitMetadata() {
         User ordinary = newUser(), privilegedOther = newUser();
         Organization org = org();
+        Workspace scope = workspace(org);
+        workspaceMapper.addMember(scope.getId(), ordinary.getId(), "member");
         orgMembers.addMember(org.getId(), privilegedOther.getId(), "owner");
         assertEquals(List.of(), privileged.privilegedMemberships(ordinary.getId()));
         assertEquals(org.getId(), privileged.privilegedMemberships(privilegedOther.getId()).getFirst().orgId());

@@ -46,13 +46,13 @@ function exitsWith(overrides: Partial<ConfinementExits> = {}): ConfinementExits 
 
 async function renderCard(
     exits: ConfinementExits,
-    options: { canLeaveWorkspaces?: boolean; locale?: string; messages?: Record<string, unknown> } = {},
+    options: { canLeaveWorkspaces?: boolean; locale?: string; messages?: Record<string, unknown>; requirements?: PasskeyRegistrationRequirements } = {},
 ) {
     await act(async () => root.render(
         <NextIntlClientProvider locale={options.locale ?? "en"} messages={options.messages ?? enAccount} timeZone="UTC">
             <PrivilegedMfaConfinementCard
                 reason="attestation"
-                requirements={requirements}
+                requirements={options.requirements ?? requirements}
                 passkeys={[{
                     credentialId: "cred-laptop",
                     label: "Laptop",
@@ -90,6 +90,22 @@ afterEach(async () => {
 });
 
 describe("the confinement card", () => {
+    it.each(["en", "ja"] as const)("offers a sole founder one security path and no impossible leave buttons in %s", async (locale) => {
+        await renderCard(exitsWith(), {
+            locale,
+            messages: locale === "en" ? enAccount : jaAccount,
+            requirements: {
+                ...requirements,
+                privilegedMemberships: [{
+                    orgId: 3, orgName: "Founder's Workspace", orgRole: "owner", lastOwner: true,
+                    workspaces: [{ workspaceId: 7, workspaceName: "Founder's Workspace", lastOwner: true }],
+                }],
+            },
+        });
+        expect(buttonTexts()).toEqual(["Enter code"]);
+        expect(container.textContent).toContain((locale === "en" ? enAccount : jaAccount).AccountSecurity.exitRefusedWorkspaceLastOwner);
+    });
+
     it("names the passkey to approve and offers the surface's action", async () => {
         await renderCard(exitsWith());
 
@@ -101,22 +117,22 @@ describe("the confinement card", () => {
     it("offers every membership that makes the account privileged as an exit", async () => {
         await renderCard(exitsWith());
 
-        expect(buttonTexts()).toEqual(expect.arrayContaining(["Leave Acme", "Leave Sales", "Leave Ops"]));
+        expect(buttonTexts()).toEqual(expect.arrayContaining(["Leave organization: Acme", "Leave workspace: Sales", "Leave workspace: Ops"]));
         expect(buttonTexts().filter((text) => text === "Leave Beta")).toHaveLength(0);
     });
 
     it("offers only organizations where the surface cannot leave a workspace", async () => {
         await renderCard(exitsWith(), { canLeaveWorkspaces: false });
 
-        expect(buttonTexts()).toContain("Leave Acme");
-        expect(buttonTexts()).not.toContain("Leave Sales");
+        expect(buttonTexts()).toContain("Leave organization: Acme");
+        expect(buttonTexts()).not.toContain("Leave workspace: Sales");
     });
 
     it("asks before leaving, and leaves only once confirmed", async () => {
         const exits = exitsWith();
         await renderCard(exits);
 
-        await act(async () => button("Leave Acme").click());
+        await act(async () => button("Leave organization: Acme").click());
         const dialog = container.querySelector("[role='dialog']");
         expect(dialog?.textContent).toContain("Leave Acme?");
         expect(dialog?.textContent).toContain(enAccount.AccountSecurity.exitConfirmOrganization);
@@ -131,7 +147,7 @@ describe("the confinement card", () => {
     it("warns about the assignment and ownership changes before leaving a workspace", async () => {
         await renderCard(exitsWith());
 
-        await act(async () => button("Leave Sales").click());
+        await act(async () => button("Leave workspace: Sales").click());
 
         expect(container.querySelector("[role='dialog']")?.textContent)
             .toContain(enAccount.AccountInvites.leaveConfirmBody);
@@ -154,7 +170,7 @@ describe("the confinement card", () => {
         });
 
         expect(container.textContent).toContain(jaAccount.AccountSecurity.exitsTitle);
-        expect(buttonTexts()).toContain("Acme から退出");
+        expect(buttonTexts()).toContain("組織「Acme」から退出");
         expect(container.textContent).toContain(jaAccount.AccountSecurity.exitRefusedWorkspaceLastOwner);
     });
 

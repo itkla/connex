@@ -17,6 +17,10 @@ import { deferred, image, json, ORIGIN, shell, stubBackend, switchWorkspace } fr
 
 const boundary = vi.hoisted<{ drawer: ComponentProps<typeof AskConnexDrawer> | null; missionCreate: ComponentProps<typeof AskConnexMissionCreate> | null; params: { sessionId?: string }; noop: () => void; canPersist: () => boolean; search: URLSearchParams; context: { user: { id: number; displayName: string }; record: ActiveRecordRef | null; selection: null } }>(() => ({ drawer: null, missionCreate: null, params: { sessionId: "4" }, noop: () => undefined, canPersist: () => true, search: new URLSearchParams(), context: { user: { id: 7, displayName: "Origin member" }, record: null, selection: null } }));
 const translate = vi.hoisted(() => Object.assign((key: string) => key, { has: () => false }));
+vi.mock('@/app/hooks/usePrivilegedMfaConfinement', async (importOriginal) => ({
+    ...await importOriginal<typeof import('@/app/hooks/usePrivilegedMfaConfinement')>(),
+    usePrivilegedMfaReadiness: () => 'ready',
+}));
 vi.mock("next/navigation", () => ({ useParams: () => boundary.params, usePathname: () => boundary.params.sessionId ? "/ask-connex/4" : "/ask-connex", useSearchParams: () => boundary.search, useRouter: () => ({ push: boundary.noop, replace: boundary.noop, refresh: boundary.noop }) }));
 vi.mock("next-intl", () => ({ useLocale: () => "en", useTranslations: () => translate }));
 vi.mock("motion/react", () => ({ useReducedMotion: () => true }));
@@ -30,6 +34,10 @@ vi.mock("@/app/hooks/useIsMobile", () => ({ useIsMobile: () => false }));
 vi.mock("@/app/hooks/useNow", () => ({ useLiveNow: () => Date.parse("2026-10-19T12:00:00Z"), useNow: () => Date.parse("2026-10-19T12:00:00Z") }));
 vi.mock("@/app/hooks/useAccountStorageGeneration", () => ({ useAccountStorageGeneration: () => boundary.canPersist }));
 vi.mock("@/app/lib/realtime", () => ({ createAiChatSocket: () => ({ activate: boundary.noop, deactivate: boundary.noop }) }));
+vi.mock("@/app/lib/api", async (importOriginal) => ({
+    ...await importOriginal<typeof import("@/app/lib/api")>(),
+    getAiCommandCenter: vi.fn().mockResolvedValue({ chatAvailable: true, watchesAvailable: true }),
+}));
 vi.mock("@/app/lib/toast", () => ({ toastError: vi.fn(), toastInfo: vi.fn(), toastSuccess: vi.fn(), toastDismiss: vi.fn() }));
 vi.mock("@/app/lib/managed-image", async (importOriginal) => ({ ...await importOriginal<typeof import("@/app/lib/managed-image")>(), isInlineManagedImageFile: vi.fn(async () => true) }));
 vi.mock("@/app/components/activity/notes/MentionEditor", () => ({ default: ({ value, onChange }: { value: string; onChange: (value: string) => void }) => <textarea value={value} onChange={(event) => onChange(event.target.value)} /> }));

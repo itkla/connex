@@ -205,6 +205,8 @@ const ASK_CONNEX_MENTION_TYPES = {
 type UnavailableState = {
     title: string;
     body: string;
+    /** Retains an existing editor during revalidation while submission stays disabled. */
+    preserveComposer?: boolean;
 } | null;
 
 const noopRecovery = () => {};
@@ -2089,8 +2091,8 @@ function ConversationSurface({
                                 <MessageScrollerItem messageId="empty">
                                     <EmptyState
                                         icon={SparklesIcon}
-                                        title={labels.emptyTitle}
-                                        body={labels.emptyBody}
+                                        title={unavailable?.title ?? labels.emptyTitle}
+                                        body={unavailable?.body ?? labels.emptyBody}
                                         tone="brand"
                                         className="border-0 bg-transparent px-4 py-12"
                                         action={(
@@ -2100,7 +2102,7 @@ function ConversationSurface({
                                                     workspace ? 'max-w-xl' : 'max-w-sm',
                                                 )}
                                             >
-                                                {jobs.map((job) => (
+                                                {(unavailable ? [] : jobs).map((job) => (
                                                     <Button
                                                         key={job.id}
                                                         type="button"
@@ -2111,9 +2113,9 @@ function ConversationSurface({
                                                         {job.label}
                                                     </Button>
                                                 ))}
-                                                <p className="pt-3 text-xs leading-relaxed text-muted-foreground">
+                                                {!unavailable ? <p className="pt-3 text-xs leading-relaxed text-muted-foreground">
                                                     {labels.disclosureCreation}
-                                                </p>
+                                                </p> : null}
                                                 {workspace ? (
                                                     <>
                                                         <Separator className="my-4" />
@@ -2255,7 +2257,7 @@ function ConversationSurface({
                 </MessageScroller>
             </MessageScrollerProvider>
 
-            {unavailable ? (
+            {unavailable && !unavailable.preserveComposer ? (
                 loadState !== 'forbidden' ? (
                     <div role="status" className="shrink-0 border-t border-border px-4 py-3 text-xs leading-relaxed text-muted-foreground">
                         <span className="font-medium text-foreground">{unavailable.title}</span>{' '}
@@ -2270,6 +2272,12 @@ function ConversationSurface({
                         requestSend();
                     }}
                 >
+                    {unavailable?.preserveComposer ? (
+                        <p role="status" className="mb-3 text-xs leading-relaxed text-muted-foreground">
+                            <span className="font-medium text-foreground">{unavailable.title}</span>{' '}
+                            {unavailable.body}
+                        </p>
+                    ) : null}
                     {offeringJobs ? (
                         <JobSuggestions
                             jobs={jobs}

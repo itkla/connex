@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { MenuIcon, PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import { Button } from "@/components/ui/button";
+import PrivilegedMfaRouteGate from "@/app/components/account/PrivilegedMfaRouteGate";
 import GlobalSearch from "@/app/components/GlobalSearch";
 import NavBreadcrumb from "@/app/components/NavBreadcrumb";
 import MobileBottomBar from "@/app/components/MobileBottomBar";
@@ -236,7 +237,7 @@ export default function ContentShell({
                             ? "min-h-0 flex-1 overflow-hidden"
                             : "flex-1 overflow-x-hidden overflow-y-auto p-6 pb-[calc(env(safe-area-inset-bottom)+5.5rem)] md:pb-6"}
                     >
-                        {children}
+                        <PrivilegedMfaRouteGate>{children}</PrivilegedMfaRouteGate>
                     </main>
                 </div>
 

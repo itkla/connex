@@ -30,10 +30,10 @@ export default function AskConnexSignalEntry({
     subject: RadarSubject;
 }) {
     const t = useTranslations('AskConnex');
-    const { openWithPrompt } = useAskConnex();
+    const { openWithPrompt, canAsk } = useAskConnex();
     const skills = useAskConnexSkills(subject.type);
 
-    if (!canExplainAskConnexSignal(skills, family, subject.type)) return null;
+    if (!canAsk || !canExplainAskConnexSignal(skills, family, subject.type)) return null;
 
     const token = askConnexMentionToken({
         kind: subject.type,

@@ -84,7 +84,7 @@ vi.mock("next-intl", () => ({
 }));
 
 vi.mock("@/app/components/ask-connex/AskConnexProvider", () => ({
-    useAskConnex: () => ({ openWithPrompt: () => undefined }),
+    useAskConnex: () => ({ openWithPrompt: () => undefined, canAsk: true, canWatch: true }),
 }));
 
 vi.mock("@/app/hooks/useAskConnexSkills", () => ({
