@@ -14,7 +14,13 @@
     },
     "parsing": "Reading file…",
     "dropPrompt": "Drop a CSV here, or click to browse",
-    "uploadHint": "Up to 5,000 rows · 5MB · .csv",
+    "uploadHint": "Up to 5,000 rows · 5MB · .csv · UTF-8 or Shift-JIS",
+    "detectedEncoding": "Detected encoding: {encoding}",
+    "encoding": {
+      "utf-8": "UTF-8",
+      "shift_jis": "Shift-JIS (Windows-932)"
+    },
+    "errorEncoding": "We couldn't read this file's text correctly. Save it as a UTF-8 or Shift-JIS CSV and try again. No records were imported.",
     "errorTooLarge": "File is too large (max {max}).",
     "errorNoColumns": "No columns found in this file.",
     "errorNoRows": "No data rows found in this file.",
@@ -138,7 +144,7 @@
         "tasks": "Tasks"
       },
       "dropPrompt": "Drop a CSV here, or click to browse",
-      "uploadHint": "Up to 5,000 rows · 5MB · .csv",
+      "uploadHint": "Up to 5,000 rows · 5MB · .csv · UTF-8 or Shift-JIS",
       "errors": {
         "tooLarge": "This file is larger than 5MB.",
         "noColumns": "No columns were found in this file.",
