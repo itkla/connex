@@ -5,6 +5,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Objects;
 
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
@@ -22,12 +23,12 @@ import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.Recor
 /**
  * The only writer of a deal row. Every route that creates a deal or changes its outcome persists
  * through this component, which reconciles the close state, writes the row and settles realized
- * value as one indivisible step.
+ * value as one indivisible step. Callers publish the returned immutable transition after their
+ * domain and audit writes, before the same transaction completes.
  *
  * <p>The containment is the point. {@code actual_value} is never written by the broad update
- * statement, so a route that changed {@code won} without reconciling realized value would leave a
- * lost deal holding the figure it was won with — and {@code deal_metrics.closed_revenue} sums
- * {@code actual_value} across every closed deal, admitting {@code won = FALSE} explicitly. Keeping
+ * statement, so every outcome change must reconcile its snapshot: a fresh win books its amount,
+ * an existing win stays frozen, and a lost deal resolves to zero. Keeping
  * {@link DealMapper#update} and the deal insert statements reachable only from here means a new
  * route cannot make that mistake: it has no way to write the row at all without reconciling.
  * {@code DealValueContractArchTest} enforces the containment.
@@ -43,6 +44,7 @@ public class DealOutcomeWriter {
 
     private final DealMapper dealMapper;
     private final DealValueService dealValueService;
+    private final RuleTriggerPublisher ruleTriggers;
 
     /**
      * Resolves a stage's outcome, treating a stageless deal as open. Callers that reconcile many
@@ -63,11 +65,12 @@ public class DealOutcomeWriter {
      * @param previousOutcome the won flag before this transition
      * @param requestedActualValue a submitted realized value, or null when the route carries none
      * @param scope the caller's captured unfiltered organization ceiling
+     * @return the captured transition to publish after domain and audit writes
      */
     @Transactional(propagation = Propagation.MANDATORY)
-    public void write(
+    public OutcomeChange write(
             int workspaceId, Deal deal, Boolean previousOutcome, BigDecimal requestedActualValue, RecordVisibilityScope scope) {
-        write(workspaceId, deal, previousOutcome, requestedActualValue,
+        return write(workspaceId, deal, previousOutcome, requestedActualValue,
             stageOutcome(workspaceId, deal.getStageId(), scope));
     }
 
@@ -79,9 +82,10 @@ public class DealOutcomeWriter {
      * @param previousOutcome the won flag before this transition
      * @param requestedActualValue a submitted realized value, or null when the route carries none
      * @param stageOutcome the resolved outcome of the deal's stage
+     * @return the captured transition to publish after domain and audit writes
      */
     @Transactional(propagation = Propagation.MANDATORY)
-    public void write(
+    public OutcomeChange write(
             int workspaceId, Deal deal, Boolean previousOutcome,
             BigDecimal requestedActualValue, String stageOutcome) {
         applyCloseState(deal, stageOutcome);
@@ -94,6 +98,7 @@ public class DealOutcomeWriter {
         }
         dealValueService.reconcileRealizedValue(
             workspaceId, deal, previousOutcome, requestedActualValue);
+        return outcomeChange(workspaceId, deal, previousOutcome);
     }
 
     /**
@@ -105,13 +110,15 @@ public class DealOutcomeWriter {
      * @param deal the locked deal to write, carrying its stored realized value
      * @param previousOutcome the won flag before this transition
      * @param scope the caller's captured unfiltered organization ceiling
+     * @return the captured transition to publish after domain and audit writes
      */
     @Transactional(propagation = Propagation.MANDATORY)
-    public void writeOutcome(int workspaceId, Deal deal, Boolean previousOutcome, RecordVisibilityScope scope) {
+    public OutcomeChange writeOutcome(int workspaceId, Deal deal, Boolean previousOutcome, RecordVisibilityScope scope) {
         dealValueService.requireConsistentLineCurrency(workspaceId, deal);
         applyCloseState(deal, stageOutcome(workspaceId, deal.getStageId(), scope));
         dealMapper.updateOutcome(deal);
         dealValueService.reconcileRealizedValue(workspaceId, deal, previousOutcome, null);
+        return outcomeChange(workspaceId, deal, previousOutcome);
     }
 
     /**
@@ -119,24 +126,29 @@ public class DealOutcomeWriter {
      * @param deal the deal to insert
      * @param requestedActualValue a submitted realized value, or null when the route carries none
      * @param stageOutcome the resolved outcome of the deal's stage
+     * @return the captured transition to publish after domain and audit writes
      */
     @Transactional(propagation = Propagation.MANDATORY)
-    public void create(Deal deal, BigDecimal requestedActualValue, String stageOutcome) {
+    public OutcomeChange create(Deal deal, BigDecimal requestedActualValue, String stageOutcome) {
         prepareForInsert(deal, requestedActualValue, stageOutcome);
         dealMapper.insert(deal);
+        return outcomeChange(deal.getWorkspaceId(), deal, null);
     }
 
     /**
      * Applies the outcome each new deal is created with and inserts them in bounded batches.
      * @param deals the deals to insert, each with the realized value and stage outcome it carries
+     * @return captured transitions to publish after the batch's domain and audit writes
      */
     @Transactional(propagation = Propagation.MANDATORY)
-    public void createBatch(List<NewDeal> deals) {
+    public List<OutcomeChange> createBatch(List<NewDeal> deals) {
         for (NewDeal item : deals) {
             prepareForInsert(item.deal(), item.requestedActualValue(), item.stageOutcome());
         }
         RecordInsertBatches.deals(deals.stream().map(NewDeal::deal).toList())
                 .forEach(dealMapper::insertBatch);
+        return deals.stream()
+            .map(item -> outcomeChange(item.deal().getWorkspaceId(), item.deal(), null)).toList();
     }
 
     /**
@@ -174,8 +186,24 @@ public class DealOutcomeWriter {
     private void prepareForInsert(Deal deal, BigDecimal requestedActualValue, String stageOutcome) {
         applyCloseState(deal, stageOutcome);
         deal.setActualValue(
-            dealValueService.resolveRealizedValueForNewDeal(deal.getWon(), requestedActualValue));
+            dealValueService.resolveRealizedValueForNewDeal(deal.getWon(), deal.getValue(), requestedActualValue));
     }
+
+    /** Publishes the captured transition after the caller's domain and audit writes, in the same transaction. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void publish(OutcomeChange change) {
+        if (change.outcome() != null && !Objects.equals(change.previousOutcome(), change.outcome())) {
+            ruleTriggers.publish(change.workspaceId(), "deal", change.dealId(),
+                Boolean.TRUE.equals(change.outcome()) ? "deal.won" : "deal.lost");
+        }
+    }
+
+    private static OutcomeChange outcomeChange(int workspaceId, Deal deal, Boolean previousOutcome) {
+        return new OutcomeChange(workspaceId, deal.getId(), previousOutcome, deal.getWon());
+    }
+
+    /** Immutable transition captured from the locked row, before callers reuse or mutate its bean. */
+    public record OutcomeChange(int workspaceId, int dealId, Boolean previousOutcome, Boolean outcome) {}
 
     /** A deal awaiting insert, with the realized value and resolved stage outcome it carries. */
     public record NewDeal(Deal deal, BigDecimal requestedActualValue, String stageOutcome) {}

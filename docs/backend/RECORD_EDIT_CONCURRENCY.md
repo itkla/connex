@@ -23,7 +23,8 @@ contact edits and other whole-record forms. Tenant, visibility and permission ch
   returns 409 `{code: "STALE_RECORD", currentVersion: <number>, message: <fixed text>}`.
   This code is distinct from the existing line-item value/currency conflicts.
 - Run the conditional broad write before dependent value/outcome writes. Its transaction covers
-  every dependent write, history, audit and event. A refusal rolls everything back. Return a
+  every dependent write, history, audit and event. A preceding value/source write would advance
+  the counter and conflict with the request's own token. A refusal rolls everything back. Return a
   fresh record after all writes so its version includes every mutation in that transaction. Close and reopen
   use the same final re-read; targeted name/value/date/owner/evaluation and board writes already
   return freshly selected records. Creation inserts at version zero and its augmentation changes
@@ -65,7 +66,10 @@ page/list. Do not update the base token when props or list data refresh while a 
 Both deal sheets carry the token in their drafts. Inline value edits replace the complete row with
 its successful response before a subsequent sheet captures it. Detail close/reopen, owner and full-edit
 responses stay available as edit bases until refreshed props reach that version. Board moves adopt
-the returned deal. Board Quick edit fetches a current record before opening because a move can
+the returned deal. Detail Edit fetches a pinned current record before opening, so line-item
+reconciliation cannot seed another draft with an old token while route refresh is pending.
+The sheet opens only if the rendered workspace still matches the captured origin. Board Quick edit
+fetches a current record before opening because a move can
 advance neighboring rows' position versions while the board reloads. Other bulk/calendar actions
 refresh their records rather than seed an edit from a partial response. Submission and snapshot helpers live in `dealEditConflict.ts`, outside component
 modules. A STALE_RECORD refusal fetches the latest record

@@ -112,7 +112,8 @@
         "cannotChangeStatus": "ステータスを変更できません: パイプラインまたはステージが未設定です",
         "dealClosed": "案件を決着にしました",
         "dealReopened": "案件を進行中に戻しました",
-        "failedToUpdateStatus": "案件のステータスを更新できませんでした"
+        "failedToUpdateStatus": "案件のステータスを更新できませんでした",
+        "failedToLoadDeal": "案件を読み込めませんでした。もう一度お試しください。"
     },
     "DealsActivityBreakdown": {
         "activityMix": "アクティビティ構成",

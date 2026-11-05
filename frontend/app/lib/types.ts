@@ -1570,7 +1570,7 @@ export type UpdateDealEvaluationPayload = {
 export type CreateDealPayload = {
     name: string;
     value: number;
-    actualValue: number;
+    actualValue?: number;
     currency: string;
     pipeline: number | null;
     stage: number | null;
@@ -1588,7 +1588,7 @@ export type UpdateDealPayload = {
     expectedVersion?: number;
     name: string;
     value: number;
-    actualValue: number;
+    actualValue?: number;
     currency: string;
     pipeline: number;
     stage: number;

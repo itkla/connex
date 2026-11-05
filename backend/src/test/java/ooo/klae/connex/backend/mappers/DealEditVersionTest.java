@@ -25,6 +25,7 @@ import ooo.klae.connex.backend.exceptions.GlobalExceptionHandler;
 import ooo.klae.connex.backend.exceptions.StaleRecordException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.services.DealOutcomeWriter;
+import ooo.klae.connex.backend.services.RuleTriggerPublisher;
 import ooo.klae.connex.backend.services.DealValueService;
 
 class DealEditVersionTest {
@@ -126,7 +127,7 @@ class DealEditVersionTest {
         when(mapper.getDealById(7, 13)).thenReturn(current);
 
         StaleRecordException error = assertThrows(StaleRecordException.class,
-            () -> new DealOutcomeWriter(mapper, values).write(7, edit, null, null, "normal"));
+            () -> new DealOutcomeWriter(mapper, values, mock(RuleTriggerPublisher.class)).write(7, edit, null, null, "normal"));
 
         assertEquals(2L, error.getCurrentVersion());
         verifyNoInteractions(values);
@@ -140,7 +141,7 @@ class DealEditVersionTest {
         edit.setId(13);
         edit.setWorkspaceId(7);
         assertThrows(ResourceNotFoundException.class,
-            () -> new DealOutcomeWriter(mapper, values).write(7, edit, null, null, "normal"));
+            () -> new DealOutcomeWriter(mapper, values, mock(RuleTriggerPublisher.class)).write(7, edit, null, null, "normal"));
         verifyNoInteractions(values);
     }
 

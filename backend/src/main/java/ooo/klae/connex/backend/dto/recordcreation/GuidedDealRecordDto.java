@@ -28,10 +28,12 @@ public record GuidedDealRecordDto(
     @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     @Pattern(regexp = "^[0-9a-f]{64}$") String duplicateReviewToken
 ) {
+    /** Preserves the omitted realized amount for canonical resolution when the chosen stage wins. */
     public Deal toBean() {
         Deal deal = new Deal();
         deal.setName(name);
         deal.setValue(value);
+        deal.setActualValue(null);
         deal.setCurrency(currency);
         deal.setPipelineId(pipeline);
         deal.setStageId(stage);

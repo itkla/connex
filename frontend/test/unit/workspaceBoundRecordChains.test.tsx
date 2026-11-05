@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { createHash, webcrypto } from "node:crypto";
-import { act, type ComponentProps, type ReactNode } from "react";
+import { act, useEffect, useState, type ComponentProps, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -17,6 +17,8 @@ import EditContactSheet from "@/app/components/records/contacts/EditContactSheet
 import EditCompanySheet from "@/app/components/records/companies/EditCompanySheet";
 import EditDealSheet from "@/app/components/records/deals/EditDealSheet";
 import DealsBrowser from "@/app/components/records/deals/DealsBrowser";
+import DealActionsMenu from "@/app/components/records/deals/DealActionsMenu";
+import DealLineItems from "@/app/components/records/deals/DealLineItems";
 import { submitDealDraftUpdates, toDealDraft } from "@/app/components/records/deals/dealEditConflict";
 import type DealEditConflictDialog from "@/app/components/records/deals/DealEditConflictDialog";
 import EditPipelineSheet from "@/app/components/records/pipelines/EditPipelineSheet";
@@ -33,8 +35,8 @@ import type QuickEditDealSheet from "@/app/components/records/deals/QuickEditDea
 import type QuickEditPipelineSheet from "@/app/components/records/pipelines/QuickEditPipelineSheet";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { bindRenderedWorkspace, releaseRenderedWorkspace, workspacePinnedRequest } from "@/app/lib/renderedWorkspace";
-import type { BusinessCardImportDraft } from "@/app/lib/types";
-import { company, contact, deal, image, json, ORIGIN, pipeline, shell, stage, stubBackend, switchWorkspace } from "./helpers/workspaceChainBackend";
+import type { BusinessCardImportDraft, Deal, DealLineItem } from "@/app/lib/types";
+import { company, contact, deal, deferred, image, json, ORIGIN, pipeline, shell, stage, stubBackend, switchWorkspace } from "./helpers/workspaceChainBackend";
 
 const captured = vi.hoisted<{
     task: ComponentProps<typeof TaskDialog> | null;
@@ -63,6 +65,7 @@ const captured = vi.hoisted<{
 }));
 const browser = vi.hoisted(() => ({
     noop: () => undefined,
+    refresh: vi.fn(),
     selectedIds: new Set([41]),
     filterState: {},
     items: [],
@@ -70,7 +73,7 @@ const browser = vi.hoisted(() => ({
 }));
 const translate = vi.hoisted(() => Object.assign((key: string) => key, { has: () => false }));
 vi.mock("next/navigation", () => ({
-    useRouter: () => ({ refresh: browser.noop, push: browser.noop, replace: browser.noop }),
+    useRouter: () => ({ refresh: browser.refresh, push: browser.noop, replace: browser.noop }),
     usePathname: () => "/records/pipelines", useSearchParams: () => browser.search,
 }));
 vi.mock("next-intl", () => ({ useTranslations: () => translate, useLocale: () => "en" }));
@@ -217,6 +220,102 @@ describe("deal edit origins", () => {
             await act(async () => get("dealConflict").onReload(snapshot));
             expect(get("dealSheet").drafts[41]).toMatchObject({ expectedVersion: 2, name: current.name });
         }
+    });
+});
+
+describe("detail edit snapshots", () => {
+    it("uses the reconciled deal after renaming a line while route refresh is held", async () => {
+        const initial = { ...deal, version: 1 };
+        let current = initial;
+        const routeRefresh = deferred<Deal>();
+        const line: DealLineItem = {
+            id: 11, dealId: deal.id, name: "Consulting", unitPrice: 100, quantity: 1,
+            billingFrequency: "one_time", position: 0, currency: "USD",
+            lineSubtotal: 100, lineTax: 0, lineTotal: 100, createdAt: "", updatedAt: "",
+        };
+        const lines = { items: [line], totals: { currency: "USD", subtotal: 100, tax: 0, oneTimeTotal: 100, recurringTotal: 0, grandTotal: 100 } };
+        const backend = stubBackend(undefined, (path, method) => {
+            if (path === "/api/deals/41/line-items/11" && method === "PUT") {
+                current = { ...current, version: 2 };
+                return json({ ...lines, items: [{ ...line, name: "Renamed consulting" }] });
+            }
+            if (path === "/api/deals/41" && method === "GET") return json(current);
+            if (path === "/api/deals/41" && method === "PUT") {
+                current = { ...current, version: 3, name: "Edited after line rename" };
+                return json(current);
+            }
+            return undefined;
+        });
+        function Route() {
+            const [pageDeal, setPageDeal] = useState<Deal>(initial);
+            useEffect(() => {
+                let mounted = true;
+                void routeRefresh.promise.then((snapshot) => { if (mounted) setPageDeal(snapshot); });
+                return () => { mounted = false; };
+            }, []);
+            return <>
+                <output>{pageDeal.version}</output>
+                <DealActionsMenu deal={pageDeal} pipelines={[pipeline]} stagesByPipeline={{ 41: [stage] }} currentUserId={7} />
+                <DealLineItems dealId={deal.id} dealCurrency="USD" initial={lines} />
+            </>;
+        }
+        await render(<Route />);
+        const name = document.querySelector<HTMLInputElement>('input[aria-label="columnItem"]');
+        if (!name) throw new Error("Expected the line name input");
+        await act(async () => {
+            name.value = "Renamed consulting";
+            name.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+            await vi.waitFor(() => expect(browser.refresh).toHaveBeenCalledOnce());
+        });
+        expect(document.querySelector("output")?.textContent).toBe("1");
+        document.cookie = "connex_workspace=5; path=/";
+        const edit = [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "edit");
+        if (!edit) throw new Error("Expected the detail Edit action");
+        await act(async () => edit.click());
+        expect(get("dealSheet").open).toBe(true);
+        const reads = vi.mocked(fetch).mock.calls.filter(([input, init]) => String(input).endsWith("/api/deals/41") && (init?.method ?? "GET") === "GET");
+        expect(reads).toHaveLength(1);
+        expect(new Headers(reads[0]?.[1]?.headers).get("X-Workspace-Id")).toBe(String(ORIGIN));
+        expect(get("dealSheet").drafts[41].expectedVersion).toBe(2);
+        await act(async () => get("dealSheet").updateDraft(41, { name: "Edited after line rename" }));
+        await act(async () => get("dealSheet").saveEdits());
+        expectWrites(backend, ["/api/deals/41/line-items/11", "/api/deals/41"]);
+        const body = backend.requests[1]?.init.body;
+        if (typeof body !== "string") throw new Error("Expected a deal update payload");
+        expect(JSON.parse(body)).toMatchObject({ expectedVersion: 2, name: "Edited after line rename" });
+        expect(captured.dealConflict).toBeNull();
+        expect(get("dealSheet").open).toBe(false);
+        expect(document.querySelector("output")?.textContent).toBe("1");
+        await act(async () => routeRefresh.resolve(current));
+        expect(document.querySelector("output")?.textContent).toBe("3");
+    });
+
+    it("does not open detail Edit after its pinned snapshot read crosses a workspace switch", async () => {
+        stubBackend();
+        const snapshot = deferred<Response>();
+        const started = deferred<void>();
+        const transport = vi.mocked(fetch);
+        const original = transport.getMockImplementation();
+        if (!original) throw new Error("Expected the stub transport");
+        let readOrigin: string | null = null;
+        transport.mockImplementation((input, init = {}) => {
+            if (String(input).endsWith("/api/deals/41") && (init.method ?? "GET") === "GET") {
+                readOrigin = new Headers(init.headers).get("X-Workspace-Id");
+                started.resolve();
+                return snapshot.promise;
+            }
+            return original(input, init);
+        });
+        await render(<DealActionsMenu deal={{ ...deal, version: 1 }} pipelines={[pipeline]} stagesByPipeline={{ 41: [stage] }} currentUserId={7} />);
+        const edit = [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === "edit");
+        if (!edit) throw new Error("Expected the detail Edit action");
+        await act(async () => { edit.click(); await started.promise; });
+        expect(edit.disabled).toBe(true);
+        expect(readOrigin).toBe(String(ORIGIN));
+        switchWorkspace();
+        await act(async () => { snapshot.resolve(json({ ...deal, version: 2 })); await snapshot.promise; });
+        expect(get("dealSheet").open).toBe(false);
+        expect(edit.disabled).toBe(false);
     });
 });
 

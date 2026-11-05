@@ -1,6 +1,6 @@
 import { updateDeal, updateDealValue } from '@/app/lib/api';
 import type { DealDraft } from './QuickEditDealSheet';
-import { actualValueForOutcome } from './dealOutcome';
+import { requestedActualValue } from './dealOutcome';
 import type { Deal, UpdateDealPayload } from '@/app/lib/types';
 import { changedRecordFields } from '@/app/lib/recordEditConflict';
 import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
@@ -23,6 +23,7 @@ export function toDealDraft(d: Deal): DealDraft {
         name: d.name ?? '',
         value: d.value ?? 0,
         actualValue: d.actualValue ?? 0,
+        actualValueEdited: false,
         currency: d.currency ?? 'USD',
         pipeline: d.pipeline ?? 0,
         stage: d.stage ?? 0,
@@ -40,7 +41,7 @@ export async function submitDealDraftUpdate(dealId: number, draft: DealDraft, in
         expectedVersion: draft.expectedVersion,
         name: draft.name.trim(),
         value: draft.value,
-        actualValue: actualValueForOutcome(draft.won, draft.actualValue),
+        actualValue: requestedActualValue(draft.won, draft.actualValue, draft.actualValueEdited),
         currency: draft.currency.trim() || 'USD',
         pipeline: draft.pipeline,
         stage: draft.stage,
@@ -67,7 +68,7 @@ export async function submitDealDraftUpdates(updates: ReadonlyArray<DealDraftUpd
             expectedVersion: draft.expectedVersion,
             name: draft.name.trim(),
             value: draft.value,
-            actualValue: actualValueForOutcome(draft.won, draft.actualValue),
+            actualValue: requestedActualValue(draft.won, draft.actualValue, draft.actualValueEdited),
             currency: draft.currency.trim(),
             pipeline: draft.pipeline,
             stage: draft.stage,

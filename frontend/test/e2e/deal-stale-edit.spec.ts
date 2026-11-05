@@ -21,7 +21,8 @@ async function openEditor(page: Page, surface: 'detail' | 'list', name: string, 
 for (const locale of ['en', 'ja'] as const) {
     for (const surface of ['detail', 'list'] as const) {
         for (const openBeforeWrite of [true, false]) {
-            test(`${surface} ${locale}: stale ${openBeforeWrite ? 'open form' : 'page before opening form'} preserves the draft across two tabs`, async ({ page, context }, testInfo) => {
+            const checksConflict = openBeforeWrite || surface === 'list';
+            test(`${surface} ${locale}: ${checksConflict ? `stale ${openBeforeWrite ? 'open form' : 'page before opening form'} preserves the draft` : 'opening Edit refreshes the snapshot'} across two tabs`, async ({ page, context }, testInfo) => {
                 const fixture = runFixture(testInfo.project.name);
                 await useLocale(context, locale);
                 const csrf = await csrfBootstrap(context.request);
@@ -57,6 +58,20 @@ for (const locale of ['en', 'ja'] as const) {
                     await otherEditor.getByRole('button', { name: message(locale, 'deals', 'DealsQuickEditSheet.save'), exact: true }).click();
                     expect((await saved).status()).toBe(200);
                     await expect(otherEditor).not.toBeVisible();
+
+                    if (!checksConflict) {
+                        const editor = await openEditor(page, surface, name, locale);
+                        await expect(editor.locator(`#deal-value-${id}`)).toHaveValue('99999');
+                        await editor.locator(`#deal-name-${id}`).fill(`${name} draft`);
+                        const updated = page.waitForResponse((response) => response.url().endsWith(`/api/deals/${id}`)
+                            && response.request().method() === 'PUT');
+                        await editor.getByRole('button', { name: message(locale, 'deals', 'DealsQuickEditSheet.save'), exact: true }).click();
+                        expect((await updated).status()).toBe(200);
+                        await expect(editor).not.toBeVisible();
+                        const stored = await context.request.get(`/api/deals/${id}`);
+                        expect(await stored.json()).toMatchObject({ name: `${name} draft`, value: 99999 });
+                        return;
+                    }
 
                     if (!openBeforeWrite) await openEditor(page, surface, name, locale);
                     const editor = page.getByRole('dialog', { name: message(locale, 'deals', 'DealsQuickEditSheet.titleSingle'), exact: true });
@@ -139,4 +154,64 @@ test('an inline value save followed by quick-edit name save uses the advanced ve
     const storedResponse = await context.request.get(`/api/deals/${id}`);
     const stored: unknown = await storedResponse.json();
     expect(stored).toEqual(expect.objectContaining({ name: `${name} edited`, value: 99999 }));
+});
+
+test('line rename followed by detail Edit uses the reconciled version while route refresh is held', async ({ page, context }, testInfo) => {
+    const fixture = runFixture(testInfo.project.name);
+    await useLocale(context, 'en');
+    const seed = seeder(context.request, fixture.workspaceId, await csrfBootstrap(context.request));
+    const sourceResponse = await context.request.get(`/api/deals/${fixture.deals.primary.id}`);
+    expect(sourceResponse.ok()).toBe(true);
+    const source: unknown = await sourceResponse.json();
+    if (!isRecord(source) || typeof source.pipeline !== 'number' || typeof source.stage !== 'number') {
+        throw new Error('The seeded deal has no pipeline or stage');
+    }
+    const name = `Line snapshot ${Date.now()} ${testInfo.testId}`;
+    const review = await seed.post('/api/duplicate-preflight/deals', { name, companyId: null });
+    const created = await seed.post('/api/deals', {
+        name, value: 100, currency: 'JPY', pipeline: source.pipeline, stage: source.stage,
+        company: null, duplicateReviewToken: review.reviewToken,
+    });
+    if (typeof created.id !== 'number') throw new Error('The created deal has no id');
+    const id = created.id;
+    const lines = await seed.post(`/api/deals/${id}/line-items`, {
+        name: 'Consulting', unitPrice: 100, quantity: 1, billingFrequency: 'one_time',
+    });
+    const line = Array.isArray(lines.items) ? lines.items.find(isRecord) : undefined;
+    if (!line || typeof line.id !== 'number') throw new Error('The created line has no id');
+    const lineId = line.id;
+    const detailPath = `/records/deals/${id}`;
+    await page.goto(detailPath);
+    const releaseRefresh = Promise.withResolvers<void>();
+    let refreshStarted = false;
+    await page.route(`**${detailPath}*`, async (route) => {
+        if (new URL(route.request().url()).pathname !== detailPath || route.request().headers().rsc !== '1') {
+            await route.continue();
+            return;
+        }
+        refreshStarted = true;
+        await releaseRefresh.promise;
+        await route.continue();
+    });
+    try {
+        const itemName = page.getByRole('textbox', { name: message('en', 'deals', 'DealsLineItems.columnItem'), exact: true });
+        await itemName.fill('Renamed consulting');
+        const lineSaved = page.waitForResponse((response) => response.url().endsWith(`/api/deals/${id}/line-items/${lineId}`)
+            && response.request().method() === 'PUT');
+        await itemName.press('Tab');
+        expect((await lineSaved).status()).toBe(200);
+        await expect.poll(() => refreshStarted).toBe(true);
+        const editor = await openEditor(page, 'detail', name, 'en');
+        await editor.locator(`#deal-name-${id}`).fill(`${name} edited`);
+        const saved = page.waitForResponse((response) => response.url().endsWith(`/api/deals/${id}`)
+            && response.request().method() === 'PUT');
+        await editor.getByRole('button', { name: message('en', 'deals', 'DealsQuickEditSheet.save'), exact: true }).click();
+        expect((await saved).status()).toBe(200);
+        await expect(editor).not.toBeVisible();
+        const stored = await context.request.get(`/api/deals/${id}`);
+        expect(await stored.json()).toMatchObject({ name: `${name} edited`, value: 100 });
+    } finally {
+        releaseRefresh.resolve();
+        await page.unrouteAll({ behavior: 'wait' });
+    }
 });
