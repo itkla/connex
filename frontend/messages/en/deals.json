@@ -147,6 +147,7 @@
         "achievedOn": "Reached on {date}"
     },
     "DealsTaskList": {
+        "entityLabel": "task",
         "taskDeleted": "Task deleted",
         "failedToDeleteTask": "Couldn't delete the task",
         "taskMarkedAsComplete": "Task marked as complete",
