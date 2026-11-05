@@ -46,7 +46,7 @@
       "loadMore": "Load more",
       "loadingMore": "Loading more",
       "runMeta": "Run #{run} · version {version}",
-      "legacyRunMeta": "Earlier run #{run} · version {version}",
+      "runReference": "Run #{run}",
       "failureCategory": "Reason: {category}",
       "recipeOrigin": "From a recipe",
       "firstRunTitle": "No runs yet",
@@ -117,7 +117,8 @@
         "waiting_backlog": "Runs are partway through, waiting out a delay.",
         "overdue_backlog": "At least one waiting run is past due.",
         "recent_failure": "A recent run failed.",
-        "execution_unavailable": "This workflow can't run here. Ask your administrator for help."
+        "execution_unavailable": "This workflow can't run here. Ask your administrator for help.",
+        "latest_run_failed": "The most recent completed run had a problem. Review its result."
       }
     },
     "backlog": {

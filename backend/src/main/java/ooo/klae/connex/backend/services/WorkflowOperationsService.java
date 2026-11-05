@@ -166,7 +166,8 @@ public class WorkflowOperationsService {
                 workflow.getIntakePausedAt(),
                 workflow.getIntakePausedById(),
                 workflow.getRuntimeOwner()),
-            health(workflow, backlogDto, interventions),
+            health(workflow, backlogDto, interventions,
+                backlog != null && backlog.isLatestOutcomeFailed()),
             activeVersion(workflow, versions),
             definitionChanges(versions),
             backlogDto,
@@ -274,7 +275,8 @@ public class WorkflowOperationsService {
     private WorkflowOperationsDetailDto.Health health(
             Workflow workflow,
             WorkflowOperationsDetailDto.Backlog backlog,
-            List<WorkflowInterventionDto> interventions) {
+            List<WorkflowInterventionDto> interventions,
+            boolean latestOutcomeFailed) {
         List<String> signals = new ArrayList<>();
         if (workflow.getArchivedAt() != null) {
             signals.add("workflow_archived");
@@ -300,8 +302,8 @@ public class WorkflowOperationsService {
         if (backlog.overdueCount() > 0) {
             signals.add("overdue_backlog");
         }
-        if (backlog.recentFailureCount() > 0) {
-            signals.add("recent_failure");
+        if (latestOutcomeFailed) {
+            signals.add("latest_run_failed");
         }
         String state;
         if (workflow.getArchivedAt() != null) {
@@ -316,7 +318,7 @@ public class WorkflowOperationsService {
             state = "intervention_required";
         } else if (backlog.overdueCount() > 0) {
             state = "backlogged";
-        } else if (backlog.recentFailureCount() > 0) {
+        } else if (latestOutcomeFailed) {
             state = "degraded";
         } else {
             state = "healthy";

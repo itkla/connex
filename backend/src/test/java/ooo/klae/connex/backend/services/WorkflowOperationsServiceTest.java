@@ -17,6 +17,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.beans.Workflow;
+import ooo.klae.connex.backend.beans.WorkflowBacklogView;
 import ooo.klae.connex.backend.beans.WorkflowOperationsLegacyRunView;
 import ooo.klae.connex.backend.beans.WorkflowOperationsRunView;
 import ooo.klae.connex.backend.dto.WorkflowRunSummaryDto;
@@ -100,6 +101,44 @@ class WorkflowOperationsServiceTest {
         assertEquals("unavailable", detail.health().state());
         assertEquals(List.of("execution_unavailable"), detail.health().signals());
         assertEquals("canonical", workflow.getRuntimeOwner());
+    }
+
+    @Test
+    void latestFailedOutcomeNeedsAttentionEvenWhenNoRecentFailuresRemain() {
+        Workflow workflow = new Workflow();
+        workflow.setId(11);
+        workflow.setEnabled(true);
+        WorkflowBacklogView backlog = new WorkflowBacklogView();
+        backlog.setLatestOutcomeFailed(true);
+        when(workflowMapper.getById(7, 11)).thenReturn(workflow);
+        when(versionMapper.listByWorkflow(7, 11)).thenReturn(List.of());
+        when(operationsMapper.getBacklog(7, 11)).thenReturn(backlog);
+        when(operationsMapper.getOpenInterventionsByWorkflow(7, 11, 50)).thenReturn(List.of());
+
+        var detail = service.workflow(11);
+
+        assertEquals("degraded", detail.health().state());
+        assertEquals(List.of("latest_run_failed"), detail.health().signals());
+        assertEquals(0, detail.backlog().recentFailureCount());
+    }
+
+    @Test
+    void recentFailureCountDoesNotOverrideANewerSuccessfulOutcome() {
+        Workflow workflow = new Workflow();
+        workflow.setId(11);
+        workflow.setEnabled(true);
+        WorkflowBacklogView backlog = new WorkflowBacklogView();
+        backlog.setRecentFailureCount(2);
+        when(workflowMapper.getById(7, 11)).thenReturn(workflow);
+        when(versionMapper.listByWorkflow(7, 11)).thenReturn(List.of());
+        when(operationsMapper.getBacklog(7, 11)).thenReturn(backlog);
+        when(operationsMapper.getOpenInterventionsByWorkflow(7, 11, 50)).thenReturn(List.of());
+
+        var detail = service.workflow(11);
+
+        assertEquals("healthy", detail.health().state());
+        assertEquals(List.of(), detail.health().signals());
+        assertEquals(2, detail.backlog().recentFailureCount());
     }
 
     private static WorkflowRunSummaryDto summary(String source, long id, LocalDateTime time) {

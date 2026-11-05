@@ -46,7 +46,7 @@ async function workflowResponses(page: Page) {
             ],
             edges: [{ id: "next", sourceNodeId: "trigger", targetNodeId: "end", outcome: "next" }],
         },
-        canvas: { positions: { trigger: { x: 0, y: 0 }, end: { x: 320, y: 0 } }, viewport: { x: 0, y: 0, zoom: 1 } },
+        canvas: { positions: { trigger: { x: 0, y: 0 }, end: { x: 320, y: 0 } }, viewport: { x: 120, y: 20, zoom: 0.75 } },
         activeVersionId: 1,
         createdById: null,
         updatedById: null,
@@ -152,7 +152,10 @@ for (const locale of ["en", "ja"] as const) {
         await expect(page.getByText(w("unavailableBadge"), { exact: true })).toBeVisible();
         await page.goto(`/workflows/${WORKFLOW_ID}`);
         await expect(page.getByRole("button", { name: w("disable"), exact: true })).toBeEnabled();
-        await page.getByRole("button", { name: w("validate"), exact: true }).click();
+        await expect(page.getByText(w("draftSaved"), { exact: true })).toBeVisible();
+        const validate = page.getByRole("button", { name: w("validate"), exact: true });
+        await expect(validate).toBeEnabled();
+        await validate.click();
         await expect(page.getByText(w("publicationReason.multiple_conditions"), { exact: true })).toBeVisible();
         await expect(page.getByText(w("validationReady"), { exact: true })).toHaveCount(0);
         await expect(page.getByRole("button", { name: w("publish"), exact: true })).toBeDisabled();
@@ -202,6 +205,10 @@ for (const locale of ["en", "ja"] as const) {
         await expect(page.getByText("Recorded handoff", { exact: true })).toBeVisible();
         await expect(page.getByText(w("runs.legacyPartial"), { exact: true })).toBeVisible();
         await expect(page.getByText(w("runs.status.running"), { exact: true })).toBeVisible();
+        for (const runNumber of [1, 2]) {
+            const run = page.locator(`a[href="/workflows/${WORKFLOW_ID}/runs/legacy-${runNumber}"]`);
+            await expect(run.locator("p").first()).toHaveText(o("runs.runReference").replace("{run}", String(runNumber)));
+        }
         await expect(page.getByText(o("summary.attention"), { exact: true }).locator("..").locator("dd")).toHaveText("1");
     });
 

@@ -46,7 +46,7 @@
       "loadMore": "さらに読み込む",
       "loadingMore": "読み込み中",
       "runMeta": "実行 #{run} · バージョン {version}",
-      "legacyRunMeta": "以前の実行 #{run} · バージョン {version}",
+      "runReference": "実行 #{run}",
       "failureCategory": "理由: {category}",
       "recipeOrigin": "レシピから作成",
       "firstRunTitle": "実行履歴はまだありません",
@@ -117,7 +117,8 @@
         "waiting_backlog": "待機時間の途中で止まっている実行があります。",
         "overdue_backlog": "予定の時刻を過ぎた待機中の実行があります。",
         "recent_failure": "最近の実行が失敗しました。",
-        "execution_unavailable": "この環境ではこのワークフローを実行できません。管理者にご相談ください。"
+        "execution_unavailable": "この環境ではこのワークフローを実行できません。管理者にご相談ください。",
+        "latest_run_failed": "直近で終了した実行に問題がありました。実行結果を確認してください。"
       }
     },
     "backlog": {

@@ -185,7 +185,7 @@ class WorkflowRecipeExecutionIntegrationTest extends AbstractServiceTest {
         Integer ruleId = workflowMapper.getById(workspace.getId(), installed.id()).getLegacyRuleId();
         assertNotNull(ruleId);
         int healthyBefore = operationsService.summary().healthyCount();
-        for (String status : List.of("running", "partial", "failed", "matched")) {
+        for (String status : List.of("running", "matched", "failed", "partial")) {
             RuleExecution execution = new RuleExecution();
             execution.setWorkspaceId(workspace.getId());
             execution.setRuleId(ruleId);

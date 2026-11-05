@@ -286,8 +286,13 @@ company. Preview returns `action_record_type_unsupported`, and installation crea
 An existing canonical-owned workflow cannot be enabled with the flag off. Workflow list/detail
 responses expose execution availability; Operations reports enabled unavailable workflows separately
 from healthy ones. Operations merges `workflow_run` and linked `rule_execution` history with source
-identity in cursor ordering, includes failed/partial rule executions in recent failures and attention
-counts, and never treats those workflows as healthy. Rule executions retain their summary-only
+identity in cursor ordering, and includes failed/partial rule executions in recent-failure metrics.
+Health and attention use the newest completed outcome across both histories, ordered by start time
+and then source/id (canonical wins equal timestamps), independently of the 24-hour recent-failure
+window. Failed or partly finished outcomes remain unhealthy until a newer completed outcome
+supersedes them; queued, running and waiting runs do not clear that failure. Existing open
+interventions and unavailable execution remain separate reasons for attention. Tenant V239 adds the
+`(workspace_id, executed_at DESC, id DESC)` index for workspace-wide execution history. Rule executions retain their summary-only
 history and cannot acquire canonical intervention controls through this read projection.
 
 Publication validation uses the same projection boundary as Publish. A single initial condition may

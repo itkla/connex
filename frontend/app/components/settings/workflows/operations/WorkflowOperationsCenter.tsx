@@ -347,7 +347,7 @@ function RunRow({ item, locale }: { item: WorkflowOperationsRunItem; locale: str
     const t = useTranslations("WorkflowOperations");
     const tw = useTranslations("WorkspaceWorkflows");
     const status = normalizeWorkflowRunStatus(item.run.status);
-    const { earlier, number } = workflowRunReferenceParts(item.run.runKey);
+    const { number } = workflowRunReferenceParts(item.run.runKey);
     return (
         <li>
             <Link
@@ -370,10 +370,9 @@ function RunRow({ item, locale }: { item: WorkflowOperationsRunItem; locale: str
                         {item.recipeKey ? <Badge variant="outline">{t("runs.recipeOrigin")}</Badge> : null}
                     </div>
                     <p className="text-xs text-muted-foreground">
-                        {t(earlier ? "runs.legacyRunMeta" : "runs.runMeta", {
-                            run: number,
-                            version: item.run.version?.number ?? 0,
-                        })}
+                        {item.run.version == null
+                            ? t("runs.runReference", { run: number })
+                            : t("runs.runMeta", { run: number, version: item.run.version.number })}
                     </p>
                     {item.failureCategory ? (
                         <p className="text-xs text-muted-foreground">
