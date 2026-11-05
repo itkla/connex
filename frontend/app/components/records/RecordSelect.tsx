@@ -10,6 +10,7 @@ import {
     ComboboxItem,
     ComboboxList,
 } from '@/components/ui/combobox';
+import type { ServerPickerSearch } from '@/lib/server-picker-search';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 
 export type RecordSelectOption = {
@@ -28,6 +29,7 @@ export default function RecordSelect({
     disabled,
     noneOption,
     onInputValueChange,
+    serverSearch,
     emptyLabel,
 }: {
     options: RecordSelectOption[];
@@ -38,9 +40,14 @@ export default function RecordSelect({
     className?: string;
     disabled?: boolean;
     noneOption?: { value: string; label: string };
-    onInputValueChange?: (value: string) => void;
     emptyLabel?: string;
-}) {
+} & ({
+    onInputValueChange: (value: string) => void;
+    serverSearch: ServerPickerSearch;
+} | {
+    onInputValueChange?: undefined;
+    serverSearch?: undefined;
+})) {
     const items = [
         ...(noneOption ? [{
             id: noneOption.value,
@@ -60,7 +67,11 @@ export default function RecordSelect({
     return (
         <Combobox<(typeof items)[number]>
             items={items}
-            filter={onInputValueChange ? null : undefined}
+            serverSearch={serverSearch && {
+                ...serverSearch,
+                accepts: (item) => (item !== null && typeof item === 'object' && 'isNone' in item && item.isNone === true)
+                    || serverSearch.accepts(item),
+            }}
             itemToStringLabel={(item) => item.label}
             value={selected}
             onInputValueChange={onInputValueChange}
@@ -76,9 +87,9 @@ export default function RecordSelect({
                 className={className}
             />
             <ComboboxContent className="pointer-events-auto">
+                <ComboboxEmpty>{emptyLabel ?? placeholder}</ComboboxEmpty>
                 <ComboboxList>
-                    <ComboboxEmpty>{emptyLabel ?? placeholder}</ComboboxEmpty>
-                    {items.map((item) => (
+                    {(item: (typeof items)[number]) => (
                         <ComboboxItem key={item.id} value={item}>
                             {!item.isNone ? (
                                 <Avatar>
@@ -90,7 +101,7 @@ export default function RecordSelect({
                             ) : null}
                             {item.label}
                         </ComboboxItem>
-                    ))}
+                    )}
                 </ComboboxList>
             </ComboboxContent>
         </Combobox>

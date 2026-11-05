@@ -61,7 +61,7 @@ The active agent environment may provide named design/review skills; use the sma
 - Every user action acknowledges input promptly; network latency must not make the UI appear dead.
 - Loading, empty, error, and permission states are distinct. Never render a permission failure as an empty result.
 - Choose interaction weight proportionately: simple reversible fields may edit inline; short focused operations use dialogs/sheets; complex authoring gets a page. Follow `../docs/PRODUCT.md` and the product-grammar contract for exact mappings.
-- Every interactive control is keyboard-operable with visible focus. Prefer semantic HTML and Base UI/Radix behavior over custom ARIA implementations.
+- Keep controls keyboard-operable with visible focus. Use semantic HTML and Base UI/Radix; respect IME composition (`isComposing`, key code 229). See `../docs/frontend/PICKER_INPUT.md`.
 - Do not use color alone to communicate state.
 - Respect `prefers-reduced-motion`. Motion changes must follow `../docs/frontend/MOTION.md` and be verified with reduced motion enabled.
 - Mobile preserves capability semantics but may use task-adaptive presentation. Do not solve mobile by horizontally scrolling desktop tables or stacking desktop cards blindly.

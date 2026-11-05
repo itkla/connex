@@ -607,6 +607,7 @@ function WorkflowEditorBody({
             <WorkflowSimulationDialog
                 open={simulationOpen}
                 records={editor.simulationRecords}
+                serverSearch={editor.simulationServerSearch}
                 loading={editor.simulationLoading}
                 supported={editor.simulationSupported}
                 result={editor.simulation}

@@ -163,12 +163,12 @@ export default function ApprovalStepApproversDialog({
                         />
                     </div>
                 </ResponsiveDialogContent>
+                <ConfirmDiscardDialog
+                    open={guard.confirm.open}
+                    onKeepEditing={guard.confirm.onKeepEditing}
+                    onDiscard={guard.confirm.onDiscard}
+                />
             </ResponsiveDialog>
-            <ConfirmDiscardDialog
-                open={guard.confirm.open}
-                onKeepEditing={guard.confirm.onKeepEditing}
-                onDiscard={guard.confirm.onDiscard}
-            />
         </>
     );
 }
