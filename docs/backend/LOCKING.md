@@ -802,6 +802,14 @@ After the board root is held, discover workspace task ids without locks, add the
 
 Do not replace this with an ordered range `FOR UPDATE` scan or return to non-locking board reads after waiting for exact locks. Compact affected status columns to contiguous zero-based positions before commit.
 
+Task assignment notices reuse the requested active membership retained before the board root.
+After a full update changes the assignee, resolve only the old recipient's workspace/task-scoped
+`task.assigned` notice. Immediately before delivery, mark the new recipient's existing notice resolved
+inside the same transaction, even if History restored it. `NotificationDelivery` then revives it
+unread and publishes the update through its established resolved-row path. No old
+recipient membership lock is acquired after the board. Notification state versions retain their
+existing deferred before-commit order after domain rows.
+
 ## Warmth model transitions
 
 Notification model baselines use the existing background organization duplicate-decision mutex and

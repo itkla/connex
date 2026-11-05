@@ -108,6 +108,8 @@
     "documentApprovalPolicyInvalidatedBody": "The approval request for {document} ended because its approval policy changed.",
     "documentApprovalUnsatisfiableBody": "The approval request for {document} ended because its approver chain can no longer be completed.",
     "documentApprovalTerminatedBody": "The approval request for {document} ended.",
+    "taskAssignedTitle": "Task assigned to you",
+    "taskAssignedBody": "{actor} assigned you: {task}",
     "taskDueTitle": "Task due soon",
     "taskDueBody": "{task} is due {date}.",
     "taskOverdueTitle": "Task overdue",
