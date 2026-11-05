@@ -433,6 +433,7 @@
     "navSearch": "Search"
   },
   "CommonContentShell": {
+    "skipToContent": "Skip to content",
     "hideSidebar": "Hide sidebar",
     "showSidebar": "Show sidebar",
     "collapseSidebar": "Collapse sidebar",

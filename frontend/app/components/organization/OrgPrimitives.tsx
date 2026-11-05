@@ -4,9 +4,7 @@ import { useTranslations } from "next-intl";
 
 import AccessDenied from "@/app/components/AccessDenied";
 
-/** Shared row-action trigger: a subtle ellipsis button that reveals on row hover. */
-export const rowActionTrigger =
-    "flex size-7 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted/70 hover:text-foreground group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100";
+export { rowActionTrigger } from "@/app/components/settings/SettingsListPrimitives";
 
 export function ListCard({ children }: { children: React.ReactNode }) {
     return (

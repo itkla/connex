@@ -164,7 +164,7 @@ export default function DashboardGrid({
         const meta = WIDGET_META[type];
         if (!meta.actionHref || !meta.actionLabelKey) return null;
         return (
-            <Link href={meta.actionHref} className="text-xs text-brand hover:text-brand-hover">
+            <Link href={meta.actionHref} className="text-xs text-brand-text hover:text-brand-text">
                 {tp(meta.actionLabelKey)}
             </Link>
         );

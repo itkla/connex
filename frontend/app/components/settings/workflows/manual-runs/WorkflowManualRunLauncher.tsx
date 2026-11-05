@@ -470,7 +470,7 @@ function InvocationSummary({
                                     {record.reasonCode ? <ManualReason code={record.reasonCode} /> : t(`status.${record.status}`)}
                                 </span>
                                 {record.runKey ? (
-                                    <Link className="text-brand hover:text-brand-hover" href={`/workflows/${preparation.workflowId}/runs/${encodeURIComponent(record.runKey)}`}>
+                                    <Link className="text-brand-text hover:text-brand-text" href={`/workflows/${preparation.workflowId}/runs/${encodeURIComponent(record.runKey)}`}>
                                         {t("manual.viewRun")}
                                     </Link>
                                 ) : null}

@@ -46,7 +46,7 @@ import { toastError } from '@/app/lib/toast';
 const inputBase = 'w-full rounded-lg bg-muted py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand';
 const inputError = 'ring-2 ring-destructive focus:ring-destructive';
 const inputWarn = 'ring-2 ring-amber-500 focus:ring-amber-500';
-const leadIcon = 'pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground transition-colors group-focus-within:text-brand';
+const leadIcon = 'pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground transition-colors group-focus-within:text-brand-text';
 const PAGE_EASE: [number, number, number, number] = [0.77, 0, 0.175, 1];
 
 function useCompanyLogoSelection({
@@ -498,7 +498,7 @@ export default function NewCompanyDialog({
                             {logoPreview ? (
                                 <img src={logoPreview} alt="" className="size-full bg-white object-contain" />
                             ) : initial ? (
-                                <div className="flex size-full select-none items-center justify-center bg-brand-light text-3xl font-semibold text-brand-dark">
+                                <div className="flex size-full select-none items-center justify-center bg-brand-light text-3xl font-semibold text-brand-text">
                                     {initial}
                                 </div>
                             ) : (
@@ -945,7 +945,7 @@ export function NewCompanyForm({
                         {logoPreview ? (
                             <img src={logoPreview} alt="" className="size-full bg-white object-contain" />
                         ) : initial ? (
-                            <div className="flex size-full select-none items-center justify-center bg-brand-light text-3xl font-semibold text-brand-dark">
+                            <div className="flex size-full select-none items-center justify-center bg-brand-light text-3xl font-semibold text-brand-text">
                                 {initial}
                             </div>
                         ) : (

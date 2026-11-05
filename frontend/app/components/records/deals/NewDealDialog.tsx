@@ -39,7 +39,7 @@ import {
 const comboInputClass =
     'rounded-lg border-0 bg-muted shadow-none ring-1 ring-border dark:bg-muted has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-brand';
 const comboLeadIconClass =
-    'size-4 text-muted-foreground transition-colors group-focus-within/input-group:text-brand';
+    'size-4 text-muted-foreground transition-colors group-focus-within/input-group:text-brand-text';
 
 /**
  * Whether a deal-create payload has diverged from its seeded baseline, so a container can drive the

@@ -52,7 +52,7 @@ export default function CampaignsBrowser({
 
                 {campaigns.length === 0 ? (
                     <Rise delay={0.06} className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border bg-card px-6 py-16 text-center sm:py-20">
-                        <span className="flex size-12 items-center justify-center rounded-full bg-brand-light text-brand-dark">
+                        <span className="flex size-12 items-center justify-center rounded-full bg-brand-light text-brand-text">
                             <MegaphoneIcon className="size-6" />
                         </span>
                         <h2 className="text-lg font-semibold">{t("empty")}</h2>
@@ -92,7 +92,7 @@ export default function CampaignsBrowser({
                                             className="group flex items-center gap-3 px-4 py-3.5 outline-none transition-colors hover:bg-muted/50 focus-visible:bg-muted/50 sm:px-5"
                                         >
                                             <div className="min-w-0 flex-1">
-                                                <p className="truncate font-medium text-foreground transition-colors group-hover:text-brand-hover">
+                                                <p className="truncate font-medium text-foreground transition-colors group-hover:text-brand-text">
                                                     {campaign.name}
                                                 </p>
                                                 <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">

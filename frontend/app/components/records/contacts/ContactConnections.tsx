@@ -119,7 +119,7 @@ export default function ContactConnections({
                     </p>
                     <Link
                         href={INTRODUCTIONS_PATH}
-                        className="text-xs text-brand transition-colors hover:text-brand-hover"
+                        className="text-xs text-brand-text transition-colors hover:text-brand-text"
                     >
                         {t('seeAllPaths')}
                     </Link>
@@ -134,7 +134,7 @@ export default function ContactConnections({
                                 <Link
                                     href={`/records/contacts/${step.personId}`}
                                     className={cn(
-                                        'text-sm transition-colors hover:text-brand-hover',
+                                        'text-sm transition-colors hover:text-brand-text',
                                         i === 0 || i === introPath.steps.length - 1
                                             ? 'font-medium text-foreground'
                                             : 'text-muted-foreground',
@@ -171,7 +171,7 @@ export default function ContactConnections({
                             <div className="min-w-0 flex-1">
                                 <Link
                                     href={`/records/contacts/${connection.personId}`}
-                                    className="block truncate text-sm font-medium text-foreground transition-colors hover:text-brand-hover"
+                                    className="block truncate text-sm font-medium text-foreground transition-colors hover:text-brand-text"
                                 >
                                     {connection.personName}
                                 </Link>

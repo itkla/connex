@@ -93,7 +93,7 @@ export default function TasksKanban({
                                 </span>
                             )}
                             {person && (
-                                <span className="inline-flex max-w-full items-center gap-1 rounded-full bg-brand-light/50 px-2 py-0.5 text-xs font-medium text-brand-dark ring-1 ring-inset ring-brand-dark/10">
+                                <span className="inline-flex max-w-full items-center gap-1 rounded-full bg-brand-light/50 px-2 py-0.5 text-xs font-medium text-brand-text ring-1 ring-inset ring-brand-dark/10">
                                     <UserIcon className="size-3 shrink-0" />
                                     <span className="truncate">{person.name}</span>
                                 </span>

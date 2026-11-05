@@ -139,7 +139,7 @@ export default function ReportWidgetRenderer({ widget }: { widget: ReportWidgetD
                                 : t('document.priorValue', { value: formatReportValue(widget.priorTotal, widget.unit, locale) })}
                         </span>
                         {widget.changePercent != null ? (
-                            <span className={isAttainment || widget.changePercent >= 0 ? 'text-brand-dark' : 'text-destructive'}>
+                            <span className={isAttainment || widget.changePercent >= 0 ? 'text-brand-text' : 'text-destructive'}>
                                 {isAttainment
                                     ? t('document.attainmentValue', {
                                         value: new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(widget.changePercent),

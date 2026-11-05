@@ -136,7 +136,7 @@ export default function MembershipPanel() {
                             return (
                                 <li key={offer.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
                                     <Avatar>
-                                        <AvatarFallback className="bg-brand-light font-medium text-brand-dark">
+                                        <AvatarFallback className="bg-brand-light font-medium text-brand-text">
                                             {scope.trim().charAt(0).toUpperCase() || "?"}
                                         </AvatarFallback>
                                     </Avatar>
@@ -187,7 +187,7 @@ export default function MembershipPanel() {
                             return (
                                 <li key={workspace.id} className="flex items-center gap-3 px-4 py-3">
                                     <Avatar>
-                                        <AvatarFallback className="bg-brand-light font-medium text-brand-dark">
+                                        <AvatarFallback className="bg-brand-light font-medium text-brand-text">
                                             {workspace.name.trim().charAt(0).toUpperCase() || "?"}
                                         </AvatarFallback>
                                     </Avatar>

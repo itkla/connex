@@ -1051,7 +1051,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
                             {allMatchingSelected ? (
                                 <>
                                     <span>{t('allMatchingSelected', { total })}</span>
-                                    <button type="button" onClick={() => { setSelectedIds(new Set()); setMatchedSignature(null); }} className="font-medium text-brand transition hover:underline">
+                                    <button type="button" onClick={() => { setSelectedIds(new Set()); setMatchedSignature(null); }} className="font-medium text-brand-text transition hover:underline">
                                         {t('clearSelection')}
                                     </button>
                                 </>
@@ -1062,7 +1062,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
                                         type="button"
                                         onClick={selectAllMatching}
                                         disabled={selectingAll || loading}
-                                        className="font-medium text-brand transition hover:underline disabled:opacity-50"
+                                        className="font-medium text-brand-text transition hover:underline disabled:opacity-50"
                                     >
                                         {selectingAll ? t('selecting') : t('selectAllMatching', { total })}
                                     </button>

@@ -156,7 +156,7 @@ function ProfilePhotoField({ previewUrl, initial, disabled, onSelect }: ProfileP
                     alt={t("photoAlt")}
                     className="size-full object-cover"
                     fallback={(
-                        <span className="flex size-full items-center justify-center bg-brand-light text-2xl font-medium text-brand-dark">
+                        <span className="flex size-full items-center justify-center bg-brand-light text-2xl font-medium text-brand-text">
                             {initial}
                         </span>
                     )}

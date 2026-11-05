@@ -140,7 +140,7 @@ export default function DealKanbanCard({
                             'rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider',
                             closed
                                 ? 'bg-neutral-200 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-200'
-                                : 'bg-brand-light text-brand-dark',
+                                : 'bg-brand-light text-brand-text',
                         )}
                     >
                         {statusLabel}

@@ -28,7 +28,7 @@ import { cn } from '@/lib/utils';
 const comboInputClass =
     'rounded-lg border-0 bg-muted shadow-none ring-1 ring-border dark:bg-muted has-[[data-slot=input-group-control]:focus-visible]:ring-2 has-[[data-slot=input-group-control]:focus-visible]:ring-brand';
 const comboLeadIconClass =
-    'size-4 text-muted-foreground transition-colors group-focus-within/input-group:text-brand';
+    'size-4 text-muted-foreground transition-colors group-focus-within/input-group:text-brand-text';
 
 type TeamMember = Pick<
     WorkspaceMember,
@@ -218,7 +218,7 @@ export default function DealTeamDialog({
                                                         <CheckCircleIcon
                                                             className={cn(
                                                                 'size-5 shrink-0 transition-colors',
-                                                                selected ? 'text-brand' : 'text-muted-foreground/30',
+                                                                selected ? 'text-brand-text' : 'text-muted-foreground/30',
                                                             )}
                                                         />
                                                     </button>

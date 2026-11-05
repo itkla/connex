@@ -9,6 +9,8 @@ public record WorkflowDto(
     String description,
     boolean enabled,
     String runtimeOwner,
+    boolean executionAvailable,
+    String executionUnavailableReason,
     LocalDateTime archivedAt,
     LocalDateTime intakePausedAt,
     Integer intakePausedById,
