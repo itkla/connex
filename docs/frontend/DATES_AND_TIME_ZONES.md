@@ -34,6 +34,15 @@ keeps its original instant, and a changed repeated time chooses the earlier occu
 and stored data are unchanged. Reporting windows and revenue buckets retain their separately
 specified workspace reporting calendar; displaying an individual instant follows the profile rule.
 
+Deal close-date adapters in `dealDates.ts` delegate parsing, formatting and civil-input conversion
+to these same shared helpers. Close-date displays and editors use the profile zone first; a reporting
+zone prop is only a workspace fallback. Imported Tokyo midnight instants still display as the imported
+day for a Tokyo profile, and bare imported calendar dates never shift. Legacy minute-offset zones such
+as `UTC+9` normalize once in the shared resolver. The shared fixed-offset formatting adapter also
+preserves second offsets across midnight. Import interpretation and revenue buckets retain their
+explicit workspace reporting calendar. Deal validation still rejects years before 1000 and invalid
+civil inputs; unchanged repeated-hour instants and timestamp seconds survive unrelated edits.
+
 Calendar slot creation carries the selected `yyyy-MM-dd` and minutes as a civil input string through
 `calendarSlotInputValue`. It must not use `Date.setHours` or epoch milliseconds in the browser zone:
 the browser's DST gap may be a valid time in the profile zone. The activity form converts that
@@ -57,7 +66,7 @@ receive UTC values and never reinterpret them as civil inputs.
 | --- | --- | --- |
 | `ActivityDialogForm` | `when` | Profile-zone input → UTC MySQL string on create; no original instant |
 | `EditActivitySheet` | `timestamp` | Zoned input ↔ UTC; passes `activity.timestamp` as previous |
-| `QuickEditDealSheet` | `closedAt` | Zoned input → UTC draft once in `onChange`; passes `d.closedAt`; parent sends the UTC draft directly |
+| `QuickEditDealSheet` | `closedAt` | Zoned input → UTC draft once in `onChange`; passes the current UTC `draft.closedAt`; parent sends the UTC draft directly |
 | `EditCampaignSheet` via `CampaignDetail` | `startAt` | Zoned input ↔ UTC ISO civil shape; unchanged values retain `current.startAt` |
 | `EditCampaignSheet` via `CampaignDetail` | `endAt` | Zoned input ↔ UTC ISO civil shape; unchanged values retain `current.endAt` |
 | `DataRequestDialog` | `receivedAt` | Zoned input ↔ UTC ISO civil shape; passes `editing.receivedAt` |

@@ -3,22 +3,23 @@
 import { getDateTimeFormatter, getNumberFormatter, getRelativeTimeFormatter } from '@/app/lib/intlFormatters';
 import { type DealRiskSeverity, type TemperatureBand } from '@/app/lib/types';
 import { LOCALE_COOKIE, type Locale } from '@/i18n/config';
-import { DEFAULT_TIME_ZONE, resolveDisplayTimeZone } from '@/app/lib/timeZone';
+import { DEFAULT_TIME_ZONE, dateTimeInTimeZone, fixedOffsetSeconds } from '@/app/lib/timeZone';
+export { fixedOffsetSeconds } from '@/app/lib/timeZone';
 
 export function formatShortDate(value: string | undefined, locale: string, timeZone = DEFAULT_TIME_ZONE) {
     if (!value) {
         return '—';
     }
 
-    const date = dateForDisplay(value);
+    const date = dateForDisplay(value, timeZone);
 
-    if (Number.isNaN(date.getTime())) return value;
+    if (Number.isNaN(date.timestamp)) return value;
 
     return getDateTimeFormatter(locale, {
         month: 'short',
         day: 'numeric',
-        timeZone: isCalendarDate(value) ? 'UTC' : resolveDisplayTimeZone(timeZone),
-    }).format(date);
+        timeZone: date.timeZone,
+    }).format(date.timestamp);
 }
 
 /**
@@ -56,15 +57,15 @@ export function formatDate(value: string | undefined, locale: string, timeZone =
         return '—';
     }
 
-    const date = dateForDisplay(value);
+    const date = dateForDisplay(value, timeZone);
 
-    if (Number.isNaN(date.getTime())) {
+    if (Number.isNaN(date.timestamp)) {
         return value;
     }
 
     return getDateTimeFormatter(locale, {
-        dateStyle: 'long', timeZone: isCalendarDate(value) ? 'UTC' : resolveDisplayTimeZone(timeZone),
-    }).format(date);
+        dateStyle: 'long', timeZone: date.timeZone,
+    }).format(date.timestamp);
 }
 
 export function formatDateTime(value: string | undefined, locale: string, timeZone = DEFAULT_TIME_ZONE) {
@@ -72,17 +73,17 @@ export function formatDateTime(value: string | undefined, locale: string, timeZo
         return 'Never';
     }
 
-    const date = dateForDisplay(value);
+    const date = dateForDisplay(value, timeZone);
 
-    if (Number.isNaN(date.getTime())) {
+    if (Number.isNaN(date.timestamp)) {
         return value;
     }
 
     return getDateTimeFormatter(locale, {
         dateStyle: 'medium',
         timeStyle: 'short',
-        timeZone: isCalendarDate(value) ? 'UTC' : resolveDisplayTimeZone(timeZone),
-    }).format(date);
+        timeZone: date.timeZone,
+    }).format(date.timestamp);
 }
 
 /**
@@ -154,11 +155,13 @@ function isCalendarDate(value: string): boolean {
     return /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
 }
 
-function dateForDisplay(value: string): Date {
-    const timestamp = isCalendarDate(value)
-        ? parseCalendarDateUtc(value)
-        : parseMysqlDateTime(value);
-    return new Date(timestamp);
+function dateForDisplay(value: string, timeZone: string) {
+    return dateTimeInTimeZone(parseDateForDisplay(value), isCalendarDate(value) ? 'UTC' : timeZone);
+}
+
+/** Parses a UTC API instant or anchors a calendar-only value to UTC for stable day formatting. */
+export function parseDateForDisplay(value?: string | null): number {
+    return value && isCalendarDate(value) ? parseCalendarDateUtc(value) : parseMysqlDateTime(value);
 }
 
 /** A date-only value represented at UTC midnight for zone-independent calendar formatting. */
@@ -181,16 +184,20 @@ export function formatCalendarDate(value: string, locale: string, options: Intl.
  * The inverse is toMysqlDateTime(value, timeZone, previous).
  */
 export function toDatetimeLocalValue(value?: string | null, timeZone = DEFAULT_TIME_ZONE): string {
+    if (value && isCalendarDate(value)) {
+        return Number.isFinite(parseCalendarDateUtc(value)) ? `${value.trim()}T00:00` : '';
+    }
     const ts = parseMysqlDateTime(value);
     if (Number.isNaN(ts)) return '';
     return civilParts(ts, timeZone).input;
 }
 
 function civilParts(timestamp: number, timeZone: string) {
+    const display = dateTimeInTimeZone(timestamp, timeZone);
     const parts = getDateTimeFormatter('en', {
-        timeZone: resolveDisplayTimeZone(timeZone), year: 'numeric', month: '2-digit', day: '2-digit',
+        timeZone: display.timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
         hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
-    }).formatToParts(timestamp);
+    }).formatToParts(display.timestamp);
     const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((entry) => entry.type === type)?.value ?? '';
     return {
         input: `${part('year')}-${part('month')}-${part('day')}T${part('hour')}:${part('minute')}`,
@@ -205,7 +212,7 @@ export function parseDatetimeLocalValue(value: string, timeZone = DEFAULT_TIME_Z
     const anchor = Date.parse(`${value}Z`);
     if (!Number.isFinite(anchor)) return NaN;
     const prior = parseMysqlDateTime(previous);
-    if (Number.isFinite(prior) && toDatetimeLocalValue(previous, timeZone) === value) return prior;
+    if (previous && !isCalendarDate(previous) && Number.isFinite(prior) && toDatetimeLocalValue(previous, timeZone) === value) return prior;
     const offsets = new Set([-36, -12, 0, 12, 36].map((hours) => {
         const sample = anchor + hours * 3_600_000;
         return civilParts(sample, timeZone).wallTimestamp - sample;
@@ -231,13 +238,14 @@ export function formatUtcDateTime(
     fallback = '—',
     timeZone = DEFAULT_TIME_ZONE,
 ): string {
-    const ms = value && isCalendarDate(value) ? parseCalendarDateUtc(value) : parseMysqlDateTime(value);
+    const ms = parseDateForDisplay(value);
     if (Number.isNaN(ms)) return fallback;
+    const display = dateTimeInTimeZone(ms, value && isCalendarDate(value) ? 'UTC' : timeZone);
     return getDateTimeFormatter(locale, {
         dateStyle: 'medium',
         timeStyle: 'short',
-        timeZone: value && isCalendarDate(value) ? 'UTC' : resolveDisplayTimeZone(timeZone),
-    }).format(new Date(ms));
+        timeZone: display.timeZone,
+    }).format(display.timestamp);
 }
 
 /**
@@ -624,24 +632,6 @@ export function riskTextClass(severity: DealRiskSeverity): string {
 }
 
 export type CalendarYearMonth = { year: number; month: number };
-
-/** Parses a legacy fixed-offset timezone ({@code UTC+9}, {@code +09:00}, …) into seconds, or null for IANA names. */
-export function fixedOffsetSeconds(timezone: string): number | null {
-    if (/^(?:Z|UTC|GMT|UT)$/i.test(timezone)) return 0;
-    const match = /^(?:(?:UTC|GMT|UT))?([+-])(\d{1,2})(?::?(\d{2}))?(?::?(\d{2}))?$/i.exec(timezone);
-    if (!match) return null;
-    const hours = Number(match[2]);
-    const minutes = Number(match[3] ?? '0');
-    const seconds = Number(match[4] ?? '0');
-    if (
-        hours > 18
-        || minutes > 59
-        || seconds > 59
-        || (hours === 18 && (minutes !== 0 || seconds !== 0))
-    ) return null;
-    const total = hours * 3600 + minutes * 60 + seconds;
-    return match[1] === '-' ? -total : total;
-}
 
 /** Resolves the calendar year and month for a timestamp in an IANA or legacy fixed-offset timezone. */
 export function yearMonthInTimezone(timestamp: number, timezone: string): CalendarYearMonth {

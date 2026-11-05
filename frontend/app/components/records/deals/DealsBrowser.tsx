@@ -1799,6 +1799,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                 {peek.drawer}
 
                 <QuickEditDealSheet
+                    timezone={timezone}
                     open={editSheetOpen}
                     onOpenChange={setEditSheetOpen}
                     selectedIds={selectedIds}

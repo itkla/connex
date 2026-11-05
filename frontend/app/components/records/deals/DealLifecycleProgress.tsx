@@ -1,12 +1,13 @@
 import { Fragment, type CSSProperties } from 'react';
-import { calendarDayInTimeZone } from '@/app/lib/timeZone';
+import { calendarDayInTimeZone, resolveDisplayTimeZone } from '@/app/lib/timeZone';
 import { requestNow } from '@/app/lib/requestClock';
 import { CheckIcon, XMarkIcon, CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/solid';
 import { getTimeZone, getLocale, getTranslations } from 'next-intl/server';
 
 import { type Stage, type NoteReference, type DealStageHistory } from '@/app/lib/types';
 import NoteContent from '@/app/components/activity/notes/NoteContent';
-import { formatDate, formatShortDate, parseMysqlDateTime, parseCalendarDateUtc } from '@/app/lib/utils';
+import { formatDate, formatShortDate, parseMysqlDateTime, parseCalendarDateUtc, toDatetimeLocalValue } from '@/app/lib/utils';
+import { formatDealClosedAt } from './dealDates';
 import { classifyStage, type DealOutcome } from '@/app/components/records/deals/dealOutcome';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 
@@ -16,6 +17,7 @@ type ScheduleTone = 'early' | 'late' | 'neutral';
 
 export default async function DealLifecycleProgress({
     stages,
+    timezone,
     currentStageId,
     outcome,
     createdAt,
@@ -26,6 +28,7 @@ export default async function DealLifecycleProgress({
     stageHistory,
 }: {
     stages: Stage[];
+    timezone: string;
     currentStageId: number | null;
     outcome: DealOutcome;
     createdAt: string;
@@ -35,7 +38,7 @@ export default async function DealLifecycleProgress({
     references?: NoteReference[];
     stageHistory?: DealStageHistory[];
 }) {
-    const timeZone = await getTimeZone();
+    const timeZone = resolveDisplayTimeZone(await getTimeZone(), timezone);
     const t = await getTranslations('DealsLifecycleProgress');
     const locale = await getLocale();
 
@@ -58,7 +61,7 @@ export default async function DealLifecycleProgress({
 
     const startMs = parseMysqlDateTime(createdAt);
     const expectedMs = expectedCloseDate ? parseCalendarDateUtc(expectedCloseDate) : NaN;
-    const closedMs = closedAt ? parseMysqlDateTime(closedAt) : NaN;
+    const closedDayMs = closedAt ? parseCalendarDateUtc(toDatetimeLocalValue(closedAt, timeZone).slice(0, 10)) : NaN;
     const nowMs = requestNow();
     const todayStart = parseCalendarDateUtc(calendarDayInTimeZone(nowMs, timeZone));
 
@@ -87,8 +90,8 @@ export default async function DealLifecycleProgress({
         ? Math.round((expectedMs - todayStart) / DAY_MS)
         : null;
     const closedVsExpected =
-        isClosed && Number.isFinite(closedMs) && Number.isFinite(expectedMs)
-            ? Math.round((closedMs - expectedMs) / DAY_MS)
+        isClosed && Number.isFinite(closedDayMs) && Number.isFinite(expectedMs)
+            ? Math.round((closedDayMs - expectedMs) / DAY_MS)
             : null;
 
     let scheduleDays: number | null = null;
@@ -281,7 +284,7 @@ export default async function DealLifecycleProgress({
                                 {isClosed ? t('closed') : t('expectedClose')}
                             </span>
                             <span>
-                                {formatDate(isClosed && closedAt ? closedAt : expectedCloseDate, locale, timeZone)}
+                                {isClosed && closedAt ? formatDealClosedAt(closedAt, locale, timeZone) : formatDate(expectedCloseDate, locale, timeZone)}
                             </span>
 
                         </div>

@@ -15,7 +15,7 @@ import { actualValueForOutcome, requestedActualValue } from "@/app/components/re
 import type { Deal, Pipeline, Stage, UpdateDealPayload } from "@/app/lib/types";
 import { toastError } from "@/app/lib/toast";
 
-const displayZone = vi.hoisted(() => ({ value: "UTC" }));
+const displayZone = vi.hoisted<{ value: string | undefined }>(() => ({ value: "UTC" }));
 
 vi.mock("@/app/lib/toast", async () => ({
     ...await vi.importActual<typeof import("@/app/lib/toast")>("@/app/lib/toast"),
@@ -236,6 +236,7 @@ function findFailureStageSelector(root: unknown): (stage: Stage) => unknown {
 function createOutcomeDraftHarness() {
     let draft: DealDraft = { ...WON_LINE_ITEM_DRAFT };
     const props = {
+        timezone: "UTC",
         open: true,
         onOpenChange: () => undefined,
         selectedIds: new Set([WON_LINE_ITEM_DEAL.id]),
@@ -293,6 +294,7 @@ describe("lost-deal actual value", () => {
     });
     function renderActualValueInput(won: boolean, actualValue: number) {
         const html = renderToStaticMarkup(createElement(QuickEditDealSheet, {
+            timezone: "UTC",
             open: true,
             onOpenChange: () => undefined,
             selectedIds: new Set([LOST_DEAL.id]),
@@ -358,14 +360,17 @@ describe("lost-deal actual value", () => {
         expect(requestedActualValue(true, 0, true)).toBe(0);
     });
 
-    it("shows the deal value when an open deal is freshly won without an amount edit", () => {
+    it.each([false, true])("keeps the imported Tokyo close date and fresh-win amount when edited=%s", (edited) => {
+        displayZone.value = "Asia/Tokyo";
         const html = renderToStaticMarkup(createElement(QuickEditDealSheet, {
+            timezone: "Asia/Tokyo",
             open: true,
             onOpenChange: () => undefined,
             selectedIds: new Set([LOST_DEAL.id]),
             selectedDeals: [{ ...LOST_DEAL, won: null, actualValue: 0 }],
             drafts: { [LOST_DEAL.id]: {
-                ...LOST_DRAFT, won: true, actualValue: 0, actualValueEdited: false,
+                ...LOST_DRAFT, won: true, actualValue: 0, actualValueEdited: edited,
+                closedAt: "2025-02-28 15:00:00",
             } },
             updateDraft: () => undefined,
             pipelines: [],
@@ -374,7 +379,34 @@ describe("lost-deal actual value", () => {
             saveEdits: () => undefined,
         }));
         const input = html.match(/<input\b[^>]*id="deal-actual-value-7"[^>]*>/)?.[0];
-        expect(input).toContain('value="500"');
+        const closedAt = html.match(/<input\b[^>]*id="deal-closed-at-7"[^>]*>/)?.[0];
+        expect(input).toContain(`value="${edited ? 0 : 500}"`);
+        expect(closedAt).toContain('value="2025-03-01T00:00"');
+    });
+
+    it.each([
+        { profile: "UTC", workspace: "Asia/Tokyo", expected: "2025-02-28T15:00" },
+        { profile: "Asia/Tokyo", workspace: "America/New_York", expected: "2025-03-01T00:00" },
+        { profile: undefined, workspace: "Asia/Tokyo", expected: "2025-03-01T00:00" },
+        { profile: "invalid", workspace: "UTC+9", expected: "2025-03-01T00:00" },
+        { profile: undefined, workspace: "invalid", expected: "2025-02-28T15:00" },
+    ])("uses profile $profile before workspace $workspace in the close editor", ({ profile, workspace, expected }) => {
+        displayZone.value = profile;
+        const html = renderToStaticMarkup(createElement(QuickEditDealSheet, {
+            timezone: workspace,
+            open: true,
+            onOpenChange: () => undefined,
+            selectedIds: new Set([LOST_DEAL.id]),
+            selectedDeals: [LOST_DEAL],
+            drafts: { [LOST_DEAL.id]: { ...LOST_DRAFT, closedAt: "2025-02-28 15:00:00" } },
+            updateDraft: () => undefined,
+            pipelines: [],
+            stagesByPipeline: {},
+            isSaving: false,
+            saveEdits: () => undefined,
+        }));
+        const closedAt = html.match(/<input\b[^>]*id="deal-closed-at-7"[^>]*>/)?.[0];
+        expect(closedAt).toContain(`value="${expected}"`);
     });
 
     it("preserves realized value when a won deal is toggled through lost back to won before submit", async () => {

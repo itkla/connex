@@ -1048,6 +1048,7 @@ const delegationScenarios: Record<string, OwnerScenario> = {
                 },
             });
             return createElement(QuickEditDealSheet, {
+                timezone: "UTC",
                 open: true,
                 onOpenChange: onClose,
                 selectedIds: new Set([deal.id]),

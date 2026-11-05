@@ -29,6 +29,7 @@ describe('profile time zone display', () => {
     it.each(['Asia/Tokyo', 'Pacific/Kiritimati', 'America/Los_Angeles', 'Pacific/Honolulu', 'UTC'])(
         'preserves calendar dates in %s', (timeZone) => {
             expect(formatDate('2026-11-05', 'en-US', timeZone)).toBe('November 5, 2026');
+            expect(toDatetimeLocalValue('2026-11-05', timeZone)).toBe('2026-11-05T00:00');
             expect(formatShortDate('2026-11-05', 'en-US', timeZone)).toBe('Nov 5');
             expect(formatCalendarDate('2026-11-05', 'ja', { month: 'long', day: 'numeric', timeZone })).toBe('11月5日');
         },
@@ -47,6 +48,15 @@ describe('profile time zone display', () => {
         expect(() => toMysqlDateTime('2026-03-08T02:30', 'America/New_York')).toThrow('Invalid date');
         expect(toMysqlDateTime('2026-11-01T01:30', 'America/New_York')).toBe('2026-11-01 05:30:00');
         expect(toMysqlDateTime('2026-11-01T01:30', 'America/New_York', '2026-11-01T06:30:00')).toBe('2026-11-01 06:30:00');
+    });
+
+    it('normalizes legacy minute offsets through the shared zone rule', () => {
+        expect(resolveDisplayTimeZone('UTC+9', 'America/New_York')).toBe('+09:00');
+        expect(resolveDisplayTimeZone(null, 'GMT-5')).toBe('-05:00');
+        expect(formatDateTime('2026-11-04 23:30:00', 'en-US', 'UTC+9')).toBe('Nov 5, 2026, 8:30 AM');
+        expect(toDatetimeLocalValue('2026-11-04 23:30:00', 'UTC+9')).toBe('2026-11-05T08:30');
+        expect(toMysqlDateTime('2026-11-05T08:30', 'UTC+9')).toBe('2026-11-04 23:30:00');
+        expect(toMysqlDateTime('2026-11-05T00:00', 'Asia/Tokyo', '2026-11-05')).toBe('2026-11-04 15:00:00');
     });
 
     it('rejects impossible calendar days and keeps empty/invalid fallbacks', () => {
