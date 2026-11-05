@@ -5,142 +5,141 @@ import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
+import { useRecordEditConflict } from '@/app/hooks/useRecordEditConflict';
 import { toastError, toastInfo, toastSuccess } from '@/app/lib/toast';
-
 import QuickEditSheet, { type ContactDraft } from '@/app/components/records/contacts/QuickEditSheet';
+import ContactEditConflictDialog from './ContactEditConflictDialog';
+import { contactDraftChanged, reconcileSavedContactDraft, submitContactDraftUpdate, toContactDraft } from './contactEditConflict';
 import { CustomFieldsEditSection, type CustomFieldsEditHandle } from '@/app/components/records/CustomFieldsEditSection';
-import { getContactById, updateContact, uploadContactPicture } from '@/app/lib/api';
+import { ApiError, getContactById, uploadContactPictureRecord } from '@/app/lib/api';
 import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
-import { type Contact, type UpdateContactPayload } from '@/app/lib/types';
+import type { Contact } from '@/app/lib/types';
 
-function toDraft(c: Contact): ContactDraft {
-    return {
-        name: c.name ?? '',
-        email: c.email ?? '',
-        phone: c.phone ?? '',
-        title: c.title ?? '',
-    };
-}
-
-function diffDraft(a: ContactDraft, b: ContactDraft): boolean {
-    return a.name !== b.name || a.email !== b.email || a.phone !== b.phone || a.title !== b.title;
-}
-
-export default function EditContactSheet({
-    contact,
-    open,
-    onOpenChange,
-}: {
+export default function EditContactSheet({ contact, open, onOpenChange, onContactUpdated }: {
     contact: Contact;
     open: boolean;
     onOpenChange: (open: boolean) => void;
+    onContactUpdated?: (saved: Contact) => void;
 }) {
     const router = useRouter();
     const t = useTranslations('ContactsEditSheet');
     const showApiError = useApiErrorToast('ContactsEditSheet');
-    const [draft, setDraft] = useState<ContactDraft>(() => toDraft(contact));
+    const [base, setBase] = useState(contact);
+    const [originWorkspaceId, setOriginWorkspaceId] = useState(renderedWorkspaceId);
+    const [draft, setDraft] = useState<ContactDraft>(() => toContactDraft(contact));
+    const draftRevisionRef = useRef(0);
     const [imageFile, setImageFile] = useState<File | null>(null);
     const [isSaving, setIsSaving] = useState(false);
+    const [reloadRevision, setReloadRevision] = useState(0);
+    const { conflict, captureConflict, clearConflict } = useRecordEditConflict(getContactById);
     const cfRef = useRef<CustomFieldsEditHandle>(null);
     const [customFieldsDirty, setCustomFieldsDirty] = useState(false);
     const { fieldErrors, setFieldErrors, reset: resetFieldErrors, clearError } = useFieldErrors();
+    const [wasOpen, setWasOpen] = useState(open);
+    if (open !== wasOpen) {
+        setWasOpen(open);
+        clearConflict();
+        resetFieldErrors();
+        if (open) {
+            setOriginWorkspaceId(renderedWorkspaceId());
+            setBase(contact);
+            setDraft(toContactDraft(contact));
+            setImageFile(null);
+        }
+    }
 
     const handleOpenChange = (next: boolean) => {
+        if (!next && isSaving) return;
+        if (!next) clearConflict();
         onOpenChange(next);
-        if (!next) {
-            setDraft(toDraft(contact));
-            setImageFile(null);
-            resetFieldErrors();
-        }
     };
 
     const saveEdits = async () => {
-        const origin = workspacePinnedRequest(renderedWorkspaceId());
+        if (isSaving) return;
+        const origin = workspacePinnedRequest(originWorkspaceId);
         resetFieldErrors();
-        const original = toDraft(contact);
-        const textChanged = diffDraft(original, draft);
-        const pictureChanged = imageFile !== null;
-        const customChanged = cfRef.current?.hasChanges() ?? false;
-
-        if (!textChanged && !pictureChanged && !customChanged) {
+        if (!contactDraftChanged(toContactDraft(base), draft) && !imageFile && !cfRef.current?.hasChanges()) {
             toastInfo(t('toastNoChanges'));
             handleOpenChange(false);
             return;
         }
-
         if (!draft.name.trim()) {
             setFieldErrors({ name: t('toastNameRequired') });
-            requestAnimationFrame(() => document.getElementById(`name-${contact.id}`)?.focus());
+            requestAnimationFrame(() => document.getElementById(`name-${base.id}`)?.focus());
             return;
         }
-
+        const submittedRevision = draftRevisionRef.current;
         setIsSaving(true);
         let committedChanges = false;
         try {
-            if (textChanged) {
-                const payload: UpdateContactPayload = {
-                    name: draft.name.trim(),
-                    email: draft.email.trim() || undefined,
-                    phone: draft.phone.trim() || undefined,
-                    title: draft.title.trim() || undefined,
-                    companyId: contact.companyId ?? contact.company?.id ?? null,
-                };
-                await updateContact(contact.id, payload, origin);
-                committedChanges = true;
+            const saved = await submitContactDraftUpdate(base, draft, origin);
+            committedChanges = true;
+            setBase(saved);
+            onContactUpdated?.(saved);
+            setDraft((current) => reconcileSavedContactDraft(current, draft, saved));
+            await cfRef.current?.save(origin);
+            if (imageFile) {
+                const pictured = await uploadContactPictureRecord(base.id, imageFile, origin);
+                setImageFile(null);
+                onContactUpdated?.(pictured);
+                if (saved.version !== undefined && pictured.version !== saved.version + 1) {
+                    await captureConflict(new ApiError('The record changed since this edit was opened', 409, 'STALE_RECORD'), saved, origin);
+                    return;
+                }
+                setBase(pictured);
+                setDraft((current) => ({ ...current, expectedVersion: pictured.version }));
             }
-
-            if (customChanged) {
-                await cfRef.current?.save(origin);
-                committedChanges = true;
-            }
-
-            if (pictureChanged && imageFile) {
-                await uploadContactPicture(contact.id, imageFile, origin);
-            }
-
+            if (draftRevisionRef.current !== submittedRevision) return;
             toastSuccess(t('toastContactUpdated'));
-            setImageFile(null);
             onOpenChange(false);
             router.refresh();
         } catch (err) {
             if (committedChanges) {
-                const updatedContact = await getContactById(contact.id).catch(() => null);
-                if (updatedContact) setDraft(toDraft(updatedContact));
                 toastError(t('toastPartiallySaved'));
                 router.refresh();
-            } else {
-                showApiError(err, 'toastFailedSave');
-            }
+            } else if (!await captureConflict(err, base, origin)) showApiError(err, 'toastFailedSave');
         } finally {
             setIsSaving(false);
         }
     };
 
     return (
-        <QuickEditSheet
-            editSheetOpen={open}
-            setEditSheetOpen={handleOpenChange}
-            selectedIds={new Set([contact.id])}
-            selectedContacts={[contact]}
-            drafts={{ [contact.id]: draft }}
-            updateDraft={(_id, patch) => {
-                for (const key of Object.keys(patch)) clearError(key);
-                setDraft((prev) => ({ ...prev, ...patch }));
-            }}
-            imageFiles={{ [contact.id]: imageFile }}
-            updateImageFile={(_id, file) => setImageFile(file)}
-            isSaving={isSaving}
-            saveEdits={saveEdits}
-            fieldErrors={{ [contact.id]: fieldErrors }}
-            customFieldsDirty={customFieldsDirty}
-            customFieldsSlot={(
-                <CustomFieldsEditSection
-                    ref={cfRef}
-                    entityType="person"
-                    entityId={contact.id}
-                    onDirtyChange={setCustomFieldsDirty}
-                />
-            )}
-        />
+        <>
+            <QuickEditSheet
+                key={reloadRevision}
+                editSheetOpen={open}
+                setEditSheetOpen={handleOpenChange}
+                selectedIds={new Set([base.id])}
+                selectedContacts={[base]}
+                drafts={{ [base.id]: draft }}
+                updateDraft={(_id, patch) => {
+                    draftRevisionRef.current += 1;
+                    for (const key of Object.keys(patch)) clearError(key);
+                    setDraft((prev) => ({ ...prev, ...patch }));
+                }}
+                imageFiles={{ [base.id]: imageFile }}
+                updateImageFile={(_id, file) => setImageFile(file)}
+                isSaving={isSaving}
+                saveEdits={saveEdits}
+                fieldErrors={{ [base.id]: fieldErrors }}
+                customFieldsDirty={customFieldsDirty}
+                customFieldsSlot={(
+                    <CustomFieldsEditSection ref={cfRef} entityType="person" entityId={base.id} onDirtyChange={setCustomFieldsDirty} />
+                )}
+            />
+            {open && conflict && <ContactEditConflictDialog
+                conflict={conflict}
+                onKeepEditing={clearConflict}
+                onReload={(current) => {
+                    setBase(current);
+                    setDraft(toContactDraft(current));
+                    setImageFile(null);
+                    resetFieldErrors();
+                    setCustomFieldsDirty(false);
+                    setReloadRevision((revision) => revision + 1);
+                    clearConflict();
+                }}
+            />}
+        </>
     );
 }

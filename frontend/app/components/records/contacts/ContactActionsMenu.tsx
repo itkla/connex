@@ -33,11 +33,12 @@ import {
 } from '@/app/components/records/RecordComposers';
 import NewNoteDialog from '@/app/components/activity/notes/NoteDialog';
 
-import { archiveContact, restoreContact, getActiveWorkspaceMembers, updateContact, updatePersonOwner } from '@/app/lib/api';
+import { archiveContact, restoreContact, getActiveWorkspaceMembers, getContactById, updatePersonOwner } from '@/app/lib/api';
 import type { RelationshipMapAvailability } from '@/app/lib/api';
 import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
 import { type WorkspaceMember } from '@/app/lib/types';
 import { type Contact, type Deal } from '@/app/lib/types';
+import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import EditContactSheet from '@/app/components/records/contacts/EditContactSheet';
 import RestrictionsDialog from '@/app/components/records/contacts/RestrictionsDialog';
 import {
@@ -65,6 +66,8 @@ export default function ContactActionsMenu({
     const [isArchiving, setIsArchiving] = useState(false);
     const [removingCompany, setRemovingCompany] = useState(false);
     const [editOpen, setEditOpen] = useState(false);
+    const [editContact, setEditContact] = useState(contact);
+    const [isPreparingEdit, setIsPreparingEdit] = useState(false);
     const [activityOpen, setActivityOpen] = useState(false);
     const [taskOpen, setTaskOpen] = useState(false);
     const [noteOpen, setNoteOpen] = useState(false);
@@ -85,24 +88,23 @@ export default function ContactActionsMenu({
     }, [assignOwnerOpen, members.length]);
     const { activeWorkspaceId } = useWorkspace();
     const owned = contact.workspaceId == null || contact.workspaceId === activeWorkspaceId;
-    const handleRemoveCompany = async () => {
-        if (!contact.company) return;
-        setRemovingCompany(true);
+    const prepareEdit = async () => {
+        const originWorkspaceId = renderedWorkspaceId();
+        setIsPreparingEdit(true);
         try {
-            await updateContact(contact.id, {
-                name: contact.name,
-                email: contact.email || undefined,
-                phone: contact.phone || undefined,
-                title: contact.title || undefined,
-                companyId: null,
-            });
-            toastSuccess(t('toastRemovedFromCompany', { contactName: contact.name, companyName: contact.company.name }));
-            router.refresh();
+            const current = await getContactById(contact.id, workspacePinnedRequest(originWorkspaceId));
+            if (renderedWorkspaceId() !== originWorkspaceId) return;
+            setEditContact(current);
+            setEditOpen(true);
         } catch (err) {
-            showApiError(err, 'toastFailedRemoveFromCompany');
+            showApiError(err, 'toastFailedLoadContact');
         } finally {
-            setRemovingCompany(false);
+            setIsPreparingEdit(false);
         }
+    };
+    const handleRemoveCompany = () => {
+        setRemovingCompany(true);
+        setChangeOpen(true);
     };
 
     const archived = contact.archivedAt != null;
@@ -132,7 +134,7 @@ export default function ContactActionsMenu({
         <>
             <div className="flex flex-row gap-2">
                 <ButtonGroup orientation="horizontal">
-                    <Button variant="outline" size="toolbar" onClick={() => setEditOpen(true)}>
+                    <Button variant="outline" size="toolbar" onClick={prepareEdit} disabled={isPreparingEdit}>
                         <PencilSquareIcon className="size-4" />
                         {t('edit')}
                     </Button>
@@ -201,6 +203,7 @@ export default function ContactActionsMenu({
                             <DropdownMenuItem
                                 onSelect={(e) => {
                                     e.preventDefault();
+                                    setRemovingCompany(false);
                                     setChangeOpen(true);
                                 }}
                             >
@@ -209,7 +212,7 @@ export default function ContactActionsMenu({
                             </DropdownMenuItem>
                             {contact.company ? (
                                 <DropdownMenuItem
-                                    disabled={removingCompany}
+                                    disabled={changeOpen}
                                     onSelect={(e) => {
                                         e.preventDefault();
                                         handleRemoveCompany();
@@ -277,7 +280,7 @@ export default function ContactActionsMenu({
                     onChange={onAttachmentFilesSelected}
                 />
 
-                <EditContactSheet contact={contact} open={editOpen} onOpenChange={setEditOpen} />
+                <EditContactSheet contact={editContact} open={editOpen} onOpenChange={setEditOpen} onContactUpdated={setEditContact} />
 
                 <RestrictionsDialog contact={contact} open={restrictionsOpen} onOpenChange={setRestrictionsOpen} />
 
@@ -314,6 +317,7 @@ export default function ContactActionsMenu({
                     open={changeOpen}
                     onOpenChange={setChangeOpen}
                     contacts={[contact]}
+                    removeCompany={removingCompany}
                 />
                 <ArchiveRecordDialog
                     open={archiveOpen}

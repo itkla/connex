@@ -148,6 +148,16 @@ export function useServerRecords<T, P extends PageParams = PageParams>(
         });
     }, [activeWorkspaceId]);
 
+    /** Replaces a complete server snapshot so omitted nullable fields cannot survive an acknowledged save. */
+    const replaceItem = useCallback((id: number, saved: T) => {
+        setRecords((previous) => previous.workspaceId !== activeWorkspaceId ? previous : {
+            ...previous,
+            items: previous.items.map((item) => (
+                typeof item === 'object' && item !== null && 'id' in item && item.id === id ? saved : item
+            )),
+        });
+    }, [activeWorkspaceId]);
+
     const changeSize = useCallback((next: number) => { setSize(next); setPage(1); }, []);
 
     const onSortChange = useCallback((key: string) => {
@@ -174,6 +184,6 @@ export function useServerRecords<T, P extends PageParams = PageParams>(
         size, setSize: changeSize,
         query, setQuery, applyQuery,
         sortKey, sortDirection, onSortChange, applySort,
-        revision, reload, patchItem,
+        revision, reload, patchItem, replaceItem,
     };
 }

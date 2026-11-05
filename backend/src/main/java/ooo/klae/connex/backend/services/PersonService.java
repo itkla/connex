@@ -40,6 +40,7 @@ import ooo.klae.connex.backend.dto.PersonDuplicatePreflightRequest;
 import ooo.klae.connex.backend.dto.WarmthFilter;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.StaleRecordException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedContent;
@@ -680,6 +681,9 @@ public class PersonService {
         if (before == null || before.getArchivedAt() != null) {
             throw new ResourceNotFoundException("Contact not found");
         }
+        if (person.getExpectedVersion() != null && person.getExpectedVersion() != before.getVersion()) {
+            throw new StaleRecordException(before.getVersion());
+        }
         preserveHiddenCompanyAndValidateRequestedCompany(
             workspaceId, companyIdOf(before), person, operationVisibilityScope);
         person.setId(id);
@@ -687,7 +691,13 @@ public class PersonService {
         person.setOwnerId(before.getOwnerId());
         person.setImageUrl(before.getImageUrl());
         admission.beforeMutation();
-        personMapper.update(person);
+        if (personMapper.update(person) == 0) {
+            Person current = personMapper.getOwnedPersonByIdForUpdate(workspaceId, id);
+            if (current == null || current.getArchivedAt() != null) {
+                throw new ResourceNotFoundException("Contact not found");
+            }
+            throw new StaleRecordException(current.getVersion());
+        }
         if (!Objects.equals(companyIdOf(before), companyIdOf(person))) {
             employmentService.recordTransition(workspaceId, id, companyIdOf(person), person.getTitle());
         }
@@ -708,9 +718,8 @@ public class PersonService {
      * membership, if any, not from the unlocked existence check, which opens this transaction's read
      * view before any lock is held. A contact archived or deleted since that check is refused under
      * the lock, before anything is written (#1948). It runs at {@code READ_COMMITTED}, so the contact
-     * returned is a fresh read: when a concurrent change already set the same owner, this write
-     * leaves no newer row version, and a repeatable-read snapshot would show the owner from before
-     * that change (#1961).
+     * returned is a fresh read carrying the database-owned edit version. Even assigning the same
+     * owner advances that counter, so the response can seed a subsequent conditional edit.
      *
      * @param personId the contact in the current workspace
      * @param ownerId the new owner, or {@code null} to unassign

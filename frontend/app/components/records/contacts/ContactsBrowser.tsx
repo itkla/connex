@@ -21,6 +21,10 @@ import { EmptyState } from '@/app/components/EmptyState';
 import DensityToggle from '@/app/components/records/DensityToggle';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useRecordDensity } from '@/app/hooks/useRecordDensity';
+import { isStaleRecordError } from '@/app/lib/recordEditConflict';
+import { useRecordEditConflict } from '@/app/hooks/useRecordEditConflict';
+import ContactEditConflictDialog from './ContactEditConflictDialog';
+import { contactDraftChanged, reconcileSavedContactDraft, submitContactDraftUpdate, toContactDraft as toDraft } from './contactEditConflict';
 import { useInlineEdit } from '@/app/hooks/useInlineEdit';
 import ColumnVisibilityMenu from '@/app/components/records/ColumnVisibilityMenu';
 import { useColumnVisibility } from '@/app/hooks/useColumnVisibility';
@@ -55,10 +59,10 @@ import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
 import NewContactDialog from '@/app/components/records/contacts/NewContactDialog';
 import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompanyDialog';
 import QuickEditSheet, { type ContactDraft } from '@/app/components/records/contacts/QuickEditSheet';
-import { updateContact, createContact, importBusinessCard, getContactsPage, getContactTemperatures, getPersonFacets, getTags, bulkAddTagToContacts, bulkRemoveTagFromContacts, bulkArchiveContacts, bulkRestoreContacts, bulkAssignPersonOwner, getActiveWorkspaceMembers, getContactIds, exportContactsCsv, isFieldError, uploadContactPicture } from '@/app/lib/api';
+import { getContactById, createContact, importBusinessCard, getContactsPage, getContactTemperatures, getPersonFacets, getTags, bulkAddTagToContacts, bulkRemoveTagFromContacts, bulkArchiveContacts, bulkRestoreContacts, bulkAssignPersonOwner, getActiveWorkspaceMembers, getContactIds, exportContactsCsv, isFieldError, uploadContactPicture } from '@/app/lib/api';
 import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
-import { type BusinessCardImportDraft, type Contact, type ContactFirstResponseState, type ContactLeadSource, type ContactLifecycleStage, type UpdateContactPayload, type CreateContactPayload, type ContactsPageParams, type PersonFacets, type RelationshipTemperature, type Tag, type WarmthFilterParams, type WorkspaceMember } from '@/app/lib/types';
+import { type BusinessCardImportDraft, type Contact, type ContactFirstResponseState, type ContactLeadSource, type ContactLifecycleStage, type CreateContactPayload, type ContactsPageParams, type PersonFacets, type RelationshipTemperature, type Tag, type WarmthFilterParams, type WorkspaceMember } from '@/app/lib/types';
 import WarmthPill from '@/app/components/records/WarmthPill';
 import CommentIndicatorChip from '@/app/components/records/comments/CommentIndicatorChip';
 import { useCommentIndicators } from '@/app/hooks/useCommentIndicators';
@@ -112,24 +116,6 @@ type ContactFilterParams = WarmthFilterParams & {
 
 const searchFields = (c: Contact) => [c.name, c.email, c.phone, c.title];
 const EMPTY_CONTACT_DRAFT: CreateContactPayload = { name: '', email: '', phone: '', title: '' };
-
-function toDraft(c: Contact): ContactDraft {
-    return {
-        name: c.name ?? '',
-        email: c.email ?? '',
-        phone: c.phone ?? '',
-        title: c.title ?? '',
-    };
-}
-
-function diffDraft(original: ContactDraft, draft: ContactDraft): boolean {
-    return (
-        original.name !== draft.name ||
-        original.email !== draft.email ||
-        original.phone !== draft.phone ||
-        original.title !== draft.title
-    );
-}
 
 const IMPORT_CONTACTS_ACTION = 'utility.import-contacts';
 
@@ -211,6 +197,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
         revision,
         reload,
         patchItem,
+        replaceItem,
     } = useServerRecords<Contact, ContactsPageParams>(getContactsPage, filterParams, { urlSync: true });
     const returnSelection = useRecordReturnSelection(
         'contacts',
@@ -417,6 +404,13 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
 
     const [isDeleting, setIsDeleting] = useState(false);
     const [editSheetOpen, setEditSheetOpen] = useState(false);
+    const [editBases, setEditBases] = useState<Contact[]>([]);
+    const [isPreparingEdit, setIsPreparingEdit] = useState(false);
+    const [editReloadRevision, setEditReloadRevision] = useState(0);
+    const editWorkspaceRef = useRef(renderedWorkspaceId());
+    const inlinePendingRef = useRef(0);
+    const draftRevisionRef = useRef(0);
+    const { conflict, captureConflict, clearConflict } = useRecordEditConflict(getContactById);
     const [drafts, setDrafts] = useState<Record<number, ContactDraft>>({});
     const [isSaving, setIsSaving] = useState(false);
     const [changeCompanyOpen, setChangeCompanyOpen] = useState(false);
@@ -553,96 +547,86 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
         }
     };
 
-    const openEditSheet = () => {
-        const next: Record<number, ContactDraft> = {};
-        for (const c of selectedContacts) next[c.id] = toDraft(c);
-        setDrafts(next);
-        setEditSheetOpen(true);
+    const prepareEdit = async (records: Contact[]) => {
+        if (isPreparingEdit || isSaving || inlinePendingRef.current > 0) return;
+        const originWorkspaceId = renderedWorkspaceId();
+        setIsPreparingEdit(true);
+        clearConflict();
+        try {
+            const bases = await Promise.all(records.map((record) => getContactById(record.id, workspacePinnedRequest(originWorkspaceId))));
+            if (renderedWorkspaceId() !== originWorkspaceId || inlinePendingRef.current > 0) return;
+            editWorkspaceRef.current = originWorkspaceId;
+            setEditBases(bases);
+            setDrafts(Object.fromEntries(bases.map((base) => [base.id, toDraft(base)])));
+            setEditSheetOpen(true);
+        } catch (error) {
+            showApiError(error, 'toastFailedLoadContact');
+        } finally {
+            setIsPreparingEdit(false);
+        }
     };
+    const openEditSheet = () => { void prepareEdit(selectedContacts); };
 
     const updateDraft = (id: number, patch: Partial<ContactDraft>) => {
+        draftRevisionRef.current += 1;
         setDrafts((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
     };
 
     const saveEdits = async () => {
-        const changed = selectedContacts.filter((c) => {
-            const draft = drafts[c.id];
-            return draft && diffDraft(toDraft(c), draft);
+        if (isSaving) return;
+        const changed = editBases.filter((base) => {
+            const draft = drafts[base.id];
+            return draft && contactDraftChanged(toDraft(base), draft);
         });
-
         if (changed.length === 0) {
             toastInfo(t('toastNoChangesToSave'));
             setEditSheetOpen(false);
             return;
         }
-
-        const invalid = changed.find((c) => !drafts[c.id].name.trim());
+        const invalid = changed.find((base) => !drafts[base.id].name.trim());
         if (invalid) {
             toastError(t('toastNameRequiredForX', { name: invalid.name }));
             return;
         }
-
+        const origin = workspacePinnedRequest(editWorkspaceRef.current);
+        const submittedRevision = draftRevisionRef.current;
         setIsSaving(true);
         try {
-            await Promise.all(
-                changed.map((c) => {
-                    const d = drafts[c.id];
-                    const payload: UpdateContactPayload = {
-                        name: d.name.trim(),
-                        email: d.email.trim() || undefined,
-                        phone: d.phone.trim() || undefined,
-                        title: d.title.trim() || undefined,
-                        companyId: c.companyId ?? c.company?.id ?? null,
-                    };
-                    return updateContact(c.id, payload);
-                }),
-            );
-            toastSuccess(
-                changed.length === 1 ? t('toastContactUpdated') : t('toastContactsUpdated', { count: changed.length }),
-            );
+            for (const base of changed) {
+                const draft = drafts[base.id];
+                if (!draft) continue;
+                try {
+                    const saved = await submitContactDraftUpdate(base, draft, origin);
+                    if (renderedWorkspaceId() === editWorkspaceRef.current) replaceItem(saved.id, saved);
+                    setEditBases((current) => current.map((item) => item.id === saved.id ? saved : item));
+                    setDrafts((current) => {
+                        const latest = current[saved.id];
+                        return latest ? { ...current, [saved.id]: reconcileSavedContactDraft(latest, draft, saved) } : current;
+                    });
+                } catch (error) {
+                    if (!await captureConflict(error, base, origin)) showApiError(error, 'toastFailedSave');
+                    return;
+                }
+            }
+            if (draftRevisionRef.current !== submittedRevision) return;
+            toastSuccess(changed.length === 1 ? t('toastContactUpdated') : t('toastContactsUpdated', { count: changed.length }));
             setEditSheetOpen(false);
             refresh();
-        } catch (err) {
-            showApiError(err, 'toastFailedSave');
         } finally {
             setIsSaving(false);
         }
     };
 
-    const bulkRemoveFromCompany = async () => {
-        const affected = selectedContacts.filter((c) => c.companyId || c.company);
-        if (affected.length === 0) {
-            toastInfo(t('toastNoneHaveCompany'));
-            return;
-        }
+    const bulkRemoveFromCompany = () => {
         setIsClearingCompany(true);
-        try {
-            await Promise.all(affected.map((c) => updateContact(c.id, {
-                name: c.name,
-                email: c.email || undefined,
-                phone: c.phone || undefined,
-                title: c.title || undefined,
-                companyId: null,
-            })));
-            toastSuccess(
-                affected.length === 1
-                    ? t('toastRemovedFromCompany')
-                    : t('toastRemovedNContactsFromCompanies', { count: affected.length }),
-            );
-            refresh();
-        } catch (err) {
-            showApiError(err, 'toastFailedRemoveFromCompany');
-        } finally {
-            setIsClearingCompany(false);
-        }
+        setChangeCompanyOpen(true);
     };
 
-    const quickEditOne = useCallback((contact: Contact) => {
+    const quickEditOne = (contact: Contact) => {
         setMatchedSignature(null);
         setSelectedIds(new Set([contact.id]));
-        setDrafts({ [contact.id]: toDraft(contact) });
-        setEditSheetOpen(true);
-    }, [setSelectedIds]);
+        void prepareEdit([contact]);
+    };
 
     const archiveOne = useCallback((contact: Contact) => {
         setMatchedSignature(null);
@@ -699,17 +683,33 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
     };
 
     const inlineEdit = useInlineEdit<Contact>(patchItem);
-    const saveContact = useCallback(
-        (full: Contact) =>
-            updateContact(full.id, {
-                name: full.name,
-                email: full.email,
-                phone: full.phone,
-                title: full.title,
-                companyId: full.companyId ?? full.company?.id,
-            }).then(() => {}),
-        [],
-    );
+    const saveContact = useCallback(async (full: Contact) => {
+        if (inlinePendingRef.current > 0) throw new Error(t('inlineSavePending'));
+        const base = contacts.find((contact) => contact.id === full.id);
+        if (!base) return;
+        const originWorkspaceId = renderedWorkspaceId();
+        const origin = workspacePinnedRequest(originWorkspaceId);
+        const draft = toDraft(full);
+        inlinePendingRef.current += 1;
+        setIsSaving(true);
+        try {
+            const saved = await submitContactDraftUpdate(base, draft, origin);
+            if (renderedWorkspaceId() === originWorkspaceId) replaceItem(saved.id, saved);
+        } catch (error) {
+            if (!isStaleRecordError(error)) throw error;
+            if (renderedWorkspaceId() !== originWorkspaceId) return;
+            replaceItem(base.id, base);
+            clearConflict();
+            editWorkspaceRef.current = originWorkspaceId;
+            setEditBases([base]);
+            setDrafts({ [base.id]: draft });
+            setEditSheetOpen(true);
+            await captureConflict(error, base, origin);
+        } finally {
+            inlinePendingRef.current -= 1;
+            setIsSaving(inlinePendingRef.current > 0);
+        }
+    }, [contacts, replaceItem, captureConflict, clearConflict, t]);
 
     const commentIndicatorIds = useMemo(() => contacts.map((contact) => contact.id), [contacts]);
     const commentCounts = useCommentIndicators('person', commentIndicatorIds);
@@ -738,13 +738,13 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
             key: 'email',
             label: t('columnEmail'),
             getSortValue: (c) => c.email ?? null,
-            editable: { getValue: (c) => c.email, save: (c, v) => inlineEdit.commit(c, 'email', v, saveContact) },
+            editable: { disabled: () => isSaving || isPreparingEdit ? t('inlineSavePending') : null, getValue: (c) => c.email, save: (c, v) => inlineEdit.commit(c, 'email', v, saveContact) },
         },
         {
             key: 'phone',
             label: t('columnPhone'),
             getSortValue: (c) => c.phone ?? null,
-            editable: { getValue: (c) => c.phone, save: (c, v) => inlineEdit.commit(c, 'phone', v, saveContact), inputType: 'tel' },
+            editable: { disabled: () => isSaving || isPreparingEdit ? t('inlineSavePending') : null, getValue: (c) => c.phone, save: (c, v) => inlineEdit.commit(c, 'phone', v, saveContact), inputType: 'tel' },
         },
         {
             key: 'company',
@@ -757,7 +757,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
             key: 'title',
             label: t('columnTitle'),
             getSortValue: (c) => c.title ?? null,
-            editable: { getValue: (c) => c.title, save: (c, v) => inlineEdit.commit(c, 'title', v, saveContact) },
+            editable: { disabled: () => isSaving || isPreparingEdit ? t('inlineSavePending') : null, getValue: (c) => c.title, save: (c, v) => inlineEdit.commit(c, 'title', v, saveContact) },
         },
         {
             key: 'owner',
@@ -777,7 +777,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
             getSortValue: (c) => (c.updatedAt ? Date.parse(c.updatedAt) : null),
             render: (c) => c.updatedAt,
         },
-    ], [t, tempByContactId, memberById, inlineEdit, saveContact, showArchived, commentCounts]);
+    ], [t, tempByContactId, memberById, inlineEdit, saveContact, showArchived, commentCounts, isSaving, isPreparingEdit]);
 
     const { columns: customColumns, addColumnSlot } = useCustomFieldColumns('person', contacts);
 
@@ -794,7 +794,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
                         <EyeIcon className="size-4" />
                         {t('view')}
                     </Button>
-                    <Button variant="outline" size="toolbar" onClick={openEditSheet}>
+                    <Button variant="outline" size="toolbar" onClick={openEditSheet} disabled={isPreparingEdit || isSaving}>
                         <PencilIcon className="size-4" />
                         {t('quickEdit')}
                     </Button>
@@ -822,12 +822,12 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
                     {!allMatchingActive && (
                         <>
                             <DropdownMenuSeparator />
-                            <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setChangeCompanyOpen(true); }}>
+                            <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setIsClearingCompany(false); setChangeCompanyOpen(true); }}>
                                 <BuildingOffice2Icon />
                                 {t('changeCompany')}
                             </DropdownMenuItem>
                             <DropdownMenuItem
-                                disabled={isClearingCompany}
+                                disabled={changeCompanyOpen}
                                 onSelect={(e) => { e.preventDefault(); bulkRemoveFromCompany(); }}
                             >
                                 <NoSymbolIcon />
@@ -1151,15 +1151,32 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
                 {peek.drawer}
 
                 <QuickEditSheet
+                    key={editReloadRevision}
                     editSheetOpen={editSheetOpen}
-                    setEditSheetOpen={setEditSheetOpen}
+                    setEditSheetOpen={(open) => { if (isSaving) return; setEditSheetOpen(open); if (!open) clearConflict(); }}
                     selectedIds={selectedIds}
-                    selectedContacts={selectedContacts}
+                    selectedContacts={editBases}
                     drafts={drafts}
                     updateDraft={updateDraft}
                     isSaving={isSaving}
                     saveEdits={saveEdits}
                 />
+
+                {editSheetOpen && conflict && <ContactEditConflictDialog
+                    conflict={conflict}
+                    onKeepEditing={clearConflict}
+                    onReload={(current) => {
+                        const otherDraftsRemain = editBases.some((base) => {
+                            const draft = drafts[base.id];
+                            return base.id !== current.id && draft && contactDraftChanged(toDraft(base), draft);
+                        });
+                        setEditBases((previous) => previous.map((base) => base.id === current.id ? current : base));
+                        setDrafts((previous) => ({ ...previous, [current.id]: toDraft(current) }));
+                        replaceItem(current.id, current);
+                        if (!otherDraftsRemain) setEditReloadRevision((revision) => revision + 1);
+                        clearConflict();
+                    }}
+                />}
 
                 <NewContactDialog
                     newContactDialogOpen={newContactDialogOpen}
@@ -1191,6 +1208,8 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
                     open={changeCompanyOpen}
                     onOpenChange={setChangeCompanyOpen}
                     contacts={selectedContacts}
+                    removeCompany={isClearingCompany}
+                    onSuccess={refresh}
                 />
 
                 <BulkTagDialog

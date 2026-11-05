@@ -1249,6 +1249,7 @@ export type UpdateCompanyPayload = {
 
 export type Contact = {
     id: number;
+    version?: number;
     workspaceId?: number;
     ownerId?: number | null;
     name: string;
@@ -1351,6 +1352,7 @@ export type ContactDisqualificationReason = string;
  * transition rules, so the client renders `allowedTransitions` rather than recomputing them.
  */
 export type ContactLifecycle = {
+    version?: number;
     personId: number | null;
     stage: ContactLifecycleStage | null;
     changedAt: string | null;
@@ -3995,6 +3997,7 @@ export type ReportGoal = ReportGoalInput & {
 };
 
 export type UpdateContactPayload = {
+    expectedVersion?: number;
     name?: string;
     email?: string;
     phone?: string;

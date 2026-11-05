@@ -1,11 +1,11 @@
 # Conditional record edits
 
-Deal full-record edits use optional optimistic concurrency (#2216). This is the pattern for
-contact edits and other whole-record forms. Tenant, visibility and permission checks still apply.
+Deal and contact full-record edits use optional optimistic concurrency (#2216). This is the pattern
+for other whole-record forms. Tenant, visibility and permission checks still apply.
 
 ## HTTP contract
 
-- GET/list/board deal DTOs return a database-owned integer `version`.
+- GET/list contact DTOs and GET/list/board deal DTOs return a database-owned integer `version`.
 - Keep the read-only DTO carrier boxed (`Long`) and populate it from the non-null bean counter.
   Jackson 3 can select Lombok's property constructor; an ignored read-only primitive constructor
   parameter would otherwise fail missing/null-primitive deserialization on incoming writes. Do not
@@ -59,6 +59,51 @@ owner cleanup is already explicit after the cross-plane owner FK was removed in 
 See [MySQL foreign-key behavior](https://dev.mysql.com/doc/refman/8.4/en/create-table-foreign-keys.html).
 Any new cascading parent action must account for this exception too.
 
+## Contact versions (tenant V242)
+
+V242 adds `person.version` with `ALGORITHM=INSTANT, LOCK=DEFAULT` and the database-owned
+`trg_person_edit_version` BEFORE UPDATE counter. Person DTOs use the same boxed read-only `version`
+and optional write-only, non-negative `expectedVersion`. `PersonService.update` checks an already
+locked owned contact before requested-company validation and retains the version predicate in the
+actual workspace/id-scoped broad UPDATE. A zero-row write refuses before employment history,
+identity intake, audit or rule publication; a missing/archived contact remains 404. The transaction
+retains the existing organization duplicate mutex → person lock order and READ_COMMITTED isolation.
+
+Person writers covered by the counter are:
+
+- `PersonMapper.update`, `updateOwner`, `updateImageUrlIfCurrent`, `updateEvaluationExclusions`,
+  `updateProcessingRestrictions`, `updateProvenance`, `updateLifecycle`, `startFirstResponseClock`,
+  `clearFirstResponseClock`, `recordFirstResponse`, `recordFirstResponseBreach`,
+  `clearMemberOwnership`, `clearOwnershipAnywhere`, `archive` and `restore`.
+- `AssignmentSweepMapper.clearOwner` for person and lifecycle-pass units;
+  `AiAssistantIdentifierMapper.updatePersonKeysIfNameCurrent` (which preserves `updated_at`);
+  `LegacyTenantUploadMigrationMapper.updatePersonImage`; direct maintenance/migration UPDATEs.
+- CSV import updates, bulk owner/lifecycle actions, assistant/rule/workflow actions,
+  activity first responses, SLA sweeps and member/account cleanup use those same statements.
+
+Person tags, employment, identity, qualification answers, lifecycle passes, consent, edges and
+custom-field junction/value writes do not overwrite the person row and do not require its token.
+Deletes remove the row; inserts start at zero. Creation augmentation affects only related rows.
+Full updates and targeted owner/picture/evaluation/restrictions/provenance/archive/restore writes
+already reselect the contact after their writes. Lifecycle transitions reselect after both stage and
+clock writes, so a returned Person always carries the final version. The lifecycle state DTO also carries that
+post-write version.
+
+The historical `fk_person_company` is ON DELETE SET NULL, whose automatic action bypasses UPDATE
+triggers. `trg_company_delete_person_edit_version` explicitly detaches those exact indexed company
+references before the existing FK action. The V241 company→deal trigger remains intact and runs
+first; V242 then detaches contacts, preserving parent→child ordering. `person.owner_id`, introduced
+in V90, has never had a user FK; member/account removal uses explicit UPDATEs and the counter.
+`workspace_id`'s control-plane FK was removed in V65, and V179 deliberately introduced no
+`referrer_person_id` FK. There is no other surviving parent cascade that mutates person fields.
+
+`PersonEditVersionTest` checks generated SQL, DTO transport/validation and shared error mapping;
+`PersonFrozenSqlTest` keeps the frozen visibility oracle aligned with the version projection.
+`PersonEditVersionMapperTest` checks targeted/legacy/maintenance writers, company detachment and
+workspace isolation. `PersonUpdateConcurrencyIntegrationTest` checks a committed second title edit
+against a stale phone draft, atomic-refusal side effects, missing rows, legacy writes, returned
+versions and the same-token two-writer SQL race. Database execution is CI-owned for this migration.
+
 ## Form behavior
 
 Capture a base record and token together when opening the form, including from an already stale
@@ -103,6 +148,36 @@ selected workspace. Board Quick edit pins its snapshot read and discards its res
 rendered workspace changes before it completes. The workspace write-chain guard's exception
 ledger remains limited to the dashboard queue; deal edits require no exception.
 
+### Contact edit surfaces
+
+Contact detail Edit, list selection/row quick edit, and the internal contact-card editor on company
+profiles fetch current records with the rendered workspace pin before opening. The internal card
+reuses `EditContactSheet`. Forms freeze their base/token and the opening workspace; background list
+or route refreshes never rebase an existing draft. Email/phone/title inline saves condition on the
+row token and replace the complete row through `useServerRecords.replaceItem`, including removal
+of nullable fields omitted from JSON. Draft submissions retain explicit empty strings for cleared
+email, phone and title values. Omission/null means no change for those mapper columns; an empty
+string means clear, for both inline edits and sheets. A stale inline refusal restores the row's last server snapshot
+and keeps the refused value only in the quick-edit draft. The entire inline request and conflict
+read block another editor from replacing it.
+
+`contactEditConflict.ts` owns contact submission, reconciliation and field comparison; the sheets
+reuse `useRecordEditConflict` and the same explicit discard-confirmation dialog pattern as deals.
+Selected-contact batches save sequentially and stop on the first refusal. Each success replaces its
+base/token; later input keeps its text and advances only to the acknowledged version. Reloading one
+conflicted contact replaces only that draft; it resets the sheet's discard baseline only when no
+other changed drafts remain. Retrying skips unchanged acknowledged rows. Custom fields and photos save only after the conditional core write.
+Photo responses advance the draft token only when they are exactly one database update after that
+core write. Any intervening writer leaves the core token in place and opens a conflict check, so a
+photo cannot bless stale text with someone else's newer token.
+
+Company association and both detail/bulk removal also send broad PUTs, so `ChangeCompanyDialog`
+loads pinned bases and uses the same conditional submission/conflict flow. Partial successes retain
+returned snapshots; retries compare each acknowledged company with the current target, so changing
+the target cannot silently skip an earlier row. Target selection and dismissal stay blocked during
+writes and current-record reads. Other profile panels (owner, lifecycle, provenance, restrictions,
+evaluation, archive and restore) use targeted endpoints and act as competing versioned writers.
+
 ## Verification
 
 `DealEditVersionTest` checks generated SQL, legacy compatibility, DTO transport and the error
@@ -111,3 +186,10 @@ writers and tenant isolation. `DealUpdateConcurrencyIntegrationTest` checks stal
 and races two SQL updates carrying the same expected token; exactly one must win. The frontend
 unit tests cover token submission, field comparison and localized error mapping; the two-tab
 Playwright spec covers both sheet entry points and pages loaded before a competing write.
+
+Contact frontend regressions cover token submission, changed-field copy, delayed draft reconciliation,
+photo interleavings, company target changes after partial success, full response replacement, and
+workspace-pinned reads/writes. `workspaceBoundRecordChains.test.tsx` exercises contact batch responses
+and retries through the real API transport. `contact-stale-edit.spec.ts` provisions an isolated workspace
+per case and covers English/Japanese two-tab detail, list and company-profile edits, pages loaded
+before the competing write, and a delayed inline refusal. Browser execution remains CI-owned.
