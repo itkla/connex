@@ -682,7 +682,7 @@ export default function CampaignDelivery({
                                     <span className="text-xs font-medium uppercase tracking-[0.1em] text-muted-foreground">
                                         {st("eligible")}
                                     </span>
-                                    <span className="tabular-nums text-sm font-semibold text-brand-hover">
+                                    <span className="tabular-nums text-sm font-semibold text-brand-text">
                                         {st("eligibleIncluded", {
                                             count: chosenSnapshot.estimatedIncluded.toLocaleString(locale),
                                         })}

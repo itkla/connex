@@ -290,7 +290,7 @@ export default function ReportBuilderBoard({
         <div className="min-h-full bg-background px-2 pb-12 pt-8 2xl:px-6">
             <header className="flex flex-wrap items-end justify-between gap-5 border-b border-border pb-6">
                 <div>
-                    <p className="mb-2 text-xs font-medium uppercase tracking-[0.12em] text-brand-dark">
+                    <p className="mb-2 text-xs font-medium uppercase tracking-[0.12em] text-brand-text">
                         {t(initialReport ? 'builder.editEyebrow' : 'builder.newEyebrow')}
                     </p>
                     <h1 className="text-4xl font-extrabold tracking-tight text-foreground">

@@ -320,7 +320,7 @@ export default function OrgMembersPanel({
                                         </Select>
                                     ) : member.orgRole === "owner" ? (
                                         <Badge
-                                            className="border-transparent bg-brand-light text-brand-dark"
+                                            className="border-transparent bg-brand-light text-brand-text"
                                             title={lockedSoleOwner ? t("lastOwnerTooltip") : undefined}
                                         >
                                             {roleLabel(member.orgRole)}

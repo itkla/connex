@@ -238,7 +238,7 @@ export default function GeneratedDocumentsBrowser({ owners }: { owners: User[] }
                                         <td className="hidden px-4 py-3 sm:px-6 md:table-cell">
                                             <Link
                                                 href={dealDocumentsHref(document.dealId)}
-                                                className="text-muted-foreground underline-offset-2 hover:text-brand hover:underline"
+                                                className="text-muted-foreground underline-offset-2 hover:text-brand-text hover:underline"
                                             >
                                                 {document.dealName ?? t('dealUnavailable')}
                                             </Link>

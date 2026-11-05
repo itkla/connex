@@ -408,7 +408,7 @@ export default function SavedViewsBar({
             {explicitView && modified ? (
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <Button size="inline" variant="ghost" menu className="ml-1 text-brand hover:text-brand-hover">
+                        <Button size="inline" variant="ghost" menu className="ml-1 text-brand-text hover:text-brand-text">
                             {t("save")}
                         </Button>
                     </DropdownMenuTrigger>
@@ -424,7 +424,7 @@ export default function SavedViewsBar({
                     <Button
                         size="inline"
                         variant="ghost"
-                        className="ml-1 gap-1 text-brand hover:text-brand-hover"
+                        className="ml-1 gap-1 text-brand-text hover:text-brand-text"
                         onClick={() => setDialog({ mode: "create" })}
                     >
                         <PlusIcon className="size-3.5" />

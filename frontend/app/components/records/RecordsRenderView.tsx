@@ -852,7 +852,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                                     <td
                                                         key={col.key}
                                                         className={cn(
-                                                            'px-4 py-2.5 whitespace-nowrap text-foreground transition-colors hover:text-brand-dark',
+                                                            'px-4 py-2.5 whitespace-nowrap text-foreground transition-colors hover:text-brand-text',
                                                             colIndex === 0 && cn('md:sticky md:z-10', stickyBodyBg, stickySeam),
                                                         )}
                                                         style={colIndex === 0 ? { left: frozenOffsets.name } : undefined}
