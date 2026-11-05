@@ -16,6 +16,7 @@
     <result property="rankExplanationJson" column="rank_explanation_json"/>
     <result property="evidenceAsOf" column="evidence_as_of"/>
     <result property="sourceStateHash" column="source_state_hash"/>
+    <result property="sourceModelVersion" column="source_model_version"/>
     <result property="generationToken" column="generation_token"/>
     <result property="version" column="version"/>
     <result property="resolvedAt" column="resolved_at"/>
@@ -40,7 +41,7 @@
   <sql id="SignalColumns">
     s.id, s.workspace_id, s.family, s.subject_type, s.subject_id, s.subject_label,
     s.priority, s.priority_rank, s.rank_value, s.dedupe_key, s.evidence_json,
-    s.rank_explanation_json, s.evidence_as_of, s.source_state_hash,
+    s.rank_explanation_json, s.evidence_as_of, s.source_state_hash, s.source_model_version,
     s.generation_token, s.version, s.resolved_at,
     st.disposition, st.snooze_until, st.dismissed_source_hash,
     CASE
@@ -60,11 +61,11 @@
     INSERT INTO relationship_signal (
       workspace_id, family, subject_type, subject_id, subject_label, priority,
       priority_rank, rank_value, dedupe_key, evidence_json, rank_explanation_json,
-      evidence_as_of, source_state_hash, generation_token
+      evidence_as_of, source_state_hash, source_model_version, generation_token
     ) VALUES (
       #{workspaceId}, #{family}, #{subjectType}, #{subjectId}, #{subjectLabel}, #{priority},
       #{priorityRank}, #{rankValue}, #{dedupeKey}, CAST(#{evidenceJson} AS JSON),
-      CAST(#{rankExplanationJson} AS JSON), #{evidenceAsOf}, #{sourceStateHash}, #{generationToken}
+      CAST(#{rankExplanationJson} AS JSON), #{evidenceAsOf}, #{sourceStateHash}, #{sourceModelVersion}, #{generationToken}
     )
     ON DUPLICATE KEY UPDATE
       id = LAST_INSERT_ID(id),
@@ -84,9 +85,28 @@
       rank_explanation_json = VALUES(rank_explanation_json),
       evidence_as_of = VALUES(evidence_as_of),
       source_state_hash = VALUES(source_state_hash),
+      source_model_version = VALUES(source_model_version),
       generation_token = VALUES(generation_token),
       resolved_at = NULL
   </insert>
+
+  <select id="lockByDedupeKey" resultMap="SignalResult" flushCache="true">
+    SELECT id, workspace_id, source_state_hash, source_model_version
+    FROM relationship_signal
+    WHERE workspace_id = #{workspaceId} AND dedupe_key = #{dedupeKey}
+    FOR UPDATE
+  </select>
+
+  <update id="rebaseModelState">
+    UPDATE relationship_signal_state
+    SET dismissed_source_hash = CASE WHEN dismissed_source_hash = #{previousHash}
+          THEN #{currentHash} ELSE dismissed_source_hash END,
+        task_source_hash = CASE WHEN task_source_hash = #{previousHash}
+          THEN #{currentHash} ELSE task_source_hash END,
+        version = version + 1
+    WHERE workspace_id = #{workspaceId} AND signal_id = #{signalId}
+      AND (dismissed_source_hash = #{previousHash} OR task_source_hash = #{previousHash})
+  </update>
 
   <update id="resolveMissing">
     UPDATE relationship_signal

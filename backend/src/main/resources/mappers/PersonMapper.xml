@@ -165,10 +165,11 @@
            'task' AS source_type,
            t.id AS source_id,
            'task' AS interaction_type,
-           t.created_at AS touched_at,
+           t.completed_at AS touched_at,
            #{model.taskWeight} AS weight
     FROM task t
     WHERE t.workspace_id = #{workspaceId} AND t.person_id IS NOT NULL
+      AND t.completed = TRUE AND t.completed_at IS NOT NULL
   </sql>
 
   <sql id="relationshipTouchSourcesExcludingHistoryImports">
@@ -207,10 +208,11 @@
            'task' AS source_type,
            t.id AS source_id,
            'task' AS interaction_type,
-           t.created_at AS touched_at,
+           t.completed_at AS touched_at,
            #{model.taskWeight} AS weight
     FROM task t
     WHERE t.workspace_id = #{workspaceId} AND t.person_id IS NOT NULL
+      AND t.completed = TRUE AND t.completed_at IS NOT NULL
     <if test="!excludedTaskIds.isEmpty()">
       AND t.id NOT IN
       <foreach collection="excludedTaskIds" item="id" open="(" separator="," close=")">
@@ -245,11 +247,12 @@
     SELECT 'task' AS source_type,
            t.id AS source_id,
            'task' AS interaction_type,
-           t.created_at AS touched_at,
+           t.completed_at AS touched_at,
            #{model.taskWeight} AS weight
     FROM task t
     WHERE t.workspace_id = #{workspaceId} AND t.person_id = #{personId}
-      AND t.created_at IS NOT NULL AND t.created_at &lt;= #{reference}
+      AND t.completed = TRUE AND t.completed_at IS NOT NULL
+      AND t.completed_at &lt;= #{reference}
   </sql>
 
   <!-- Contact evidence reads the capped source set twice: once collapsed to totals, once ranked for
@@ -909,13 +912,14 @@
     WHERE p.workspace_id = #{workspaceId} AND p.archived_at IS NOT NULL
   </select>
 
-  <!-- Contacts the team has engaged (any activity, note, or task): warm-intro entry points. -->
+  <!-- Contacts the team has engaged (any activity, workspace note, or dated completed task): warm-intro entry points. -->
   <select id="getEngagedPersonIds" resultType="int">
     SELECT DISTINCT engaged.person_id FROM (
       SELECT person_id FROM activity WHERE workspace_id = #{workspaceId} AND person_id IS NOT NULL
       UNION SELECT person_id FROM note
         WHERE workspace_id = #{workspaceId} AND visibility = 'workspace' AND person_id IS NOT NULL
       UNION SELECT person_id FROM task WHERE workspace_id = #{workspaceId} AND person_id IS NOT NULL
+        AND completed = TRUE AND completed_at IS NOT NULL AND completed_at &lt;= UTC_TIMESTAMP(6)
     ) engaged
     JOIN person p ON p.id = engaged.person_id
     WHERE <include refid="visible"/>

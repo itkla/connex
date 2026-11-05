@@ -4,6 +4,7 @@ import java.util.List;
 
 import com.fasterxml.jackson.annotation.JsonIdentityInfo;
 import com.fasterxml.jackson.annotation.JsonIdentityReference;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.ObjectIdGenerators;
 
 import lombok.Data;
@@ -30,6 +31,10 @@ public class Note {
     private Person person;
     @JsonIdentityReference(alwaysAsId = true)
     private Deal deal;
+    @JsonIgnore
+    private boolean personSpecified;
+    @JsonIgnore
+    private boolean dealSpecified;
     private String createdAt;
     private String updatedAt;
     private List<EntityReference> references;
@@ -88,6 +93,7 @@ public class Note {
 
     public void setPerson(Person person) {
         this.person = person;
+        this.personSpecified = true;
     }
 
     public Deal getDeal() {
@@ -96,6 +102,7 @@ public class Note {
 
     public void setDeal(Deal deal) {
         this.deal = deal;
+        this.dealSpecified = true;
     }
 
     public String getCreatedAt() {
