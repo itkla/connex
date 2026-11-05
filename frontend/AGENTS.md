@@ -23,7 +23,7 @@ Next.js 16 App Router/RSC · React 19 · strict TypeScript · Tailwind v4 · sha
 
 ## Task routing
 
-Read the relevant contract before editing that area:
+Before editing, read:
 
 | Work | Required reading |
 |---|---|
