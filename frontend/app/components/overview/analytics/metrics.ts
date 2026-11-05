@@ -1,4 +1,5 @@
 import { type Deal } from '@/app/lib/types';
+import { getDateTimeFormatter } from '@/app/lib/intlFormatters';
 import { fixedOffsetSeconds, parseMysqlDateTime } from '@/app/lib/utils';
 
 export type RollingRangeKey = '30d' | '90d' | '12m';
@@ -224,21 +225,21 @@ export function computeKpis(
 
 export type TimeBucket = { start: number; end: number; label: string };
 
-export function buildTimeBuckets(range: RollingRangeKey, now: number, locale: string): TimeBucket[] {
+export function buildTimeBuckets(range: RollingRangeKey, now: number, locale: string, timeZone = 'UTC'): TimeBucket[] {
     const out: TimeBucket[] = [];
     if (range === '12m') {
-        const monthLabel = new Intl.DateTimeFormat(locale, { month: 'short' });
+        const monthLabel = getDateTimeFormatter(locale, { month: 'short', timeZone: 'UTC' });
         const base = new Date(now);
-        base.setDate(1);
-        base.setHours(0, 0, 0, 0);
+        base.setUTCDate(1);
+        base.setUTCHours(0, 0, 0, 0);
         for (let i = 11; i >= 0; i--) {
-            const s = new Date(base.getFullYear(), base.getMonth() - i, 1);
-            const e = new Date(base.getFullYear(), base.getMonth() - i + 1, 1);
+            const s = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() - i, 1));
+            const e = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() - i + 1, 1));
             out.push({ start: s.getTime(), end: e.getTime(), label: monthLabel.format(s) });
         }
         return out;
     }
-    const dayLabel = new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' });
+    const dayLabel = getDateTimeFormatter(locale, { month: 'short', day: 'numeric', timeZone });
     const count = range === '30d' ? 6 : 9;
     const total = RANGE_DAYS[range] * DAY;
     const span = total / count;
@@ -292,7 +293,7 @@ function todayAnchor(now: number, timezone: string): Date {
         return utcDateFromParts(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate());
     }
     try {
-        const iso = new Intl.DateTimeFormat('en-CA', {
+        const iso = getDateTimeFormatter('en-CA', {
             timeZone: timezone,
             year: 'numeric',
             month: '2-digit',
@@ -392,13 +393,13 @@ export function formatPeriodTick(
     const date = new Date(`${periodStart}T00:00:00Z`);
     if (Number.isNaN(date.getTime())) return periodStart;
     if (granularity === 'month') {
-        return new Intl.DateTimeFormat(locale, {
+        return getDateTimeFormatter(locale, {
             month: 'short',
             ...(withYear ? { year: 'numeric' as const } : {}),
             timeZone: 'UTC',
         }).format(date);
     }
-    return new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(date);
+    return getDateTimeFormatter(locale, { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(date);
 }
 
 /** Formats a bucket's start date for tooltips: full date for day/week grains, month + year for months. */
@@ -406,9 +407,9 @@ export function formatPeriodTooltipDate(periodStart: string, granularity: Granul
     const date = new Date(`${periodStart}T00:00:00Z`);
     if (Number.isNaN(date.getTime())) return periodStart;
     if (granularity === 'month') {
-        return new Intl.DateTimeFormat(locale, { year: 'numeric', month: 'short', timeZone: 'UTC' }).format(date);
+        return getDateTimeFormatter(locale, { year: 'numeric', month: 'short', timeZone: 'UTC' }).format(date);
     }
-    return new Intl.DateTimeFormat(locale, {
+    return getDateTimeFormatter(locale, {
         year: 'numeric',
         month: 'short',
         day: 'numeric',

@@ -1,3 +1,5 @@
+import { getDateTimeFormatter } from '@/app/lib/intlFormatters';
+
 export type TimeZoneOption = {
     value: string;
     label: string;
@@ -23,19 +25,8 @@ const ZONE_ALIASES: Record<string, string> = {
     UTC: 'GMT coordinated universal time 協定世界時 世界標準時',
 };
 
-const formatters = new Map<string, Intl.DateTimeFormat>();
-
 function zoneFormatter(zone: string, locale: string, style: 'longGeneric' | 'longOffset' | 'shortOffset'): Intl.DateTimeFormat {
-    const key = `${locale}:${zone}:${style}`;
-    const cached = formatters.get(key);
-    if (cached) return cached;
-    const formatter = new Intl.DateTimeFormat(locale, { timeZone: zone, timeZoneName: style });
-    if (formatters.size >= 2048) {
-        const oldest = formatters.keys().next().value;
-        if (oldest !== undefined) formatters.delete(oldest);
-    }
-    formatters.set(key, formatter);
-    return formatter;
+    return getDateTimeFormatter(locale, { timeZone: zone, timeZoneName: style });
 }
 
 function zoneName(zone: string, locale: string, style: 'longGeneric' | 'longOffset' | 'shortOffset', date: Date): string {

@@ -1,5 +1,6 @@
 'use client';
 
+import { getNumberFormatter } from '@/app/lib/intlFormatters';
 import { useMemo, type ComponentProps } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import {
@@ -48,7 +49,7 @@ export function formatReportValue(
     if (value == null) return '-';
     if (unit && /^[A-Z]{3}$/.test(unit)) {
         const displayNotation = notation === 'compact' && Math.abs(value) >= 10000 ? 'compact' : 'standard';
-        return new Intl.NumberFormat(locale, {
+        return getNumberFormatter(locale, {
             style: 'currency',
             currency: unit,
             minimumFractionDigits: 0,
@@ -57,16 +58,16 @@ export function formatReportValue(
         }).format(value);
     }
     if (unit && /^[A-Z]{4,8}$/.test(unit)) {
-        const formatted = new Intl.NumberFormat(locale, {
+        const formatted = getNumberFormatter(locale, {
             maximumFractionDigits: 2,
             notation: notation === 'compact' && Math.abs(value) >= 10000 ? 'compact' : 'standard',
         }).format(value);
         return `${formatted} ${unit}`;
     }
     if (unit === 'percent' || unit === '%') {
-        return new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(value) + '%';
+        return getNumberFormatter(locale, { maximumFractionDigits: 1 }).format(value) + '%';
     }
-    return new Intl.NumberFormat(locale, {
+    return getNumberFormatter(locale, {
         maximumFractionDigits: 1,
         notation: Math.abs(value) >= 10000 ? 'compact' : 'standard',
     }).format(value);
@@ -109,7 +110,7 @@ export default function ReportWidgetRenderer({ widget }: { widget: ReportWidgetD
         const indicatorColor = typeof payload === 'object' && payload !== null && 'fill' in payload
             && typeof payload.fill === 'string' ? payload.fill : item.color;
         const formattedValue = typeof value === 'number' && (widget.unit == null || widget.unit === 'count')
-            ? new Intl.NumberFormat(locale).format(value)
+            ? getNumberFormatter(locale).format(value)
             : formatReportValue(typeof value === 'number' ? value : null, widget.unit, locale);
         return (
             <>
@@ -171,10 +172,10 @@ export default function ReportWidgetRenderer({ widget }: { widget: ReportWidgetD
                             <span className={isAttainment || widget.changePercent >= 0 ? 'text-brand-text' : 'text-destructive'}>
                                 {isAttainment
                                     ? t('document.attainmentValue', {
-                                        value: new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(widget.changePercent),
+                                        value: getNumberFormatter(locale, { maximumFractionDigits: 1 }).format(widget.changePercent),
                                     })
                                     : t('document.changeValue', {
-                                        value: new Intl.NumberFormat(locale, { maximumFractionDigits: 1, signDisplay: 'always' }).format(widget.changePercent),
+                                        value: getNumberFormatter(locale, { maximumFractionDigits: 1, signDisplay: 'always' }).format(widget.changePercent),
                                     })}
                             </span>
                         ) : null}

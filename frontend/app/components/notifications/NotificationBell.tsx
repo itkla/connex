@@ -4,7 +4,7 @@ import { BellIcon, CheckCircleIcon, CheckIcon, EyeIcon, XMarkIcon } from "@heroi
 import { CheckCheck } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
 import { DropdownMenu } from "radix-ui";
 import { motion, useReducedMotion } from "motion/react";
 
@@ -35,6 +35,7 @@ import {
 import { instant, springJiggle } from "@/app/lib/motion";
 
 export default function NotificationBell() {
+    const timeZone = useTimeZone();
     const t = useTranslations("Notifications");
     const locale = useLocale();
     const now = useLiveNow();
@@ -260,7 +261,7 @@ export default function NotificationBell() {
                                             </div>
                                             <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{content.body}</p>
                                             <p className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                                                {formatRelativeTime(item.triggeredAt, locale, now)}
+                                                {formatRelativeTime(item.triggeredAt, locale, now, timeZone)}
                                                 {item.workspaceName ? (
                                                     <span className="rounded-full bg-muted px-1.5 py-0.5 font-medium">
                                                         {item.workspaceName}

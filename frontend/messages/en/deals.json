@@ -121,6 +121,7 @@
         "total": "total"
     },
     "DealsCard": {
+        "closedOn": "Closed {date}",
         "dealActions": "Deal actions",
         "view": "View",
         "quickEdit": "Quick edit",
@@ -187,6 +188,7 @@
         "a11yCancelled": "Moving deal {name} was cancelled."
     },
     "DealsBrowser": {
+        "columnClosedAt": "Closed at",
         "title": "Deals",
         "addDeal": "Add deal",
         "newButton": "New",
@@ -322,7 +324,7 @@
         "create": "Create"
     },
     "DealsQuickEditSheet": {
-        "invalidClosedAt": "Enter a valid close time in the workspace reporting timezone.",
+        "closedAtInvalid": "That time doesn't exist in the reporting timezone shown below. Choose another time.",
         "companySearchFailed": "Couldn't search companies. Try again.",
         "titleSingle": "Quick edit deal",
         "titleMulti": "Quick edit {count} deals",

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
 import {
     DevicePhoneMobileIcon,
     EllipsisHorizontalIcon,
@@ -78,6 +78,7 @@ function PasskeyIcon({ passkey }: { passkey: Passkey }) {
 }
 
 export default function SecurityPanel() {
+    const timeZone = useTimeZone();
     const t = useTranslations("AccountSecurity");
     const locale = useLocale();
     const now = useLiveNow();
@@ -392,12 +393,12 @@ export default function SecurityPanel() {
                                         </span>
                                         <span className="block truncate text-xs text-muted-foreground">
                                             {t("addedOn", {
-                                                date: formatRelativeTime(passkey.createdAt, locale, now),
+                                                date: formatRelativeTime(passkey.createdAt, locale, now, timeZone),
                                             })}
                                             {" · "}
                                             {passkey.lastUsedAt
                                                 ? t("lastUsed", {
-                                                      date: formatRelativeTime(passkey.lastUsedAt, locale, now),
+                                                      date: formatRelativeTime(passkey.lastUsedAt, locale, now, timeZone),
                                                   })
                                                 : t("neverUsed")}
                                         </span>

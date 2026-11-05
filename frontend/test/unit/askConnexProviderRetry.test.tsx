@@ -58,7 +58,7 @@ vi.mock('@/app/components/ask-connex/AskConnexDrawer', () => ({
         return null;
     },
 }));
-vi.mock('next-intl', () => ({ useLocale: () => 'en', useTranslations: () => boundary.translate }));
+vi.mock('next-intl', () => ({ useTimeZone: () => "UTC", useLocale: () => 'en', useTranslations: () => boundary.translate }));
 vi.mock('next/navigation', () => ({
     useSearchParams: () => new URLSearchParams(), useParams: () => ({}),
     usePathname: () => '/records/contacts',

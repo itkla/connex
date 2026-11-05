@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
 import { MoonIcon } from "@heroicons/react/24/outline";
 
 import type { QuietHours, QuietHoursConfig, QuietHoursDay } from "@/app/lib/types";
@@ -49,6 +49,7 @@ function toConfig(data: QuietHours): QuietHoursConfig {
  * reverts on failure.
  */
 export default function QuietHoursPanel() {
+    const timeZone = useTimeZone();
     const t = useTranslations("AccountQuietHours");
     const locale = useLocale();
     const [data, setData] = useState<QuietHours | null>(null);
@@ -151,7 +152,7 @@ export default function QuietHoursPanel() {
                                     {data.nextTransitionAt ? (
                                         <span className="text-xs text-muted-foreground">
                                             {t(data.activeNow ? "resumesAt" : "nextStartsAt", {
-                                                time: formatDateTime(data.nextTransitionAt, locale),
+                                                time: formatDateTime(data.nextTransitionAt, locale, timeZone),
                                             })}
                                         </span>
                                     ) : null}

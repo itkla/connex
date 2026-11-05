@@ -9,7 +9,7 @@ import type { WorkflowOperationsDetail, WorkflowRunDetail } from "@/app/lib/type
 const api = vi.hoisted(() => ({ operations: vi.fn(), pause: vi.fn(), run: vi.fn() }));
 
 vi.mock("next-intl", () => ({
-    useLocale: () => "en",
+    useTimeZone: () => "UTC", useLocale: () => "en",
     useTranslations: () => (key: string) => key,
 }));
 vi.mock("@/app/hooks/useActions", () => ({ useActions: () => ({ openOverlay: vi.fn() }) }));

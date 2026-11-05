@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
 import { ChevronRightIcon, MegaphoneIcon, PlusIcon } from "@heroicons/react/24/outline";
 import { Button } from "@/components/ui/button";
 import Rise from "@/app/components/motion/Rise";
@@ -26,6 +26,7 @@ export default function CampaignsBrowser({
     campaigns: Campaign[];
     canCreate: boolean;
 }) {
+    const timeZone = useTimeZone();
     const t = useTranslations("CampaignsPage");
     const locale = useLocale();
     const [open, setOpen] = useState(false);
@@ -83,7 +84,7 @@ export default function CampaignsBrowser({
                                         : null;
                                 const window =
                                     campaign.startAt || campaign.endAt
-                                        ? `${formatShortDate(campaign.startAt ?? undefined, locale)} – ${formatShortDate(campaign.endAt ?? undefined, locale)}`
+                                        ? `${formatShortDate(campaign.startAt ?? undefined, locale, timeZone)} – ${formatShortDate(campaign.endAt ?? undefined, locale, timeZone)}`
                                         : null;
                                 return (
                                     <li key={campaign.id}>

@@ -3,7 +3,7 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import RecordsActions from '@/app/components/import/RecordsActions';
 import { ButtonGroup } from '@/components/ui/button-group';
@@ -54,6 +54,7 @@ import { usePermission } from '@/app/hooks/usePermissions';
 import { MAX_URL_PAGE_SIZE, parseListInt, writeListStateToUrl } from '@/app/hooks/listStateUrl';
 import { FILTER_EMPTY, type ColumnDef, type ColumnFilterFacet, type FilterState, type SelectionId, facetChips, countActiveFilters } from '@/app/components/records/types';
 import DealCard from '@/app/components/records/deals/DealCard';
+import { formatDealClosedAt } from '@/app/components/records/deals/dealDates';
 import DealListRow from '@/app/components/records/deals/DealListRow';
 import CommentIndicatorChip from '@/app/components/records/comments/CommentIndicatorChip';
 import { useCommentIndicators } from '@/app/hooks/useCommentIndicators';
@@ -321,6 +322,7 @@ function dealSegmentChipCondition(
 }
 
 export default function DealsBrowser({ deals: initialDeals, total: initialTotal, metrics: initialMetrics, serverFacets: initialFacets, savedViews, defaultView, savedViewsUnavailable, timezone, currentUserId }: { deals: Deal[]; total: number; metrics: DealMetrics; serverFacets: DealFacets; savedViews: SavedView[]; defaultView: SavedView | null; savedViewsUnavailable?: boolean; timezone: string; currentUserId: number }) {
+    const timeZone = useTimeZone();
     const router = useRouter();
     const t = useTranslations('DealsBrowser');
     const tf = useTranslations('Filters');
@@ -1115,10 +1117,16 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             filter: { getValue: (d) => (d.stage != null ? stageById.get(d.stage)?.name ?? null : null) },
         },
         {
+            key: 'closedAt',
+            label: t('columnClosedAt'),
+            sortable: false,
+            render: (d) => isDealClosed(d) ? formatDealClosedAt(d.closedAt, locale, timezone) : '—',
+        },
+        {
             key: 'expectedCloseDate',
             label: t('columnExpectedClose'),
             getSortValue: (d) => (d.expectedCloseDate ? parseCalendarDate(d.expectedCloseDate) : null),
-            render: (d) => formatDate(d.expectedCloseDate, locale),
+            render: (d) => formatDate(d.expectedCloseDate, locale, timeZone),
         },
         {
             key: 'risk',
@@ -1184,9 +1192,9 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             key: 'updatedAt',
             label: t('columnUpdated'),
             getSortValue: (d) => (d.updatedAt ? Date.parse(d.updatedAt) : null),
-            render: (d) => formatDateTime(d.updatedAt, locale),
+            render: (d) => formatDateTime(d.updatedAt, locale, timeZone),
         },
-    ], [companyById, pipelineById, stageById, riskByDealId, toggleDealStatus, levelLabel, t, locale, inlineEdit, replaceDeal, commentCounts]);
+    ], [companyById, pipelineById, stageById, riskByDealId, toggleDealStatus, levelLabel, t, locale, timeZone, timezone, inlineEdit, replaceDeal, commentCounts]);
 
     const visibleDeals = deals;
 
@@ -1678,6 +1686,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                 <Rise delay={0.3}>
                     {renderedDisplayMode === 'kanban' ? (
                         <DealsKanban
+                            timezone={timezone}
                             deals={visibleDeals}
                             pipelines={pipelines}
                             stagesByPipeline={stagesByPipeline}
@@ -1709,6 +1718,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                             addColumnSlot={addColumnSlot}
                             renderCard={(item, { onQuickEdit, onDelete, menu }) => (
                                 <DealCard
+                                    timezone={timezone}
                                     deal={item}
                                     company={item.company != null ? companyById.get(item.company) : undefined}
                                     pipeline={item.pipeline != null ? pipelineById.get(item.pipeline) : undefined}
@@ -1723,6 +1733,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                             cardOwnsRecordMenu
                             renderListRow={(item) => (
                                 <DealListRow
+                                    timezone={timezone}
                                     deal={item}
                                     company={item.company != null ? companyById.get(item.company) : undefined}
                                     stage={item.stage != null ? stageById.get(item.stage) : undefined}

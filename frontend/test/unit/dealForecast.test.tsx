@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { NextIntlClientProvider } from 'next-intl';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { NowProvider } from '@/app/hooks/useNow';
 import PipelineChart from '@/app/components/dashboard/PipelineChart';
 import { getDealRevenueTimeseries } from '@/app/lib/api';
 import enDashboard from '@/messages/en/dashboard.json';
@@ -32,12 +33,14 @@ describe('deal forecast basis', () => {
     ] as const)('shows the full open total beyond dated chart buckets in %s', (locale, messages, expected) => {
         const html = renderToStaticMarkup(
             <NextIntlClientProvider locale={locale} messages={messages} timeZone="UTC">
+                <NowProvider value={Date.UTC(2026, 10, 5)}>
                 <PipelineChart
                     currency="USD"
                     range="90d"
                     openValue={441000}
                     series={{ closed: [], projected: [{ year: 2000, month: 1, total: 100 }] }}
                 />
+                </NowProvider>
             </NextIntlClientProvider>,
         );
 

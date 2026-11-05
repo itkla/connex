@@ -6,24 +6,27 @@ import { formatCompactCurrency } from '@/app/lib/utils';
 import type { Company, Deal, DealRisk, Stage } from '@/app/lib/types';
 import DealRiskPill from './DealRiskPill';
 import { isDealClosed } from './dealOutcome';
+import DealCloseDate from './DealCloseDate';
 
 /**
  * A deal as one row of the viewport-forced mobile list: the name over its position in the pipeline
  * (stage and account), with the amount trailing because value is what a phone user ranks a deal
  * list by.
  *
- * Two of the desktop card's cues are conditional so the row can never outgrow one line. The closed
+ * Closed deals retain their reporting-calendar close day below the secondary metadata. The closed
  * badge only appears once a deal is closed — open is the expected state and needs no badge — and the
  * risk pill is held back until `sm`, where there is room for it beside the name, mirroring how the
  * task list defers its secondary chips.
  */
 export default function DealListRow({
     deal,
+    timezone,
     company,
     stage,
     risk,
 }: {
     deal: Deal;
+    timezone: string;
     company?: Company;
     stage?: Stage;
     risk?: DealRisk | null;
@@ -47,6 +50,7 @@ export default function DealListRow({
                     </span>
                 </span>
                 {secondary && <span className="mt-0.5 block truncate text-xs text-muted-foreground">{secondary}</span>}
+                <DealCloseDate deal={deal} timezone={timezone} />
             </span>
             <span className="shrink-0 text-sm font-semibold tabular-nums text-foreground">
                 {formatCompactCurrency(deal.value, deal.currency || 'USD', locale)}

@@ -22,7 +22,7 @@ vi.mock("next/navigation", () => ({
     useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
 }));
 vi.mock("next-intl", () => ({
-    useTranslations: (namespace: string) => (key: string) => `${namespace}.${key}`,
+    useTimeZone: () => "UTC", useTranslations: (namespace: string) => (key: string) => `${namespace}.${key}`,
     useFormatter: () => ({ dateTime: () => "Oct 21, 2026" }),
 }));
 vi.mock("motion/react", async () => {

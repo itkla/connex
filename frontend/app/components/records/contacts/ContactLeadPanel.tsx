@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
 import { Button } from '@/components/ui/button';
@@ -71,6 +71,7 @@ export default function ContactLeadPanel({
     canEdit,
     className,
 }: Props) {
+    const timeZone = useTimeZone();
     const t = useTranslations('ContactLead');
     const tl = useTranslations('ContactLifecycle');
     const tp = useTranslations('ContactProvenance');
@@ -89,22 +90,22 @@ export default function ContactLeadPanel({
             return {
                 tone: 'border-border bg-muted text-muted-foreground',
                 label: t('response.answered'),
-                detail: formatUtcDateTime(contact.firstRespondedAt, locale, contact.firstRespondedAt),
+                detail: formatUtcDateTime(contact.firstRespondedAt, locale, contact.firstRespondedAt, timeZone),
             };
         }
         if (contact.firstResponseBreachedAt) {
             return {
                 tone: 'border-destructive/30 bg-destructive/10 text-destructive',
                 label: t('response.overdue'),
-                detail: formatUtcDateTime(dueAt, locale, dueAt),
+                detail: formatUtcDateTime(dueAt, locale, dueAt, timeZone),
             };
         }
         return {
             tone: 'border-border bg-muted text-muted-foreground',
             label: t('response.due'),
-            detail: formatUtcDateTime(dueAt, locale, dueAt),
+            detail: formatUtcDateTime(dueAt, locale, dueAt, timeZone),
         };
-    }, [contact, locale, t]);
+    }, [contact, locale, t, timeZone]);
 
     const blocking = [
         ...new Set(qualification?.scores.flatMap((score) => score.unmetRequiredLabels) ?? []),
@@ -186,7 +187,7 @@ export default function ContactLeadPanel({
                         <div className="px-6 py-3 xl:px-4">
                             <dt className="text-xs text-muted-foreground">{t('stageChanged')}</dt>
                             <dd className="mt-0.5 text-foreground">
-                                {formatDateTime(lifecycle.changedAt, locale)}
+                                {formatDateTime(lifecycle.changedAt, locale, timeZone)}
                             </dd>
                         </div>
                     ) : null}

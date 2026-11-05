@@ -1,4 +1,4 @@
-import { getLocale, getTranslations } from "next-intl/server";
+import { getTimeZone, getLocale, getTranslations } from "next-intl/server";
 import { DocumentTextIcon } from "@heroicons/react/24/outline";
 
 import { type Note } from "@/app/lib/types";
@@ -7,6 +7,7 @@ import NoteContent from "@/app/components/activity/notes/NoteContent";
 import { timeOf, formatShortDate } from "@/app/lib/utils";
 
 export default async function NoteList({ notes }: { notes: Note[] }) {
+    const timeZone = await getTimeZone();
     const t = await getTranslations("MeNoteList");
     const locale = await getLocale();
 
@@ -37,7 +38,7 @@ export default async function NoteList({ notes }: { notes: Note[] }) {
                         />
                         {note.createdAt ? (
                             <span className="shrink-0 text-xs text-muted-foreground">
-                                {formatShortDate(note.createdAt, locale)}
+                                {formatShortDate(note.createdAt, locale, timeZone)}
                             </span>
                         ) : null}
                     </div>

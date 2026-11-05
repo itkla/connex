@@ -12,7 +12,7 @@ import {
     useState,
 } from "react";
 import { useRouter } from "next/navigation";
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
 import { CameraIcon } from "@heroicons/react/24/outline";
 import { Loader2Icon } from "lucide-react";
 
@@ -196,6 +196,7 @@ function ProfilePhotoField({ previewUrl, initial, disabled, onSelect }: ProfileP
 }
 
 function ProfileDetails({ user }: Props) {
+    const timeZone = useTimeZone();
     const t = useTranslations("AccountProfile");
     const locale = useLocale();
 
@@ -205,12 +206,12 @@ function ProfileDetails({ user }: Props) {
             <dl className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
                 <div className="flex items-center justify-between gap-4 px-4 py-3">
                     <dt className="text-sm text-muted-foreground">{t("memberSince")}</dt>
-                    <dd className="text-sm text-foreground">{formatDate(user.createdAt, locale)}</dd>
+                    <dd className="text-sm text-foreground">{formatDate(user.createdAt, locale, timeZone)}</dd>
                 </div>
                 <div className="flex items-center justify-between gap-4 px-4 py-3">
                     <dt className="text-sm text-muted-foreground">{t("lastLogin")}</dt>
                     <dd className="text-sm text-foreground">
-                        {user.lastLoginAt ? formatDateTime(user.lastLoginAt, locale) : t("lastLoginNever")}
+                        {user.lastLoginAt ? formatDateTime(user.lastLoginAt, locale, timeZone) : t("lastLoginNever")}
                     </dd>
                 </div>
             </dl>
@@ -441,6 +442,7 @@ export default function ProfilePanel({ user }: Props) {
 
     const timeZones = useMemo(() => {
         const zones = supportedTimeZones();
+        if (!zones.includes("UTC")) zones.unshift("UTC");
         if (confirmedUser.timezone && !zones.includes(confirmedUser.timezone)) {
             return [confirmedUser.timezone, ...zones];
         }

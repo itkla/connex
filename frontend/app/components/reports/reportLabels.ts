@@ -1,5 +1,6 @@
 'use client';
 
+import { getDateTimeFormatter } from '@/app/lib/intlFormatters';
 import { useCallback } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 
@@ -20,7 +21,7 @@ export function useReportLabels() {
         (value: string): string => {
             if (/^\d{4}-\d{2}(?:-\d{2})?$/.test(value)) {
                 const date = new Date(`${value}${value.length === 7 ? '-01' : ''}T00:00:00Z`);
-                return new Intl.DateTimeFormat(locale, {
+                return getDateTimeFormatter(locale, {
                     timeZone: 'UTC',
                     year: 'numeric',
                     month: 'short',

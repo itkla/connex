@@ -1,5 +1,6 @@
 'use client';
 
+import { getDateTimeFormatter } from '@/app/lib/intlFormatters';
 import * as React from 'react';
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from 'recharts';
 import { useLocale, useTranslations } from 'next-intl';
@@ -18,7 +19,8 @@ import {
 } from '@/components/ui/tooltip';
 import { type DealMonthTotal, type DealRevenueSeries } from '@/app/lib/types';
 import { cn } from '@/lib/utils';
-import { formatCompactCurrency } from '@/app/lib/utils';
+import { useLiveNow } from '@/app/hooks/useNow';
+import { formatCompactCurrency, yearMonthInTimezone } from '@/app/lib/utils';
 import { type RollingRangeKey } from '@/app/components/overview/analytics/metrics';
 
 const MIN_MONTHS_FORWARD = 3;
@@ -30,9 +32,9 @@ type Bucket = { key: string; label: string; profit: number; projections: number 
 
 const METRICS: readonly Metric[] = ['profit', 'projections'];
 
-function forwardHorizon(series: DealRevenueSeries, now: number): number {
-    const reference = new Date(now);
-    const base = reference.getFullYear() * 12 + reference.getMonth();
+function forwardHorizon(series: DealRevenueSeries, now: number, timezone: string): number {
+    const reference = yearMonthInTimezone(now, timezone);
+    const base = reference.year * 12 + reference.month - 1;
     let furthest = MIN_MONTHS_FORWARD;
     for (const point of [...series.closed, ...series.projected]) {
         const offset = point.year * 12 + (point.month - 1) - base;
@@ -41,23 +43,21 @@ function forwardHorizon(series: DealRevenueSeries, now: number): number {
     return Math.min(MAX_MONTHS_FORWARD, Math.max(MIN_MONTHS_FORWARD, furthest));
 }
 
-function buildBuckets(series: DealRevenueSeries, now: number, locale: string, range: RollingRangeKey): Bucket[] {
-    const start = new Date(now);
-    start.setDate(1);
-    start.setHours(0, 0, 0, 0);
-    start.setMonth(start.getMonth() - (MONTHS_BACK[range] - 1));
+function buildBuckets(series: DealRevenueSeries, now: number, locale: string, range: RollingRangeKey, timezone: string): Bucket[] {
+    const current = yearMonthInTimezone(now, timezone);
+    const start = new Date(Date.UTC(current.year, current.month - MONTHS_BACK[range], 1));
 
-    const monthLabel = new Intl.DateTimeFormat(locale, { month: 'short' });
-    const monthYearLabel = new Intl.DateTimeFormat(locale, { month: 'short', year: '2-digit' });
+    const monthLabel = getDateTimeFormatter(locale, { month: 'short', timeZone: 'UTC' });
+    const monthYearLabel = getDateTimeFormatter(locale, { month: 'short', year: '2-digit', timeZone: 'UTC' });
     const buckets: Bucket[] = [];
     const keyToIndex = new Map<string, number>();
-    const total = MONTHS_BACK[range] + forwardHorizon(series, now);
+    const total = MONTHS_BACK[range] + forwardHorizon(series, now, timezone);
 
     for (let i = 0; i < total; i++) {
-        const d = new Date(start.getFullYear(), start.getMonth() + i, 1);
-        const key = `${d.getFullYear()}-${d.getMonth()}`;
+        const d = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + i, 1));
+        const key = `${d.getUTCFullYear()}-${d.getUTCMonth()}`;
         keyToIndex.set(key, buckets.length);
-        const label = d.getMonth() === 0 || i === 0 ? monthYearLabel.format(d) : monthLabel.format(d);
+        const label = d.getUTCMonth() === 0 || i === 0 ? monthYearLabel.format(d) : monthLabel.format(d);
         buckets.push({ key, label, profit: 0, projections: 0 });
     }
 
@@ -83,20 +83,22 @@ export default function PipelineChart({
     openValue,
     currency,
     range,
+    timezone = 'UTC',
 }: {
     series: DealRevenueSeries;
     openValue: number;
     currency: string;
     range: RollingRangeKey;
+    timezone?: string;
 }) {
     const t = useTranslations('DashboardPipelineChart');
     const locale = useLocale();
     const [active, setActive] = React.useState<Metric>('projections');
-    const [now] = React.useState(() => Date.now());
+    const now = useLiveNow();
 
     const data = React.useMemo(
-        () => buildBuckets(series, now, locale, range),
-        [series, now, locale, range],
+        () => buildBuckets(series, now, locale, range, timezone),
+        [series, now, locale, range, timezone],
     );
     const labelByKey = React.useMemo(() => {
         const map = new Map<string, string>();

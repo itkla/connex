@@ -1,5 +1,6 @@
 'use client';
 
+import { parseMysqlDateTime } from '@/app/lib/utils';
 import { useFormatter, useTranslations } from 'next-intl';
 
 import AskConnexProposalReview, { type AskConnexProposalReviewLabels } from '@/app/components/ask-connex/AskConnexProposalReview';
@@ -73,8 +74,8 @@ export default function AskConnexMissionProgress({
                         <p role="status" className="text-xs text-muted-foreground">{t('review.pending', { count: run.proposalCounts.pending })}</p>
                     ) : null}
                     {!run.contentWithheld && run.reviewExpiresAt ? (
-                        <p className="text-xs text-muted-foreground">{t(now >= Date.parse(run.reviewExpiresAt) ? 'review.expired' : 'review.deadline', {
-                            date: format.dateTime(new Date(run.reviewExpiresAt), { dateStyle: 'medium', timeStyle: 'short' }),
+                        <p className="text-xs text-muted-foreground">{t(now >= parseMysqlDateTime(run.reviewExpiresAt) ? 'review.expired' : 'review.deadline', {
+                            date: format.dateTime(new Date(parseMysqlDateTime(run.reviewExpiresAt)), { dateStyle: 'medium', timeStyle: 'short' }),
                         })}</p>
                     ) : null}
                     <div className="flex flex-wrap gap-2">

@@ -16,7 +16,7 @@ const fixture = vi.hoisted(() => ({
 }));
 
 vi.mock("next/headers", () => ({ headers: async () => new Headers({ cookie: "connex_workspace=7" }) }));
-vi.mock("next-intl/server", () => ({ getTranslations: async () => (key: string) => key, getLocale: async () => "en" }));
+vi.mock("next-intl/server", () => ({ getTranslations: async () => (key: string) => key, getTimeZone: async () => "UTC", getLocale: async () => "en" }));
 vi.mock("@/app/lib/api", () => ({
     getCurrentUserResultFromCookie: async () => ({ ok: true, data: fixture.user }),
     getUserById: async () => fixture.user,

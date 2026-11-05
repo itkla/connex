@@ -2,7 +2,7 @@
 
 import { startTransition, useOptimistic, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useLocale, useTranslations } from "next-intl";
+import { useTimeZone, useLocale, useTranslations } from "next-intl";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { EllipsisVerticalIcon, PencilIcon, TrashIcon, InformationCircleIcon } from "@heroicons/react/24/outline";
 
@@ -27,6 +27,7 @@ import DeleteRecordDialog from "@/app/components/records/DeleteRecordDialog";
  * lands, so the round trip never blocks the feedback. Editing and deleting stay in the row menu.
  */
 export default function DealTaskList({ dealId, companyId, tasks, deals }: { dealId: number, companyId?: number | null, tasks: Task[], deals: Deal[] }) {
+    const timeZone = useTimeZone();
     const t = useTranslations('DealsTaskList');
     const showApiError = useApiErrorToast('DealsTaskList');
     const locale = useLocale();
@@ -141,7 +142,7 @@ export default function DealTaskList({ dealId, companyId, tasks, deals }: { deal
                                                 <p className="text-sm text-foreground"><NoteContent content={task.description} references={task.references} /></p>
                                                 {task.dueDate ? (
                                                     <p className="mt-0.5 text-xs text-muted-foreground">
-                                                        {t('due', { date: formatDate(task.dueDate, locale) })}
+                                                        {t('due', { date: formatDate(task.dueDate, locale, timeZone) })}
                                                     </p>
                                                 ) : null}
                                             </div>

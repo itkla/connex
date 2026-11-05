@@ -13,7 +13,7 @@ import {
     useState,
     type ReactNode,
 } from 'react';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { ArrowsPointingOutIcon, SparklesIcon } from '@heroicons/react/24/outline';
 
@@ -418,6 +418,7 @@ export function useAskConnexMount(): AskConnexMountValue {
 
 /** Owns Ask Connex continuity, transcript, accepted-turn reconciliation, and responsive surfaces. */
 export default function AskConnexProvider({ children }: { children: ReactNode }) {
+    const timeZone = useTimeZone();
     const t = useTranslations('AskConnex');
     const tRoot = useTranslations();
     const showApiError = useApiErrorToast('AskConnex');
@@ -3036,8 +3037,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             return tReports.has(`${value}.name`) ? tReports(`${value}.name`)
                 : t('toolCards.templateDefaults.unavailable');
         }
-        if (field === 'start') return formatUtcDateTime(value, locale, value);
-        if (field === 'dueDate') return formatDate(value, locale);
+        if (field === 'start') return formatUtcDateTime(value, locale, value, timeZone);
+        if (field === 'dueDate') return formatDate(value, locale, timeZone);
         if (field === 'visibility') {
             return ASK_CONNEX_NOTE_VISIBILITIES.includes(value)
                 ? t(`toolCards.outcomeValues.visibility.${value}`)
@@ -3049,7 +3050,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 : value;
         }
         return value;
-    }, [locale, t, tReports]);
+    }, [locale, t, tReports, timeZone]);
     /** States one value a pending proposal reviews; see `askConnexChangeValueText`. */
     const changeValueText = useCallback((
         field: AiAssistantToolCallChangeField,
@@ -3103,8 +3104,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             locale,
             (hours) => t('toolCards.change.responseDueInHours', { hours }),
             { open: t('toolCards.change.taskOpen'), done: t('toolCards.change.taskDone') },
+            timeZone,
         );
-    }, [locale, t, tProvenance, tReports]);
+    }, [locale, t, tProvenance, tReports, timeZone]);
     const labels = useMemo(() => ({
         assistantAuthor: t('assistantAuthor'),
         archive: t('archive'),
@@ -3115,7 +3117,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         imageDisclosure: tDisclosure('imageProvider'),
         citationKind,
         citationFreshness: (label: string, instant: string) =>
-            t('citationFreshness', { label, time: formatAnswerInstant(instant, locale) }),
+            t('citationFreshness', { label, time: formatAnswerInstant(instant, locale, timeZone) }),
         citationFreshnessUnknown: (label: string) => t('citationFreshnessUnknown', { label }),
         close: t('close'),
         closeWorkspace: t('closeWorkspace'),
@@ -3239,7 +3241,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         sessionActivity: (time: string) => t('sessionActivity', { time }),
         sessionRail: t('sessionRail'),
         sessionGroup: (key: AskConnexSessionGroupKey) => t(`sessionGroups.${key}`),
-        relativeTime: (instant: string) => formatRelativeTime(instant, locale, now),
+        relativeTime: (instant: string) => formatRelativeTime(instant, locale, now, timeZone),
         proposalReview: {
             heading: (count: number) => t('proposalReview.heading', { count }),
             applicable: (applicable: number, count: number) =>
@@ -3434,7 +3436,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 requestCompleted: t('toolCards.summaries.requestCompleted'),
             },
         },
-    }), [changeValueText, citationKind, locale, now, outcomeValueText, scopeDeclaredSummary, scopeList, scopeSummary, t, terminalMessages, tDisclosure, tWarmth]);
+    }), [changeValueText, citationKind, locale, now, outcomeValueText, scopeDeclaredSummary, scopeList, scopeSummary, t, timeZone, terminalMessages, tDisclosure, tWarmth]);
 
     const value = useMemo<AskConnexContextValue>(
         () => ({

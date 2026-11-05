@@ -4,7 +4,7 @@ import AccessDeniedPage from "@/app/components/AccessDeniedPage";
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
 import { loadRecord } from "@/app/lib/recordAccess";
 import Link from "next/link";
-import { getLocale, getTranslations } from "next-intl/server";
+import { getTimeZone, getLocale, getTranslations } from "next-intl/server";
 import { BriefcaseIcon, UserIcon } from "@heroicons/react/24/outline";
 
 import {
@@ -40,6 +40,7 @@ export default async function ActivityDetailPage({
 }: {
     params: Promise<{ id: string }>;
 }) {
+    const timeZone = await getTimeZone();
     const { id } = await params;
     const cookie = (await headers()).get("cookie");
     const userResult = await getCurrentUserResultFromCookie(cookie);
@@ -104,7 +105,7 @@ export default async function ActivityDetailPage({
                             </h1>
                             <p className="mt-1 text-sm text-muted-foreground">
                                 {typeLabel}
-                                {activity.timestamp ? ` · ${formatDateTime(activity.timestamp, locale)}` : ""}
+                                {activity.timestamp ? ` · ${formatDateTime(activity.timestamp, locale, timeZone)}` : ""}
                             </p>
                         </div>
                     </div>
@@ -165,7 +166,7 @@ export default async function ActivityDetailPage({
                         {activity.timestamp ? (
                             <MetaRow label={t("when")}>
                                 <span className="tabular-nums">
-                                    {formatDateTime(activity.timestamp, locale)}
+                                    {formatDateTime(activity.timestamp, locale, timeZone)}
                                 </span>
                             </MetaRow>
                         ) : null}
