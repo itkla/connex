@@ -250,7 +250,7 @@ export default function WorkflowRunOperationsDetail({ workflowId, runKey }: { wo
                         ) : null}
                         <Button
                             variant="outline"
-                            disabled={workflow.archivedAt !== null}
+                            disabled={workflow.archivedAt != null}
                             onClick={() => openOverlay({
                                 kind: "workflow-manual-run",
                                 sourceSurface: "record",
@@ -286,7 +286,7 @@ export default function WorkflowRunOperationsDetail({ workflowId, runKey }: { wo
                                 <Button
                                     size="sm"
                                     variant="outline"
-                                    disabled={pending !== null || workflow.archivedAt !== null}
+                                    disabled={pending !== null || workflow.archivedAt != null}
                                     onClick={() => void mutate("resume", async () => {
                                         await resumeWorkflow(workflowId, { headers });
                                     })}
@@ -298,7 +298,7 @@ export default function WorkflowRunOperationsDetail({ workflowId, runKey }: { wo
                                 <Button
                                     size="sm"
                                     variant="outline"
-                                    disabled={pending !== null || workflow.archivedAt !== null}
+                                    disabled={pending !== null || workflow.archivedAt != null}
                                     onClick={() => void mutate("pause", async () => {
                                         await pauseWorkflow(workflowId, { headers });
                                     })}
@@ -311,7 +311,7 @@ export default function WorkflowRunOperationsDetail({ workflowId, runKey }: { wo
                                 <Button
                                     size="sm"
                                     variant="outline"
-                                    disabled={pending !== null || workflow.archivedAt !== null}
+                                    disabled={pending !== null || workflow.archivedAt != null}
                                     onClick={() => void mutate("disable", async () => {
                                         await disableWorkflow(workflowId, { headers });
                                     })}

@@ -4131,14 +4131,16 @@ export function getDealFacets(init: RequestInit = {}) {
 
 /**
  * Server-computed monthly revenue trend (realized won revenue by scheduled close month, projected
- * by expected-close month) over ALL deals, optionally scoped to a currency. The IANA timezone
- * applies the viewer's historical offset rules when bucketing realized revenue.
+ * by expected-close month). openOnly restricts the projected series to open deals; the realized
+ * series is unchanged. Currency is optional. The IANA timezone applies historical offset rules
+ * when bucketing realized revenue.
  */
 export function getDealRevenueTimeseries(
     currency?: string, timezone?: string, scope: Types.MemberScopeParams = {}, init: RequestInit = {},
+    openOnly = false,
 ) {
     return getJson<Types.DealRevenueSeries>(
-        `/api/deals/revenue-timeseries${buildQuery({ currency, timezone, ...scope })}`, init);
+        `/api/deals/revenue-timeseries${buildQuery({ currency, timezone, ...scope, openOnly })}`, init);
 }
 
 /**

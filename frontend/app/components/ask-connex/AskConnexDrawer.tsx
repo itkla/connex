@@ -92,6 +92,7 @@ import {
     askConnexCitationHref,
     askConnexCitations,
     askConnexGroupedToolCallIds,
+    askConnexMessageAuthor,
     askConnexMessageNarration,
     askConnexMessageTodos,
     askConnexPromptFocusPending,
@@ -848,10 +849,7 @@ function TranscriptMessage({
     const format = useFormatter();
     const reduceMotion = useReducedMotion() ?? false;
     const user = message.authorKind === 'user';
-    const author = user
-        ? message.authorDisplayName
-            ?? (message.authorUserId === null ? labels.formerMember : labels.memberAuthor(message.authorUserId))
-        : labels.assistantAuthor;
+    const author = askConnexMessageAuthor(message, labels);
     const allowedRecords = useMemo<ReadonlySet<string>>(
         () => new Set(
             (message.citations ?? []).map((citation) => `${citation.kind}:${citation.id}`),

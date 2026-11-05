@@ -34,6 +34,17 @@ First run only: `node_modules/.bin/playwright install chromium` — Chromium is 
 
 Useful selections: `playwright test --project=mobile-chromium` (phone viewport only), `playwright test --grep @mobile`, `playwright test locale-ja.spec.ts`.
 
+CSV contacts and interaction-history imports share `app/lib/import.ts`: decode bytes with fatal
+UTF-8 first (including BOM), then fatal Shift-JIS using the browser's Windows-932 mapping.
+Reject replacement characters before mapping or review. Both dialogs show the detected encoding
+before commit. Successful fallback does not identify the source encoding: on Shift-JIS fallback,
+also refuse a CJK unified ideograph flanked by ASCII letters or halfwidth katakana adjacent to
+an ASCII letter as suspected Western mojibake. This heuristic can refuse genuine mixed-script
+Shift-JIS and cannot identify every unsupported encoding; the refusal directs users to CSV UTF-8.
+`test/unit/csvEncoding.test.ts` covers real bytes, including Windows-only ㈱, ordinary Japanese
+business names, Japanese headers, and rejected Western input. CI runs
+`test/e2e/csv-encoding.spec.ts` to exercise the upload flow and refusal without writes.
+
 `connected-capture.spec.ts` can run without the backend or auth bootstrap. Its test-only fixture
 starts the real Next.js app against a stub API; a per-test `e2e_capture` cookie switches the
 server-rendered capability on or off. Browser route mocks own the capture responses and validate

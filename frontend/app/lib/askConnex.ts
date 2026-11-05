@@ -1468,6 +1468,16 @@ export function askConnexMessageContent(content: string): string {
     return content.replace(REFERENCE_TOKEN, '$1').trim();
 }
 
+/** Resolves a retained message's author after nullable identity fields have been omitted. */
+export function askConnexMessageAuthor(
+    message: Pick<AiChatMessage, 'authorKind' | 'authorDisplayName' | 'authorUserId'>,
+    labels: { assistantAuthor: string; formerMember: string; memberAuthor: (id: number) => string },
+): string {
+    if (message.authorKind !== 'user') return labels.assistantAuthor;
+    return message.authorDisplayName
+        ?? (message.authorUserId == null ? labels.formerMember : labels.memberAuthor(message.authorUserId));
+}
+
 /** Removes one attached record token from MentionEditor content. */
 export function removeAskConnexAttachment(content: string, attachment: AskConnexAttachment): string {
     return content
@@ -1943,13 +1953,13 @@ export function groupAskConnexMessages(
         const current = groups.at(-1);
         const previous = current?.messages.at(-1);
         if (current?.authorKind === message.authorKind
-            && current.authorUserId === message.authorUserId
+            && current.authorUserId === (message.authorUserId ?? null)
             && (previous === undefined || !breakAfterMessageIds?.has(previous.id))) {
             current.messages.push(message);
         } else {
             groups.push({
                 authorKind: message.authorKind,
-                authorUserId: message.authorUserId,
+                authorUserId: message.authorUserId ?? null,
                 messages: [message],
             });
         }
