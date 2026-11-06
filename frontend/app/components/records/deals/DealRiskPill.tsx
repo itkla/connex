@@ -11,9 +11,10 @@ import { useRiskText } from './dealRisk';
 
 /**
  * Compact risk indicator for a deal — the sibling of {@link WarmthPill}. Renders nothing when
- * the deal is not at risk; on hover its tooltip lists the contributing factors.
+ * the deal is not at risk; on hover its tooltip lists the contributing factors. Standalone
+ * controls can opt into keyboard focus without adding a tab stop inside linked record rows.
  */
-export default function DealRiskPill({ risk }: { risk?: DealRisk | null }) {
+export default function DealRiskPill({ risk, className, focusable = false }: { risk?: DealRisk | null; className?: string; focusable?: boolean }) {
     const { levelLabel, factorText } = useRiskText();
 
     const level = risk?.level;
@@ -23,9 +24,11 @@ export default function DealRiskPill({ risk }: { risk?: DealRisk | null }) {
         <Tooltip>
             <TooltipTrigger asChild>
                 <span
+                    tabIndex={focusable ? 0 : undefined}
                     className={cn(
-                        'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset select-none',
+                        'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring forced-colors:focus-visible:outline-[Highlight]',
                         riskSurfaceClasses(level),
+                        className,
                     )}
                 >
                     <ExclamationTriangleIcon className={cn('size-3.5 shrink-0', riskTextClass(level))} aria-hidden />
