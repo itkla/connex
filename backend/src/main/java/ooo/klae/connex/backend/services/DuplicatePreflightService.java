@@ -59,7 +59,8 @@ import ooo.klae.connex.backend.util.LikePattern;
  *
  * <p>Email, phone, and domain evidence is {@link DuplicateMatchStrength#STRONG}. Name evidence is
  * {@link DuplicateMatchStrength#WEAK} and is accepted only when
- * {@link MatchingService#normalizeName(String)} is exactly equal. No fuzzy or edit-distance
+ * {@link MatchingService#normalizeName(String)} is exactly equal, or company legal-form review
+ * names are equal. No fuzzy or edit-distance
  * matching is performed. Persistence applies owned-or-shared visibility before bounded
  * candidate selection.
  */
@@ -212,7 +213,7 @@ public class DuplicatePreflightService {
             false,
             identityMapper::findVisiblePersonIdentityMatches,
             identityMapper::findVisiblePersonNameMatches).getFirst();
-        requireReviewed(response, duplicateReviewToken);
+        requireReviewed(response, duplicateReviewToken, true);
     }
 
     /**
@@ -635,10 +636,18 @@ public class DuplicatePreflightService {
     private static void requireReviewed(
             DuplicatePreflightResponse response,
             String duplicateReviewToken) {
-        if (response.truncated()) {
+        requireReviewed(response, duplicateReviewToken, false);
+    }
+
+    private static void requireReviewed(
+            DuplicatePreflightResponse response,
+            String duplicateReviewToken,
+            boolean allowSeparatePerson) {
+        boolean separatePerson = allowSeparatePerson && response.allowSeparateCreation();
+        if (response.truncated() && !separatePerson) {
             throw duplicateReviewConflict(duplicateReviewToken, true);
         }
-        if (!response.candidates().isEmpty()
+        if ((!response.candidates().isEmpty() || separatePerson)
                 && !Objects.equals(response.reviewToken(), duplicateReviewToken)) {
             throw duplicateReviewConflict(duplicateReviewToken, false);
         }
@@ -907,6 +916,7 @@ public class DuplicatePreflightService {
         List<DuplicateNameKey> nameKeys = requests.stream()
             .map(NormalizedRequest::normalizedName)
             .flatMap(Optional::stream)
+            .map(name -> reviewName(recordType, name))
             .distinct()
             .map(name -> new DuplicateNameKey(name, namePattern(name)))
             .toList();
@@ -937,8 +947,10 @@ public class DuplicatePreflightService {
             Map<String, List<DuplicateCandidateRow>> nameRows) {
         Map<Integer, CandidateBuilder> builders = new LinkedHashMap<>();
         boolean truncated = false;
+        boolean hasIdentityMatches = false;
         for (DuplicateIdentityKey key : request.identityKeys()) {
             List<DuplicateCandidateRow> rows = identityRows.getOrDefault(key, List.of());
+            hasIdentityMatches |= !rows.isEmpty();
             if (rows.size() >= perKeyLimit) {
                 truncated = true;
             }
@@ -948,7 +960,7 @@ public class DuplicatePreflightService {
             }
         }
         if (request.normalizedName().isPresent()) {
-            String normalizedName = request.normalizedName().orElseThrow();
+            String normalizedName = reviewName(recordType, request.normalizedName().orElseThrow());
             List<DuplicateCandidateRow> rows =
                 nameRows.getOrDefault(normalizedName, List.of());
             if (rows.size() >= perKeyLimit) {
@@ -956,7 +968,8 @@ public class DuplicatePreflightService {
             }
             for (DuplicateCandidateRow row : rows) {
                 if (!normalizedName.equals(
-                        matchingService.normalizeName(row.getName()).orElse(null))) {
+                        matchingService.normalizeName(row.getName())
+                            .map(name -> reviewName(recordType, name)).orElse(null))) {
                     continue;
                 }
                 candidate(builders, row, workspaceId, recordType)
@@ -977,11 +990,16 @@ public class DuplicatePreflightService {
             .limit(candidateLimit)
             .map(RankedCandidate::candidate)
             .toList();
+        boolean allowSeparateCreation = "person".equals(recordType)
+            && candidateLimit == PUBLIC_CANDIDATE_LIMIT
+            && truncated
+            && !hasIdentityMatches;
         return new DuplicatePreflightResponse(
             recordType,
             candidates,
             truncated,
-            reviewToken(workspaceId, recordType, request, candidates, truncated));
+            reviewToken(workspaceId, recordType, request, candidates, truncated, allowSeparateCreation),
+            allowSeparateCreation);
     }
 
     private static String reviewToken(
@@ -989,11 +1007,13 @@ public class DuplicatePreflightService {
             String recordType,
             NormalizedRequest request,
             List<DuplicateCandidateDto> candidates,
-            boolean truncated) {
+            boolean truncated,
+            boolean allowSeparateCreation) {
         MessageDigest digest = sha256();
         updateDigest(digest, Integer.toString(workspaceId));
         updateDigest(digest, recordType);
         updateDigest(digest, Boolean.toString(truncated));
+        updateDigest(digest, Boolean.toString(allowSeparateCreation));
         for (DuplicateIdentityKey key : request.identityKeys()) {
             updateDigest(digest, key.kind());
             updateDigest(digest, key.normalizedValue());
@@ -1227,6 +1247,12 @@ public class DuplicatePreflightService {
         return Arrays.stream(normalizedName.split(" "))
             .map(LikePattern::escape)
             .collect(Collectors.joining("%", "%", "%"));
+    }
+
+    private String reviewName(String recordType, String normalizedName) {
+        return "company".equals(recordType)
+            ? matchingService.normalizeCompanyNameForReview(normalizedName).orElse(normalizedName)
+            : normalizedName;
     }
 
     private CandidateBuilder candidate(

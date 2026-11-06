@@ -11,6 +11,13 @@ Evidence classes:
 - Strong: exact canonical email, phone, domain, or external id.
 - Weak: exact normalized name after a bounded broad candidate read and Java-side recheck.
 
+Company weak-name review additionally compares boundary legal-form variants through
+`MatchingService.normalizeCompanyNameForReview`: 株式会社, 有限会社, 合同会社, their
+parenthesized abbreviations, and the suffixes Inc./Incorporated, Co., Ltd., Ltd./Limited,
+K.K. and GmbH. Unicode width, case and kana folding precedes this comparison. This review
+key never replaces canonical names or identity keys. A variant never authorizes automatic
+attachment or merging; CSV company dependencies retain canonical-exact name validation.
+
 Never auto-attach an unreviewed weak, shared, ambiguous, truncated, or aggregate-overflow result.
 
 Response limits remain bounded. Direct and CSV response ceilings are product/security contracts; changing them requires explicit memory/UX review, not an arbitrary increase.
@@ -94,6 +101,18 @@ Manual person/company/deal creation, staged contacts, and OCR-reviewed contact/c
 
 Client debounce is an early warning only. Submission performs an immediate final review. Deal acknowledgement is bound to the exact request workspace and complete candidate-response token; truncated results cannot be acknowledged. The mutation consumes that same proof only after its locked final candidate recheck.
 
+Person name lookup is bounded independently of exact email/phone lookup. When its broad
+prefilter or exact-name set exceeds the existing response bound, `truncated` remains true:
+filtering a bounded prefilter cannot prove that unseen exact names do not exist. Direct
+person review may return `allowSeparateCreation=true` only when every supplied canonical
+identity lookup is complete and empty. The user can then explicitly acknowledge the displayed
+bounded name review and create a separate contact, even if no exact candidate survived the
+prefilter. The same token, including this permission and the displayed result, must still
+match the final recheck under the duplicate mutex and identity locks. New strong evidence or
+a changed displayed result invalidates that acknowledgement. This is permission to create,
+never proof of completeness for reuse, imports, automatic linking or merging. Those paths
+retain their existing truncation guards. Company and deal overflow remain blocking.
+
 The frontend uses the shared duplicate-preflight hook/request scope rather than implementing feature-specific matching.
 
 ## Locking and mutation recheck
@@ -105,7 +124,8 @@ While holding the locks:
 - requery the current candidate/identity state;
 - automatic targets must remain the unique owner of supplied identities;
 - creates must still have no owned match;
-- acknowledgement must still describe the complete current candidate result;
+- acknowledgement must still describe the current candidate result, or the explicitly bounded
+  name-only separate-person review described above;
 - target loss or concurrent candidate change fails/revalidates according to the owning batch contract.
 
 Do not rely on the preview snapshot as commit authorization.

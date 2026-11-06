@@ -104,6 +104,9 @@
     "rowColLink": "リンク",
     "reviewLinkHint": "処理対象{total}行のうち{shown}行を表示しています。重複候補がある{candidates}行はすべて含まれます。別のレコードを指定するには「リンク」を使用してください。",
     "candidateListLabel": "既存レコードの候補",
+    "candidateCompanyNameStrength": "会社名が類似",
+    "candidateCompanyNameEvidence": "会社名が一致、または法人種別の表記違い",
+    "companyVariantNeedsReview": "似た名前の会社が登録されています。候補を確認し、ファイルの会社名を登録済みの表記に合わせてから取り込んでください。",
     "candidateStrength": {
       "STRONG": "識別情報が完全一致",
       "WEAK": "名前が完全一致"

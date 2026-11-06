@@ -61,10 +61,27 @@ test.describe("CSV duplicate review", () => {
         const candidates = page.getByLabel("Possible existing records");
         await expect(candidates.getByText(fixture.companyName)).toBeVisible();
         await expect(candidates.getByText("Company", { exact: true })).toBeVisible();
-        await expect(candidates.getByText("Exact name")).toBeVisible();
-        await expect(candidates.getByText("Same normalized name")).toBeVisible();
+        await expect(candidates.getByText(message("en", "importExport", "importExport.candidateCompanyNameStrength"))).toBeVisible();
+        await expect(candidates.getByText(message("en", "importExport", "importExport.candidateCompanyNameEvidence"))).toBeVisible();
         await expect(page.getByRole("button", { name: "Use record" })).toHaveCount(0);
         await expect(page.getByRole("button", { name: "Import", exact: true })).toBeEnabled();
+    });
+
+    test("requires review before attaching a company legal-form variant", async ({ page }, testInfo) => {
+        const fixture = runFixture(testInfo.project.name);
+        await page.goto("/records/contacts?view=table");
+        await page.getByRole("button", { name: "More actions" }).click();
+        await page.getByRole("menuitem", { name: "Import" }).click();
+        await page.locator('input[type="file"]').setInputFiles({
+            name: "company-variant.csv",
+            mimeType: "text/csv",
+            buffer: Buffer.from(`Name,Company\nVariant review contact,${fixture.companyName} Inc.\n`, "utf8"),
+        });
+        await page.getByRole("button", { name: "Next" }).click();
+        await expect(page.getByText(message("en", "importExport", "importExport.companyVariantNeedsReview"))).toBeVisible();
+        const candidates = page.getByLabel("Possible existing records");
+        await expect(candidates.getByText(fixture.companyName, { exact: true })).toBeVisible();
+        await expect(page.getByRole("button", { name: "Import", exact: true })).toBeDisabled();
     });
 });
 

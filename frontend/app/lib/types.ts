@@ -157,6 +157,7 @@ export type DuplicatePreflightResponse = {
     candidates: DuplicateCandidate[];
     truncated: boolean;
     reviewToken: string;
+    allowSeparateCreation?: boolean;
 };
 
 export type PersonDuplicatePreflightRequest = {

@@ -205,6 +205,33 @@ class ImportServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void legalFormVariantIsReviewedWithoutAutomaticallyAttachingACompany() {
+        String companyName = "Reviewed variant " + unique();
+        Company existing = new Company();
+        existing.setWorkspaceId(workspace.getId());
+        existing.setName(companyName);
+        companyMapper.insert(existing);
+        ImportRequest request = req(
+            List.of(map("Name", "name"), map("Company", "company")),
+            List.of(Map.of("Name", "Variant person " + unique(), "Company", companyName + " Inc.")),
+            "fill_empty");
+
+        ImportPreviewResult preview = importService.previewPersons(request);
+
+        assertEquals("invalid", preview.getRows().getFirst().getStatus());
+        assertEquals(existing.getId(), preview.getRows().getFirst().getCandidates().getFirst().recordId());
+        assertEquals(DuplicateMatchStrength.WEAK,
+            preview.getRows().getFirst().getCandidates().getFirst().strength());
+        assertTrue(preview.getRows().getFirst().getErrors().contains(
+            "Company name variant requires an explicit company selection"));
+        request.setDuplicateReviewProof(preview.getDuplicateReviewProof());
+        ImportResult result = importService.commitPersons(request);
+        assertEquals(0, result.getCreated());
+        assertEquals(0, rowCount("SELECT COUNT(*) FROM person WHERE workspace_id = ? AND name = ?",
+            workspace.getId(), request.getRows().getFirst().get("Name")));
+    }
+
+    @Test
     void skippedPersonMatchDoesNotConsumeAnAmbiguousCompanyDependency() {
         String companyName = "Unused ambiguous company " + unique();
         Company first = new Company();

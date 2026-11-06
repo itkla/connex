@@ -19,6 +19,8 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -38,6 +40,7 @@ import ooo.klae.connex.backend.dto.IdentityCollisionGroupPageRow;
 import ooo.klae.connex.backend.dto.PersonDuplicatePreflightRequest;
 import ooo.klae.connex.backend.mappers.DealDuplicateReviewProofMapper;
 import ooo.klae.connex.backend.mappers.IdentityCollisionMapper;
+import ooo.klae.connex.backend.mappers.CompanyMapper;
 
 class DuplicatePreflightDatabaseTest extends AbstractServiceTest {
 
@@ -49,6 +52,7 @@ class DuplicatePreflightDatabaseTest extends AbstractServiceTest {
     @Autowired private WorkspaceService workspaceService;
     @Autowired private DuplicatePreflightProperties duplicatePreflightProperties;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private CompanyMapper companyMapper;
 
     @Test
     void personPreflightCombinesStrongCanonicalEvidenceAndWeakExactName() {
@@ -145,6 +149,48 @@ class DuplicatePreflightDatabaseTest extends AbstractServiceTest {
             response.candidates().getFirst().matches().stream()
                 .map(match -> match.kind())
                 .collect(Collectors.toSet()));
+    }
+
+    @ParameterizedTest
+    @CsvSource(delimiter = '|', value = {
+        "株式会社さくら商事|さくら商事",
+        "株式会社さくら商事|（株）さくら商事",
+        "株式会社さくら商事|株式会社 さくら商事",
+        "（株）さくら商事|さくら商事株式会社",
+        "㈱さくら商事|株式会社さくら商事",
+        "さくら商事|合同会社さくら商事",
+        "Sakura Robotics|Sakura Robotics Inc.",
+        "Sakura Robotics Inc.|Sakura Robotics",
+        "Sakura Robotics Co., Ltd.|Sakura Robotics K.K.",
+        "Ｓａｋｕｒａ　Ｒｏｂｏｔｉｃｓ　Ｉｎｃ．|Sakura Robotics"
+    })
+    void companyLegalFormsAreOnlyWeakReviewEvidence(String storedName, String probeName) {
+        Company company = new Company();
+        company.setWorkspaceId(workspace.getId());
+        company.setName(storedName);
+        companyMapper.insert(company);
+        CompanyDuplicatePreflightRequest request = new CompanyDuplicatePreflightRequest(
+            probeName, List.of(), List.of());
+
+        DuplicatePreflightResponse response = duplicatePreflightService.preflightCompany(request);
+
+        assertFalse(response.truncated());
+        assertFalse(response.allowSeparateCreation());
+        assertEquals(List.of(company.getId()), response.candidates().stream()
+            .map(candidate -> candidate.recordId()).toList());
+        assertEquals(DuplicateMatchStrength.WEAK, response.candidates().getFirst().strength());
+        assertEquals(List.of(DuplicateMatchKind.NAME), response.candidates().getFirst().matches()
+            .stream().map(match -> match.kind()).toList());
+        org.junit.jupiter.api.Assertions.assertThrows(
+            ooo.klae.connex.backend.exceptions.DuplicateReviewException.class,
+            () -> duplicatePreflightService.requireReviewedCompanyCreation(request, null));
+        duplicatePreflightService.requireReviewedCompanyCreation(request, response.reviewToken());
+        assertEquals(storedName, jdbcTemplate.queryForObject(
+            "SELECT name FROM company WHERE workspace_id = ? AND id = ?", String.class,
+            workspace.getId(), company.getId()));
+        assertEquals(0, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM company_identity WHERE workspace_id = ? AND company_id = ?",
+            Integer.class, workspace.getId(), company.getId()));
     }
 
     @Test

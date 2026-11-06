@@ -10,10 +10,20 @@ This document is authoritative for person/company/deal identity matching, duplic
 - Hydrate the same-organization workspace visibility allowlist through the established control-access service, then use visibility-scoped `IdentityMapper` reads.
 - Strong evidence is exact canonical identity (email, phone, domain, external id as applicable).
 - Weak evidence is exact normalized name after a bounded broad candidate read and Java recheck.
+- Company name review also recognizes the boundary legal forms documented in
+  [Duplicate Review](DUPLICATE_REVIEW.md), after Unicode width/case/kana folding. These are weak
+  review keys only; canonical identity/name keys are unchanged. Variants never authorize
+  automatic attachment or merging.
 - Never auto-attach an unreviewed weak, shared, ambiguous, truncated, or aggregate-overflow result.
 - Every mapper statement remains parameterized and tenant/visibility scoped.
 
 Direct responses remain bounded to the established candidate ceiling; CSV responses retain their per-row and whole-request bounds. A truncated result is not acknowledgeable proof of completeness.
+
+Direct person review can explicitly permit separate creation from a bounded name-only result
+through `allowSeparateCreation`, while retaining `truncated=true`. This permission requires
+complete, empty canonical email/phone results, explicit user acknowledgement, and the same
+request/result token at the locked final recheck, including when the displayed candidate list
+is empty. It never permits reuse or import resolution; company and deal overflow still blocks.
 
 ### Person CSV identity decisions
 
@@ -96,6 +106,8 @@ Person/deal previews bind exact referenced-company names to the proof; deal proo
 At commit:
 
 - a unique visible company dependency may be reused;
+- dependency reuse still requires canonical-exact names; a legal-form variant is shown for
+  review and refuses unresolved rows until the file uses the intended company's exact name;
 - ambiguous/truncated dependencies fail closed only for rows that consume them;
 - do not create a dependency under the duplicate mutex until all required target/identity revalidation passes;
 - lock writable matched targets individually in ascending record id and canonical identity groups in deterministic kind/value order;
