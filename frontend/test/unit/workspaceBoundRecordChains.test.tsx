@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { createHash, webcrypto } from "node:crypto";
-import { act, isValidElement, useEffect, useState, type ComponentProps, type ReactNode } from "react";
+import { act, cloneElement, isValidElement, useEffect, useState, type ComponentProps, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -74,6 +74,7 @@ const captured = vi.hoisted<{
     pipelineSheet: null,
 }));
 const browser = vi.hoisted(() => ({
+    activeWorkspaceId: 9,
     noop: () => undefined,
     refresh: vi.fn(),
     selectedIds: new Set([41]),
@@ -97,7 +98,7 @@ vi.mock("next/navigation", () => ({
 vi.mock("next-intl", () => ({ useTranslations: () => translate, useTimeZone: () => "UTC", useLocale: () => "en" }));
 vi.mock("motion/react", () => ({ useReducedMotion: () => true, motion: { div: ({ children }: { children?: ReactNode }) => <div>{children}</div> } }));
 vi.mock("@/app/lib/toast", () => ({ toastError: vi.fn(), toastInfo: vi.fn(), toastSuccess: vi.fn(), toastWarn: vi.fn(), toastDismiss: vi.fn() }));
-vi.mock("@/app/hooks/useWorkspace", () => ({ useWorkspace: () => ({ activeWorkspaceId: 9, workspaces: [] }) }));
+vi.mock("@/app/hooks/useWorkspace", () => ({ useWorkspace: () => ({ activeWorkspaceId: browser.activeWorkspaceId, workspaces: [] }) }));
 vi.mock("@/app/hooks/usePermissions", () => ({ usePermission: () => true }));
 vi.mock("@/app/hooks/useActions", () => ({
     useActions: () => ({ actions: [], pendingIds: new Set(), context: { user: { id: 7 } }, run: browser.noop }),
@@ -204,6 +205,7 @@ function expectWrites(backend: ReturnType<typeof stubBackend>, paths: string[]) 
     );
 }
 beforeEach(() => {
+    browser.activeWorkspaceId = 9;
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     vi.stubGlobal("crypto", webcrypto);
     vi.stubGlobal("matchMedia", (query: string) => ({ media: query, matches: false, addEventListener: browser.noop, removeEventListener: browser.noop }));
@@ -734,6 +736,24 @@ describe("company quick creation preserves one origin", () => {
 });
 
 describe("pipeline chains preserve one origin", () => {
+    it.each(["sheet", "browser"] as const)("%s restores rejected stage ordering without losing field edits", async (surface) => {
+        const won = { ...stage, id: stage.id + 1, name: "Won", position: 1, success: true };
+        const backend = stubBackend(undefined, (path, method) => path === "/api/pipelines/41/stages"
+            ? method === "PUT" ? json({ error: "Unavailable" }, 503) : json([stage, won])
+            : undefined);
+        if (surface === "browser") browser.search = new URLSearchParams("edit=41");
+        await render(surface === "sheet"
+            ? <EditPipelineSheet pipeline={pipeline} stages={[stage, won]} open onOpenChange={browser.noop} />
+            : <PipelinesBrowser pipelines={[pipeline]} />);
+        await act(async () => get("pipelineSheet").updateDraft(41, {
+            stages: [won, { ...stage, name: "Renamed" }],
+            stageOrderBeforeMove: [`saved-${stage.id}`, `saved-${won.id}`],
+        }));
+        await act(async () => { await get("pipelineSheet").saveEdits(); });
+        expect(get("pipelineSheet").drafts[41].stages.map((item) => item.name)).toEqual(["Renamed", "Won"]);
+        expect(get("pipelineSheet").orderRestorationVersion).toBe(1);
+        expectWrites(backend, ["/api/pipelines/41/stages"]);
+    });
     it.each(["sheet", "browser"] as const)("%s updates name then stages", async (surface) => {
         const backend = stubBackend("/api/pipelines/41");
         await render(surface === "sheet" ? <EditPipelineSheet pipeline={pipeline} stages={[stage]} open onOpenChange={browser.noop} /> : <PipelinesBrowser pipelines={[pipeline]} />);
@@ -751,6 +771,30 @@ describe("pipeline chains preserve one origin", () => {
 });
 
 describe("deal creation callbacks accept the preflight origin", () => {
+    it.each(["browser", "company menu", "quick create", "calendar"])("%s scopes created choices and ignores old callbacks", async (surface) => {
+        stubBackend(undefined, (path, method) => path === "/api/pipelines" && method === "GET" ? json([]) : undefined);
+        const element = surface === "browser"
+            ? <DealsBrowser deals={[]} total={0} metrics={{ byCurrency: [], totalCount: 0 }} serverFacets={{ status: [], stages: [], pipelines: [], companies: [], currencies: [], risk: [], owners: [] }} savedViews={[]} defaultView={null} timezone="UTC" currentUserId={7} />
+            : surface === "company menu" ? <CompanyActionsMenu company={company} />
+            : surface === "quick create" ? <DealCreateContainer open onOpenChange={browser.noop} />
+            : <CalendarNewDealContainer open onOpenChange={browser.noop} defaultExpectedCloseDate="2026-10-20" />;
+        await render(element);
+        const publish = get("deal").onPipelineCreated;
+        if (!publish) throw new Error("Missing choice publication callback");
+        await act(async () => publish(pipeline, [stage]));
+        expect(get("deal").pipelines).toEqual([pipeline]);
+        browser.activeWorkspaceId = 5;
+        switchWorkspace();
+        await render(cloneElement(element));
+        await act(async () => publish(pipeline, [stage]));
+        expect(get("deal").pipelines).toEqual([]);
+        expect(get("deal").stagesByPipeline).toEqual({});
+        browser.activeWorkspaceId = ORIGIN;
+        bindRenderedWorkspace(shell, ORIGIN);
+        await render(cloneElement(element));
+        await act(async () => publish(pipeline, [stage]));
+        expect(get("deal").pipelines).toEqual([]);
+    });
     it.each(["browser", "company menu", "quick create", "calendar"])("%s", async (surface) => {
         const backend = stubBackend();
         await render(surface === "browser" ? <DealsBrowser deals={[]} total={0} metrics={{ byCurrency: [], totalCount: 0 }} serverFacets={{ status: [], stages: [], pipelines: [], companies: [], currencies: [], risk: [], owners: [] }} savedViews={[]} defaultView={null} timezone="UTC" currentUserId={7} /> : surface === "company menu" ? <CompanyActionsMenu company={company} /> : surface === "quick create" ? <DealCreateContainer open onOpenChange={browser.noop} /> : <CalendarNewDealContainer open onOpenChange={browser.noop} defaultExpectedCloseDate="2026-10-20" />);

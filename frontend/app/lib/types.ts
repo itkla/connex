@@ -1645,9 +1645,10 @@ export type DealStageHistory = {
     achievedAt: string;
 };
 
+/** Pipeline creation draft; stage client ids are editor keys omitted from requests. */
 export type CreatePipelinePayload = {
     name?: string;
-    stages?: { name: string; success?: boolean; failure?: boolean }[];
+    stages?: { name: string; success?: boolean; failure?: boolean; clientId?: string }[];
 };
 
 export type CreateStagePayload = {
@@ -4609,6 +4610,13 @@ export type GeneratedDocumentSummary = {
     generatedAt?: string;
     createdAt?: string;
     updatedAt?: string;
+};
+
+/** Minimal reference returned only when its parent deal is readable in the current workspace. */
+export type GeneratedDocumentTarget = {
+    id: number;
+    dealId: number;
+    title?: string;
 };
 
 /** Filters accepted by the cross-deal generated-document index. */

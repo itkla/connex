@@ -6,11 +6,16 @@ import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.DealDocument;
 import ooo.klae.connex.backend.dto.GeneratedDocumentSummaryDto;
+import ooo.klae.connex.backend.dto.GeneratedDocumentTargetDto;
 import ooo.klae.connex.backend.dto.MemberScope;
 
 /** Mapper for {@code deal_document}; every statement is workspace-scoped. */
 public interface DealDocumentMapper {
     List<DealDocument> getByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
+
+    /** Workspace-scoped minimal references; the service applies the existing parent-deal gate. */
+    List<GeneratedDocumentTargetDto> getTargets(@Param("workspaceId") int workspaceId,
+        @Param("ids") List<Integer> ids);
 
     /**
      * One bounded page of generated documents across every deal in the workspace.

@@ -73,6 +73,29 @@ Per-surface deviations are product decisions, not precedent for inventing a new 
 
 ## Signed-off adaptations
 
+### Pipeline setup and order
+
+When New deal has no pipelines, offer pipeline creation in a nested responsive dialog and retain
+the pending deal. Seed editable open, Won, and Lost stages; require a named open stage before
+returning to the deal, then select that pipeline and its first open stage. Members without pipeline
+management permission see guidance to ask a pipeline manager. A failed stage save keeps setup open
+and retries against the pipeline already created.
+Publish the new pipeline and stages to the calling container so later deal dialogs and the current
+page's pipeline choices include them without a reload.
+Pipeline choices and late setup completions belong to one workspace visit. Switching workspaces
+clears those choices and discards pending completions, including a completion during dialog closing.
+If pipeline creation finishes after a switch, initialize its stages under the original request pin
+without publishing that pipeline into the newly selected workspace.
+Before retrying a stage write whose response was lost, reconcile saved stage identities with the
+previous submission rather than inserting the same stage set again.
+
+Stage editors use explicit up/down controls for pointer and keyboard ordering. Reordering retains
+stage identities and outcome flags and uses the existing transactional stage replacement API.
+Existing order is not normalized: the server does not require terminal stages to be last. Newly
+added open stages go before the first terminal stage, receive input focus, and can be moved explicitly.
+Editor rows retain a persisted or client-generated identity while moving. A rejected save restores
+the order from before the move, retains other field edits, and announces the restoration.
+
 ### Map capacity
 
 The relationship map loads the workspace as a whole, including when a record is focused. Keep its

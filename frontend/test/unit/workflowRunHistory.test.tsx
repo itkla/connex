@@ -5,7 +5,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import WorkflowRunsDialog from "@/app/components/settings/workflows/WorkflowRunsDialog";
-import { getCompanyById, getTaskById, getWorkflowRuns } from "@/app/lib/api";
+import { getCompanyById, getGeneratedDocumentTargets, getTaskById, getWorkflowRuns } from "@/app/lib/api";
 import type { WorkflowRunSummary } from "@/app/lib/types";
 import enWorkspace from "@/messages/en/workspace.json";
 import jaWorkspace from "@/messages/ja/workspace.json";
@@ -15,6 +15,7 @@ import jaOperations from "@/messages/ja/workflow-operations.json";
 vi.mock("@/app/lib/api", () => ({
     getWorkflowRuns: vi.fn(), getWorkflowRun: vi.fn(),
     getCompanyById: vi.fn(), getContactById: vi.fn(), getDealSummary: vi.fn(), getTaskById: vi.fn(),
+    getGeneratedDocumentTargets: vi.fn(),
 }));
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -52,6 +53,23 @@ describe("workflow history failure recovery", () => {
     for (const [locale, workspace, operations] of [
         ["en", enWorkspace, enOperations], ["ja", jaWorkspace, jaOperations],
     ] as const) {
+        it(`${locale}: links visible documents and gives hidden and deleted documents the same neutral label`, async () => {
+            vi.mocked(getWorkflowRuns).mockResolvedValue({ items: [61, 62, 63].map((id) => ({
+                ...run, runKey: `legacy-${id}`,
+                trigger: { type: "entity_change", event: "document.finalized", recordType: "document", recordId: id },
+            })), nextCursor: null });
+            vi.mocked(getGeneratedDocumentTargets).mockResolvedValue([{ id: 61, dealId: 41, title: "Visible quote" }]);
+            await renderHistory(locale, { ...workspace, ...operations });
+            const rows = document.querySelectorAll("ol > li");
+            expect(rows).toHaveLength(3);
+            expect(rows[0]?.querySelector('a[href="/records/deals/41#deal-documents"]')?.textContent).toBe("Visible quote");
+            for (const row of [rows[1], rows[2]]) {
+                expect(row?.textContent).toContain(workspace.WorkspaceWorkflows.runs.documentTargetUnavailable);
+                expect(row?.querySelector('a[href^="/records/deals/"]')).toBeNull();
+            }
+            expect(document.body.textContent).not.toContain(workspace.WorkspaceWorkflows.runs.targetNameNotRecorded);
+        });
+
         it(`${locale}: shows the failed action, safe reason, recovery and a named permitted target`, async () => {
             vi.mocked(getWorkflowRuns).mockResolvedValue({ items: [run], nextCursor: null });
             vi.mocked(getCompanyById).mockResolvedValue({ id: 41, name: "Example Company", website: "", industry: "", phone: "", address: "", logoUrl: "", createdAt: run.startedAt, updatedAt: run.startedAt });
@@ -85,8 +103,8 @@ describe("workflow history failure recovery", () => {
         expect(document.querySelector('a[href="/activity/tasks?task=51"]')?.textContent).toBe("Follow up");
     });
 
-    it("does not claim a document was deleted when its name cannot be resolved here", async () => {
-        vi.mocked(getWorkflowRuns).mockResolvedValue({ items: [{ ...run, trigger: { type: "entity_change", event: "document.finalized", recordType: "document", recordId: 61 } }], nextCursor: null });
+    it("does not claim an unsupported target was deleted when its name cannot be resolved here", async () => {
+        vi.mocked(getWorkflowRuns).mockResolvedValue({ items: [{ ...run, trigger: { type: "entity_change", event: "activity.created", recordType: "activity", recordId: 61 } }], nextCursor: null });
         await renderHistory("en", { ...enWorkspace, ...enOperations });
         expect(document.body.textContent).toContain(enWorkspace.WorkspaceWorkflows.runs.targetNameNotRecorded);
         expect(document.body.textContent).not.toContain(enWorkspace.WorkspaceWorkflows.runs.targetUnavailable);
