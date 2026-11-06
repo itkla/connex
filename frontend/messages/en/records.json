@@ -1,4 +1,14 @@
 {
+  "DealCurrencyScope": {
+    "title": "Currency scope",
+    "dashboardBasis": "Money totals and charts: {currency} only",
+    "dealsBasis": "Deals and totals: {currency} only",
+    "widgetBasis": "{currency} only",
+    "recordCountsBasis": "Deal counts include all currencies.",
+    "dashboardExcluded": "{count, plural, =0 {No deals in other currencies are excluded from these money totals and charts.} =1 {1 deal in another currency is excluded from these money totals and charts. Switch currency to view it.} other {# deals in other currencies are excluded from these money totals and charts. Switch currency to view them.}}",
+    "excluded": "{count, plural, =0 {No deals in other currencies are excluded.} =1 {1 deal in another currency is excluded. Switch currency to view it.} other {# deals in other currencies are excluded. Switch currency to view them.}}",
+    "viewDeals": "View {currency} deals"
+  },
   "RecordListState": {
     "title": "Couldn't load the list",
     "body": "Your records haven't been changed. Try again.",
