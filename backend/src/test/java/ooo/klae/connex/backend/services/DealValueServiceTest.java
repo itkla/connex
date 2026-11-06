@@ -15,8 +15,10 @@ import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.DealLineValueConsentException;
 import ooo.klae.connex.backend.mappers.DealLineItemMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.DealValueMapper;
 
 class DealValueServiceTest {
 
@@ -25,7 +27,21 @@ class DealValueServiceTest {
 
     private final DealMapper dealMapper = mock(DealMapper.class);
     private final DealLineItemMapper dealLineItemMapper = mock(DealLineItemMapper.class);
-    private final DealValueService service = new DealValueService(dealMapper, dealLineItemMapper);
+    private final DealValueMapper dealValueMapper = mock(DealValueMapper.class);
+    private final DealValueService service = new DealValueService(dealMapper, dealLineItemMapper, dealValueMapper);
+
+    @Test
+    void consentRequiredAndStaleConsentHaveDistinctMachineCodes() {
+        Deal deal = deal("manual", "1000.00", "0.00");
+        deal.setCurrency("USD");
+        DealLineValueConsentException required = assertThrows(DealLineValueConsentException.class,
+            () -> service.requireConfirmedLineValue(deal, false, null, null));
+        assertEquals(DealLineValueConsentException.REQUIRED, required.getCode());
+        DealLineValueConsentException stale = assertThrows(DealLineValueConsentException.class,
+            () -> service.requireConfirmedLineValue(deal, true, new BigDecimal("999"), "USD"));
+        assertEquals(DealLineValueConsentException.STALE, stale.getCode());
+        verifyNoInteractions(dealMapper, dealValueMapper);
+    }
 
     @Test
     void manualValuesNormalizeToScaleTwoHalfUp() {
@@ -85,7 +101,7 @@ class DealValueServiceTest {
         when(dealLineItemMapper.sumLineTotals(WORKSPACE_ID, DEAL_ID))
             .thenReturn(new BigDecimal("75.555"));
 
-        BigDecimal result = service.reconcileLineItems(WORKSPACE_ID, deal);
+        BigDecimal result = service.reconcileLineItems(WORKSPACE_ID, deal, true, null);
 
         assertMoney("75.56", result);
         verify(dealMapper).updateValueAndSource(
@@ -102,6 +118,76 @@ class DealValueServiceTest {
         assertMoney("75.56", result);
         verify(dealMapper).updateValueSource(WORKSPACE_ID, DEAL_ID, "manual");
         verifyNoMoreInteractions(dealMapper);
+    }
+
+    @Test
+    void nonzeroManualTakeoverRequiresExplicitConsentBeforeAnyWrite() {
+        Deal deal = deal("manual", "114200.00", "0.00");
+        assertThrows(ConflictException.class,
+            () -> service.requireConfirmedLineValue(deal, false, null, null));
+        assertThrows(ConflictException.class,
+            () -> service.requireConfirmedLineValue(deal, true, new BigDecimal("114199.00"), null));
+        assertThrows(ConflictException.class,
+            () -> service.reconcileLineItems(WORKSPACE_ID, manualWithLines()));
+        verifyNoInteractions(dealMapper, dealValueMapper);
+    }
+
+    private Deal manualWithLines() {
+        when(dealLineItemMapper.countByDealId(WORKSPACE_ID, DEAL_ID)).thenReturn(1);
+        return deal("manual", "114200.00", "0.00");
+    }
+
+    @Test
+    void consentedTakeoverCapturesManualAmountAndLaterEditsKeepIt() {
+        Deal deal = deal("manual", "121600.00", "900.00");
+        deal.setWon(Boolean.TRUE);
+        when(dealLineItemMapper.countByDealId(WORKSPACE_ID, DEAL_ID)).thenReturn(1);
+        when(dealLineItemMapper.sumLineTotals(WORKSPACE_ID, DEAL_ID)).thenReturn(new BigDecimal("132.55"));
+
+        assertMoney("132.55", service.reconcileLineItems(
+            WORKSPACE_ID, deal, true, new BigDecimal("121600.00")));
+        verify(dealValueMapper).setPriorManualValue(WORKSPACE_ID, DEAL_ID, new BigDecimal("121600.00"));
+        verify(dealMapper, never()).updateActualValue(org.mockito.ArgumentMatchers.anyInt(),
+            org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.any());
+
+        deal.setValueSource("line_items");
+        when(dealLineItemMapper.sumLineTotals(WORKSPACE_ID, DEAL_ID)).thenReturn(new BigDecimal("331.38"));
+        assertMoney("331.38", service.reconcileLineItems(WORKSPACE_ID, deal));
+        verifyNoMoreInteractions(dealValueMapper);
+    }
+
+    @Test
+    void finalLineRestoresAndClearsProspectivelyStoredManualAmount() {
+        Deal deal = deal("line_items", "331.38", "900.00");
+        when(dealValueMapper.getPriorManualValueForUpdate(WORKSPACE_ID, DEAL_ID))
+            .thenReturn(new BigDecimal("121600.00"));
+
+        assertMoney("121600.00", service.reconcileLineItems(WORKSPACE_ID, deal));
+        verify(dealMapper).updateValueAndSource(WORKSPACE_ID, DEAL_ID, new BigDecimal("121600.00"), "manual");
+        verify(dealValueMapper).setPriorManualValue(WORKSPACE_ID, DEAL_ID, null);
+        assertMoney("900.00", deal.getActualValue());
+    }
+
+    @Test
+    void zeroManualAmountNeedsNoConfirmationButIsStillRestorable() {
+        Deal deal = deal("manual", "0.00", "0.00");
+        when(dealLineItemMapper.countByDealId(WORKSPACE_ID, DEAL_ID)).thenReturn(1);
+        when(dealLineItemMapper.sumLineTotals(WORKSPACE_ID, DEAL_ID)).thenReturn(BigDecimal.TEN);
+        assertMoney("10.00", service.reconcileLineItems(WORKSPACE_ID, deal));
+        verify(dealValueMapper).setPriorManualValue(WORKSPACE_ID, DEAL_ID, new BigDecimal("0.00"));
+    }
+
+    @Test
+    void confirmationConflictsIfTheCurrencyOrManualSourceChanged() {
+        Deal deal = deal("manual", "121600.00", "0.00");
+        deal.setCurrency("JPY");
+        assertThrows(ConflictException.class, () -> service.requireConfirmedLineValue(
+            deal, true, new BigDecimal("121600.00"), "USD"));
+        deal.setCurrency("USD");
+        deal.setValueSource("line_items");
+        assertThrows(ConflictException.class, () -> service.requireConfirmedLineValue(
+            deal, true, new BigDecimal("121600.00"), "USD"));
+        verifyNoInteractions(dealMapper, dealValueMapper);
     }
 
     @Test

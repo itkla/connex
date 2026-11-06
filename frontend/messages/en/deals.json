@@ -392,7 +392,22 @@
         "grandTotal": "Total",
         "totalsUnavailable": "Totals are unavailable while line currencies are being repaired.",
         "currencyMismatch": "This line uses {lineCurrency}; the deal uses {dealCurrency}. Check the amounts before editing this line in {dealCurrency}, or remove it. No currency conversion is applied.",
-        "saveFailed": "Couldn't save the line item"
+        "saveFailed": "Couldn't save the line item",
+        "draftTitle": "New line item",
+        "draftHelp": "This line is unsaved. Enter a price, then save to review the deal value.",
+        "saveLine": "Save line",
+        "discardDraft": "Discard line",
+        "taxRate": "Tax rate (%)",
+        "discountType": "Discount type",
+        "discountValue": "Discount value",
+        "discountNone": "No discount",
+        "discountPercent": "Percentage (%)",
+        "discountAmount": "Fixed amount",
+        "confirmTitle": "Replace the deal value?",
+        "confirmDescription": "The deal value will change from {previous} to {next}, including tax. Removing the last line will restore the previous manual amount.",
+        "confirmReplacement": "Replace value and save",
+        "cancel": "Cancel",
+        "restoreHelp": "Removing the last line will restore the manual deal value of {amount}."
     },
     "DealsDocuments": {
         "title": "Documents",

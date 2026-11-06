@@ -13,8 +13,10 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.dto.DealLineItemDto;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.DealLineValueConsentException;
 import ooo.klae.connex.backend.mappers.DealLineItemMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.DealValueMapper;
 
 /** Owns the canonical deal-value contract across manual and line-item-derived amounts. */
 @Service
@@ -29,6 +31,27 @@ public class DealValueService {
 
     private final DealMapper dealMapper;
     private final DealLineItemMapper dealLineItemMapper;
+    private final DealValueMapper dealValueMapper;
+
+    /** Requires consent against the locked manual amount before a line write can take it over. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void requireConfirmedLineValue(
+            Deal lockedDeal, boolean confirmed, BigDecimal expectedManualValue, String expectedCurrency) {
+        boolean stale = expectedManualValue != null && (!MANUAL.equals(lockedDeal.getValueSource())
+            || money(expectedManualValue).compareTo(money(lockedDeal.getValue())) != 0)
+            || expectedCurrency != null && !expectedCurrency.equalsIgnoreCase(lockedDeal.getCurrency());
+        if (stale) {
+            throw DealLineValueConsentException.stale();
+        }
+        if (MANUAL.equals(lockedDeal.getValueSource()) && money(lockedDeal.getValue()).signum() != 0 && !confirmed) {
+            throw DealLineValueConsentException.required();
+        }
+    }
+
+    /** Returns the prospective fallback, never a reconstruction of a historical manual amount. */
+    public BigDecimal priorManualValue(int workspaceId, int dealId) {
+        return dealValueMapper.getPriorManualValue(workspaceId, dealId);
+    }
 
     /** Returns the normalized authoritative value for the deal's current source. */
     @Transactional(readOnly = true)
@@ -58,11 +81,28 @@ public class DealValueService {
     /** Reconciles the locked deal after a line-item mutation. */
     @Transactional(propagation = Propagation.MANDATORY)
     public BigDecimal reconcileLineItems(int workspaceId, Deal lockedDeal) {
+        return reconcileLineItems(workspaceId, lockedDeal, false, null);
+    }
+
+    /** Reconciles a consented takeover, preserving the manual amount until the final line is removed. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public BigDecimal reconcileLineItems(
+            int workspaceId, Deal lockedDeal, boolean confirmed, BigDecimal expectedManualValue) {
         requireConsistentLineCurrency(workspaceId, lockedDeal);
         if (dealLineItemMapper.countByDealId(workspaceId, lockedDeal.getId()) > 0) {
+            requireConfirmedLineValue(lockedDeal, confirmed, expectedManualValue, null);
+            if (MANUAL.equals(lockedDeal.getValueSource())) {
+                dealValueMapper.setPriorManualValue(workspaceId, lockedDeal.getId(), money(lockedDeal.getValue()));
+            }
             BigDecimal total = money(dealLineItemMapper.sumLineTotals(workspaceId, lockedDeal.getId()));
             dealMapper.updateValueAndSource(workspaceId, lockedDeal.getId(), total, LINE_ITEMS);
             return total;
+        }
+        BigDecimal prior = dealValueMapper.getPriorManualValueForUpdate(workspaceId, lockedDeal.getId());
+        if (prior != null) {
+            dealMapper.updateValueAndSource(workspaceId, lockedDeal.getId(), money(prior), MANUAL);
+            dealValueMapper.setPriorManualValue(workspaceId, lockedDeal.getId(), null);
+            return money(prior);
         }
         dealMapper.updateValueSource(workspaceId, lockedDeal.getId(), MANUAL);
         return money(lockedDeal.getValue());

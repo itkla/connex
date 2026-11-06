@@ -5136,12 +5136,12 @@ export function getDealLineItemsFromCookie(dealId: number, cookie: string | null
     );
 }
 
-export function createDealLineItem(dealId: number, payload: Types.DealLineItemPayload) {
-    return postJson<Types.DealLineItemsResponse>(`/api/deals/${dealId}/line-items`, payload);
+export function createDealLineItem(dealId: number, payload: Types.DealLineItemPayload, init: RequestInit = {}) {
+    return postJson<Types.DealLineItemsResponse>(`/api/deals/${dealId}/line-items`, payload, init);
 }
 
-export function updateDealLineItem(dealId: number, itemId: number, payload: Types.DealLineItemPayload) {
-    return putJson<Types.DealLineItemsResponse>(`/api/deals/${dealId}/line-items/${itemId}`, payload);
+export function updateDealLineItem(dealId: number, itemId: number, payload: Types.DealLineItemPayload, init: RequestInit = {}) {
+    return putJson<Types.DealLineItemsResponse>(`/api/deals/${dealId}/line-items/${itemId}`, payload, init);
 }
 
 export function deleteDealLineItem(dealId: number, itemId: number, init: RequestInit = {}) {

@@ -217,6 +217,7 @@ class DocumentTemplateServiceTest extends AbstractCommittedDocumentDeliveryServi
         jdbcTemplate.update("UPDATE deal SET currency = 'USD' WHERE workspace_id = ? AND id = ?",
             workspace.getId(), deal.getId());
         DealLineItemRequest line = new DealLineItemRequest();
+        line.setConfirmValueReplacement(true);
         line.setName("Services");
         line.setUnitPrice(new BigDecimal("100000"));
         line.setQuantity(BigDecimal.ONE);

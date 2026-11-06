@@ -531,8 +531,10 @@ describe("in-flight deal drafts", () => {
 
 describe("detail edit snapshots", () => {
     it("uses the reconciled deal after renaming a line while route refresh is held", async () => {
+        window.history.replaceState(null, "", "/records/pipelines");
         const initial = { ...deal, version: 1 };
         let current = initial;
+        let lineRequests = 0;
         const routeRefresh = deferred<Deal>();
         const line: DealLineItem = {
             id: 11, dealId: deal.id, name: "Consulting", unitPrice: 100, quantity: 1,
@@ -542,7 +544,8 @@ describe("detail edit snapshots", () => {
         const lines = { items: [line], totals: { currency: "USD", subtotal: 100, tax: 0, oneTimeTotal: 100, recurringTotal: 0, grandTotal: 100 } };
         const backend = stubBackend(undefined, (path, method) => {
             if (path === "/api/deals/41/line-items/11" && method === "PUT") {
-                current = { ...current, version: 2 };
+                lineRequests += 1;
+                if (lineRequests === 2) current = { ...current, version: 2 };
                 return json({ ...lines, items: [{ ...line, name: "Renamed consulting" }] });
             }
             if (path === "/api/deals/41" && method === "GET") return json(current);
@@ -562,7 +565,7 @@ describe("detail edit snapshots", () => {
             return <>
                 <output>{pageDeal.version}</output>
                 <DealActionsMenu deal={pageDeal} timezone="Asia/Tokyo" pipelines={[pipeline]} stagesByPipeline={{ 41: [stage] }} currentUserId={7} />
-                <DealLineItems dealId={deal.id} dealCurrency="USD" initial={lines} />
+                <DealLineItems dealId={deal.id} dealWorkspaceId={ORIGIN} dealCurrency="USD" initial={lines} />
             </>;
         }
         await render(<Route />);
@@ -586,8 +589,13 @@ describe("detail edit snapshots", () => {
         expect(get("dealSheet").timezone).toBe("Asia/Tokyo");
         await act(async () => get("dealSheet").updateDraft(41, { name: "Edited after line rename" }));
         await act(async () => get("dealSheet").saveEdits());
-        expectWrites(backend, ["/api/deals/41/line-items/11", "/api/deals/41"]);
-        const body = backend.requests[1]?.init.body;
+        expectWrites(backend, ["/api/deals/41/line-items/11", "/api/deals/41/line-items/11", "/api/deals/41"]);
+        for (const [index, request] of backend.requests.slice(0, 2).entries()) {
+            const payload: unknown = JSON.parse(String(request.init.body));
+            expect(payload).toMatchObject(index === 0 ? { previewOnly: true } : { name: "Renamed consulting" });
+            expect(payload).not.toHaveProperty("expectedVersion");
+        }
+        const body = backend.requests[2]?.init.body;
         if (typeof body !== "string") throw new Error("Expected a deal update payload");
         expect(JSON.parse(body)).toMatchObject({ expectedVersion: 2, name: "Edited after line rename" });
         expect(captured.dealConflict).toBeNull();

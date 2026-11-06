@@ -73,6 +73,19 @@ afterEach(() => {
     vi.clearAllMocks();
 });
 
+describe("deal line consent errors", () => {
+    it.each(["DEAL_LINE_VALUE_CONSENT_REQUIRED", "DEAL_LINE_VALUE_CONSENT_STALE"])("asks for review while preserving the draft for %s", (code) => {
+        const error = new ApiError(POISONED_MESSAGE, 409, code);
+        const english = userMessageFor(error, t)?.description;
+        const japanese = userMessageFor(error, ja)?.description;
+        expect(english).toContain("Your line is still here");
+        expect(english?.toLowerCase()).toContain("review");
+        expect(english).not.toContain("Reload");
+        expect(japanese).toContain("明細は残っています");
+        expect(japanese).not.toContain("再読み込み");
+    });
+});
+
 describe("userMessageFor status mapping", () => {
     it("gives stale edits specific localized copy ahead of generic conflict fallbacks", () => {
         const error = new ApiError(POISONED_MESSAGE, 409, "STALE_RECORD");

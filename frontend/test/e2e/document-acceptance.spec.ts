@@ -656,6 +656,7 @@ test("authenticated setup completes through a cookie-less public bearer", async 
                 headers: writeHeaders,
                 data: {
                     name: "Acceptance implementation service",
+                    confirmValueReplacement: true,
                     unitPrice: 1250,
                     quantity: 2,
                     taxRate: 10,

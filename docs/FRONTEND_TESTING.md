@@ -235,6 +235,10 @@ in for persistence proof.
 
 ## Flake policy
 
+- Specs that register their own accounts must start with empty `storageState` or a fresh context.
+  Registering through a project-seeded session replaces that session on the server and signs out
+  every test that inherited it. The shared `registerUser` helper refuses an authenticated or
+  indeterminate context before posting; `e2eRegistrationIsolation.test.ts` covers this boundary.
 - **No sleeps.** Waits are Playwright auto-retrying assertions (`toBeVisible`, `toHaveURL`, …). Animations are neutralized with `reducedMotion: "reduce"`; locale/timezone are pinned (`en-US`/UTC).
 - Specs only touch **records seeded for that spec** (distinct contacts per flow), and desktop/phone projects own separate tenants and fixture files, so the default 2 workers never race each other.
 - CI runs with `retries: 2` and uploads **traces + screenshots + the HTML report** on failure; locally retries are 0 so flake is visible, not hidden.

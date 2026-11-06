@@ -45,6 +45,8 @@ const CODE_MESSAGE_KEYS = new Map<string, string>([
     ["PRIVILEGED_MFA_ATTESTATION_REQUIRED", "AccountSecurity.approvalNeededDescription"],
     ["IDENTITY_COLLISION_REPORT_TIMEOUT", "ApiErrors.identityCollisionReportTimeout"],
     ["SHARE_BLOCKED_PRIVACY_HOLD", "ApiErrors.sharePrivacyHold"],
+    ["DEAL_LINE_VALUE_CONSENT_REQUIRED", "ApiErrors.dealLineValueConsentRequired"],
+    ["DEAL_LINE_VALUE_CONSENT_STALE", "ApiErrors.dealLineValueConsentStale"],
     ["STALE_RECORD", "ApiErrors.staleRecord"],
 ]);
 

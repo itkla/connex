@@ -77,6 +77,7 @@ class ApprovalPolicyServiceTest extends AbstractServiceTest {
         p.setBillingFrequency("one_time");
         Product product = productService.create(p);
         DealLineItemRequest r = new DealLineItemRequest();
+        r.setConfirmValueReplacement(true);
         r.setProductId(product.getId());
         r.setQuantity(new BigDecimal(quantity));
         if (discountType != null) {
@@ -199,6 +200,26 @@ class ApprovalPolicyServiceTest extends AbstractServiceTest {
         Deal mild = jpyDeal();
         addLine(mild, "100.00", "2", "percent", "10");
         assertFalse(quote(mild).requiresApproval());
+    }
+
+    @Test
+    void editableDiscountAndTaxPersistIntoTotalsAndTriggerApproval() {
+        policy(null, "JPY", null, "20");
+        Deal deal = jpyDeal();
+        DealLineItemRequest request = new DealLineItemRequest();
+        request.setName("Discounted service");
+        request.setUnitPrice(new BigDecimal("120.50"));
+        request.setQuantity(new BigDecimal("2.5"));
+        request.setDiscountType("percent");
+        request.setDiscountValue(new BigDecimal("20"));
+        request.setTaxRate(new BigDecimal("10"));
+        request.setConfirmValueReplacement(true);
+        var saved = lineItemService.create(deal.getId(), request);
+
+        assertEquals(0, new BigDecimal("265.10").compareTo(saved.totals().grandTotal()));
+        assertEquals(0, new BigDecimal("24.10").compareTo(saved.totals().tax()));
+        assertEquals("percent", lineItemService.getForDeal(deal.getId()).items().getFirst().getDiscountType());
+        assertTrue(quote(deal).requiresApproval());
     }
 
     @Test

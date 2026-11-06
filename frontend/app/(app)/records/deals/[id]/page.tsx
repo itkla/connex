@@ -528,7 +528,7 @@ export default async function DealPage({ params }: DealPageProps) {
                             <RecordDetailSection recordKind="deal" section="activity" className="flex flex-col gap-8">
                                 <DealTaskList dealId={deal.id} companyId={deal.company} tasks={tasks} deals={dealSeeds} />
 
-                                <DealLineItems dealId={deal.id} dealCurrency={deal.currency ?? 'USD'} initial={lineItems} />
+                                <DealLineItems key={`${deal.workspaceId}:${deal.id}`} dealId={deal.id} dealWorkspaceId={deal.workspaceId ?? null} dealCurrency={deal.currency ?? 'USD'} initial={lineItems} />
                             </RecordDetailSection>
                         </Rise>
                     </div>

@@ -66,6 +66,7 @@ class DealDocumentServiceTest extends AbstractServiceTest {
 
     private DealLineItemRequest line(int productId, String quantity) {
         DealLineItemRequest r = new DealLineItemRequest();
+        r.setConfirmValueReplacement(true);
         r.setProductId(productId);
         r.setQuantity(new BigDecimal(quantity));
         return r;
@@ -133,6 +134,7 @@ class DealDocumentServiceTest extends AbstractServiceTest {
         deal.setCurrency(currency);
         dealMapper.update(deal);
         DealLineItemRequest request = new DealLineItemRequest();
+        request.setConfirmValueReplacement(true);
         request.setName("Quoted item");
         request.setUnitPrice(new BigDecimal(amount));
         request.setQuantity(BigDecimal.ONE);

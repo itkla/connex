@@ -1596,6 +1596,7 @@ class DealServiceTest extends AbstractServiceTest {
         Stage open = newStage(pipeline, 0);
         Deal deal = newDeal(pipeline, open, newCompany());
         DealLineItemRequest line = new DealLineItemRequest();
+        line.setConfirmValueReplacement(true);
         line.setName("Service " + unique());
         line.setUnitPrice(new BigDecimal("100000.00"));
         line.setQuantity(BigDecimal.ONE);
@@ -2168,6 +2169,7 @@ class DealServiceTest extends AbstractServiceTest {
 
     private void addLineItem(Deal deal, String unitPrice) {
         DealLineItemRequest request = new DealLineItemRequest();
+        request.setConfirmValueReplacement(true);
         request.setName("Ad-hoc line " + unique());
         request.setUnitPrice(new BigDecimal(unitPrice));
         request.setQuantity(BigDecimal.ONE);

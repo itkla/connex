@@ -47,7 +47,10 @@ Schema rollback is not needed for an older binary; omitted expected tokens retai
 The trigger covers all DealMapper detail/name/outcome/value/source/actual-value/owner/risk/date/
 position methods, member/account ownership cleanup, AssignmentSweepMapper owner cleanup,
 AiAssistantIdentifierMapper backfill, and migration callbacks. Imports, bulk stage actions,
-workflow/rule/assistant actions and line-item reconciliation reach these writers. Inserts start at
+workflow/rule/assistant actions and line-item reconciliation reach these writers.
+DealValueMapper fallback capture and clear also update the parent row and advance its counter.
+Line preview is read-only; confirmation carries the reviewed manual amount and currency, without
+a parent expected-version token. Line writes retain the parent lock and do not replay a broad edit. Inserts start at
 zero; deleted rows remain missing. Junction-only tags, people and collaborators do not rewrite
 full-record fields and need no deal token increment.
 

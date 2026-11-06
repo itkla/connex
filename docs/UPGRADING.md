@@ -7,12 +7,13 @@ migration-discipline part of #87 §9 / #102).
 > The specific support window below is a **proposed** policy; confirm it before it is published to
 > customers.
 
-The active rollback floor for this release is tenant V240, including with AI and missions disabled.
+The active rollback floor for this release is tenant V243, including with AI and missions disabled.
 Earlier floors in version-specific sections below describe historical component contracts and do not
-permit rollback after V240. Apply control V236 → tenant V237 → tenant V238 → tenant V239 → tenant V240
+permit rollback after V243. Apply control V236 → tenant V237 → tenant V238 → tenant V239 → tenant V240 → tenant V241 → tenant V242 → tenant V243
 in that order. Follow [the retained-chat cutover](#v236v237-retained-ask-connex-privacy-cutover),
 [the singleton-proposal cutover](#mission-singleton-proposals-tenant-v238), and
-[the task-completion cutover](#task-completion-and-relationship-warmth-tenant-v240).
+[the task-completion cutover](#task-completion-and-relationship-warmth-tenant-v240), and
+[the deal-value cutover](#deal-line-value-takeover-tenant-v243).
 
 ## Campaign engagement response compatibility (#2257)
 
@@ -72,7 +73,7 @@ MySQL account needs `PROCESS` to read `information_schema.INNODB_TABLES`.
 MySQL documents the [online FK/index operations](https://dev.mysql.com/doc/refman/8.4/en/innodb-online-ddl-operations.html)
 and [INSTANT lock restriction](https://dev.mysql.com/doc/refman/8.4/en/alter-table.html#alter-table-concurrency).
 
-The rollback floor stays `tenant/V232__ai_agent_runs.sql`: V233 is additive and dormant, and
+The historical V233 component floor stays `tenant/V232__ai_agent_runs.sql`: V233 is additive and dormant, and
 V232-compatible binaries continue writing null-set calls. The existing
 [V232 privacy and message-sequence cutover](#v232-mission-privacy-and-message-sequence-cutover)
 still applies, including when missions are disabled. Production set activation and set-specific
@@ -260,7 +261,7 @@ contract is in [AI_SECURITY.md](backend/AI_SECURITY.md#exposure-enforcement-acro
 
 V232 requires a coordinated drain of every old backend, scheduled worker, and message writer before migration. Keep message writes stopped through backfill and deploy only binaries that use the session's durable `message_seq_high_water` allocator for every message insertion. Deleting messages never resets that counter or the immutable first-mission taint boundary.
 
-The rollback floor is `tenant/V232__ai_agent_runs.sql`. Once this backend may have run, a pre-V232 binary cannot safely read or write enrolled chat holdings, even with missions disabled. Use forward recovery. Returning below this floor requires an explicit drain, terminal settlement, privacy purge and residual verification; disabling the flag alone is insufficient.
+The historical V232 component floor is `tenant/V232__ai_agent_runs.sql`. Once this backend may have run, a pre-V232 binary cannot safely read or write enrolled chat holdings, even with missions disabled. Use forward recovery. Returning below this floor requires an explicit drain, terminal settlement, privacy purge and residual verification; disabling the flag alone is insufficient.
 
 Keep missions disabled until routed initialization has verified every workspace barrier, recovered legacy null-token turns and unowned mission attempts, and confirmed incomplete privacy work remains blocked. Missing barriers with mission evidence require repair, never generation-1 recreation. Complete the [mission acceptance gate](backend/AI_MISSIONS.md) and record synthetic staging evidence on #2101 before enabling exact provider declarations. Slice 1 requires a drained single serving JVM; mixed-version or multi-JVM operation is not supported by the local dispatch fence.
 
@@ -1189,7 +1190,7 @@ Column additions and the default change require `ALGORITHM=INSTANT, LOCK=DEFAULT
 
 DDL auto-commits. If migration fails, keep writers disabled, inspect the applied statements and Flyway failure record, and recover through the normal migration procedure. Do not bypass the algorithm guards.
 
-V235 established the continuation compatibility minimum; V240 is now the overall rollback floor, including when AI and missions are disabled. Pre-V235 binaries cannot safely clean up runtime-2 holdings. Returning below the V235 component minimum requires an explicit reviewed drain, settlement, privacy-purge, and residual-verification procedure; it does not waive later rollback floors.
+V235 established the continuation compatibility minimum; V243 is now the overall rollback floor, including when AI and missions are disabled. Pre-V235 binaries cannot safely clean up runtime-2 holdings. Returning below the V235 component minimum requires an explicit reviewed drain, settlement, privacy-purge, and residual-verification procedure; it does not waive later rollback floors.
 
 ## V236/V237: retained Ask Connex privacy cutover
 
@@ -1204,7 +1205,7 @@ applying `control/V236__ai_assistant_privacy_coordination.sql` and
 serving JVM. Proposal-set production remains disabled.
 
 V237 established the all-chat privacy compatibility minimum: earlier binaries can disclose or
-republish invalidated content despite accepting the additive schema. V240 is the active rollback
+republish invalidated content despite accepting the additive schema. V243 is the active rollback
 floor for this release, including when AI and missions are disabled. Recovery below the active
 floor requires a separately reviewed procedure; normal recovery is a forward fix.
 
@@ -1256,11 +1257,11 @@ guards or permit COPY fallback. Online algorithms still require metadata-lock ac
 
 DDL auto-commits. If migration fails, retain the drain, inspect applied statements and Flyway
 history, and recover forward. V238 established the singleton-proposal compatibility minimum;
-the higher release-wide rollback floor is now `tenant/V240__task_completion_warmth.sql`, including
+the higher release-wide rollback floor is now `tenant/V243__deal_prior_manual_value.sql`, including
 when missions are disabled. Pre-V238 binaries still cannot safely purge/export source-linked
 proposals or preserve frozen-review invariants. Returning below that V238 component minimum
 requires a separately reviewed drain, settlement, complete enrolled privacy purge and unconditional
-residual verification. Those procedures do not waive the higher V240 task-writer requirement.
+residual verification. Those procedures do not waive the V240 task-writer component minimum or the higher V243 release-wide floor.
 
 Review expires at the earlier of earliest authoritative preparation plus 72 hours and the
 fixed hard deadline. Publication, retries and restart never refresh preparation age. Waiting
@@ -1274,15 +1275,32 @@ undated: there is no `updated_at` backfill, and scores based on those tasks can 
 their existing weight.
 
 Drain pre-V240 serving binaries and task writers before this cutover. Once the V240 backend may
-have run, the active rollback floor is `tenant/V240__task_completion_warmth.sql`. Older task update,
+have run, the task-writer component minimum is `tenant/V240__task_completion_warmth.sql`;
+the current overall release floor is V243. Older task update,
 board-move and completion writers do not maintain `completed_at`: a task completed at T1, reopened
 and completed at T2 under an older binary can retain T1. A later compatible binary would then score
 that stale instant. Rollback candidates must retain completion stamping and clearing on reopen;
 copying only the migration resource into an older binary does not make it compatible. The existing
 proven-not-started exception in the staging rollback procedure is unchanged.
 
-This raises the previous V238 floor and keeps the V236/V237 privacy and V238 singleton-proposal
+This historical component cutover raised the previous V238 floor and keeps the V236/V237 privacy and V238 singleton-proposal
 constraints in force. Binaries that contain V238 or V239 but lack V240 are refused, even if they
 satisfy the older component floors. Recover forward with a compatible binary. A scoring-policy
-change remains possible in a forward release that preserves the V240 task writers and rollback
-floor; deploying a pre-V240 binary is not a supported way to reverse the scoring change.
+change remains possible in a forward release that preserves the V240 task-writer component
+minimum and the current V243 release-wide floor; deploying a pre-V240 binary is not a supported way to reverse the scoring change.
+
+## Deal line value takeover (tenant V243)
+
+Deploy after #2276's `V241__deal_edit_version.sql` and #2290's
+`V242__person_edit_version.sql`; those migrations own V241 and V242 respectively.
+
+V243 adds nullable `deal.prior_manual_value` with explicit INSTANT DDL and no historical backfill.
+Existing overwritten amounts remain unknown. New confirmed takeovers store the manual amount,
+and removing the final line automatically restores it. Old clients receive HTTP 409 when they
+omit confirmation for a nonzero manual amount. The line preview mode does not write any data.
+
+The serving rollback floor is V243: earlier binaries still start but bypass consent and restoration.
+Rollback must use a compatible serving binary; retain the additive column and roll forward.
+INSTANT DDL still needs a metadata lock; deploy outside long deal transactions. If execution stops,
+inspect the column and Flyway history before following the deployment recovery procedure.
+Do not edit an applied migration or blindly rerun a partially committed ALTER.
