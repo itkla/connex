@@ -35,6 +35,7 @@ import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.AiAgentHoldingsPurgeRequest;
 import ooo.klae.connex.backend.dto.WorkspaceLifecycleRef;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.AiAgentDsrControlMapper;
 import ooo.klae.connex.backend.mappers.DataSubjectRequestMapper;
@@ -82,6 +83,20 @@ class DataSubjectRequestControlOperationsTest {
             json, assistantPrivacy,
             org.mockito.Mockito.mock(ooo.klae.connex.backend.ai.AiRestrictionEpoch.class));
         lenient().when(userMapper.lockByIdForShare(ACTOR_ID)).thenReturn(ACTOR_ID);
+    }
+
+    @Test
+    void unverifiedDisclosureReturnsSpecificCodeBeforeReadingSubjectData() {
+        DataSubjectRequest request = request(WORKSPACE_ID);
+        request.setIdentityVerifiedAt(null);
+        when(tenantLifecycleControlMapper.isOrgAdminForLifecycle(ORG_ID, ACTOR_ID)).thenReturn(true);
+        when(dataSubjectRequestMapper.findById(ORG_ID, request.getId())).thenReturn(request);
+
+        BadRequestException refused = assertThrows(BadRequestException.class,
+            () -> operations.prepareDisclosure(ORG_ID, request.getId(), ACTOR_ID));
+
+        assertEquals("DISCLOSURE_IDENTITY_VERIFICATION_REQUIRED", refused.getCode());
+        verifyNoInteractions(workspaceMapper, auditService);
     }
 
     @Test

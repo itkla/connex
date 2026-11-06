@@ -306,7 +306,7 @@
         "deleteFailed": "ロールを削除できませんでした",
         "loadFailed": "ロールを読み込めませんでした",
         "nameRequired": "ロール名を入力してください",
-        "noAccess": "ロールを管理できるのはワークスペースのオーナーのみです。",
+        "noAccess": "現在のロールではワークスペースのロールを管理できません。アクセス権が必要な場合は、ワークスペースのオーナーに依頼してください。",
         "empty": "カスタムロールはまだありません。",
         "permissionCount": "{count} 件の権限",
         "defaultRolesLabel": "標準ロール",
@@ -323,15 +323,273 @@
         "selectAll": "すべて選択",
         "clearAll": "クリア",
         "create": "ロールを作成",
-        "noPermissionsHint": "このロールに許可するアクションを少なくとも 1 つ選択してください。",
+        "noPermissionsHint": "操作の権限が選択されていません。ワークスペースのメンバーとして公開されているレコードは引き続き閲覧できます。",
         "roleEntityLabel": "ロール",
         "permissionLabels": {
-            "teamManage": {
-                "group": "チーム",
-                "action": "管理"
+            "COMPANY_CREATE": {
+                "action": "作成",
+                "description": "このワークスペースに会社を作成できます。"
+            },
+            "COMPANY_UPDATE": {
+                "action": "編集",
+                "description": "アクセスできる会社を編集できます。"
+            },
+            "COMPANY_DELETE": {
+                "action": "アーカイブ・復元",
+                "description": "アクセスできる会社をアーカイブ・復元できます。アーカイブ後も履歴は保持され、元に戻せます。"
+            },
+            "PERSON_CREATE": {
+                "action": "作成",
+                "description": "このワークスペースに連絡先を作成できます。"
+            },
+            "PERSON_UPDATE": {
+                "action": "編集",
+                "description": "アクセスできる連絡先を編集できます。"
+            },
+            "PERSON_DELETE": {
+                "action": "アーカイブ・復元",
+                "description": "アクセスできる連絡先をアーカイブ・復元できます。アーカイブ後も履歴は保持され、元に戻せます。"
+            },
+            "DEAL_CREATE": {
+                "action": "作成",
+                "description": "このワークスペースに案件を作成できます。"
+            },
+            "DEAL_UPDATE": {
+                "action": "編集",
+                "description": "アクセスできる案件を編集できます。"
+            },
+            "DEAL_DELETE": {
+                "action": "削除",
+                "description": "アクセスできる案件を削除できます。下書き以外の文書がある案件の削除には、カスタムロールが割り当てられていない組み込みのオーナーまたは管理者ロールも必要です。"
+            },
+            "ACTIVITY_CREATE": {
+                "action": "作成",
+                "description": "このワークスペースにアクティビティを作成できます。"
+            },
+            "ACTIVITY_UPDATE": {
+                "action": "編集",
+                "description": "アクセスできるアクティビティを編集できます。連携アカウントから自動取得されたアクティビティは閲覧のみ可能です。"
+            },
+            "ACTIVITY_DELETE": {
+                "action": "削除",
+                "description": "アクセスできるアクティビティを削除できます。連携アカウントから自動取得されたアクティビティは閲覧のみ可能です。"
+            },
+            "NOTE_CREATE": {
+                "action": "作成",
+                "description": "このワークスペースにメモを作成できます。"
+            },
+            "NOTE_UPDATE": {
+                "action": "編集",
+                "description": "アクセスできるメモを編集できます。"
+            },
+            "NOTE_DELETE": {
+                "action": "削除",
+                "description": "アクセスできるメモを削除できます。"
+            },
+            "TASK_CREATE": {
+                "action": "作成",
+                "description": "このワークスペースにタスクを作成できます。"
+            },
+            "TASK_UPDATE": {
+                "action": "編集",
+                "description": "アクセスできるタスクを編集できます。"
+            },
+            "TASK_DELETE": {
+                "action": "削除",
+                "description": "アクセスできるタスクを削除できます。"
+            },
+            "REPORT_CREATE": {
+                "action": "作成",
+                "description": "このワークスペースにレポートを作成できます。"
+            },
+            "REPORT_UPDATE": {
+                "action": "編集",
+                "description": "アクセスできるレポートを編集できます。"
+            },
+            "REPORT_DELETE": {
+                "action": "削除",
+                "description": "自分が作成したレポートとスナップショットを削除できます。ほかのメンバーが作成した内容や、定期配信のスナップショットを含むレポートの削除には、カスタムロールが割り当てられていない組み込みのオーナーまたは管理者ロールが必要です。"
+            },
+            "COMMENT_CREATE": {
+                "action": "コメントを追加",
+                "description": "アクセスできるレコードにコメントを追加できます。"
+            },
+            "COMMENT_MODERATE": {
+                "action": "コメントを管理",
+                "description": "アクセスできるレコードで、ほかの作成者のコメント本文を削除できます。コメントの追加権限も必要です。自分のコメントの削除にコメントの管理権限は不要です。"
+            },
+            "ATTACHMENT_CREATE": {
+                "action": "ファイルをアップロード",
+                "description": "アクセスできるレコードにファイルをアップロードできます。"
+            },
+            "ATTACHMENT_DELETE": {
+                "action": "ファイルを削除",
+                "description": "アクセスできるファイルを削除できます。隔離されたファイルの削除には、隔離ファイルの管理権限も必要です。"
+            },
+            "ATTACHMENT_QUARANTINE_MANAGE": {
+                "action": "隔離ファイルを管理",
+                "description": "隔離されたファイルの状態を確認・管理できます。ファイルの内容を閲覧する権限は付与されません。"
+            },
+            "REPORT_READ": {
+                "action": "レポートを閲覧",
+                "description": "ワークスペースのレポートを閲覧できます。作成・編集には別の権限が必要です。"
+            },
+            "GOAL_READ": {
+                "action": "目標を閲覧",
+                "description": "目標と進捗を閲覧できます。"
+            },
+            "GOAL_MANAGE": {
+                "action": "目標を管理",
+                "description": "目標を作成・編集・削除できます。"
+            },
+            "PIPELINE_MANAGE": {
+                "action": "パイプラインを管理",
+                "description": "パイプラインとステージを作成・編集・削除できます。"
+            },
+            "TAG_MANAGE": {
+                "action": "タグを管理",
+                "description": "ワークスペースのタグを作成・編集・削除できます。"
+            },
+            "PRODUCT_MANAGE": {
+                "action": "商品を管理",
+                "description": "ワークスペースの商品一覧で商品を作成・編集・削除できます。"
+            },
+            "DOCUMENT_MANAGE": {
+                "action": "文書テンプレートと承認ポリシーを管理",
+                "description": "文書テンプレートを作成・編集・削除し、文書の承認ポリシーを設定できます。案件の文書の編集には案件の編集権限が、送信・承認にはそれぞれ別の権限が必要です。"
+            },
+            "DOCUMENT_SEND": {
+                "action": "文書を送信",
+                "description": "文書の送信、再送、送信の無効化を行えます。"
+            },
+            "DOCUMENT_APPROVE": {
+                "action": "文書を承認",
+                "description": "レビュー対象の文書を承認・却下できます。承認ポリシーを管理する権限は付与されません。"
+            },
+            "CUSTOM_FIELD_MANAGE": {
+                "action": "カスタム項目を管理",
+                "description": "カスタム項目の定義を作成・編集・削除できます。"
+            },
+            "SHARE_MANAGE": {
+                "action": "共有を管理",
+                "description": "このワークスペースが所有する会社・連絡先・パイプラインの組織内での共有を管理できます。共有先のワークスペースへの参加が必要です。プライバシー保護の制限は引き続き適用されます。"
+            },
+            "MEMBER_MANAGE": {
+                "action": "メンバーを管理",
+                "description": "自分の権限の範囲でメンバーを招待・解除し、組み込みのロールを割り当てできます。オーナーの変更はワークスペースのオーナーのみが行え、新たにオーナーになる方の承諾が必要です。カスタムロールの割り当てにはロールの管理権限が必要です。"
+            },
+            "ROLE_MANAGE": {
+                "action": "ロールを管理",
+                "description": "自分が持つ権限の範囲でカスタムロールを作成・編集・割り当てし、未使用のロールを削除できます。オーナーに割り当てられているロールの変更には、ワークスペースのオーナーの資格も必要です。カスタムロールではオーナーの資格は付与されません。"
+            },
+            "AUDIT_READ": {
+                "action": "ワークスペースの監査ログを閲覧",
+                "description": "ワークスペースの監査履歴を閲覧できます。組織の監査ログには別の権限が必要です。"
+            },
+            "WORKSPACE_SETTINGS": {
+                "action": "ワークスペース設定を管理",
+                "description": "ワークスペースの設定を編集できます。組織のセキュリティやシングルサインオンの設定には組織の権限が必要です。AI設定には組織管理者の権限が必要です。"
+            },
+            "API_CREDENTIAL_MANAGE": {
+                "action": "API認証情報を管理",
+                "description": "自分の権限の範囲でAPI認証情報を発行し、ワークスペース内の認証情報の確認・失効を行えます。"
+            },
+            "RULE_MANAGE": {
+                "action": "ワークフローを管理",
+                "description": "ワークスペースのワークフローを作成・編集・公開・管理できます。実行する操作には、それぞれの権限が必要です。"
+            },
+            "CAMPAIGN_VIEW": {
+                "action": "キャンペーンを閲覧",
+                "description": "キャンペーンと結果を閲覧できます。連絡先の配信対象の詳細確認には連絡に関する設定の管理権限が、編集・送信にはそれぞれ別の権限が必要です。"
+            },
+            "CAMPAIGN_MANAGE": {
+                "action": "キャンペーンを管理",
+                "description": "キャンペーンを作成・編集・削除し、メッセージと配信対象を管理できます。連絡先の配信対象や送信の下書きの作成には連絡に関する設定の管理権限も必要です。送信には別の権限が必要です。"
+            },
+            "CAMPAIGN_SEND": {
+                "action": "キャンペーンを送信",
+                "description": "送信条件を満たす宛先にキャンペーンを送信できます。連絡に関する設定とプライバシー保護の制限は引き続き適用されます。"
+            },
+            "CONSENT_MANAGE": {
+                "action": "連絡に関する設定を管理",
+                "description": "このワークスペースが所有する連絡先のマーケティングに関する設定と、ワークスペースの配信対象からの除外を管理できます。プライバシー保護の制限は引き続き適用されます。"
+            },
+            "AI_USE": {
+                "action": "AI機能を利用",
+                "description": "組織でAIプロバイダーが設定され、機能が有効な場合にAsk ConnexとAI機能を利用できます。ほかのメンバーの非公開チャットへのアクセス権は付与されません。AI設定には組織管理者の権限が必要です。"
+            },
+            "AI_SESSION_SHARE": {
+                "action": "自分のチャットを共有",
+                "description": "AIの回答がまだない自分のチャットを共有し、ワークスペースのメンバーを招待できます。自分と参加者の双方にAI機能の利用権限も必要です。"
+            },
+            "AI_SESSION_ADMIN": {
+                "action": "退出したメンバーのチャットを閲覧",
+                "description": "作成者がワークスペースを退出した後に保管されたチャットを閲覧できます。内容の変更や作成者に代わる送信はできません。"
+            },
+            "SEQUENCE_VIEW": {
+                "action": "シーケンスを閲覧",
+                "description": "アクセスできるシーケンスのテンプレートを閲覧できます。編集・公開にはシーケンスの管理権限が必要です。"
+            },
+            "SEQUENCE_MANAGE": {
+                "action": "シーケンスを管理",
+                "description": "アクセスできるシーケンスのテンプレートを作成・編集・アーカイブ・公開できます。キャンペーンを送信する権限は付与されません。"
+            },
+            "TEAM_MANAGE": {
+                "action": "チームを管理",
+                "description": "チームを作成し、メンバーとマネージャーを管理できます。チームへの所属だけではワークスペースの権限は付与されません。"
             }
         },
-        "confinementSubjectRoleEdit": "ロール「{name}」の変更を保存"
+        "confinementSubjectRoleEdit": "ロール「{name}」の変更を保存",
+        "permissionGroups": {
+            "COMPANY": "会社",
+            "PERSON": "連絡先",
+            "DEAL": "案件",
+            "ACTIVITY": "アクティビティ",
+            "NOTE": "メモ",
+            "COMMENT": "コメント",
+            "TASK": "タスク",
+            "ATTACHMENT": "ファイル",
+            "REPORT": "レポート",
+            "GOAL": "目標",
+            "PIPELINE": "パイプライン",
+            "TAG": "タグ",
+            "PRODUCT": "商品",
+            "DOCUMENT": "文書",
+            "CUSTOM": "カスタム項目",
+            "SHARE": "共有",
+            "MEMBER": "メンバー",
+            "ROLE": "ロール",
+            "AUDIT": "監査ログ",
+            "WORKSPACE": "ワークスペース設定",
+            "API": "API認証情報",
+            "RULE": "ワークフロー",
+            "CAMPAIGN": "キャンペーン",
+            "CONSENT": "連絡に関する設定",
+            "AI": "Ask ConnexとAI機能",
+            "SEQUENCE": "シーケンス",
+            "TEAM": "チーム"
+        },
+        "accessDetails": "許可される操作・されない操作を確認",
+        "accessScopeHint": "「許可」と表示された操作のみ実行できます。レコードの公開範囲、組織の権限、セキュリティ上の確認は引き続き適用されます。",
+        "allowed": "許可",
+        "notAllowed": "許可なし",
+        "unknownPermission": "追加の操作",
+        "unknownPermissionDescription": "この操作の説明はまだありません。権限を付与する前にワークスペースのオーナーに確認してください。",
+        "unknownPermissionGroup": "追加の権限",
+        "builtInRoles": {
+            "owner": {
+                "name": "オーナー",
+                "description": "メンバーとロールの管理を含む、ワークスペースのすべての権限を持ちます。組織の権限は別途必要で、AI設定には組織管理者の権限が必要です。"
+            },
+            "admin": {
+                "name": "管理者",
+                "description": "ワークスペース設定、メンバー、ワークフローを管理し、AI機能を利用できます。AI設定には組織管理者の権限が必要です。カスタムロールの管理やワークスペースのオーナー権限の付与はできません。"
+            },
+            "member": {
+                "name": "メンバー",
+                "description": "連絡先、案件、アクティビティ、メモ、コメント、タスク、ファイル、レポートを扱えます。ワークスペース設定、メンバー、ロール、ワークフローの管理やAI機能の利用はできません。"
+            }
+        }
     },
     "WorkflowAuthoring": {
         "noAccess": "このワークスペースでワークフローを管理する権限がありません。必要な場合はワークスペース管理者にご相談ください。",

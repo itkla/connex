@@ -76,7 +76,7 @@
         "renamed": "パスキーの名前を変更しました",
         "renameFailed": "パスキーの名前を変更できませんでした。もう一度お試しください。",
         "removed": "パスキーを削除しました",
-        "removeFailed": "パスキーを削除できませんでした。もう一度お試しください。",
+        "removeFailed": "パスキーを削除できませんでした",
         "loadFailed": "パスキーを読み込めませんでした。",
         "retry": "再試行",
         "confirmationTitle": "メールで確認",

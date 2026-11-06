@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -40,8 +41,9 @@ class InviteLinkDomainGateTest extends AbstractServiceTest {
         allowedDomainService.addDomain(workspace.getId(), currentUser.getId(), "acme.com");
         InviteLinkDto link = inviteLinkService.createLink(workspace.getId(), currentUser, "member", null, null);
 
-        assertThrows(ForbiddenException.class,
+        ForbiddenException refusal = assertThrows(ForbiddenException.class,
             () -> inviteLinkService.redeemLink(link.getToken(), outsiderWithDomain("other.com")));
+        assertEquals("INVITE_EMAIL_DOMAIN_NOT_ALLOWED", refusal.getCode());
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
