@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -42,20 +44,24 @@ import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.RecordTag;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
+import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.AiAssistantToolCallReadDto;
 import ooo.klae.connex.backend.dto.DealDocumentDto;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
+import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.DocumentTemplateMapper;
+import ooo.klae.connex.backend.mappers.EntityReferenceMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
+import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.ActivityService;
 import ooo.klae.connex.backend.services.CompanyService;
 import ooo.klae.connex.backend.services.DealDocumentService;
@@ -64,6 +70,7 @@ import ooo.klae.connex.backend.services.LeadResponseSlaService;
 import ooo.klae.connex.backend.services.NoteService;
 import ooo.klae.connex.backend.services.PersonService;
 import ooo.klae.connex.backend.services.PipelineService;
+import ooo.klae.connex.backend.services.ReferenceService;
 import ooo.klae.connex.backend.services.TagService;
 import ooo.klae.connex.backend.services.TaskService;
 import ooo.klae.connex.backend.services.WorkspaceService;
@@ -118,7 +125,7 @@ class AiAssistantToolCallReadServiceTest {
         activityMapper = mock(ActivityMapper.class);
         taskMapper = mock(TaskMapper.class);
         referenceService = mock(ooo.klae.connex.backend.services.ReferenceService.class);
-        when(referenceService.hydrateTasksForMasking(org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyList()))
+        when(referenceService.hydrateTasks(org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyList()))
                 .thenAnswer(invocation -> invocation.getArgument(1));
         noteMapper = mock(NoteMapper.class);
         reportMapper = mock(ooo.klae.connex.backend.mappers.ReportMapper.class);
@@ -3039,7 +3046,7 @@ class AiAssistantToolCallReadServiceTest {
             task.setDescription("Private reference");
             return List.of(task);
         });
-        when(referenceService.hydrateTasksForMasking(WORKSPACE_ID, List.of(task))).thenAnswer(invocation -> {
+        when(referenceService.hydrateTasks(WORKSPACE_ID, List.of(task))).thenAnswer(invocation -> {
             task.setDescription("[unavailable]");
             return List.of(task);
         });
@@ -3063,6 +3070,56 @@ class AiAssistantToolCallReadServiceTest {
         assertNull(service.list(SESSION_ID, false).getFirst().change());
         when(taskMapper.getTaskSnapshotsIn(WORKSPACE_ID, List.of(73))).thenReturn(List.of());
         assertNull(service.list(SESSION_ID, false).getFirst().target().id());
+    }
+
+    @Test
+    void taskCardsHidePendingReferencesLikeOutsiderReferencesWithRealHydration() {
+        WorkspaceMapper memberships = mock(WorkspaceMapper.class);
+        when(memberships.getActiveMemberIdsIn(eq(WORKSPACE_ID), anyList())).thenReturn(List.of());
+        when(memberships.getMemberIdsIncludingPending(eq(WORKSPACE_ID), anyList())).thenAnswer(invocation -> {
+            List<Integer> ids = invocation.getArgument(1);
+            return ids.contains(42) ? List.of(42) : List.of();
+        });
+        referenceService = new ReferenceService(mock(EntityReferenceMapper.class), workspaceService,
+            personMapper, dealMapper, companyMapper, noteMapper, mock(AttachmentMapper.class),
+            taskMapper, activityMapper, memberships, unfiltered());
+        service = service(List.of(new AiAssistantCompleteTaskWriteTool(mock(TaskService.class))));
+        Task pending = new Task();
+        pending.setId(73);
+        pending.setDescription("[Invitee](user:42)");
+        pending.setStatus("todo");
+        pending.setAssignedTo(user(USER_ID, "Ada Owner", "ada-owner"));
+        Task outsider = new Task();
+        outsider.setId(74);
+        outsider.setDescription("[Invitee](user:43)");
+        outsider.setStatus("todo");
+        outsider.setAssignedTo(user(USER_ID, "Ada Owner", "ada-owner"));
+        when(taskMapper.getTaskSnapshotsIn(WORKSPACE_ID, List.of(73, 74))).thenReturn(List.of(pending, outsider));
+        List<AiChatToolCall> proposals = new ArrayList<>();
+        ObjectMapper mapper = JsonMapper.builder().build();
+        for (Task task : List.of(pending, outsider)) {
+            int proposalId = 91 + proposals.size();
+            AiChatToolCall proposal = toolCall(
+                proposalId, USER_ID, "complete_task", "confirm", "proposed", "task", task.getId(), proposalId, null);
+            proposal.setArgumentsJson(mapper.writeValueAsString(Map.of(
+                "tool", "complete_task", "tier", "confirm", "restrictionEpoch", 1,
+                "target", Map.of("kind", "task", "id", task.getId()), "request", Map.of("handle", "t1"),
+                "targetVersion", TaskService.assistantStateVersion(task), "principals", List.of())));
+            proposals.add(proposal);
+        }
+        when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100, null, 1L)).thenReturn(proposals);
+
+        List<AiAssistantToolCallReadDto> cards = service.list(SESSION_ID, false);
+
+        assertEquals(2, cards.size());
+        assertEquals(List.of(73, 74), cards.stream().map(card -> card.target().id()).toList());
+        assertEquals(List.of("(unavailable reference)", "(unavailable reference)"),
+            cards.stream().map(card -> card.target().label()).toList());
+        JsonNode wire = JsonMapper.builder().build().valueToTree(cards);
+        for (JsonNode card : wire) {
+            assertEquals("(unavailable reference)", card.path("target").path("label").asString());
+        }
+        verify(memberships, never()).getMemberIdsIncludingPending(eq(WORKSPACE_ID), anyList());
     }
 
 }

@@ -150,14 +150,19 @@ class NoteBodyReadBoundaryArchTest {
     }
 
     @Test
-    void pendingMemberMaskingProvenanceIsConfinedToAssistantCallers() throws Exception {
+    void pendingMemberMaskingProvenanceIsConfinedToProviderCallers() throws Exception {
         Path sources = repoRoot().resolve("backend/src/main/java/ooo/klae/connex/backend");
+        Set<Path> providerCallers = Set.of(
+            sources.resolve("ai/assistant/AiAssistantHistoryService.java"),
+            sources.resolve("ai/assistant/AiAssistantScopeReadService.java"),
+            sources.resolve("ai/assistant/AiAssistantWorkBriefReadService.java"),
+            sources.resolve("ai/assistant/AiAssistantIdentifierResolver.java"));
         Pattern maskingRead = Pattern.compile(
             "\\.(?:hydrate(?:Tasks|Activities)?ForMasking|memberIdsForMasking)\\s*\\(");
         try (var files = Files.walk(sources)) {
             for (Path file : files.filter(path -> path.toString().endsWith(".java")).toList()) {
                 if (maskingRead.matcher(Files.readString(file)).find()) {
-                    assertTrue(file.startsWith(sources.resolve("ai/assistant")),
+                    assertTrue(providerCallers.contains(file),
                         "Pending masking provenance cannot feed reader responses: " + sources.relativize(file));
                 }
             }

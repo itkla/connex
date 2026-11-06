@@ -208,6 +208,10 @@ Assistant reads use `hydrateForMasking`, `hydrateTasksForMasking` and
 retain authored labels for scoped active or pending membership IDs without resolving account profiles.
 Ordinary hydration and write-response reference projection remain active-only; internal mention
 persistence retains pending grants so queued notifications can surface after acceptance.
+Masking hydration is restricted to history, scope and work-brief provider projections. Reader-facing
+tool cards use ordinary hydration even though their reader service lives in the assistant package;
+pending references must not survive in REST target labels. An architecture allowlist guards these
+distinct consumers.
 
 Both member provenance and reader visibility use the pure `ReferenceContentReader` shared by
 `ReferenceService`. It parses original source with pinned CommonMark Java 0.30.1, the GFM tables extension and the
