@@ -336,6 +336,14 @@ in bounded keyset pages. It does not reauthorize against mutable subject linkage
 initiating administrator's later membership. API replays and progress reads still require
 current administrator access.
 
+Scheduled DSR recovery uses a 15-second startup delay and a 10-second fixed delay by default.
+`connex.ai.mission-dsr-recovery-initial-delay` controls startup independently of
+`connex.ai.mission-dsr-recovery-delay`. The shared integration-test configuration defers the
+startup timer for one hour, as it does the other privacy timers; tests drive recovery directly.
+Every cached context scans the same acceptance ledger, so a timer from another context could
+otherwise append C2 between a crash fixture's tenant cleanup and its injected completion failure.
+The scheduling-registration regression verifies both the production cadence and test deferral.
+
 For v1, the cutoff is established at each workspace's first T1 invalidation, and later workspaces
 are excluded. V2 fixes the organization cutoff at C1; initial workspace IDs are discovery only and
 later-discovered old-generation holdings remain covered. New current-generation chats are excluded. Domain records and effects are
@@ -403,7 +411,10 @@ JVM, initialized workspace and organization authority, completed active-attempt 
 and the full compatible reader/writer rollout. Drain incompatible serving binaries, scheduled
 workers and in-flight writers before control V236 → tenant V237 → tenant V238. Upgrades crossing V232 must also retain that
 version's stopped-writer sequence-backfill procedure.
-V238 is the rollback floor, including with AI and missions disabled. Multi-instance activation requires the separately reviewed
+V238 remains the mission component minimum; control V246 is the current release-wide rollback floor,
+including with AI and missions disabled; see the
+[workspace-currency cutover](../UPGRADING.md#workspace-default-deal-currency-control-v246).
+Multi-instance activation requires the separately reviewed
 #941 distributed fencing contract.
 
 Focused continuation selectors are `AiAgentContinuationCodecTest`, `AiAgentPlanServiceTest`,
@@ -582,6 +593,6 @@ Positive object receipts and placement evidence remain prerequisites for complet
 decodes source JSON using explicit UTF-8 transport and validates runtime, review metadata and
 action provenance; all-chat invalidation cancels affected exports at actual publication.
 
-V238 raises the rollback floor; see [UPGRADING](../UPGRADING.md#mission-singleton-proposals-tenant-v238)
+V238 established the mission component minimum; see [UPGRADING](../UPGRADING.md#mission-singleton-proposals-tenant-v238)
 and the [lock matrix](LOCKING.md#mission-singleton-proposals-v238). Activation still requires a
 single serving JVM and approved live staging evidence; this slice does not authorize a live run.

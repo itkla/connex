@@ -106,6 +106,19 @@ neighbourhood map and scalable rendering remain deferred under [#2262](https://g
 
 ### Campaigns
 
+Contact details expose marketing preferences for contacts owned by the rendered workspace. Consent and contact-restriction details and changes require `CONSENT_MANAGE`; privacy holds independently require `PERSON_UPDATE`. Consent updates are explicit manual records, and never remove contact restrictions. Removing a restriction requires separate confirmation explaining the shared-address effect. The panel uses the server marketing-status projection for current blocks and explains the existing opt-out default without promising delivery. Missing or unknown consent alone does not block; explicit revocation, contact restrictions, privacy holds, and final dispatch checks still apply. LINE and WhatsApp preferences are recordable but have no delivery support.
+
+Consent confirmations retain the reviewed mutation version, including explicit row absence. A stale
+write reloads preferences and requires a new action; it never retries automatically. Restriction
+details come from the contact-scoped, cursor-paged endpoint (50 entries per page), matched server-side
+by person link or canonical channel address. The contact panel never downloads the workspace-wide
+restriction list or unrelated addresses, operator notes, creator ids, or person ids. Cancelling a
+confirmation restores focus to the initiating action; confirmed changes return focus to the labeled
+preferences section, including while refreshed data is still pending. Background route refreshes
+revalidate preferences in place, preserving an open confirmation and its captured mutation version.
+Workspace/contact identity changes still replace the controls. Older reads cannot replace a newer post-save result.
+Privacy controls submit only deliberately changed flags.
+
 Campaign creation asks for the minimum facts required by the backend (name and type) before entering the campaign builder. Objective/status/budget/window belong in the builder rather than an oversized create dialog. Campaign settings use the established quick-edit sheet shell.
 
 ### Calendar peek

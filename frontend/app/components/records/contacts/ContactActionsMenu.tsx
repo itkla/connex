@@ -26,6 +26,7 @@ import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompany
 import ArchiveRecordDialog from '@/app/components/records/ArchiveRecordDialog';
 import ShareDialog from '@/app/components/records/ShareDialog';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
+import { usePermission } from '@/app/hooks/usePermissions';
 import {
     RecordActivityComposer,
     RecordTaskComposer,
@@ -87,7 +88,9 @@ export default function ContactActionsMenu({
         getActiveWorkspaceMembers().then((list) => setMembers(list.filter((member) => member.status === "active"))).catch(() => setMembers([]));
     }, [assignOwnerOpen, members.length]);
     const { activeWorkspaceId } = useWorkspace();
+    const canRestrict = usePermission('PERSON_UPDATE');
     const owned = contact.workspaceId == null || contact.workspaceId === activeWorkspaceId;
+    const canManageRestrictions = canRestrict && activeWorkspaceId != null && contact.workspaceId === activeWorkspaceId;
     const prepareEdit = async () => {
         const originWorkspaceId = renderedWorkspaceId();
         setIsPreparingEdit(true);
@@ -244,7 +247,7 @@ export default function ContactActionsMenu({
                                     <span>{t('share')}</span>
                                 </DropdownMenuItem>
                             )}
-                            {owned && (
+                            {canManageRestrictions && (
                                 <DropdownMenuItem
                                     onSelect={(e) => {
                                         e.preventDefault();
@@ -282,7 +285,7 @@ export default function ContactActionsMenu({
 
                 <EditContactSheet contact={editContact} open={editOpen} onOpenChange={setEditOpen} onContactUpdated={setEditContact} />
 
-                <RestrictionsDialog contact={contact} open={restrictionsOpen} onOpenChange={setRestrictionsOpen} />
+                {canManageRestrictions ? <RestrictionsDialog key={JSON.stringify([contact.id, contact.suspendedAt, contact.provisionCeasedAt])} contact={contact} open={restrictionsOpen} onOpenChange={setRestrictionsOpen} /> : null}
 
                 <RecordActivityComposer
                     anchor={composerAnchor}

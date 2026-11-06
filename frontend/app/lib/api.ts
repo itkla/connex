@@ -5654,7 +5654,7 @@ export function assembleDataSubjectDisclosure(orgId: number, requestId: number) 
 }
 
 /** Sets or clears a contact's APPI processing restrictions (suspend / cease provision). */
-export function updateContactRestrictions(contactId: number, body: { suspended: boolean; provisionCeased: boolean }) {
+export function updateContactRestrictions(contactId: number, body: { suspended?: boolean; provisionCeased?: boolean }) {
     return putJson<Types.Contact>(`/api/persons/${contactId}/restrictions`, body);
 }
 
@@ -7877,6 +7877,11 @@ export function setPersonConsent(personId: number, payload: Types.ContactChannel
 
 export function getSuppressions(init: RequestInit = {}) {
     return getJson<Types.SuppressionEntry[]>(`/api/suppressions`, init);
+}
+
+/** Reads one bounded page of this contact's matching restrictions, without operator metadata. */
+export function getPersonSuppressions(personId: number, afterId = 0, init: RequestInit = {}) {
+    return getJson<Types.ContactSuppressionPage>(`/api/suppressions/persons/${personId}?afterId=${afterId}`, init);
 }
 
 export function getSuppressionsFromCookie(cookie: string | null) {

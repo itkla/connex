@@ -978,8 +978,8 @@ turn/message association under the session mutex, insert parent and members in o
 and require complete membership before commit. Storage provenance guards and privacy cleanup are
 active at V237. Production set creation, effective-tier decisions and whole-call publication/decision
 routes remain disabled until their own slices. V233 itself retained its then-V232 floor; the current
-V237 privacy compatibility minimum applies independently of future producer activation; V243 is
-the active release rollback floor (see [the deal-value cutover](../UPGRADING.md#deal-line-value-takeover-tenant-v243)).
+V237 privacy compatibility minimum applies independently of future producer activation; control V246 is
+the active release rollback floor (see [the workspace-currency cutover](../UPGRADING.md#workspace-default-deal-currency-control-v246)).
 
 ### Adding an assistant write tool
 

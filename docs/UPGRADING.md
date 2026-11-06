@@ -9,33 +9,14 @@ migration-discipline part of #87 §9 / #102).
 
 The active rollback floor for this release is control V246, including with AI and missions disabled.
 Earlier floors in version-specific sections below describe historical component contracts and do not
-permit rollback after V246. Apply control V236 → tenant V237 → tenant V238 → tenant V239 → tenant V240 → tenant V241 → tenant V242 → tenant V243 → tenant V244 → tenant V245 → control V246
+permit rollback after V246. Apply control V236 → tenant V237 → tenant V238 → tenant V239 →
+tenant V240 → tenant V241 → tenant V242 → tenant V243 → tenant V244 → tenant V245 → control V246
 in that order. Follow [the retained-chat cutover](#v236v237-retained-ask-connex-privacy-cutover),
 [the singleton-proposal cutover](#mission-singleton-proposals-tenant-v238), and
 [the task-completion cutover](#task-completion-and-relationship-warmth-tenant-v240), and
-[the deal-value cutover](#deal-line-value-takeover-tenant-v243).
-
-## Workspace default deal currency (control V246)
-
-Merge and apply tenant V245 (contact consent versions, #2298) before control V246.
-V246 adds a nullable `workspace.default_currency` with `ALGORITHM=INSTANT, LOCK=DEFAULT`;
-it must fail rather than rebuild the control-plane workspace table. Existing workspaces stay
-unset. Their effective default remains USD and the UI explains that this is the original fallback
-until an administrator explicitly saves a choice. No stored deal or amount is backfilled or converted.
-
-Workspace owners, administrators, and custom roles granted `WORKSPACE_SETTINGS` may save a supported
-currency. The save reuses recent-authentication and locked workspace-settings authorization, checks
-`expectedIdentityVersion`, increments that version, and appends a workspace-scoped audit entry.
-Deal dialogs, quick create, calendar creation, built-in guided templates, and new CSV rows without a
-currency use the saved default. An explicit deal or custom-template currency remains authoritative;
-CSV updates without a currency preserve the stored value.
-
-V246 is the release-wide rollback floor: earlier binaries still start against the additive column
-but ignore an explicitly chosen currency when creating deals. Drain those writers before enabling
-the setting and deploy matching frontend/backend versions. On a DDL failure, inspect the column and
-Flyway history, reconcile any committed prefix through the normal migration recovery procedure,
-and retain the online-DDL guards before retrying. The column needs a brief metadata lock; deploy
-outside long-running workspace-settings transactions.
+[the deal-value cutover](#deal-line-value-takeover-tenant-v243), and
+[the consent-version cutover](#contact-channel-consent-versions-tenant-v245), and
+[the workspace-currency cutover](#workspace-default-deal-currency-control-v246).
 
 ## Campaign engagement response compatibility (#2257)
 
@@ -1000,8 +981,9 @@ during the exception. After draining and the fresh preflight, set attestation en
 and restart all backend replicas with the attributed change.
 
 **Rollback:** policy rollback uses the same `false` plus accountable actor and a backend restart.
-It needs no schema rollback. The **V225 rollback floor is unchanged**: no binary older than the
-release carrying V225 and its switch-independent grantor checks may serve.
+It needs no schema rollback. The **V225 component minimum is unchanged**: no binary older than the
+release carrying V225 and its switch-independent grantor checks may serve. The current release-wide
+rollback floor is control V246.
 
 **What confined users see:** Security and onboarding show the passkey-approval confinement card,
 with approval-code entry and the organizations still needing approval. A covered grantor can issue
@@ -1227,7 +1209,7 @@ applying `control/V236__ai_assistant_privacy_coordination.sql` and
 serving JVM. Proposal-set production remains disabled.
 
 V237 established the all-chat privacy compatibility minimum: earlier binaries can disclose or
-republish invalidated content despite accepting the additive schema. V243 is the active rollback
+republish invalidated content despite accepting the additive schema. V246 is the active rollback
 floor for this release, including when AI and missions are disabled. Recovery below the active
 floor requires a separately reviewed procedure; normal recovery is a forward fix.
 
@@ -1321,7 +1303,7 @@ Existing overwritten amounts remain unknown. New confirmed takeovers store the m
 and removing the final line automatically restores it. Old clients receive HTTP 409 when they
 omit confirmation for a nonzero manual amount. The line preview mode does not write any data.
 
-The serving rollback floor is V243: earlier binaries still start but bypass consent and restoration.
+The V243 component minimum preserves takeover confirmation and restoration; the release-wide floor is now V246.
 Rollback must use a compatible serving binary; retain the additive column and roll forward.
 INSTANT DDL still needs a metadata lock; deploy outside long deal transactions. If execution stops,
 inspect the column and Flyway history before following the deployment recovery procedure.
@@ -1335,7 +1317,54 @@ independently committed pages after migration success; a repair interruption doe
 on startup. A compatible partial DDL prefix replays through schema-verified column/index operations
 and trigger creation without an invalidation gap. Supported equivalent search forms remain
 available through NULL-key fallback before reconciliation; startup prioritizes missing keys.
-Earlier compatible binaries
-can still serve safely, so its component rollback floor remains V243; the release-wide floor is control V246. See
+V244 is additive, and earlier compatible binaries can still serve safely. For V244 alone,
+the component rollback floor remains V243. V245 then establishes the consent-writer component
+minimum because older binaries can overwrite a newer revocation from a stale confirmation.
+Control V246 is the current release-wide floor. Follow the
+[consent-version cutover](#contact-channel-consent-versions-tenant-v245), then the
+[workspace-currency cutover](#workspace-default-deal-currency-control-v246), for the serving drain
+and forward-recovery requirements. See
 [record-search operation and recovery](backend/RECORD_SEARCH.md) for page bounds, cursor wrap,
 legacy-write repair, scheduling controls and partial-DDL recovery.
+
+## Contact-channel consent versions (tenant V245)
+
+V245 adds a non-null consent counter at one with `ALGORITHM=INSTANT, LOCK=DEFAULT`, then creates
+`trg_contact_consent_version`. Every UPDATE, including trusted unsubscribe/provider revocation,
+advances it. There is no historical consent rewrite or new index. Reserve version zero in the API
+for explicit absence. Apply `tenant/V244__record_search_keys.sql` before
+`tenant/V245__contact_consent_version.sql`; the global lineage remains consecutive. Deploy the
+backend before the frontend that sends required expected consent versions.
+
+The ALTER and CREATE TRIGGER take metadata locks. Deploy outside long consent transactions and
+resolve blockers without relaxing the algorithm/lock guards. DDL commits independently: after an
+interruption, inspect the column, trigger definition and Flyway history, reconcile the exact reviewed
+prefix through the existing Flyway recovery procedure, and validate before serving conditional
+consent writes. Do not reset counters or recreate active triggers under traffic. Earlier binaries
+remain schema-compatible and their writes advance the trigger, but do not enforce the new HTTP
+consent precondition. V245 establishes the consent-writer component minimum: older binaries can
+overwrite a newer revocation from a stale manual confirmation. The current release-wide rollback
+floor is control V246. Drain older serving backends before admitting these conditional writes;
+recover forward with a compatible binary and retain the additive schema.
+
+## Workspace default deal currency (control V246)
+
+Apply tenant V245 (contact consent versions, #2298) before control V246.
+V246 adds a nullable `workspace.default_currency` with `ALGORITHM=INSTANT, LOCK=DEFAULT`;
+it must fail rather than rebuild the control-plane workspace table. Existing workspaces stay
+unset. Their effective default remains USD and the UI explains that this is the original fallback
+until an administrator explicitly saves a choice. No stored deal or amount is backfilled or converted.
+
+Workspace owners, administrators, and custom roles granted `WORKSPACE_SETTINGS` may save a supported
+currency. The save reuses recent-authentication and locked workspace-settings authorization, checks
+`expectedIdentityVersion`, increments that version, and appends a workspace-scoped audit entry.
+Deal dialogs, quick create, calendar creation, built-in guided templates, and new CSV rows without a
+currency use the saved default. An explicit deal or custom-template currency remains authoritative;
+CSV updates without a currency preserve the stored value.
+
+V246 is the release-wide rollback floor: earlier binaries still start against the additive column
+but ignore an explicitly chosen currency when creating deals. Drain those writers before enabling
+the setting and deploy matching frontend/backend versions. On a DDL failure, inspect the column and
+Flyway history, reconcile any committed prefix through the normal migration recovery procedure,
+and retain the online-DDL guards before retrying. The column needs a brief metadata lock; deploy
+outside long-running workspace-settings transactions.
