@@ -13,6 +13,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.Pipeline;
+import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.ColumnMapping;
 import ooo.klae.connex.backend.dto.ImportRequest;
@@ -30,7 +32,7 @@ class WorkspaceDefaultCurrencyTest extends AbstractServiceTest {
     void legacyFallbackIsExplicitAndSettingDoesNotRewriteDeals() {
         var pipeline = newPipeline();
         var stage = newStage(pipeline, 0);
-        Deal existing = newDeal(pipeline, stage, null);
+        Deal existing = existingDeal(pipeline, stage);
         String storedCurrency = existing.getCurrency();
         assertNull(workspaceMapper.getActiveById(workspace.getId()).getDefaultCurrency());
         assertEquals("USD", workspaceService.getCurrentDefaultCurrency());
@@ -133,7 +135,7 @@ class WorkspaceDefaultCurrencyTest extends AbstractServiceTest {
         workspaceService.updateDefaultCurrency(workspace.getId(), currentUser.getId(), "EUR", 0L);
         var pipeline = newPipeline();
         var stage = newStage(pipeline, 0);
-        Deal existing = newDeal(pipeline, stage, null);
+        Deal existing = existingDeal(pipeline, stage);
         String existingCurrency = existing.getCurrency();
         var mappings = List.of(new ColumnMapping("Name", "name", null, null, null));
         ImportRequest request = new ImportRequest(
@@ -143,9 +145,23 @@ class WorkspaceDefaultCurrencyTest extends AbstractServiceTest {
         assertEquals("EUR", jdbcTemplate.queryForObject(
             "SELECT currency FROM deal WHERE workspace_id = ? AND name = ?", String.class,
             workspace.getId(), "Imported default currency"));
-        ImportRequest update = new ImportRequest(List.of(Map.of("Name", existing.getName())), mappings, "overwrite", null);
+        ImportRequest update = new ImportRequest(
+            List.of(Map.of("Name", existing.getName(), "Value", "20.00")),
+            List.of(new ColumnMapping("Name", "name", null, null, null),
+                new ColumnMapping("Value", "value", null, null, null)), "overwrite", null);
         update.setDuplicateReviewProof(importService.previewDeals(update).getDuplicateReviewProof());
         assertEquals(1, importService.commitDeals(update).getUpdated());
         assertEquals(existingCurrency, dealService.getDealById(existing.getId()).getCurrency());
+        assertEquals(new BigDecimal("20.00"), dealService.getDealById(existing.getId()).getValue());
+    }
+
+    private Deal existingDeal(Pipeline pipeline, Stage stage) {
+        Deal deal = new Deal();
+        deal.setName("Existing currency " + java.util.UUID.randomUUID());
+        deal.setValue(BigDecimal.TEN);
+        deal.setCurrency("GBP");
+        deal.setPipelineId(pipeline.getId());
+        deal.setStageId(stage.getId());
+        return dealService.create(deal);
     }
 }

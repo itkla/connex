@@ -26,6 +26,24 @@ class AiAssistantToolCatalogTest {
     private final AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
 
     @Test
+    void dealCurrencyIsOptionalInBothTheModelCatalogAndBoundRequest() {
+        var args = objectMapper.createObjectNode().put("handle", "r1").put("name", "Renewal")
+                .put("stage", "Proposal").put("value", "100.00");
+        assertTrue(catalog.permitsArguments("create_deal", args));
+        var tool = catalog.tools(AiAssistantToolCatalog.ALL).stream()
+                .filter(candidate -> candidate.name().equals("create_deal")).findFirst().orElseThrow();
+        assertFalse(tool.arguments().stream().filter(argument -> argument.name().equals("currency"))
+                .findFirst().orElseThrow().required());
+        var request = objectMapper.treeToValue(args, AiAssistantWriteToolRequest.CreateDeal.class);
+        assertNull(request.currency());
+        try (var factory = jakarta.validation.Validation.buildDefaultValidatorFactory()) {
+            assertTrue(factory.getValidator().validate(request).isEmpty());
+            assertFalse(factory.getValidator().validate(new AiAssistantWriteToolRequest.CreateDeal(
+                    "r1", "Renewal", "Proposal", "100.00", "", null)).isEmpty());
+        }
+    }
+
+    @Test
     void workspaceCreatesHaveNoModelTargetAndReportTemplatesExcludeQuotaAttainment() {
         for (String key : AiAssistantCreateReportWriteTool.TEMPLATE_KEYS) {
             assertTrue(catalog.permitsArguments("create_report",

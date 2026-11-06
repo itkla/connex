@@ -164,6 +164,7 @@
         "currencyFallback": "Current default: {currency}. No workspace default has been saved, so new deals use the original USD default. Save a currency to choose one explicitly.",
         "currencyInvalid": "Choose a supported currency from the list.",
         "currencySaved": "Default deal currency saved",
+        "currencySave": "Save default currency",
         "title": "Workspace identity",
         "description": "Keep the name people see and the time boundary used for shared reporting accurate.",
         "nameLabel": "Workspace name",

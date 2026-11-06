@@ -6,10 +6,13 @@ import type { ComponentProps } from 'react';
 import DealCreateContainer from '@/app/components/actions/create/DealCreateContainer';
 import CalendarNewDealContainer from '@/app/components/calendar/CalendarNewDealContainer';
 import WorkspaceCurrencyPanel from '@/app/components/settings/WorkspaceCurrencyPanel';
+import WorkspaceIdentityPanel from '@/app/components/settings/WorkspaceIdentityPanel';
 import { ApiError } from '@/app/lib/api';
 import { workspaceDefaultCurrency } from '@/app/lib/currencies';
 import type { Workspace } from '@/app/lib/types';
 import type NewDealDialog from '@/app/components/records/deals/NewDealDialog';
+import en from '@/messages/en/workspace.json';
+import ja from '@/messages/ja/workspace.json';
 
 const workspace: Workspace = {
     id: 7, name: 'Sales', slug: 'sales', timezone: null, defaultCurrency: 'EUR', identityVersion: 2,
@@ -19,10 +22,11 @@ const state = vi.hoisted(() => ({ currency: 'EUR' as string | null }));
 const api = vi.hoisted(() => ({ create: vi.fn(), save: vi.fn(), publish: vi.fn(), refresh: vi.fn() }));
 const choices = vi.hoisted(() => ({ scope: {}, pipelines: [], stagesByPipeline: {}, setPipelines: vi.fn(), setStagesByPipeline: vi.fn() }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: api.refresh }) }));
-vi.mock('next-intl', () => ({ useTranslations: () => (key: string) => key }));
+vi.mock('next-intl', () => ({ useTranslations: () => (key: string) => key, useLocale: () => 'en' }));
 vi.mock('@/app/hooks/useWorkspace', () => ({ useWorkspace: () => ({
-    activeWorkspaceId: 7, activeWorkspace: { defaultCurrency: state.currency }, publishWorkspaceIdentity: api.publish,
+    activeWorkspaceId: 7, activeWorkspace: { ...workspace, defaultCurrency: state.currency }, publishWorkspaceIdentity: api.publish,
 }) }));
+vi.mock('@/app/hooks/usePermissions', () => ({ usePermissionCheck: () => 'granted', usePermissionsRefresh: () => vi.fn() }));
 vi.mock('@/app/hooks/usePipelineChoices', () => ({ usePipelineChoices: () => choices }));
 vi.mock('@/app/hooks/useFormDraft', () => ({ useFormDraft: () => ({ persist: vi.fn(), clear: vi.fn() }) }));
 vi.mock('@/app/hooks/useApiErrorToast', () => ({ useApiErrorToast: () => vi.fn() }));
@@ -97,15 +101,26 @@ describe('workspace default deal currency', () => {
     it('shows the unsaved fallback and allows explicitly choosing that same effective default', async () => {
         render(<WorkspaceCurrencyPanel workspace={{ ...workspace, defaultCurrency: null }} />);
         expect(screen.getByText('currencyFallback')).toBeTruthy();
-        fireEvent.click(screen.getByRole('button', { name: 'save' }));
+        fireEvent.click(screen.getByRole('button', { name: 'currencySave' }));
         await waitFor(() => expect(api.save).toHaveBeenCalledWith(7, 'USD', 2));
         await waitFor(() => expect(api.publish).toHaveBeenCalledWith(expect.objectContaining({ defaultCurrency: 'USD', identityVersion: 3 })));
+    });
+
+    it('keeps the workspace identity and currency save actions distinct in both languages', () => {
+        state.currency = null;
+        render(<WorkspaceIdentityPanel />);
+        const identitySave = screen.getByRole('button', { name: 'save' });
+        const currencySave = screen.getByRole('button', { name: 'currencySave' });
+        expect(identitySave.closest('form')).not.toBe(currencySave.closest('form'));
+        for (const catalog of [en, ja]) {
+            expect(catalog.WorkspaceIdentity.currencySave).not.toBe(catalog.WorkspaceIdentity.save);
+        }
     });
 
     it('retains the selected currency and reports a localized field error after refusal', async () => {
         api.save.mockRejectedValue(new ApiError('Unsupported', 400, undefined, { defaultCurrency: 'diagnostic' }));
         render(<WorkspaceCurrencyPanel workspace={{ ...workspace, defaultCurrency: null }} />);
-        fireEvent.click(screen.getByRole('button', { name: 'save' }));
+        fireEvent.click(screen.getByRole('button', { name: 'currencySave' }));
         await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('currencyInvalid'));
         expect(api.publish).not.toHaveBeenCalled();
     });

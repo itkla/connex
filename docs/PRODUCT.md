@@ -68,7 +68,9 @@ Numbered and testable. Cite them by number in reviews.
 
 Workspace General offers an explicit default deal currency. Workspace owners, administrators and
 custom roles granted workspace settings may change it. New-deal dialogs, quick create, calendar
-creation, built-in guided templates and CSV creation without a currency use that setting. People
+creation, built-in guided templates, Ask Connex creation and CSV creation without a currency use that setting.
+Ask Connex shows the effective currency for review and retains that currency through approval, even
+if an administrator changes the workspace default in the meantime. People
 may choose a different currency for a deal or in a custom template. Existing workspaces without a
 saved setting show USD as the effective default and explain that it is the original fallback until
 an administrator chooses one. Never infer a currency from locale, timezone or historical deals;

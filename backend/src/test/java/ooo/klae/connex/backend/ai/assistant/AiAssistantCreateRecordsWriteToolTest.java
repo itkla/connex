@@ -12,6 +12,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.clearInvocations;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -214,6 +215,54 @@ class AiAssistantCreateRecordsWriteToolTest {
         assertEquals(Map.of("recordType", "deal", "created", true),
                 dealTool.modelOutcome(objectMapper.valueToTree(outcome.data())));
         verifyNoInteractions(presetService);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"EUR", "GBP"})
+    void omittedCurrencyIsPinnedShownAndAppliedFromTheSameTemplateSnapshot(String currency) {
+        CreateDeal request = new CreateDeal("r1", "Renewal", "Qualified", "1250.50", null, null);
+        when(pipelineService.getAllStages()).thenReturn(List.of(stage(7, "Qualified")));
+        when(presetService.deals(RecordCreationEntryPoint.quick_create, 52))
+                .thenReturn(catalog(RecordCreationRecordType.deal, field("currency", true, currency)));
+        assertDoesNotThrow(() -> dealTool.validateFor("company", objectMapper.valueToTree(request)));
+
+        Map<String, Object> pinned = dealTool.pin(COMPANY, request);
+
+        assertEquals(currency, pinned.get("currency"));
+        Diff currencyDiff = dealTool.diffs(review(request, List.of(stage(7, "Qualified")), 7, pinned))
+                .stream().filter(diff -> diff.field().equals("currency")).findFirst().orElseThrow();
+        assertEquals(currency, currencyDiff.proposedValue());
+        assertEquals(DiffState.CHANGED, currencyDiff.state());
+        when(presetService.deals(RecordCreationEntryPoint.quick_create, 52))
+                .thenReturn(catalog(RecordCreationRecordType.deal, field("currency", true, "JPY")));
+        when(pipelineService.getStageById(7)).thenReturn(stage(7, "Qualified"));
+        Deal created = new Deal();
+        created.setId(64);
+        created.setStageId(7);
+        created.setCurrency(currency);
+        when(creationService.createDeal(any(), eq("Qualified"))).thenReturn(created);
+        clearInvocations(presetService);
+
+        dealTool.apply(execution(request, new Resolution("stage", 7, "Qualified"), pinned));
+
+        ArgumentCaptor<GuidedDealCreateRequestDto> captured = ArgumentCaptor.forClass(GuidedDealCreateRequestDto.class);
+        verify(creationService).createDeal(captured.capture(), eq("Qualified"));
+        assertEquals(currency, captured.getValue().record().currency());
+        verifyNoInteractions(presetService);
+    }
+
+    @Test
+    void omittedCurrencyWithoutAReviewedPinCannotCreate() {
+        CreateDeal request = new CreateDeal("r1", "Renewal", "Qualified", "1250.50", null, null);
+        when(pipelineService.getStageById(7)).thenReturn(stage(7, "Qualified"));
+
+        assertThrows(ConflictException.class,
+                () -> dealTool.apply(execution(request, new Resolution("stage", 7, "Qualified"), pin())));
+
+        Diff currency = dealTool.diffs(review(request, List.of(stage(7, "Qualified")), 7, pin()))
+                .stream().filter(diff -> diff.field().equals("currency")).findFirst().orElseThrow();
+        assertEquals(DiffState.UNRESOLVED, currency.state());
+        verifyNoInteractions(creationService);
     }
 
     @Test

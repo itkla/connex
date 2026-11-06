@@ -34,7 +34,7 @@ public record GuidedDealRecordDto(
         deal.setName(name);
         deal.setValue(value);
         deal.setActualValue(null);
-        deal.setCurrency(currency);
+        deal.setCurrency(currency == null || currency.isBlank() ? null : currency);
         deal.setPipelineId(pipeline);
         deal.setStageId(stage);
         deal.setCompanyId(company);

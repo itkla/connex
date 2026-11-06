@@ -79,7 +79,7 @@ export default function WorkspaceCurrencyPanel({ workspace }: { workspace: Works
                 </div>
                 <div className="flex justify-end border-t border-border bg-muted/30 px-6 py-4">
                     <Button type="submit" variant="brand" disabled={saving || currency === workspace.defaultCurrency}>
-                        {saving ? t('saving') : t('save')}
+                        {saving ? t('saving') : t('currencySave')}
                     </Button>
                 </div>
             </form>

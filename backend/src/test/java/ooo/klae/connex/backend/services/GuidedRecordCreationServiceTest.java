@@ -20,6 +20,9 @@ import java.util.Set;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
 import tools.jackson.databind.JsonNode;
@@ -77,17 +80,39 @@ class GuidedRecordCreationServiceTest {
     @Test
     void missingGuidedCurrencyUsesWorkspaceDefaultAndExplicitTemplateCurrencyIsPreserved() {
         when(workspaceService.getCurrentDefaultCurrency()).thenReturn("EUR");
+        RecordCreationTemplateUseDto template = use(RecordCreationRecordType.deal);
+        when(augmentationService.resolvePreliminary(RecordCreationRecordType.deal, template, SCOPE))
+            .thenReturn(resolved(RecordCreationRecordType.deal, field("currency", null, true, null)));
         when(dealService.createReviewed(any(), eq("proof"), any(), eq(MutationAdmission.UNRESTRICTED), eq(SCOPE)))
             .thenAnswer(invocation -> invocation.getArgument(0));
         GuidedDealCreateRequestDto request = new GuidedDealCreateRequestDto(
             new GuidedDealRecordDto("Renewal", BigDecimal.TEN, null, 8, 9, null, null, "proof"),
-            null, Map.of(), List.of());
+            template, Map.of(), List.of());
         assertEquals("EUR", service.createDeal(request).getCurrency());
-        RecordCreationTemplateUseDto template = use(RecordCreationRecordType.deal);
         when(augmentationService.resolvePreliminary(RecordCreationRecordType.deal, template, SCOPE))
             .thenReturn(resolved(RecordCreationRecordType.deal, field("currency", null, true, node("GBP"))));
         assertEquals("GBP", service.createDeal(new GuidedDealCreateRequestDto(
             request.record(), template, Map.of(), List.of())).getCurrency());
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {" ", "\t\n"})
+    void absentAndBlankCurrencyPreserveTemplateThenWorkspacePrecedence(String currency) {
+        when(workspaceService.getCurrentDefaultCurrency()).thenReturn("EUR");
+        when(dealService.createReviewed(any(), eq("proof"), any(), eq(MutationAdmission.UNRESTRICTED), eq(SCOPE)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
+        RecordCreationTemplateUseDto template = use(RecordCreationRecordType.deal);
+        when(augmentationService.resolvePreliminary(RecordCreationRecordType.deal, template, SCOPE))
+            .thenReturn(resolved(RecordCreationRecordType.deal, field("currency", null, true, node("GBP"))));
+        var record = new GuidedDealRecordDto("Renewal", BigDecimal.TEN, currency, 8, 9, null, null, "proof");
+
+        assertEquals("GBP", service.createDeal(new GuidedDealCreateRequestDto(
+            record, template, Map.of(), List.of())).getCurrency());
+        when(augmentationService.resolvePreliminary(RecordCreationRecordType.deal, template, SCOPE))
+            .thenReturn(resolved(RecordCreationRecordType.deal, field("currency", null, true, null)));
+        assertEquals("EUR", service.createDeal(new GuidedDealCreateRequestDto(
+            record, template, Map.of(), List.of())).getCurrency());
     }
 
     @Test

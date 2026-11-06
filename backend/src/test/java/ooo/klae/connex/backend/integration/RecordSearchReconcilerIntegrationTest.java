@@ -95,7 +95,7 @@ class RecordSearchReconcilerIntegrationTest {
         pool.setConnectionTimeout(2000);
         jdbc = new JdbcTemplate(pool);
         jdbc.execute("CREATE TABLE " + control + ".organization (id INT PRIMARY KEY, name VARCHAR(255), slug VARCHAR(255), lifecycle_state VARCHAR(32) DEFAULT 'active')");
-        jdbc.execute("CREATE TABLE " + control + ".workspace (id INT PRIMARY KEY, org_id INT NOT NULL, name VARCHAR(255), slug VARCHAR(255), timezone VARCHAR(64) DEFAULT 'Asia/Tokyo', identity_version BIGINT DEFAULT 1, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, lifecycle_state VARCHAR(32) DEFAULT 'active')");
+        jdbc.execute("CREATE TABLE " + control + ".workspace (id INT PRIMARY KEY, org_id INT NOT NULL, name VARCHAR(255), slug VARCHAR(255), timezone VARCHAR(64) DEFAULT 'Asia/Tokyo', default_currency VARCHAR(3) NULL, identity_version BIGINT DEFAULT 1, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, lifecycle_state VARCHAR(32) DEFAULT 'active')");
         jdbc.update("INSERT INTO " + control + ".organization (id, name, slug) VALUES (1, 'Search A', 'a'), (2, 'Search B', 'b')");
         jdbc.update("INSERT INTO " + control + ".workspace (id, org_id, name, slug) VALUES (11, 1, 'Search A', 'a'), (22, 2, 'Search B', 'b')");
         for (String catalog : List.of(first, second)) {

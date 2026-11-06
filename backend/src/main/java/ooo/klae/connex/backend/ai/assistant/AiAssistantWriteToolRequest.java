@@ -141,7 +141,7 @@ public sealed interface AiAssistantWriteToolRequest {
             @NotBlank @Size(max = 255) String name,
             @NotBlank @Size(max = 128) String stage,
             @NotBlank @Size(max = 16) String value,
-            @NotBlank @Pattern(regexp = "[A-Z]{3}") String currency,
+            @Pattern(regexp = "[A-Z]{3}") String currency,
             @JsonProperty("expected_close_date")
             @Size(min = 10, max = 10) String expectedCloseDate)
             implements AiAssistantWriteToolRequest {
