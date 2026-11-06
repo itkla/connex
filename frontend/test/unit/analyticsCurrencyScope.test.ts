@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DealMetrics } from "@/app/lib/types";
-import { currencyCountsForDeals, currencyCountsForMetrics, resolveCurrency } from "@/app/components/overview/analytics/currencyScope";
+import { currencyCountsForDeals, currencyCountsForMetrics, resolveCurrency, resolveDealViewCurrency } from "@/app/components/overview/analytics/currencyScope";
 
 function metrics(entries: Array<[string, number, number]>): DealMetrics {
     return {
@@ -48,5 +48,37 @@ describe("shared Analytics currency scope", () => {
     it("preserves the metrics endpoint's currency ordering for ties and the empty fallback", () => {
         expect(resolveCurrency(currencyCountsForDeals([{ currency: "USD" }, { currency: "JPY" }]), null)).toBe("JPY");
         expect(resolveCurrency(currencyCountsForDeals([]), null)).toBe("USD");
+    });
+});
+
+describe("Deals and Dashboard currency URL resolution", () => {
+    const counts = new Map([["JPY", 3], ["USD", 1]]);
+
+    it.each([null, "", " ", "\t\n", "\u3000", "JPY,USD", "JPY&currency=USD", "<script>", "X".repeat(200)])(
+        "falls back to one known currency for invalid input %s", (input) => {
+            expect(resolveDealViewCurrency(counts, input)).toBe("JPY");
+        },
+    );
+
+    it.each(["usd", " USD ", "\tusd\n"])("canonicalizes the known URL currency %s", (input) => {
+        expect(resolveDealViewCurrency(counts, input)).toBe("USD");
+    });
+
+    it("retains a known selection when the active filters have no matching deals in it", () => {
+        expect(resolveDealViewCurrency(new Map([["USD", 1]]), "jpy", counts)).toBe("JPY");
+        expect(resolveDealViewCurrency(new Map(), "jpy", counts)).toBe("JPY");
+    });
+
+    it("uses workspace buckets when current filters match nothing", () => {
+        expect(resolveDealViewCurrency(new Map(), " ", counts)).toBe("JPY");
+    });
+
+    it("keeps existing non-ISO buckets reachable without introducing currency policy", () => {
+        expect(resolveDealViewCurrency(counts, " x-local ", new Map([["X-LOCAL", 1]]))).toBe("X-LOCAL");
+    });
+
+    it("never selects blank metadata and keeps the empty-workspace fallback scoped", () => {
+        expect(resolveDealViewCurrency(new Map([[" ", 100], ["JPY", 1]]), " ")).toBe("JPY");
+        expect(resolveDealViewCurrency(new Map(), " ")).toBe("USD");
     });
 });
