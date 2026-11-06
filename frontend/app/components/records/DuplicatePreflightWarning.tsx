@@ -14,6 +14,7 @@ import type {
     DuplicatePreflightKind,
     DuplicatePreflightStatus,
 } from '@/app/hooks/useDuplicatePreflight';
+import { canAcknowledgeDuplicatePreflight } from '@/app/hooks/useDuplicatePreflight';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -85,6 +86,7 @@ export default function DuplicatePreflightWarning({
         );
     }
     if (!response || response.candidates.length === 0 && !response.truncated) return null;
+    const canAcknowledge = canAcknowledgeDuplicatePreflight(response);
 
     return (
         <section id={id} className="grid gap-2 rounded-lg border border-warning/40 bg-warning/5 p-3" aria-label={t('heading')}>
@@ -110,7 +112,8 @@ export default function DuplicatePreflightWarning({
                                     {candidate.name}
                                 </Link>
                                 <Badge variant={candidate.strength === 'STRONG' ? 'secondary' : 'outline'} className="h-5 px-1.5 text-[10px]">
-                                    {t(`strength.${candidate.strength}`)}
+                                    {t(kind === 'company' && candidate.strength === 'WEAK'
+                                        ? 'companyNameStrength' : `strength.${candidate.strength}`)}
                                 </Badge>
                                 {!candidate.ownedByActiveWorkspace && (
                                     <span className="text-[11px] text-muted-foreground">{t('shared')}</span>
@@ -121,7 +124,8 @@ export default function DuplicatePreflightWarning({
                             )}
                             <p className="text-[11px] text-muted-foreground">
                                 {candidate.matches
-                                    .map((match) => t(`evidence.${match.kind}`))
+                                    .map((match) => t(kind === 'company' && match.kind === 'NAME'
+                                        ? 'companyNameEvidence' : `evidence.${match.kind}`))
                                     .join(' · ')}
                             </p>
                         </li>
@@ -130,7 +134,7 @@ export default function DuplicatePreflightWarning({
             </ul>
             {response.truncated && (
                 <p className="text-xs text-muted-foreground">
-                    {t('truncated')}
+                    {t(canAcknowledge ? 'nameOnlyTruncated' : 'truncated')}
                 </p>
             )}
             {personResolution && !response.truncated ? (
@@ -168,7 +172,7 @@ export default function DuplicatePreflightWarning({
                         </span>
                     </Button>
                 </div>
-            ) : onAcknowledgedChange && !response.truncated ? (
+            ) : onAcknowledgedChange && canAcknowledge ? (
                 <label className="flex items-start gap-2 text-xs text-foreground">
                     <Checkbox
                         checked={acknowledged}

@@ -937,7 +937,7 @@ public class ImportService {
             List.copyOf(rowsByRequest));
     }
 
-    private static void applyCompanyDependencyCandidates(
+    private void applyCompanyDependencyCandidates(
             CompanyDependencyReview review,
             List<DuplicatePreflightResponse> responses) {
         if (review.requests().size() != responses.size()) {
@@ -956,8 +956,14 @@ public class ImportService {
                     row.companyDependencyError =
                         "Multiple visible companies match the company name";
                 } else if (response.candidates().size() == 1) {
-                    row.resolvedCompanyId =
-                        response.candidates().getFirst().recordId();
+                    DuplicateCandidateDto candidate = response.candidates().getFirst();
+                    if (matchingService.normalizeName(review.requests().get(index).name())
+                            .equals(matchingService.normalizeName(candidate.name()))) {
+                        row.resolvedCompanyId = candidate.recordId();
+                    } else {
+                        row.companyDependencyError =
+                            "Company name variant requires an explicit company selection";
+                    }
                 }
             }
         }
