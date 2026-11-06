@@ -371,7 +371,7 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
         assertEquals(NORMALIZED_SUBJECT_ID, legacyAttached.tasks().getFirst().dealId());
         assertEquals(Integer.valueOf(stage.getId()), legacyAttached.dealStageId());
         assertEffectsParity(legacyFailed, canonicalFailed);
-        assertEquals(List.of("partial"), legacyFailed.runOutcome().statuses());
+        assertEquals(List.of("failed"), legacyFailed.runOutcome().statuses());
         assertEquals(List.of("intervention_required"), canonicalFailed.runOutcome().statuses());
         assertEquals("record_unavailable", canonicalFailureCode(rule, canonicalMissing.documentId()));
     }
@@ -809,7 +809,7 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
                 rule,
                 entityTrigger("company.updated", "d3-right", OCCURRED_AT));
 
-            assertEquals(List.of("partial"), legacy.runOutcome().statuses());
+            assertEquals(List.of("failed"), legacy.runOutcome().statuses());
             assertEquals(List.of("intervention_required"), canonical.runOutcome().statuses());
             assertEquals(1, legacy.actionInvocationCount());
             assertEquals(0, canonical.actionInvocationCount());
@@ -845,7 +845,7 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
                 rule,
                 entityTrigger("deal.updated", "d4-right", OCCURRED_AT));
 
-            assertEquals(List.of("partial"), legacy.runOutcome().statuses());
+            assertEquals(List.of("failed"), legacy.runOutcome().statuses());
             assertEquals(List.of("intervention_required"), canonical.runOutcome().statuses());
             assertEquals(1, legacy.actionInvocationCount());
             assertEquals(0, canonical.actionInvocationCount());

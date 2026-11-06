@@ -6,10 +6,12 @@ with `parseMysqlDateTime`, never with `new Date(rawApiValue)`. Display them with
 from next-intl's `useTimeZone` / `getTimeZone`. Relative-time helpers also take that zone for their
 absolute-date fallback. Do not use the browser or server host's zone as a preference.
 
-`i18n/request.ts` supplies the request zone and shared request clock. `requestTimeZone` resolves the
-authenticated profile zone first, then the active workspace zone, then UTC. It reads workspace
-membership through the existing authenticated API and does not interpret the workspace cookie as
-authority. Public requests without a session use UTC without fetching the backend. The root
+`i18n/request.ts` supplies the request zone and shared request clock. Its cached `requestPreferences`
+resolver shares one authenticated profile read for language and time zone; `requestTimeZone`
+delegates to that same resolver. The zone uses the authenticated profile first, then the active
+workspace, then UTC. It reads workspace membership through the existing authenticated API and does
+not interpret the workspace cookie as authority. Public requests without a session use UTC without
+fetching the backend. The root
 `NextIntlClientProvider` inherits this configuration, so server rendering and hydration agree.
 Refreshing after a profile save updates the provider's zone. The profile picker filters localized
 zone names and Tokyo/UTC aliases while retaining canonical API identifiers.

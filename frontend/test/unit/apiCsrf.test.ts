@@ -101,6 +101,7 @@ describe("API client CSRF bootstrap", () => {
 
         expect(fetchMock).toHaveBeenCalledExactlyOnceWith("/api/auth/csrf", {
             credentials: "include", cache: "no-store",
+            headers: { "Accept-Language": "en" },
         });
         pending.resolve(bootstrap());
         expect(await Promise.all(headers)).toEqual(Array.from({ length: 12 }, () => ({ "X-XSRF-TOKEN": "csrf-token" })));
@@ -232,6 +233,20 @@ describe("API client CSRF bootstrap", () => {
         const mutation = fetchMock.mock.calls.find(([input]) => String(input).endsWith("/sessions/7/turns"));
         expect(new Headers(mutation?.[1]?.headers).get("X-XSRF-TOKEN")).toBe("csrf-token");
         expect(csrf).toHaveBeenCalledTimes(2);
+    });
+
+    it("sends the rendered language on CSRF and AI requests without a locale cookie", async () => {
+        vi.stubGlobal("document", { cookie: "connex_workspace=5", documentElement: { lang: "ja" } });
+        const fetchMock = backend(async () => bootstrap());
+        const { startAiChatTurn } = await import("@/app/lib/api");
+
+        await startAiChatTurn(7, { content: "Review this record" });
+
+        const turn = fetchMock.mock.calls.find(([input]) => String(input).endsWith("/sessions/7/turns"));
+        expect(new Headers(turn?.[1]?.headers).get("Accept-Language")).toBe("ja");
+        const csrfRequests = fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/api/auth/csrf"));
+        expect(csrfRequests.length).toBeGreaterThan(0);
+        expect(csrfRequests.every(([, init]) => new Headers(init?.headers).get("Accept-Language") === "ja")).toBe(true);
     });
 
     it("refuses a pending AI identity check after a transition without caching its old token", async () => {
