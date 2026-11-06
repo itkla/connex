@@ -753,6 +753,29 @@ will not catch the resolution failure above.
 
 The two are asymmetric, and the asymmetry is easy to misread as a product-wide capability.
 
+**Saved campaign content and personalization**
+
+Saved campaign revisions are immutable and can be reopened from Delivery → Messages → View content.
+Inspection shows the exact saved subject, HTML source and plain-text body in read-only controls.
+HTML is inert text: it is never inserted as markup, executed, or loaded as a document. Saving keeps
+the author's draft available. Starting a new revision copies saved content into the authoring form;
+replacing nonempty, different input requires discard confirmation and never edits the saved revision.
+
+The only supported personalization token is the exact, case-sensitive `{{unsubscribe_url}}`, in
+subject, HTML and plain-text content (SMS uses plain text only). There is no whitespace or alias
+normalization. Unknown or incomplete placeholders beginning with `{{` are refused by the server
+before revision insertion, audience-send creation, queueing an existing draft, or workflow enrollment. Existing
+invalid revisions remain inspectable and must be copied into a corrected new revision before use;
+validation does not rewrite historical content. Queue validation reads the send's bound revision,
+including drafts created before this guard was introduced. Sends already queued before rollout are
+not recalled or revalidated by this admission guard; inspect outstanding queued content before rollout.
+Ordinary closing CSS braces remain literal content, so nested email stylesheet rules remain usable.
+Token refusals return HTTP 400 with `CAMPAIGN_UNSUPPORTED_TOKEN` without echoing customer content.
+
+A visual editor, rendered/recipient-specific previews and test-send flow are deferred. This source
+inspection adds no external delivery. The instance capability, transport readiness, permissions,
+consent and suppression gates continue to apply.
+
 | | Campaign (marketing) | Transactional (invites, notifications, reports, account mail) |
 |---|---|---|
 | Bounce handling | Yes — **ESP provider with webhooks only** | **None** |

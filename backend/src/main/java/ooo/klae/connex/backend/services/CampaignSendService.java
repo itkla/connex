@@ -24,6 +24,7 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.capability.Capability;
 import ooo.klae.connex.backend.capability.CapabilityRegistry;
 import ooo.klae.connex.backend.delivery.ChannelAddressNormalizer;
+import ooo.klae.connex.backend.delivery.CampaignMessageTokens;
 import ooo.klae.connex.backend.delivery.DeliveryChannel;
 import ooo.klae.connex.backend.delivery.DeliveryProviderConfigService;
 import ooo.klae.connex.backend.dto.CampaignMessageDto;
@@ -132,6 +133,7 @@ public class CampaignSendService {
         revision.setVersion(campaignMessageMapper.nextRevisionVersion(workspaceId, messageId));
         revision.setLocale(locale);
         applyContent(DeliveryChannel.fromToken(message.getChannel()), request, revision);
+        CampaignMessageTokens.validate(revision);
         campaignMessageMapper.insertRevision(revision);
         auditService.record("campaign.message.revision", "campaign", campaignId, campaign.getName(),
                 "Added campaign message revision", Map.of("messageId", messageId, "version", revision.getVersion()));
@@ -186,6 +188,7 @@ public class CampaignSendService {
             throw new ResourceNotFoundException("Campaign message revision not found for version: "
                     + request.messageVersion());
         }
+        CampaignMessageTokens.validate(revision);
         CampaignAudienceSnapshot snapshot =
                 campaignMapper.getSnapshotForShare(workspaceId, campaignId, request.snapshotVersion());
         if (snapshot == null) {
@@ -245,6 +248,13 @@ public class CampaignSendService {
         }
         CampaignSend send = requireSend(workspaceId, campaignId, sendId);
         requireAudienceSend(send);
+        CampaignMessageRevision revision = campaignMessageMapper.getRevision(
+                workspaceId, send.getMessageId(), send.getMessageVersion());
+        if (revision == null) {
+            throw new ResourceNotFoundException("Campaign message revision not found for version: "
+                    + send.getMessageVersion());
+        }
+        CampaignMessageTokens.validate(revision);
         DeliveryChannel channel = resolveDispatchableChannel(send.getChannel());
         if (!deliveryProviderConfigService.isReady(workspaceId, channel)) {
             throw new BadRequestException(

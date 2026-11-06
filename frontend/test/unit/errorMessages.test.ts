@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import enAccount from "@/messages/en/account.json";
 import jaAccount from "@/messages/ja/account.json";
+import enCampaigns from "@/messages/en/campaigns.json";
+import jaCampaigns from "@/messages/ja/campaigns.json";
 import { ApiError } from "@/app/lib/api";
 import { type MessageTranslator, toastApiError, userMessageFor } from "@/app/lib/errorMessages";
 import { isAuthPath, redirectToSignIn, resetRedirectMemoForTests, sameOriginPath, signInHref } from "@/app/lib/sessionExpiry";
@@ -42,6 +44,7 @@ function flattenKeys(tree: { [key: string]: MessageValue }, prefix = ""): string
 function translator(locale: string): MessageTranslator {
     const messages: { [key: string]: MessageValue } = {
         ...errorMessages(locale),
+        CampaignMessages: (locale === "ja" ? jaCampaigns : enCampaigns).CampaignMessages,
         AccountSecurity: (locale === "ja" ? jaAccount : enAccount).AccountSecurity,
         Contacts: {
             toastFailedSave: "Couldn't save the contact",
@@ -71,6 +74,19 @@ beforeEach(() => {
 afterEach(() => {
     vi.unstubAllGlobals();
     vi.clearAllMocks();
+});
+
+describe("campaign personalization errors", () => {
+    it("explains the supported token and retained draft in both locales", () => {
+        const error = new ApiError(POISONED_MESSAGE, 400, "CAMPAIGN_UNSUPPORTED_TOKEN");
+        for (const translator of [t, ja]) {
+            const description = userMessageFor(error, translator)?.description;
+            expect(description).toContain("{{unsubscribe_url}}");
+            expect(description).not.toContain(POISONED_MESSAGE);
+        }
+        expect(userMessageFor(error, t)?.description).toContain("Your draft is still here");
+        expect(userMessageFor(error, ja)?.description).toContain("入力内容は保持されています");
+    });
 });
 
 describe("deal line consent errors", () => {

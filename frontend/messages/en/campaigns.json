@@ -199,7 +199,14 @@
         "noRevisions": "No revisions yet",
         "version": "v{version}",
         "createFailed": "Couldn't create the message",
-        "revisionSaveFailed": "Couldn't save the revision"
+        "revisionSaveFailed": "Couldn't save the revision",
+        "supportedTokens": "Supported token: '{{'unsubscribe_url'}}' only, spelled exactly as shown. It works in the subject, HTML and plain text. Names and other fields are not supported. An opt-out link or instruction is added automatically.",
+        "unsupportedTokens": "Only '{{'unsubscribe_url'}}' is supported. Remove other personalization fields and check the braces before saving or queueing. Your draft is still here.",
+        "inspect": "View content",
+        "inspectRevision": "View revision v{version}",
+        "sourceInspectionHint": "This is the exact saved source. HTML is shown as text; scripts and remote content do not run. Recipient previews, a visual editor and test sending are not available yet.",
+        "startFromRevision": "Start new revision from this",
+        "closeInspection": "Close"
     },
     "CampaignSends": {
         "title": "Sends",

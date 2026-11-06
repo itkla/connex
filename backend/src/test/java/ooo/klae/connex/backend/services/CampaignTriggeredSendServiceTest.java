@@ -77,6 +77,7 @@ import ooo.klae.connex.backend.dto.SuppressionEntryRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.exceptions.UnsupportedCampaignTokenException;
 import ooo.klae.connex.backend.mappers.CampaignDeliveryMapper;
 import ooo.klae.connex.backend.mappers.CampaignMessageMapper;
 import ooo.klae.connex.backend.mappers.CampaignSendMapper;
@@ -236,6 +237,22 @@ class CampaignTriggeredSendServiceTest extends CampaignRealDbTestSupport {
     }
 
     private static final class WorkerLost extends Error { }
+
+    @Test
+    void legacyUnsupportedTokensCannotBeQueuedByWorkflowEnrollment() {
+        String prefix = "workflow-tokens-" + unique();
+        Person recipient = person(prefix, prefix + "@example.com");
+        CampaignMessageDto message = message(prefix);
+        jdbcTemplate.update("UPDATE campaign_message_revision SET body_text = ? "
+                        + "WHERE workspace_id = ? AND message_id = ? AND version = 1",
+                "{{first_name}}", workspace.getId(), message.id());
+
+        assertThrows(UnsupportedCampaignTokenException.class,
+                () -> triggeredSendService.enroll(recipient.getId(), message.id(), 1));
+
+        assertTrue(campaignSendService.listSends(message.campaignId()).isEmpty());
+        assertEquals(0, fakeDispatcher.count());
+    }
 
     @Test
     void enrollCreatesOneTriggeredSendAndOneIdempotentDelivery() {

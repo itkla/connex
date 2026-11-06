@@ -24,6 +24,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
@@ -65,6 +66,7 @@ import ooo.klae.connex.backend.dto.SuppressionEntryRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.exceptions.UnsupportedCampaignTokenException;
 import ooo.klae.connex.backend.mappers.CampaignDeliveryMapper;
 import ooo.klae.connex.backend.mappers.CampaignSendMapper;
 import ooo.klae.connex.backend.services.OneTimeLinkFlowService.ResolvedFlow;
@@ -628,6 +630,45 @@ class CampaignSendServiceTest extends CampaignRealDbTestSupport {
         assertEquals("Just text", saved.revisions().getFirst().bodyText());
         assertNull(saved.revisions().getFirst().subject());
         assertNull(saved.revisions().getFirst().bodyHtml());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"subject", "html", "text", "sms"})
+    void unsupportedTokensAreRefusedBeforeSavingARevision(String field) {
+        String prefix = "tokens-" + unique();
+        CampaignDto campaign = campaignService.create(new CampaignRequest(
+                prefix, null, "email", null, currentUser.getId(), null, null, null, null, null));
+        CampaignMessageDto message = campaignSendService.createMessage(campaign.id(),
+                new CampaignMessageRequest(prefix, "sms".equals(field) ? "sms" : "email"));
+        CampaignMessageRevisionRequest request = new CampaignMessageRevisionRequest(
+                "ja", "subject".equals(field) ? "{{first_name}}" : "Subject",
+                "html".equals(field) ? "<p>{{first_name}}</p>" : "<p>本文</p>",
+                Set.of("text", "sms").contains(field) ? "{{first_name}}" : "本文");
+
+        assertThrows(UnsupportedCampaignTokenException.class,
+                () -> campaignSendService.addRevision(campaign.id(), message.id(), request));
+
+        assertTrue(campaignSendService.getMessage(campaign.id(), message.id()).revisions().isEmpty());
+    }
+
+    @Test
+    void legacyInvalidContentCannotCreateOrQueueASendAndRemainsInspectable() {
+        CampaignSendDto send = readySend("legacy-tokens-" + unique());
+        jdbcTemplate.update("UPDATE campaign_message_revision SET body_html = ? "
+                        + "WHERE workspace_id = ? AND message_id = ? AND version = ?",
+                "<p>{{first_name}}</p>", workspace.getId(), send.messageId(), send.messageVersion());
+
+        assertThrows(UnsupportedCampaignTokenException.class,
+                () -> campaignSendService.createSend(send.campaignId(),
+                        new CampaignSendRequest(1, send.messageId(), send.messageVersion(), null, null)));
+        assertThrows(UnsupportedCampaignTokenException.class,
+                () -> campaignSendService.queueSend(send.campaignId(), send.id()));
+
+        assertEquals("draft", campaignSendService.getSend(send.campaignId(), send.id()).status());
+        assertEquals(1, campaignSendService.listSends(send.campaignId()).size());
+        assertEquals("<p>{{first_name}}</p>", campaignSendService.getMessage(
+                send.campaignId(), send.messageId()).revisions().getFirst().bodyHtml());
+        assertEquals(0, fakeDispatcher.count());
     }
 
     private Person channelPerson(DeliveryChannel channel, String prefix) {

@@ -2,6 +2,7 @@ import { act, type PropsWithChildren, type ReactNode, type ComponentProps } from
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type CampaignRevisionSheet from "@/app/components/marketing/campaigns/CampaignRevisionSheet";
 import type EditCampaignSheet from "@/app/components/marketing/campaigns/EditCampaignSheet";
 import AudienceEstimatePanel from "@/app/components/marketing/campaigns/AudienceEstimatePanel";
 import CampaignDelivery from "@/app/components/marketing/campaigns/CampaignDelivery";
@@ -24,6 +25,9 @@ import {
 } from "@/test/unit/helpers/interactiveDocument";
 
 const localeState = vi.hoisted<{ locale: "en" | "ja"; zone: string }>(() => ({ locale: "en", zone: "UTC" }));
+const inspector = vi.hoisted<{ current: ComponentProps<typeof CampaignRevisionSheet> | null }>(() => ({ current: null }));
+const saveRevisionMock = vi.hoisted(() => vi.fn());
+
 const editor = vi.hoisted<{ current: ComponentProps<typeof EditCampaignSheet> | null }>(() => ({ current: null }));
 
 const { reconcileCampaignExportMock, setCampaignAudienceMock, updateCampaignMock } = vi.hoisted(() => ({
@@ -78,6 +82,7 @@ vi.mock("@/app/lib/api", async (importOriginal) => {
     const actual = await importOriginal<typeof import("@/app/lib/api")>();
     return {
         ...actual,
+        addCampaignMessageRevision: saveRevisionMock,
         getSegmentFields: vi.fn(async () => ({ industries: [], tags: [] })),
         reconcileCampaignExport: reconcileCampaignExportMock,
         setCampaignAudience: setCampaignAudienceMock,
@@ -183,6 +188,12 @@ vi.mock("@/app/components/records/SegmentBuilder", () => ({
 }));
 
 vi.mock("@/app/components/marketing/campaigns/NewMessageDialog", () => ({ default: () => null }));
+vi.mock("@/app/components/marketing/campaigns/CampaignRevisionSheet", () => ({
+    default: (props: ComponentProps<typeof CampaignRevisionSheet>) => {
+        inspector.current = props;
+        return null;
+    },
+}));
 vi.mock("@/app/components/marketing/campaigns/CampaignEngagement", () => ({ default: () => null }));
 vi.mock("@/app/components/marketing/campaigns/EditCampaignSheet", () => ({ default: (props: ComponentProps<typeof EditCampaignSheet>) => { editor.current = props; return null; } }));
 vi.mock("@/app/components/records/DeleteRecordDialog", () => ({ default: () => null }));
@@ -318,6 +329,7 @@ function requiredElement(
 
 afterEach(() => {
     localeState.locale = "en";
+    inspector.current = null;
     vi.clearAllMocks();
     vi.unstubAllGlobals();
 });
@@ -361,6 +373,43 @@ describe("campaign date inputs", () => {
 });
 
 describe("campaign audience labels and unavailable state", () => {
+    it("reuses a saved revision and keeps the draft after saving another immutable revision", async () => {
+        const interactive = installInteractiveDocument();
+        const { createRoot } = await import("react-dom/client");
+        const root = createRoot(interactive.container);
+        saveRevisionMock.mockResolvedValue({
+            ...EMAIL_MESSAGE,
+            revisions: [{ ...EMAIL_MESSAGE.revisions[0], version: 2 }, ...EMAIL_MESSAGE.revisions],
+        });
+        await act(async () => {
+            root.render(<CampaignDelivery campaignId={CAMPAIGN.id} initialMessages={[EMAIL_MESSAGE]}
+                initialSends={[]} snapshots={[]} access={{ manage: true, send: true, consent: true }}
+                deliveryAvailability="enabled" />);
+        });
+        const view = requiredElement(interactive.elements,
+            (element) => element.getAttribute("aria-label") === "View revision v1", "Saved revision action");
+        await act(async () => { interactive.dispatch("click", view); });
+        const props = inspector.current;
+        if (!props?.revision || !props.onUse) throw new Error("Saved revision did not open");
+        expect(props.revision).toEqual(EMAIL_MESSAGE.revisions[0]);
+        await act(async () => { props.onUse?.(EMAIL_MESSAGE.revisions[0]); });
+        const save = requiredElement(interactive.elements,
+            (element) => element.tagName === "BUTTON" && element.textContent === enCampaigns.CampaignMessages.saveRevision,
+            "Save revision action");
+        await act(async () => { interactive.dispatch("click", save); });
+        expect(saveRevisionMock).toHaveBeenCalledWith(CAMPAIGN.id, EMAIL_MESSAGE.id, {
+            locale: "en", subject: "Product update", bodyHtml: "<p>Update</p>", bodyText: "Update",
+        });
+        expect(requiredElement(interactive.elements, (element) => element.id === "revision-subject", "Subject").value)
+            .toBe("Product update");
+        expect(requiredElement(interactive.elements, (element) => element.id === "revision-body-html", "HTML body").value)
+            .toBe("<p>Update</p>");
+        expect(requiredElement(interactive.elements, (element) => element.id === "revision-body-text", "Text body").value)
+            .toBe("Update");
+        expect(EMAIL_MESSAGE.revisions).toHaveLength(1);
+        await act(async () => root.unmount());
+    });
+
     it("labels draft send membership as prepared recipients in both locales", () => {
         for (const locale of ["en", "ja"] as const) {
             localeState.locale = locale;
