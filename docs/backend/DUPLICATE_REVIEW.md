@@ -16,7 +16,9 @@ Company weak-name review additionally compares boundary legal-form variants thro
 parenthesized abbreviations, and the suffixes Inc./Incorporated, Co., Ltd., Ltd./Limited,
 K.K., LLC/L.L.C. and GmbH. Unicode width, case and kana folding precedes this comparison. This review
 key never replaces canonical names or identity keys. A variant never authorizes automatic
-attachment or merging; CSV company dependencies retain canonical-exact name validation.
+attachment or merging. CSV company dependencies require an explicit visible candidate choice,
+including canonical-exact names; a legal-form variant remains unresolved until that choice is
+reviewed and bound to the import proof.
 
 Never auto-attach an unreviewed weak, shared, ambiguous, truncated, or aggregate-overflow result.
 
@@ -157,7 +159,7 @@ Person/deal previews bind every exact referenced-company name; deal proofs also 
 During commit:
 
 - resolve company dependencies under the duplicate-decision hierarchy;
-- reuse only a unique visible dependency;
+- reuse only an explicitly selected visible dependency, with the same choice rechecked at commit;
 - ambiguous/truncated dependencies fail closed for rows that consume them;
 - lock writable matched targets ascending, then canonical identity groups deterministically;
 - create custom fields, tags, or reviewed referenced companies only after target/identity revalidation;

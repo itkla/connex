@@ -14,9 +14,15 @@ public class RowError {
     private int rowIndex;
     private String reason;
     private List<String> errors;
+    private List<ImportProblem> problems;
 
     /** Preserves the reason-only contract for importers without structured row validation. */
     public RowError(int rowIndex, String reason) {
-        this(rowIndex, reason, null);
+        this(rowIndex, reason, null, null);
+    }
+
+    /** Retains the problem-code construction contract for importers without raw error arrays. */
+    public RowError(int rowIndex, String reason, List<ImportProblem> problems) {
+        this(rowIndex, reason, null, problems);
     }
 }

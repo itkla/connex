@@ -200,6 +200,16 @@ Outcomes remain stage-independent. Mark won/lost keeps the current stage. Moving
 stage forces its outcome; moving away does not clear it. Reopening is an explicit operation with
 the existing reopen semantics.
 
+The deal board restores the source placement while confirming entry into a won/lost stage, and
+applies the move only after consent. The confirmation names the deal currency and displayed
+amounts: Lost resets realized revenue to zero and clears any earlier win amount; an already-won
+deal keeps its stored win amount frozen. For a fresh win the exact server amount cannot be
+confirmed client-side: it uses the line total or manual value current when saved, then freezes
+that amount. The displayed deal value is context, not a guaranteed booking preview.
+Its result names the saved stage, server-returned position and outcome. Moving a closed deal to an
+ordinary stage explains that it is still won or lost and offers an explicit Reopen action through the existing intent endpoint; no ordinary
+stage move automatically reopens a deal.
+
 The reconciliation resolves these cases:
 
 - **Lost deals:** `actual_value` is **always zero**, on every route. Any client-supplied value is

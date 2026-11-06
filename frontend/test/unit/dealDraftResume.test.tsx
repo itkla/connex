@@ -1122,6 +1122,8 @@ describe('deal draft persistence', () => {
         expect(dealNameInputs(mounted)).toHaveLength(1);
         await act(async () => latestOpenConfirm().onDiscard());
         expect(dealNameInputs(mounted)).toHaveLength(0);
+        expect(onClose).not.toHaveBeenCalled();
+        expect(connectedElements(mounted, 'BUTTON').some((button) => button.getAttribute('role') === 'option')).toBe(true);
 
         await act(async () => mounted.dispatch('click', requiredButton(mounted, (button) => (
             button.getAttribute('role') === 'option'

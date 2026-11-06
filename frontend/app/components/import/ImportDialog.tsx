@@ -7,6 +7,7 @@ import { motion, useReducedMotion } from 'motion/react';
 import { ArrowUpTrayIcon, CheckCircleIcon, DocumentTextIcon, ExclamationTriangleIcon, XMarkIcon } from '@heroicons/react/24/outline';
 import { LoaderCircle } from 'lucide-react';
 
+import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -20,13 +21,12 @@ import {
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-import { commitImport, isFieldError, isWorkspaceUnavailableError, previewImport, search } from '@/app/lib/api';
+import { ApiError, commitImport, getCustomFieldSchema, isWorkspaceUnavailableError, previewImport, search } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { usePermission } from '@/app/hooks/usePermissions';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import {
-    importRowErrorMessage,
     columnSamples,
     CsvEncodingError,
     CREATE_CUSTOM_FIELD,
@@ -42,7 +42,11 @@ import {
     type ParsedCsv,
     type PersonNameOrder,
 } from '@/app/lib/import';
+import { companyChoiceRows, duplicateMappingColumns, existingCustomTarget, importFailureKey, importMappingErrorColumns, importPresentationProblems, importReviewRows, unavailableCustomColumns, needsImportDecision, REVIEW_FILTERS, reviewPage, type ReviewFilter } from '@/app/lib/importReview';
 import type {
+    CustomFieldSchemaEntry,
+    ImportProblem,
+    ImportRowAnalysis,
     DuplicateCandidate,
     ImportColumnMapping,
     ImportDuplicateAction,
@@ -75,6 +79,8 @@ function reviewInputKey(
     mapping: ImportColumnMapping[],
     onDuplicate: ImportDuplicateAction,
     links: Record<number, number>,
+    companyLinks: Record<number, number>,
+    skippedRows: number[],
 ): string {
     return JSON.stringify([
         workspaceKey,
@@ -83,6 +89,8 @@ function reviewInputKey(
         mapping,
         onDuplicate,
         Object.entries(links).sort(([left], [right]) => Number(left) - Number(right)),
+        Object.entries(companyLinks).sort(([left], [right]) => Number(left) - Number(right)),
+        [...skippedRows].sort((left, right) => left - right),
     ]);
 }
 
@@ -101,14 +109,6 @@ function createScopedRequest(requestInit?: RequestInit) {
 
 function requestWorkspaceKey(requestInit?: RequestInit): string {
     return new Headers(requestInit?.headers).get('X-Workspace-Id') ?? '';
-}
-
-function firstFieldError(error: unknown, fallback: string): string {
-    if (isFieldError(error)) {
-        const first = Object.values(error.fieldErrors)[0];
-        if (first) return first;
-    }
-    return fallback;
 }
 
 /**
@@ -130,9 +130,9 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
     const t = useTranslations('importExport');
     const locale = useLocale();
     const showApiError = useApiErrorToast();
-    const reportFailure = (error: unknown, fallback: string) => {
+    const reportFailure = (error: unknown) => {
         if (isWorkspaceUnavailableError(error)) showApiError(error);
-        else toastError(firstFieldError(error, fallback));
+        else toastError(t(importFailureKey(error)));
     };
     const reduceMotion = useReducedMotion();
     const canCreateCustomField = usePermission('CUSTOM_FIELD_MANAGE');
@@ -156,6 +156,36 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
     const [reviewedProof, setReviewedProof] = useState<string | null>(null);
     const [links, setLinks] = useState<Record<number, number>>({});
     const [linkLabels, setLinkLabels] = useState<Record<number, string>>({});
+    const [companyLinks, setCompanyLinks] = useState<Record<number, number>>({});
+    const [skippedRows, setSkippedRows] = useState<number[]>([]);
+    const [commitFailure, setCommitFailure] = useState<string | null>(null);
+    const [customFieldsAttempt, setCustomFieldsAttempt] = useState(0);
+    const [serverDuplicateColumns, setServerDuplicateColumns] = useState<{
+        key: string; columns: Set<string>;
+    } | null>(null);
+    const [customFieldState, setCustomFieldState] = useState<{
+        key: string; fields: CustomFieldSchemaEntry[]; failed: boolean; attempt: number;
+    } | null>(null);
+    const customFieldKey = `${workspaceKey}:${entity}`;
+    const customFields = useMemo(() => customFieldState?.key === customFieldKey ? customFieldState.fields : [], [customFieldState, customFieldKey]);
+    const customFieldsFailed = customFieldState?.key === customFieldKey && customFieldState.failed;
+    const customFieldsLoading = customFieldState?.key !== customFieldKey || customFieldState.attempt !== customFieldsAttempt;
+    useEffect(() => {
+        if (!open) return;
+        const scoped = createScopedRequest(requestInit);
+        const entityType = entity === 'persons' ? 'person' : entity === 'companies' ? 'company' : 'deal';
+        getCustomFieldSchema(entityType, scoped.requestInit).then((fields) => {
+            if (!scoped.controller.signal.aborted) {
+                setCustomFieldState({ key: customFieldKey, fields, failed: false, attempt: customFieldsAttempt });
+            }
+        }).catch((error: unknown) => {
+            if (!scoped.controller.signal.aborted) {
+                setCustomFieldState({ key: customFieldKey, fields: [], failed: true, attempt: customFieldsAttempt });
+                if (isWorkspaceUnavailableError(error)) showApiError(error);
+            }
+        });
+        return () => { scoped.controller.abort(); scoped.release(); };
+    }, [open, entity, customFieldKey, requestInit, customFieldsAttempt, showApiError]);
     const previewControllerRef = useRef<AbortController | null>(null);
     const previousWorkspaceKeyRef = useRef(workspaceKey);
     const previewGenerationRef = useRef(0);
@@ -179,6 +209,26 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
         setReviewedProof(null);
         setLinks({});
         setLinkLabels({});
+        setCompanyLinks({});
+        setSkippedRows([]);
+        setCommitFailure(null);
+        setServerDuplicateColumns(null);
+    }
+
+    function recoverMappingFailure(error: unknown) {
+        const affected = importMappingErrorColumns(error, parsed?.headers ?? []);
+        if (affected.size > 0) {
+            setServerDuplicateColumns({ key: mappingSnapshotKey, columns: affected });
+            setStep('map');
+        }
+        if (error instanceof ApiError && error.code === 'IMPORT_CUSTOM_UNAVAILABLE') {
+            setCustomFieldsAttempt((attempt) => attempt + 1);
+        }
+    }
+
+    function refreshCustomFields() {
+        setServerDuplicateColumns(null);
+        setCustomFieldsAttempt((attempt) => attempt + 1);
     }
 
     function handleOpenChange(next: boolean) {
@@ -213,10 +263,20 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
             const suggestions = suggestColumnTargets(result.headers, entity);
             for (const header of result.headers) {
                 initial[header] = {
-                    target: suggestions[header] ?? IGNORE_COLUMN,
+                    target: suggestions[header] !== IGNORE_COLUMN && suggestions[header] != null
+                        ? suggestions[header] : existingCustomTarget(header, customFields) ?? IGNORE_COLUMN,
                     customType: inferColumnType(columnSamples(result.rows, header)),
                 };
             }
+            setLinks({});
+            setLinkLabels({});
+            setCompanyLinks({});
+            setSkippedRows([]);
+            setPreview(null);
+            setReviewedInputKey(null);
+            setReviewedProof(null);
+            setCommitFailure(null);
+            setServerDuplicateColumns(null);
             setParsed(result);
             setColumns(initial);
             setNameOrder(defaultPersonNameOrder(result.headers, locale));
@@ -237,7 +297,9 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
                 const target = resolveColumnTarget(col?.target, canCreateCustomField);
                 if (!col || target === IGNORE_COLUMN) continue;
                 if (target === CREATE_CUSTOM_FIELD) {
-                    mapping.push({ column: header, createCustomField: true, customFieldType: col.customType, customFieldLabel: header });
+                    const existing = customFields.filter((field) => field.label.trim() === header.trim() && field.fieldType === col.customType);
+                    mapping.push(existing.length === 1 ? { column: header, field: `custom:${existing[0].definitionId}` }
+                        : { column: header, createCustomField: true, customFieldType: col.customType, customFieldLabel: header });
                 } else {
                     mapping.push({ column: header, field: target });
                 }
@@ -245,7 +307,7 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
             return mapping;
         }
         return parsed ? prepareImport(parsed, entity, buildMapping(), nameOrder) : null;
-    }, [parsed, entity, columns, canCreateCustomField, nameOrder]);
+    }, [parsed, entity, columns, canCreateCustomField, nameOrder, customFields]);
     const preparedCsv = useMemo(
         () => parsed && prepared ? { ...parsed, rows: prepared.rows } : null,
         [parsed, prepared],
@@ -258,7 +320,13 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
             ).length,
         [columns, canCreateCustomField],
     );
-    const hasName = prepared?.nameColumn != null && !prepared.nameConflict;
+    const mappingSnapshotKey = JSON.stringify([workspaceKey, prepared?.mapping ?? []]);
+    const duplicateColumns = new Set([...duplicateMappingColumns(prepared?.mapping ?? []),
+        ...(serverDuplicateColumns?.key === mappingSnapshotKey ? serverDuplicateColumns.columns : [])]);
+    const unavailableColumns = !customFieldsLoading && !customFieldsFailed
+        ? unavailableCustomColumns(prepared?.mapping ?? [], customFields) : new Set<string>();
+    const hasName = prepared?.nameColumn != null && !prepared.nameConflict
+        && duplicateColumns.size === 0 && unavailableColumns.size === 0;
     const nameColumn = prepared?.nameColumn ?? null;
     const currentReviewInputKey = prepared
         ? reviewInputKey(
@@ -268,6 +336,8 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
             prepared.mapping,
             onDuplicate,
             links,
+            companyLinks,
+            skippedRows,
         )
         : null;
     const reviewStale = currentReviewInputKey !== reviewedInputKey
@@ -297,20 +367,22 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
         try {
             const data = await previewImport(
                 entity,
-                { rows: prepared.rows, mapping: prepared.mapping, onDuplicate, links },
+                { rows: prepared.rows, mapping: prepared.mapping, onDuplicate, links, companyLinks, skippedRows },
                 scopedRequest.requestInit,
             );
             if (scopedRequest.controller.signal.aborted || generation !== previewGenerationRef.current) return;
             if (!data.duplicateReviewProof) {
                 throw new Error('Duplicate review proof is missing');
             }
+            setCommitFailure(null);
             setPreview(data);
             setReviewedInputKey(inputKey);
             setReviewedProof(data.duplicateReviewProof ?? null);
             setStep('review');
         } catch (error) {
             if (scopedRequest.controller.signal.aborted || generation !== previewGenerationRef.current) return;
-            reportFailure(error, t('errorPreview'));
+            recoverMappingFailure(error);
+            reportFailure(error);
         } finally {
             scopedRequest.release();
             if (previewControllerRef.current === scopedRequest.controller) {
@@ -332,19 +404,21 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
         try {
             const data = await previewImport(
                 entity,
-                { rows: prepared.rows, mapping: prepared.mapping, onDuplicate, links },
+                { rows: prepared.rows, mapping: prepared.mapping, onDuplicate, links, companyLinks, skippedRows },
                 scopedRequest.requestInit,
             );
             if (scopedRequest.controller.signal.aborted || generation !== previewGenerationRef.current) return;
             if (!data.duplicateReviewProof) {
                 throw new Error('Duplicate review proof is missing');
             }
+            setCommitFailure(null);
             setPreview(data);
             setReviewedInputKey(inputKey);
             setReviewedProof(data.duplicateReviewProof ?? null);
         } catch (error) {
             if (scopedRequest.controller.signal.aborted || generation !== previewGenerationRef.current) return;
-            reportFailure(error, t('errorPreview'));
+            recoverMappingFailure(error);
+            reportFailure(error);
         } finally {
             scopedRequest.release();
             if (previewControllerRef.current === scopedRequest.controller) {
@@ -399,6 +473,8 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
                     mapping: prepared.mapping,
                     onDuplicate,
                     links,
+                    companyLinks,
+                    skippedRows,
                     duplicateReviewProof: reviewedProof ?? undefined,
                 },
                 requestInit,
@@ -411,8 +487,9 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
         } catch (error) {
             if (requestInit?.signal?.aborted) return;
             setReviewedProof(null);
-            setReviewedInputKey(null);
-            reportFailure(error, t('errorImport'));
+            setCommitFailure(importFailureKey(error));
+            recoverMappingFailure(error);
+            reportFailure(error);
         } finally {
             if (!requestInit?.signal?.aborted) setBusy(false);
         }
@@ -421,7 +498,7 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
     return (
         <Dialog open={open} onOpenChange={handleOpenChange}>
             <DialogContent
-                className="gap-0 overflow-hidden p-0 sm:max-w-3xl"
+                className="max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-3xl"
                 onEscapeKeyDown={(event) => {
                     const target = event.target instanceof Element ? event.target : null;
                     if (target?.closest('[data-row-linker-input][aria-expanded="true"]')) event.preventDefault();
@@ -438,7 +515,7 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
                     )}
                 </DialogHeader>
 
-                <div className="max-h-[60vh] overflow-y-auto px-6 py-5">
+                <div className="max-h-[60vh] min-h-0 min-w-0 overflow-y-auto px-4 py-5 sm:px-6">
                     <motion.div
                         key={step}
                         initial={{ opacity: 0, y: reduceMotion ? 0 : 6 }}
@@ -459,7 +536,10 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
                             parsed={parsed}
                             entity={entity}
                             columns={columns}
-                            setColumns={setColumns}
+                            setColumns={(updater) => {
+                                setServerDuplicateColumns(null);
+                                setColumns(updater);
+                            }}
                             mappedCount={mappedCount}
                             canCreateCustomField={canCreateCustomField}
                             nameOrder={nameOrder}
@@ -467,18 +547,48 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
                             usesNameParts={prepared?.usesNameParts ?? false}
                             nameConflict={prepared?.nameConflict ?? false}
                             nameSamples={prepared && nameColumn ? columnSamples(prepared.rows, nameColumn, 3) : []}
+                            customFields={customFields}
+                            customFieldsFailed={customFieldsFailed}
+                            retryCustomFields={refreshCustomFields}
+                            customFieldsLoading={customFieldsLoading}
+                            duplicateColumns={duplicateColumns}
+                            unavailableColumns={unavailableColumns}
                         />
                     )}
+                    {step === 'review' && commitFailure && (
+                        <p className="mb-4 break-words text-sm text-destructive" role="alert">{t(commitFailure)}</p>
+                    )}
                     {step === 'review' && preview && (
-                        <ReviewStep preview={preview} stale={reviewStale} onDuplicate={onDuplicate} onSelectAction={selectAction} previewing={previewing} entity={entity} parsed={preparedCsv} nameColumn={nameColumn} links={links} linkLabels={linkLabels} onLink={linkRow} onUnlink={unlinkRow} requestInit={requestInit} />
+                        <fieldset disabled={busy || previewing} className="min-w-0">
+                        <ReviewStep preview={preview} stale={currentReviewInputKey !== reviewedInputKey} onDuplicate={onDuplicate} onSelectAction={selectAction} previewing={previewing} entity={entity} parsed={preparedCsv} nameColumn={nameColumn} links={links} linkLabels={linkLabels} onLink={linkRow} onUnlink={unlinkRow} requestInit={requestInit}
+                            source={parsed} companyLinks={companyLinks} skippedRows={skippedRows}
+                            onCompanyChoice={(indices, id) => setCompanyLinks((previous) => {
+                                const next = { ...previous };
+                                for (const index of indices) {
+                                    if (id == null) delete next[index];
+                                    else next[index] = id;
+                                }
+                                return next;
+                            })}
+                            onSkip={(index) => setSkippedRows((previous) => previous.includes(index)
+                                ? previous.filter((row) => row !== index) : [...previous, index])}
+                            onEdit={(index, column, value) => {
+                                setParsed((previous) => previous ? { ...previous,
+                                    rows: previous.rows.map((row, rowIndex) => rowIndex === index ? { ...row, [column]: value } : row),
+                                } : null);
+                                setCompanyLinks((previous) => {
+                                    const next = { ...previous }; delete next[index]; return next;
+                                });
+                            }} />
+                        </fieldset>
                     )}
                     {step === 'done' && result && <DoneStep result={result} entity={entity} parsed={parsed} />}
                     </motion.div>
                 </div>
 
-                <div className="flex items-center justify-between gap-3 border-t border-border px-6 py-4">
-                    <span className="truncate text-xs text-muted-foreground">{fileName && step !== 'done' ? fileName : ''}</span>
-                    <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center justify-end gap-3 border-t border-border px-4 py-4 sm:justify-between sm:px-6">
+                    <span className="w-full truncate text-xs text-muted-foreground sm:w-auto">{fileName && step !== 'done' ? fileName : ''}</span>
+                    <div className="flex flex-wrap items-center justify-end gap-2">
                         {step === 'map' && (
                             <>
                                 <Button variant="ghost" onClick={() => returnToStep('upload')}>{t('back')}</Button>
@@ -490,9 +600,9 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
                         )}
                         {step === 'review' && preview && (
                             <>
-                                <Button variant="ghost" onClick={() => returnToStep('map')}>{t('back')}</Button>
+                                <Button variant="ghost" disabled={busy || previewing} onClick={() => returnToStep('map')}>{t('back')}</Button>
                                 {reviewStale && (
-                                    <Button variant="outline" onClick={runPreview} disabled={previewing}>
+                                    <Button variant="outline" onClick={runPreview} disabled={busy || previewing}>
                                         {previewing && <LoaderCircle className="size-4 animate-spin" />}
                                         {t('refreshReview')}
                                     </Button>
@@ -606,6 +716,12 @@ function MapStep({
     usesNameParts,
     nameConflict,
     nameSamples,
+    customFields,
+    customFieldsFailed,
+    retryCustomFields,
+    customFieldsLoading,
+    duplicateColumns,
+    unavailableColumns,
 }: {
     parsed: ParsedCsv;
     entity: ImportEntity;
@@ -618,6 +734,12 @@ function MapStep({
     usesNameParts: boolean;
     nameConflict: boolean;
     nameSamples: string[];
+    customFields: CustomFieldSchemaEntry[];
+    customFieldsFailed: boolean;
+    retryCustomFields: () => void;
+    customFieldsLoading: boolean;
+    duplicateColumns: Set<string>;
+    unavailableColumns: Set<string>;
 }) {
     const t = useTranslations('importExport');
     const nameOrderId = useId();
@@ -660,27 +782,39 @@ function MapStep({
             )}
             {nameConflict && <p className="text-sm text-destructive" role="alert">{t('nameMappingConflict')}</p>}
             {entity === 'deals' && <p className="text-xs text-muted-foreground">{t('dealDateHint')}</p>}
+            <Button variant="outline" size="toolbar" disabled={customFieldsLoading}
+                aria-busy={customFieldsLoading} onClick={retryCustomFields}>
+                {customFieldsLoading && <LoaderCircle className="size-4 animate-spin" />}
+                {t(customFieldsLoading ? 'refreshingCustomFields' : 'refreshCustomFields')}
+            </Button>
+            {customFieldsFailed && <p role="alert" className="text-sm text-destructive">{t('customFieldsFailed')}</p>}
             <div className="space-y-2">
                 {parsed.headers.map((header) => {
                     const col = columns[header];
                     const target = resolveColumnTarget(col?.target, canCreateCustomField);
                     const samples = columnSamples(parsed.rows, header, 3).join(', ');
                     return (
-                        <div key={header} className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 rounded-lg border border-border px-3 py-2">
+                        <div key={header} data-import-column={header} className="grid min-w-0 grid-cols-1 items-center gap-3 rounded-lg border border-border px-3 py-2 sm:grid-cols-[1fr_auto_1fr]">
                             <div className="min-w-0">
                                 <p className="truncate text-sm font-medium">{header}</p>
                                 {samples && <p className="truncate text-xs text-muted-foreground">{samples}</p>}
                             </div>
-                            <span className="text-muted-foreground" aria-hidden>→</span>
-                            <div className="flex items-center gap-2">
+                            <span className="hidden text-muted-foreground sm:block" aria-hidden>→</span>
+                            <div className="flex min-w-0 flex-wrap items-center gap-2">
                                 <Select value={target} onValueChange={(v) => setTarget(header, v)}>
                                     <SelectTrigger size="sm" className="w-full" aria-label={t('mapColumn', { column: header })}>
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>
                                         <SelectItem value={IGNORE_COLUMN}>{t('ignore')}</SelectItem>
+                                        {unavailableColumns.has(header) && <SelectItem value={target} disabled>{t('unavailableCustomField')}</SelectItem>}
                                         {fieldOptions.map((f) => (
                                             <SelectItem key={f.key} value={f.key}>{f.label}</SelectItem>
+                                        ))}
+                                        {customFields.map((field) => (
+                                            <SelectItem key={field.definitionId} value={`custom:${field.definitionId}`}>
+                                                {t('existingCustomField', { name: field.label })}
+                                            </SelectItem>
                                         ))}
                                         {canCreateCustomField && (
                                             <SelectItem value={CREATE_CUSTOM_FIELD}>{t('createCustomField')}</SelectItem>
@@ -698,6 +832,11 @@ function MapStep({
                                             ))}
                                         </SelectContent>
                                     </Select>
+                                )}
+                                {duplicateColumns.has(header) && <p role="alert" className="w-full text-sm text-destructive">{t('duplicateMapping')}</p>}
+                                {unavailableColumns.has(header) && <p role="alert" className="w-full text-sm text-destructive">{t('unavailableCustomFieldHint')}</p>}
+                                {target === CREATE_CUSTOM_FIELD && customFields.filter((field) => field.label.trim() === header.trim() && field.fieldType === col?.customType).length === 1 && (
+                                    <p className="w-full text-xs text-muted-foreground">{t('reuseCustomField')}</p>
                                 )}
                             </div>
                         </div>
@@ -722,7 +861,19 @@ function ReviewStep({
     onLink,
     onUnlink,
     requestInit,
+    source,
+    companyLinks,
+    skippedRows,
+    onCompanyChoice,
+    onSkip,
+    onEdit,
 }: {
+    source: ParsedCsv | null;
+    companyLinks: Record<number, number>;
+    skippedRows: number[];
+    onCompanyChoice: (indices: number[], id: number | null) => void;
+    onSkip: (index: number) => void;
+    onEdit: (index: number, column: string, value: string) => void;
     preview: ImportPreviewResult;
     stale: boolean;
     onDuplicate: ImportDuplicateAction;
@@ -740,14 +891,12 @@ function ReviewStep({
     const t = useTranslations('importExport');
     const formatter = useFormatter();
     const missingCloseDates = preview.rows.filter((row) => row.dealDates?.usesImportTime).length;
-    const reviewable = preview.rows.filter((row) => row.status !== 'skip');
-    const candidateRows = reviewable.filter((row) => (row.candidates?.length ?? 0) > 0);
-    const priorityRows = reviewable.filter((row) => (row.candidates?.length ?? 0) > 0 || row.dealDates?.futureClosedAt);
-    const ordinaryRows = reviewable.filter((row) => (row.candidates?.length ?? 0) === 0 && !row.dealDates?.futureClosedAt);
-    const shown = [
-        ...priorityRows,
-        ...ordinaryRows.slice(0, Math.max(0, 100 - priorityRows.length)),
-    ].sort((left, right) => left.rowIndex - right.rowIndex);
+    const skipped = useMemo(() => new Set(skippedRows), [skippedRows]);
+    const [filter, setFilter] = useState<ReviewFilter>('all');
+    const [page, setPage] = useState(0);
+    const rows = useMemo(() => importReviewRows(preview), [preview]);
+    const pagination = reviewPage(rows, filter, page);
+    const shown = pagination.rows;
     return (
         <div className="space-y-5">
             {stale && (
@@ -761,7 +910,7 @@ function ReviewStep({
                     {DUPLICATE_ACTIONS.map((action) => (
                         <Button
                             key={action}
-                            size="sm"
+                            size="toolbar"
                             variant={onDuplicate === action ? 'default' : 'outline'}
                             disabled={previewing}
                             onClick={() => onSelectAction(action)}
@@ -785,15 +934,27 @@ function ReviewStep({
                 </div>
             )}
 
+            <p className="text-xs text-muted-foreground">{t('reviewTotal', { count: preview.total })}</p>
+            <Select value={filter} onValueChange={(value) => {
+                const next = REVIEW_FILTERS.find((item) => item === value);
+                if (next) { setFilter(next); setPage(0); }
+            }}>
+                <SelectTrigger className="w-full sm:w-64" aria-label={t('reviewFilter')}><SelectValue /></SelectTrigger>
+                <SelectContent>
+                    {REVIEW_FILTERS.map((value) => <SelectItem key={value} value={value}>
+                        {t(`reviewFilters.${value}`)} ({value === 'all' ? rows.length
+                            : rows.filter((row) => value === 'decision' ? needsImportDecision(row) : row.status === value).length})
+                    </SelectItem>)}
+                </SelectContent>
+            </Select>
+            <nav aria-label={t('reviewPagination')} className="flex flex-wrap items-center justify-between gap-2">
+                <Button size="toolbar" variant="outline" disabled={pagination.current === 0} onClick={() => setPage(pagination.current - 1)}>{t('previousPage')}</Button>
+                <span className="text-xs text-muted-foreground" role="status">{t('reviewPage', { page: pagination.current + 1, pages: pagination.pages, total: pagination.total })}</span>
+                <Button size="toolbar" variant="outline" disabled={pagination.current + 1 >= pagination.pages} onClick={() => setPage(pagination.current + 1)}>{t('nextPage')}</Button>
+            </nav>
+            {shown.length === 0 && <p className="text-sm text-muted-foreground">{t('reviewEmpty')}</p>}
             {shown.length > 0 && (
                 <div className="space-y-2">
-                    <p className="text-xs text-muted-foreground">
-                        {t('reviewLinkHint', {
-                            shown: shown.length,
-                            total: reviewable.length,
-                            candidates: candidateRows.length,
-                        })}
-                    </p>
                     <div className="overflow-hidden rounded-lg border border-border">
                         <table role="table" className="block w-full text-sm sm:table">
                             <caption className="sr-only">{t('reviewTableCaption')}</caption>
@@ -807,7 +968,7 @@ function ReviewStep({
                             </thead>
                             <tbody role="rowgroup" className="block sm:table-row-group">
                                 {shown.map((row) => (
-                                    <tr key={row.rowIndex} role="row" className="grid grid-cols-[auto_1fr] border-b border-border last:border-0 sm:table-row">
+                                    <tr key={row.rowIndex} role="row" data-import-row={row.rowIndex} className="grid grid-cols-[auto_1fr] border-b border-border last:border-0 sm:table-row">
                                         <td role="cell" className="px-3 pt-3 text-xs text-muted-foreground sm:w-12 sm:py-2 sm:align-middle">#{row.rowIndex + 1}</td>
                                         <td role="cell" className="px-3 pt-3 sm:w-20 sm:py-2 sm:align-middle">
                                             <Badge variant={row.status === 'invalid' ? 'destructive' : row.status === 'match' ? 'secondary' : 'outline'}>
@@ -816,15 +977,13 @@ function ReviewStep({
                                         </td>
                                         <td role="cell" className="col-span-2 min-w-0 px-3 py-2 sm:max-w-0 sm:align-middle">
                                             <div className="min-w-0 space-y-2">
-                                                <p className={cn(
-                                                    'break-words text-sm sm:truncate',
-                                                    row.errors?.length ? 'text-destructive' : 'text-muted-foreground',
-                                                )}>
-                                                    {row.errors?.length
-                                                        ? importRowErrorMessage(row.errors.map((error) => error === 'Company name variant requires an explicit company selection'
-                                                            ? t('companyVariantNeedsReview') : error), t('currencyInvalid'))
-                                                        : row.matchedLabel ?? (nameColumn && parsed ? parsed.rows[row.rowIndex]?.[nameColumn] ?? '' : '')}
+                                                <p className="break-words text-sm font-medium">
+                                                    {nameColumn && parsed ? parsed.rows[row.rowIndex]?.[nameColumn] ?? '' : row.matchedLabel}
                                                 </p>
+                                                {row.matchedId != null && <p className="break-words text-xs text-muted-foreground">{t('linkedTo', { name: row.matchedLabel ?? '' })}</p>}
+                                                {importPresentationProblems(row).map((problem) => <p key={`${row.rowIndex}:${problem.code}:${problem.field ?? ''}`} className="break-words text-sm text-destructive">
+                                                    {problemText(t, problem)}
+                                                </p>)}
                                                 {row.dealDates && (
                                                     <div className="space-y-1 text-xs text-muted-foreground">
                                                         {(['closedAt', 'createdAt'] as const).map((field) => {
@@ -853,7 +1012,9 @@ function ReviewStep({
                                                             : t('rowMergeContributor', { row: row.canonicalRowIndex + 1 })}
                                                     </p>
                                                 )}
-                                                {row.candidates && row.candidates.length > 0 && (
+                                                {row.candidates && row.candidates.length > 0 && row.status !== 'match' && row.status !== 'skip' && (
+                                                    <details>
+                                                        <summary className="cursor-pointer py-2 text-xs font-medium">{t('showCandidates', { count: row.candidates.length })}</summary>
                                                     <DuplicateCandidates
                                                         entity={entity}
                                                         candidates={row.candidates}
@@ -864,17 +1025,38 @@ function ReviewStep({
                                                             candidate.name,
                                                         )}
                                                     />
+                                                    </details>
                                                 )}
+                                                {row.companyDependency && <CompanyChoices row={row} allRows={rows}
+                                                    selectedId={companyLinks[row.rowIndex]} onChoice={onCompanyChoice} />}
+                                                {source && <details>
+                                                    <summary className="cursor-pointer py-2 text-xs font-medium">{t('editRow')}</summary>
+                                                    <div className="space-y-3 py-2">
+                                                        <p className="text-xs text-muted-foreground">{t('editRowHint')}</p>
+                                                        {source.headers.map((column) => <label key={column} className="block space-y-1 text-xs">
+                                                            <span className="break-words">{column}</span>
+                                                            <Input value={source.rows[row.rowIndex]?.[column] ?? ''}
+                                                                onChange={(event) => {
+                                                                    if (event.target.value !== (source.rows[row.rowIndex]?.[column] ?? '')) onEdit(row.rowIndex, column, event.target.value);
+                                                                }} />
+                                                        </label>)}
+                                                    </div>
+                                                </details>}
                                             </div>
                                         </td>
                                         <td role="cell" className="col-span-2 min-w-0 px-3 pb-3 text-left sm:w-56 sm:py-2 sm:text-right sm:align-middle">
-                                            <RowLinker
+                                            <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                                            <Button size="toolbar" variant="outline" onClick={() => onSkip(row.rowIndex)}>
+                                                {t(skipped.has(row.rowIndex) ? 'includeRow' : 'skipRow')}
+                                            </Button>
+                                            {!skipped.has(row.rowIndex) && <RowLinker
                                                 entity={entity}
                                                 linkedLabel={links[row.rowIndex] != null ? linkLabels[row.rowIndex] : undefined}
                                                 onLink={(id, label) => onLink(row.rowIndex, id, label)}
                                                 onClear={() => onUnlink(row.rowIndex)}
                                                 requestInit={requestInit}
-                                            />
+                                            />}
+                                            </div>
                                         </td>
                                     </tr>
                                 ))}
@@ -887,12 +1069,52 @@ function ReviewStep({
     );
 }
 
+function problemText(t: ReturnType<typeof useTranslations>, problem: ImportProblem): string {
+    const key = `problems.${problem.code}`;
+    return t(t.has(key) ? key : 'problems.ROW_INVALID', { field: problem.field ?? '' });
+}
+
+function CompanyChoices({ row, allRows, selectedId, onChoice }: {
+    row: ImportRowAnalysis;
+    allRows: ImportRowAnalysis[];
+    selectedId?: number;
+    onChoice: (indices: number[], id: number | null) => void;
+}) {
+    const t = useTranslations('importExport');
+    const dependency = row.companyDependency;
+    if (!dependency) return null;
+    const selected = dependency.candidates?.find((candidate) => candidate.recordId === selectedId);
+    const indices = selectedId == null ? [] : companyChoiceRows(allRows, row, selectedId);
+    return <details open={selectedId == null}>
+        <summary className="cursor-pointer py-2 text-xs font-medium">
+            {t('companyChoice', { name: dependency.name })}
+            {selected && <span className="block break-words font-normal text-muted-foreground">
+                {t('linkedTo', { name: [selected.name, selected.industry, selected.website].filter(Boolean).join(' · ') })}
+            </span>}
+        </summary>
+        <p className="mb-2 text-xs text-muted-foreground">{t(dependency.truncated ? 'problems.COMPANY_TRUNCATED' : 'companyChoiceHint')}</p>
+        {!dependency.truncated && <DuplicateCandidates entity="companies" candidates={dependency.candidates ?? []}
+            linkedId={selectedId} allowShared onLink={(candidate) => onChoice([row.rowIndex], candidate.recordId)} />}
+        {selected && <div className="mt-2 space-y-2">
+            <p className="break-words text-xs">{t('bulkCompanyReview', { name: selected.name, count: indices.length })}</p>
+            <div className="flex flex-wrap gap-2">
+                {indices.length > 1 && <Button size="toolbar" variant="outline" onClick={() => onChoice(indices, selected.recordId)}>
+                    {t('applyCompanyChoice', { count: indices.length })}
+                </Button>}
+                <Button size="toolbar" variant="ghost" onClick={() => onChoice([row.rowIndex], null)}>{t('clearCompanyChoice')}</Button>
+            </div>
+        </div>}
+    </details>;
+}
+
 function DuplicateCandidates({
     entity,
     candidates,
     linkedId,
     onLink,
+    allowShared = false,
 }: {
+    allowShared?: boolean;
     entity: ImportEntity;
     candidates: DuplicateCandidate[];
     linkedId?: number;
@@ -912,11 +1134,12 @@ function DuplicateCandidates({
                 return (
                     <div
                         key={`${candidate.recordType}-${candidate.recordId}`}
+                        data-import-candidate={candidate.recordId}
                         className="flex min-w-0 items-start justify-between gap-3 rounded-md border border-border bg-muted/40 px-2.5 py-2"
                     >
                         <div className="min-w-0 space-y-1">
                             <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                                <span className="truncate text-xs font-medium text-foreground">
+                                <span className="break-words text-xs font-medium text-foreground">
                                     {candidate.name}
                                 </span>
                                 <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
@@ -931,12 +1154,12 @@ function DuplicateCandidates({
                                 </Badge>
                                 {!candidate.ownedByActiveWorkspace && (
                                     <span className="text-[11px] text-muted-foreground">
-                                        {t('candidateShared')}
+                                        {t(allowShared ? 'dependencyShared' : 'candidateShared')}
                                     </span>
                                 )}
                             </div>
                             {context.length > 0 && (
-                                <p className="truncate text-[11px] text-muted-foreground">
+                                <p className="break-words text-[11px] text-muted-foreground">
                                     {context.join(' · ')}
                                 </p>
                             )}
@@ -947,18 +1170,19 @@ function DuplicateCandidates({
                                     .join(' · ')}
                             </p>
                         </div>
-                        {candidate.ownedByActiveWorkspace
+                        {(candidate.ownedByActiveWorkspace || allowShared)
                                 && candidate.recordType === (
                                     entity === 'companies' ? 'company' : entity === 'persons' ? 'person' : ''
                                 ) && (
-                            <button
-                                type="button"
+                            <Button
+                                size="toolbar"
+                                variant="outline"
                                 disabled={selected}
                                 onClick={() => onLink(candidate)}
-                                className="shrink-0 rounded-sm px-1.5 py-0.5 text-xs font-medium text-foreground underline-offset-2 transition-colors hover:bg-accent hover:underline disabled:text-muted-foreground disabled:no-underline"
+                                className="shrink-0"
                             >
                                 {selected ? t('candidateSelected') : t('candidateUse')}
-                            </button>
+                            </Button>
                         )}
                     </div>
                 );
@@ -1077,19 +1301,20 @@ function RowLinker({
 
     if (linkedLabel) {
         return (
-            <button
+            <Button
                 ref={actionButtonRef}
-                type="button"
+                size="toolbar"
+                variant="outline"
                 onClick={() => {
                     onClear();
                     window.requestAnimationFrame(() => actionButtonRef.current?.focus());
                 }}
                 aria-label={t('linkClear', { name: linkedLabel })}
-                className="inline-flex max-w-full items-center gap-1 rounded-sm bg-accent px-2 py-0.5 text-xs text-accent-foreground transition-colors hover:bg-accent/70"
+                className="max-w-full"
             >
                 <span className="truncate">{t('linkedTo', { name: linkedLabel })}</span>
                 <XMarkIcon className="size-3 shrink-0" />
-            </button>
+            </Button>
         );
     }
     if (!open) {
@@ -1185,13 +1410,11 @@ function DoneStep({ result, entity, parsed }: { result: ImportResult; entity: Im
     const reduceMotion = useReducedMotion();
     function downloadErrors() {
         if (!parsed) return;
-        const lines = [[...parsed.headers, 'error'].map(csvCell).join(',')];
+        const lines = [[...parsed.headers, t('errorColumn')].map(csvCell).join(',')];
         result.failed.forEach((failure) => {
             const row = parsed.rows[failure.rowIndex];
             if (!row) return;
-            const reason = importRowErrorMessage(failure.errors ?? failure.reason, t('currencyInvalid'))
-                .replaceAll('Company name variant requires an explicit company selection', t('companyVariantNeedsReview'));
-            lines.push([...parsed.headers.map((h) => row[h] ?? ''), reason].map(csvCell).join(','));
+            lines.push([...parsed.headers.map((h) => row[h] ?? ''), (importPresentationProblems(failure).map((problem) => problemText(t, problem)).join('; ') || t('problems.ROW_INVALID'))].map(csvCell).join(','));
         });
         const blob = new Blob([String.fromCharCode(0xfeff) + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
         const url = URL.createObjectURL(blob);
@@ -1224,7 +1447,7 @@ function DoneStep({ result, entity, parsed }: { result: ImportResult; entity: Im
                         <DocumentTextIcon className="size-4" />
                         {t('failedCount', { count: result.failed.length })}
                     </span>
-                    <Button variant="outline" size="sm" onClick={downloadErrors}>{t('downloadErrors')}</Button>
+                    <Button variant="outline" size="toolbar" onClick={downloadErrors}>{t('downloadErrors')}</Button>
                 </div>
             )}
         </div>
