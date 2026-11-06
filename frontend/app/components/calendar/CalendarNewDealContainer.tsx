@@ -1,5 +1,8 @@
 'use client';
 
+import { useWorkspace } from '@/app/hooks/useWorkspace';
+import { usePipelineChoices } from '@/app/hooks/usePipelineChoices';
+
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
@@ -40,9 +43,10 @@ export default function CalendarNewDealContainer({
     const t = useTranslations('Calendar');
     const showApiError = useApiErrorToast('Calendar');
 
-    const [loaded, setLoaded] = useState(false);
-    const [pipelines, setPipelines] = useState<Pipeline[]>([]);
-    const [stagesByPipeline, setStagesByPipeline] = useState<Record<number, Stage[]>>({});
+    const [loadedScope, setLoadedScope] = useState<object | null>(null);
+    const { activeWorkspaceId } = useWorkspace();
+    const { scope: pipelineScope, pipelines, stagesByPipeline, setPipelines, setStagesByPipeline } = usePipelineChoices();
+    const loaded = loadedScope === pipelineScope;
 
     const [payload, setPayload] = useState<CreateDealPayload>(EMPTY_DRAFT);
     const [creating, setCreating] = useState(false);
@@ -51,23 +55,24 @@ export default function CalendarNewDealContainer({
     useEffect(() => {
         if (!open || loaded) return;
         let cancelled = false;
+        const origin = workspacePinnedRequest(activeWorkspaceId);
         void (async () => {
-            const nextPipelines = await getPipelines().catch(() => [] as Pipeline[]);
+            const nextPipelines = await getPipelines(origin).catch(() => [] as Pipeline[]);
             if (cancelled) return;
             setPipelines(nextPipelines);
             const entries = await Promise.all(
                 nextPipelines.map(
-                    async (p) => [p.id, await getStagesByPipelineId(p.id).catch(() => [] as Stage[])] as const,
+                    async (p) => [p.id, await getStagesByPipelineId(p.id, origin).catch(() => [] as Stage[])] as const,
                 ),
             );
             if (cancelled) return;
             setStagesByPipeline(Object.fromEntries(entries));
-            setLoaded(true);
+            setLoadedScope(pipelineScope);
         })();
         return () => {
             cancelled = true;
         };
-    }, [open, loaded]);
+    }, [pipelineScope, activeWorkspaceId, setPipelines, setStagesByPipeline, open, loaded]);
 
     useEffect(() => {
         if (!open) return;
@@ -76,7 +81,7 @@ export default function CalendarNewDealContainer({
             setSucceeded(false);
         });
         return () => window.cancelAnimationFrame(raf);
-    }, [open, defaultExpectedCloseDate]);
+    }, [activeWorkspaceId, open, defaultExpectedCloseDate]);
 
     const handleOpenChange = (next: boolean) => {
         if (!next && creating) return;

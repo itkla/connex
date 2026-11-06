@@ -89,6 +89,22 @@ for (const locale of ['en', 'ja'] as const) {
         await editor.locator(`#pipeline-stage-${pipelineId}-0-down`).press('Enter');
         await expect(editor.locator(`#pipeline-stage-${pipelineId}-1-down`)).toBeFocused();
         await editor.locator(`#pipeline-stage-${pipelineId}-1-up`).press('Space');
+        let rejectSave = true;
+        await page.route(`**/api/pipelines/${pipelineId}/stages`, async (route) => {
+            if (route.request().method() === 'PUT' && rejectSave) {
+                rejectSave = false;
+                await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'Unavailable' }) });
+            } else {
+                await route.continue();
+            }
+        });
+        const rejected = page.waitForResponse((response) => response.url().endsWith(`/api/pipelines/${pipelineId}/stages`) && response.request().method() === 'PUT');
+        await editor.getByRole('button', { name: message(locale, 'pipelines', 'PipelinesQuickEditSheet.save'), exact: true }).click();
+        expect((await rejected).status()).toBe(503);
+        await expect(editor.locator(`#pipeline-stage-${pipelineId}-0`)).toHaveValue(message(locale, 'deals', 'DealsNewDialog.starterOpen'));
+        await expect(editor.locator(`#pipeline-stage-${pipelineId}-1`)).toHaveValue('Discovery');
+        await expect(editor.getByRole('status').filter({ hasText: message(locale, 'pipelines', 'PipelineStageOrder.restored') })).toHaveText(message(locale, 'pipelines', 'PipelineStageOrder.restored'));
+        await editor.locator(`#pipeline-stage-${pipelineId}-1-up`).press('Enter');
         const saved = page.waitForResponse((response) => response.url().endsWith(`/api/pipelines/${pipelineId}/stages`) && response.request().method() === 'PUT');
         await editor.getByRole('button', { name: message(locale, 'pipelines', 'PipelinesQuickEditSheet.save'), exact: true }).click();
         const savedResponse = await saved;

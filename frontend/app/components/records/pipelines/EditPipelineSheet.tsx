@@ -11,7 +11,7 @@ import { replacePipelineStages, updatePipeline } from '@/app/lib/api';
 import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { Pipeline, Stage, UpdatePipelinePayload } from '@/app/lib/types';
 import QuickEditPipelineSheet, { type PipelineDraft, type StageKind } from '@/app/components/records/pipelines/QuickEditPipelineSheet';
-import { insertOpenStage } from '@/app/components/records/pipelines/stageDrafts';
+import { insertOpenStage, newStageDraft, restoreStageOrder } from '@/app/components/records/pipelines/stageDrafts';
 
 function toDraft(p: Pipeline, stages: Stage[] = []): PipelineDraft {
     return {
@@ -50,6 +50,7 @@ export default function EditPipelineSheet({
     const reportApiError = useApiErrorToast('PipelinesEditSheet');
     const [draft, setDraft] = useState<PipelineDraft>(() => toDraft(pipeline, stages));
     const [isSaving, setIsSaving] = useState(false);
+    const [orderRestorationVersion, setOrderRestorationVersion] = useState(0);
     const { fieldErrors, setFieldErrors, reset: resetFieldErrors, clearError } = useFieldErrors();
 
     const handleOpenChange = (next: boolean) => {
@@ -82,7 +83,7 @@ export default function EditPipelineSheet({
         clearError('stages');
         setDraft((prev) => ({
             ...prev,
-            stages: insertOpenStage(prev.stages, { id: null, name: '', success: false, failure: false }),
+            stages: insertOpenStage(prev.stages, { id: null, ...newStageDraft() }),
         }));
     };
 
@@ -133,6 +134,10 @@ export default function EditPipelineSheet({
             setDraft(toDraft(pipeline, fresh));
             router.refresh();
         } catch (err) {
+            if (draft.stageOrderBeforeMove) {
+                setDraft((current) => ({ ...current, stages: restoreStageOrder(current.stages, draft.stageOrderBeforeMove), stageOrderBeforeMove: undefined }));
+                setOrderRestorationVersion((version) => version + 1);
+            }
             reportApiError(err, 'failedToSave');
         } finally {
             setIsSaving(false);
@@ -156,6 +161,7 @@ export default function EditPipelineSheet({
             removeStage={removeStage}
             isSaving={isSaving}
             saveEdits={saveEdits}
+            orderRestorationVersion={orderRestorationVersion}
             fieldErrors={{ [pipeline.id]: fieldErrors }}
         />
     );

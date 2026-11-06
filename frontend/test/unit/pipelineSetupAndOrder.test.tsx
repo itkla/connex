@@ -7,11 +7,13 @@ import NewPipelineDialog from '@/app/components/records/pipelines/NewPipelineDia
 import EditPipelineSheet from '@/app/components/records/pipelines/EditPipelineSheet';
 import { NewDealForm } from '@/app/components/records/deals/NewDealDialog';
 import { insertOpenStage, moveStage } from '@/app/components/records/pipelines/stageDrafts';
-import { createPipeline, replacePipelineStages } from '@/app/lib/api';
+import { createPipeline, getStagesByPipelineId, replacePipelineStages } from '@/app/lib/api';
+import { usePipelineChoices } from '@/app/hooks/usePipelineChoices';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import type { CreateDealPayload, CreatePipelinePayload, Pipeline, Stage } from '@/app/lib/types';
 
-const state = vi.hoisted(() => ({ canManage: true, workspaceId: 9 }));
+const state = vi.hoisted(() => ({ canManage: true, workspaceId: 9, version: 0 }));
+const closing = vi.hoisted<{ defer: boolean; complete: (() => void) | null }>(() => ({ defer: false, complete: null }));
 const reportError = vi.hoisted(() => vi.fn());
 const createDeal = vi.hoisted(() => vi.fn());
 const publishPipeline = vi.hoisted(() => vi.fn());
@@ -27,13 +29,15 @@ vi.mock('next-intl', () => ({ useTranslations: () => (key: string, values?: Reco
 } }));
 vi.mock('@/app/hooks/useApiErrorToast', () => ({ useApiErrorToast: () => reportError }));
 vi.mock('@/app/hooks/usePermissions', () => ({ usePermission: () => state.canManage }));
+vi.mock('@/app/hooks/useWorkspace', () => ({ useWorkspace: () => ({ activeWorkspaceId: state.workspaceId }) }));
 vi.mock('@/app/hooks/useCompanySearch', () => ({ useCompanySearch: () => ({ companies: [], options: [], error: null }) }));
 vi.mock('@/app/hooks/useDuplicatePreflight', () => ({ useDuplicatePreflight: () => ({ status: 'idle', blocked: false }) }));
 vi.mock('@/app/components/records/DuplicatePreflightWarning', () => ({ default: () => null }));
 vi.mock('@/app/lib/toast', () => ({ toastSuccess: vi.fn(), toastError: vi.fn(), toastInfo: vi.fn() }));
-vi.mock('@/app/lib/api', () => ({ createPipeline: vi.fn(), replacePipelineStages: vi.fn(), updatePipeline: vi.fn(), isFieldError: () => false }));
+vi.mock('@/app/lib/api', () => ({ createPipeline: vi.fn(), getStagesByPipelineId: vi.fn(), replacePipelineStages: vi.fn(), updatePipeline: vi.fn(), isFieldError: () => false }));
 vi.mock('@/app/lib/renderedWorkspace', () => ({
     renderedWorkspaceId: () => state.workspaceId,
+    renderedWorkspaceNavigationVersion: () => state.version,
     workspacePinnedRequest: (id: number) => ({ headers: { 'X-Workspace-Id': String(id) } }),
 }));
 vi.mock('@/components/ui/dialog-status-cover', async (original) => ({
@@ -45,7 +49,10 @@ vi.mock('@/components/ui/responsive-dialog', () => {
         ResponsiveDialog: ({ open, onCloseComplete, children }: { open: boolean; onCloseComplete?: () => void; children?: ReactNode }) => {
             const wasOpen = useRef(open);
             useEffect(() => {
-                if (wasOpen.current && !open) onCloseComplete?.();
+                if (wasOpen.current && !open) {
+                    if (closing.defer) closing.complete = onCloseComplete ?? null;
+                    else onCloseComplete?.();
+                }
                 wasOpen.current = open;
             }, [open, onCloseComplete]);
             return open ? <>{children}</> : null;
@@ -69,6 +76,12 @@ const stages: Stage[] = [
 ];
 const deal: CreateDealPayload = { name: 'Pending renewal', value: 12345, currency: 'JPY', pipeline: 0, stage: 0, company: 17, expectedCloseDate: '2027-01-01' };
 let root: Root;
+
+function deferred<T>() {
+    let resolve: (value: T) => void = noop;
+    const promise = new Promise<T>((done) => { resolve = done; });
+    return { promise, resolve };
+}
 
 function input(id: string): HTMLInputElement {
     const element = document.getElementById(id);
@@ -116,8 +129,12 @@ beforeEach(() => {
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { callback(0); return 1; });
     state.canManage = true;
     state.workspaceId = 9;
+    state.version = 0;
+    closing.defer = false;
+    closing.complete = null;
     vi.mocked(createPipeline).mockResolvedValue(pipeline);
     vi.mocked(replacePipelineStages).mockResolvedValue(stages);
+    vi.mocked(getStagesByPipelineId).mockResolvedValue([]);
     const container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -148,6 +165,10 @@ describe('pipeline order and setup', () => {
         await change('new-pipeline-stage-1', 'Discovery');
         expect(input('new-pipeline-stage-2').value).toBe('Won');
         expect(input('new-pipeline-stage-3').value).toBe('Lost');
+        const added = input('new-pipeline-stage-1');
+        await act(async () => document.getElementById('new-pipeline-stage-1-up')?.click());
+        expect(input('new-pipeline-stage-0')).toBe(added);
+        expect(input('new-pipeline-stage-1').value).toBe('Lead');
     });
 
     it('moves and saves stages through the shared editor without changing terminal flags', async () => {
@@ -155,10 +176,12 @@ describe('pipeline order and setup', () => {
         await click('addStage');
         expect(document.activeElement).toBe(input('pipeline-stage-41-1'));
         await change('pipeline-stage-41-1', 'Discovery');
+        const added = input('pipeline-stage-41-1');
         const up = document.getElementById('pipeline-stage-41-1-up');
         await act(async () => up?.click());
         expect(document.activeElement?.id).toBe('pipeline-stage-41-0-up');
         expect(input('pipeline-stage-41-0').value).toBe('Discovery');
+        expect(input('pipeline-stage-41-0')).toBe(added);
         expect(document.querySelector('[role="status"]')?.textContent).toBe('moved');
         await click('Save');
         expect(replacePipelineStages).toHaveBeenCalledWith(41, [51, 52, 53], [
@@ -188,7 +211,6 @@ describe('pipeline order and setup', () => {
         vi.mocked(replacePipelineStages).mockRejectedValueOnce(new Error('Unavailable'));
         await render(<DealHarness />);
         await click('setupPipeline');
-        state.workspaceId = 10;
         await submitPipeline();
         expect(reportError).toHaveBeenCalledWith(expect.any(Error), 'pipelineSetupFailed', 'pipelineSetupRetry');
         expect(input('deal-name').value).toBe(deal.name);
@@ -197,6 +219,98 @@ describe('pipeline order and setup', () => {
         expect(replacePipelineStages).toHaveBeenCalledTimes(2);
         expect(vi.mocked(replacePipelineStages).mock.calls.every((call) => new Headers(call[3]?.headers).get('X-Workspace-Id') === '9')).toBe(true);
         expect(input('deal-stage').value).toBe('Lead');
+    });
+
+    it('restores the prior order and announces a rejected stage save, retaining field edits', async () => {
+        vi.mocked(replacePipelineStages).mockRejectedValueOnce(new Error('Rejected'));
+        await render(<EditPipelineSheet pipeline={pipeline} stages={stages} open onOpenChange={noop} />);
+        await act(async () => document.getElementById('pipeline-stage-41-1-up')?.click());
+        await change('pipeline-stage-41-1', 'Renamed lead');
+        await click('Save');
+        expect(input('pipeline-stage-41-0').value).toBe('Renamed lead');
+        expect(input('pipeline-stage-41-1').value).toBe('Won');
+        expect(document.querySelector('[role="status"]')?.textContent).toBe('restored');
+        await render(<EditPipelineSheet pipeline={pipeline} stages={stages} open={false} onOpenChange={noop} />);
+        await render(<EditPipelineSheet pipeline={pipeline} stages={stages} open onOpenChange={noop} />);
+        expect(document.querySelector('[role="status"]')?.textContent).toBe('');
+    });
+
+    it('reconciles a committed stage set after losing its response instead of inserting duplicates', async () => {
+        vi.mocked(replacePipelineStages).mockRejectedValueOnce(new Error('Response lost'));
+        vi.mocked(getStagesByPipelineId).mockResolvedValue(stages);
+        await render(<DealHarness />);
+        await click('setupPipeline');
+        await submitPipeline();
+        await submitPipeline();
+        expect(createPipeline).toHaveBeenCalledTimes(1);
+        expect(replacePipelineStages).toHaveBeenLastCalledWith(41, [51, 52, 53], [
+            { id: 51, name: 'Lead', success: false, failure: false },
+            { id: 52, name: 'Won', success: true, failure: false },
+            { id: 53, name: 'Lost', success: false, failure: true },
+        ], { headers: { 'X-Workspace-Id': '9' } });
+        expect(new Headers(vi.mocked(getStagesByPipelineId).mock.calls[0][1]?.headers).get('X-Workspace-Id')).toBe('9');
+    });
+
+    it.each(['create', 'stages'])('discards a stale setup response during %s', async (step) => {
+        const createReply = deferred<Pipeline>();
+        const stageReply = deferred<Stage[]>();
+        if (step === 'create') vi.mocked(createPipeline).mockReturnValueOnce(createReply.promise);
+        else vi.mocked(replacePipelineStages).mockReturnValueOnce(stageReply.promise);
+        await render(<DealHarness />);
+        await click('setupPipeline');
+        await act(async () => { input('pipeline-name').form?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+        state.workspaceId = 10;
+        state.version++;
+        await render(<DealHarness />);
+        await act(async () => {
+            if (step === 'create') createReply.resolve(pipeline);
+            else stageReply.resolve(stages);
+        });
+        expect(publishPipeline).not.toHaveBeenCalled();
+        expect(JSON.parse(document.querySelector('output')?.textContent ?? '{}')).toMatchObject({ pipeline: 0, stage: 0 });
+        expect(new Headers(vi.mocked(createPipeline).mock.calls[0][1]?.headers).get('X-Workspace-Id')).toBe('9');
+        expect(replacePipelineStages).toHaveBeenCalledTimes(1);
+        expect(vi.mocked(replacePipelineStages).mock.calls.every((call) => new Headers(call[3]?.headers).get('X-Workspace-Id') === '9')).toBe(true);
+    });
+
+    it('discards completion when the workspace changes during the closing animation, even after returning', async () => {
+        closing.defer = true;
+        await render(<DealHarness />);
+        await click('setupPipeline');
+        await submitPipeline();
+        expect(closing.complete).not.toBeNull();
+        state.workspaceId = 10;
+        state.version++;
+        state.workspaceId = 9;
+        state.version++;
+        await act(async () => closing.complete?.());
+        expect(publishPipeline).not.toHaveBeenCalled();
+        expect(input('deal-pipeline').value).toBe('');
+        closing.defer = false;
+        await click('setupPipeline');
+        await submitPipeline();
+        expect(publishPipeline).toHaveBeenCalledTimes(1);
+    });
+
+    it('scopes choice caches and late callbacks to a workspace visit', async () => {
+        const capture: { current: ReturnType<typeof usePipelineChoices> | null } = { current: null };
+        function Harness() {
+            const choices = usePipelineChoices();
+            useEffect(() => { capture.current = choices; }, [choices]);
+            return <output>{choices.pipelines.map((item) => item.name).join(',')}</output>;
+        }
+        await render(<Harness />);
+        const first = capture.current;
+        if (!first) throw new Error('Missing initial choices');
+        await act(async () => first.setPipelines([pipeline]));
+        state.workspaceId = 10;
+        await render(<Harness />);
+        expect(document.querySelector('output')?.textContent).toBe('');
+        await act(async () => first.setStagesByPipeline({ 41: stages }));
+        state.workspaceId = 9;
+        await render(<Harness />);
+        await act(async () => first.setPipelines([pipeline]));
+        expect(document.querySelector('output')?.textContent).toBe('');
     });
 
     it('refuses setup without an open stage and keeps the deal draft', async () => {

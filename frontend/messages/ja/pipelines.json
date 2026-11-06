@@ -101,6 +101,7 @@
     "moveUp": "ステージを上へ移動",
     "moveDown": "ステージを下へ移動",
     "stageName": "ステージ{position}の名前",
-    "moved": "{name}を全{count}ステージ中の{position}番目に移動しました。"
+    "moved": "{name}を全{count}ステージ中の{position}番目に移動しました。",
+    "restored": "ステージの並び順を保存できなかったため、変更前の順序に戻しました。"
   }
 }

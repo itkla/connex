@@ -8,7 +8,7 @@ import { PlusIcon, XMarkIcon, FunnelIcon, FlagIcon } from '@heroicons/react/24/o
 import { Label } from '@/components/ui/label';
 import { type CreatePipelinePayload } from '@/app/lib/types';
 import { stageKindOf, type StageKind } from '@/app/components/records/pipelines/QuickEditPipelineSheet';
-import { Dispatch, SetStateAction, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Dispatch, SetStateAction, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Select, SelectItem, SelectContent, SelectValue, SelectTrigger } from '@/components/ui/select';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
@@ -16,7 +16,7 @@ import { isFieldError } from '@/app/lib/api';
 import { cn } from '@/lib/utils';
 import { DialogStatusCover, resolveDialogStatus, fieldInputClass, fieldErrorClass, fieldLeadIconClass } from '@/components/ui/dialog-status-cover';
 import { StageOrderControls } from './StageOrderControls';
-import { insertOpenStage, moveStage } from './stageDrafts';
+import { insertOpenStage, moveStage, newStageDraft } from './stageDrafts';
 import { isSubmitShortcut } from '@/app/lib/submitShortcut';
 
 type Props = {
@@ -44,7 +44,7 @@ export default function NewPipelineDialog({
 }: Props) {
     const t = useTranslations('PipelinesNewDialog');
     const tOrder = useTranslations('PipelineStageOrder');
-    const stages = payload.stages ?? [];
+    const stages = useMemo(() => payload.stages ?? [], [payload.stages]);
     const pendingFocus = useRef<string | null>(null);
     const [announcement, setAnnouncement] = useState('');
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
@@ -61,6 +61,14 @@ export default function NewPipelineDialog({
     useEffect(() => {
         if (!open) resetFieldErrors();
     }, [open, resetFieldErrors]);
+
+    useEffect(() => {
+        if (!stages.some((stage) => !stage.clientId)) return;
+        setPayload((previous) => ({
+            ...previous,
+            stages: previous.stages?.map((stage) => stage.clientId ? stage : { ...stage, clientId: crypto.randomUUID() }),
+        }));
+    }, [stages, setPayload]);
 
     useLayoutEffect(() => {
         if (!pendingFocus.current) return;
@@ -102,7 +110,7 @@ export default function NewPipelineDialog({
         pendingFocus.current = `new-pipeline-stage-${terminalIndex < 0 ? stages.length : terminalIndex}`;
         setPayload((prev) => ({
             ...prev,
-            stages: insertOpenStage(prev.stages ?? [], { name: '', success: false, failure: false }),
+            stages: insertOpenStage(prev.stages ?? [], newStageDraft()),
         }));
     };
 
@@ -184,9 +192,10 @@ export default function NewPipelineDialog({
                             <div className="flex flex-col gap-2">
                                 <p role="status" className="sr-only">{announcement}</p>
                                 {stages.map((s, i) => {
+                                    if (!s.clientId) return null;
                                     const isDuplicate = duplicateStageNames.has((s.name ?? '').trim().toLowerCase());
                                     return (
-                                        <div key={i} className="flex flex-wrap items-center gap-2">
+                                        <div key={s.clientId} className="flex flex-wrap items-center gap-2">
                                             <div className="group relative min-w-24 flex-1">
                                                 <FlagIcon className={fieldLeadIconClass} />
                                                 <input

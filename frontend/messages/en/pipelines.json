@@ -101,6 +101,7 @@
     "moveUp": "Move stage up",
     "moveDown": "Move stage down",
     "stageName": "Stage {position} name",
-    "moved": "{name} moved to position {position} of {count}."
+    "moved": "{name} moved to position {position} of {count}.",
+    "restored": "Couldn't save the stage order. The previous order has been restored."
   }
 }

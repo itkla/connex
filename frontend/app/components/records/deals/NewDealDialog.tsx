@@ -27,6 +27,7 @@ import { useCompanySearch } from '@/app/hooks/useCompanySearch';
 import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
 import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';
 import DealPipelineSetup from '@/app/components/records/deals/DealPipelineSetup';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { toastError } from '@/app/lib/toast';
 import {
     TagIcon,
@@ -457,7 +458,9 @@ export function NewDealForm({
     const t = useTranslations('DealsNewDialog');
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
     const submissionPendingRef = useRef(false);
-    const [createdPipeline, setCreatedPipeline] = useState<{ pipeline: Pipeline; stages: Stage[] } | null>(null);
+    const { activeWorkspaceId } = useWorkspace();
+    const [createdPipeline, setCreatedPipeline] = useState<{ workspaceId: number | null; pipeline: Pipeline; stages: Stage[] } | null>(null);
+    if (createdPipeline && createdPipeline.workspaceId !== activeWorkspaceId) setCreatedPipeline(null);
     const availablePipelines = createdPipeline && !pipelines.some((pipeline) => pipeline.id === createdPipeline.pipeline.id)
         ? [...pipelines, createdPipeline.pipeline] : pipelines;
     const availableStages = createdPipeline
@@ -545,8 +548,8 @@ export function NewDealForm({
                         companySearch={companySearch}
                         duplicatePreflight={duplicatePreflight}
                         pipelineSetup={
-                            <DealPipelineSetup needed={availablePipelines.length === 0} requestInit={requestInit} onCreated={(pipeline, stages) => {
-                                setCreatedPipeline({ pipeline, stages });
+                            <DealPipelineSetup key={activeWorkspaceId} needed={availablePipelines.length === 0} requestInit={requestInit} onCreated={(pipeline, stages) => {
+                                setCreatedPipeline({ workspaceId: activeWorkspaceId, pipeline, stages });
                                 onPipelineCreated?.(pipeline, stages);
                                 const firstOpenStage = [...stages].sort((a, b) => a.position - b.position)
                                     .find((stage) => !stage.success && !stage.failure);

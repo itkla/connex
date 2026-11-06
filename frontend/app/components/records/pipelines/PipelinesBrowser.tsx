@@ -30,7 +30,7 @@ import PipelineCard from '@/app/components/records/pipelines/PipelineCard';
 import NewPipelineDialog from '@/app/components/records/pipelines/NewPipelineDialog';
 import QuickEditPipelineSheet, { type PipelineDraft, type StageKind } from '@/app/components/records/pipelines/QuickEditPipelineSheet';
 import { parsePipelineEditId } from '@/app/components/records/pipelines/pipelineLinks';
-import { insertOpenStage } from '@/app/components/records/pipelines/stageDrafts';
+import { insertOpenStage, newStageDraft, restoreStageOrder } from '@/app/components/records/pipelines/stageDrafts';
 import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
 import {
@@ -121,6 +121,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
     const openedDeepLinkRef = useRef<number | null>(null);
     const [drafts, setDrafts] = useState<Record<number, PipelineDraft>>({});
     const [isSaving, setIsSaving] = useState(false);
+    const [orderRestorationVersion, setOrderRestorationVersion] = useState(0);
     const clearPipelineEditDeepLink = useCallback(() => {
         openedDeepLinkRef.current = null;
         writeOwnedParamsToUrl(pathname, { [PIPELINE_EDIT_URL_KEY]: undefined });
@@ -279,7 +280,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
             if (!current) return prev;
             return {
                 ...prev,
-                [pipelineId]: { ...current, stages: insertOpenStage(current.stages, { id: null, name: '', success: false, failure: false }) },
+                [pipelineId]: { ...current, stages: insertOpenStage(current.stages, { id: null, ...newStageDraft() }) },
             };
         });
     };
@@ -334,24 +335,42 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
 
         setIsSaving(true);
         try {
-            await Promise.all(
+            const results = await Promise.allSettled(
                 changed.map(async (p) => {
                     const draft = drafts[p.id];
                     const original = toDraft(p, stagesByPipeline.get(p.id) ?? []);
 
-                    if (original.name !== draft.name) {
-                        const payload: UpdatePipelinePayload = { name: draft.name.trim() };
-                        await updatePipeline(p.id, payload, origin);
-                    }
+                    try {
+                        if (original.name !== draft.name) {
+                            const payload: UpdatePipelinePayload = { name: draft.name.trim() };
+                            await updatePipeline(p.id, payload, origin);
+                        }
 
-                    await replacePipelineStages(p.id, (stagesByPipeline.get(p.id) ?? []).map((s) => s.id), draft.stages.map((s) => ({
-                        id: s.id ?? undefined,
-                        name: s.name.trim(),
-                        success: s.success,
-                        failure: s.failure,
-                    })), origin);
+                        await replacePipelineStages(p.id, (stagesByPipeline.get(p.id) ?? []).map((s) => s.id), draft.stages.map((s) => ({
+                            id: s.id ?? undefined,
+                            name: s.name.trim(),
+                            success: s.success,
+                            failure: s.failure,
+                        })), origin);
+                    } catch (error) {
+                        if (draft.stageOrderBeforeMove) {
+                            setDrafts((current) => {
+                                const currentDraft = current[p.id];
+                                if (!currentDraft) return current;
+                                return { ...current, [p.id]: {
+                                    ...currentDraft,
+                                    stages: restoreStageOrder(currentDraft.stages, draft.stageOrderBeforeMove),
+                                    stageOrderBeforeMove: undefined,
+                                } };
+                            });
+                            setOrderRestorationVersion((version) => version + 1);
+                        }
+                        throw error;
+                    }
                 }),
             );
+            const rejected = results.find((result) => result.status === 'rejected');
+            if (rejected) throw rejected.reason;
             toastSuccess(
                 changed.length === 1 ? t('pipelineUpdated') : t('pipelinesUpdated', { count: changed.length }),
             );
@@ -635,6 +654,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
                     removeStage={removeStage}
                     isSaving={isSaving}
                     saveEdits={saveEdits}
+                    orderRestorationVersion={orderRestorationVersion}
                 />
 
                 <NewPipelineDialog

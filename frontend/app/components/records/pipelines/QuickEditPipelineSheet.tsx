@@ -19,7 +19,7 @@ import {
 } from '@/app/components/records/quick-edit/QuickEditSheetShell';
 import { quickEditErrorId } from '@/app/hooks/useFieldErrors';
 import { StageOrderControls } from './StageOrderControls';
-import { moveStage } from './stageDrafts';
+import { moveStage, stageDraftKey } from './stageDrafts';
 
 export type StageKind = 'normal' | 'won' | 'lost';
 
@@ -36,6 +36,7 @@ const STAGE_DOT: Record<StageKind, string> = {
 };
 
 export type PipelineStageDraft = {
+    clientId?: string;
     id: number | null;
     name: string;
     success: boolean;
@@ -45,6 +46,7 @@ export type PipelineStageDraft = {
 export type PipelineDraft = {
     name: string;
     stages: PipelineStageDraft[];
+    stageOrderBeforeMove?: string[];
 };
 
 type Props = {
@@ -60,6 +62,7 @@ type Props = {
     removeStage: (pipelineId: number, index: number) => void;
     isSaving: boolean;
     saveEdits: () => void;
+    orderRestorationVersion?: number;
     /** Per-pipeline inline validation messages, keyed by pipeline id then `name` or `stages`. */
     fieldErrors?: Record<number, Record<string, string>>;
 };
@@ -77,12 +80,14 @@ export default function QuickEditPipelineSheet({
     isSaving,
     saveEdits,
     fieldErrors,
+    orderRestorationVersion = 0,
 }: Props) {
     const t = useTranslations('PipelinesQuickEditSheet');
     const total = selectedPipelines.length;
     const tOrder = useTranslations('PipelineStageOrder');
     const pendingFocus = useRef<string | null>(null);
-    const [announcement, setAnnouncement] = useState('');
+    const [announcement, setAnnouncement] = useState({ open, version: orderRestorationVersion, text: '' });
+    if (announcement.open !== open) setAnnouncement({ open, version: orderRestorationVersion, text: '' });
 
     useLayoutEffect(() => {
         if (!pendingFocus.current) return;
@@ -104,7 +109,7 @@ export default function QuickEditPipelineSheet({
             cancelLabel={t('cancel')}
             dirtySnapshot={drafts}
         >
-            <p role="status" className="sr-only">{announcement}</p>
+            <p role="status" className="sr-only">{announcement.version === orderRestorationVersion ? announcement.text : tOrder('restored')}</p>
             {selectedPipelines.map((p, idx) => {
                 const draft = drafts[p.id];
                 if (!draft) return null;
@@ -131,7 +136,7 @@ export default function QuickEditPipelineSheet({
                             <Label>{t('stages')}</Label>
                             <div className="flex flex-col gap-2">
                                 {draft.stages.map((s, i) => (
-                                    <div key={s.id ?? `new-${i}`} className="flex flex-wrap items-center gap-2">
+                                    <div key={stageDraftKey(s)} className="flex flex-wrap items-center gap-2">
                                         <span className={cn('size-2 shrink-0 rounded-full', STAGE_DOT[stageKindOf(s)])} />
                                         <Input
                                             id={`pipeline-stage-${p.id}-${i}`}
@@ -167,8 +172,11 @@ export default function QuickEditPipelineSheet({
                                             disabled={isSaving}
                                             onMove={(to, direction) => {
                                                 pendingFocus.current = `pipeline-stage-${p.id}-${to}-${direction}`;
-                                                updateDraft(p.id, { stages: moveStage(draft.stages, i, to) });
-                                                setAnnouncement(tOrder('moved', { name: s.name, position: to + 1, count: draft.stages.length }));
+                                                updateDraft(p.id, {
+                                                    stages: moveStage(draft.stages, i, to),
+                                                    stageOrderBeforeMove: draft.stageOrderBeforeMove ?? draft.stages.map(stageDraftKey),
+                                                });
+                                                setAnnouncement({ open, version: orderRestorationVersion, text: tOrder('moved', { name: s.name, position: to + 1, count: draft.stages.length }) });
                                             }}
                                         />
                                         <IconButton
