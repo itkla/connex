@@ -17,6 +17,7 @@ import { WorkspaceProvider } from '@/app/hooks/useWorkspace';
 import type { Deal, Pipeline, Stage, User, Workspace } from '@/app/lib/types';
 import { bindRenderedWorkspace, releaseRenderedWorkspace } from '@/app/lib/renderedWorkspace';
 import { deferred, json } from './helpers/workspaceChainBackend';
+import { TooltipProvider } from '@/components/ui/tooltip';
 
 declare global {
     var IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -116,6 +117,7 @@ async function renderCard(card: ReactNode, permissions: readonly string[] = []) 
     await act(async () => {
         root.render(
             <NextIntlClientProvider locale="en" messages={messages}>
+                <TooltipProvider>
                 <AppRouterContext.Provider value={router}>
                     <PathnameContext.Provider value="/records/contacts">
                         <SearchParamsContext.Provider value={new URLSearchParams()}>
@@ -127,6 +129,7 @@ async function renderCard(card: ReactNode, permissions: readonly string[] = []) 
                         </SearchParamsContext.Provider>
                     </PathnameContext.Provider>
                 </AppRouterContext.Provider>
+                </TooltipProvider>
             </NextIntlClientProvider>,
         );
     });
@@ -471,8 +474,14 @@ describe('real record card action menus', () => {
 
         const kanbanCard = container.querySelector<HTMLElement>('[data-kanban-card]');
         expect(kanbanCard).not.toBeNull();
-        expect(kanbanCard?.getAttribute('role')).toBe(draggable ? 'button' : null);
-        expect(kanbanCard?.getAttribute('tabindex')).toBe(draggable ? '0' : null);
+        expect(kanbanCard?.getAttribute('role')).toBeNull();
+        expect(kanbanCard?.getAttribute('tabindex')).toBeNull();
+        const handle = kanbanCard?.querySelector('[data-kanban-drag-handle]');
+        expect(Boolean(handle)).toBe(draggable);
+        if (draggable) {
+            expect(handle?.getAttribute('role')).toBe('button');
+            expect(handle?.getAttribute('tabindex')).toBe('0');
+        }
     });
 
     it('invokes the owned contact handlers through the real menu items', async () => {
