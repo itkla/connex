@@ -27,6 +27,7 @@ import ooo.klae.connex.backend.services.WarmthFilterResolver;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.util.DealFilterNormalizer;
 import ooo.klae.connex.backend.util.LikePattern;
+import ooo.klae.connex.backend.services.CurrencyFilterService;
 
 /**
  * REST controller for CSV export of contacts, companies, deals, and products. Each endpoint returns
@@ -48,6 +49,7 @@ public class ExportController {
     private final MemberScopeResolver memberScopeResolver;
     private final WarmthFilterResolver warmthFilterResolver;
     private final WorkspaceService workspaceService;
+    private final CurrencyFilterService currencyFilterService;
 
     /**
      * Export contacts as CSV, honoring the contact list's search, facet, and member-scope filters.
@@ -134,7 +136,7 @@ public class ExportController {
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
         MemberScope memberScope = resolveMemberScope(scope, memberIds);
         return csv("deals.csv", exportService.exportDeals(
-            query, currency,
+            query, currencyFilterService.resolve(currency),
             DealFilterNormalizer.normalizeIds(pipelineId, "pipelineId"),
             DealFilterNormalizer.normalizeIds(stageId, "stageId"),
             DealFilterNormalizer.normalizeIds(companyId, "companyId"),
@@ -155,7 +157,7 @@ public class ExportController {
         MemberScope memberScope = resolveMemberScope(request.getScope(), request.getMemberIds());
         return csv("deals.csv", exportService.exportSegmentDeals(
             request.getDefinition(), query,
-            request.getCurrency() == null || request.getCurrency().isBlank() ? null : request.getCurrency(),
+            currencyFilterService.resolve(request.getCurrency()),
             DealFilterNormalizer.normalizeIds(request.getPipelineId(), "pipelineId"),
             DealFilterNormalizer.normalizeIds(request.getStageId(), "stageId"),
             DealFilterNormalizer.normalizeIds(request.getCompanyId(), "companyId"),

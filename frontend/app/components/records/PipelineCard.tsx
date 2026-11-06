@@ -1,12 +1,14 @@
+'use client';
+
 import Link from "next/link";
-import { getLocale, getTranslations } from "next-intl/server";
+import { useLocale, useTranslations } from "next-intl";
 import { formatCompactCurrency } from "@/app/lib/utils";
 import { type Deal } from "@/app/lib/types";
 
-export default async function PipelineCard({ deals, render = "active" }: { deals: Deal[], render?: "active" | "inactive" | "previous"
+export default function PipelineCard({ deals, render = "active" }: { deals: Deal[], render?: "active" | "inactive" | "previous"
  }   ) {
-    const t = await getTranslations('RecordsPipelineCard');
-    const locale = await getLocale();
+    const t = useTranslations('RecordsPipelineCard');
+    const locale = useLocale();
     let title = "";
     let emptyMessage = "";
     switch (render) {
@@ -31,8 +33,6 @@ export default async function PipelineCard({ deals, render = "active" }: { deals
         <>
             <div className="mt-6 mb-3 flex h-8 items-center">
                 <h2 className="px-6 text-xs font-medium tracking-[0.12em] text-muted-foreground uppercase">
-                    {/* // show all types and let the user click to switch between them */}
-                    {/* <span className="cursor-pointer" onClick={() => setType(type === "active" ? "inactive" : type === "inactive" ? "previous" : "active")}>{title}</span> */}
                     {title}
                 </h2>
             </div>

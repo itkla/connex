@@ -13,6 +13,44 @@ Money in Connex is `BigDecimal`, **scale 2, `HALF_UP`**. Every deal has exactly 
 also governs its line items. **There is no FX anywhere**, and aggregates never sum across
 currencies — every revenue figure is currency-partitioned.
 
+### Currency boundaries and approval configuration
+
+New deal and approval-policy currencies use the shared `CurrencyCodes` ISO 4217 monetary validator.
+New values are trimmed and uppercased with `Locale.ROOT`; no-currency, testing and nonmonetary
+codes are refused. Create-request validation uses `ValidCurrency.OnCreate`; update requests defer
+currency admission to the workspace-scoped service, which compares against the persisted record.
+Deal creation defaults an omitted, null or blank currency to the schema's `USD` default;
+explicit nonblank input must be ISO-valid. Whole-record edits still require a supplied currency,
+and a blank analytics filter is refused rather than defaulted or dropped. Guided creation applies
+its resolved template currency first, then uses the same create-only default if still absent.
+Normalized equality means trimmed, case-insensitive equality, without aliases or FX. An unchanged
+stored currency, including `X-LOCAL`, `US$`, lowercase or padded ISO codes, retains its exact stored
+spelling. Newly entered values still require ISO validation. Line-item edits use the same normalized
+comparison before deciding whether currency changed; persisted line/deal consistency checks also
+ignore space padding and case. No stored currency is inferred or migrated.
+
+Deal list, metrics, analytics, matching-id and CSV export currency filters, including segment bodies,
+resolve through `CurrencyFilterService` against existing buckets in the active workspace. Exact
+stored values take precedence, then normalized equivalents; an existing bucket is passed to SQL
+unchanged. A value with no existing bucket must be a supported ISO code. An absent/null filter
+retains its existing meaning; a supplied blank or unknown malformed code returns HTTP 400 and never
+drops the currency predicate.
+
+Approval-policy responses include read-only `currencyValid`. Settings → CRM configuration →
+Approval policies warns about saved configuration and offers code entry for the complete supported
+ISO set, including KWD and CLF. An unchanged legacy value can be retained while editing other fields;
+its warning remains until explicitly corrected. Evaluation refuses an invalid active policy only
+when its document type, currency bucket and threshold conditions otherwise apply, including when an
+earlier policy matches. An unrelated bucket or a total below the threshold is evaluated normally.
+A missing currency does not invent a bucket. No thresholds means the existing blanket-policy rule;
+discount thresholds keep their existing currency-independent semantics.
+
+Approval/finalization mutations retain HTTP 409 `APPROVAL_POLICY_CURRENCY_INVALID` for an applicable
+invalid policy. Document reads preserve every frozen snapshot, including final documents; an affected
+draft instead carries that code in `approvalConfigurationError` and `requiresApproval: true`. The
+sales document panel displays localized correction guidance and withholds advancement actions for
+that draft. A failed draft evaluation cannot become an empty document list.
+
 `deal.value_source` declares where `deal.value` comes from:
 
 | `value_source` | `deal.value` is | Manual edits |

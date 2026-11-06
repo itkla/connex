@@ -20,6 +20,8 @@ import type {
 } from "@/app/lib/types";
 import enCampaigns from "@/messages/en/campaigns.json";
 import jaCampaigns from "@/messages/ja/campaigns.json";
+import enRecords from "@/messages/en/records.json";
+import jaRecords from "@/messages/ja/records.json";
 import {
     installInteractiveDocument,
     type InteractiveElement,
@@ -50,7 +52,10 @@ vi.mock("next-intl", async () => {
         import("@/messages/en/campaigns.json"),
         import("@/messages/ja/campaigns.json"),
     ]);
-    const catalogs = { en, ja };
+    const [{ default: enRecords }, { default: jaRecords }] = await Promise.all([
+        import("@/messages/en/records.json"), import("@/messages/ja/records.json"),
+    ]);
+    const catalogs = { en: { ...en, ...enRecords }, ja: { ...ja, ...jaRecords } };
     return {
         useTimeZone: () => localeState.zone, useLocale: () => localeState.locale,
         useTranslations: (namespace: string) => (
@@ -299,9 +304,11 @@ function detailHtml(
     audienceUnavailable: boolean,
     snapshots: CampaignAudienceSnapshotSummary[] = [SNAPSHOT],
     engagement: CampaignEngagement | null = null,
+    failures: Pick<ComponentProps<typeof CampaignDetail>, "messagesFailure" | "sendsFailure" | "exportsFailure"> = {},
 ): string {
     return renderToStaticMarkup(
         <CampaignDetail
+            {...failures}
             campaign={CAMPAIGN}
             initialAudience={null}
             audienceUnavailable={audienceUnavailable}
@@ -373,6 +380,62 @@ describe("campaign date inputs", () => {
 });
 
 describe("campaign audience labels and unavailable state", () => {
+    it("hides failed delivery and export collections instead of showing empty states in both locales", () => {
+        for (const locale of ["en", "ja"] as const) {
+            localeState.locale = locale;
+            const catalog = locale === "en" ? enCampaigns : jaCampaigns;
+            const records = locale === "en" ? enRecords : jaRecords;
+            const html = detailHtml(false, [], null, {
+                messagesFailure: { kind: "failed", status: 503 },
+                exportsFailure: { kind: "failed", status: 403 },
+            });
+            const failedTitle = records.RecordListState.sectionTitle.replace("{section}", catalog.CampaignMessages.title);
+            const deniedTitle = records.RecordListState.sectionDeniedTitle.replace("{section}", catalog.CampaignDetail.tabExports);
+            expect(html).toContain(failedTitle.replaceAll("'", "&#x27;"));
+            expect(html).toContain(deniedTitle.replaceAll("'", "&#x27;"));
+            expect(html).not.toContain(catalog.CampaignMessages.empty);
+            expect(html).not.toContain(catalog.CampaignExports.empty);
+            const recovered = detailHtml(false, []);
+            expect(recovered).toContain(catalog.CampaignMessages.empty);
+            expect(recovered).toContain(catalog.CampaignExports.empty);
+        }
+    });
+
+    it("keeps message authoring visible when only sends fail in both locales", () => {
+        for (const locale of ["en", "ja"] as const) {
+            localeState.locale = locale;
+            const catalog = locale === "en" ? enCampaigns : jaCampaigns;
+            const html = detailHtml(false, [], null, { sendsFailure: { kind: "failed", status: 503 } });
+            expect(html).toContain(catalog.CampaignMessages.empty);
+            expect(html).toContain(catalog.CampaignMessages.new);
+            expect(html).not.toContain(catalog.CampaignSends.empty);
+        }
+    });
+
+    it("keeps send history visible while refusing queueing and hiding message labels after a message denial", () => {
+        const send: ComponentProps<typeof CampaignDelivery>["initialSends"][number] = {
+            id: 9, campaignId: CAMPAIGN.id, snapshotId: 11, origin: "audience",
+            messageId: EMAIL_MESSAGE.id, messageVersion: 1, channel: "email", purpose: "marketing",
+            providerId: null, status: "draft", scheduledAt: null, startedAt: null, completedAt: null,
+            totalRecipients: 1, dispatchedCount: 0, skippedCount: 0, failedCount: 0,
+            createdById: 1, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+            contentRefused: true,
+        };
+        const html = (denied: boolean) => renderToStaticMarkup(<CampaignDelivery campaignId={CAMPAIGN.id}
+            initialMessages={[EMAIL_MESSAGE]} initialSends={[send]} snapshots={[SNAPSHOT]}
+            messagesFailure={denied ? { kind: "failed", status: 403 } : null}
+            access={{ manage: true, send: true, consent: true }} deliveryAvailability="enabled" />);
+        const queue = (markup: string) => [...markup.matchAll(/<button\b[^>]*>[\s\S]*?<\/button>/g)]
+            .map((match) => match[0]).find((button) => button.endsWith(`>${enCampaigns.CampaignSends.queue}</button>`));
+        expect(queue(html(false))).not.toContain('disabled=""');
+        const denied = html(true);
+        expect(queue(denied)).toContain('disabled=""');
+        expect(denied).toContain(enCampaigns.CampaignSends.title);
+        expect(denied).toContain(enCampaigns.CampaignSends.contentRefusedStatus);
+        expect(denied).toContain(enCampaigns.CampaignSends.contentRefused);
+        expect(denied).not.toContain(EMAIL_MESSAGE.name);
+    });
+
     it.each(["en", "ja"] as const)("shows persisted send refusal to readers without roster permission in %s", (locale) => {
         localeState.locale = locale;
         const send = {
@@ -393,7 +456,7 @@ describe("campaign audience labels and unavailable state", () => {
         expect(html).not.toContain("CAMPAIGN_UNSUPPORTED_TOKEN");
     });
 
-    it("reuses a saved revision and keeps the draft after saving another immutable revision", async () => {
+    it("keeps saved-revision inspection and reuse independent of failed sends, then hides inspection when messages fail", async () => {
         const interactive = installInteractiveDocument();
         const { createRoot } = await import("react-dom/client");
         const root = createRoot(interactive.container);
@@ -404,7 +467,7 @@ describe("campaign audience labels and unavailable state", () => {
         await act(async () => {
             root.render(<CampaignDelivery campaignId={CAMPAIGN.id} initialMessages={[EMAIL_MESSAGE]}
                 initialSends={[]} snapshots={[]} access={{ manage: true, send: true, consent: true }}
-                deliveryAvailability="enabled" />);
+                sendsFailure={{ kind: "failed", status: 503 }} deliveryAvailability="enabled" />);
         });
         const view = requiredElement(interactive.elements,
             (element) => element.getAttribute("aria-label") === "View revision v1", "Saved revision action");
@@ -427,6 +490,17 @@ describe("campaign audience labels and unavailable state", () => {
         expect(requiredElement(interactive.elements, (element) => element.id === "revision-body-text", "Text body").value)
             .toBe("Update");
         expect(EMAIL_MESSAGE.revisions).toHaveLength(1);
+        await act(async () => { interactive.dispatch("click", view); });
+        expect(inspector.current?.revision).toBeDefined();
+        for (const status of [503, 403]) {
+            inspector.current = null;
+            await act(async () => {
+                root.render(<CampaignDelivery campaignId={CAMPAIGN.id} initialMessages={[EMAIL_MESSAGE]}
+                    initialSends={[]} snapshots={[]} access={{ manage: true, send: true, consent: true }}
+                    messagesFailure={{ kind: "failed", status }} deliveryAvailability="enabled" />);
+            });
+            expect(inspector.current).toBeNull();
+        }
         await act(async () => root.unmount());
     });
 

@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { act, type ReactNode } from "react";
+import { act, type ReactNode, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { NextIntlClientProvider } from "next-intl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -43,8 +43,8 @@ vi.mock("@/components/ui/dropdown-menu", () => ({
     DropdownMenuContent: ({ children }: { children: ReactNode }) => children,
     DropdownMenuTrigger: ({ children }: { children: ReactNode }) => children,
     DropdownMenuSeparator: () => null,
-    DropdownMenuItem: ({ children, onClick }: { children: ReactNode; onClick: () => void }) =>
-        <button onClick={onClick}>{children}</button>,
+    DropdownMenuItem: ({ children, onClick, disabled, title }: { children: ReactNode; onClick: () => void; disabled?: boolean; title?: string }) =>
+        <button onClick={onClick} disabled={disabled} title={title}>{children}</button>,
 }));
 
 const entries: TimelineEntry[] = [
@@ -67,13 +67,13 @@ afterEach(async () => {
     container.remove();
 });
 
-async function render(entry: TimelineEntry, locale: "en" | "ja" = "en") {
+async function render(entry: TimelineEntry, locale: "en" | "ja" = "en", choices: Pick<ComponentProps<typeof TimelineRow>, "personsUnavailable" | "dealsUnavailable"> = {}) {
     const messages = locale === "en"
         ? { ...enMe, ...enRecords, ContactLifecycle: enContacts.ContactLifecycle }
         : { ...jaMe, ...jaRecords, ContactLifecycle: jaContacts.ContactLifecycle };
     await act(async () => root.render(
         <NextIntlClientProvider locale={locale} messages={messages} timeZone="UTC">
-            <ul><TimelineRow entry={entry} author={{ id: 2, displayName: "Aiko", username: "aiko" }}
+            <ul><TimelineRow {...choices} entry={entry} author={{ id: 2, displayName: "Aiko", username: "aiko" }}
                 persons={[]} deals={[]} companyId={null} currentUserId={1} originWorkspaceId={7} /></ul>
         </NextIntlClientProvider>,
     ));
@@ -154,4 +154,19 @@ it("disables confirmation and cancellation while the request is pending", async 
     expect(api.task).toHaveBeenCalledOnce();
     await act(async () => finish?.());
     expect(api.refresh).toHaveBeenCalledOnce();
+});
+
+
+it.each([
+    { entry: entries[0], personsUnavailable: true, dealsUnavailable: false, disabled: false },
+    { entry: entries[0], personsUnavailable: false, dealsUnavailable: true, disabled: true },
+    { entry: entries[1], personsUnavailable: true, dealsUnavailable: false, disabled: true },
+    { entry: entries[1], personsUnavailable: false, dealsUnavailable: true, disabled: true },
+    { entry: entries[2], personsUnavailable: true, dealsUnavailable: true, disabled: false },
+])("gates only an entry's actual editor dependencies: $entry.kind ($personsUnavailable/$dealsUnavailable)", async ({ entry, personsUnavailable, dealsUnavailable, disabled }) => {
+    await render(entry, "en", { personsUnavailable, dealsUnavailable });
+    const edit = [...container.querySelectorAll("button")].find((button) => button.textContent === enMe.MeTimeline.edit);
+    expect(edit?.disabled).toBe(disabled);
+    expect(edit?.title).toBe(disabled ? enRecords.RecordListState.editChoicesUnavailable : "");
+    expect(container.textContent).not.toBe("");
 });

@@ -16,6 +16,9 @@ import {
     SelectContent,
     SelectItem,
 } from "@/components/ui/select";
+import { useDetailSectionData, useDetailSections } from "@/app/hooks/useDetailSections";
+import DetailSectionState from "@/app/components/records/DetailSectionState";
+import type { DetailSectionFailure } from "@/app/lib/detailSectionResult";
 import Panel from "@/app/components/overview/analytics/Panel";
 import PermissionsUnavailable from "@/app/components/PermissionsUnavailable";
 import WorkspaceUnavailableRetry from "@/app/components/WorkspaceUnavailableRetry";
@@ -73,6 +76,8 @@ export default function CampaignDelivery({
     campaignId,
     initialMessages,
     initialSends,
+    messagesFailure = null,
+    sendsFailure = null,
     snapshots,
     access,
     deliveryAvailability,
@@ -80,6 +85,8 @@ export default function CampaignDelivery({
     campaignId: number;
     initialMessages: CampaignMessage[];
     initialSends: CampaignSend[];
+    messagesFailure?: DetailSectionFailure | null;
+    sendsFailure?: DetailSectionFailure | null;
     snapshots: CampaignAudienceSnapshotSummary[];
     access: CampaignAccess;
     deliveryAvailability: CapabilityAvailability;
@@ -92,8 +99,11 @@ export default function CampaignDelivery({
     const showSendApiError = useApiErrorToast("CampaignSends");
     const locale = useLocale();
 
-    const [messages, setMessages] = useState<CampaignMessage[]>(initialMessages);
-    const [sends, setSends] = useState<CampaignSend[]>(initialSends);
+    const [messages, setMessages] = useDetailSectionData("campaignMessages", initialMessages);
+    const [sends, setSends] = useDetailSectionData("campaignSends", initialSends);
+
+    const sections = useDetailSections();
+    const messagesUnavailable = sections?.results.campaignMessages?.kind === 'failed' || (!sections && messagesFailure !== null);
 
     const [dialogOpen, setDialogOpen] = useState(false);
     const [messagePayload, setMessagePayload] = useState<CampaignMessagePayload>(EMPTY_MESSAGE_PAYLOAD);
@@ -345,10 +355,11 @@ export default function CampaignDelivery({
     };
 
     const messageName = (messageId: number) =>
-        messages.find((message) => message.id === messageId)?.name ?? st("unknownMessage");
+        messagesUnavailable ? st("unknownMessage") : messages.find((message) => message.id === messageId)?.name ?? st("unknownMessage");
 
     return (
         <div className="flex flex-col gap-6">
+            <DetailSectionState sectionKeys={["campaignMessages"]} title={t("title")} failure={messagesFailure}>
             <Panel
                 title={t("title")}
                 subtitle={t("subtitle")}
@@ -581,7 +592,9 @@ export default function CampaignDelivery({
                     </div>
                 )}
             </Panel>
+            </DetailSectionState>
 
+            <DetailSectionState sectionKeys={["campaignSends"]} title={st("title")} failure={sendsFailure}>
             <Panel title={st("title")} subtitle={st("subtitle")}>
                 <div className="flex flex-col gap-6">
                     {deliveryAvailability === "unavailable" ? (
@@ -607,7 +620,7 @@ export default function CampaignDelivery({
                             </p>
                         </div>
                     )}
-                    {canMaterializeSend && (
+                    {canMaterializeSend && !messagesUnavailable && (
                         <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4">
                             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                                 <div className="grid gap-1.5">
@@ -811,7 +824,7 @@ export default function CampaignDelivery({
                                                         variant="brand"
                                                         size="sm"
                                                         onClick={() => queue(send)}
-                                                        disabled={busy || deliveryUnavailable}
+                                                        disabled={busy || deliveryUnavailable || messagesUnavailable}
                                                     >
                                                         {busy ? (
                                                             <Loader2Icon className="size-4 animate-spin" />
@@ -850,14 +863,15 @@ export default function CampaignDelivery({
                     )}
                 </div>
             </Panel>
+            </DetailSectionState>
 
-            {inspectedRevision && <CampaignRevisionSheet
+            {inspectedRevision && !messagesUnavailable && <CampaignRevisionSheet
                 revision={inspectedRevision}
                 isSms={isSmsMessage}
                 onClose={() => setInspectedRevision(null)}
                 onUse={canManage && !isSavingRevision ? startFromRevision : undefined}
             />}
-            {pendingRevisionDraft && <ConfirmDiscardDialog
+            {pendingRevisionDraft && !messagesUnavailable && <ConfirmDiscardDialog
                 open={pendingRevisionDraft !== null}
                 onKeepEditing={() => setPendingRevisionDraft(null)}
                 onDiscard={() => {
