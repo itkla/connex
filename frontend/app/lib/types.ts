@@ -5180,6 +5180,8 @@ export type WorkflowRunFailure = {
     nodeId: string | null;
     code: string;
     message: string;
+    actionNumber?: number | null;
+    actionType?: string | null;
 };
 
 export type WorkflowRunSummary = {

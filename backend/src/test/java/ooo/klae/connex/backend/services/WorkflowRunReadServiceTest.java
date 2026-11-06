@@ -146,6 +146,46 @@ class WorkflowRunReadServiceTest {
     }
 
     @Test
+    void actionFailureReadbackUsesOnlyAllowlistedEvidenceAndPinnedVersion() {
+        when(workflowMapper.getById(7, 11)).thenReturn(workflow);
+        RuleExecution execution = legacyExecution(9, "failed", asOf.minusMinutes(1));
+        execution.setDetail("""
+            {"workflowVersionId":19,"failure":{"actionNumber":2,"actionType":"add_tag",
+             "code":"action_tag_unavailable","message":"token=private"}}
+            """);
+        when(ruleMapper.getExecutionById(7, 13, 9)).thenReturn(execution);
+        var detail = service.getRun(11, "legacy-9");
+        assertEquals("action_tag_unavailable", detail.failure().code());
+        assertEquals(2, detail.failure().actionNumber());
+        assertEquals("add_tag", detail.failure().actionType());
+        assertFalse(detail.failure().message().contains("private"));
+
+        when(workflowMapper.getByLegacyRuleId(7, 13)).thenReturn(workflow);
+        WorkflowVersion version = new WorkflowVersion();
+        version.setId(19L);
+        version.setVersionNumber(2);
+        version.setDefinitionHash(new byte[32]);
+        when(workflowVersionMapper.getById(7, 11, 19L)).thenReturn(version);
+        assertEquals(2, service.legacySummary(execution).version().number());
+    }
+
+    @Test
+    void unknownFailureEvidenceNeverReturnsStoredPayloads() {
+        RuleExecution execution = legacyExecution(9, "failed", asOf.minusMinutes(1));
+        execution.setDetail("""
+            {"failure":{"actionNumber":1,"actionType":"add_tag","code":"secret=private"},
+             "message":"raw stack trace and customer content"}
+            """);
+        when(workflowMapper.getById(7, 11)).thenReturn(workflow);
+        when(ruleMapper.getExecutionById(7, 13, 9)).thenReturn(execution);
+        var summary = service.getRun(11, "legacy-9");
+        assertEquals("legacy_failed", summary.failure().code());
+        assertNull(summary.failure().actionNumber());
+        assertFalse(summary.failure().message().contains("private"));
+        assertNull(summary.version());
+    }
+
+    @Test
     void canonicalDetailLoadsAndVerifiesTheRunPinnedVersion() {
         when(workflowMapper.getById(7, 11)).thenReturn(workflow);
         WorkflowRunView run = canonicalRun(31L, asOf.minusMinutes(1));
