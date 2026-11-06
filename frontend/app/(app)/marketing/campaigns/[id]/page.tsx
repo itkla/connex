@@ -1,4 +1,4 @@
-import { headers } from "next/headers";
+import { headers, cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import {
     getCampaign,
@@ -12,23 +12,16 @@ import {
     getCurrentUserResultFromCookie,
     getEffectivePermissionsResultFromCookie,
     toResult,
-    type CookieResult,
 } from "@/app/lib/api";
+import { loadDetailSection } from "@/app/lib/loadDetailSection";
+import { DetailSectionsProvider } from "@/app/hooks/useDetailSections";
+import { detailSectionFailure } from "@/app/lib/detailSectionResult";
 import { capabilityAvailability } from "@/app/lib/capabilityAvailability";
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
-import {
-    type CampaignAudience,
-    type CampaignAudienceExport,
-    type CampaignAudienceSnapshotSummary,
-    type CampaignEngagement,
-    type CampaignMessage,
-    type CampaignSend,
-    type InstanceCapabilities,
-} from "@/app/lib/types";
 import CampaignDetail from "@/app/components/marketing/campaigns/CampaignDetail";
 import AccessDeniedPage from "@/app/components/AccessDeniedPage";
 import PermissionsUnavailablePage from "@/app/components/PermissionsUnavailablePage";
-import { loadCollection, loadRecord, type CollectionAccess } from "@/app/lib/recordAccess";
+import { loadCollection, loadRecord } from "@/app/lib/recordAccess";
 import { resolveCampaignAccess } from "@/app/lib/campaignAccess";
 
 export default async function CampaignDetailPage({
@@ -37,6 +30,7 @@ export default async function CampaignDetailPage({
     params: Promise<{ id: string }>;
 }) {
     const cookie = (await headers()).get("cookie");
+    const detailWorkspaceId = Number((await cookies()).get("connex_workspace")?.value) || undefined;
     const userResult = await getCurrentUserResultFromCookie(cookie);
     if (!userResult.ok) {
         return <WorkspaceUnavailablePage />;
@@ -64,27 +58,18 @@ export default async function CampaignDetailPage({
     const [
         audienceResult,
         snapshotsAccess,
-        messages,
-        sends,
-        exports,
+        messagesResult,
+        sendsResult,
+        exportsResult,
         engagement,
         effectivePermissions,
         capabilitiesResult,
-    ]: [
-        { ok: true; data: CampaignAudience | undefined } | { ok: false },
-        CollectionAccess<CampaignAudienceSnapshotSummary>,
-        CampaignMessage[],
-        CampaignSend[],
-        CampaignAudienceExport[],
-        CampaignEngagement | null,
-        CookieResult<string[]>,
-        CookieResult<InstanceCapabilities>,
     ] = await Promise.all([
         getCampaignAudienceFromCookie(id, cookie),
         loadCollection(() => getCampaignSnapshots(id, init)),
-        getCampaignMessages(id, init).catch(() => []),
-        getCampaignSends(id, init).catch(() => []),
-        getCampaignExports(id, init).catch(() => []),
+        loadDetailSection(() => getCampaignMessages(id, init)),
+        loadDetailSection(() => getCampaignSends(id, init)),
+        loadDetailSection(() => getCampaignExports(id, init)),
         getCampaignEngagement(id, init).catch(() => null),
         getEffectivePermissionsResultFromCookie(cookie),
         toResult(getCapabilities(init)),
@@ -97,20 +82,25 @@ export default async function CampaignDetailPage({
         audienceResult.ok && audienceResult.data ? audienceResult.data : null;
 
     return (
+        <DetailSectionsProvider key={`${detailWorkspaceId}:${id}`} recordId={id} workspaceId={detailWorkspaceId} initial={{ campaignMessages: messagesResult, campaignSends: sendsResult, campaignExports: exportsResult }}>
         <CampaignDetail
             campaign={campaignAccess.record}
             initialAudience={initialAudience}
             audienceUnavailable={!audienceResult.ok}
             initialSnapshots={snapshotsAccess.kind === "loaded" ? snapshotsAccess.items : []}
             snapshotsRestricted={snapshotsAccess.kind === "forbidden"}
-            initialMessages={messages}
-            initialSends={sends}
-            initialExports={exports}
+            initialMessages={messagesResult.kind === "loaded" ? messagesResult.data : []}
+            initialSends={sendsResult.kind === "loaded" ? sendsResult.data : []}
+            initialExports={exportsResult.kind === "loaded" ? exportsResult.data : []}
+            messagesFailure={detailSectionFailure(messagesResult)}
+            sendsFailure={detailSectionFailure(sendsResult)}
+            exportsFailure={detailSectionFailure(exportsResult)}
             initialEngagement={engagement}
             access={resolveCampaignAccess(effectivePermissions.data)}
             deliveryAvailability={capabilityAvailability(
                 capabilitiesResult.ok ? capabilitiesResult.data.campaignDelivery : null,
             )}
         />
+        </DetailSectionsProvider>
     );
 }

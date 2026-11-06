@@ -1,9 +1,21 @@
 import { ApiError } from '@/app/lib/api';
-import type { CustomFieldSchemaEntry, ImportColumnMapping, ImportPreviewResult, ImportRowAnalysis } from '@/app/lib/types';
+import type { CustomFieldSchemaEntry, ImportColumnMapping, ImportPreviewResult, ImportProblem, ImportRowAnalysis } from '@/app/lib/types';
 
 export const REVIEW_PAGE_SIZE = 20;
 export const REVIEW_FILTERS = ['all', 'decision', 'invalid', 'create', 'match', 'skip'] as const;
 export type ReviewFilter = typeof REVIEW_FILTERS[number];
+
+/** Prefers structured codes; legacy diagnostics expose only recognized refusals or generic guidance. */
+export function importPresentationProblems(row: Pick<ImportRowAnalysis, 'problems' | 'errors'> & { reason?: string }): ImportProblem[] {
+    if (row.problems?.length) return row.problems;
+    const diagnostics = row.errors?.length ? row.errors : row.reason ? [row.reason] : [];
+    const codes = diagnostics.flatMap((diagnostic) => diagnostic.split('; ')).map((diagnostic) => {
+        if (diagnostic === 'CURRENCY_INVALID') return 'CURRENCY_INVALID';
+        if (diagnostic === 'Company name variant requires an explicit company selection') return 'COMPANY_VARIANT_CHOICE_REQUIRED';
+        return 'ROW_INVALID';
+    });
+    return [...new Set(codes)].map((code) => ({ code }));
+}
 
 /** Joins shared bounded dependency candidates locally without repeating them in the response. */
 export function importReviewRows(preview: ImportPreviewResult): ImportRowAnalysis[] {

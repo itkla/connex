@@ -42,6 +42,8 @@ publish after acknowledged creation, including activity follow-up tasks; rejecte
 publish nothing. This reloads the current filtered page and total even when Quick Create lives outside
 the list tree. A server-component refresh alone does not invalidate those client-owned pages.
 
+Server-loaded detail collections use `loadDetailSection`, a record/workspace-scoped `DetailSectionsProvider`, and `DetailSectionState`. Retry fetches only failed collections and updates their consumers without refreshing the route or reloading successful sections. Failed entry collections hide dependent totals/history; failed editor choices disable the affected editing actions while independently loaded chronology remains visible. Campaign messages, sends and exports recover separately; send creation and queueing additionally require messages. Permission denials hide the affected content, and expired sessions preserve the current path/query through the existing sign-in `redirect` parameter. Late responses cannot publish into another workspace. The recovery wrapper owns the section landmark; embedded content must not add a second region with the same name. A successful retry announces a localized status and transfers focus from its removed Retry control to the named section, unless the user has moved focus elsewhere.
+
 Every collection/list surface distinguishes all four states:
 
 - Loading: shape-matched `loading.tsx` skeletons, not a centered spinner over content.

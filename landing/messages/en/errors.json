@@ -17,7 +17,8 @@
     "workspaceUnavailable": "This belongs to a workspace that is no longer available to you, so nothing was saved. Everything you entered is still here. Copy what you want to keep before you reload.",
     "workspaceUnavailableNamed": "This belongs to {workspace}, which is no longer available to you, so nothing was saved. Everything you entered is still here. Copy what you want to keep before you reload.",
     "reference": "Reference: {id}",
-    "staleRecord": "This record has changed since you loaded it. Your changes were not saved. Review the latest version before saving again."
+    "staleRecord": "This record has changed since you loaded it. Your changes were not saved. Review the latest version before saving again.",
+    "approvalPolicyCurrencyInvalid": "Document approval could not be checked because an approval policy has an invalid currency. Nothing was changed. Ask a workspace administrator to correct it in Settings → CRM configuration → Approval policies."
   },
   "ErrorState": {
     "title": "Something went wrong",

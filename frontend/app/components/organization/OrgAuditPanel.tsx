@@ -1,18 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useTimeZone, useLocale, useMessages, useTranslations } from "next-intl";
-import { Loader2Icon } from "lucide-react";
+import { useMessages, useTranslations } from "next-intl";
 
-import { formatRelativeTime } from "@/app/lib/utils";
 import type { AuditLogEntry } from "@/app/lib/types";
 import { ApiError, getOrgAudit } from "@/app/lib/api";
-import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
-import { useLiveNow } from "@/app/hooks/useNow";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { orgAuditActionKey, titleCaseAction } from "@/app/lib/orgAuditActionLabel";
-import { isSensitiveAuditEntry } from "@/app/lib/auditPresentation";
-import { Button } from "@/components/ui/button";
+import AuditLogBrowser from "@/app/components/admin/AuditLogBrowser";
 import Rise from "@/app/components/motion/Rise";
 import {
     SettingsPanelHeading,
@@ -22,95 +17,63 @@ import { NoAccessCard, EmptyRow, ListCard } from "@/app/components/organization/
 
 const PAGE_SIZE = 30;
 
+type AuditRead =
+    | { kind: "loading" }
+    | { kind: "loaded"; entries: AuditLogEntry[] }
+    | { kind: "refused" }
+    | { kind: "failed" };
 
-/**
- * The organization's own audit log: the governance events that happen above any single workspace.
- *
- * Reading it requires an organization administrator, which both of this panel's homes establish
- * before rendering it, so the panel carries no gate of its own.
- *
- * @param presentation - which of the panel's two homes is rendering it; defaults to its own route
- */
+/** Organization governance events, with the same loaded-row filters as the workspace audit log. */
 export default function OrgAuditPanel({
     presentation = "page",
 }: {
     presentation?: SettingsPanelPresentation;
 } = {}) {
-    const t = useTranslations("OrgAudit");
-    const showApiError = useApiErrorToast("OrgAudit");
-    const messages = useMessages();
-    const locale = useLocale();
-    const timeZone = useTimeZone();
-    const now = useLiveNow();
     const { activeWorkspace } = useWorkspace();
-    const orgId = activeWorkspace?.orgId ?? null;
+    const orgId = activeWorkspace?.orgId;
+    return orgId == null ? null : <OrgAuditContent key={orgId} orgId={orgId} presentation={presentation} />;
+}
 
-    const [entries, setEntries] = useState<AuditLogEntry[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [accessDenied, setAccessDenied] = useState(false);
-    const [loadError, setLoadError] = useState(false);
-    const [loadingMore, setLoadingMore] = useState(false);
-    const [hasMore, setHasMore] = useState(false);
+function OrgAuditContent({ orgId, presentation }: { orgId: number; presentation: SettingsPanelPresentation }) {
+    const t = useTranslations("OrgAudit");
+    const messages = useMessages();
+    const [read, setRead] = useState<AuditRead>({ kind: "loading" });
+
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const entries = await getOrgAudit(orgId, { limit: PAGE_SIZE, offset: 0 });
+                if (!cancelled) setRead({ kind: "loaded", entries });
+            } catch (error) {
+                if (!cancelled) setRead({ kind: error instanceof ApiError && error.status === 403 ? "refused" : "failed" });
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [orgId]);
 
     const actionLabel = (action: string) => {
         const key = orgAuditActionKey(messages, action);
         return key === null ? titleCaseAction(action) : t(key);
     };
 
-    const eventLines = (entry: AuditLogEntry) => {
-        const action = actionLabel(entry.action);
-        const summary = isSensitiveAuditEntry(entry) ? null : entry.summary;
-        return summary ? { title: summary, detail: action } : { title: action, detail: null };
-    };
-
-    useEffect(() => {
-        if (!orgId) return;
-        let cancelled = false;
-        (async () => {
-            setLoading(true);
-            try {
-                const page = await getOrgAudit(orgId, { limit: PAGE_SIZE, offset: 0 });
-                if (cancelled) return;
-                setEntries(page);
-                setHasMore(page.length === PAGE_SIZE);
-            } catch (err) {
-                if (cancelled) return;
-                if (err instanceof ApiError && err.status === 403) setAccessDenied(true);
-                else setLoadError(true);
-            } finally {
-                if (!cancelled) setLoading(false);
-            }
-        })();
-        return () => {
-            cancelled = true;
-        };
-    }, [orgId]);
-
-    async function loadMore() {
-        if (!orgId) return;
-        setLoadingMore(true);
-        try {
-            const page = await getOrgAudit(orgId, { limit: PAGE_SIZE, offset: entries.length });
-            setEntries((prev) => [...prev, ...page]);
-            setHasMore(page.length === PAGE_SIZE);
-        } catch (err) {
-            showApiError(err, "loadMoreFailed");
-        } finally {
-            setLoadingMore(false);
-        }
+    if (read.kind === "refused") return <NoAccessCard />;
+    if (read.kind === "loaded") {
+        return <AuditLogBrowser
+            initialEntries={read.entries}
+            pageSize={PAGE_SIZE}
+            presentation={presentation}
+            orgId={orgId}
+            heading={t("title")}
+            description={t("subtitle")}
+            actionLabel={actionLabel}
+        />;
     }
-
-    if (accessDenied) return <NoAccessCard />;
 
     return (
         <Rise className="space-y-4">
-            <SettingsPanelHeading
-                presentation={presentation}
-                title={t("title")}
-                description={t("subtitle")}
-            />
-
-            {loading ? (
+            <SettingsPanelHeading presentation={presentation} title={t("title")} description={t("subtitle")} />
+            {read.kind === "failed" ? <EmptyRow>{t("loadError")}</EmptyRow> : (
                 <ListCard>
                     {[0, 1, 2].map((i) => (
                         <li key={i} className="flex items-center justify-between gap-3 px-4 py-3">
@@ -119,43 +82,6 @@ export default function OrgAuditPanel({
                         </li>
                     ))}
                 </ListCard>
-            ) : loadError ? (
-                <EmptyRow>{t("loadError")}</EmptyRow>
-            ) : entries.length === 0 ? (
-                <EmptyRow>{t("empty")}</EmptyRow>
-            ) : (
-                <>
-                    <ListCard>
-                        {entries.map((entry) => {
-                            const { title, detail } = eventLines(entry);
-                            const actor = entry.currentActorLabel || entry.actorLabel || t("actorSystem");
-                            return (
-                                <li key={entry.id} className="flex items-start justify-between gap-4 px-4 py-3">
-                                    <div className="min-w-0 flex-1">
-                                        <p className="truncate text-sm font-medium text-foreground">{title}</p>
-                                        <p className="truncate text-xs text-muted-foreground">
-                                            {detail === null ? actor : `${detail} · ${actor}`}
-                                        </p>
-                                    </div>
-                                    <time
-                                        className="shrink-0 pt-0.5 text-xs tabular-nums text-muted-foreground"
-                                        dateTime={entry.createdAt}
-                                        title={entry.createdAt}
-                                    >
-                                        {formatRelativeTime(entry.createdAt, locale, now, timeZone)}
-                                    </time>
-                                </li>
-                            );
-                        })}
-                    </ListCard>
-                    {hasMore && (
-                        <div className="flex justify-center">
-                            <Button variant="outline" onClick={loadMore} disabled={loadingMore}>
-                                {loadingMore ? <Loader2Icon className="size-4 animate-spin" /> : t("loadMore")}
-                            </Button>
-                        </div>
-                    )}
-                </>
             )}
         </Rise>
     );

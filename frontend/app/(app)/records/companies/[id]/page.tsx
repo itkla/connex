@@ -1,17 +1,17 @@
+import { CompanyPeopleSection, CompanyDealsSection } from "@/app/components/records/DetailCollections";
 import { cookies } from "next/headers";
 import Link from "next/link";
-import { Suspense } from "react";
 import { notFound, redirect } from "next/navigation";
 import AccessDeniedPage from "@/app/components/AccessDeniedPage";
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
 import { loadRecord } from "@/app/lib/recordAccess";
+import { loadDetailSection } from "@/app/lib/loadDetailSection";
+import { DetailSectionsProvider } from "@/app/hooks/useDetailSections";
 import { CrumbLabel } from "@/app/hooks/useNavTrail";
 import RecentRecordBridge from "@/app/components/actions/RecentRecordBridge";
 import ActionRecordBridge from "@/app/components/actions/ActionRecordBridge";
 import { getTimeZone, getLocale, getTranslations } from "next-intl/server";
 import { UserIcon } from "@heroicons/react/24/outline";
-import PipelineCard from "@/app/components/records/PipelineCard";
-import { Skeleton } from "@/components/ui/skeleton";
 
 import {
     getAttachmentsFromCookie,
@@ -30,7 +30,7 @@ import {
     getUserReferences,
     getRelationshipMapAvailability,
 } from "@/app/lib/api";
-import { type Company, type Contact, type Deal, type Tag } from "@/app/lib/types";
+import { type Company, type Tag } from "@/app/lib/types";
 import { formatDate, formatDateTime } from "@/app/lib/utils";
 
 import Rise from "@/app/components/motion/Rise";
@@ -48,7 +48,6 @@ import Timeline from "@/app/components/me/Timeline";
 import { commentsFromThreads, TIMELINE_COMMENT_LIMIT } from "@/app/components/me/timelineEntries";
 import { Avatar, AvatarFallback, AvatarGroup, AvatarImage } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import ContactsGrid from "@/app/components/records/companies/ContactsGrid";
 import Attachments from "@/app/components/attachments/Attachments";
 import CommentsSection from "@/app/components/records/comments/CommentsSection";
 import CustomFieldRows from "@/app/components/records/CustomFieldRows";
@@ -62,7 +61,9 @@ type CompanyPageProps = {
 export default async function CompanyPage({ params }: CompanyPageProps) {
     const timeZone = await getTimeZone();
     const { id } = await params;
-    const cookie = (await cookies()).toString();
+    const cookieStore = await cookies();
+    const cookie = cookieStore.toString();
+    const detailWorkspaceId = Number(cookieStore.get("connex_workspace")?.value) || undefined;
     const init = { headers: { cookie } } as const;
     const currentUserResult = await getCurrentUserResultFromCookie(cookie);
     if (!currentUserResult.ok) {
@@ -78,8 +79,8 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
         locale,
         companyAccess,
         allTags,
-        people,
-        deals,
+        peopleResult,
+        dealsResult,
         companyTags,
         engagement,
         timeline,
@@ -94,8 +95,8 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
         getLocale(),
         loadRecord<Company>(() => getCompanyById(id, init)),
         getTags(init).catch(() => [] as Tag[]),
-        getCompanyPeople(id, init).catch(() => [] as Contact[]),
-        getCompanyDeals(id, init).catch(() => [] as Deal[]),
+        loadDetailSection(() => getCompanyPeople(id, init)),
+        loadDetailSection(() => getCompanyDeals(id, init)),
         getCompanyTags(id, init).catch(() => [] as Tag[]),
         getCompanyEngagement(id, init),
         getCompanyTimeline(id, 100, init),
@@ -116,6 +117,8 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
     const company = companyAccess.record;
     const websiteUrl = company.website ? (/^https?:\/\//i.test(company.website) ? company.website : `https://${company.website}`) : undefined;
 
+    const people = peopleResult.kind === "loaded" ? peopleResult.data : [];
+    const deals = dealsResult.kind === "loaded" ? dealsResult.data : [];
     const { activities, tasks, notes } = timeline;
     const relatedUserIds = new Set<number>([
         ...engagement.relatedUserIds,
@@ -129,6 +132,7 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
     const interactionUsers = relatedUsers.filter((user) => interactionUserIds.has(user.id));
 
     return (
+        <DetailSectionsProvider key={`${detailWorkspaceId}:${id}`} recordId={Number(id)} workspaceId={detailWorkspaceId} initial={{ companyPeople: peopleResult, companyDeals: dealsResult }}>
         <PageShell>
                 <Rise>
                     <CrumbLabel value={company.name} />
@@ -263,13 +267,11 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
                         </RecordDetailSection>
 
                         <RecordDetailSection recordKind="company" section="activity">
-                            <PipelineCard deals={deals} render="active" />
+                            <CompanyDealsSection />
                         </RecordDetailSection>
 
                         <RecordDetailSection recordKind="company" section="related">
-                            <Suspense fallback={<Skeleton className="h-40 w-full rounded-2xl" />}>
-                                <ContactsGrid contacts={people} company={company} allTags={allTags} />
-                            </Suspense>
+                            <CompanyPeopleSection company={company} allTags={allTags} />
                         </RecordDetailSection>
                     </Rise>
                 </div>
@@ -303,21 +305,23 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
                         <div>
                             <SectionHeader title={t("timeline")} />
                             <div className="overflow-hidden rounded-2xl border border-border bg-card">
-                                <Timeline
-                                    tasks={tasks}
-                                    activities={activities}
-                                    notes={notes}
-                                    users={relatedUsers}
-                                    persons={people}
-                                    deals={deals}
-                                    comments={commentsFromThreads(commentThreads)}
-                                    currentUserId={currentUser.id}
-                                    companyId={company.id}
-                                />
+                                    <Timeline
+                                        detailKind="company"
+                                        tasks={tasks}
+                                        activities={activities}
+                                        notes={notes}
+                                        users={relatedUsers}
+                                        persons={people}
+                                        deals={deals}
+                                        comments={commentsFromThreads(commentThreads)}
+                                        currentUserId={currentUser.id}
+                                        companyId={company.id}
+                                    />
                             </div>
                         </div>
                     </RecordDetailSection>
                 </Rise>
         </PageShell>
+        </DetailSectionsProvider>
     );
 }

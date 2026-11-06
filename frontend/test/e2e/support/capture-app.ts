@@ -32,8 +32,47 @@ const workspaces: MyWorkspaces = {
 
 function serveApi(request: IncomingMessage, response: ServerResponse): void {
     const pathname = new URL(request.url ?? '/', 'http://localhost').pathname;
+    const failure = /(?:^|;\s*)e2e_detail=(503|403)(?:;|$)/.exec(request.headers.cookie ?? '')?.[1];
+    if (failure && /^\/api\/companies\/1\/(people|deals)$/.test(pathname)) {
+        response.writeHead(Number(failure), { 'Content-Type': 'application/json' })
+            .end(JSON.stringify({ message: 'Section unavailable', correlationId: 'detail-load-test' }));
+        return;
+    }
+    if (/(?:^|;\s*)e2e_detail=unrelated(?:;|$)/.test(request.headers.cookie ?? '')
+        && /^\/api\/companies\/1(?:\/(timeline|engagement))?$/.test(pathname)) {
+        response.writeHead(503).end();
+        return;
+    }
     let body: unknown;
     switch (pathname) {
+        case '/api/companies/1':
+            body = {
+                id: 1, name: 'Detail recovery company', workspaceId: 1,
+                createdAt: user.createdAt, updatedAt: user.updatedAt,
+            };
+            break;
+        case '/api/companies/1/engagement':
+            body = {
+                relatedUserIds: [], weeklyEngagement: [], numActivities: 0, numNotes: 0,
+                numTasks: 0, openTasks: 0, numDeals: 0, pastRevenue: 0, projectedRevenue: 0, currency: 'JPY',
+            };
+            break;
+        case '/api/companies/1/timeline':
+            body = { activities: [{ id: 1, type: 'call', subject: 'Recorded company call', createdById: 1, timestamp: user.createdAt }], tasks: [], notes: [] };
+            break;
+        case '/api/companies/page':
+        case '/api/persons/page':
+            body = { items: [], total: 0 };
+            break;
+        case '/api/tags':
+        case '/api/companies/1/tags':
+        case '/api/companies/1/people':
+        case '/api/companies/1/deals':
+        case '/api/comment-threads':
+        case '/api/companies/1/custom-fields':
+        case '/api/attachments':
+            body = [];
+            break;
         case '/api/capabilities':
             body = {
                 sso: false,

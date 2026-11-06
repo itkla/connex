@@ -1,5 +1,7 @@
 "use client";
 
+import { useDetailSectionData } from "@/app/hooks/useDetailSections";
+
 import { useMemo, useState } from "react";
 import { useTimeZone, useLocale, useTranslations } from "next-intl";
 import { Loader2Icon } from "lucide-react";
@@ -69,7 +71,7 @@ export default function CampaignExportPanel({
     const showApiError = useApiErrorToast("CampaignExports");
     const locale = useLocale();
 
-    const [exports, setExports] = useState<CampaignAudienceExport[]>(initialExports);
+    const [exports, setExports] = useDetailSectionData("campaignExports", initialExports);
     const [exportSnapshot, setExportSnapshot] = useState<string>("");
     const [exportConnector, setExportConnector] = useState<string>("");
     const [isCreatingExport, setIsCreatingExport] = useState(false);
