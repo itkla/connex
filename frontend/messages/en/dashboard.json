@@ -188,6 +188,7 @@
     "summaryUnavailable": "We couldn't load your day's summary."
   },
   "DashboardPipelineChart": {
+    "currencyScope": "{currency} only",
     "pipelineLabel": "Pipeline",
     "activePipeline": "Active pipeline",
     "summary": "{openCount} open · {scheduled} scheduled in next {months} months",
