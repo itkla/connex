@@ -136,6 +136,7 @@ public class RuleActionExecutor {
     }
 
     private void addTag(RuleAction action, AutomationActionContext ctx) {
+        requireTag(action, ctx);
         switch (ctx.recordType()) {
             case "company" -> companyService.addTag(ctx.entityId(), action.getTagId());
             case "person" -> personService.addTag(ctx.entityId(), action.getTagId());
@@ -144,13 +145,17 @@ public class RuleActionExecutor {
         }
     }
 
-    private void removeTag(RuleAction action, AutomationActionContext ctx) {
+    private void requireTag(RuleAction action, AutomationActionContext ctx) {
         if (tagMapper.getTagById(ctx.workspaceId(), action.getTagId()) == null) {
             throw new WorkflowExecutionException(
                 WorkflowDiagnosticCode.ACTION_TAG_UNAVAILABLE.value(),
                 "The workflow action is no longer executable.",
                 true);
         }
+    }
+
+    private void removeTag(RuleAction action, AutomationActionContext ctx) {
+        requireTag(action, ctx);
         switch (ctx.recordType()) {
             case "company" -> companyService.removeTag(ctx.entityId(), action.getTagId());
             case "person" -> personService.removeTag(ctx.entityId(), action.getTagId());

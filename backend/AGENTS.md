@@ -182,6 +182,7 @@ set +a
 - Local DB: `docker compose up -d db`
 - Optional OCR sidecar: `docker compose --profile ocr up -d ocr`
 - Full backend suite: CI-owned through `Backend — build & test`
+- Gradle daemon heap: `gradle.properties` sets `org.gradle.jvmargs` to 2 GiB, because `compileTestJava` runs inside the daemon and keeps about 1.1 GiB live. Raise it there if the daemon reports GC thrashing; don't remove it.
 
 Three tooling traps that cost real time:
 

@@ -13,6 +13,8 @@ import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Isolation;
@@ -42,6 +44,9 @@ class RuleEngineServiceTest extends AbstractServiceTest {
     @Autowired RuleEngineService ruleEngineService;
     @Autowired RuleService ruleService;
     @Autowired RuleMapper ruleMapper;
+    @Autowired WorkflowRunReadService runReadService;
+    @Autowired WorkflowOperationsService operationsService;
+    @Autowired ooo.klae.connex.backend.mappers.WorkflowMapper workflowMapper;
     @Autowired DealDocumentService documentService;
     @Autowired DocumentTemplateService templateService;
     @Autowired JdbcTemplate jdbcTemplate;
@@ -412,7 +417,7 @@ class RuleEngineServiceTest extends AbstractServiceTest {
 
         assertEquals(0, matchedExecutions(rule.getId()));
         assertTrue(ruleMapper.getExecutionsByRule(workspace.getId(), rule.getId(), 50).stream()
-            .anyMatch(execution -> "partial".equals(execution.getStatus())));
+            .anyMatch(execution -> "failed".equals(execution.getStatus())));
         assertTrue(taskMapper.getTasksByDealId(workspace.getId(), deal.getId()).stream()
             .noneMatch(task -> createTask.getTitle().equals(task.getDescription())));
     }
@@ -554,12 +559,13 @@ class RuleEngineServiceTest extends AbstractServiceTest {
         assertFalse(tagged(company.getId(), tag.getId()));
     }
 
-    @Test
-    void removeTag_actionFailsClosedWhenThePublishedTagWasDeleted() {
+    @ParameterizedTest
+    @ValueSource(strings = {"add_tag", "remove_tag"})
+    void tagActionFailsClosedWhenThePublishedTagWasDeleted(String actionType) {
         Company company = newCompany();
         Tag tag = newTag();
         RuleAction remove = new RuleAction();
-        remove.setType("remove_tag");
+        remove.setType(actionType);
         remove.setTagId(tag.getId());
         RuleDto rule = entityChangeRule("company", remove, null, "company.updated");
         tagMapper.delete(workspace.getId(), tag.getId());
@@ -568,8 +574,19 @@ class RuleEngineServiceTest extends AbstractServiceTest {
             workspace.getId(), "company", company.getId(), "company.updated");
 
         assertEquals(0, matchedExecutions(rule.getId()));
-        assertTrue(ruleMapper.getExecutionsByRule(
-            workspace.getId(), rule.getId(), 50).stream()
-            .anyMatch(execution -> "partial".equals(execution.getStatus())));
+        var execution = ruleMapper.getExecutionsByRule(workspace.getId(), rule.getId(), 50).getFirst();
+        assertEquals("failed", execution.getStatus());
+        var workflow = workflowMapper.getByLegacyRuleId(workspace.getId(), rule.getId());
+        var summary = runReadService.listRuns(workflow.getId(), 50, null).items().getFirst();
+        assertEquals("failed", summary.status());
+        assertEquals("action_tag_unavailable", summary.failure().code());
+        assertEquals(1, summary.failure().actionNumber());
+        assertEquals(actionType, summary.failure().actionType());
+        assertNotNull(summary.version());
+        assertEquals("degraded", operationsService.workflow(workflow.getId()).health().state());
+        assertTrue(operationsService.workflow(workflow.getId()).health().signals().contains("latest_run_failed"));
+        assertTrue(operationsService.runs("failed", null, null, 100, null).items().stream()
+            .anyMatch(run -> run.workflowId() == workflow.getId()
+                && "action_tag_unavailable".equals(run.run().failure().code())));
     }
 }

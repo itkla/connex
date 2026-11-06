@@ -436,6 +436,10 @@ public class WorkflowRuntimeClaimService {
         execution.setTriggerEntityId(recordId);
         execution.setStatus("running");
         execution.setDedupeKey(keys.primary());
+        if (workflow != null && workflow.getActiveVersionId() != null
+                && rule.equals(ruleMapper.getById(workspaceId, rule.getId()))) {
+            execution.setDetail("{\"workflowVersionId\":" + workflow.getActiveVersionId() + "}");
+        }
         try {
             ruleMapper.insertExecution(execution);
             return new LegacyClaim(execution, keys.primary(), true, false, false);
