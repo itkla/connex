@@ -2,6 +2,9 @@ package ooo.klae.connex.backend.controllers;
 
 import java.util.List;
 
+import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Size;
+
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -10,6 +13,7 @@ import org.springframework.web.bind.annotation.RestController;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.dto.GeneratedDocumentSummaryDto;
+import ooo.klae.connex.backend.dto.GeneratedDocumentTargetDto;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
@@ -35,6 +39,13 @@ public class GeneratedDocumentController {
     private final DealDocumentService documentService;
     private final MemberScopeResolver memberScopeResolver;
     private final WorkspaceService workspaceService;
+
+    /** Resolves at most fifty document ids without distinguishing unavailable targets. */
+    @GetMapping("/targets")
+    public List<GeneratedDocumentTargetDto> getTargets(
+            @RequestParam @Size(min = 1, max = 50) List<@Positive Integer> ids) {
+        return documentService.getTargets(ids);
+    }
 
     /**
      * Returns one bounded page of generated documents across every deal in the active workspace.

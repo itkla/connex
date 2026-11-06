@@ -4932,6 +4932,11 @@ export function getGeneratedDocuments(params: Types.GeneratedDocumentsPageParams
     return getJson<Types.Page<Types.GeneratedDocumentSummary>>(`/api/documents${buildQuery(params)}`, init);
 }
 
+/** Resolves at most fifty document ids; unavailable documents are absent from the response. */
+export function getGeneratedDocumentTargets(ids: number[], init: RequestInit = {}) {
+    return getJson<Types.GeneratedDocumentTarget[]>(`/api/documents/targets${buildQuery({ ids })}`, { cache: "no-store", ...init });
+}
+
 export function getDealDocuments(dealId: number, init: RequestInit = {}) {
     return getJson<Types.DealDocument[]>(`/api/deals/${dealId}/documents`, init);
 }

@@ -2,21 +2,23 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { getCompanyById, getContactById, getDealSummary, getTaskById } from "@/app/lib/api";
+import { getCompanyById, getContactById, getDealSummary, getGeneratedDocumentTargets, getTaskById } from "@/app/lib/api";
+import { dealDocumentsHref } from "@/app/components/records/deals/dealLinks";
 import { TASK_URL_KEY } from "@/app/hooks/listStateUrl";
 import type { WorkflowRunSummary } from "@/app/lib/types";
 
 type Target = { name: string; href: string };
-type TargetRequest = { key: string; recordType: "person" | "company" | "deal" | "task"; id: number };
+type TargetRequest = { key: string; recordType: "person" | "company" | "deal" | "task" | "document"; id: number };
 type TargetSnapshot = { workspace: { id: number }; values: Map<string, Target>; settled: Set<string> };
 type TargetCache = TargetSnapshot & {
     controller: AbortController;
     requested: Set<string>;
-    queue: TargetRequest[];
+    queue: TargetRequest[][];
     active: number;
 };
 
 const TARGET_CONCURRENCY = 4;
+const DOCUMENT_BATCH_SIZE = 50;
 
 /** Resolves each target once per workspace through APIs enforcing the viewer's current access. */
 export function useWorkflowRunTargets(runs: WorkflowRunSummary[], workspaceId: number) {
@@ -40,11 +42,16 @@ export function useWorkflowRunTargets(runs: WorkflowRunSummary[], workspaceId: n
     useEffect(() => {
         const cache = cacheRef.current;
         if (cache == null || cache.workspace !== workspace) return;
+        const documents: TargetRequest[] = [];
         for (const run of runs) {
             const request = targetRequest(run);
             if (request == null || cache.requested.has(request.key)) continue;
             cache.requested.add(request.key);
-            cache.queue.push(request);
+            if (request.recordType === "document") documents.push(request);
+            else cache.queue.push([request]);
+        }
+        for (let offset = 0; offset < documents.length; offset += DOCUMENT_BATCH_SIZE) {
+            cache.queue.push(documents.slice(offset, offset + DOCUMENT_BATCH_SIZE));
         }
         while (cache.active < TARGET_CONCURRENCY && cache.queue.length > 0) {
             void resolveQueuedTargets(cache, () => setTargets({
@@ -65,7 +72,7 @@ function targetRequest(run: WorkflowRunSummary): TargetRequest | null {
     const id = run.trigger?.recordId;
     const recordType = run.trigger?.recordType;
     if (id == null || !Number.isSafeInteger(id) || id <= 0) return null;
-    if (recordType !== "person" && recordType !== "company" && recordType !== "deal" && recordType !== "task") return null;
+    if (recordType !== "person" && recordType !== "company" && recordType !== "deal" && recordType !== "task" && recordType !== "document") return null;
     return { key: runTargetKey(run), recordType, id };
 }
 
@@ -73,24 +80,43 @@ async function resolveQueuedTargets(cache: TargetCache, publish: () => void) {
     cache.active += 1;
     try {
         while (!cache.controller.signal.aborted) {
-            const request = cache.queue.shift();
-            if (request == null) return;
+            const requests = cache.queue.shift();
+            if (requests == null) return;
             try {
-                const target = await resolveTarget(request, {
+                const resolved = await resolveTargets(requests, {
                     signal: cache.controller.signal,
                     headers: { "X-Workspace-Id": String(cache.workspace.id) },
                 });
                 if (cache.controller.signal.aborted) return;
-                if (target != null) cache.values.set(request.key, target);
+                for (const [key, target] of resolved) cache.values.set(key, target);
             } catch {
                 if (cache.controller.signal.aborted) return;
             }
-            cache.settled.add(request.key);
+            for (const request of requests) cache.settled.add(request.key);
             publish();
         }
     } finally {
         cache.active -= 1;
     }
+}
+
+async function resolveTargets(requests: TargetRequest[], init: RequestInit): Promise<Map<string, Target>> {
+    const first = requests[0];
+    const resolved = new Map<string, Target>();
+    if (first == null) return resolved;
+    if (first.recordType === "document") {
+        const documents = await getGeneratedDocumentTargets(requests.map((request) => request.id), init);
+        for (const request of requests) {
+            const document = documents.find((item) => item.id === request.id);
+            if (document?.title?.trim() && Number.isSafeInteger(document.dealId) && document.dealId > 0) {
+                resolved.set(request.key, { name: document.title, href: dealDocumentsHref(document.dealId) });
+            }
+        }
+    } else {
+        const target = await resolveTarget(first, init);
+        if (target != null) resolved.set(first.key, target);
+    }
+    return resolved;
 }
 
 async function resolveTarget(request: TargetRequest, init: RequestInit): Promise<Target | null> {
