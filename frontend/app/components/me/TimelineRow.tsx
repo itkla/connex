@@ -124,6 +124,8 @@ export default function TimelineRow({
     author,
     persons,
     deals,
+    personsUnavailable = false,
+    dealsUnavailable = false,
     currentUserId,
     companyId,
     originWorkspaceId,
@@ -132,6 +134,8 @@ export default function TimelineRow({
     author?: UserReference;
     persons: Contact[];
     deals: Deal[];
+    personsUnavailable?: boolean;
+    dealsUnavailable?: boolean;
     currentUserId?: number;
     companyId: number | null;
     originWorkspaceId: number | null;
@@ -177,7 +181,10 @@ export default function TimelineRow({
 
     useEffect(() => () => noteRequest.current?.abort(), []);
 
+    const editUnavailable = entry.kind === 'task' ? dealsUnavailable : entry.kind === 'activity' && (personsUnavailable || dealsUnavailable);
+    const recoveryT = useTranslations('RecordListState');
     const handleEdit = async () => {
+        if (editUnavailable) return;
         if (entry.kind !== 'note') {
             setEditOpen(true);
             return;
@@ -403,7 +410,7 @@ export default function TimelineRow({
                         </IconButton>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                        <DropdownMenuItem disabled={loadingNote} onClick={handleEdit}>
+                        <DropdownMenuItem disabled={loadingNote || editUnavailable} title={editUnavailable ? recoveryT("editChoicesUnavailable") : undefined} onClick={handleEdit}>
                             <PencilIcon className="size-4 text-muted-foreground" />
                             {t('edit')}
                         </DropdownMenuItem>

@@ -12,7 +12,6 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
@@ -67,7 +66,6 @@ import tools.jackson.databind.ObjectMapper;
  */
 @Service
 public class TenantExportService {
-    private static final String AUDIT_ACTION = "org.workspace.export";
     static final int MAX_CONCURRENT_EXPORTS = 4;
     private static final long OBJECT_ADMISSION_RETRY_NANOS =
         Duration.ofMillis(10).toNanos();
@@ -192,22 +190,16 @@ public class TenantExportService {
         try {
             Route route = lifecycleAccess.capture(acquired.workspace(), orgId);
             objectSpool = createObjectSpool();
-            auditService.recordStrictIndependentScoped(
-                AUDIT_ACTION,
-                "workspace",
-                acquired.workspace().id(),
-                null,
-                orgId,
-                "workspace:" + acquired.workspace().id(),
-                "Tenant export authorized and streaming started",
-                Map.of("declaredTableCount", declaredTableCount()));
+            AuditService.PreparedWorkspaceExportAudit preparedAudit = auditService.recordWorkspaceExportStarted(
+                acquired.workspace().id(), orgId, actorId, declaredTableCount());
             TenantExportDownload download = new TenantExportDownload(
                 acquired.workspace().id(),
                 acquired.workspace().orgId(),
                 actorId,
                 route,
                 operationLease,
-                objectSpool);
+                objectSpool,
+                preparedAudit);
             return download;
         } catch (RuntimeException | Error exception) {
             cleanupBeforeTransfer(exception, operationLease, objectSpool);
@@ -215,7 +207,7 @@ public class TenantExportService {
         }
     }
 
-    private void writeBundle(
+    private Snapshot writeBundle(
             int orgId,
             int workspaceId,
             int actorId,
@@ -224,9 +216,9 @@ public class TenantExportService {
             OutputStream output,
             TrackedResource outputResource,
             TenantExportExecution execution) throws IOException {
-        lifecycleAccess.withRoute(route, actorId, () -> {
+        return lifecycleAccess.withRoute(route, actorId, () -> {
             try {
-                writeRoutedBundle(
+                return writeRoutedBundle(
                     orgId,
                     workspaceId,
                     actorId,
@@ -234,14 +226,13 @@ public class TenantExportService {
                     output,
                     outputResource,
                     execution);
-                return null;
             } catch (IOException exception) {
                 throw new ExportWriteException(exception);
             }
         });
     }
 
-    private void writeRoutedBundle(
+    private Snapshot writeRoutedBundle(
             int orgId,
             int workspaceId,
             int actorId,
@@ -286,8 +277,9 @@ public class TenantExportService {
                 outputResource.close();
             }
         };
+        Snapshot snapshot;
         try (ZipOutputStream zip = new ZipOutputStream(ownedOutput)) {
-            Snapshot snapshot =
+            snapshot =
                 snapshotTransaction.capture(workspaceId, zip, objectSpool, execution);
             long writtenObjects =
                 writeObjects(zip, workspaceId, actorId, objectSpool, execution);
@@ -311,6 +303,8 @@ public class TenantExportService {
             zip.closeEntry();
             zip.finish();
         }
+        execution.checkActive();
+        return snapshot;
     }
 
     private long writeObjects(
@@ -540,6 +534,7 @@ public class TenantExportService {
         private final OperationLease operationLease;
         private final AtomicReference<Path> objectSpool;
         private final TenantExportExecution execution;
+        private final AuditService.PreparedWorkspaceExportAudit preparedAudit;
 
         private TenantExportDownload(
                 int workspaceId,
@@ -547,13 +542,15 @@ public class TenantExportService {
                 int actorId,
                 Route route,
                 OperationLease operationLease,
-                Path objectSpool) {
+                Path objectSpool,
+                AuditService.PreparedWorkspaceExportAudit preparedAudit) {
             this.workspaceId = workspaceId;
             this.orgId = orgId;
             this.actorId = actorId;
             this.route = route;
             this.operationLease = operationLease;
             this.objectSpool = new AtomicReference<>(objectSpool);
+            this.preparedAudit = Objects.requireNonNull(preparedAudit, "preparedAudit");
             execution = new TenantExportExecution(
                 properties.getExportTimeout(),
                 cancellationExecutor,
@@ -578,7 +575,7 @@ public class TenantExportService {
                 if (spool == null) {
                     throw new IllegalStateException("Tenant export object-reference spool is unavailable");
                 }
-                writeBundle(
+                Snapshot snapshot = writeBundle(
                     orgId,
                     workspaceId,
                     actorId,
@@ -587,6 +584,17 @@ public class TenantExportService {
                     output,
                     outputResource,
                     execution);
+                long rowCount = 0;
+                for (CapturedTable table : snapshot.tables()) {
+                    rowCount = Math.addExact(rowCount, table.rowCount());
+                }
+                long completedRows = rowCount;
+                execution.checkActive();
+                tenantWorkScope.unrouted(() -> {
+                    auditService.recordWorkspaceExportCompleted(preparedAudit,
+                        completedRows, snapshot.tables().size(), snapshot.objectCount());
+                    return null;
+                });
             } catch (ExportWriteException exception) {
                 primary = exception.ioException();
                 throw exception.ioException();

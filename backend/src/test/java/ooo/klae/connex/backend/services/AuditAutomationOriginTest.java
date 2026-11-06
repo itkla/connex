@@ -151,7 +151,7 @@ class AuditAutomationOriginTest {
         });
         ArgumentCaptor<AuditLog> entry = ArgumentCaptor.forClass(AuditLog.class);
         verify(integrityService).append(entry.capture());
-        when(auditLogMapper.findWorkspaceExport(7, 10, 0)).thenReturn(List.of(entry.getValue()));
+        when(auditLogMapper.findWorkspaceExport(7, 10, 0, null, null, null)).thenReturn(List.of(entry.getValue()));
         tenantContext.set(7, 8, actor.getId(), "member", "cnx_test");
 
         String csv = auditService.exportRecent(10, 0);

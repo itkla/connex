@@ -59,6 +59,7 @@ import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.beans.AuditLog;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.support.TestEntityFixtures;
+import ooo.klae.connex.backend.support.OwnershipOfferTestFixtures;
 import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 import ooo.klae.connex.backend.delivery.CampaignDispatchService;
 import ooo.klae.connex.backend.delivery.DeliveryProviderConfigService;
@@ -573,6 +574,7 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         retained.setSummary("Workspace audit integrity survives teardown");
         auditIntegrityService.appendIndependent(retained);
 
+        OwnershipOfferTestFixtures.stepUpApprovedCurrent(jdbcTemplate, currentUser);
         teardownService.teardownWorkspace(
             drillOrganization.getId(),
             drillWorkspace.getId(),
@@ -629,7 +631,8 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         assertTrue(auditLogMapper.findOrgExport(
             drillOrganization.getId(),
             500,
-            0).stream().noneMatch(
+            0,
+            null).stream().noneMatch(
                 entry -> "test.lifecycle.retained".equals(entry.getAction())));
     }
 

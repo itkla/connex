@@ -48,6 +48,7 @@ async function setup(page: Page, value: number) {
     const dealId = id(deal);
     await page.goto(`/records/deals/${dealId}`);
     const lines = page.getByRole('region', { name: 'Line items', exact: true });
+    await expect(lines).toHaveCount(1);
     await expect(lines).toBeVisible();
     const saved = async () => body(await page.request.get(`/api/deals/${dealId}`, { headers }));
     const figures = async () => {

@@ -21,6 +21,6 @@ describe('campaignDelivery is a first-class instance capability', () => {
 
 describe('the campaign delivery surface reflects whether delivery is available', () => {
     it('keeps the queue control disabled while delivery is unavailable', () => {
-        expect(source(DELIVERY_PANEL)).toContain('disabled={busy || deliveryUnavailable}');
+        expect(source(DELIVERY_PANEL)).toContain('disabled={busy || deliveryUnavailable || messagesUnavailable}');
     });
 });
