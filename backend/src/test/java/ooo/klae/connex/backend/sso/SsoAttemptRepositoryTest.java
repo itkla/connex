@@ -24,6 +24,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -65,6 +66,110 @@ class SsoAttemptRepositoryTest {
         filter(false).doFilter(request, new MockHttpServletResponse(), (incoming, outgoing) -> called.set(true));
         assertEquals(true, called.get());
         assertNull(request.getSession(false));
+        verifyNoInteractions(oauthRegistrations, samlRegistrations);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/oauth2/authorization/google", "/saml2/authenticate/org-7", "/saml2/authenticate"})
+    void fourCrossSiteImageStartsAllocateNothing(String path) throws Exception {
+        var session = new MockHttpSession();
+        for (int index = 0; index < 4; index++) {
+            var request = new MockHttpServletRequest("GET", path);
+            request.setSession(session);
+            request.addParameter("registrationId", "org-7");
+            request.addHeader("Sec-Fetch-Site", "cross-site");
+            request.addHeader("Sec-Fetch-Mode", "no-cors");
+            request.addHeader("Sec-Fetch-Dest", "image");
+            var response = new MockHttpServletResponse();
+            filter(true).doFilter(request, response, (incoming, outgoing) -> {
+                throw new AssertionError("Cross-site image must not reach an attempt-allocating filter");
+            });
+            assertEquals(403, response.getStatus());
+            assertEquals("no-store", response.getHeader("Cache-Control"));
+        }
+        assertEquals(false, session.getAttributeNames().hasMoreElements());
+        verifyNoInteractions(oauthRegistrations, samlRegistrations);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"})
+    void crossSiteSubresourceGuardCoversEveryStartMethodAndRoute(String method) throws Exception {
+        for (String path : new String[] {"/api/oauth2/authorization/google", "/saml2/authenticate/org-7", "/saml2/authenticate"}) {
+            var request = new MockHttpServletRequest(method, path);
+            request.addHeader("Sec-Fetch-Site", "cross-site");
+            request.addHeader("Sec-Fetch-Mode", "no-cors");
+            request.addHeader("Sec-Fetch-Dest", "image");
+            var response = new MockHttpServletResponse();
+            filter(true).doFilter(request, response, (incoming, outgoing) -> {
+                throw new AssertionError("No start method may allocate a cross-site image attempt");
+            });
+            assertEquals(403, response.getStatus());
+            assertNull(request.getSession(false));
+        }
+        verifyNoInteractions(oauthRegistrations, samlRegistrations);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"navigate,image", "no-cors,document", "navigate,", ",document", ","})
+    void crossSiteStartsNeedBothTopLevelNavigationHeaders(String mode, String destination) throws Exception {
+        var request = new MockHttpServletRequest("GET", "/api/oauth2/authorization/google");
+        request.addHeader("Sec-Fetch-Site", "cross-site");
+        if (mode != null) request.addHeader("Sec-Fetch-Mode", mode);
+        if (destination != null) request.addHeader("Sec-Fetch-Dest", destination);
+        var response = new MockHttpServletResponse();
+        filter(true).doFilter(request, response, (incoming, outgoing) -> {
+            throw new AssertionError("Cross-site subresource must not start");
+        });
+        assertEquals(403, response.getStatus());
+        assertNull(request.getSession(false));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/oauth2/authorization/google", "/saml2/authenticate/org-7", "/saml2/authenticate"})
+    void topLevelCrossSiteNavigationStillCannotSetADestination(String path) throws Exception {
+        var request = start(path, "/invite", "cross-site");
+        request.addParameter("registrationId", "org-7");
+        request.addHeader("Sec-Fetch-Mode", "navigate");
+        request.addHeader("Sec-Fetch-Dest", "document");
+        var response = new MockHttpServletResponse();
+        filter(true).doFilter(request, response, (incoming, outgoing) -> {
+            throw new AssertionError("Destination-setting starts still require same-origin metadata");
+        });
+        assertEquals(403, response.getStatus());
+        assertNull(request.getSession(false));
+        verifyNoInteractions(oauthRegistrations, samlRegistrations);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/oauth2/authorization/google", "/saml2/authenticate/org-7", "/saml2/authenticate"})
+    void topLevelCrossSiteAndHeaderlessStartsCanAllocateTheirOwnAttempts(String path) throws Exception {
+        for (boolean legacy : new boolean[] {false, true}) {
+            var request = new MockHttpServletRequest("GET", path);
+            request.addParameter("registrationId", "org-7");
+            if (!legacy) {
+                request.addHeader("Sec-Fetch-Site", "cross-site");
+                request.addHeader("Sec-Fetch-Mode", "navigate");
+                request.addHeader("Sec-Fetch-Dest", "document");
+            }
+            filter(true).doFilter(request, new MockHttpServletResponse(), (incoming, outgoing) -> {
+                if (path.startsWith("/api/oauth2/")) {
+                    new OAuthAuthenticationAttemptRepository().saveAuthorizationRequest(oauth("google", "state"),
+                            request, new MockHttpServletResponse());
+                } else {
+                    new SamlAuthenticationAttemptRepository().saveAuthenticationRequest(saml("org-7", "request-id", "relay"),
+                            request, new MockHttpServletResponse());
+                }
+            });
+            assertNotNull(request.getSession(false));
+            if (path.startsWith("/api/oauth2/")) {
+                assertNotNull(new OAuthAuthenticationAttemptRepository().loadAuthorizationRequest(oauthCallback(request, "google", "state")));
+            } else {
+                var callback = new MockHttpServletRequest("POST", "/api/login/saml2/sso/org-7");
+                callback.setSession(request.getSession(false));
+                callback.addParameter("RelayState", "relay");
+                assertNotNull(new SamlAuthenticationAttemptRepository().loadAuthenticationRequest(callback));
+            }
+        }
         verifyNoInteractions(oauthRegistrations, samlRegistrations);
     }
 
@@ -192,7 +297,7 @@ class SsoAttemptRepositoryTest {
     }
 
     @Test
-    void duplicateAndFullAttemptsAreRefusedWithoutEvictingAnExistingState() {
+    void duplicateAttemptCannotReplaceItsAuthorizationOrDestination() {
         var repository = new OAuthAuthenticationAttemptRepository();
         var request = start("/api/oauth2/authorization/google", "/invite", "same-origin");
         AuthenticationReturnPathSession.prepareStart(request);
@@ -201,14 +306,38 @@ class SsoAttemptRepositoryTest {
         AuthenticationReturnPathSession.prepareStart(request);
         assertThrows(IllegalStateException.class, () -> repository.saveAuthorizationRequest(
                 oauth("google", "state-0"), request, new MockHttpServletResponse()));
-        for (int index = 1; index < 4; index++) {
-            repository.saveAuthorizationRequest(oauth("google", "state-" + index), request, new MockHttpServletResponse());
-        }
-        assertThrows(IllegalStateException.class, () -> repository.saveAuthorizationRequest(
-                oauth("google", "new-state"), request, new MockHttpServletResponse()));
         var original = oauthCallback(request, "google", "state-0");
         assertNotNull(repository.removeAuthorizationRequest(original, new MockHttpServletResponse()));
         assertEquals("/invite", AuthenticationReturnPathSession.captured(original));
+    }
+
+    @Test
+    void fifthLegitimateStartEvictsEarliestExpiryAndItsCallbackFailsClosed() throws Exception {
+        when(oauthRegistrations.findByRegistrationId("google")).thenReturn(mock(ClientRegistration.class));
+        var session = new MockHttpSession();
+        Instant now = Instant.parse("2026-11-06T00:00:00Z");
+        for (int index : new int[] {2, 0, 3, 1, 4}) {
+            var repository = new OAuthAuthenticationAttemptRepository(Clock.fixed(now.plusSeconds(index), ZoneOffset.UTC));
+            var request = start("/api/oauth2/authorization/google", "/invite?attempt=" + index, "same-origin");
+            request.setSession(session);
+            var response = new MockHttpServletResponse();
+            var authorization = oauth("google", "state-" + index);
+            filter(false).doFilter(request, response, (incoming, outgoing) ->
+                    repository.saveAuthorizationRequest(authorization, request, response));
+            assertEquals(200, response.getStatus());
+        }
+        var repository = new OAuthAuthenticationAttemptRepository(Clock.fixed(now.plusSeconds(5), ZoneOffset.UTC));
+        var start = new MockHttpServletRequest();
+        start.setSession(session);
+        var evicted = oauthCallback(start, "google", "state-0");
+        assertNull(repository.removeAuthorizationRequest(evicted, new MockHttpServletResponse()));
+        assertNull(AuthenticationReturnPathSession.captured(evicted));
+        assertEquals("/auth/login?sso_error=1", AuthenticationReturnPathSession.failurePath(evicted));
+        for (int index = 1; index <= 4; index++) {
+            var callback = oauthCallback(start, "google", "state-" + index);
+            assertNotNull(repository.removeAuthorizationRequest(callback, new MockHttpServletResponse()));
+            assertEquals("/invite?attempt=" + index, AuthenticationReturnPathSession.captured(callback));
+        }
     }
 
     @Test

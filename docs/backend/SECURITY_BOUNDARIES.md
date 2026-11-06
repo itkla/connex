@@ -71,20 +71,26 @@ and backend. Starts carrying `redirect` require exactly `Sec-Fetch-Site: same-or
 `none`, same-site and cross-site metadata are refused before registration/configuration reads.
 Only enabled OAuth registrations and enabled SAML ceremonies can admit a destination. A disabled
 SAML start cannot mutate an OAuth attempt, including on a social-only deployment.
+All attempt allocations also refuse cross-site subresource requests: `cross-site` metadata
+requires both `Sec-Fetch-Mode: navigate` and `Sec-Fetch-Dest: document`. This guard covers every
+supported start method, SAML's query-form start, and repository allocation from other paths.
+Ordinary starts without destinations retain top-level cross-site and headerless-client support.
 
-Full authorization requests and their destinations are saved together in separate session
-attributes keyed by OAuth state or SAML RelayState. SAML records retain the AuthnRequest id for
+Full authorization requests and their destinations are saved together in one immutable session
+map keyed by OAuth state or SAML RelayState. SAML records retain the AuthnRequest id for
 framework response correlation. Matching also checks the callback's registration. Unknown,
 duplicate or mismatched callback state does not remove another attempt or produce navigation.
 Only matching repository removal publishes request-local navigation before session replacement;
 success, linking and failure handlers never read a last-destination session slot.
 
-Attempts expire after ten minutes. Starts refuse duplicate identities and an observed count of
-four live attempts rather than evicting an in-flight request. Distinct attribute keys avoid the
-lost updates of a shared map under Spring Session attribute deltas. Concurrent detached session
-snapshots can observe spare capacity simultaneously and exceed the count by concurrent starts;
-the bound is observational, while identity/destination association remains exact and fail-closed.
-Legacy singleton return state is not adopted. Missing or invalid destinations retain the existing
+Attempts expire after ten minutes. Each save prunes expired entries, refuses duplicate live
+identities, evicts the earliest-expiring entry when full, and persists a fresh immutable map with
+at most four entries. Capacity never refuses a fresh start. Each removal also copies, prunes and
+replaces the map. No request can persist more than four entries; this bound does not rely on
+locking per-request Spring Session wrappers. Concurrent detached snapshots may drop another
+in-flight entry; its callback fails closed, and no destination or authorization is rebound.
+Evicted attempts fail closed in the same way. Legacy per-attempt attributes and singleton return
+state are ignored. Missing or invalid destinations retain the existing
 dashboard/onboarding fallback, and no caller-supplied origin becomes the redirect origin.
 
 Self-service registration accepts `skipInitialWorkspace` to suppress optional personal workspace

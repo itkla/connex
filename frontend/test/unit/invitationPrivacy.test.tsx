@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import MembersPanel from "@/app/components/settings/MembersPanel";
 import {
     createWorkspaceInvite, getBuiltInRoles, getWorkspaceInviteLinks, getWorkspaceInvites,
-    getWorkspaceMembers, getWorkspaceOwnershipOffers, getWorkspaceRoles, removeWorkspaceMember, revokeWorkspaceInviteLink,
+    getWorkspaceMembers, getWorkspaceOwnershipOffers, getWorkspaceRoles, removeWorkspaceMember, revokeWorkspaceInvite, revokeWorkspaceInviteLink,
 } from "@/app/lib/api";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import type { WorkspaceInvite } from "@/app/lib/types";
@@ -31,7 +31,7 @@ vi.mock("@/app/lib/api", async (importOriginal) => ({
     ...await importOriginal<typeof import("@/app/lib/api")>(),
     createWorkspaceInvite: vi.fn(), getBuiltInRoles: vi.fn(), getWorkspaceInviteLinks: vi.fn(),
     getWorkspaceInvites: vi.fn(), getWorkspaceMembers: vi.fn(), getWorkspaceOwnershipOffers: vi.fn(),
-    getWorkspaceRoles: vi.fn(), removeWorkspaceMember: vi.fn(), revokeWorkspaceInviteLink: vi.fn(),
+    getWorkspaceRoles: vi.fn(), removeWorkspaceMember: vi.fn(), revokeWorkspaceInvite: vi.fn(), revokeWorkspaceInviteLink: vi.fn(),
 }));
 vi.mock("@/app/components/motion/Rise", () => ({ default: ({ children }: { children?: ReactNode }) => <>{children}</> }));
 vi.mock("@/app/components/records/DeleteRecordDialog", () => ({ default: () => null }));
@@ -44,11 +44,20 @@ vi.mock("@/components/ui/select", () => {
         SelectGroup: Pass, SelectItem: Pass, SelectLabel: Pass,
     };
 });
-vi.mock("@/components/ui/tabs", () => {
+vi.mock("@/components/ui/tabs", async () => {
+    const { createContext, useContext } = await import("react");
+    const Selection = createContext<{ value: string; onValueChange: (value: string) => void }>({ value: "email", onValueChange: noop });
     const Pass = ({ children }: { children?: ReactNode }) => <div>{children}</div>;
     return {
-        Tabs: Pass, TabsList: Pass, TabsTrigger: Pass,
-        TabsContent: ({ children, value }: { children?: ReactNode; value: string }) => value === "email" ? <div>{children}</div> : null,
+        Tabs: ({ children, value, onValueChange }: { children?: ReactNode; value: string; onValueChange: (value: string) => void }) =>
+            <Selection.Provider value={{ value, onValueChange }}>{children}</Selection.Provider>,
+        TabsList: Pass,
+        TabsTrigger: ({ children, value }: { children?: ReactNode; value: string }) => {
+            const selection = useContext(Selection);
+            return <button role="tab" aria-selected={selection.value === value} onClick={() => selection.onValueChange(value)}>{children}</button>;
+        },
+        TabsContent: ({ children, value }: { children?: ReactNode; value: string }) =>
+            useContext(Selection).value === value ? <div role="tabpanel">{children}</div> : null,
     };
 });
 vi.mock("@/components/ui/dropdown-menu", () => {
@@ -85,8 +94,10 @@ beforeEach(() => {
     vi.mocked(getWorkspaceInviteLinks).mockResolvedValue([]);
     vi.mocked(getWorkspaceOwnershipOffers).mockResolvedValue([]);
     vi.mocked(getWorkspaceRoles).mockResolvedValue([]);
-    vi.mocked(createWorkspaceInvite).mockResolvedValue({ invite: pending });
+    vi.mocked(createWorkspaceInvite).mockReset().mockResolvedValue({ invite: pending });
     vi.mocked(removeWorkspaceMember).mockResolvedValue(undefined);
+    vi.mocked(revokeWorkspaceInvite).mockResolvedValue(undefined);
+    vi.mocked(revokeWorkspaceInviteLink).mockResolvedValue(undefined);
 });
 
 afterEach(async () => {
@@ -102,13 +113,13 @@ async function render(language: "en" | "ja") {
     ));
 }
 
-async function submitInvitation() {
+async function submitInvitation(email = pending.email) {
     const input = host.querySelector('input[type="email"]');
     const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
     const form = host.querySelector("form");
     if (!(input instanceof HTMLInputElement) || !setValue || !form) throw new Error("Missing invite form");
     await act(async () => {
-        setValue.call(input, pending.email);
+        setValue.call(input, email);
         input.dispatchEvent(new Event("input", { bubbles: true }));
     });
     await act(async () => { form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
@@ -183,19 +194,91 @@ describe("member-flow outcomes", () => {
 
         await submitInvitation();
 
-        const dialog = document.querySelector('[role="dialog"]');
-        const link = dialog?.querySelector("input");
-        expect(dialog?.textContent).toContain(copy.copyFailedDescription);
+        const recovery = host.querySelector('[role="region"]');
+        const link = recovery?.querySelector("input");
+        expect(recovery?.getAttribute("aria-label")).toBe(copy.copyFailed);
+        expect(recovery?.textContent).toContain(copy.copyFailedDescription);
         expect(link?.value).toContain("/invite#token=new-token");
         expect(link?.readOnly).toBe(true);
+        expect(document.querySelector('[role="dialog"]')).toBeNull();
         expect(toastSuccess).toHaveBeenCalledWith(copy.invitationCreated);
         expect(toastSuccess).not.toHaveBeenCalledWith(copy.linkCopied);
         expect(toastError).toHaveBeenCalledWith(copy.copyFailed, { description: copy.copyFailedDescription });
         clipboard.mockResolvedValue(undefined);
-        const retry = [...(dialog?.querySelectorAll("button") ?? [])].find((button) => button.textContent === copy.copyLink);
+        const retry = [...(recovery?.querySelectorAll("button") ?? [])].find((button) => button.textContent === copy.copyLink);
         await act(async () => retry?.click());
         expect(toastSuccess).toHaveBeenCalledWith(copy.linkCopied);
+        expect(host.querySelector('[role="region"]')).toBeNull();
+    });
+
+    it.each(["en", "ja"] as const)("announces mail failure while allowing another invitation after copy refusal in %s", async (language) => {
+        const copy = (language === "en" ? english : japanese).WorkspaceMembers;
+        const secondEmail = "another-invite@example.test";
+        clipboard.mockRejectedValue(new Error("Clipboard refused"));
+        vi.mocked(createWorkspaceInvite)
+            .mockResolvedValueOnce({ invite: pending, emailDelivery: "FAILED" })
+            .mockResolvedValueOnce({ invite: { ...pending, id: "b".repeat(64), email: secondEmail }, emailDelivery: "SKIPPED" });
+        await render(language);
+        const status = host.querySelector('[role="status"]');
+        expect(status?.textContent).toBe("");
+        expect(status?.getAttribute("aria-live")).toBe("polite");
+        expect(status?.getAttribute("aria-atomic")).toBe("true");
+
+        await submitInvitation();
+
+        expect(host.querySelector('[role="status"]')).toBe(status);
+        expect(status?.textContent).toBe(copy.emailFailed);
+        expect(status?.closest('[aria-hidden="true"]')).toBeNull();
         expect(document.querySelector('[role="dialog"]')).toBeNull();
+        expect(host.querySelector('[role="region"]')).not.toBeNull();
+
+        await submitInvitation(secondEmail);
+
+        expect(createWorkspaceInvite).toHaveBeenNthCalledWith(2, 9, secondEmail, "member");
+        expect(status?.textContent).toBe(copy.emailSkipped);
+        expect(host.querySelectorAll("li")).toHaveLength(3);
+        expect(toastSuccess).not.toHaveBeenCalledWith(copy.linkCopied);
+    });
+
+    it.each(["en", "ja"] as const)("keeps link-tab copy recovery visible and clears it after revocation in %s", async (language) => {
+        const copy = (language === "en" ? english : japanese).WorkspaceMembers;
+        clipboard.mockRejectedValue(new Error("Clipboard refused"));
+        vi.mocked(getWorkspaceInviteLinks).mockResolvedValue([{
+            id: 7, token: "shareable-token", role: "member", usedCount: 0,
+            maxUses: null, revoked: false, createdByLabel: "Workspace owner",
+            expiresAt: "2026-11-20T00:00:00Z", createdAt: "2026-11-06T00:00:00Z",
+        }]);
+        await render(language);
+        const tab = [...host.querySelectorAll("button")].find((button) => button.getAttribute("role") === "tab" && button.textContent === copy.inviteTabLink);
+        await act(async () => tab?.click());
+        expect(host.querySelector('input[type="email"]')).toBeNull();
+        const copyButton = [...host.querySelectorAll("button")].find((button) => button.textContent === copy.copyLink);
+        expect(copyButton).toBeDefined();
+
+        await act(async () => copyButton?.click());
+
+        expect(host.querySelector('[role="region"] input')?.getAttribute("value")).toContain("/invite-link#token=shareable-token");
+        expect(document.querySelector('[role="dialog"]')).toBeNull();
+        const revoke = [...host.querySelectorAll("button")].find((button) => button.textContent?.includes(copy.revoke));
+        expect(revoke).toBeDefined();
+        await act(async () => revoke?.click());
+        expect(revokeWorkspaceInviteLink).toHaveBeenCalledWith(9, 7);
+        expect(host.querySelector('[role="region"]')).toBeNull();
+    });
+
+    it.each(["en", "ja"] as const)("clears a failed email-invitation copy after revocation in %s", async (language) => {
+        const copy = (language === "en" ? english : japanese).WorkspaceMembers;
+        clipboard.mockRejectedValue(new Error("Clipboard refused"));
+        await render(language);
+        await submitInvitation();
+        expect(host.querySelector('[role="region"]')).not.toBeNull();
+        const revoke = [...host.querySelectorAll("button")].find((button) => button.textContent?.includes(copy.revoke));
+        expect(revoke).toBeDefined();
+
+        await act(async () => revoke?.click());
+
+        expect(revokeWorkspaceInvite).toHaveBeenCalledWith(9, pending.id);
+        expect(host.querySelector('[role="region"]')).toBeNull();
     });
 
     it.each(["ACCEPTED", "SKIPPED", "FAILED", "UNCONFIRMED"] as const)("reports %s without inferring recipient account state", async (emailDelivery) => {

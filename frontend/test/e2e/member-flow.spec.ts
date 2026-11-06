@@ -107,7 +107,7 @@ for (const locale of ["en", "ja"] as const) {
                 : emailResult.emailDelivery === "SKIPPED" ? "emailSkipped"
                     : emailResult.emailDelivery === "FAILED" ? "emailFailed" : "emailUnconfirmed";
             await expect(section.getByRole("status")).toHaveText(copy(outcomeKey));
-            const recovery = page.getByRole("dialog", { name: copy("copyFailed"), exact: true });
+            const recovery = section.getByRole("region", { name: copy("copyFailed"), exact: true });
             await expect(recovery.getByRole("textbox", { name: copy("inviteUrl"), exact: true })).toHaveValue(/\/invite#token=/);
             await expect(recovery.getByText(copy("copyFailedDescription"), { exact: true })).toBeVisible();
             await expect(page.getByText(copy("linkCopied"), { exact: true })).toHaveCount(0);

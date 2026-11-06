@@ -10,7 +10,7 @@ import org.springframework.security.saml2.provider.service.registration.RelyingP
 import org.springframework.web.filter.OncePerRequestFilter;
 import ooo.klae.connex.backend.config.RequestPathNormalizer;
 
-/** Admits destination-setting starts only for enabled ceremonies and same-origin browser navigation. */
+/** Refuses cross-site subresource starts and admits destinations only for enabled, same-origin ceremonies. */
 public final class AuthenticationReturnPathFilter extends OncePerRequestFilter {
     private final boolean samlEnabled;
     private final CompositeClientRegistrationRepository oauthRegistrations;
@@ -27,16 +27,19 @@ public final class AuthenticationReturnPathFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
         String path = RequestPathNormalizer.apiPath(request);
-        boolean oauth = path.matches("/api/oauth2/authorization/[a-zA-Z0-9_-]+");
-        boolean saml = path.matches("/saml2/authenticate/org-[0-9]+");
-        if ("GET".equals(request.getMethod()) && (oauth || saml)) {
+        boolean oauth = path.matches("/api/oauth2/authorization/[^/]+");
+        boolean saml = path.matches("/saml2/authenticate/[^/]+") || path.equals("/saml2/authenticate");
+        if (oauth || saml) {
             boolean destinationRequested = request.getParameterValues("redirect") != null;
-            if (saml && !samlEnabled || destinationRequested && !"same-origin".equals(request.getHeader("Sec-Fetch-Site"))) {
+            if (saml && !samlEnabled || isCrossSiteSubresource(request)
+                    || destinationRequested && !"same-origin".equals(request.getHeader("Sec-Fetch-Site"))) {
                 refuse(response);
                 return;
             }
             if (destinationRequested) {
-                String registration = path.substring(path.lastIndexOf('/') + 1);
+                String registration = path.equals("/saml2/authenticate")
+                        ? AuthenticationAttemptStore.parameter(request, "registrationId")
+                        : path.substring(path.lastIndexOf('/') + 1);
                 boolean enabled;
                 try {
                     enabled = oauth ? oauthRegistrations.findByRegistrationId(registration) != null
@@ -53,6 +56,12 @@ public final class AuthenticationReturnPathFilter extends OncePerRequestFilter {
             }
         }
         filterChain.doFilter(request, response);
+    }
+
+    static boolean isCrossSiteSubresource(HttpServletRequest request) {
+        return "cross-site".equals(request.getHeader("Sec-Fetch-Site"))
+                && (!"navigate".equals(request.getHeader("Sec-Fetch-Mode"))
+                        || !"document".equals(request.getHeader("Sec-Fetch-Dest")));
     }
 
     private static void refuse(HttpServletResponse response) {

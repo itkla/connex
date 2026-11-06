@@ -51,6 +51,7 @@ import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { useScopeOwnershipOffers } from "@/app/hooks/useScopeOwnershipOffers";
 import { useConfinementAcknowledgement } from "@/app/hooks/useConfinementAcknowledgement";
 import { toastError, toastSuccess } from "@/app/lib/toast";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -459,6 +460,7 @@ function MembersWorkspacePanel({
         if (!workspaceId || sending) return;
         resetFieldErrors();
         setMailOutcome(null);
+        setCopyRecoveryUrl(null);
         setSending(true);
         try {
             const result = await createWorkspaceInvite(workspaceId, email, requestedRole);
@@ -491,6 +493,7 @@ function MembersWorkspacePanel({
         try {
             await revokeWorkspaceInvite(workspaceId, inviteId);
             setInvites((prev) => prev.filter((i) => i.id !== inviteId));
+            setCopyRecoveryUrl(null);
             toastSuccess(t("revoked"));
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
@@ -546,6 +549,7 @@ function MembersWorkspacePanel({
         try {
             await revokeWorkspaceInviteLink(workspaceId, linkId);
             setInviteLinks((prev) => prev.filter((l) => l.id !== linkId));
+            setCopyRecoveryUrl(null);
             toastSuccess(t("linkRevoked"));
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
@@ -836,6 +840,20 @@ function MembersWorkspacePanel({
                                 )}
                             </TabsList>
 
+                            {copyRecoveryUrl ? (
+                                <Alert role="region" aria-label={t("copyFailed")}>
+                                    <AlertTitle>{t("copyFailed")}</AlertTitle>
+                                    <AlertDescription className="gap-3">
+                                        <p>{t("copyFailedDescription")}</p>
+                                        <Input aria-label={t("inviteUrl")} readOnly value={copyRecoveryUrl} onFocus={(event) => event.currentTarget.select()} />
+                                        <div className="flex flex-wrap gap-2">
+                                            <Button variant="outline" onClick={() => setCopyRecoveryUrl(null)}>{t("close")}</Button>
+                                            <Button onClick={() => { void copyUrl(copyRecoveryUrl); }}>{t("copyLink")}</Button>
+                                        </div>
+                                    </AlertDescription>
+                                </Alert>
+                            ) : null}
+
                             <TabsContent value="email" className="space-y-5">
                                 <p className="max-w-prose text-sm text-muted-foreground">{t("inviteSubtitle")}</p>
                                 {roleOptionsStatus === "loading" ? (
@@ -919,7 +937,7 @@ function MembersWorkspacePanel({
                                     </form>
                                 )}
 
-                                {mailOutcome ? <p role="status" className="max-w-prose text-sm text-muted-foreground">{mailOutcome}</p> : null}
+                                <p role="status" aria-live="polite" aria-atomic="true" className="max-w-prose text-sm text-muted-foreground">{mailOutcome}</p>
                                 <div className="space-y-2">
                                     <TabListHeading title={t("pendingTitle")} count={invites.length} />
                                     <p className="max-w-prose text-sm text-muted-foreground">{t("replaceInviteHint")}</p>
@@ -1195,20 +1213,6 @@ function MembersWorkspacePanel({
                         <Button variant="destructive" disabled={isRemoving} onClick={confirmRemove}>
                             {isRemoving ? <Loader2Icon className="size-4 animate-spin" /> : t("remove")}
                         </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
-
-            <Dialog open={copyRecoveryUrl !== null} onOpenChange={(open) => { if (!open) setCopyRecoveryUrl(null); }}>
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>{t("copyFailed")}</DialogTitle>
-                        <DialogDescription>{t("copyFailedDescription")}</DialogDescription>
-                    </DialogHeader>
-                    <Input aria-label={t("inviteUrl")} readOnly value={copyRecoveryUrl ?? ""} onFocus={(event) => event.currentTarget.select()} />
-                    <DialogFooter>
-                        <DialogClose asChild><Button variant="outline">{t("close")}</Button></DialogClose>
-                        <Button onClick={() => { if (copyRecoveryUrl) void copyUrl(copyRecoveryUrl); }}>{t("copyLink")}</Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>

@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -10,6 +11,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import ooo.klae.connex.backend.beans.User;
@@ -34,10 +36,19 @@ class InviteServiceTest extends AbstractServiceTest {
     @Autowired RoleService roleService;
     @Autowired NotificationMapper notificationMapper;
 
+    @BeforeEach
+    void isolateCommittedInvitationFixtures() {
+        tenantContext.clear();
+        var isolated = workspaceService.createWorkspace("Invitation fixtures", currentUser.getId());
+        authenticateAs(currentUser, isolated.getId());
+        approveForStepUp(currentUser);
+    }
+
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @Test
     void inviteNewEmail_returnsTokenInviteThenAccepts() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Invite WS", currentUser.getId());
+        assertNotEquals(workspace.getOrgId(), ws.getOrgId());
         String email = "newcomer-" + unique() + "@example.com";
 
         InviteResultDto result = afterFixtureCommit(() -> inviteService.createInvite(ws.getId(), currentUser, email, "member"));

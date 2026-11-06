@@ -98,8 +98,15 @@ a live attempt's destination. Callback handlers use only navigation published by
 request removal, including linking and failure continuations across session replacement.
 Absolute URLs, controls, backslashes and encoded separators/controls remain refused under the
 shared frontend/backend validation vectors. There is no singleton last-destination fallback.
-Attempts have a ten-minute lifetime and an observed four-live-attempt limit with no live eviction;
-concurrent Spring Session snapshots can exceed the observed count without aliasing identities.
+Every attempt allocation refuses cross-site subresources unless metadata identifies a top-level
+navigation (`navigate` mode and `document` destination). This includes every supported start
+method and SAML's query-form start. Ordinary headerless and cross-site top-level starts still
+work without destinations; destination-bearing starts retain the stricter same-origin rule.
+Attempts have a ten-minute lifetime and share one immutable session map of at most four entries.
+Saves prune expired entries and evict the earliest expiry to admit a fresh identity at capacity;
+duplicate live identities remain refused. Concurrent session snapshots may drop another attempt,
+whose callback fails closed without aliasing authorization or destinations. The previous
+per-attempt session attributes are ignored.
 
 Self-service registration accepts an optional `skipInitialWorkspace` boolean, defaulting to false.
 It suppresses only the optional personal workspace, so invitation entry can continue without

@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -11,6 +12,7 @@ import java.util.List;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,9 +30,18 @@ class InvitationPrivacyTest extends AbstractServiceTest {
     @Autowired private WorkspaceService workspaceService;
     @Autowired private RoleService roleService;
 
+    @BeforeEach
+    void isolateCommittedInvitationFixtures() {
+        tenantContext.clear();
+        var isolated = workspaceService.createWorkspace("Invitation privacy fixtures", currentUser.getId());
+        authenticateAs(currentUser, isolated.getId());
+        approveForStepUp(currentUser);
+    }
+
     @Test
     void accountCreationAndRepeatedPendingInvitesDoNotChangeTheDisclosure() {
         var target = workspaceService.createWorkspace("Private invitation", currentUser.getId());
+        assertNotEquals(workspace.getOrgId(), target.getOrgId());
         String email = "invite-privacy-" + unique() + "@example.com";
         var absent = afterFixtureCommit(() -> inviteService.createInvite(target.getId(), currentUser, email, "member"));
         User recipient = newUser();
@@ -110,7 +121,10 @@ class InvitationPrivacyTest extends AbstractServiceTest {
     @Test
     void historicalInvitationRevocationIsWorkspaceBoundAndCannotRemoveAcceptedMembership() {
         var first = workspaceService.createWorkspace("First privacy", currentUser.getId());
+        authenticateAs(currentUser, first.getId());
+        approveForStepUp(currentUser);
         var second = workspaceService.createWorkspace("Second privacy", currentUser.getId());
+        assertEquals(first.getOrgId(), second.getOrgId());
         User recipient = newUser();
         workspaceService.addPendingMember(first.getId(), currentUser, recipient, "member");
         String reference = inviteService.listInvites(first.getId(), currentUser.getId()).getFirst().getId();
