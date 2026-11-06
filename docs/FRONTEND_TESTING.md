@@ -122,6 +122,19 @@ descending order, and preserves header order for ties. Unsupported ranges, wildc
 zero-quality ranges and malformed entries are ignored. An absent or unsupported cookie does not
 prevent browser-language matching. Browser inference never writes a preference cookie.
 
+API requests use the same effective UI language through `app/lib/apiLocale.ts`: the browser reads
+the server-rendered `html[lang]`, and server fetches read next-intl's request locale. JSON, multipart,
+public-link, CSV, report and upload requests share this choice, including the locale in AI/request
+identity keys. Cookie changes take effect after the rendered language changes. Outside a rendered
+page or next-intl request context, the client retains the cookie/English fallback.
+
+The profile bootstrap explicitly carries the cookie/browser language available before the saved
+profile is known. Workspace-zone fallback honors an explicit cookie before the profile language. These
+preference reads bypass next-intl resolution to avoid recursively requesting their own unfinished
+configuration; later data requests use the resolved request language. Neither bootstrap adds a
+second profile lookup. `apiLocalePropagation.test.ts` exercises this loop with the real request
+configuration and API helpers, including workspace fallback and concurrent request isolation.
+
 The saved profile language applies to the first server render, including public routes without
 `PreferenceActionsBridge`. To pin a Japanese run regardless of its saved profile or browser
 language, set the cookie itself:
@@ -141,6 +154,10 @@ await expect(page.getByRole("heading", { name: message("ja", "auth", "AuthLogin.
 It covers sign-in, registration, recovery, email/passkey confirmation, signed-out invitation
 redirects and unsubscribe entry on desktop and phone, plus explicit-cookie precedence,
 authenticated English profiles with Japanese browsers, and unsupported-browser fallback.
+The public-page cases also compare API `Accept-Language` with the rendered language for saved
+English/Japanese profiles, explicit cookies and signed-out browser inference.
+`publicEntryLocaleMessages.test.ts` checks the spec's literal and table-driven catalogue/key
+references in both languages before browser execution, including invitation copy in `workspace.json`.
 `i18nRequest.test.ts` checks locale precedence, profile-read failure and a single shared profile
 read for language and time zone. Document acceptance retains its separate document-locale contract
 in [ESIGNATURE.md](ESIGNATURE.md).

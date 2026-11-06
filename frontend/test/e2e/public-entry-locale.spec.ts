@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
 import { csrfBootstrap, registerUser } from "./support/api";
 import { message } from "./support/messages";
-import { useLocale } from "./support/locale";
+import { useLocale as setBrowserLocale } from "./support/locale";
 
 const entryRoutes = [
     { path: "/auth/login", namespace: "auth", heading: "AuthLogin.title" },
@@ -20,6 +20,9 @@ test.describe("public entry in a Japanese browser", () => {
 
     for (const entry of entryRoutes) {
         test(`${entry.path} uses Japanese without a locale cookie @mobile`, async ({ page }) => {
+            const unsubscribeRequest = entry.path === "/unsubscribe"
+                ? page.waitForRequest((request) => request.url().endsWith("/api/delivery/unsubscribe") && request.method() === "GET")
+                : null;
             const response = await page.goto(entry.path);
 
             expect(response?.status()).toBe(200);
@@ -28,6 +31,7 @@ test.describe("public entry in a Japanese browser", () => {
                 name: message("ja", entry.namespace, entry.heading),
                 exact: true,
             })).toBeVisible();
+            if (unsubscribeRequest) expect((await unsubscribeRequest).headers()["accept-language"]).toBe("ja");
             expect((await page.context().cookies()).some(({ name }) => name === "NEXT_LOCALE")).toBe(false);
         });
     }
@@ -46,9 +50,12 @@ test.describe("public entry in a Japanese browser", () => {
     }
 
     test("an explicit English cookie wins across sign-in and unsubscribe entry @mobile", async ({ page }) => {
-        await useLocale(page, "en");
+        await setBrowserLocale(page, "en");
 
         for (const entry of entryRoutes.filter(({ path }) => path === "/auth/login" || path === "/unsubscribe")) {
+            const unsubscribeRequest = entry.path === "/unsubscribe"
+                ? page.waitForRequest((request) => request.url().endsWith("/api/delivery/unsubscribe") && request.method() === "GET")
+                : null;
             await page.goto(entry.path);
 
             await expect(page.locator("html")).toHaveAttribute("lang", "en");
@@ -56,10 +63,12 @@ test.describe("public entry in a Japanese browser", () => {
                 name: message("en", entry.namespace, entry.heading),
                 exact: true,
             })).toBeVisible();
+            if (unsubscribeRequest) expect((await unsubscribeRequest).headers()["accept-language"]).toBe("en");
         }
     });
 
-    test("a saved English profile wins on unsubscribe and invitation pages without a locale cookie @mobile", async ({ page, context }) => {
+    test("profile and cookie choices keep UI and API languages aligned on public pages @mobile", async ({ page, context }) => {
+        test.setTimeout(120_000);
         const unique = randomUUID();
         await registerUser(context.request, {
             username: `locale-${unique}`,
@@ -68,27 +77,36 @@ test.describe("public entry in a Japanese browser", () => {
             displayName: "Locale preference",
         });
         const csrf = await csrfBootstrap(context.request);
-        const response = await context.request.patch("/api/users/me/locale", {
-            headers: { [csrf.headerName]: csrf.token },
-            data: { locale: "en" },
-        });
-        expect(response.ok()).toBe(true);
-        await context.clearCookies({ name: "NEXT_LOCALE" });
+        for (const choice of [
+            { profile: "en", cookie: null, rendered: "en" },
+            { profile: "ja", cookie: null, rendered: "ja" },
+            { profile: "ja", cookie: "en", rendered: "en" },
+        ] as const) {
+            const response = await context.request.patch("/api/users/me/locale", {
+                headers: { [csrf.headerName]: csrf.token },
+                data: { locale: choice.profile },
+            });
+            expect(response.ok()).toBe(true);
+            await context.clearCookies({ name: "NEXT_LOCALE" });
+            if (choice.cookie) await setBrowserLocale(context, choice.cookie);
 
-        for (const entry of [
-            { path: "/unsubscribe", namespace: "unsubscribe", heading: "Unsubscribe.invalidTitle" },
-            { path: "/invite", namespace: "auth", heading: "InviteAccept.invalidTitle" },
-            { path: "/invite-link", namespace: "auth", heading: "InviteLinkAccept.invalidTitle" },
-        ]) {
-            const documentResponse = await page.goto(entry.path);
+            for (const entry of [
+                { path: "/unsubscribe", api: "/api/delivery/unsubscribe", namespace: "unsubscribe", heading: "Unsubscribe.invalidTitle" },
+                { path: "/invite", api: "/api/invites", namespace: "workspace", heading: "InviteAccept.invalidTitle" },
+                { path: "/invite-link", api: "/api/invite-links", namespace: "workspace", heading: "InviteLinkAccept.invalidTitle" },
+            ]) {
+                const apiRequest = page.waitForRequest((request) => request.url().endsWith(entry.api) && request.method() === "GET");
+                const documentResponse = await page.goto(entry.path);
 
-            expect(documentResponse?.status()).toBe(200);
-            expect(await documentResponse?.text()).toContain('<html lang="en"');
-            await expect(page.getByRole("heading", {
-                name: message("en", entry.namespace, entry.heading),
-                exact: true,
-            })).toBeVisible();
-            expect((await context.cookies()).some(({ name }) => name === "NEXT_LOCALE")).toBe(false);
+                expect(documentResponse?.status()).toBe(200);
+                expect(await documentResponse?.text()).toContain(`<html lang="${choice.rendered}"`);
+                await expect(page.getByRole("heading", {
+                    name: message(choice.rendered, entry.namespace, entry.heading),
+                    exact: true,
+                })).toBeVisible();
+                expect((await apiRequest).headers()["accept-language"]).toBe(choice.rendered);
+                expect((await context.cookies()).some(({ name }) => name === "NEXT_LOCALE")).toBe(choice.cookie !== null);
+            }
         }
     });
 });
@@ -104,7 +122,7 @@ test.describe("public entry with an unsupported browser language", () => {
         })).toBeVisible();
         await expect(page.locator("html")).toHaveAttribute("lang", "en");
 
-        await useLocale(page, "ja");
+        await setBrowserLocale(page, "ja");
         await page.reload();
 
         await expect(page.getByRole("heading", {

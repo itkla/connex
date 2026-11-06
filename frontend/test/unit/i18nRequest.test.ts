@@ -149,7 +149,7 @@ describe("next-intl request locale", () => {
 
             expect(config.locale).toBe("en");
             expect(config.timeZone).toBe("Asia/Tokyo");
-            expect(profile).toHaveBeenCalledExactlyOnceWith("JSESSIONID=session");
+            expect(profile).toHaveBeenCalledExactlyOnceWith("JSESSIONID=session", "ja");
             expect(workspaces).not.toHaveBeenCalled();
         },
     );

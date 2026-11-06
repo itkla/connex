@@ -20,7 +20,7 @@ beforeEach(() => {
 describe('request time zone', () => {
     it('uses the authenticated profile without fetching workspaces', async () => {
         expect(await requestTimeZone()).toBe('Asia/Tokyo');
-        expect(api.user).toHaveBeenCalledWith('JSESSIONID=test; connex_workspace=2');
+        expect(api.user).toHaveBeenCalledWith('JSESSIONID=test; connex_workspace=2', 'en');
         expect(api.workspaces).not.toHaveBeenCalled();
     });
     it('uses only the active workspace when the profile zone is invalid', async () => {
@@ -62,5 +62,13 @@ describe('request time zone', () => {
         api.user.mockResolvedValue({ ok: true, data: { locale: 'en', timezone: '' } });
         api.workspaces.mockRejectedValue(new TypeError('Workspaces unavailable'));
         expect(await requestPreferences()).toEqual({ locale: 'en', timeZone: 'UTC' });
+    });
+    it('keeps an explicit cookie choice on profile and workspace bootstrap requests', async () => {
+        const cookie = 'JSESSIONID=test; NEXT_LOCALE=en';
+        api.headers.mockResolvedValue(new Headers({ cookie, 'accept-language': 'ja-JP' }));
+        api.user.mockResolvedValue({ ok: true, data: { locale: 'ja', timezone: 'invalid' } });
+        expect(await requestPreferences()).toEqual({ locale: 'ja', timeZone: 'America/New_York' });
+        expect(api.user).toHaveBeenCalledExactlyOnceWith(cookie, 'en');
+        expect(api.workspaces).toHaveBeenCalledExactlyOnceWith(cookie, 'en');
     });
 });
