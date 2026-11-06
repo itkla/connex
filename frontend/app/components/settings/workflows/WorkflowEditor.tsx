@@ -1,13 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { ExclamationTriangleIcon, EyeIcon, XMarkIcon } from "@heroicons/react/24/outline";
 
 import { segmentDefinitionLabel } from "@/app/lib/segmentLabels";
 import AccessDenied from "@/app/components/AccessDenied";
+import ConfirmDiscardDialog from "@/app/components/ConfirmDiscardDialog";
 import WorkflowCanvasEditor from "@/app/components/settings/workflows/WorkflowCanvasEditor";
 import WorkflowConflictDialog from "@/app/components/settings/workflows/WorkflowConflictDialog";
 import WorkflowInspector from "@/app/components/settings/workflows/WorkflowInspector";
@@ -24,6 +25,7 @@ import { workflowRunReferenceParts } from "@/app/components/settings/workflows/w
 import { canAuthorTriggeredSend } from "@/app/components/settings/workflows/vocabulary";
 import { useGrantedPermissions } from "@/app/hooks/usePermissions";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
+import { useUnsavedChangesGuard } from "@/app/hooks/useUnsavedChangesGuard";
 import {
     getCampaignMessages,
     getCampaigns,
@@ -79,12 +81,24 @@ export default function WorkflowEditor({
     workflowId?: number;
     triggeredSendEnabled: boolean;
 }) {
+    const router = useRouter();
+    const [revision, setRevision] = useState(0);
+    const [refreshing, startTransition] = useTransition();
+    const discardDraft = useCallback(() => {
+        startTransition(() => {
+            setRevision((value) => value + 1);
+            router.refresh();
+        });
+    }, [router]);
     return (
-        <ReactFlowProvider>
-            <WorkflowEditorBody
-                workflowId={workflowId}
-                triggeredSendEnabled={triggeredSendEnabled}
-            />
+        <ReactFlowProvider key={revision}>
+            {refreshing ? <Skeleton className="h-80 w-full" /> : (
+                <WorkflowEditorBody
+                    workflowId={workflowId}
+                    triggeredSendEnabled={triggeredSendEnabled}
+                    onDiscard={discardDraft}
+                />
+            )}
         </ReactFlowProvider>
     );
 }
@@ -92,15 +106,19 @@ export default function WorkflowEditor({
 function WorkflowEditorBody({
     workflowId,
     triggeredSendEnabled,
+    onDiscard,
 }: {
     workflowId?: number;
     triggeredSendEnabled: boolean;
+    onDiscard: () => void;
 }) {
     const t = useTranslations("WorkspaceWorkflows");
     const tr = useTranslations("WorkflowAuthoring");
     const tSegments = useTranslations("SmartSegments");
     const router = useRouter();
+    const pathname = usePathname();
     const searchParams = useSearchParams();
+    const search = searchParams.toString();
     const isNarrow = useSyncExternalStore(
         subscribeToNarrowEditor,
         narrowEditorSnapshot,
@@ -110,6 +128,17 @@ function WorkflowEditorBody({
     const grantedPermissions = useGrantedPermissions();
     const { canRunAsSystem, members } = useWorkflowWorkspaceAccess();
     const editor = useWorkflowEditor({ workflowId, activeWorkspaceId, switching, canRunAsSystem });
+    const guard = useUnsavedChangesGuard({
+        isDirty: editor.dirty,
+        onClose: () => router.push("/workflows"),
+        navigation: {
+            push: router.push,
+            replace: router.replace,
+            renderedHref: search ? `${pathname}?${search}` : pathname,
+            onBeforeLeave: editor.cancelCreationContinuation,
+            onDiscard,
+        },
+    });
     const loadedWorkflow = editor.workflow;
     const inspectRun = editor.inspectRun;
     const requestedRunKey = searchParams.get("runKey");
@@ -460,6 +489,7 @@ function WorkflowEditorBody({
 
     return (
         <div className="flex min-h-[calc(100dvh-4rem)] flex-col bg-background">
+            <ConfirmDiscardDialog {...guard.confirm} />
             <WorkflowLifecycleBar
                 name={editor.history.present.name}
                 revision={editor.workflow?.draftRevision ?? -1}
@@ -476,10 +506,7 @@ function WorkflowEditorBody({
                 canRedo={editor.history.future.length > 0}
                 busyAction={editor.busyAction}
                 readOnly={editor.editingReadOnly}
-                onBack={() => {
-                    editor.cancelCreationContinuation();
-                    router.push("/workflows");
-                }}
+                onBack={guard.requestClose}
                 onNameChange={editor.changeName}
                 onNameCommit={editor.commitTransient}
                 onUndo={editor.undo}

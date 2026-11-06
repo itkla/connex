@@ -12,6 +12,7 @@ import {
 import { PEEK_PARAM } from './useRecordPeek';
 import { SERVER_RECORDS_URL_KEYS } from './useServerRecords';
 import {
+    isCurrentListPath,
     listStateAddress,
     parseListQuery,
     PIPELINE_EDIT_URL_KEY,
@@ -100,6 +101,7 @@ export function useRecordsBrowser<T extends { id: SelectionId }>(
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
     useEffect(() => {
+        if (!isCurrentListPath(pathname)) return;
         const params = new URLSearchParams(window.location.search);
         params.set('view', displayMode);
         for (const key of Array.from(params.keys())) {
