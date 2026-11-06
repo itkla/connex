@@ -8,6 +8,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.eq;
 
 import java.time.LocalDate;
 import java.time.Clock;
@@ -54,6 +55,7 @@ class RuleActionRecipientTest {
     @Mock private CampaignTriggeredSendService campaignTriggeredSendService;
     @Mock private WorkspaceService workspaceService;
     @Mock private UserCalendarService userCalendarService;
+    @Mock private WorkflowTaskCreationService workflowTaskCreationService;
     @InjectMocks private RuleActionExecutor executor;
 
     @BeforeEach
@@ -72,14 +74,14 @@ class RuleActionRecipientTest {
         RuleActionExecutor zonedExecutor = new RuleActionExecutor(taskService, activityService,
             companyService, personService, leadResponseSlaService, dealService, noteService,
             notificationDelivery, tagMapper, documentMapper, campaignTriggeredSendService,
-            workspaceService, new UserCalendarService(auth, clock));
+            workspaceService, new UserCalendarService(auth, clock), workflowTaskCreationService);
         RuleAction action = action("create_task");
         action.setDueInDays(0);
 
         zonedExecutor.execute(action, contexts().getFirst());
 
         ArgumentCaptor<Task> tasks = ArgumentCaptor.forClass(Task.class);
-        verify(taskService).create(tasks.capture());
+        verify(workflowTaskCreationService).create(eq(7), tasks.capture());
         assertEquals(expectedDate, tasks.getValue().getDueDate());
     }
 
@@ -94,7 +96,7 @@ class RuleActionRecipientTest {
             executor.execute(action, context);
         }
         ArgumentCaptor<Task> tasks = ArgumentCaptor.forClass(Task.class);
-        verify(taskService, times(2)).create(tasks.capture());
+        verify(workflowTaskCreationService, times(2)).create(eq(7), tasks.capture());
         for (Task task : tasks.getAllValues()) {
             assertEquals(23, task.getAssignedTo().getId());
             assertEquals(today.toString(), task.getDueDate());
@@ -106,7 +108,7 @@ class RuleActionRecipientTest {
     void absentRecipientAndDueDaysRetainRunAsMemberAndDefaultDate() {
         executor.execute(action("create_task"), contexts().getFirst());
         ArgumentCaptor<Task> tasks = ArgumentCaptor.forClass(Task.class);
-        verify(taskService).create(tasks.capture());
+        verify(workflowTaskCreationService).create(eq(7), tasks.capture());
         assertEquals(17, tasks.getValue().getAssignedTo().getId());
         assertEquals(LocalDate.of(2026, 11, 9).toString(), tasks.getValue().getDueDate());
     }
@@ -189,7 +191,7 @@ class RuleActionRecipientTest {
         WorkflowExecutionException failure = assertThrows(WorkflowExecutionException.class,
             () -> executor.execute(action, contexts().getFirst()));
         assertEquals("action_target_member_unavailable", failure.code());
-        verifyNoInteractions(taskService, notificationDelivery);
+        verifyNoInteractions(taskService, workflowTaskCreationService, notificationDelivery);
     }
 
     @ParameterizedTest
@@ -198,7 +200,7 @@ class RuleActionRecipientTest {
         RuleAction action = action("create_task");
         action.setDueInDays(days);
         assertThrows(BadRequestException.class, () -> executor.execute(action, contexts().getFirst()));
-        verifyNoInteractions(taskService);
+        verifyNoInteractions(taskService, workflowTaskCreationService);
     }
 
     @Test

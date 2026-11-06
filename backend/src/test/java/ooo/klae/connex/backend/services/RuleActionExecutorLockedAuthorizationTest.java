@@ -34,7 +34,8 @@ class RuleActionExecutorLockedAuthorizationTest {
             mock(DealDocumentMapper.class),
             triggeredSendService,
             mock(WorkspaceService.class),
-            mock(UserCalendarService.class));
+            mock(UserCalendarService.class),
+            mock(WorkflowTaskCreationService.class));
         RuleAction action = new RuleAction();
         action.setType("send_message");
         action.setCampaignMessageId(31);

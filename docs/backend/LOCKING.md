@@ -783,7 +783,18 @@ roots; re-entering that prefix adds no new blocking root. No target account root
 a workflow/run root. The new recipient membership never waits behind departure or membership-first
 writes: contention propagates as a refusal. The exact active membership check and notification upsert
 share one transaction, so departure either wins before that check or follows delivery's commit.
-Task effects continue through `TaskService` and its existing retained assignee membership.
+Workflow task effects join the existing `READ_COMMITTED` effect transaction, or open one for
+non-durable dispatch, through `WorkflowTaskCreationService`. Before delegating to `TaskService`,
+they resolve/bind the existing record-visibility scope, then retain the exact active assignee with
+`lockActiveMemberWithoutWaiting`. This adds no target
+account or broader authorization root. The ordinary task service's blocking assignee read then
+re-enters the retained row before taking its board, linked-record and audit locks. A durable
+delivery may already hold the workspace audit head from an earlier action: if a direct task create
+holds the assignee while waiting for that head, NOWAIT refuses before the workflow can wait on that
+membership or the task board. The helper's exact NOWAIT conflict is exposed as
+`CannotAcquireLockException` so both workflow engines retry in a fresh transaction; missing active
+membership remains `action_target_member_unavailable`. Ordinary task requests keep their existing
+membership-first order.
 
 ## Task board mutations
 

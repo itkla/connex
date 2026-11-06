@@ -268,7 +268,10 @@ Future fenced record types use the same centralized gate instead of scattered ch
 Schema-v1 `create_task` and `notify` actions use the existing optional `targetUserId` for a
 specific active member of the same workspace. An absent target retains the run-as attribution member.
 Authoring and execution refuse invalid or unavailable explicit members rather than redirecting work
-to the actor. Task creation continues through `TaskService` and its locked assignment checks;
+to the actor. Task effects retain the exact assignee through a transactional NOWAIT fence before
+delegating to `TaskService` and its locked assignment checks. Membership contention propagates as a
+retryable lock failure, so an earlier action's audit head cannot close a cycle with a direct task
+create holding that assignee. Missing active membership requires intervention;
 notification effects retain attribution and recipient memberships through the write using the existing
 actor/workspace prefix and ordered NOWAIT membership union. Missing or contended membership refuses
 the action instead of completing an invisible notification. Recipient/source access filters remain in place.

@@ -46,6 +46,7 @@ public class RuleActionExecutor {
     private final CampaignTriggeredSendService campaignTriggeredSendService;
     private final WorkspaceService workspaceService;
     private final UserCalendarService userCalendarService;
+    private final WorkflowTaskCreationService workflowTaskCreationService;
 
     private static final DateTimeFormatter TIMESTAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd");
@@ -124,7 +125,7 @@ public class RuleActionExecutor {
         } else if (attachesToDeal(ctx)) {
             task.setDeal(deal(dealIdFor(ctx)));
         }
-        taskService.create(task);
+        workflowTaskCreationService.create(ctx.workspaceId(), task);
     }
 
     private void logActivity(RuleAction action, AutomationActionContext ctx) {
