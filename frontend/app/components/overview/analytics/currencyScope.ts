@@ -20,6 +20,22 @@ export function resolveCurrency(counts: ReadonlyMap<string, number>, selected: s
     return best;
 }
 
+/** Resolves URL currencies against known buckets, retaining known selections with no filter matches. */
+export function resolveDealViewCurrency(
+    counts: ReadonlyMap<string, number>,
+    selected: string | null,
+    workspaceCounts: ReadonlyMap<string, number> = counts,
+): string {
+    const filteredCounts = new Map([...counts].filter(([code]) => code.trim().length > 0));
+    const knownCounts = new Map([...workspaceCounts, ...filteredCounts].filter(([code]) => code.trim().length > 0));
+    const requested = selected?.trim().toUpperCase();
+    if (requested) {
+        const known = [...knownCounts.keys()].find((code) => code.toUpperCase() === requested);
+        if (known) return known;
+    }
+    return resolveCurrency(filteredCounts.size > 0 ? filteredCounts : knownCounts, null);
+}
+
 /** Rebuilds currency counts in the metrics endpoint's currency order from an authorized deal list. */
 export function currencyCountsForDeals(deals: readonly Pick<Deal, 'currency'>[]): Map<string, number> {
     const counts = new Map<string, number>();
