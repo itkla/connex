@@ -201,7 +201,7 @@
     WHERE d.workspace_id = #{workspaceId} AND d.id = #{id} AND d.status = 'pending'
       AND (d.attempt_target_fingerprint IS NULL
         OR d.attempt_target_fingerprint = #{attemptTargetFingerprint})
-      AND s.origin = 'triggered' AND s.status = 'triggered'
+      AND s.origin = 'triggered' AND s.status = 'triggered' AND s.completed_at IS NULL
   </update>
 
   <update id="markPendingTriggeredTargetMismatchAmbiguous">
@@ -214,7 +214,7 @@
     WHERE d.workspace_id = #{workspaceId} AND d.id = #{id} AND d.status = 'pending'
       AND d.attempt_target_fingerprint IS NOT NULL
       AND d.attempt_target_fingerprint &lt;&gt; #{attemptTargetFingerprint}
-      AND s.origin = 'triggered' AND s.status = 'triggered'
+      AND s.origin = 'triggered' AND s.status = 'triggered' AND s.completed_at IS NULL
   </update>
 
   <update id="renewTriggeredClaim">
@@ -243,10 +243,14 @@
         dispatch_lease_owner = NULL, dispatch_lease_until = NULL
     WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'dispatching'
       AND dispatch_lease_owner = #{leaseOwner}
+      AND EXISTS (
+        SELECT 1 FROM campaign_send s
+        WHERE s.workspace_id = #{workspaceId} AND s.id = campaign_delivery.send_id
+          AND s.completed_at IS NULL)
   </update>
 
   <select id="expiredTriggeredClaimsPage" resultType="CampaignDelivery">
-    SELECT d.id, d.provider_id, d.attempt_target_fingerprint, s.channel
+    SELECT d.id, d.send_id, d.provider_id, d.attempt_target_fingerprint, s.channel
     FROM campaign_delivery d
     JOIN campaign_send s ON s.workspace_id = d.workspace_id AND s.id = d.send_id
     WHERE d.workspace_id = #{workspaceId} AND d.status = 'dispatching'
@@ -264,7 +268,7 @@
     WHERE d.workspace_id = #{workspaceId} AND d.id = #{id} AND d.status = 'dispatching'
       AND d.dispatch_lease_until &lt; UTC_TIMESTAMP(6)
       AND d.attempt_target_fingerprint = #{attemptTargetFingerprint}
-      AND s.origin = 'triggered' AND s.status = 'triggered'
+      AND s.origin = 'triggered' AND s.status = 'triggered' AND s.completed_at IS NULL
   </update>
 
   <update id="markExpiredTriggeredClaimAmbiguous">
@@ -560,7 +564,7 @@
     WHERE d.workspace_id = #{workspaceId} AND d.id = #{deliveryId}
       AND d.person_id = #{personId} AND s.channel = #{channel}
       AND d.status = 'dispatching' AND d.submitted_at IS NULL
-      AND s.status IN ('queued', 'running', 'triggered')
+      AND s.status IN ('queued', 'running', 'triggered') AND s.completed_at IS NULL
       <choose>
         <when test="leaseOwner != null">
           AND s.origin = 'triggered' AND s.status = 'triggered'
@@ -625,6 +629,40 @@
       SELECT 1 FROM campaign_delivery_event
       WHERE workspace_id = #{workspaceId} AND delivery_id = #{deliveryId} AND event_type = #{eventType}
     )
+  </select>
+
+  <sql id="uncertainPendingHistory">
+    ((attempt_count > 0 OR attempt_target_fingerprint IS NOT NULL
+      OR submitted_at IS NOT NULL OR frequency_reserved_at IS NOT NULL) AND NOT (last_error_code IS NULL
+      AND COALESCE(last_error, '') = 'Claim released before provider egress'))
+  </sql>
+
+  <update id="settleContentRefusedPending">
+    UPDATE campaign_delivery
+    SET status = CASE WHEN <include refid="uncertainPendingHistory"/> THEN 'failed' ELSE 'skipped' END,
+        skip_reason = CASE WHEN <include refid="uncertainPendingHistory"/> THEN NULL ELSE 'not_dispatchable' END,
+        reconciliation_required_at = CASE WHEN <include refid="uncertainPendingHistory"/>
+          THEN UTC_TIMESTAMP(6) ELSE reconciliation_required_at END
+    WHERE workspace_id = #{workspaceId} AND send_id = #{sendId} AND status = 'pending'
+  </update>
+
+  <insert id="insertContentRefusal">
+    INSERT INTO campaign_delivery_event (workspace_id, delivery_id, event_type, detail, provider_event_id)
+    SELECT #{workspaceId}, d.id, 'failed', 'CAMPAIGN_UNSUPPORTED_TOKEN', CONCAT('connex-content-refusal:', #{sendId})
+    FROM campaign_delivery d
+    WHERE d.workspace_id = #{workspaceId} AND d.send_id = #{sendId} AND d.status = 'pending'
+    ORDER BY d.id
+    LIMIT 1
+  </insert>
+
+  <select id="hasContentRefusal" resultType="boolean">
+    SELECT EXISTS (
+      SELECT 1 FROM campaign_delivery_event e
+      JOIN campaign_delivery recorded ON recorded.workspace_id = e.workspace_id AND recorded.id = e.delivery_id
+      WHERE e.workspace_id = #{workspaceId} AND recorded.workspace_id = #{workspaceId}
+        AND recorded.send_id = #{sendId} AND e.event_type = 'failed'
+        AND e.detail = 'CAMPAIGN_UNSUPPORTED_TOKEN'
+        AND e.provider_id IS NULL AND e.provider_event_id = CONCAT('connex-content-refusal:', #{sendId}))
   </select>
 
 </mapper>

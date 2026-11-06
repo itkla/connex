@@ -58,6 +58,52 @@ import ooo.klae.connex.backend.services.WorkflowTriggeredSendGate;
 
 class CampaignDispatchServiceTest {
 
+    @ParameterizedTest
+    @ValueSource(strings = {"audience", "triggered"})
+    void refusesLegacyInvalidContentBeforeProviderResolutionOrClaim(String origin) {
+        CampaignSendMapper sends = mock(CampaignSendMapper.class);
+        CampaignDeliveryMapper deliveries = mock(CampaignDeliveryMapper.class);
+        DeliveryProviderConfigService providers = mock(DeliveryProviderConfigService.class);
+        WorkflowTriggeredSendGate gate = mock(WorkflowTriggeredSendGate.class);
+        when(gate.enabled()).thenReturn(true);
+        CampaignSend send = triggeredSend();
+        send.setOrigin(origin);
+        send.setStatus("triggered".equals(origin) ? "triggered" : "queued");
+        when(sends.getSend(7, 11)).thenReturn(send);
+        CampaignDispatchService dispatch = service(sends, deliveries, providers, gate);
+        CampaignMessageMapper messages = mock(CampaignMessageMapper.class);
+        CampaignMessageRevision content = revision();
+        content.setBodyHtml("<p>&#123;&#123;first_name&#125;&#125;</p>");
+        when(messages.getRevision(7, 12, 3)).thenReturn(content);
+        ReflectionTestUtils.setField(dispatch, "campaignMessageMapper", messages);
+        CampaignContentRefusalService refusal = mock(CampaignContentRefusalService.class);
+        ReflectionTestUtils.setField(dispatch, "contentRefusalService", refusal);
+
+        assertFalse(dispatch.processSend(7, 11));
+
+        verify(refusal).record(7, 11);
+        verifyNoInteractions(providers);
+        verify(deliveries, never()).pendingDeliveryIdsPage(anyInt(), anyInt(), anyInt());
+        verify(deliveries, never()).claim(anyInt(), anyInt(), anyLong());
+        verify(deliveries, never()).claimTriggered(anyInt(), anyInt(), anyString(), anyLong(), anyString(), anyString());
+        verify(sends, never()).assignProvider(anyInt(), anyInt(), anyString());
+    }
+
+    @Test
+    void persistedContentRefusalRemainsVisibleWithoutParsingOrProviderWork() {
+        CampaignSendMapper sends = mock(CampaignSendMapper.class);
+        CampaignDeliveryMapper deliveries = mock(CampaignDeliveryMapper.class);
+        DeliveryProviderConfigService providers = mock(DeliveryProviderConfigService.class);
+        WorkflowTriggeredSendGate gate = mock(WorkflowTriggeredSendGate.class);
+        when(gate.enabled()).thenReturn(true);
+        CampaignSend send = triggeredSend();
+        send.setContentRefused(true);
+        when(sends.getSend(7, 11)).thenReturn(send);
+        assertTrue(service(sends, deliveries, providers, gate).processSend(7, 11));
+        verifyNoInteractions(providers);
+        verify(deliveries, never()).pendingDeliveryIdsPage(anyInt(), anyInt(), anyInt());
+    }
+
     private static final String EXPIRED_AUDIENCE_RESERVATION =
             "AMBIGUOUS: Audience dispatch did not finish before its reservation expired";
     private static final long RESERVATION_GRACE_MICROS = 30_000_000L;
@@ -132,7 +178,7 @@ class CampaignDispatchServiceTest {
                 gate,
                 workflowRunMapper,
                 boundary,
-                admission, registration(), automationExecutor(), systemActor());
+                admission, registration(), automationExecutor(), systemActor(), mock(CampaignContentRefusalService.class));
 
         assertTrue(service.processSend(7, 11));
 
@@ -230,7 +276,7 @@ class CampaignDispatchServiceTest {
                 sendMapper, deliveryMapper, messageMapper, eligibilityService, providerConfigService,
                 providerRouter, new DeliveryProperties(), capabilityRegistry, gate,
                 mock(WorkflowRunMapper.class), mock(CampaignDispatchClaimBoundary.class), admission,
-                registration(), automationExecutor(), systemActor());
+                registration(), automationExecutor(), systemActor(), mock(CampaignContentRefusalService.class));
         ReflectionTestUtils.setField(service, "nanoTimeSource", (java.util.function.LongSupplier) now::get);
 
         assertTrue(service.processSend(7, 11));
@@ -286,7 +332,7 @@ class CampaignDispatchServiceTest {
                 gate,
                 workflowRunMapper,
                 boundary,
-                admittedFrequency(), registration(), automationExecutor(), systemActor());
+                admittedFrequency(), registration(), automationExecutor(), systemActor(), mock(CampaignContentRefusalService.class));
 
         assertTrue(service.processSend(7, 11));
 
@@ -312,6 +358,8 @@ class CampaignDispatchServiceTest {
         when(deliveryMapper.expiredTriggeredClaimsPage(7, 200)).thenReturn(List.of(expired));
         when(providerConfigService.describeClaimTarget(7, DeliveryChannel.EMAIL))
                 .thenReturn(claimTarget(current));
+        when(deliveryMapper.recoverExpiredTriggeredClaim(7, expired.getId(), current.attemptTargetFingerprint()))
+                .thenReturn(1);
         CampaignDispatchService service = service(
                 sendMapper, deliveryMapper, providerConfigService, gate);
 
@@ -820,7 +868,7 @@ class CampaignDispatchServiceTest {
                 sendMapper, deliveryMapper, messageMapper, eligibilityService, providerConfigService,
                 providerRouter, new DeliveryProperties(), capabilityRegistry, gate,
                 mock(WorkflowRunMapper.class), mock(CampaignDispatchClaimBoundary.class), admission,
-                registration(), automationExecutor(), systemActor());
+                registration(), automationExecutor(), systemActor(), mock(CampaignContentRefusalService.class));
     }
 
     private static CampaignDispatchService audienceDispatch(
@@ -850,7 +898,7 @@ class CampaignDispatchServiceTest {
                 sendMapper, deliveryMapper, messageMapper, mock(AudienceEligibilityService.class),
                 providerConfigService, providerRouter, new DeliveryProperties(), capabilityRegistry, gate,
                 mock(WorkflowRunMapper.class), mock(CampaignDispatchClaimBoundary.class), admission,
-                registration(), automationExecutor(), systemActor());
+                registration(), automationExecutor(), systemActor(), mock(CampaignContentRefusalService.class));
     }
 
     @ParameterizedTest
@@ -1197,10 +1245,12 @@ class CampaignDispatchServiceTest {
             WorkflowTriggeredSendGate gate) {
         CapabilityRegistry capabilityRegistry = mock(CapabilityRegistry.class);
         when(capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY)).thenReturn(true);
+        CampaignMessageMapper messageMapper = mock(CampaignMessageMapper.class);
+        when(messageMapper.getRevision(anyInt(), anyInt(), anyInt())).thenReturn(revision());
         return new CampaignDispatchService(
                 sendMapper,
                 deliveryMapper,
-                mock(CampaignMessageMapper.class),
+                messageMapper,
                 mock(AudienceEligibilityService.class),
                 providerConfigService,
                 mock(DeliveryProviderRouter.class),
@@ -1209,6 +1259,6 @@ class CampaignDispatchServiceTest {
                 gate,
                 mock(WorkflowRunMapper.class),
                 mock(CampaignDispatchClaimBoundary.class),
-                admittedFrequency(), registration(), automationExecutor(), systemActor());
+                admittedFrequency(), registration(), automationExecutor(), systemActor(), mock(CampaignContentRefusalService.class));
     }
 }
