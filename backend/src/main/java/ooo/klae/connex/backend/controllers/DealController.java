@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -15,6 +16,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import ooo.klae.connex.backend.ai.AiGenerationAdapterService;
+import ooo.klae.connex.backend.validation.ValidCurrency;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.DealPerson;
 import ooo.klae.connex.backend.dto.AiGenerationStatusDto;
@@ -72,6 +74,7 @@ import ooo.klae.connex.backend.util.LikePattern;
 import ooo.klae.connex.backend.util.NotePageCursor;
 import ooo.klae.connex.backend.util.PageBounds;
 import ooo.klae.connex.backend.tenant.TenantJournalAttributable;
+import ooo.klae.connex.backend.services.CurrencyFilterService;
 
 import java.util.List;
 import java.util.Map;
@@ -99,6 +102,7 @@ public class DealController {
     private final DealRiskService dealRiskService;
     private final AiGenerationAdapterService aiGenerationAdapterService;
     private final WorkspaceService workspaceService;
+    private final CurrencyFilterService currencyFilterService;
     private final MemberScopeResolver memberScopeResolver;
 
     /**
@@ -154,7 +158,7 @@ public class DealController {
         String direction = validateOptionalValue(dir, SORT_DIRECTIONS, "dir");
         MemberScope memberScope = resolveMemberScope(scope, memberIds);
         PageResponse<Deal> result = dealService.queryDealsPage(
-            query, sort, direction, currency,
+            query, sort, direction, currencyFilterService.resolve(currency),
             normalizeIds(pipelineId, "pipelineId"),
             normalizeIds(stageId, "stageId"),
             normalizeIds(companyId, "companyId"),
@@ -197,7 +201,7 @@ public class DealController {
     ) {
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
         return dealService.queryDealMetrics(
-            query, currency,
+            query, currencyFilterService.resolve(currency),
             normalizeIds(pipelineId, "pipelineId"),
             normalizeIds(stageId, "stageId"),
             normalizeIds(companyId, "companyId"),
@@ -233,7 +237,7 @@ public class DealController {
             @RequestParam(required = false) List<Integer> memberIds) {
         String query = q == null || q.isBlank() ? null : LikePattern.containing(q);
         return dealService.getMatchingDealIds(
-            query, blankToNull(currency), normalizeIds(pipelineId, "pipelineId"),
+            query, currencyFilterService.resolve(currency), normalizeIds(pipelineId, "pipelineId"),
             normalizeIds(stageId, "stageId"), normalizeIds(companyId, "companyId"),
             normalizeIds(personId, "personId"), noCompany,
             normalizeStatuses(status), normalizeValues(risk, DealFilterNormalizer.DEAL_RISKS, "risk"),
@@ -300,7 +304,7 @@ public class DealController {
         @RequestParam(required = false) List<Integer> memberIds,
         @RequestParam(defaultValue = "false") boolean openOnly
     ) {
-        String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
+        String normalizedCurrency = currencyFilterService.resolve(currency);
         return dealService.getRevenueTimeseries(
             normalizedCurrency, workspaceService.getCurrentAnalyticsTimezone(),
             analyticsMemberScope(scope, memberIds), openOnly);
@@ -321,7 +325,7 @@ public class DealController {
         @RequestParam(required = false) String scope,
         @RequestParam(required = false) List<Integer> memberIds
     ) {
-        String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
+        String normalizedCurrency = currencyFilterService.resolve(currency);
         Window window = AnalyticsPeriods.requiredWindow(
             from, to, workspaceService.getCurrentAnalyticsTimezone(), null);
         List<AnalyticsPeriod> periods = AnalyticsPeriods.periods(window, granularity);
@@ -338,7 +342,7 @@ public class DealController {
         @RequestParam(required = false) String scope,
         @RequestParam(required = false) List<Integer> memberIds
     ) {
-        String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
+        String normalizedCurrency = currencyFilterService.resolve(currency);
         return dealService.getStageDistribution(normalizedCurrency, analyticsMemberScope(scope, memberIds));
     }
 
@@ -357,7 +361,7 @@ public class DealController {
         @RequestParam(name = "timezone", required = false) String legacyTimezone,
         @RequestParam(name = "tzOffset", required = false) String legacyTzOffset
     ) {
-        String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
+        String normalizedCurrency = currencyFilterService.resolve(currency);
         Optional<Window> window = analyticsWindow(from, to);
         if (window.isPresent()) {
             List<AnalyticsPeriod> periods = AnalyticsPeriods.periods(window.get(), granularity);
@@ -382,7 +386,7 @@ public class DealController {
         @RequestParam(name = "timezone", required = false) String legacyTimezone,
         @RequestParam(name = "tzOffset", required = false) String legacyTzOffset
     ) {
-        String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
+        String normalizedCurrency = currencyFilterService.resolve(currency);
         Optional<Window> window = analyticsWindow(from, to);
         if (window.isPresent()) {
             return dealService.getDealPipelineValue(
@@ -401,7 +405,7 @@ public class DealController {
         @RequestParam(required = false) String scope,
         @RequestParam(required = false) List<Integer> memberIds
     ) {
-        String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
+        String normalizedCurrency = currencyFilterService.resolve(currency);
         return dealService.getDealAging(normalizedCurrency, analyticsMemberScope(scope, memberIds));
     }
 
@@ -414,7 +418,7 @@ public class DealController {
         @RequestParam(required = false) String scope,
         @RequestParam(required = false) List<Integer> memberIds
     ) {
-        String normalizedCurrency = (currency == null || currency.isBlank()) ? null : currency;
+        String normalizedCurrency = currencyFilterService.resolve(currency);
         return dealService.getTopDeals(normalizedCurrency, analyticsMemberScope(scope, memberIds));
     }
 
@@ -470,7 +474,7 @@ public class DealController {
                 ? null
                 : LikePattern.containing(request.getQ()),
             validateOptionalValue(request.getDir(), SORT_DIRECTIONS, "dir"),
-            blankToNull(request.getCurrency()),
+            currencyFilterService.resolve(request.getCurrency()),
             normalizeIds(request.getPipelineId(), "pipelineId"),
             normalizeIds(request.getStageId(), "stageId"),
             normalizeIds(request.getCompanyId(), "companyId"),
@@ -478,10 +482,6 @@ public class DealController {
             normalizeStatuses(request.getStatus()),
             normalizeValues(request.getRisk(), DealFilterNormalizer.DEAL_RISKS, "risk"),
             resolveMemberScope(request.getScope(), request.getMemberIds()));
-    }
-
-    private static String blankToNull(String value) {
-        return value == null || value.isBlank() ? null : value;
     }
 
     private record SegmentDealFilters(
@@ -617,7 +617,7 @@ public class DealController {
      * @return
      */
     @PutMapping("/{id}")
-    public DealDto updateDeal(@PathVariable int id, @Valid @RequestBody DealDto dto) {
+    public DealDto updateDeal(@PathVariable int id, @Validated(ValidCurrency.OnUpdate.class) @RequestBody DealDto dto) {
         return DealDto.from(dealService.update(id, dto.toBean()));
     }
 

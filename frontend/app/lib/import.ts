@@ -295,3 +295,9 @@ export async function parseCsv(file: File): Promise<ParsedCsv> {
     }
     return { encoding, headers, rows };
 }
+
+/** Localizes the currency row refusal for both review and downloadable import errors. */
+export function importRowErrorMessage(error: string | readonly string[], invalidCurrencyMessage: string): string {
+    const errors = typeof error === 'string' ? error.split('; ') : error;
+    return errors.map((part) => part === 'CURRENCY_INVALID' ? invalidCurrencyMessage : part).join('; ');
+}

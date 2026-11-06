@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.controllers;
 
+import static org.mockito.Mockito.mock;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -26,6 +27,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import ooo.klae.connex.backend.dto.FacetCount;
+import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.services.CurrencyFilterService;
 import ooo.klae.connex.backend.ai.AiGenerationAdapterService;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Person;
@@ -48,7 +52,6 @@ import ooo.klae.connex.backend.dto.DealSegmentQueryRequest;
 import ooo.klae.connex.backend.dto.DealRevenueSeriesDto;
 import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.DealTopDto;
-import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.WarmthFilter;
 import ooo.klae.connex.backend.dto.PageResponse;
@@ -541,7 +544,8 @@ class RecordListControllerTest {
     void dealsWithoutFilterRequirePageEndpoint() {
         DealController controller = new DealController(
             dealService, bulkOperationService, dealRiskService, aiGenerationAdapterService,
-            workspaceService, memberScopeResolver);
+            workspaceService, new CurrencyFilterService(
+                mock(DealMapper.class), workspaceService), memberScopeResolver);
 
         assertThrows(BadRequestException.class, () -> controller.getDeals(null, null, null, null, null));
 
@@ -552,7 +556,8 @@ class RecordListControllerTest {
     void dealsPageClampsSize() {
         DealController controller = new DealController(
             dealService, bulkOperationService, dealRiskService, aiGenerationAdapterService,
-            workspaceService, memberScopeResolver);
+            workspaceService, new CurrencyFilterService(
+                mock(DealMapper.class), workspaceService), memberScopeResolver);
         MemberScope memberScope = MemberScope.fromRequest(null, null, 7);
         when(workspaceService.getCurrentUserId()).thenReturn(7);
         when(memberScopeResolver.resolve(null, null, 7)).thenReturn(memberScope);
@@ -575,7 +580,8 @@ class RecordListControllerTest {
     void dealsPageRejectsInvalidStatusAndDirection() {
         DealController controller = new DealController(
             dealService, bulkOperationService, dealRiskService, aiGenerationAdapterService,
-            workspaceService, memberScopeResolver);
+            workspaceService, new CurrencyFilterService(
+                mock(DealMapper.class), workspaceService), memberScopeResolver);
 
         assertThrows(BadRequestException.class, () -> controller.getDealsPage(
             1, 25, null, null, "sideways", null, null, null, null, null, false, null, null,
@@ -593,7 +599,8 @@ class RecordListControllerTest {
     void dealsPageExpandsClosedAndBoundsFilterLists() {
         DealController controller = new DealController(
             dealService, bulkOperationService, dealRiskService, aiGenerationAdapterService,
-            workspaceService, memberScopeResolver);
+            workspaceService, new CurrencyFilterService(
+                mock(DealMapper.class), workspaceService), memberScopeResolver);
         MemberScope memberScope = MemberScope.fromRequest(null, null, 7);
         when(workspaceService.getCurrentUserId()).thenReturn(7);
         when(memberScopeResolver.resolve(null, null, 7)).thenReturn(memberScope);
@@ -619,7 +626,8 @@ class RecordListControllerTest {
     void dealMetricsAndIdsPreserveTheContactFilter() {
         DealController controller = new DealController(
             dealService, bulkOperationService, dealRiskService, aiGenerationAdapterService,
-            workspaceService, memberScopeResolver);
+            workspaceService, new CurrencyFilterService(
+                mock(DealMapper.class), workspaceService), memberScopeResolver);
         MemberScope memberScope = MemberScope.fromRequest(null, null, 7);
         when(workspaceService.getCurrentUserId()).thenReturn(7);
         when(memberScopeResolver.resolve(null, null, 7)).thenReturn(memberScope);
@@ -647,7 +655,8 @@ class RecordListControllerTest {
     void dealSegmentEndpointsPreserveAndNormalizeTheCompleteListScope() {
         DealController controller = new DealController(
             dealService, bulkOperationService, dealRiskService, aiGenerationAdapterService,
-            workspaceService, memberScopeResolver);
+            workspaceService, new CurrencyFilterService(
+                mock(DealMapper.class), workspaceService), memberScopeResolver);
         SegmentDefinition definition = new SegmentDefinition();
         definition.setMatch("all");
         definition.setConditions(List.of());
@@ -703,7 +712,8 @@ class RecordListControllerTest {
     void dealBoardRequiresPositivePipelineAndDelegates() {
         DealController controller = new DealController(
             dealService, bulkOperationService, dealRiskService, aiGenerationAdapterService,
-            workspaceService, memberScopeResolver);
+            workspaceService, new CurrencyFilterService(
+                mock(DealMapper.class), workspaceService), memberScopeResolver);
         when(dealService.getDealBoard(4)).thenReturn(List.of());
 
         assertTrue(controller.getDealBoard(4).isEmpty());
@@ -716,7 +726,8 @@ class RecordListControllerTest {
     void dealPrimaryContactsNormalizeAndDelegateTheBoundedIdBatch() {
         DealController controller = new DealController(
             dealService, bulkOperationService, dealRiskService, aiGenerationAdapterService,
-            workspaceService, memberScopeResolver);
+            workspaceService, new CurrencyFilterService(
+                mock(DealMapper.class), workspaceService), memberScopeResolver);
         List<DealPrimaryContactDto> contacts = List.of(
             new DealPrimaryContactDto(4, 9, "Primary", null));
         when(dealService.getPrimaryContacts(List.of(4, 2))).thenReturn(contacts);
@@ -735,7 +746,8 @@ class RecordListControllerTest {
     void dealChartEndpointsUseServerOwnedTimezoneAndNormalizeCurrency() {
         DealController controller = new DealController(
             dealService, bulkOperationService, dealRiskService, aiGenerationAdapterService,
-            workspaceService, memberScopeResolver);
+            workspaceService, new CurrencyFilterService(
+                mock(DealMapper.class), workspaceService), memberScopeResolver);
         MemberScope allTeam = MemberScope.allTeam();
         when(workspaceService.getCurrentUserId()).thenReturn(7);
         when(workspaceService.getCurrentAnalyticsTimezone()).thenReturn("Pacific/Honolulu");
@@ -750,8 +762,11 @@ class RecordListControllerTest {
             "JPY", "Mars/Olympus", "25:00", null, null, false));
         assertSame(distribution, controller.getStageDistribution("JPY", null, null));
 
-        controller.getRevenueTimeseries("  ", null, null, null, null, true);
-        controller.getStageDistribution("", null, null);
+        controller.getRevenueTimeseries(null, null, null, null, null, true);
+        controller.getStageDistribution(null, null, null);
+        assertThrows(BadRequestException.class,
+            () -> controller.getRevenueTimeseries("  ", null, null, null, null, true));
+        assertThrows(BadRequestException.class, () -> controller.getStageDistribution("", null, null));
 
         verify(dealService).getRevenueTimeseries("JPY", "Pacific/Honolulu", allTeam, false);
         verify(dealService).getStageDistribution("JPY", allTeam);
@@ -763,7 +778,8 @@ class RecordListControllerTest {
     void dealAnalyticsEndpointsNormalizeAndForwardParameters() {
         DealController controller = new DealController(
             dealService, bulkOperationService, dealRiskService, aiGenerationAdapterService,
-            workspaceService, memberScopeResolver);
+            workspaceService, new CurrencyFilterService(
+                mock(DealMapper.class), workspaceService), memberScopeResolver);
         MemberScope allTeam = MemberScope.allTeam();
         when(workspaceService.getCurrentUserId()).thenReturn(7);
         when(memberScopeResolver.resolve(null, null, 7)).thenReturn(allTeam);
@@ -783,10 +799,13 @@ class RecordListControllerTest {
             "JPY", "30d", null, null, null, null, null, null, null));
         assertSame(pipelineValues, controller.getDealPipelineValue(
             "JPY", "12m", null, null, null, null, null, null));
-        assertSame(aging, controller.getDealAging("  ", null, null));
-        assertSame(top, controller.getTopDeals("", null, null));
-
-        controller.getDealKpis(" ", null, null, null, null, null, "month", "Mars/Olympus", "+09:00");
+        assertSame(aging, controller.getDealAging(null, null, null));
+        assertSame(top, controller.getTopDeals(null, null, null));
+        assertThrows(BadRequestException.class, () -> controller.getDealAging("  ", null, null));
+        assertThrows(BadRequestException.class, () -> controller.getTopDeals("", null, null));
+        assertThrows(BadRequestException.class, () -> controller.getDealKpis(
+            " ", null, null, null, null, null, "month", "Mars/Olympus", "+09:00"));
+        controller.getDealKpis(null, null, null, null, null, null, "month", "Mars/Olympus", "+09:00");
 
         verify(dealService).getDealKpis("JPY", 30, allTeam);
         verify(dealService).getDealPipelineValue("JPY", 365, allTeam);
@@ -799,7 +818,8 @@ class RecordListControllerTest {
     void dealAnalyticsEndpointsRejectInvalidRange() {
         DealController controller = new DealController(
             dealService, bulkOperationService, dealRiskService, aiGenerationAdapterService,
-            workspaceService, memberScopeResolver);
+            workspaceService, new CurrencyFilterService(
+                mock(DealMapper.class), workspaceService), memberScopeResolver);
 
         assertThrows(BadRequestException.class, () -> controller.getDealKpis(
             null, "7d", null, null, null, null, null, null, null));
@@ -814,7 +834,8 @@ class RecordListControllerTest {
     void legacyAnalyticsEndpointsPreserveEverySupportedRange() {
         DealController dealController = new DealController(
             dealService, bulkOperationService, dealRiskService, aiGenerationAdapterService,
-            workspaceService, memberScopeResolver);
+            workspaceService, new CurrencyFilterService(
+                mock(DealMapper.class), workspaceService), memberScopeResolver);
         ActivityController activityController = new ActivityController(
             activityService, workspaceService, memberScopeResolver);
         MemberScope allTeam = MemberScope.allTeam();
@@ -846,7 +867,8 @@ class RecordListControllerTest {
     void windowedAnalyticsEndpointsDispatchWithServerOwnedTimezone() {
         DealController dealController = new DealController(
             dealService, bulkOperationService, dealRiskService, aiGenerationAdapterService,
-            workspaceService, memberScopeResolver);
+            workspaceService, new CurrencyFilterService(
+                mock(DealMapper.class), workspaceService), memberScopeResolver);
         ActivityController activityController = new ActivityController(
             activityService, workspaceService, memberScopeResolver);
         MemberScope allTeam = MemberScope.allTeam();
@@ -903,7 +925,8 @@ class RecordListControllerTest {
     void windowValidationRejectsInvalidCommonParameters() {
         DealController controller = new DealController(
             dealService, bulkOperationService, dealRiskService, aiGenerationAdapterService,
-            workspaceService, memberScopeResolver);
+            workspaceService, new CurrencyFilterService(
+                mock(DealMapper.class), workspaceService), memberScopeResolver);
 
         assertThrows(BadRequestException.class, () -> controller.getDealKpis(
             null, "90d", null, null,
@@ -932,7 +955,8 @@ class RecordListControllerTest {
     void dealClosingSoonCountValidatesAndDelegatesDays() {
         DealController controller = new DealController(
             dealService, bulkOperationService, dealRiskService, aiGenerationAdapterService,
-            workspaceService, memberScopeResolver);
+            workspaceService, new CurrencyFilterService(
+                mock(DealMapper.class), workspaceService), memberScopeResolver);
         CountDto count = new CountDto(4);
         when(dealService.getClosingSoonCount(7)).thenReturn(count);
 
@@ -947,7 +971,8 @@ class RecordListControllerTest {
     void dealClosingSoonListValidatesAndDelegatesBounds() {
         DealController controller = new DealController(
             dealService, bulkOperationService, dealRiskService, aiGenerationAdapterService,
-            workspaceService, memberScopeResolver);
+            workspaceService, new CurrencyFilterService(
+                mock(DealMapper.class), workspaceService), memberScopeResolver);
         when(dealService.getClosingSoonDeals(7, 6)).thenReturn(List.of());
 
         assertEquals(List.of(), controller.getClosingSoonDeals(7, 6));
@@ -963,7 +988,8 @@ class RecordListControllerTest {
     void interactiveDealRiskRequiresIdsAndAnalyticsUsesBoundedProjection() {
         DealController controller = new DealController(
             dealService, bulkOperationService, dealRiskService, aiGenerationAdapterService,
-            workspaceService, memberScopeResolver);
+            workspaceService, new CurrencyFilterService(
+                mock(DealMapper.class), workspaceService), memberScopeResolver);
         MemberScope allTeam = MemberScope.allTeam();
         DealRiskAnalyticsDto analytics = new DealRiskAnalyticsDto(List.of(), false);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);

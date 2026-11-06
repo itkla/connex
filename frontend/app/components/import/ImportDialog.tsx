@@ -42,7 +42,7 @@ import {
     type ParsedCsv,
     type PersonNameOrder,
 } from '@/app/lib/import';
-import { companyChoiceRows, duplicateMappingColumns, existingCustomTarget, importFailureKey, importMappingErrorColumns, importReviewRows, unavailableCustomColumns, needsImportDecision, REVIEW_FILTERS, reviewPage, type ReviewFilter } from '@/app/lib/importReview';
+import { companyChoiceRows, duplicateMappingColumns, existingCustomTarget, importFailureKey, importMappingErrorColumns, importPresentationProblems, importReviewRows, unavailableCustomColumns, needsImportDecision, REVIEW_FILTERS, reviewPage, type ReviewFilter } from '@/app/lib/importReview';
 import type {
     CustomFieldSchemaEntry,
     ImportProblem,
@@ -981,10 +981,9 @@ function ReviewStep({
                                                     {nameColumn && parsed ? parsed.rows[row.rowIndex]?.[nameColumn] ?? '' : row.matchedLabel}
                                                 </p>
                                                 {row.matchedId != null && <p className="break-words text-xs text-muted-foreground">{t('linkedTo', { name: row.matchedLabel ?? '' })}</p>}
-                                                {row.problems?.map((problem) => <p key={`${row.rowIndex}:${problem.code}:${problem.field ?? ''}`} className="break-words text-sm text-destructive">
+                                                {importPresentationProblems(row).map((problem) => <p key={`${row.rowIndex}:${problem.code}:${problem.field ?? ''}`} className="break-words text-sm text-destructive">
                                                     {problemText(t, problem)}
                                                 </p>)}
-                                                {!row.problems?.length && row.errors?.length ? <p className="break-words text-sm text-destructive">{t('problems.ROW_INVALID')}</p> : null}
                                                 {row.dealDates && (
                                                     <div className="space-y-1 text-xs text-muted-foreground">
                                                         {(['closedAt', 'createdAt'] as const).map((field) => {
@@ -1415,7 +1414,7 @@ function DoneStep({ result, entity, parsed }: { result: ImportResult; entity: Im
         result.failed.forEach((failure) => {
             const row = parsed.rows[failure.rowIndex];
             if (!row) return;
-            lines.push([...parsed.headers.map((h) => row[h] ?? ''), (failure.problems?.map((problem) => problemText(t, problem)).join('; ') || t('problems.ROW_INVALID'))].map(csvCell).join(','));
+            lines.push([...parsed.headers.map((h) => row[h] ?? ''), (importPresentationProblems(failure).map((problem) => problemText(t, problem)).join('; ') || t('problems.ROW_INVALID'))].map(csvCell).join(','));
         });
         const blob = new Blob([String.fromCharCode(0xfeff) + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
         const url = URL.createObjectURL(blob);

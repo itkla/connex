@@ -226,6 +226,7 @@ export type ImportPreviewResult = {
 export type ImportRowError = {
     rowIndex: number;
     reason: string;
+    errors?: string[] | null;
     problems?: ImportProblem[] | null;
 };
 
@@ -2189,6 +2190,7 @@ export type WorkItemActionResponse = {
 
 /** Declares when a generated document requires internal approval before finalization. */
 export type ApprovalPolicy = {
+    currencyValid?: boolean;
     id: number;
     name: string;
     active: boolean;
@@ -2298,6 +2300,7 @@ export type DealDocument = {
     createdBy: number | null;
     content: DocumentContent;
     requiresApproval: boolean;
+    approvalConfigurationError?: string | null;
     latestApproval?: DocumentApproval | null;
 };
 

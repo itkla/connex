@@ -1,7 +1,7 @@
 import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '@/app/lib/api';
-import { companyChoiceRows, duplicateMappingColumns, existingCustomTarget, importFailureKey, importMappingErrorColumns, importReviewRows, reviewPage, unavailableCustomColumns } from '@/app/lib/importReview';
+import { companyChoiceRows, duplicateMappingColumns, existingCustomTarget, importFailureKey, importMappingErrorColumns, importPresentationProblems, importReviewRows, reviewPage, unavailableCustomColumns } from '@/app/lib/importReview';
 import type { CustomFieldSchemaEntry, DuplicateCandidate, ImportRowAnalysis } from '@/app/lib/types';
 import en from '@/messages/en/importExport.json';
 import ja from '@/messages/ja/importExport.json';
@@ -15,6 +15,32 @@ function row(index: number): ImportRowAnalysis {
 }
 
 describe('complete import review', () => {
+    it('keeps structured currency and amount problems authoritative over raw diagnostics', () => {
+        const problems = [{ code: 'CURRENCY_INVALID' }, { code: 'VALUE_INVALID' }];
+        expect(importPresentationProblems({ problems, errors: ['private diagnostic'] })).toBe(problems);
+        expect(importPresentationProblems({})).toEqual([]);
+    });
+
+    it.each(['en', 'ja'] as const)('localizes combined legacy currency errors without exposing diagnostics in %s', (locale) => {
+        const messages = locale === 'en' ? en : ja;
+        const t = createTranslator({ locale, messages, namespace: 'importExport' });
+        const errors = ['CURRENCY_INVALID', 'Company name variant requires an explicit company selection', 'Invalid deal value: private'];
+        const expected = [{ code: 'CURRENCY_INVALID' }, { code: 'COMPANY_VARIANT_CHOICE_REQUIRED' }, { code: 'ROW_INVALID' }];
+        expect(importPresentationProblems({ errors })).toEqual(expected);
+        expect(importPresentationProblems({ reason: errors.join('; ') })).toEqual(expected);
+        const text = importPresentationProblems({ errors }).map((problem) => {
+            const code = Object.keys(messages.importExport.problems).find(
+                (key): key is keyof typeof messages.importExport.problems => key === problem.code,
+            );
+            if (!code) throw new Error('Missing import problem translation');
+            return t(`problems.${code}`);
+        }).join('; ');
+        expect(text).toContain(messages.importExport.problems.CURRENCY_INVALID);
+        expect(text).toContain(messages.importExport.problems.COMPANY_VARIANT_CHOICE_REQUIRED);
+        expect(text).not.toContain('private');
+        expect(text).not.toContain('CURRENCY_INVALID');
+    });
+
     it('shares one bounded dependency catalogue across all source rows', () => {
         const rows = importReviewRows({ total: 2, toCreate: 0, toUpdate: 0, toSkip: 0, invalid: 2,
             companyCandidates: { example: [candidate] },
