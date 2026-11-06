@@ -1,5 +1,6 @@
 'use client';
 
+import { useContactTargetSearch, useDealTargetSearch } from '@/app/hooks/useRecordTargetSearch';
 import { useEffect, useLayoutEffect, useRef, useState, type WheelEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTimeZone, useTranslations } from 'next-intl';
@@ -274,6 +275,8 @@ export function ActivityDialogForm({
     const [when, setWhen] = useState(() => defaultTimestamp ?? toDatetimeLocalValue(new Date().toISOString(), timeZone));
     const [selectedPerson, setSelectedPerson] = useState<Contact | null>(() => defaultPerson);
     const [selectedDeal, setSelectedDeal] = useState<Deal | null>(() => defaultDeal);
+    const personSearch = useContactTargetSearch(true, [selectedPerson?.id], persons);
+    const dealSearch = useDealTargetSearch(true, [selectedDeal?.id], deals);
     const [submitting, setSubmitting] = useState(false);
     const [succeeded, setSucceeded] = useState(false);
     const [followUpEnabled, setFollowUpEnabled] = useState(false);
@@ -517,7 +520,9 @@ export function ActivityDialogForm({
                         <div className="grid gap-1.5">
                             <Label htmlFor="activity-person">{t('personLabel')}</Label>
                             <Combobox
-                                items={persons}
+                                items={personSearch.contacts}
+                                serverSearch={personSearch.serverSearch}
+                                onInputValueChange={personSearch.onInputValueChange}
                                 itemToStringLabel={(p: Contact) => p.name}
                                 value={selectedPerson}
                                 onValueChange={(p) => {
@@ -551,7 +556,9 @@ export function ActivityDialogForm({
                         <div className="grid gap-1.5">
                             <Label htmlFor="activity-deal">{t('dealLabel')}</Label>
                             <Combobox
-                                items={deals}
+                                items={dealSearch.deals}
+                                serverSearch={dealSearch.serverSearch}
+                                onInputValueChange={dealSearch.onInputValueChange}
                                 itemToStringLabel={(d: Deal) => d.name}
                                 value={selectedDeal}
                                 onValueChange={(d) => {

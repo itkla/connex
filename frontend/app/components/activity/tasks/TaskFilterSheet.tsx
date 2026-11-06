@@ -6,6 +6,8 @@ import {
     CheckIcon,
 } from '@heroicons/react/24/outline';
 
+import { Input } from '@/components/ui/input';
+import type { ServerPickerSearch } from '@/lib/server-picker-search';
 import { Button } from '@/components/ui/button';
 import {
     ResponsiveDialog,
@@ -24,8 +26,9 @@ export interface TaskFilterSheetSection {
     options: {
         value: string;
         label: string;
-        total: number;
+        total?: number;
     }[];
+    search?: { value: string; onChange: (value: string) => void; state: ServerPickerSearch };
     selected: ReadonlySet<string>;
     onToggle: (value: string) => void;
 }
@@ -85,13 +88,14 @@ export default function TaskFilterSheet({
                 </ResponsiveDialogHeader>
 
                 <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2">
-                    {sections.map((section) => section.options.length > 0 ? (
+                    {sections.map((section) => (
                         <section key={section.label} className="border-b border-border px-2 py-3 last:border-b-0">
                             <h3 className="px-2 pb-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
                                 {section.label}
                             </h3>
+                            {section.search ? <Input value={section.search.value} aria-label={section.label} placeholder={section.label} onChange={(event) => section.search?.onChange(event.target.value)} /> : null}
                             <div className="flex flex-col">
-                                {section.options.map((option) => {
+                                {section.options.filter((option) => !section.search || section.selected.has(option.value) || section.search.state.accepts({ id: option.value })).map((option) => {
                                     const selected = section.selected.has(option.value);
                                     return (
                                         <Button
@@ -123,7 +127,7 @@ export default function TaskFilterSheet({
                                 })}
                             </div>
                         </section>
-                    ) : null)}
+                    ))}
                 </div>
 
                 <ResponsiveDialogFooter className="shrink-0 flex-row items-center justify-between gap-2 border-t border-border px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">

@@ -13,6 +13,8 @@ import {
     DropdownMenuSeparator,
     DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import type { ServerPickerSearch } from "@/lib/server-picker-search";
 import { cn } from "@/lib/utils";
 
 export type MultiSelectOption = { value: string; total?: number; label?: string };
@@ -57,6 +59,7 @@ export function MultiSelectFilter({
     clearLabel,
     capitalize,
     scroll,
+    search,
 }: {
     label: string;
     ariaLabel: string;
@@ -68,6 +71,7 @@ export function MultiSelectFilter({
     clearLabel: string;
     capitalize?: boolean;
     scroll?: boolean;
+    search?: { value: string; onChange: (value: string) => void; state: ServerPickerSearch };
 }) {
     const active = selected.size > 0;
     return (
@@ -85,8 +89,10 @@ export function MultiSelectFilter({
             <DropdownMenuContent align="start" className="w-60 data-open:animate-none data-closed:animate-none">
                 <DropdownMenuLabel>{label}</DropdownMenuLabel>
                 <DropdownMenuSeparator />
+                {search ? <Input value={search.value} aria-label={label} placeholder={label} className="mb-2" onChange={(event) => search.onChange(event.target.value)}
+                    onKeyDown={(event) => { if (!['Escape', 'ArrowDown', 'ArrowUp', 'Tab'].includes(event.key)) event.stopPropagation(); }} /> : null}
                 <div className={cn(scroll && "max-h-72 overflow-y-auto")}>
-                    {options.map((opt) => {
+                    {options.filter((opt) => !search || selected.has(opt.value) || search.state.accepts({ id: opt.value })).map((opt) => {
                         const checked = selected.has(opt.value);
                         const count = countOf(opt.value, counts, opt.total);
                         const text = opt.label ?? opt.value;
@@ -96,7 +102,7 @@ export function MultiSelectFilter({
                                 checked={checked}
                                 onSelect={(e) => {
                                     e.preventDefault();
-                                    onToggle(opt.value);
+                                    if (!search || selected.has(opt.value) || search.state.accepts({ id: opt.value })) onToggle(opt.value);
                                 }}
                             >
                                 <span className={cn("flex flex-1 items-center justify-between gap-2", capitalize && "capitalize")}>

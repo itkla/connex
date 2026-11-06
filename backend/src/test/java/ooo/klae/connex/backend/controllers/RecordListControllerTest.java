@@ -50,6 +50,8 @@ import ooo.klae.connex.backend.dto.DealStageDistributionDto;
 import ooo.klae.connex.backend.dto.DealTopDto;
 import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.dto.ActivityListFilter;
+import ooo.klae.connex.backend.util.PageBounds;
 import ooo.klae.connex.backend.dto.WarmthFilter;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.PersonOwnerDto;
@@ -1022,13 +1024,13 @@ class RecordListControllerTest {
     @Test
     void tasksPageClampsSize() {
         TaskController controller = new TaskController(taskService, workspaceService, memberScopeResolver);
-        when(taskService.getTasksPage(100, 0)).thenReturn(List.of());
-        when(taskService.countTasks()).thenReturn(0L);
+        ActivityListFilter filter = new ActivityListFilter();
+        when(taskService.getListPage(filter, PageBounds.of(0, 500))).thenReturn(new PageResponse<>(List.of(), 0));
 
-        var response = controller.getTasksPage(0, 500);
+        var response = controller.getTasksPage(0, 500, filter);
 
         assertEquals(0, response.total());
-        verify(taskService).getTasksPage(100, 0);
+        verify(taskService).getListPage(filter, PageBounds.of(1, 100));
     }
 
     @Test
@@ -1067,13 +1069,13 @@ class RecordListControllerTest {
     void activitiesPageClampsSize() {
         ActivityController controller = new ActivityController(
             activityService, workspaceService, memberScopeResolver);
-        when(activityService.getActivitiesPage(null, null, null, 100, 0)).thenReturn(List.of());
-        when(activityService.countActivities(null, null, null)).thenReturn(0L);
+        ActivityListFilter filter = new ActivityListFilter();
+        when(activityService.getListPage(filter, PageBounds.of(0, 500))).thenReturn(new PageResponse<>(List.of(), 0));
 
-        var response = controller.getActivitiesPage(0, 500, null, null, null);
+        var response = controller.getActivitiesPage(0, 500, filter);
 
         assertEquals(0, response.total());
-        verify(activityService).getActivitiesPage(null, null, null, 100, 0);
+        verify(activityService).getListPage(filter, PageBounds.of(1, 100));
     }
 
     @Test

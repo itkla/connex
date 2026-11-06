@@ -91,6 +91,13 @@ public class UserService implements UserDetailsService {
         return workspaceService.getMembers(workspaceService.getCurrentWorkspaceId());
     }
 
+    /** Reads at most fifty active members without materializing the workspace directory. */
+    public List<User> getUserOptions(String query) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String pattern = ooo.klae.connex.backend.util.LikePattern.containing(query.trim());
+        return tenantWorkScope.unroutedRead(() -> userMapper.getUserOptions(workspaceId, pattern));
+    }
+
     /** Returns requested active-member references without loading the whole workspace directory. */
     public List<UserReferenceDto> getActiveWorkspaceMemberReferences(List<Integer> ids) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();

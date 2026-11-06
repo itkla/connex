@@ -17,6 +17,14 @@
     <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
   </select>
 
+  <select id="getUserOptions" resultType="User">
+    SELECT u.id, u.username, u.display_name, u.email, u.timezone, u.locale, u.created_at, u.updated_at, u.last_login_at, u.profile_picture_url
+    FROM app_user u JOIN workspace_member wm ON wm.user_id = u.id
+    WHERE wm.workspace_id = #{workspaceId} AND wm.status = 'active'
+      AND (u.display_name LIKE #{query} OR u.username LIKE #{query})
+    ORDER BY u.display_name, u.id LIMIT 50
+  </select>
+
   <select id="getAllUsers" resultType="User">
     SELECT <include refid="userColumns"/>
     FROM app_user

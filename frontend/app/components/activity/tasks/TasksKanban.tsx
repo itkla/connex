@@ -11,6 +11,7 @@ import { kanbanAccessibility } from '@/app/components/kanban/kanbanAccessibility
 import NoteContent from '@/app/components/activity/notes/NoteContent';
 import { useLiveNow } from '@/app/hooks/useNow';
 import { DUE_CHIP, formatDue } from '@/app/components/activity/tasks/taskDue';
+import { taskBoardPosition } from './taskBoardPosition';
 import { moveTask } from '@/app/lib/api';
 import { noteContentToPlainText } from '@/app/lib/references';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
@@ -132,14 +133,15 @@ export default function TasksKanban({
     const onMove = useCallback(
         async (taskId: number, columnId: string, index: number) => {
             try {
-                await moveTask(taskId, columnId as TaskStatus, index);
+                if (columnId !== 'todo' && columnId !== 'in_progress' && columnId !== 'done') return;
+                await moveTask(taskId, columnId, taskBoardPosition(tasks, taskId, columnId, index));
                 onMoved();
             } catch (err) {
                 showApiError(err, 'moveFailed');
                 throw err;
             }
         },
-        [onMoved, showApiError],
+        [onMoved, showApiError, tasks],
     );
 
     const taskName = useCallback((id: UniqueIdentifier) => noteContentToPlainText(tasksById.get(Number(id))?.description ?? ''), [tasksById]);

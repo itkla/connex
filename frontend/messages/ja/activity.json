@@ -1,4 +1,13 @@
 {
+  "ActivityList": {
+    "pickerLoadFailed": "レコード名とフィルター候補を読み込めません",
+    "pickerLoadFailedBody": "レコードは変更されていません。ページを再読み込みして、もう一度お試しください。",
+    "loading": "読み込み中…",
+    "range": "{total}件中 {from}–{to}件",
+    "pagination": "一覧のページ切り替え",
+    "previous": "前のページ",
+    "next": "次のページ"
+  },
   "ActivityPage": {
     "title": "アクティビティ",
     "subtitle": "チームが記録したすべての通話・メール・ミーティングを1つのタイムラインに。",
@@ -7,7 +16,7 @@
     "allActivities": "すべてのアクティビティ",
     "new": "新規作成",
     "newAria": "アクティビティを記録",
-    "searchPlaceholder": "アクティビティを検索",
+    "searchPlaceholder": "件名・内容・連絡先・案件を検索",
     "filtersHeader": "種類",
     "filterAll": "すべて",
     "typeCall": "電話",
@@ -216,7 +225,7 @@
     "a11yOver": "タスク「{name}」が「{column}」列の上にあります。",
     "a11yDropped": "タスク「{name}」を「{column}」列にドロップしました。",
     "a11yCancelled": "タスク「{name}」の移動をキャンセルしました。",
-    "searchPlaceholder": "タスクを検索",
+    "searchPlaceholder": "タスク名・連絡先・案件を検索",
     "queuesHeader": "キュー",
     "queue_myOpen": "自分の未完了",
     "queue_dueToday": "今日が期限",

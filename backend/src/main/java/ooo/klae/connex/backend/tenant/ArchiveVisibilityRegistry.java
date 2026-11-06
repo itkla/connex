@@ -231,18 +231,18 @@ public final class ArchiveVisibilityRegistry {
             "Duplicate review is an actionable worklist, so pair summaries and materialized groups "
                 + "exclude archived contacts and companies while retaining prior decision rows for "
                 + "suppression memory and later restoration.");
-        declare(entries, "ActivityMapper", ArchiveStrategy.NO_RECORD_PROJECTION,
-            "Activity reads join contacts only to resolve which activities belong to a company, so "
-                + "the company timeline excludes rows linked to archived contacts while direct "
-                + "association reads remain reachable for compliance and erasure.");
+        declare(entries, "ActivityMapper", ArchiveStrategy.EXCLUDE_ARCHIVED,
+            "Paged activity search matches visible contact names and company context, excluding "
+                + "archived contacts and companies in those predicates. Retained direct association "
+                + "reads remain reachable for compliance and erasure.");
         declare(entries, "NoteMapper", ArchiveStrategy.EXCLUDE_ARCHIVED,
             "Retained note associations remain reachable for compliance and erasure; the only reads "
                 + "that touch a contact's name are the two note searches, and they exclude archived "
                 + "contacts so a note stops being findable by an archived person's name.");
-        declare(entries, "TaskMapper", ArchiveStrategy.NO_RECORD_PROJECTION,
-            "Task reads join contacts only to resolve which tasks belong to a company, so retained "
-                + "associations stay reachable for compliance and erasure while the company timeline "
-                + "excludes rows linked to archived contacts.");
+        declare(entries, "TaskMapper", ArchiveStrategy.EXCLUDE_ARCHIVED,
+            "Paged task search matches visible contact names and company context, excluding "
+                + "archived contacts and companies in those predicates. Retained direct association "
+                + "reads remain reachable for compliance and erasure.");
         declare(entries, "AttachmentMapper", ArchiveStrategy.EXCLUDE_ARCHIVED,
             "The owner-label joins that back the file browser exclude archived contacts and companies, "
                 + "so an archived owner's name never becomes a file's chip. Retention, quota, and "

@@ -68,7 +68,23 @@ export type CompanySegmentPageParams = Omit<CompaniesPageParams, 'ids'> & {
     definition: SegmentDefinition;
 };
 
-export type ActivitiesPageParams = PageParams & {
+export type ActivityListParams = PageParams & {
+    companyId?: number;
+    persons?: number[];
+    companies?: number[];
+    deals?: number[];
+    members?: number[];
+};
+
+export type TasksPageParams = ActivityListParams & {
+    queue?: string;
+    personId?: number;
+    dealId?: number;
+    assignedToId?: number;
+};
+
+export type ActivitiesPageParams = ActivityListParams & {
+    type?: string;
     personId?: number;
     dealId?: number;
     createdById?: number;

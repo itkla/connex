@@ -1,5 +1,6 @@
 'use client';
 
+import { useContactTargetSearch, useDealTargetSearch, useMemberTargetSearch } from '@/app/hooks/useRecordTargetSearch';
 import { useEffect, useLayoutEffect, useRef, useState, type WheelEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
@@ -292,8 +293,11 @@ export function TaskDialogForm({
     const [assignee, setAssignee] = useState<User | null>(() =>
         defaultAssignee ?? users.find((u) => u.id === currentUserId) ?? null,
     );
+    const memberSearch = useMemberTargetSearch(!compact, [assignee?.id, currentUserId], users);
     const [selectedPerson, setSelectedPerson] = useState<Contact | null>(() => defaultPerson);
     const [selectedDeal, setSelectedDeal] = useState<Deal | null>(() => defaultDeal);
+    const personSearch = useContactTargetSearch(!compact && !hideLinks, [selectedPerson?.id], persons);
+    const dealSearch = useDealTargetSearch(!compact && !hideLinks, [selectedDeal?.id], deals);
     const [submitting, setSubmitting] = useState(false);
     const [succeeded, setSucceeded] = useState(false);
     const ownsDraftRef = useRef(ownsInitialDraft);
@@ -308,15 +312,13 @@ export function TaskDialogForm({
         dealId: selectedDeal?.id ?? null,
     }));
 
-    const [sawUsers, setSawUsers] = useState(users.length > 0);
-    if (!sawUsers && users.length > 0) {
-        setSawUsers(true);
+    const [initializedAssignee, setInitializedAssignee] = useState(defaultAssignee != null || users.some((user) => user.id === currentUserId));
+    const self = memberSearch.users.find((user) => user.id === currentUserId);
+    if (!initializedAssignee && self) {
+        setInitializedAssignee(true);
         if (!defaultAssignee && assignee === null) {
-            const self = users.find((u) => u.id === currentUserId);
-            if (self) {
-                setAssignee(self);
-                setInitial((prev) => ({ ...prev, assigneeId: self.id }));
-            }
+            setAssignee(self);
+            setInitial((previous) => ({ ...previous, assigneeId: self.id }));
         }
     }
 
@@ -486,7 +488,9 @@ export function TaskDialogForm({
                         <div className="grid gap-1.5">
                             <Label htmlFor="task-assignee">{t('assignedToLabel')}</Label>
                             <Combobox
-                                items={users}
+                                items={memberSearch.users}
+                                serverSearch={memberSearch.serverSearch}
+                                onInputValueChange={memberSearch.onInputValueChange}
                                 itemToStringLabel={(u: User) => u.displayName || u.username}
                                 value={assignee}
                                 onValueChange={(u) => setAssignee(u as User | null)}
@@ -518,7 +522,9 @@ export function TaskDialogForm({
                         <div className="grid gap-1.5">
                             <Label htmlFor="task-person">{t('personLabel')}</Label>
                             <Combobox
-                                items={persons}
+                                items={personSearch.contacts}
+                                serverSearch={personSearch.serverSearch}
+                                onInputValueChange={personSearch.onInputValueChange}
                                 itemToStringLabel={(p: Contact) => p.name}
                                 value={selectedPerson}
                                 onValueChange={(p) => setSelectedPerson(p as Contact | null)}
@@ -548,7 +554,9 @@ export function TaskDialogForm({
                         <div className="grid gap-1.5">
                             <Label htmlFor="task-deal">{t('dealLabel')}</Label>
                             <Combobox
-                                items={deals}
+                                items={dealSearch.deals}
+                                serverSearch={dealSearch.serverSearch}
+                                onInputValueChange={dealSearch.onInputValueChange}
                                 itemToStringLabel={(d: Deal) => d.name}
                                 value={selectedDeal}
                                 onValueChange={(d) => setSelectedDeal(d as Deal | null)}

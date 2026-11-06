@@ -11,7 +11,7 @@ import {
     type KeyboardEvent,
 } from 'react';
 import { useTimeZone, useLocale, useTranslations } from 'next-intl';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import {
@@ -29,6 +29,12 @@ import {
 } from '@heroicons/react/24/outline';
 import { PlusIcon } from '@heroicons/react/24/solid';
 
+import { useServerRecords } from '@/app/hooks/useServerRecords';
+import { useActivityListFilters } from '@/app/hooks/useActivityListFilters';
+import { useContactTargetSearch, useDealTargetSearch, useMemberTargetSearch } from '@/app/hooks/useRecordTargetSearch';
+import { useCompanySearch } from '@/app/hooks/useCompanySearch';
+import { RecordListState } from '@/app/components/records/RecordListState';
+import ActivityListPagination from '@/app/components/activity/ActivityListPagination';
 import { SearchField, FilterBar, MultiSelectFilter, type FilterChipData } from '@/app/components/filters';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -57,7 +63,7 @@ import { type DueTone, DUE_CHIP, formatDue } from '@/app/components/activity/tas
 import Rise from '@/app/components/motion/Rise';
 import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
-import { deleteTask, getTaskById, updateTask } from '@/app/lib/api';
+import { deleteTask, getTaskById, updateTask, getTasksPage } from '@/app/lib/api';
 import { parseDeepLinkId, TASK_URL_KEY } from '@/app/hooks/listStateUrl';
 import { useOwnedUrlParams } from '@/app/hooks/useOwnedUrlParams';
 import { useIsMobile } from '@/app/hooks/useIsMobile';
@@ -67,15 +73,10 @@ import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { toastSuccess } from '@/app/lib/toast';
 import { noteSnippet } from '@/app/lib/noteText';
-import { parseMysqlDateTime } from '@/app/lib/utils';
 import { cn } from '@/lib/utils';
 import type { Contact, Deal, Task, User } from '@/app/lib/types';
 
 type Props = {
-    tasks: Task[];
-    persons: Contact[];
-    deals: Deal[];
-    users: User[];
     currentUserId: number;
     canDeleteTasks: boolean;
     originWorkspaceId: number | null;
@@ -94,7 +95,6 @@ const VIEW_STORAGE_KEY = 'tasks:view';
 const EASE_OUT: [number, number, number, number] = [0.23, 1, 0.32, 1];
 const COMPLETE_LINGER_MS = 230;
 const DAY_MS = 24 * 60 * 60 * 1000;
-const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 const QUEUE_ICON: Record<Queue, IconType> = {
     myOpen: InboxIcon,
@@ -146,18 +146,6 @@ function isInQueue(queue: Queue, task: Task, currentUserId: number, today: numbe
     }
 }
 
-function bumpOption(map: Map<string, { label: string; count: number }>, key: string, label: string) {
-    const e = map.get(key);
-    if (e) e.count++;
-    else map.set(key, { label, count: 1 });
-}
-
-function toOptions(map: Map<string, { label: string; count: number }>) {
-    return [...map.entries()]
-        .sort((a, b) => b[1].count - a[1].count || a[1].label.localeCompare(b[1].label))
-        .map(([value, { label, count }]) => ({ value, label, total: count }));
-}
-
 function toggleInSet(setter: React.Dispatch<React.SetStateAction<Set<string>>>, value: string) {
     setter((prev) => {
         const next = new Set(prev);
@@ -168,10 +156,6 @@ function toggleInSet(setter: React.Dispatch<React.SetStateAction<Set<string>>>, 
 }
 
 export default function TasksBrowser({
-    tasks: initialTasks,
-    persons,
-    deals,
-    users,
     currentUserId,
     canDeleteTasks,
     originWorkspaceId,
@@ -179,9 +163,9 @@ export default function TasksBrowser({
     const t = useTranslations('ActivityTasks');
     const tf = useTranslations('Filters');
     const showApiError = useApiErrorToast('ActivityTasks');
+    const showPickerError = useApiErrorToast('ActivityList');
     const locale = useLocale();
     const timeZone = useTimeZone() ?? 'UTC';
-    const router = useRouter();
     const pathname = usePathname() ?? '';
     const reduce = useReducedMotion() ?? false;
     const { activeWorkspaceId, switching } = useWorkspace();
@@ -190,26 +174,16 @@ export default function TasksBrowser({
 
     const now = useLiveNow();
     const today = parseCalendarDateUtc(calendarDayInTimeZone(now, timeZone));
-    const [tasks, setTasks] = useState<Task[]>(initialTasks);
-    useEffect(() => {
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setTasks(initialTasks);
-    }, [initialTasks]);
-
-    const personById = useMemo(() => new Map(persons.map((p) => [p.id, p])), [persons]);
-    const dealById = useMemo(() => new Map(deals.map((d) => [d.id, d])), [deals]);
-    const userById = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
-
-    const [query, setQuery] = useState('');
-    const [assigneeFilter, setAssigneeFilter] = useState<Set<string>>(new Set());
-    const [personFilter, setPersonFilter] = useState<Set<string>>(new Set());
-    const [dealFilter, setDealFilter] = useState<Set<string>>(new Set());
-    const [companyFilter, setCompanyFilter] = useState<Set<string>>(new Set());
+    const searchParams = useSearchParams();
+    const urlPreference = searchParams.get('queue');
+    const listFilters = useActivityListFilters();
+    const { personFilter, setPersonFilter, dealFilter, setDealFilter, companyFilter, setCompanyFilter } = listFilters;
+    const [assigneeFilter, setAssigneeFilter] = [listFilters.memberFilter, listFilters.setMemberFilter];
     const [queue, setQueue] = useScopedViewPreference<Queue>({
         storageKey: QUEUE_STORAGE_KEY,
         userId: currentUserId,
         workspaceId: activeWorkspaceId,
-        initialValue: null,
+        initialValue: isQueue(urlPreference) ? urlPreference : listFilters.hasRecordContext ? 'allOpen' : null,
         fallback: 'myOpen',
         isValue: isQueue,
     });
@@ -222,6 +196,24 @@ export default function TasksBrowser({
         isValue: isTaskView,
     });
     const effectiveView: TaskView = effectiveListView(view, isMobile);
+    const records = useServerRecords(getTasksPage, { ...listFilters.params, queue: effectiveView === 'board' ? 'all' : queue }, { urlSync: true, retainPreviousData: false, requestContext: String(today) });
+    const tasks = records.items;
+    const { query, setQuery } = records;
+    const personSearch = useContactTargetSearch(true, [...records.items.map((item) => item.personId), ...personFilter].map((id) => id == null ? null : Number(id)));
+    const dealSearch = useDealTargetSearch(true, [...records.items.map((item) => item.dealId), ...dealFilter].map((id) => id == null ? null : Number(id)));
+    const memberSearch = useMemberTargetSearch(true, [currentUserId, ...records.items.map((item) => item.assignedToId), ...listFilters.memberFilter].map(Number));
+    const companySearch = useCompanySearch(true, [...companyFilter].map(Number));
+    const pickerError = personSearch.error ?? dealSearch.error ?? memberSearch.error ?? companySearch.error;
+    useEffect(() => {
+        if (pickerError != null) showPickerError(pickerError, 'pickerLoadFailed', 'pickerLoadFailedBody');
+    }, [pickerError, showPickerError]);
+    const persons = personSearch.contacts;
+    const deals = dealSearch.deals;
+    const users = memberSearch.users;
+    const personById = useMemo(() => new Map(persons.map((p) => [p.id, p])), [persons]);
+    const dealById = useMemo(() => new Map(deals.map((d) => [d.id, d])), [deals]);
+    const userById = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
+
     const [editingTask, setEditingTask] = useState<Task | null>(null);
     const [creating, setCreating] = useState(false);
     const [deletingTask, setDeletingTask] = useState<Task | null>(null);
@@ -284,7 +276,7 @@ export default function TasksBrowser({
         return () => window.clearTimeout(timer);
     }, [pageCurrent]);
 
-    const searchParams = useSearchParams();
+    useOwnedUrlParams({ queue });
     const [deepLinkSettled, setDeepLinkSettled] = useState(
         () => parseDeepLinkId(searchParams.get(TASK_URL_KEY)) === null,
     );
@@ -304,117 +296,20 @@ export default function TasksBrowser({
 
     useEffect(() => () => timers.current.forEach((id) => window.clearTimeout(id)), []);
 
-    const queueCounts = useMemo(() => {
-        const counts: Record<Queue, number> = {
-            myOpen: 0, dueToday: 0, overdue: 0, unassigned: 0, allOpen: 0, completed: 0,
-        };
-        for (const task of tasks) {
-            for (const q of ALL_QUEUES) {
-                if (isInQueue(q, task, currentUserId, today)) counts[q]++;
-            }
-        }
-        return counts;
-    }, [tasks, currentUserId, today]);
-
-    const todayFocus = useMemo(() => {
-        const start = today;
-        const end = today + DAY_MS - 1;
-        let total = 0;
-        let done = 0;
-        let doneThisWeek = 0;
-        const weekAgo = now - WEEK_MS;
-        for (const task of tasks) {
-            const ts = parseCalendarDateUtc(task.dueDate ?? '');
-            if (!Number.isNaN(ts) && ts >= start && ts <= end) {
-                total++;
-                if (task.completed) done++;
-            }
-            if (task.completed) {
-                const updated = parseMysqlDateTime(task.updatedAt);
-                if (!Number.isNaN(updated) && updated >= weekAgo) doneThisWeek++;
-            }
-        }
-        return { total, done, left: total - done, overdue: queueCounts.overdue, doneThisWeek };
-    }, [tasks, queueCounts.overdue, now, today]);
-
-    const companyIdForTask = useCallback(
-        (task: Task) => {
-            if (task.personId == null) return null;
-            const person = personById.get(task.personId);
-            return person?.company?.id ?? person?.companyId ?? null;
-        },
-        [personById],
-    );
-
     const queueTasks = useMemo(
         () => tasks.filter((task) => isInQueue(queue, task, currentUserId, today) || completing.has(task.id)),
-        [tasks, queue, currentUserId, completing, today],
+        [tasks, queue, currentUserId, today, completing],
     );
 
-    const dimensionOptions = useMemo(() => {
-        const assignees = new Map<string, { label: string; count: number }>();
-        const persons_ = new Map<string, { label: string; count: number }>();
-        const deals_ = new Map<string, { label: string; count: number }>();
-        const companies = new Map<string, { label: string; count: number }>();
-        for (const task of queueTasks) {
-            const assignee = userById.get(task.assignedToId);
-            if (assignee) bumpOption(assignees, String(task.assignedToId), assignee.displayName || assignee.username);
-            if (task.personId != null) {
-                const person = personById.get(task.personId);
-                if (person) bumpOption(persons_, String(person.id), person.name);
-            }
-            if (task.dealId != null) {
-                const deal = dealById.get(task.dealId);
-                if (deal) bumpOption(deals_, String(deal.id), deal.name);
-            }
-            const companyId = companyIdForTask(task);
-            if (companyId != null) {
-                const company = task.personId != null ? personById.get(task.personId)?.company : undefined;
-                if (company) bumpOption(companies, String(companyId), company.name);
-            }
-        }
-        return {
-            assignees: toOptions(assignees),
-            persons: toOptions(persons_),
-            deals: toOptions(deals_),
-            companies: toOptions(companies),
-        };
-    }, [queueTasks, userById, personById, dealById, companyIdForTask]);
+    const dimensionOptions = {
+        assignees: users.map((u) => ({ value: String(u.id), label: u.displayName || u.username })),
+        persons: persons.map((p) => ({ value: String(p.id), label: p.name })),
+        deals: deals.map((d) => ({ value: String(d.id), label: d.name })),
+        companies: companySearch.companies.map((c) => ({ value: String(c.id), label: c.name })),
+    };
 
-    const filtered = useMemo(() => {
-        const q = query.trim().toLowerCase();
-        return queueTasks.filter((task) => {
-            if (assigneeFilter.size && !assigneeFilter.has(String(task.assignedToId))) return false;
-            if (personFilter.size && !(task.personId != null && personFilter.has(String(task.personId)))) return false;
-            if (dealFilter.size && !(task.dealId != null && dealFilter.has(String(task.dealId)))) return false;
-            if (companyFilter.size) {
-                const companyId = companyIdForTask(task);
-                if (!(companyId != null && companyFilter.has(String(companyId)))) return false;
-            }
-            if (!q) return true;
-            const haystacks = [
-                task.description,
-                task.personId ? personById.get(task.personId)?.name : null,
-                task.dealId ? dealById.get(task.dealId)?.name : null,
-                userById.get(task.assignedToId)?.displayName,
-            ];
-            return haystacks.some((s) => s?.toLowerCase().includes(q));
-        });
-    }, [queueTasks, query, assigneeFilter, personFilter, dealFilter, companyFilter, companyIdForTask, personById, dealById, userById]);
-
-    const boardTasks = useMemo(() => {
-        const q = query.trim().toLowerCase();
-        if (!q) return tasks;
-        return tasks.filter((task) => {
-            const haystacks = [
-                task.description,
-                task.personId ? personById.get(task.personId)?.name : null,
-                task.dealId ? dealById.get(task.dealId)?.name : null,
-                userById.get(task.assignedToId)?.displayName,
-            ];
-            return haystacks.some((s) => s?.toLowerCase().includes(q));
-        });
-    }, [tasks, query, personById, dealById, userById]);
+    const filtered = queueTasks;
+    const boardTasks = tasks;
 
     const grouped = useMemo(() => {
         const buckets: Record<Bucket, Task[]> = { overdue: [], today: [], upcoming: [], noDate: [], completed: [] };
@@ -506,7 +401,7 @@ export default function TasksBrowser({
     );
 
     const setTaskCompleted = (id: number, value: boolean) =>
-        setTasks((prev) => prev.map((task) => (task.id === id ? { ...task, completed: value } : task)));
+        records.patchItem(id, { completed: value });
 
     const handleToggleComplete = async (task: Task, next: boolean) => {
         const operationWorkspaceId = originWorkspaceId;
@@ -529,6 +424,7 @@ export default function TasksBrowser({
         setPendingToggle((prev) => new Set(prev).add(task.id));
         let optimisticTimerId: number | null = null;
         let requestSettled = false;
+        let requestSucceeded = false;
         let timerSettled = !(next && !reduce);
 
         const finishOperation = () => {
@@ -536,6 +432,7 @@ export default function TasksBrowser({
             if (toggleControllersRef.current.get(task.id) !== controller) return;
             toggleControllersRef.current.delete(task.id);
             if (scopeCurrent()) {
+                if (requestSucceeded) records.reload();
                 setPendingToggle((prev) => {
                     const n = new Set(prev);
                     n.delete(task.id);
@@ -592,6 +489,7 @@ export default function TasksBrowser({
                     signal: controller.signal,
                 },
             );
+            requestSucceeded = true;
         } catch (err) {
             if (controller.signal.aborted || !scopeCurrent()) return;
             if (optimisticTimerId !== null) {
@@ -649,10 +547,9 @@ export default function TasksBrowser({
             if (controller.signal.aborted || !scopeCurrent()) return;
             pendingFocusRef.current = focusTarget?.id ?? 'search';
             setRovingTaskId(focusTarget?.id ?? null);
-            setTasks((previous) => previous.filter((task) => task.id !== deletingTask.id));
             setDeletingTask(null);
             toastSuccess(t('toastDeleted'));
-            router.refresh();
+            records.reload();
         } catch (error) {
             if (controller.signal.aborted || !scopeCurrent()) return;
             showApiError(error, 'toastFailedDelete');
@@ -669,8 +566,7 @@ export default function TasksBrowser({
         : null;
     const visibleDeletingTask = pageCurrent ? deletingTask : null;
 
-    const hasAnyTasks = tasks.length > 0;
-    const isEmpty = filtered.length === 0;
+    const isEmpty = !records.loading && filtered.length === 0;
     const isCompletedQueue = queue === 'completed';
     const dimensionsActive =
         assigneeFilter.size > 0 || personFilter.size > 0 || dealFilter.size > 0 || companyFilter.size > 0;
@@ -703,18 +599,6 @@ export default function TasksBrowser({
                 </Button>
             }
         />
-    ) : !hasAnyTasks ? (
-        <EmptyState
-            icon={CheckCircleIcon}
-            title={t('emptyFirstRunTitle')}
-            body={t('emptyFirstRunBody')}
-            action={
-                <Button variant="brand" onClick={() => setCreating(true)}>
-                    <PlusIcon strokeWidth={2.5} />
-                    {t('new')}
-                </Button>
-            }
-        />
     ) : (
         <EmptyState
             tone="muted"
@@ -734,24 +618,28 @@ export default function TasksBrowser({
         {
             label: tf('assignee'),
             options: dimensionOptions.assignees,
+            search: { value: memberSearch.query, onChange: memberSearch.onInputValueChange, state: memberSearch.serverSearch },
             selected: assigneeFilter,
             onToggle: (value) => toggleInSet(setAssigneeFilter, value),
         },
         {
             label: tf('contact'),
             options: dimensionOptions.persons,
+            search: { value: personSearch.query, onChange: personSearch.onInputValueChange, state: personSearch.serverSearch },
             selected: personFilter,
             onToggle: (value) => toggleInSet(setPersonFilter, value),
         },
         {
             label: tf('deal'),
             options: dimensionOptions.deals,
+            search: { value: dealSearch.query, onChange: dealSearch.onInputValueChange, state: dealSearch.serverSearch },
             selected: dealFilter,
             onToggle: (value) => toggleInSet(setDealFilter, value),
         },
         {
             label: tf('company'),
             options: dimensionOptions.companies,
+            search: { value: companySearch.query, onChange: companySearch.onInputValueChange, state: companySearch.serverSearch },
             selected: companyFilter,
             onToggle: (value) => toggleInSet(setCompanyFilter, value),
         },
@@ -832,27 +720,15 @@ export default function TasksBrowser({
                     />
                 </Rise>
 
-                {hasAnyTasks && (
-                    <Rise delay={0.06}>
-                        <FocusStrip
-                            focus={todayFocus}
-                            reduce={reduce}
-                            t={t}
-                            onSelectToday={() => setQueue('dueToday')}
-                            onSelectOverdue={() => setQueue('overdue')}
-                            onSelectWeek={() => setQueue('completed')}
-                        />
-                    </Rise>
-                )}
-
                 <Rise delay={0.12}>
+                    <ActivityListPagination page={records.page} size={records.size} total={records.total} loading={records.loading} onPageChange={records.setPage} />
                     {effectiveView === 'board' ? (
                         <div className="min-w-0 space-y-4">
                             <FilterBar
                                 reduce={reduce}
-                                chips={query.trim() ? [{ id: 'q', label: tf('chipSearch', { query: query.trim() }), onRemove: () => setQuery('') }] : []}
-                                hasActiveFilters={query.trim() !== ''}
-                                onClearAll={() => setQuery('')}
+                                chips={chips}
+                                hasActiveFilters={query.trim() !== '' || dimensionsActive}
+                                onClearAll={clearAllFilters}
                                 clearAllLabel={tf('clearAll')}
                                 className="py-0"
                                 search={
@@ -867,19 +743,21 @@ export default function TasksBrowser({
                                     />
                                 }
                             />
+                            <RecordListState error={records.error} loading={records.loading} hasRecords={tasks.length > 0} onRetry={records.reload}>
                             <TasksKanban
                                 tasks={boardTasks}
                                 personById={personById}
                                 dealById={dealById}
                                 userById={userById}
-                                onMoved={() => router.refresh()}
+                                onMoved={records.reload}
                                 onOpen={setEditingTask}
                                 reduce={reduce}
                             />
+                            </RecordListState>
                         </div>
                     ) : (
-                        <div className="grid grid-cols-1 gap-6 md:grid-cols-[200px_minmax(0,1fr)] md:gap-10">
-                            <aside className="md:sticky md:top-6 md:self-start">
+                        <div className="grid grid-cols-1 gap-6 xl:grid-cols-[200px_minmax(0,1fr)] xl:gap-10">
+                            <aside className="xl:sticky xl:top-6 xl:self-start">
                                 <h2 className="mb-2 px-3 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
                                     {t('queuesHeader')}
                                 </h2>
@@ -889,7 +767,7 @@ export default function TasksBrowser({
                                             key={q}
                                             Icon={QUEUE_ICON[q]}
                                             label={t(`queue_${q}` as 'queue_myOpen')}
-                                            count={queueCounts[q]}
+                                            count={queue === q ? records.total : undefined}
                                             active={queue === q}
                                             reduce={reduce}
                                             onClick={() => setQueue(q)}
@@ -899,7 +777,7 @@ export default function TasksBrowser({
                                     <QueueButton
                                         Icon={QUEUE_ICON.completed}
                                         label={t('queue_completed')}
-                                        count={queueCounts.completed}
+                                        count={queue === 'completed' ? records.total : undefined}
                                         active={queue === 'completed'}
                                         reduce={reduce}
                                         onClick={() => setQueue('completed')}
@@ -936,11 +814,12 @@ export default function TasksBrowser({
                                         />
                                     }
                                 >
-                                    {dimensionOptions.assignees.length > 0 && (
+                                    {(
                                         <MultiSelectFilter
                                             label={tf('assignee')}
                                             ariaLabel={tf('assignee')}
                                             options={dimensionOptions.assignees}
+                                        search={{ value: memberSearch.query, onChange: memberSearch.onInputValueChange, state: memberSearch.serverSearch }}
                                             selected={assigneeFilter}
                                             onToggle={(v) => toggleInSet(setAssigneeFilter, v)}
                                             onClear={() => setAssigneeFilter(new Set())}
@@ -948,11 +827,12 @@ export default function TasksBrowser({
                                             scroll
                                         />
                                     )}
-                                    {dimensionOptions.persons.length > 0 && (
+                                    {(
                                         <MultiSelectFilter
                                             label={tf('contact')}
                                             ariaLabel={tf('contact')}
                                             options={dimensionOptions.persons}
+                                        search={{ value: personSearch.query, onChange: personSearch.onInputValueChange, state: personSearch.serverSearch }}
                                             selected={personFilter}
                                             onToggle={(v) => toggleInSet(setPersonFilter, v)}
                                             onClear={() => setPersonFilter(new Set())}
@@ -960,11 +840,12 @@ export default function TasksBrowser({
                                             scroll
                                         />
                                     )}
-                                    {dimensionOptions.deals.length > 0 && (
+                                    {(
                                         <MultiSelectFilter
                                             label={tf('deal')}
                                             ariaLabel={tf('deal')}
                                             options={dimensionOptions.deals}
+                                        search={{ value: dealSearch.query, onChange: dealSearch.onInputValueChange, state: dealSearch.serverSearch }}
                                             selected={dealFilter}
                                             onToggle={(v) => toggleInSet(setDealFilter, v)}
                                             onClear={() => setDealFilter(new Set())}
@@ -972,11 +853,12 @@ export default function TasksBrowser({
                                             scroll
                                         />
                                     )}
-                                    {dimensionOptions.companies.length > 0 && (
+                                    {(
                                         <MultiSelectFilter
                                             label={tf('company')}
                                             ariaLabel={tf('company')}
                                             options={dimensionOptions.companies}
+                                        search={{ value: companySearch.query, onChange: companySearch.onInputValueChange, state: companySearch.serverSearch }}
                                             selected={companyFilter}
                                             onToggle={(v) => toggleInSet(setCompanyFilter, v)}
                                             onClear={() => setCompanyFilter(new Set())}
@@ -986,6 +868,7 @@ export default function TasksBrowser({
                                     )}
                                 </FilterBar>
 
+                                <RecordListState error={records.error} loading={records.loading} hasRecords={tasks.length > 0} onRetry={records.reload}>
                                 {isEmpty ? (
                                     taskEmptyState
                                 ) : isCompletedQueue ? (
@@ -1022,6 +905,7 @@ export default function TasksBrowser({
                                         ))}
                                     </div>
                                 )}
+                                </RecordListState>
                             </div>
                         </div>
                     )}
@@ -1033,7 +917,7 @@ export default function TasksBrowser({
                     task={editingTask}
                     open={!!editingTask}
                     onOpenChange={(open) => {
-                        if (!open) setEditingTask(null);
+                        if (!open) { setEditingTask(null); records.reload(); }
                     }}
                     companyId={drawerCompanyId}
                     deals={deals}
@@ -1055,105 +939,13 @@ export default function TasksBrowser({
 
             <TaskDialog
                 open={creating}
-                onOpenChange={setCreating}
+                onOpenChange={(open) => { setCreating(open); if (!open) records.reload(); }}
                 persons={persons}
                 deals={deals}
                 users={users}
                 currentUserId={currentUserId}
             />
         </>
-    );
-}
-
-function ProgressRing({ value, reduce, label }: { value: number; reduce: boolean; label: string }) {
-    const size = 48;
-    const stroke = 5;
-    const r = (size - stroke) / 2;
-    const c = 2 * Math.PI * r;
-    const pct = Math.max(0, Math.min(1, value));
-    const offset = c * (1 - pct);
-    return (
-        <div className="relative shrink-0" style={{ width: size, height: size }}>
-            <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
-                <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--chart-grid)" strokeWidth={stroke} />
-                <motion.circle
-                    cx={size / 2}
-                    cy={size / 2}
-                    r={r}
-                    fill="none"
-                    stroke="var(--color-brand)"
-                    strokeWidth={stroke}
-                    strokeLinecap="round"
-                    strokeDasharray={c}
-                    initial={{ strokeDashoffset: reduce ? offset : c }}
-                    animate={{ strokeDashoffset: offset }}
-                    transition={{ duration: reduce ? 0 : 0.9, ease: EASE_OUT }}
-                />
-            </svg>
-            <span className="absolute inset-0 flex items-center justify-center font-mono text-[11px] font-medium tabular-nums text-foreground">
-                {label}
-            </span>
-        </div>
-    );
-}
-
-function FocusStrip({
-    focus,
-    reduce,
-    t,
-    onSelectToday,
-    onSelectOverdue,
-    onSelectWeek,
-}: {
-    focus: { total: number; done: number; left: number; overdue: number; doneThisWeek: number };
-    reduce: boolean;
-    t: ReturnType<typeof useTranslations>;
-    onSelectToday: () => void;
-    onSelectOverdue: () => void;
-    onSelectWeek: () => void;
-}) {
-    const { total, done, left, overdue, doneThisWeek } = focus;
-    const todaySub =
-        total === 0 ? t('nothingDueToday') : left === 0 ? t('allDoneToday') : t('tasksLeft', { count: left });
-
-    return (
-        <div className="grid grid-cols-3 gap-px overflow-hidden rounded-2xl border border-border bg-border">
-            <button
-                type="button"
-                onClick={onSelectToday}
-                className="flex min-h-20 items-center gap-3.5 bg-card p-4 text-left outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand"
-            >
-                <ProgressRing
-                    value={total === 0 ? 0 : done / total}
-                    reduce={reduce}
-                    label={total === 0 ? '0' : `${done}/${total}`}
-                />
-                <span className="min-w-0">
-                    <span className="block text-sm font-semibold text-foreground">{t('today')}</span>
-                    <span className="mt-0.5 block truncate text-xs text-muted-foreground">{todaySub}</span>
-                </span>
-            </button>
-
-            <button
-                type="button"
-                onClick={onSelectOverdue}
-                className="flex min-h-20 flex-col justify-center bg-card p-4 text-left outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand"
-            >
-                <span className={cn('text-2xl font-semibold leading-none tabular-nums', overdue > 0 ? 'text-destructive' : 'text-muted-foreground')}>
-                    {overdue}
-                </span>
-                <span className="mt-1.5 text-xs font-medium text-muted-foreground">{t('queue_overdue')}</span>
-            </button>
-
-            <button
-                type="button"
-                onClick={onSelectWeek}
-                className="flex min-h-20 flex-col justify-center bg-card p-4 text-left outline-none transition hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand"
-            >
-                <span className="text-2xl font-semibold leading-none tabular-nums text-foreground">{doneThisWeek}</span>
-                <span className="mt-1.5 text-xs font-medium text-muted-foreground">{t('doneThisWeek')}</span>
-            </button>
-        </div>
     );
 }
 
@@ -1167,7 +959,7 @@ function QueueButton({
 }: {
     Icon: IconType;
     label: string;
-    count: number;
+    count?: number;
     active: boolean;
     reduce: boolean;
     onClick: () => void;
@@ -1194,7 +986,7 @@ function QueueButton({
                 <span className={cn('truncate', active && 'font-medium')}>{label}</span>
             </span>
             <span className={cn('relative z-10 shrink-0 text-xs tabular-nums', active ? 'text-brand-text/70' : 'text-muted-foreground')}>
-                {count}
+                {count ?? ''}
             </span>
         </button>
     );
@@ -1309,60 +1101,60 @@ function TaskRow({
                     />
                 </div>
 
-                <span
-                    onPointerDown={(event) => {
-                        if (event.target instanceof Element && event.target.closest('a')) {
-                            event.stopPropagation();
-                        }
-                    }}
-                    className={cn(
-                        'pointer-events-none relative z-10 min-w-0 flex-1 truncate text-sm [&_a]:pointer-events-auto',
-                        checked || isCompletedRow ? 'text-muted-foreground line-through' : 'text-foreground',
-                    )}
-                >
-                    <NoteContent content={task.description} references={task.references} />
-                </span>
+                <div className="pointer-events-none relative z-10 min-w-0 flex-1">
+                    <span
+                        onPointerDown={(event) => {
+                            if (event.target instanceof Element && event.target.closest('a')) {
+                                event.stopPropagation();
+                            }
+                        }}
+                        className={cn(
+                            'pointer-events-none relative z-10 block min-w-0 line-clamp-2 break-words text-sm [overflow-wrap:anywhere] [&_a]:pointer-events-auto',
+                            checked || isCompletedRow ? 'text-muted-foreground line-through' : 'text-foreground',
+                        )}
+                    >
+                        <NoteContent content={task.description} references={task.references} />
+                    </span>
 
-                <div className="relative z-10 hidden shrink-0 items-center gap-1.5 sm:flex">
-                    {person && (
-                        <Link
-                            href={`/records/contacts/${person.id}`}
-                            onClick={(event) => event.stopPropagation()}
-                            onPointerDown={(event) => event.stopPropagation()}
-                            className="inline-flex max-w-40 items-center gap-1 rounded-full bg-brand-light/50 px-2 py-0.5 text-xs font-medium text-brand-text ring-1 ring-inset ring-brand-dark/10 transition hover:bg-brand-light"
-                            title={person.name}
-                        >
-                            <UserIcon className="size-3 shrink-0" />
-                            <span className="truncate">{person.name}</span>
-                        </Link>
-                    )}
-                    {deal && (
-                        <Link
-                            href={`/records/deals/${deal.id}`}
-                            onClick={(event) => event.stopPropagation()}
-                            onPointerDown={(event) => event.stopPropagation()}
-                            className="inline-flex max-w-40 items-center gap-1 rounded-full bg-card px-2 py-0.5 text-xs font-medium text-foreground ring-1 ring-inset ring-border transition hover:bg-muted"
-                            title={deal.name}
-                        >
-                            <BriefcaseIcon className="size-3 shrink-0" />
-                            <span className="truncate">{deal.name}</span>
-                        </Link>
-                    )}
+                    <div className="relative z-10 mt-1 flex min-w-0 flex-wrap items-center gap-1.5">
+                        {person && (
+                            <Link
+                                href={`/records/contacts/${person.id}`}
+                                onClick={(event) => event.stopPropagation()}
+                                onPointerDown={(event) => event.stopPropagation()}
+                                className="pointer-events-auto inline-flex max-w-full items-center gap-1 rounded-full bg-brand-light/50 px-2 py-0.5 text-xs font-medium text-brand-text ring-1 ring-inset ring-brand-dark/10 transition hover:bg-brand-light"
+                                title={person.name}
+                            >
+                                <UserIcon className="size-3 shrink-0" />
+                                <span className="truncate">{person.name}</span>
+                            </Link>
+                        )}
+                        {deal && (
+                            <Link
+                                href={`/records/deals/${deal.id}`}
+                                onClick={(event) => event.stopPropagation()}
+                                onPointerDown={(event) => event.stopPropagation()}
+                                className="pointer-events-auto inline-flex max-w-full items-center gap-1 rounded-full bg-card px-2 py-0.5 text-xs font-medium text-foreground ring-1 ring-inset ring-border transition hover:bg-muted"
+                                title={deal.name}
+                            >
+                                <BriefcaseIcon className="size-3 shrink-0" />
+                                <span className="truncate">{deal.name}</span>
+                            </Link>
+                        )}
+                        <div className="pointer-events-none relative z-10 text-right">
+                            {due && !isCompletedRow ? (
+                                <span
+                                    className={cn(
+                                        'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium tabular-nums ring-1 ring-inset',
+                                        DUE_CHIP[due.tone],
+                                    )}
+                                >
+                                    {due.label}
+                                </span>
+                            ) : null}
+                        </div>
+                    </div>
                 </div>
-
-                <div className="pointer-events-none relative z-10 w-18 shrink-0 text-right">
-                    {due && !isCompletedRow ? (
-                        <span
-                            className={cn(
-                                'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium tabular-nums ring-1 ring-inset',
-                                DUE_CHIP[due.tone],
-                            )}
-                        >
-                            {due.label}
-                        </span>
-                    ) : null}
-                </div>
-
                 <button
                     type="button"
                     tabIndex={-1}

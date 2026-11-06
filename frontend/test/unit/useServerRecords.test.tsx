@@ -85,6 +85,37 @@ describe('useServerRecords failures and recovery', () => {
         expect(result.current.error).toBeNull();
     });
 
+    it('discards the old context immediately when the list forbids retaining previous results', async () => {
+        const next = deferredPage();
+        const fetcher = vi.fn<(params: PageParams & { companyId?: number }) => Promise<Page<Record>>>()
+            .mockResolvedValueOnce(firstPage).mockReturnValueOnce(next.promise);
+        const { result, rerender } = renderHook(({ companyId }) => useServerRecords(fetcher, { companyId }, { retainPreviousData: false }),
+            { initialProps: { companyId: 1 } });
+        await waitFor(() => expect(result.current.items).toEqual(firstPage.items));
+        rerender({ companyId: 2 });
+        expect(result.current.items).toEqual([]);
+        expect(result.current.total).toBe(0);
+        expect(result.current.loading).toBe(true);
+        await act(async () => next.reject(new Error('New context unavailable')));
+        expect(result.current.items).toEqual([]);
+        expect(result.current.error?.message).toBe('New context unavailable');
+    });
+
+    it('refreshes a server-owned calendar window without sending the client window as a query filter', async () => {
+        const next = deferredPage();
+        const fetcher = vi.fn<(params: PageParams) => Promise<Page<Record>>>()
+            .mockResolvedValueOnce(firstPage).mockReturnValueOnce(next.promise);
+        const { result, rerender } = renderHook(({ day }) => useServerRecords(fetcher, {}, { retainPreviousData: false, requestContext: day }),
+            { initialProps: { day: '2026-11-05' } });
+        await waitFor(() => expect(result.current.items).toEqual(firstPage.items));
+        rerender({ day: '2026-11-06' });
+        expect(result.current.items).toEqual([]);
+        expect(fetcher.mock.calls[1]).toEqual(fetcher.mock.calls[0]);
+        await act(async () => next.reject(new Error('New day unavailable')));
+        expect(result.current.items).toEqual([]);
+        expect(result.current.error?.message).toBe('New day unavailable');
+    });
+
     it('clears a failure on a successful genuinely empty retry', async () => {
         const fetcher = vi.fn<(params: PageParams) => Promise<Page<Record>>>()
             .mockRejectedValueOnce(new Error('Unavailable'))

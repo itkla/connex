@@ -2910,6 +2910,11 @@ export async function getUserReferences(ids: number[], init: RequestInit = {}) {
     return references.flat();
 }
 
+/** Bounded active-member search for activity and task pickers. */
+export function getUserOptions(q = '', init: RequestInit = {}) {
+    return getJson<Types.User[]>(`/api/users/options${buildQuery({ q })}`, init);
+}
+
 export function getUsers(init: RequestInit = {}) {
     return getJson<Types.User[]>(`/api/users`, init);
 }
@@ -2968,7 +2973,7 @@ export function getTasks(init: RequestInit = {}) {
     return getCompletePageItems<Types.Task>(getTasksPage, init);
 }
 
-export function getTasksPage(params: Types.PageParams = {}, init: RequestInit = {}) {
+export function getTasksPage(params: Types.TasksPageParams = {}, init: RequestInit = {}) {
     return getJson<Types.Page<Types.Task>>(`/api/tasks/page${buildQuery(params)}`, init);
 }
 
@@ -2982,7 +2987,7 @@ export function getTasksFromCookie(cookie: string | null) {
 
 export function getTasksPageResultFromCookie(
     cookie: string | null,
-    params: Types.PageParams = {},
+    params: Types.TasksPageParams = {},
 ) {
     return resultWithCookie<Types.Page<Types.Task>>((init) => getTasksPage(params, init), cookie);
 }

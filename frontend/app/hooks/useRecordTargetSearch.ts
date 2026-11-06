@@ -8,24 +8,31 @@ import {
     getContactsPage,
     getDealById,
     getDealsPage,
+    getUserOptions,
+    getUserById,
 } from '@/app/lib/api';
 import { createServerPickerSearch, pickerQueryKey } from '@/lib/server-picker-search';
-import type { Contact, Deal, Page } from '@/app/lib/types';
+import type { Contact, Deal, Page, User } from '@/app/lib/types';
 
 const SEARCH_SIZE = 50;
 const SEARCH_DELAY_MS = 200;
 const EMPTY_IDS: Array<number | null | undefined> = [];
 const EMPTY_CONTACTS: Contact[] = [];
 const EMPTY_DEALS: Deal[] = [];
+const EMPTY_USERS: User[] = [];
 
-type RecordTarget = { id: number; name: string };
+type RecordTarget = { id: number; name?: string; displayName?: string; username?: string };
+
+function targetLabel(target: RecordTarget): string {
+    return target.name ?? target.displayName ?? target.username ?? '';
+}
 
 function mergeTargets<T extends RecordTarget>(...groups: T[][]): T[] {
     const byId = new Map<number, T>();
     for (const group of groups) {
         for (const target of group) byId.set(target.id, target);
     }
-    return [...byId.values()].sort((left, right) => left.name.localeCompare(right.name));
+    return [...byId.values()].sort((left, right) => targetLabel(left).localeCompare(targetLabel(right)));
 }
 
 function selectedKey(ids: Array<number | null | undefined>): string {
@@ -94,6 +101,7 @@ function useRecordTargetSearch<T extends RecordTarget>(
     }, [enabled, normalizedQuery, idsKey, stableIds, stableIdSet, seeds, loadPage, loadById]);
 
     return {
+        query,
         targets,
         serverSearch,
         loading: enabled && serverSearch.pending,
@@ -146,4 +154,20 @@ export function useDealTargetSearch(
         loadDealById,
     );
     return { ...result, deals: result.targets };
+}
+
+const loadMembersPage = async (query: string, signal: AbortSignal) => {
+    const items = await getUserOptions(query, { signal });
+    return { items, total: items.length };
+};
+const loadMemberById = (id: number, signal: AbortSignal) => getUserById(id, { signal });
+
+/** Provides bounded active-member search while retaining the selected assignees or creators. */
+export function useMemberTargetSearch(
+    enabled: boolean,
+    ids: Array<number | null | undefined> = EMPTY_IDS,
+    seeds: User[] = EMPTY_USERS,
+) {
+    const result = useRecordTargetSearch(enabled, ids, seeds, loadMembersPage, loadMemberById);
+    return { ...result, users: result.targets };
 }
