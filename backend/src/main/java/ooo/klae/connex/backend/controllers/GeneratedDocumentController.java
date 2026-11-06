@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RestController;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.dto.GeneratedDocumentSummaryDto;
+import ooo.klae.connex.backend.dto.GeneratedDocumentTargetDto;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
@@ -35,6 +36,16 @@ public class GeneratedDocumentController {
     private final DealDocumentService documentService;
     private final MemberScopeResolver memberScopeResolver;
     private final WorkspaceService workspaceService;
+
+    /** Resolves at most fifty document ids without distinguishing unavailable targets. */
+    @GetMapping("/targets")
+    public List<GeneratedDocumentTargetDto> getTargets(@RequestParam List<Integer> ids) {
+        if (ids == null || ids.isEmpty() || ids.size() > 50
+                || ids.stream().anyMatch(id -> id == null || id < 1)) {
+            throw new BadRequestException("Between one and fifty positive document ids are required");
+        }
+        return documentService.getTargets(ids);
+    }
 
     /**
      * Returns one bounded page of generated documents across every deal in the active workspace.

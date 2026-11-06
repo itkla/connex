@@ -42,6 +42,7 @@ import ooo.klae.connex.backend.dto.DealLineItemsResponse;
 import ooo.klae.connex.backend.dto.DocumentApprovalDto;
 import ooo.klae.connex.backend.dto.DocumentContent;
 import ooo.klae.connex.backend.dto.GeneratedDocumentSummaryDto;
+import ooo.klae.connex.backend.dto.GeneratedDocumentTargetDto;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
@@ -105,6 +106,32 @@ public class DealDocumentService {
 
     /** Every document type a template can produce. */
     public static final Set<String> INDEX_TYPES = Set.of("quote", "proposal", "order_form", "contract");
+
+    /**
+     * Resolves up to fifty ids under the same parent-deal gate as {@link #getOne}.
+     * Missing documents and unreadable parents are omitted without revealing which check refused them.
+     *
+     * @param ids positive document ids, bounded before deduplication
+     * @return only minimal references whose parent deal is readable in the resolved workspace
+     */
+    public List<GeneratedDocumentTargetDto> getTargets(List<Integer> ids) {
+        if (ids == null || ids.isEmpty() || ids.size() > 50
+                || ids.stream().anyMatch(id -> id == null || id < 1)) {
+            throw new BadRequestException("Between one and fifty positive document ids are required");
+        }
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Map<Integer, Boolean> readableDeals = new HashMap<>();
+        return documentMapper.getTargets(workspaceId, ids.stream().distinct().toList()).stream()
+            .filter(target -> readableDeals.computeIfAbsent(target.dealId(), dealId -> {
+                try {
+                    requireDeal(workspaceId, dealId);
+                    return true;
+                } catch (ResourceNotFoundException exception) {
+                    return false;
+                }
+            }))
+            .toList();
+    }
 
     /**
      * One bounded page of generated documents across every deal in the workspace.
