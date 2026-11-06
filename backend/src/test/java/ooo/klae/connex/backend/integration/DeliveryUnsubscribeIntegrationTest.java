@@ -122,7 +122,7 @@ class DeliveryUnsubscribeIntegrationTest {
     void smtpCaptureLinkExchangesPreviewsAndConfirmsWhileExportedDigestIsNotABearer() throws Exception {
         RequestContextHolder.resetRequestAttributes();
         Workspace workspace = newWorkspace();
-        try (SmtpCaptureServer smtp = new SmtpCaptureServer()) {
+        try {
             Person person = newPerson(workspace);
             jdbcTemplate.update("UPDATE person SET email = 'recipient@dest.test' WHERE id = ?", person.getId());
             Campaign campaign = newCampaign(workspace);
@@ -145,19 +145,24 @@ class DeliveryUnsubscribeIntegrationTest {
             campaignDeliveryMapper.insertDeliveries(workspace.getId(), List.of(delivery));
             int deliveryId = campaignDeliveryMapper.getBySendAndPerson(
                     workspace.getId(), send.getId(), person.getId()).getId();
-            ResolvedMailConfig config = new ResolvedMailConfig("127.0.0.1", smtp.port(), null, null,
-                    "sender@example.test", "Capture", false, false, false, 2000, 2000, 2000, false);
-            when(deliveryProviderConfigService.resolveForWorkspace(
-                    workspace.getId(), DeliveryChannel.EMAIL)).thenReturn(new ResolvedDeliveryProvider(
-                            "smtp", DeliveryChannel.EMAIL, workspace.getId(), null, null, null,
-                            DeliveryCredentials.none(), false, "f".repeat(64), config));
+            String bearer;
+            try (SmtpCaptureServer smtp = new SmtpCaptureServer()) {
+                ResolvedMailConfig config = new ResolvedMailConfig("127.0.0.1", smtp.port(), null, null,
+                        "sender@example.test", "Capture", false, false, false, 2000, 2000, 2000, false);
+                when(deliveryProviderConfigService.resolveForWorkspace(
+                        workspace.getId(), DeliveryChannel.EMAIL)).thenReturn(new ResolvedDeliveryProvider(
+                                "smtp", DeliveryChannel.EMAIL, workspace.getId(), null, null, null,
+                                DeliveryCredentials.none(), false, "f".repeat(64), config));
 
-            assertTrue(campaignDispatchService.processSend(workspace.getId(), send.getId()));
-            assertEquals("dispatched", campaignDeliveryMapper.getDelivery(workspace.getId(), deliveryId).getStatus());
-            String body = mimeText(smtp.awaitMessage());
-            Matcher token = Pattern.compile("/unsubscribe#token=([a-f0-9]{64})").matcher(body);
-            assertTrue(token.find());
-            String bearer = token.group(1);
+                assertTrue(campaignDispatchService.processSend(workspace.getId(), send.getId()));
+                CampaignDelivery outcome = campaignDeliveryMapper.getDelivery(workspace.getId(), deliveryId);
+                assertNotNull(outcome);
+                assertEquals("dispatched", outcome.getStatus(), () -> deliveryFailureDiagnostic(outcome));
+                String body = mimeText(smtp.awaitMessage());
+                Matcher token = Pattern.compile("/unsubscribe#token=([a-f0-9]{64})").matcher(body);
+                assertTrue(token.find());
+                bearer = token.group(1);
+            }
             String exportedDigest = jdbcTemplate.queryForObject(
                     "SELECT token_hash FROM campaign_delivery_unsubscribe_token WHERE delivery_id = ?",
                     String.class, deliveryId);
@@ -499,6 +504,14 @@ class DeliveryUnsubscribeIntegrationTest {
                 .toList()) {
             assertFalse(value.contains(rawToken));
         }
+    }
+
+    private static String deliveryFailureDiagnostic(CampaignDelivery delivery) {
+        String detail = String.valueOf(delivery.getLastError())
+                .replaceAll("(?i)[a-f0-9]{64,}", "[bearer]")
+                .replaceAll("[^\\s<>]+@[^\\s<>]+", "[address]")
+                .replaceAll("https?://[^\\s<>]+", "[url]");
+        return String.valueOf(delivery.getLastErrorCode()) + ": " + detail;
     }
 
     private Recipient seedRecipient() {

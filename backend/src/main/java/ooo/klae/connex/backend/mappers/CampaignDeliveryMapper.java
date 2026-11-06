@@ -460,6 +460,15 @@ public interface CampaignDeliveryMapper {
 
     void insertEvent(CampaignDeliveryEvent event);
 
+    /** Appends one send-level refusal marker against a pending recipient while the send root is locked. */
+    int insertContentRefusal(@Param("workspaceId") int workspaceId, @Param("sendId") int sendId);
+
+    /** Settles pending work while retaining possible prior submissions for reconciliation. */
+    int settleContentRefusedPending(@Param("workspaceId") int workspaceId, @Param("sendId") int sendId);
+
+    /** Checks the owning send's internal marker after its mutex has been acquired. */
+    boolean hasContentRefusal(@Param("workspaceId") int workspaceId, @Param("sendId") int sendId);
+
     boolean hasEvent(
             @Param("workspaceId") int workspaceId,
             @Param("deliveryId") int deliveryId,

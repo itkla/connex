@@ -84,6 +84,11 @@ The core flow specs do not rely on pre-seeded credentials. The `setup-desktop` a
 
 Because each browser project registers a **fresh user and workspace**, desktop and phone runs are tenant-isolated, rerunnable, and safe to execute in parallel against a shared dev database. Throwaway users accumulate in the dev DB; that is accepted (tenant-isolated).
 
+The workspace seeder checks HTTP success before decoding a response and reports the path, status
+and bounded response body on failure. Use `seed.post` for JSON object responses and
+`seed.postEmpty` for void endpoints, including adding a contact to a deal. An empty successful
+response must not be parsed as JSON; creation endpoints must still return their record object.
+
 `campaign-metrics.spec.ts` registers a separate user and workspace for each case with empty storage
 state. Its extra contacts must stay outside the shared project workspace: adding contacts there
 can move another spec's seeded contact off its sorted first page, even when the new contacts have

@@ -360,7 +360,12 @@ export default async function DealPage({ params }: DealPageProps) {
                                         <CustomFieldRows entityType="deal" entityId={deal.id} initialEntries={customFields} />
                                     </dl>
                                 </div>
-                                <DealRiskPanel risk={risk} />
+                                <DealRiskPanel
+                                    risk={risk}
+                                    hasNoHistoryStakeholders={Array.from(stakeholderWarmth.byPerson.values()).some(
+                                        (temperature) => temperature.daysSinceTouch == null,
+                                    )}
+                                />
                             </RecordDetailSection>
 
                             <RecordDetailSection recordKind="deal" section="related">

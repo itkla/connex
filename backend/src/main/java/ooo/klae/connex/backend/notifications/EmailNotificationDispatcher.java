@@ -43,11 +43,12 @@ public class EmailNotificationDispatcher implements NotificationDispatcher {
             return 0;
         }
 
-        String actionUrl = notification.getActionUrl() == null ? mailProperties.getAppBaseUrl()
-                : UriComponentsBuilder.fromUriString(mailProperties.getAppBaseUrl())
-                        .path(notification.getActionUrl())
-                        .build()
-                        .toUriString();
+        UriComponentsBuilder destination = UriComponentsBuilder.fromUriString(mailProperties.getAppBaseUrl())
+            .path("/notifications");
+        if (notification.getId() > 0 && notification.getActionUrl() != null) {
+            destination.queryParam("open", notification.getId());
+        }
+        String actionUrl = destination.build().toUriString();
 
         String body = templateRenderer.render("notification", "en", Map.of(
                 "title", notification.getTitle() == null ? "" : notification.getTitle(),
