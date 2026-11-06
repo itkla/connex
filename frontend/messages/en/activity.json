@@ -358,7 +358,8 @@
     "toastDeleted": "Deleted tag {name}",
     "toastFailedDelete": "Couldn't delete the tag",
     "entityLabel": "tag",
-    "deleteDetails": "It also comes off every contact, company, and deal it is on."
+    "deleteDetails": "It also comes off every contact, company, and deal it is on.",
+    "membersAria": "View records tagged {name}"
   },
   "ActivityLibraryTagDialog": {
     "titleCreate": "New tag",
@@ -564,5 +565,26 @@
     "loading": "Loading notes…",
     "retry": "Try again",
     "failed": "Notes couldn't be loaded. Try again."
+  },
+  "TagMembers": {
+    "title": "Records tagged {name}",
+    "description": "View tagged records, add a record, or remove its tag. Removing a tag keeps the record.",
+    "viewContacts": "View filtered contacts",
+    "contacts": "Contacts",
+    "companies": "Companies",
+    "deals": "Deals",
+    "add": {
+      "contacts": "Add a contact",
+      "companies": "Add a company",
+      "deals": "Add a deal"
+    },
+    "search": "Search records",
+    "empty": "No records of this type have this tag yet.",
+    "remove": "Remove",
+    "removeFor": "Remove tag from {name}",
+    "added": "Tag added",
+    "removed": "Tag removed",
+    "changeFailed": "Couldn’t change the tag. Try again.",
+    "searchFailed": "Couldn’t load search results. Search again to retry."
   }
 }

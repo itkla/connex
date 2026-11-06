@@ -599,5 +599,28 @@
             "won": "結果",
             "riskExcluded": "案件リスク評価"
         }
+    },
+    "DealStakeholders": {
+        "title": "関係者",
+        "add": "連絡先を追加",
+        "empty": "関係者がまだ登録されていません。この案件に関わる連絡先を追加できます。",
+        "editRole": "役割を編集",
+        "editRoleFor": "{name}の役割を編集",
+        "remove": "解除",
+        "removeFor": "この案件から{name}を解除",
+        "description": "連絡先を選び、この案件での役割を入力してください。",
+        "contact": "連絡先",
+        "chooseContact": "連絡先を検索",
+        "role": "役割（任意）",
+        "rolePlaceholder": "例：推進者、購買担当者",
+        "save": "保存",
+        "cancel": "キャンセル",
+        "saved": "関係者を保存しました",
+        "removed": "関係者を解除しました",
+        "saveFailed": "関係者を保存できませんでした。入力内容は保持されています。もう一度お試しください。",
+        "removeFailed": "関係者を解除できませんでした。もう一度お試しください。",
+        "searchFailed": "連絡先を読み込めませんでした。もう一度検索してください。",
+        "warmthUnavailable": "温度感を取得できません",
+        "contactRequired": "追加する連絡先を選択してください。"
     }
 }

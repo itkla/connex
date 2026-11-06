@@ -232,6 +232,11 @@ function countConditions(group: SegmentDefinition): number {
 
 export const EMPTY_DEFINITION: SegmentDefinition = { match: "all", conditions: [] };
 
+/** Resolves the record's own name separately from its linked company. */
+export function segmentFieldLabel(field: string | undefined, recordType: string, t: (key: string) => string): string {
+    return t(field === "name" ? `recordName.${recordType}` : `field.${field}`);
+}
+
 /**
  * Builds the natural-language label for a condition: e.g. "Industry is Fintech", "Has an open deal",
  * "Tag is not Priority". {@code resolveTagName} maps a tag id to its name. Used by the removable
@@ -243,6 +248,7 @@ export function segmentConditionLabel(
     t: (key: string, values?: Record<string, string | number>) => string,
     resolveTagName: (id: string) => string,
     resolveOwnerName?: (id: string) => string,
+    recordType = "company",
 ): string {
     if (condition.type === "predicate") {
         const key = condition.key ?? "";
@@ -252,17 +258,48 @@ export function segmentConditionLabel(
         }
         return label;
     }
-    const field = t(`field.${condition.field}`);
+    const field = segmentFieldLabel(condition.field, recordType, t);
     const op = t(`op.${operatorTokenFor(condition.op, condition.negate)}`);
     if (condition.op === "is_set") {
         return `${field} ${op}`;
+    }
+    if (condition.op === "within_days") {
+        return t("chipField", { field, op, value: t("durationDays", { days: condition.days ?? DEFAULT_DAYS }) });
     }
     const value = condition.field === "tag"
         ? resolveTagName(condition.value ?? "")
         : condition.field === "owner" && resolveOwnerName
             ? resolveOwnerName(condition.value ?? "")
+            : condition.field === "status" && ["open", "won", "lost"].includes(condition.value ?? "")
+                ? t(`status.${condition.value}`)
             : (condition.value ?? "");
     return t("chipField", { field, op, value });
+}
+
+/** Describes a saved condition tree without changing its fields, values or grouping. */
+export function segmentDefinitionLabel(
+    definition: SegmentDefinition,
+    recordType: string,
+    t: (key: string, values?: Record<string, string | number>) => string,
+    fields: SegmentFields | null,
+    options?: RuleBuilderOptions | null,
+): string {
+    const parts = (definition.conditions ?? []).map((condition) => {
+        const references = condition.field === "company" ? options?.companies
+            : condition.field === "stage" ? options?.stages : undefined;
+        const display = ["company", "stage"].includes(condition.field ?? "") && condition.value
+            ? { ...condition, value: references?.find((item) => String(item.id) === condition.value)?.name ?? t("unavailableValue") }
+            : condition;
+        return segmentConditionLabel(display, t,
+            (id) => fields?.tags.find((tag) => String(tag.id) === id)?.name ?? t("unavailableValue"),
+            (id) => options?.owners.find((owner) => String(owner.id) === id)?.name ?? t("unavailableValue"),
+            recordType);
+    });
+    for (const group of definition.groups ?? []) {
+        const label = segmentDefinitionLabel(group, recordType, t, fields, options);
+        if (label) parts.push(`(${label})`);
+    }
+    return parts.join(t(definition.match === "any" ? "summaryOr" : "summaryAnd"));
 }
 
 /**
@@ -287,6 +324,7 @@ export default function SegmentBuilder({
     focusPath,
     focusDescriptionId,
     initiallyOpen = false,
+    context = "segment",
 }: {
     definition: SegmentDefinition;
     fields: SegmentFields | null;
@@ -301,6 +339,7 @@ export default function SegmentBuilder({
     focusPath?: string | null;
     focusDescriptionId?: string;
     initiallyOpen?: boolean;
+    context?: "segment" | "workflow";
 }) {
     const t = useTranslations("SmartSegments");
     const [open, setOpen] = useState(initiallyOpen);
@@ -329,10 +368,13 @@ export default function SegmentBuilder({
 
     return (
         <ResponsiveDialog open={open} onOpenChange={setOpen}>
+            {context === "workflow" && total > 0 ? (
+                <p className="mb-2 text-sm text-foreground">{segmentDefinitionLabel(definition, recordType, t, fields, options)}</p>
+            ) : null}
             <ResponsiveDialogTrigger asChild>
                 <Button variant="outline" size="toolbar" className="h-9 gap-1.5" {...triggerProps}>
                     <SparklesIcon className="size-4" />
-                    {t("title")}
+                    {t(context === "workflow" ? "setCondition" : "title")}
                     {total > 0 && (
                         <span className="flex size-5 items-center justify-center rounded-full bg-brand text-xs font-semibold text-brand-foreground">
                             {total}
@@ -343,8 +385,8 @@ export default function SegmentBuilder({
             <ResponsiveDialogContent className="gap-0 overflow-hidden p-0 sm:max-w-2xl">
                 <div className="px-6 pt-6">
                     <ResponsiveDialogHeader className="mb-4">
-                        <ResponsiveDialogTitle>{t("builderTitle")}</ResponsiveDialogTitle>
-                        <ResponsiveDialogDescription>{t("builderDescription")}</ResponsiveDialogDescription>
+                        <ResponsiveDialogTitle>{t(context === "workflow" ? "conditionTitle" : "builderTitle")}</ResponsiveDialogTitle>
+                        <ResponsiveDialogDescription>{t(`${context === "workflow" ? "conditionDescription" : "recordDescription"}.${recordType}`)}</ResponsiveDialogDescription>
                     </ResponsiveDialogHeader>
                 </div>
 
@@ -622,7 +664,7 @@ function AddConditionMenu({
                     </DropdownMenuLabel>
                     {catalog.fields.map((field) => (
                         <DropdownMenuItem key={field.field} onClick={() => onAdd(`field:${field.field}`)}>
-                            {t(`field.${field.field}`)}
+                            {segmentFieldLabel(field.field, catalog.recordType, t)}
                         </DropdownMenuItem>
                     ))}
                 </DropdownMenuGroup>
@@ -697,7 +739,7 @@ function ConditionCard({
                             ))}
                             {catalog.fields.map((field) => (
                                 <SelectItem key={field.field} value={`field:${field.field}`}>
-                                    {t(`field.${field.field}`)}
+                                    {segmentFieldLabel(field.field, catalog.recordType, t)}
                                 </SelectItem>
                             ))}
                         </SelectContent>
@@ -745,6 +787,9 @@ function ConditionCard({
                     <XMarkIcon className="size-4" />
                 </Button>
             </div>
+            {condition.type === "field" && condition.field === "company" ? (
+                <p className="mt-2 text-xs text-muted-foreground">{t("linkedCompanyHint")}</p>
+            ) : null}
         </div>
     );
 }

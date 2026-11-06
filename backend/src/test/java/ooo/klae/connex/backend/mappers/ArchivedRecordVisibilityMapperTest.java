@@ -182,11 +182,11 @@ class ArchivedRecordVisibilityMapperTest extends AbstractMapperTest {
 
         assertFalse(personMapper.distinctCompanies(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId())).contains(employer.getName()));
         assertFalse(personMapper.getPersonIdsFiltered(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), null,
-            List.of(employer.getName()), null, false, allTeamScope(), null, false, null, false, null, false, false, null, 100)
+            List.of(employer.getName()), null, false, allTeamScope(), null, false, null, false, null, false, false, null, 100, null)
             .contains(employee.getId()));
         assertTrue(personMapper.hasPersonWithoutCompany(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId())));
         assertTrue(personMapper.getPersonIdsFiltered(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), null, null, null,
-            true, allTeamScope(), null, false, null, false, null, false, false, null, 100).contains(employee.getId()));
+            true, allTeamScope(), null, false, null, false, null, false, false, null, 100, null).contains(employee.getId()));
     }
 
     /** P1-4: the file browser labels every file with its owner's name. */
@@ -365,7 +365,7 @@ class ArchivedRecordVisibilityMapperTest extends AbstractMapperTest {
 
     private Person personPageOf(Person person) {
         return personMapper.getPersonsPage(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), null, "name", "asc", null, null,
-                false, allTeamScope(), null, false, null, false, null, false, false, null, 500, 0)
+                false, allTeamScope(), null, false, null, false, null, false, false, null, 500, 0, null)
             .stream().filter(row -> row.getId() == person.getId()).findFirst().orElseThrow();
     }
 
@@ -477,7 +477,7 @@ class ArchivedRecordVisibilityMapperTest extends AbstractMapperTest {
 
     private List<Integer> personPageIds(Workspace viewer, boolean archived) {
         return personMapper.getPersonsPage(viewer.getId(), orgWorkspaceIdsJson(workspaceMapper, viewer.getId()), null, "name", "asc", null, null, false,
-                allTeamScope(), null, false, null, false, null, false, archived, null, 500, 0)
+                allTeamScope(), null, false, null, false, null, false, archived, null, 500, 0, null)
             .stream().map(Person::getId).toList();
     }
 

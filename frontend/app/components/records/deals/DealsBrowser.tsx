@@ -1310,6 +1310,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                     tSeg,
                     (id) => segmentFields?.tags.find((tag) => String(tag.id) === id)?.name ?? id,
                     (id) => memberById.get(Number(id))?.displayName ?? id,
+                    "deal",
                 ),
                 onRemove: () => changeDefinition(removeSegmentCondition(definition, groupPath, conditionIndex)),
             };

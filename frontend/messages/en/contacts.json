@@ -133,7 +133,9 @@
         "toastFailedRestore": "Couldn't restore the selected contacts",
         "entityLabelPlural": "contacts",
         "toastFailedLoadContact": "Couldn't load the contact",
-        "inlineSavePending": "Wait for the current contact save to finish."
+        "inlineSavePending": "Wait for the current contact save to finish.",
+        "filterTag": "Tag",
+        "tagUnavailable": "Unavailable tag"
     },
     "ContactsCard": {
         "copyEmail": "Copy email",
