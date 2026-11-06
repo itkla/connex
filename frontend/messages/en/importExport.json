@@ -115,6 +115,9 @@
     "rowColLink": "Link",
     "reviewLinkHint": "Showing {shown} of {total} actionable rows, including all {candidates} rows with possible matches. Use Link to resolve another record.",
     "candidateListLabel": "Possible existing records",
+    "candidateCompanyNameStrength": "Company name match",
+    "candidateCompanyNameEvidence": "Same name or legal-form variant",
+    "companyVariantNeedsReview": "An existing company has a similar name. Review the match and use its exact name in the file before importing.",
     "candidateStrength": {
       "STRONG": "Exact identity",
       "WEAK": "Exact name"

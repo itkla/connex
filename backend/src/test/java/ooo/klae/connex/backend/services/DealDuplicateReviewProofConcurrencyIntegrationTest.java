@@ -108,7 +108,8 @@ class DealDuplicateReviewProofConcurrencyIntegrationTest {
         WorkspaceService workspaceService = mock(WorkspaceService.class);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(WORKSPACE_ID);
         when(workspaceService.getCurrentUserId()).thenReturn(ACTOR_ID);
-        return new DealDuplicateReviewProofService(mapper, workspaceService, properties);
+        return new DealDuplicateReviewProofService(mapper, workspaceService, properties,
+            new ooo.klae.connex.backend.config.AuditIntegrityProperties());
     }
 
     private Claim consumeAfterStart(

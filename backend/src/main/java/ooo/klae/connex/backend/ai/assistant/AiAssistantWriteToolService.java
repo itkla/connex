@@ -303,11 +303,8 @@ public class AiAssistantWriteToolService {
         boolean candidates;
         try {
             candidates = switch (probe.kind()) {
-                case "person" -> {
-                    DuplicatePreflightResponse response = duplicatePreflightService.preflightPerson(
-                            new PersonDuplicatePreflightRequest(probe.name(), probe.emails(), probe.phones()));
-                    yield response.truncated() || !response.candidates().isEmpty();
-                }
+                case "person" -> duplicatePreflightService.personCandidatesExist(
+                        new PersonDuplicatePreflightRequest(probe.name(), probe.emails(), probe.phones()));
                 case "company" -> {
                     DuplicatePreflightResponse response = duplicatePreflightService.preflightCompany(
                             new CompanyDuplicatePreflightRequest(probe.name(), probe.websites(), probe.phones()));
