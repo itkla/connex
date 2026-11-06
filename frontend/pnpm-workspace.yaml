@@ -35,6 +35,9 @@ overrides:
   'qs@<6.16.1': ^6.16.1
   # GHSA-c8x8-7fp4-3x9w (high, XSS): the editor's prosemirror-view, pulled by @tiptap/pm, below 1.42.3.
   prosemirror-view: ^1.42.3
+  # GHSA-g3hv-75wg-m249 (moderate): minimatch 7.x to 11.0.0 through ts-morph and typescript-estree, fixed in 11.0.1 with no
+  # patch on the older lines. The bound leaves the unaffected 3.x line alone.
+  'minimatch@>=7 <11.0.1': ^11.0.1
   # One prosemirror-model for every ProseMirror package: prosemirror-view 1.42.5+ needs ^1.25.12,
   # and two copies break ProseMirror's Fragment/Node identity checks ("multiple versions of
   # prosemirror-model were loaded") on reparse, paste, drop and collaboration.

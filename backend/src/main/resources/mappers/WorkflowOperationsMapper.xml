@@ -273,7 +273,7 @@
 
   <select id="getLegacyOperationsRuns" resultType="WorkflowOperationsLegacyRunView">
     SELECT re.id, re.workspace_id, re.rule_id, re.trigger_entity_type, re.trigger_entity_id,
-           re.status, re.executed_at, w.id AS workflow_id, w.name AS workflow_name, origin.recipe_key
+           re.status, re.executed_at, re.detail, w.id AS workflow_id, w.name AS workflow_name, origin.recipe_key
     FROM rule_execution re
     JOIN workflow w
       ON w.workspace_id = re.workspace_id

@@ -125,6 +125,7 @@ Add a new action to the closed validated vocabulary and `RuleActionExecutor`, de
 
 - Map the action to its required permission in the validator/guard.
 - Extend `SystemActor`'s permission set only when system mode must legitimately perform the action.
+- Add its key to `RuleExecutionEvidence`'s closed action allowlist so failure history can identify it safely.
 - Classify retry behavior explicitly; unknown actions default to no automatic retry.
 - Preserve the existing transactional/deduplicated effect semantics.
 
@@ -294,6 +295,26 @@ supersedes them; queued, running and waiting runs do not clear that failure. Exi
 interventions and unavailable execution remain separate reasons for attention. Tenant V239 adds the
 `(workspace_id, executed_at DESC, id DESC)` index for workspace-wide execution history. Rule executions retain their summary-only
 history and cannot acquire canonical intervention controls through this read projection.
+
+New rule executions preserve bounded failure evidence in the existing `rule_execution.detail` JSON:
+`workflowVersionId` and the first failed action's one-based `actionNumber`, closed `actionType`, and
+allowlisted `code`. The claim records a published version only when the rule being executed still
+matches the persisted projection under the existing workflow lock; a publication race leaves the
+version unknown. All failed actions produce `failed`; a mix of completed and failed actions produces
+`partial`. Exception messages and action payloads never enter this evidence or its read DTO. Older
+summary-only failures remain unknown rather than having steps or versions inferred from today's draft.
+
+Run history and Operations expose the safe first-failure evidence and link to workflow review as the
+owner investigation path. They do not offer summary-only runs a step retry: completed actions may
+already have changed records. History resolves contact, company, deal, and task names through the
+viewer's existing workspace-pinned record APIs, with no name/link when access is refused. Target
+lookups retain settled results only within the current workspace, fetch each new distinct target
+once, and run at most four requests concurrently. Each result appears independently; switching
+workspaces aborts pending reads and discards the cache. Document
+names cannot be resolved from a document-only history id by the existing deal-scoped read API;
+that case explicitly says the name is unavailable in this history, without claiming deletion or
+lack of permission. Run-number sequences identify the execution ledger, never whether a run was
+migrated; unknown versions are labelled as unrecorded.
 
 Publication validation uses the same projection boundary as Publish. A single initial condition may
 terminate its two branches at separate End steps. Delays, multiple conditions, actions on the No
