@@ -37,7 +37,8 @@
   <sql id="personalScores">
     WITH personal AS (
       SELECT p.id FROM person p
-      WHERE p.workspace_id = #{workspaceId} AND p.owner_id = #{userId}
+      WHERE <include refid="ooo.klae.connex.backend.mappers.PersonMapper.visibleAny"/>
+        AND p.owner_id = #{userId}
         AND p.archived_at IS NULL AND p.suspended_at IS NULL AND p.provision_ceased_at IS NULL
     ), scores AS (
       SELECT p.id,

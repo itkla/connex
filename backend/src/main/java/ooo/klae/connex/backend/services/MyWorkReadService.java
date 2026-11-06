@@ -77,15 +77,15 @@ public class MyWorkReadService {
     public MyWorkRelationshipsDto relationships() {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = workspaceService.getCurrentUserId();
+        String workspaceIds = visibility.getForWorkspace(workspaceId).workspaceIdsJson();
         var instant = clock.instant().truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
         LocalDateTime reference = LocalDateTime.ofInstant(instant, ZoneOffset.UTC);
         var model = RelationshipWarmthModel.current().sqlParameters();
-        var counts = mapper.relationshipCounts(workspaceId, userId, reference, model);
+        var counts = mapper.relationshipCounts(workspaceId, userId, workspaceIds, reference, model);
         LinkedHashSet<Integer> ids = new LinkedHashSet<>(
-            mapper.relationshipIds(workspaceId, userId, reference, model, false, 18));
-        ids.addAll(mapper.relationshipIds(workspaceId, userId, reference, model, true, 6));
+            mapper.relationshipIds(workspaceId, userId, workspaceIds, reference, model, false, 18));
+        ids.addAll(mapper.relationshipIds(workspaceId, userId, workspaceIds, reference, model, true, 6));
         if (ids.isEmpty()) return new MyWorkRelationshipsDto(counts, List.of(), List.of());
-        String workspaceIds = visibility.getForWorkspace(workspaceId).workspaceIdsJson();
         return new MyWorkRelationshipsDto(counts,
             personMapper.getByIds(workspaceId, workspaceIds, List.copyOf(ids)).stream().map(PersonDto::from).toList(),
             scoringService.temperatures(personMapper.getRelationshipScoreAggregatesByIds(

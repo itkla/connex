@@ -78,15 +78,40 @@ failed or denied section.
 
 Supporting reads use `/api/my-work/{relationships,deal-kpis,risks,pulse,history}`. The server resolves
 the active workspace and current actor; callers cannot select another member. Personal relationships
-are active, processable contacts owned by that member. Full-corpus warmth counts are aggregated in
-SQL; only the warmest 18 and the six most urgent cooling contacts are hydrated. History loads the
-latest 25 assigned tasks, 25 authored activities, and 25 visible authored note previews, with the
+are active, processable contacts owned by that member and visible in the active workspace, including
+shared-in contacts under the contact list's canonical `scope=me` visibility and organization ceiling.
+Full-corpus warmth counts are aggregated in SQL; only the warmest 18 and the six most urgent cooling
+contacts are hydrated. History loads the latest 25 assigned tasks, 25 authored activities, and 25
+visible authored note previews, with the
 existing note continuation. The 84-day UTC pulse remains complete independently of those previews,
 using activity timestamps, completed-task update timestamps, and visible-note creation timestamps.
 Risk ranking retains the existing 1,000-candidate interactive ceiling; overflow shows unavailable
 guidance instead of an incomplete all-clear. Currency changes re-fetch the personal KPI partition,
 preserve other URL parameters, and acknowledge the pending navigation. The reporting window and
 currency semantics remain those in `PRODUCT.md`.
+
+### Pipeline setup and order
+
+When New deal has no pipelines, offer pipeline creation in a nested responsive dialog and retain
+the pending deal. Seed editable open, Won, and Lost stages; require a named open stage before
+returning to the deal, then select that pipeline and its first open stage. Members without pipeline
+management permission see guidance to ask a pipeline manager. A failed stage save keeps setup open
+and retries against the pipeline already created.
+Publish the new pipeline and stages to the calling container so later deal dialogs and the current
+page's pipeline choices include them without a reload.
+Pipeline choices and late setup completions belong to one workspace visit. Switching workspaces
+clears those choices and discards pending completions, including a completion during dialog closing.
+If pipeline creation finishes after a switch, initialize its stages under the original request pin
+without publishing that pipeline into the newly selected workspace.
+Before retrying a stage write whose response was lost, reconcile saved stage identities with the
+previous submission rather than inserting the same stage set again.
+
+Stage editors use explicit up/down controls for pointer and keyboard ordering. Reordering retains
+stage identities and outcome flags and uses the existing transactional stage replacement API.
+Existing order is not normalized: the server does not require terminal stages to be last. Newly
+added open stages go before the first terminal stage, receive input focus, and can be moved explicitly.
+Editor rows retain a persisted or client-generated identity while moving. A rejected save restores
+the order from before the move, retains other field edits, and announces the restoration.
 
 ### Map capacity
 

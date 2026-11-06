@@ -30,6 +30,7 @@ import ooo.klae.connex.backend.dto.NoteActivityDayDto;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.MyWorkReadMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
+import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 import ooo.klae.connex.backend.util.AnalyticsPeriods.Window;
 
 /** Personal projection bounds, aggregate independence, self scope, and honest failure behavior. */
@@ -90,13 +91,15 @@ class MyWorkReadServiceTest {
         when(workspaceService.getCurrentUserId()).thenReturn(51);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         var counts = new Counts(0, 0, 0, 0, 0);
-        when(mapper.relationshipCounts(eq(7), eq(51), any(LocalDateTime.class), any())).thenReturn(counts);
-        when(mapper.relationshipIds(eq(7), eq(51), any(LocalDateTime.class), any(), eq(false), eq(18)))
+        when(visibility.getForWorkspace(7)).thenReturn(new RecordVisibilityScope(90, List.of(7, 8)));
+        when(mapper.relationshipCounts(eq(7), eq(51), eq("[7,8]"), any(LocalDateTime.class), any())).thenReturn(counts);
+        when(mapper.relationshipIds(eq(7), eq(51), eq("[7,8]"), any(LocalDateTime.class), any(), eq(false), eq(18)))
             .thenReturn(List.of());
-        when(mapper.relationshipIds(eq(7), eq(51), any(LocalDateTime.class), any(), eq(true), eq(6)))
+        when(mapper.relationshipIds(eq(7), eq(51), eq("[7,8]"), any(LocalDateTime.class), any(), eq(true), eq(6)))
             .thenReturn(List.of());
         assertEquals(counts, service.relationships().counts());
-        verifyNoInteractions(personMapper, scoringService, visibility, dealMapper);
+        verify(visibility).getForWorkspace(7);
+        verifyNoInteractions(personMapper, scoringService, dealMapper);
     }
 
     @Test

@@ -39,6 +39,7 @@ class WarmthMapperXmlTest {
         Configuration configuration = configuration();
         Map<String, Object> parameters = Map.of(
             "workspaceId", 7, "userId", 51,
+            "orgWorkspaceIdsJson", "[7,8]",
             "reference", LocalDateTime.of(2026, 6, 30, 0, 0),
             "model", RelationshipWarmthModel.current().sqlParameters(),
             "coolingOnly", true, "limit", 6);
@@ -48,6 +49,9 @@ class WarmthMapperXmlTest {
         assertTrue(sql.contains("p.archived_at IS NULL"));
         assertTrue(sql.contains("p.suspended_at IS NULL"));
         assertTrue(sql.contains("p.provision_ceased_at IS NULL"));
+        assertTrue(sql.contains("FROM person_share ps"));
+        assertTrue(sql.contains("JSON_TABLE"));
+        assertTrue(sql.contains("org_workspace.id = p.workspace_id"));
         assertEquals(10, timeout(configuration, MyWorkReadMapper.class, "relationshipIds"));
     }
 

@@ -18,8 +18,10 @@ public interface MyWorkReadMapper {
     List<NoteActivityDayDto> activityPulse(@Param("workspaceId") int workspaceId, @Param("userId") int userId,
             @Param("from") LocalDateTime from, @Param("to") LocalDateTime to);
     Counts relationshipCounts(@Param("workspaceId") int workspaceId, @Param("userId") int userId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
             @Param("reference") LocalDateTime reference, @Param("model") SqlParameters model);
     List<Integer> relationshipIds(@Param("workspaceId") int workspaceId, @Param("userId") int userId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
             @Param("reference") LocalDateTime reference, @Param("model") SqlParameters model,
             @Param("coolingOnly") boolean coolingOnly, @Param("limit") int limit);
 }
