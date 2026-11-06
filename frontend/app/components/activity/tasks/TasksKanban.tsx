@@ -86,7 +86,7 @@ export default function TasksKanban({
                 >
                     <div className="flex items-start gap-2">
                         <div className={cn('min-w-0 flex-1 text-sm font-medium leading-snug text-foreground line-clamp-3', task.status === 'done' && 'text-muted-foreground line-through')}>
-                            <NoteContent content={task.description} references={task.references} />
+                            <NoteContent content={task.description} references={task.references} block={false} />
                         </div>
                         <div className="relative z-10 -mt-1">{dragHandle}</div>
                     </div>

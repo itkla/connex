@@ -44,7 +44,8 @@ for (const locale of ['en', 'ja'] as const) {
             const handleName = message(locale, 'deals', 'DealsKanban.moveCard').replace('{name}', name);
             const handle = page.getByRole('button', { name: handleName, exact: true });
             await expect(handle).toBeVisible();
-            await expect(page.locator('[data-kanban-board] > section').getByRole('heading', { level: 3 })).toHaveText([openStage.name, terminalStage.name]);
+            await expect(page.locator('[data-kanban-board] > section > header').getByRole('heading', { level: 3 })).toHaveText([openStage.name, terminalStage.name]);
+            await expect(page.locator('[data-kanban-card]').getByRole('heading')).toHaveCount(0);
             const riskTrigger = page.locator('[data-kanban-card] [data-slot="tooltip-trigger"]').filter({ hasText: message(locale, 'deals', 'DealRisk.levelHigh') });
             await expect(riskTrigger).toHaveAttribute('tabindex', '0');
             await riskTrigger.hover();
@@ -158,6 +159,7 @@ for (const locale of ['en', 'ja'] as const) {
         await page.getByRole('button', { name: message(locale, 'activity', 'ActivityTasks.viewBoard'), exact: true }).click();
         await page.getByPlaceholder(message(locale, 'activity', 'ActivityTasks.searchPlaceholder'), { exact: true }).fill(name);
         await expect(page.locator('[data-kanban-card]')).toHaveCount(2);
+        await expect(page.locator('[data-kanban-card]').getByRole('heading')).toHaveCount(0);
         const handle = page.getByRole('button', { name: message(locale, 'activity', 'ActivityTasks.moveCard').replace('{name}', name), exact: true });
         await expect(handle).toBeVisible();
         const over = (column: string) => message(locale, 'activity', 'ActivityTasks.a11yOver').replace('{name}', name).replace('{column}', column);

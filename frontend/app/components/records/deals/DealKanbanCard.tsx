@@ -71,11 +71,11 @@ export default function DealKanbanCard({
             className="group relative flex flex-col gap-2.5 rounded-xl bg-card p-3.5 ring-1 ring-border"
         >
             <div className="flex items-start gap-2">
-                <h3 className="min-w-0 flex-1 text-sm font-semibold leading-snug text-foreground line-clamp-2">
+                <div className="min-w-0 flex-1 text-sm font-semibold leading-snug text-foreground line-clamp-2">
                     <Link href={recordDetailNavigationPath('deals', deal.id, returnSelection)} className="after:absolute after:inset-0 after:rounded-xl focus-visible:outline-none">
                         {deal.name}
                     </Link>
-                </h3>
+                </div>
                 <div className="relative z-10 -mt-1 flex shrink-0 items-center">
                     {dragHandle}
                     <DropdownMenu>
