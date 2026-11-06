@@ -171,12 +171,15 @@ class MyWorkTenantIsolationIntegrationTest {
         Deal yen = deal(firstWorkspace);
         Deal dollars = deal(firstWorkspace);
         Deal otherDeal = deal(firstWorkspace);
+        Deal otherWorkspaceDeal = deal(second);
         jdbc.update("UPDATE deal SET owner_id = ?, currency = 'JPY' WHERE workspace_id = ? AND id = ?",
             actor.getId(), firstWorkspace.getId(), yen.getId());
         jdbc.update("UPDATE deal SET owner_id = ?, currency = 'USD' WHERE workspace_id = ? AND id = ?",
             actor.getId(), firstWorkspace.getId(), dollars.getId());
         jdbc.update("UPDATE deal SET owner_id = ? WHERE workspace_id = ? AND id = ?",
             other.getId(), firstWorkspace.getId(), otherDeal.getId());
+        jdbc.update("UPDATE deal SET owner_id = ? WHERE workspace_id = ? AND id = ?",
+            actor.getId(), second.getId(), otherWorkspaceDeal.getId());
         MockHttpSession session = login(actor.getUsername());
         mockMvc.perform(get("/api/my-work/history").session(session)
                 .header("X-Workspace-Id", firstWorkspace.getId()).param("userId", Integer.toString(other.getId())))
@@ -210,8 +213,8 @@ class MyWorkTenantIsolationIntegrationTest {
                 .param("userId", Integer.toString(other.getId()))
                 .param("scope", "members").param("memberIds", Integer.toString(other.getId())))
             .andExpect(status().isOk()).andExpect(jsonPath("$.inputLimitExceeded").value(false))
-            .andExpect(jsonPath("$.deals.length()").value(2))
-            .andExpect(jsonPath("$.deals[?(@.id == " + otherDeal.getId() + ")].length()").value(0));
+            .andExpect(jsonPath("$.deals[*].id", containsInAnyOrder(yen.getId(), dollars.getId())))
+            .andExpect(jsonPath("$.risks[*].dealId", containsInAnyOrder(yen.getId(), dollars.getId())));
         mockMvc.perform(get("/api/my-work/history").session(session)
                 .header("X-Workspace-Id", second.getId()))
             .andExpect(status().isOk()).andExpect(jsonPath("$.tasks.length()").value(1))
