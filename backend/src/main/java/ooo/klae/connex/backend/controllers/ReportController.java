@@ -29,6 +29,7 @@ import ooo.klae.connex.backend.dto.ReportComposerPreviewDto;
 import ooo.klae.connex.backend.dto.ReportComposerRequest;
 import ooo.klae.connex.backend.dto.ReportDocumentDto;
 import ooo.klae.connex.backend.dto.ReportGenerateRequest;
+import ooo.klae.connex.backend.dto.ReportExportCompletionRequest;
 import ooo.klae.connex.backend.dto.ReportKpiDto;
 import ooo.klae.connex.backend.dto.ReportSnapshotDto;
 import ooo.klae.connex.backend.dto.ReportSnapshotSummaryDto;
@@ -180,6 +181,15 @@ public class ReportController {
     public ResponseEntity<byte[]> exportSnapshot(@PathVariable int id, @PathVariable int snapshotId) {
         return csv("report-" + id + "-snapshot-" + snapshotId + ".csv",
                 reportService.exportSnapshotCsv(id, snapshotId));
+    }
+
+    /** Records an authorized release attempt after the browser has prepared a PNG. */
+    @PostMapping("/{id}/export-completion")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @RequirePermission(Permission.REPORT_READ)
+    public void completeImageExport(@PathVariable int id,
+            @Valid @RequestBody ReportExportCompletionRequest request) {
+        reportService.completeImageExport(id, request.format());
     }
 
     private static ResponseEntity<byte[]> csv(String filename, String body) {

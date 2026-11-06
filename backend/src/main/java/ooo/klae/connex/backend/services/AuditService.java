@@ -26,6 +26,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.AuditSupportRowDto;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 import ooo.klae.connex.backend.mappers.AuditLogMapper;
 import ooo.klae.connex.backend.observability.ClientAssertedCorrelationPseudonymizer;
@@ -45,6 +46,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Service
 @RequiredArgsConstructor
@@ -894,6 +896,50 @@ public class AuditService {
         recordStrict(entityType + ".export", entityType, null, null, "CSV export prepared", Map.of(
             "format", "csv", "rowCount", rowCount, "scope", "workspace", "memberScope", mode.name(),
             "filtered", filtered || mode != MemberScope.Mode.ALL_TEAM, "segment", segment));
+    }
+
+    /**
+     * Records authorization as an attempt and captures the original authenticated actor, request
+     * and execution origin for the one eventual asynchronous workspace-export completion.
+     */
+    public PreparedWorkspaceExportAudit recordWorkspaceExportStarted(
+            int workspaceId, int orgId, int actorId, int declaredTableCount) {
+        AuditLog completion = buildEntry("org.workspace.export", "workspace", workspaceId, null,
+            OUTCOME_SUCCESS, "Workspace ZIP export assembled", null, null, true, null, orgId, true);
+        if (completion.getActorId() == null || completion.getActorId() != actorId) {
+            throw new ForbiddenException("Workspace export actor does not match the authenticated member");
+        }
+        AuditLog attempt = buildEntry("org.workspace.export_started", "workspace", workspaceId, null,
+            "attempt", "Workspace ZIP export authorized", Map.of("declaredTableCount", declaredTableCount),
+            null, true, null, orgId, true);
+        appendAndObserve(attempt, true);
+        return new PreparedWorkspaceExportAudit(completion);
+    }
+
+    /** Appends counted success only after ZIP assembly, preserving the captured request identity. */
+    public void recordWorkspaceExportCompleted(PreparedWorkspaceExportAudit prepared,
+            long rowCount, int tableCount, long objectCount) {
+        Objects.requireNonNull(prepared, "prepared");
+        if (rowCount < 0 || tableCount < 0 || objectCount < 0) {
+            throw new IllegalArgumentException("Workspace export counts must be nonnegative");
+        }
+        if (!prepared.recorded.compareAndSet(false, true)) {
+            throw new IllegalStateException("Workspace export completion was already recorded");
+        }
+        prepared.completion.setChanges(toSanitizedJson(Map.of(
+            "format", "zip", "scope", "workspace", "rowCount", rowCount,
+            "tableCount", tableCount, "objectCount", objectCount)));
+        appendAndObserve(prepared.completion, true);
+    }
+
+    /** Opaque, single-use completion evidence captured before an export changes threads. */
+    public static final class PreparedWorkspaceExportAudit {
+        private final AuditLog completion;
+        private final AtomicBoolean recorded = new AtomicBoolean();
+
+        private PreparedWorkspaceExportAudit(AuditLog completion) {
+            this.completion = completion;
+        }
     }
 
     private String completedAuditExport(List<AuditLog> entries, Integer workspaceId, Integer orgId,

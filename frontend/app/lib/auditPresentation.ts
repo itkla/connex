@@ -37,7 +37,14 @@ export type AuditMetadataLabelKey =
     | 'metaExportScope'
     | 'metaExportFiltered'
     | 'metaExportSegment'
-    | 'metaExportSelected';
+    | 'metaExportSelected'
+    | 'metaExportFormat'
+    | 'metaExportImages'
+    | 'metaExportDocuments'
+    | 'metaExportWidgets'
+    | 'metaExportTables'
+    | 'metaExportObjects'
+    | 'metaExportSnapshot';
 
 export type AuditMetadataRow = {
     key: string;
@@ -262,7 +269,10 @@ const AI_FIELDS: readonly MetadataField[] = [
     { key: 'reason', labelKey: 'metaReason', validate: knownString(AI_REASONS) },
 ];
 
-const CSV_EXPORT_TARGETS = new Map([
+const EXPORT_TARGETS = new Map([
+    ['report.export', 'export.report'],
+    ['org.workspace.export', 'export.workspace'],
+    ['org.workspace.export_started', 'export.workspace'],
     ['person.export', 'export.person'],
     ['company.export', 'export.company'],
     ['deal.export', 'export.deal'],
@@ -271,7 +281,14 @@ const CSV_EXPORT_TARGETS = new Map([
     ['organization.audit.export', 'export.audit'],
 ]);
 
-const CSV_EXPORT_FIELDS: readonly MetadataField[] = [
+const EXPORT_FIELDS: readonly MetadataField[] = [
+    { key: 'format', labelKey: 'metaExportFormat', validate: knownString(new Set(['csv', 'png', 'zip'])) },
+    { key: 'imageCount', labelKey: 'metaExportImages', validate: nonNegativeInteger },
+    { key: 'documentCount', labelKey: 'metaExportDocuments', validate: nonNegativeInteger },
+    { key: 'widgetCount', labelKey: 'metaExportWidgets', validate: nonNegativeInteger },
+    { key: 'tableCount', labelKey: 'metaExportTables', validate: nonNegativeInteger },
+    { key: 'objectCount', labelKey: 'metaExportObjects', validate: nonNegativeInteger },
+    { key: 'snapshot', labelKey: 'metaExportSnapshot', validate: booleanValue },
     { key: 'rowCount', labelKey: 'metaExportRows', validate: nonNegativeInteger },
     { key: 'scope', labelKey: 'metaExportScope', validate: knownString(new Set(['workspace', 'organization'])) },
     { key: 'filtered', labelKey: 'metaExportFiltered', validate: booleanValue },
@@ -337,7 +354,7 @@ export function auditOutcome(
 export function auditTargetLabel(
     entry: Pick<AuditLogEntry, 'action' | 'entityType' | 'targetLabel' | 'changes'>,
 ): string | null | undefined {
-    const exportTarget = CSV_EXPORT_TARGETS.get(entry.action);
+    const exportTarget = EXPORT_TARGETS.get(entry.action);
     if (exportTarget !== undefined) return exportTarget;
     if (isSecretEntry(entry)) {
         const purpose = knownString(SECRET_PURPOSES)(entry.changes?.purpose);
@@ -363,7 +380,7 @@ export function auditTargetLabel(
 export function auditSummary(
     entry: Pick<AuditLogEntry, 'action' | 'entityType' | 'summary'>,
 ): string | null {
-    return isSensitiveAuditEntry(entry) || CSV_EXPORT_TARGETS.has(entry.action) ? null : entry.summary ?? null;
+    return isSensitiveAuditEntry(entry) || EXPORT_TARGETS.has(entry.action) ? null : entry.summary ?? null;
 }
 
 /** Returns a controlled error category for sensitive audit rows. */
@@ -380,12 +397,12 @@ export function presentAuditEntry(
     entry: Pick<AuditLogEntry, 'action' | 'entityType' | 'entityId' | 'targetLabel' | 'outcome' | 'changes'>,
 ): AuditPresentation {
     const changes = entry.changes;
-    if (CSV_EXPORT_TARGETS.has(entry.action)) {
+    if (EXPORT_TARGETS.has(entry.action)) {
         return {
             diffs: [],
             metadata: [
                 ...fixedMetadata({ ...entry, targetLabel: auditTargetLabel(entry) }),
-                ...metadataRows(changes, CSV_EXPORT_FIELDS),
+                ...metadataRows(changes, EXPORT_FIELDS),
             ],
         };
     }

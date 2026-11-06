@@ -63,6 +63,7 @@ const ORG_PLANE_AUDIT_ACTIONS = [
     "org.support_bundle.download",
     "org.workspace.create",
     "org.workspace.export",
+    "org.workspace.export_started",
     "org.workspace_member.sso_provision",
     "organization.audit.export",
     "secret_store.diagnostics.read",

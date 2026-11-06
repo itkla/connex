@@ -113,6 +113,8 @@ const TARGET_LABEL_KEYS: Record<string, string> = {
     "export.deal": "targetExportDeals",
     "export.product": "targetExportProducts",
     "export.audit": "targetExportAudit",
+    "export.report": "targetExportReports",
+    "export.workspace": "exportScopeWorkspace",
     "workspace.smtp.password": "targetSmtpPassword",
     "workspace.delivery.provider_credential": "targetDeliveryCredential",
     "workspace.delivery.webhook_secret": "targetDeliveryWebhookSecret",
@@ -124,6 +126,42 @@ const TARGET_LABEL_KEYS: Record<string, string> = {
     "user.provider.microsoft_token": "targetMicrosoftConnection",
     secret_store: "targetStoredCredential",
     ai_call: "targetAiProvider",
+};
+
+const FILTER_VERB_LABEL_KEYS: Record<string, string> = {
+    add: "verbAdded",
+    remove: "verbRemoved",
+    rename: "verbRenamed",
+    set: "verbChanged",
+    save: "verbSaved",
+    provision: "verbProvisioned",
+    sso_provision: "verbJoinedViaSso",
+    federated_link: "verbSignedInViaSso",
+    founding_owner: "verbFoundingOwner",
+    zdr_attest: "verbConfirmedRetention",
+    completed: "verbCompleted",
+    export_started: "verbExportStarted",
+    download: "verbDownloaded",
+    disclosure: "verbDisclosed",
+    issued: "verbIssued",
+    revoked: "verbRevoked",
+    revoke: "verbRevoked",
+    redeemed: "verbRedeemed",
+    link: "verbLinked",
+    leave: "verbLeft",
+    teardown: "verbDeleted",
+};
+
+const ENTITY_LABEL_KEYS: Record<string, string> = {
+    organization: "exportScopeOrganization",
+    workspace: "exportScopeWorkspace",
+    user: "entityMember",
+    audit_log: "heading",
+    report: "targetExportReports",
+    person: "targetExportContacts",
+    company: "targetExportCompanies",
+    deal: "targetExportDeals",
+    product: "targetExportProducts",
 };
 
 const PLAIN_VERBS = new Set<string>(["login", "logout", "updateAvatar"]);
@@ -325,7 +363,7 @@ export default function AuditLogBrowser({
 
     const entityOptions = useMemo(
         () => [...entityTotal.entries()].sort((a, b) => b[1] - a[1]).map(([value, total]) => ({
-            value, total, label: value === "audit_log" ? t("heading") : value,
+            value, total, label: entityLabel(value, t),
         })),
         [entityTotal, t],
     );
@@ -566,7 +604,7 @@ export default function AuditLogBrowser({
             chips.push({ id: `v-${v}`, label: opt ? opt.label : v, onRemove: () => toggleSet("verbs", v) });
         }
         for (const e of filters.entities) {
-            chips.push({ id: `e-${e}`, label: e === "audit_log" ? t("heading") : e, onRemove: () => toggleSet("entities", e) });
+            chips.push({ id: `e-${e}`, label: entityLabel(e, t), onRemove: () => toggleSet("entities", e) });
         }
         if (filters.outcome !== "all") {
             const label = filters.outcome === "failed" ? t("outcomeFailed") : t("outcomeSuccess");
@@ -855,7 +893,13 @@ function countBy(
 }
 
 function verbLabel(verb: string, t: ReturnType<typeof useTranslations>): string {
-    return VERB_META[verb] ? t(VERB_META[verb].verbKey) : verb;
+    const key = VERB_META[verb]?.verbKey ?? FILTER_VERB_LABEL_KEYS[verb];
+    return typeof key === "string" ? t(key) : verb;
+}
+
+function entityLabel(entity: string, t: ReturnType<typeof useTranslations>): string {
+    const key = ENTITY_LABEL_KEYS[entity];
+    return typeof key === "string" ? t(key) : entity;
 }
 
 function dayLabel(
@@ -993,6 +1037,11 @@ function targetText(label: string | null | undefined, t: Translator): string | n
 function auditMetadataValue(row: AuditMetadataRow, t: Translator): string {
     if (row.value == null) return t("valueUnknown");
     if (typeof row.value === "boolean") return t(row.value ? "valueYes" : "valueNo");
+    if (row.key === "format") {
+        if (row.value === "csv") return t("exportFormatCsv");
+        if (row.value === "png") return t("exportFormatPng");
+        if (row.value === "zip") return t("exportFormatZip");
+    }
     if (row.key === "scope") {
         if (row.value === "workspace") return t("exportScopeWorkspace");
         if (row.value === "organization") return t("exportScopeOrganization");

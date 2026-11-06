@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.concurrent.Executors;
 
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -56,6 +57,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.config.AuditIntegrityProperties;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 import ooo.klae.connex.backend.mappers.AuditLogMapper;
 import ooo.klae.connex.backend.observability.ClientAssertedCorrelationPseudonymizer;
@@ -242,6 +244,49 @@ class AuditServiceTest {
             {"format":"csv","rowCount":23,"scope":"workspace","memberScope":"MEMBERS","filtered":true,"segment":false}
             """), objectMapper.readTree(entry.getChanges()));
         assertNull(entry.getContext());
+    }
+
+    @Test
+    void workspaceExportAttemptAndAsyncCompletionRetainTheOriginalActorAndServerCounts() throws Exception {
+        User actor = new User();
+        actor.setId(41);
+        actor.setDisplayName("Original export actor");
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken(actor, null, actor.getAuthorities()));
+        AuditService.PreparedWorkspaceExportAudit prepared;
+        try {
+            prepared = service.recordWorkspaceExportStarted(7, 8, 41, 50);
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            executor.submit(() -> service.recordWorkspaceExportCompleted(prepared, 27L, 2, 4L)).get();
+        }
+        ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService, org.mockito.Mockito.times(2)).appendIndependent(captor.capture());
+        AuditLog attempt = captor.getAllValues().getFirst();
+        AuditLog completed = captor.getAllValues().getLast();
+        assertEquals("org.workspace.export_started", attempt.getAction());
+        assertEquals("attempt", attempt.getOutcome());
+        assertEquals("org.workspace.export", completed.getAction());
+        assertEquals("success", completed.getOutcome());
+        assertEquals(41, completed.getActorId());
+        assertEquals("Original export actor", completed.getActorLabel());
+        assertNull(completed.getWorkspaceId());
+        assertEquals(8, completed.getOrgId());
+        assertEquals(7, completed.getEntityId());
+        assertNull(completed.getTargetLabel());
+        assertEquals(objectMapper.readTree("""
+            {"format":"zip","scope":"workspace","rowCount":27,"tableCount":2,"objectCount":4}
+            """), objectMapper.readTree(completed.getChanges()));
+        assertThrows(IllegalStateException.class,
+            () -> service.recordWorkspaceExportCompleted(prepared, 27L, 2, 4L));
+    }
+
+    @Test
+    void workspaceExportCaptureRejectsAnActorDifferentFromTheAuthenticatedMember() {
+        assertThrows(ForbiddenException.class, () -> service.recordWorkspaceExportStarted(7, 8, 41, 50));
+        verifyNoInteractions(auditIntegrityService);
     }
 
     @ParameterizedTest

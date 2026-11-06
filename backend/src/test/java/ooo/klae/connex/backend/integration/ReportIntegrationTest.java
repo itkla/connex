@@ -2091,6 +2091,11 @@ class ReportIntegrationTest {
                 .header("X-Workspace-Id", workspace.getId())
                 .session(session))
             .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/reports/{id}/export-completion", reportId)
+                .header("X-Workspace-Id", workspace.getId()).session(session)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"format\":\"png\"}")
+                .with(csrf().asHeader()))
+            .andExpect(status().isForbidden());
     }
 
     @Test
@@ -2116,6 +2121,19 @@ class ReportIntegrationTest {
             .andReturn();
         int snapshotId = responseId(snapshotResult);
 
+        markRecentlyAuthenticated(session, member.getId());
+        for (Workspace unauthorized : List.of(sibling, foreign)) {
+            mockMvc.perform(post("/api/reports/{id}/export-completion", reportId)
+                    .header("X-Workspace-Id", unauthorized.getId()).session(session)
+                    .contentType(MediaType.APPLICATION_JSON).content("{\"format\":\"png\"}")
+                    .with(csrf().asHeader()))
+                .andExpect(status().isNotFound());
+        }
+        mockMvc.perform(post("/api/reports/{id}/export-completion", reportId)
+                .header("X-Workspace-Id", first.getId()).session(session)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"format\":\"png\"}")
+                .with(csrf().asHeader()))
+            .andExpect(status().isNoContent());
         assertReportAbsent(session, sibling, reportId, snapshotId);
         assertReportAbsent(session, foreign, reportId, snapshotId);
         mockMvc.perform(get("/api/reports/{id}", reportId)

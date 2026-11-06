@@ -50,6 +50,33 @@ function view(locale: "en" | "ja", organization: boolean, rows = entries) {
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 describe("audit export controls", () => {
+    it("translates organization action/entity options and chips without changing the filter values", async () => {
+        const labels = japaneseAdmin.AdminAuditLog;
+        view("ja", true, [
+            { id: 101, action: "org.rename", entityType: "organization", actorLabel: "Auditor", createdAt: "2026-11-05T10:00:00Z" },
+            { id: 102, action: "org.member.set", entityType: "organization", actorLabel: "Auditor", createdAt: "2026-11-05T09:00:00Z" },
+        ]);
+        const actions = await screen.findByRole("button", { name: labels.filterAction });
+        fireEvent.keyDown(actions, { key: "Enter" });
+        const renamed = await screen.findByRole("menuitemcheckbox", { name: new RegExp(labels.verbRenamed) });
+        expect(screen.getByRole("menuitemcheckbox", { name: new RegExp(`^${labels.verbChanged}`) })).toBeTruthy();
+        expect(screen.queryByRole("menuitemcheckbox", { name: /^rename\b/ })).toBeNull();
+        expect(screen.queryByRole("menuitemcheckbox", { name: /^set\b/ })).toBeNull();
+        fireEvent.click(renamed);
+        expect(screen.getAllByText(labels.verbRenamed).length).toBeGreaterThan(1);
+        fireEvent.keyDown(renamed, { key: "Escape" });
+        await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+        fireEvent.keyDown(screen.getByRole("button", { name: labels.filterEntity }), { key: "Enter" });
+        const organization = await screen.findByRole("menuitemcheckbox", { name: new RegExp(labels.exportScopeOrganization) });
+        expect(screen.queryByRole("menuitemcheckbox", { name: /^organization\b/ })).toBeNull();
+        fireEvent.click(organization);
+        expect(screen.getAllByText(labels.exportScopeOrganization).length).toBeGreaterThan(1);
+        fireEvent.keyDown(organization, { key: "Escape" });
+        await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+        fireEvent.click(screen.getByRole("button", { name: labels.exportCsv }));
+        await waitFor(() => expect(api.exportRows).toHaveBeenCalledWith([101], 3, expect.anything()));
+    });
+
     it.each([
         { locale: "en", organization: false }, { locale: "en", organization: true },
         { locale: "ja", organization: false }, { locale: "ja", organization: true },

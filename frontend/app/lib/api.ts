@@ -7403,6 +7403,24 @@ export async function exportReportSnapshotCsv(id: number, snapshotId: number): P
     downloadBlob(blob, `report-${id}-snapshot-${snapshotId}.csv`);
 }
 
+/** Assembles a PNG, records authorized release, then downloads it under the original request identity. */
+export async function exportReportPng(
+    id: number,
+    prepare: () => Promise<Blob>,
+    filename = `report-${id}.png`,
+): Promise<void> {
+    const path = `/api/reports/${id}/export-completion`;
+    const pinned = pinWriteNow(path);
+    const blob = await withReportRequestIdentity(async (init) => {
+        const image = await prepare();
+        init.signal?.throwIfAborted();
+        await postJson<void>(path, { format: "png" }, init);
+        init.signal?.throwIfAborted();
+        return image;
+    }, pinned);
+    downloadBlob(blob, filename);
+}
+
 /*
  * == Smart segments
  */

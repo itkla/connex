@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
@@ -105,6 +106,7 @@ class TenantExportServiceTest {
     @Mock private TenantExportSnapshotTransaction snapshotTransaction;
     @Mock private ManagedObjectService managedObjectService;
     @Mock private AuditService auditService;
+    @Mock private AuditService.PreparedWorkspaceExportAudit preparedAudit;
 
     private final TenantLifecycleProperties properties = new TenantLifecycleProperties();
     private final ObjectMapper objectMapper = JsonMapper.builder().build();
@@ -114,6 +116,8 @@ class TenantExportServiceTest {
 
     @BeforeEach
     void setUp() throws java.io.IOException {
+        lenient().when(auditService.recordWorkspaceExportStarted(eq(WORKSPACE_ID), eq(ORG_ID), eq(ACTOR_ID), anyInt()))
+            .thenReturn(preparedAudit);
         lenient().when(assistantPrivacyService.current(org.mockito.ArgumentMatchers.anyInt())).thenReturn(1L);
         lenient().doAnswer(call -> {
             call.<ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyPublicationGuard.IoAction>getArgument(2).run();
@@ -201,15 +205,8 @@ class TenantExportServiceTest {
         stubPreparedRoute();
         IllegalStateException primary = new IllegalStateException("audit failed");
         IllegalStateException cleanup = new IllegalStateException("release failed");
-        doThrow(primary).when(auditService).recordStrictIndependentScoped(
-            any(),
-            any(),
-            anyInt(),
-            any(),
-            anyInt(),
-            any(),
-            any(),
-            any());
+        doThrow(primary).when(auditService).recordWorkspaceExportStarted(
+            eq(WORKSPACE_ID), eq(ORG_ID), eq(ACTOR_ID), anyInt());
         doThrow(cleanup).when(controlOperations).release(OPERATION_LEASE);
 
         IllegalStateException thrown = assertThrows(
@@ -288,6 +285,7 @@ class TenantExportServiceTest {
         assertFalse(Files.exists(capturedSpool.get()));
         verify(controlOperations).release(OPERATION_LEASE);
         assertFalse(output.toString(StandardCharsets.UTF_8).contains("manifest.json"));
+        verify(auditService, never()).recordWorkspaceExportCompleted(any(), anyLong(), anyInt(), anyLong());
     }
 
     @Test
@@ -432,6 +430,7 @@ class TenantExportServiceTest {
         TenantExportDownload download = service.prepare(ORG_ID, WORKSPACE_ID, ACTOR_ID);
         ByteArrayOutputStream output = new ByteArrayOutputStream();
 
+        verify(auditService, never()).recordWorkspaceExportCompleted(any(), anyLong(), anyInt(), anyLong());
         download.writeTo(output);
 
         JsonNode manifest = manifest(output.toByteArray());
@@ -452,8 +451,107 @@ class TenantExportServiceTest {
             List.of("data/person.jsonl", "manifest.json"),
             entryNames(output.toByteArray()));
         verify(controlOperations).release(OPERATION_LEASE);
-        verify(tenantWorkScope, times(2)).unrouted(any());
+        verify(tenantWorkScope, times(3)).unrouted(any());
+        verify(auditService).recordWorkspaceExportCompleted(preparedAudit, 1L, 1, 0L);
         assertFalse(Files.exists(capturedSpool.get()));
+    }
+
+    @Test
+    void interruptedZipOutputNeverRecordsSuccess() throws Exception {
+        stubStreamingRoute();
+        when(snapshotTransaction.capture(eq(WORKSPACE_ID), any(), any(Path.class), any()))
+            .thenReturn(new Snapshot(List.of(), 0));
+        TenantExportDownload download = service.prepare(ORG_ID, WORKSPACE_ID, ACTOR_ID);
+        OutputStream output = new OutputStream() {
+            @Override
+            public void write(int value) throws IOException {
+                throw new IOException("Output interrupted");
+            }
+        };
+
+        assertThrows(IOException.class, () -> download.writeTo(output));
+
+        verify(auditService, never()).recordWorkspaceExportCompleted(any(), anyLong(), anyInt(), anyLong());
+        verify(controlOperations).release(OPERATION_LEASE);
+    }
+
+    @Test
+    void completionAddsActualRowCountsAcrossAllCapturedTables() throws Exception {
+        stubStreamingRoute();
+        doAnswer(invocation -> {
+            ZipOutputStream zip = invocation.getArgument(1);
+            zip.putNextEntry(new ZipEntry("data/person.jsonl"));
+            zip.write("{}\n{}\n{}\n".getBytes(StandardCharsets.UTF_8));
+            zip.closeEntry();
+            zip.putNextEntry(new ZipEntry("data/company.jsonl"));
+            zip.write("{}\n{}\n{}\n{}\n{}\n".getBytes(StandardCharsets.UTF_8));
+            zip.closeEntry();
+            return new Snapshot(List.of(new CapturedTable("person", "data/person.jsonl", 3),
+                new CapturedTable("company", "data/company.jsonl", 5)), 0);
+        }).when(snapshotTransaction).capture(eq(WORKSPACE_ID), any(), any(Path.class), any());
+
+        service.prepare(ORG_ID, WORKSPACE_ID, ACTOR_ID).writeTo(new ByteArrayOutputStream());
+
+        verify(auditService).recordWorkspaceExportCompleted(preparedAudit, 8L, 2, 0L);
+    }
+
+    @Test
+    void completionAuditFailurePropagatesAfterAssemblyAndReleasesTheLease() throws Exception {
+        stubStreamingRoute();
+        when(snapshotTransaction.capture(eq(WORKSPACE_ID), any(), any(Path.class), any()))
+            .thenReturn(new Snapshot(List.of(), 0));
+        doThrow(new IllegalStateException("Completion audit unavailable")).when(auditService)
+            .recordWorkspaceExportCompleted(preparedAudit, 0L, 0, 0L);
+        TenantExportDownload download = service.prepare(ORG_ID, WORKSPACE_ID, ACTOR_ID);
+
+        assertThrows(IllegalStateException.class, () -> download.writeTo(new ByteArrayOutputStream()));
+
+        verify(controlOperations).release(OPERATION_LEASE);
+    }
+
+    @Test
+    void finalOutputCloseFailureNeverRecordsSuccessEvenWhenCleanupCanRetryTheClose() throws Exception {
+        stubStreamingRoute();
+        when(snapshotTransaction.capture(eq(WORKSPACE_ID), any(), any(Path.class), any()))
+            .thenReturn(new Snapshot(List.of(), 0));
+        TenantExportDownload download = service.prepare(ORG_ID, WORKSPACE_ID, ACTOR_ID);
+        ByteArrayOutputStream output = new ByteArrayOutputStream() {
+            private boolean firstClose = true;
+
+            @Override
+            public void close() throws IOException {
+                if (firstClose) {
+                    firstClose = false;
+                    throw new IOException("Final output close failed");
+                }
+                super.close();
+            }
+        };
+
+        assertThrows(IOException.class, () -> download.writeTo(output));
+
+        verify(auditService, never()).recordWorkspaceExportCompleted(any(), anyLong(), anyInt(), anyLong());
+        verify(controlOperations).release(OPERATION_LEASE);
+    }
+
+    @Test
+    void cancellationDuringFinalOutputClosePreventsTheCompletionAppend() throws Exception {
+        stubStreamingRoute();
+        when(snapshotTransaction.capture(eq(WORKSPACE_ID), any(), any(Path.class), any()))
+            .thenReturn(new Snapshot(List.of(), 0));
+        TenantExportDownload download = service.prepare(ORG_ID, WORKSPACE_ID, ACTOR_ID);
+        ByteArrayOutputStream output = new ByteArrayOutputStream() {
+            @Override
+            public void close() throws IOException {
+                download.cancel();
+                super.close();
+            }
+        };
+
+        assertThrows(IOException.class, () -> download.writeTo(output));
+
+        verify(auditService, never()).recordWorkspaceExportCompleted(any(), anyLong(), anyInt(), anyLong());
+        verify(controlOperations, timeout(1_000)).release(OPERATION_LEASE);
     }
 
     @Test

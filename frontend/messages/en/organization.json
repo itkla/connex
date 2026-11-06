@@ -287,7 +287,8 @@
                 },
                 "workspace": {
                     "create": "Workspace created",
-                    "export": "Workspace data exported"
+                    "export": "Workspace data exported",
+                    "export_started": "Workspace data export started"
                 },
                 "support_bundle": {
                     "completed": "Support bundle prepared",

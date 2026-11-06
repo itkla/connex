@@ -92,3 +92,36 @@ workspace events never become organization-plane events merely because a workspa
 Without `ids`, the existing export limit (at most 10,000), offset bound and ordering remain in
 place. The audit UI explicitly exports up to 200 currently loaded rows matching its filters,
 using server CSV generation and the existing authority/step-up path.
+
+## Report and workspace-archive completion (#2260 follow-up)
+
+Live and frozen report CSV assembly appends one strict `report.export` event after rendering.
+The approved metadata is `format=csv`, `scope=workspace`, actual appendix `rowCount`,
+`documentCount=1`, `widgetCount`, and a `snapshot` flag. CSV formula escaping is unchanged.
+Report names, dates, source IDs, labels, values, and definition contents are excluded.
+
+`POST /api/reports/{id}/export-completion` accepts exactly `{"format":"png"}` and returns
+204 after a strict `report.export` append. Unknown body fields, including client counts and
+names, are rejected. The existing `REPORT_READ`, current-workspace report visibility, saved
+report domain-read permissions and recent-WebAuthn step-up apply. The browser assembles its
+PNG first, calls this endpoint, and releases the image only after the append succeeds.
+Metadata contains `format=png`, `scope=workspace`, `imageCount=1`, `documentCount=1`, a saved
+configuration `widgetCount`, and `clientPrepared=true`. No row count is claimed for an image
+whose rendered period or snapshot is unavailable to the server. This records an authorized
+client-prepared image release attempt; it does not verify image contents or client receipt.
+
+Workspace ZIP authorization appends `org.workspace.export_started` with outcome `attempt`
+and only `declaredTableCount`. It is deliberately not a completed export. The synchronous
+boundary captures an opaque single-use completion envelope with the original authenticated
+actor, request metadata, organization scope and execution origin. The asynchronous writer
+uses that envelope without changing or inventing a security context. Only after all table
+and object writes, the manifest, ZIP finalization and output close succeed does it append
+one strict `org.workspace.export` success. Its metadata is `format=zip`, `scope=workspace`,
+actual table-row `rowCount`, actual `tableCount`, and verified `objectCount`. Table names,
+object paths and exported values are excluded. Query, object, output and cancellation failures
+before complete assembly produce no success event. Completion evidence remains organization
+scoped with null workspace scope, matching the existing export authority. Neither stage
+changes grant redemption, admission, deadline, privacy-publication or object-verdict controls.
+A completion-audit persistence failure propagates and releases the export resources, but cannot
+retract ZIP bytes already streamed. The durable pre-stream attempt remains available in that case;
+this streaming path does not promise the pre-release withholding available to in-memory CSV/PNG.

@@ -31,6 +31,7 @@ import {
     deleteReportSnapshot,
     exportReportCsv,
     exportReportSnapshotCsv,
+    exportReportPng,
     generateReport,
     getReportSnapshot,
     resolveAcceptedAiGeneration,
@@ -432,9 +433,10 @@ export default function ReportDocumentBoard({
         if (!paperRef.current) return;
         setExportingPng(true);
         try {
-            await exportElementPng(paperRef.current, `${definition.name}.png`);
-        } catch {
-            toastError(t('document.pngFailed'));
+            const element = paperRef.current;
+            await exportReportPng(definition.id, () => renderElementPng(element), `${definition.name}.png`);
+        } catch (error) {
+            showApiError(error, 'document.pngFailed');
         } finally {
             setExportingPng(false);
         }
@@ -1006,7 +1008,7 @@ function ReportDocumentSkeleton() {
     );
 }
 
-async function exportElementPng(element: HTMLElement, filename: string): Promise<void> {
+async function renderElementPng(element: HTMLElement): Promise<Blob> {
     const clonedNode = element.cloneNode(true);
     if (!(clonedNode instanceof HTMLElement)) throw new Error('Report cloning is unavailable');
     const clone = clonedNode;
@@ -1038,15 +1040,9 @@ async function exportElementPng(element: HTMLElement, filename: string): Promise
         if (!context) throw new Error('Canvas rendering is unavailable');
         context.scale(scale, scale);
         context.drawImage(image, 0, 0, width, height);
-        const blob = await new Promise<Blob>((resolve, reject) => {
+        return await new Promise<Blob>((resolve, reject) => {
             canvas.toBlob((result) => result ? resolve(result) : reject(new Error('PNG export failed')), 'image/png');
         });
-        const url = URL.createObjectURL(blob);
-        const anchor = window.document.createElement('a');
-        anchor.href = url;
-        anchor.download = filename;
-        anchor.click();
-        URL.revokeObjectURL(url);
     } finally {
         URL.revokeObjectURL(svgUrl);
     }

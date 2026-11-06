@@ -27,6 +27,20 @@ function entry(overrides: Partial<AuditLogEntry>): AuditLogEntry {
 }
 
 describe('presentAuditEntry', () => {
+    it.each([
+        { action: 'report.export', changes: { format: 'png', scope: 'workspace', imageCount: 1, documentCount: 1, widgetCount: 3 }, keys: ['format', 'scope', 'imageCount', 'documentCount', 'widgetCount'] },
+        { action: 'report.export', changes: { format: 'csv', scope: 'workspace', rowCount: 0, snapshot: true }, keys: ['format', 'scope', 'rowCount', 'snapshot'] },
+        { action: 'org.workspace.export', changes: { format: 'zip', scope: 'workspace', rowCount: 27, tableCount: 14, objectCount: 2 }, keys: ['format', 'scope', 'rowCount', 'tableCount', 'objectCount'] },
+    ])('shows only safe export evidence for $action/$changes.format', ({ action, changes, keys }) => {
+        const exported = entry({ action, changes: { ...changes, name: 'private report name', rows: ['private values'] } });
+        const presentation = presentAuditEntry(exported);
+        expect(presentation.diffs).toEqual([]);
+        expect(presentation.metadata.map(({ key }) => key)).toEqual(expect.arrayContaining(keys));
+        expect(JSON.stringify(presentation)).not.toContain('private');
+        expect(auditSummary(exported)).toBeNull();
+        if (changes.format === 'png') expect(presentation.metadata.some(({ key }) => key === 'rowCount')).toBe(false);
+    });
+
     it.each(['person.export', 'company.export', 'deal.export', 'product.export', 'audit.export', 'organization.audit.export'])(
         'presents safe counts and scope for %s without copying filter or exported values', (action) => {
             const exported = entry({
