@@ -41,6 +41,7 @@ import ooo.klae.connex.backend.exceptions.WorkspaceOwnerRequiredException;
 import ooo.klae.connex.backend.exceptions.WorkspaceRecoveryOwnerRequiredException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.InviteDomainNotAllowedException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
@@ -2361,7 +2362,7 @@ public class WorkspaceService {
             throw new ForbiddenException("Verify your email address before joining this workspace");
         }
         if (!orgAllowedDomainService.isJoinAllowed(workspace.getOrgId(), user.getEmail())) {
-            throw new ForbiddenException("This organization only allows members from approved email domains");
+            throw new InviteDomainNotAllowedException("This organization only allows members from approved email domains");
         }
         if (workspaceMapper.activateMember(workspaceId, userId) == 0) {
             throw pendingMembershipNotFound();

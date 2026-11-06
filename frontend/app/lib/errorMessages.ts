@@ -49,6 +49,14 @@ const CODE_MESSAGE_KEYS = new Map<string, string>([
     ["DEAL_LINE_VALUE_CONSENT_REQUIRED", "ApiErrors.dealLineValueConsentRequired"],
     ["DEAL_LINE_VALUE_CONSENT_STALE", "ApiErrors.dealLineValueConsentStale"],
     ["STALE_RECORD", "ApiErrors.staleRecord"],
+    ["WORKSPACE_LAST_OWNER", "ApiErrors.workspaceLastOwner"],
+    ["ORG_LAST_OWNER", "ApiErrors.organizationLastOwner"],
+    ["WORKSPACE_RECOVERY_OWNER_REQUIRED", "ApiErrors.workspaceRecoveryOwnerRequired"],
+    ["INVITE_EMAIL_DOMAIN_NOT_ALLOWED", "ApiErrors.inviteEmailDomainNotAllowed"],
+    ["LAST_PASSKEY_REQUIRED", "ApiErrors.lastPasskeyRequired"],
+    ["LAST_SUFFICIENT_PASSKEY_REQUIRED", "ApiErrors.lastSufficientPasskeyRequired"],
+    ["ORG_MEMBER_ELIGIBILITY_REQUIRED", "ApiErrors.organizationMemberEligibilityRequired"],
+    ["DISCLOSURE_IDENTITY_VERIFICATION_REQUIRED", "ApiErrors.disclosureIdentityVerificationRequired"],
 ]);
 
 function statusMessageKey(status: number): string {

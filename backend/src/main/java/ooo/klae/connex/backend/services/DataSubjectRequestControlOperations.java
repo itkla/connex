@@ -19,6 +19,7 @@ import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.AuditEntryDto;
 import ooo.klae.connex.backend.dto.DataSubjectRequestDto;
 import ooo.klae.connex.backend.dto.WorkspaceLifecycleRef;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.DisclosureIdentityVerificationRequiredException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -165,7 +166,7 @@ public class DataSubjectRequestControlOperations {
             throw new BadRequestException("Disclosure can only be assembled for a disclosure-type request");
         }
         if (request.getIdentityVerifiedAt() == null) {
-            throw new BadRequestException(
+            throw new DisclosureIdentityVerificationRequiredException(
                 "Identity verification must be recorded before disclosure can be assembled");
         }
         Integer workspaceId = request.getSubjectWorkspaceId();

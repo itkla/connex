@@ -8,6 +8,7 @@ import RolesPanel from "@/app/components/settings/RolesPanel";
 import { ApiError, PRIVILEGED_MFA_CONFINEMENT_ACKNOWLEDGEMENT_REQUIRED_CODE } from "@/app/lib/api";
 import enSettings from "@/messages/en/settings.json";
 import enWorkspace from "@/messages/en/workspace.json";
+import jaWorkspace from "@/messages/ja/workspace.json";
 
 const spies = vi.hoisted(() => ({
     updateWorkspaceRole: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
@@ -19,8 +20,10 @@ const spies = vi.hoisted(() => ({
 vi.mock("@/app/lib/api", async (importOriginal) => ({
     ...await importOriginal<typeof import("@/app/lib/api")>(),
     getWorkspaceRoles: vi.fn(async () => [{ id: 4, name: "Ops", permissions: ["MEMBER_MANAGE"] }]),
-    getBuiltInRoles: vi.fn(async () => []),
-    getPermissionCatalog: vi.fn(async () => ["MEMBER_MANAGE"]),
+    getBuiltInRoles: vi.fn(async () => [
+        { id: 0, name: "member", permissions: ["MEMBER_MANAGE"] },
+    ]),
+    getPermissionCatalog: vi.fn(async () => ["MEMBER_MANAGE", "ROLE_MANAGE"]),
     updateWorkspaceRole: spies.updateWorkspaceRole,
 }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: spies.refresh }) }));
@@ -160,5 +163,31 @@ describe("editing a custom role that would confine its assignees", () => {
         expect(spies.updateWorkspaceRole).toHaveBeenLastCalledWith(5, 4, "Ops", ["MEMBER_MANAGE"], true);
         expect(spies.toastSuccess).toHaveBeenCalledWith(enWorkspace.WorkspaceRoles.updated);
         expect(spies.refresh).toHaveBeenCalled();
+    });
+});
+
+describe.each(["en", "ja"] as const)("localized role explanations in %s", (locale) => {
+    it("names built-in roles, shows denied actions, and labels editable permissions", async () => {
+        const messages = locale === "en" ? enWorkspace : jaWorkspace;
+        const copy = messages.WorkspaceRoles;
+        await act(async () => root.render(
+            <NextIntlClientProvider locale={locale} messages={{ ...messages, ...enSettings }}>
+                <RolesPanel />
+            </NextIntlClientProvider>,
+        ));
+        await flush();
+        expect(container.textContent).toContain(copy.builtInRoles.member.name);
+        expect(container.textContent).toContain(copy.builtInRoles.member.description);
+        expect(container.querySelector("details")?.textContent)
+            .toContain(`${copy.permissionLabels.ROLE_MANAGE.action} · ${copy.notAllowed}`);
+        expect(container.textContent).not.toContain("Member Manage");
+        await act(async () => button(copy.newRole).click());
+        const checkbox = container.querySelector<HTMLInputElement>('input[aria-labelledby="role-action-ROLE_MANAGE"]');
+        expect(checkbox).not.toBeNull();
+        expect(document.getElementById(checkbox?.getAttribute("aria-describedby") ?? "")?.textContent)
+            .toBe(copy.permissionLabels.ROLE_MANAGE.description);
+        await act(async () => checkbox?.click());
+        expect(checkbox?.checked).toBe(true);
+        expect(spies.updateWorkspaceRole).not.toHaveBeenCalled();
     });
 });
