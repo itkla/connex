@@ -1,6 +1,6 @@
 'use client';
 
-import { type ReactNode, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useId, useLayoutEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import {
@@ -58,6 +58,7 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
 const CADENCES: ReportCadence[] = ['weekly', 'monthly', 'quarterly', 'custom'];
@@ -81,15 +82,7 @@ function toggleValue<T>(values: T[] | null, value: T): T[] | null {
     return next.length > 0 ? next : null;
 }
 
-export default function ReportBuilderBoard({
-    initialReport,
-    initialTemplate,
-    pipelines,
-    owners,
-    ownersFailed,
-    tags,
-    canReadGoals,
-}: {
+type ReportBuilderProps = {
     initialReport?: ReportDefinition;
     initialTemplate?: ReportTemplate;
     pipelines: Pipeline[];
@@ -97,7 +90,23 @@ export default function ReportBuilderBoard({
     ownersFailed: boolean;
     tags: Tag[];
     canReadGoals: boolean;
-}) {
+};
+
+export default function ReportBuilderBoard(props: ReportBuilderProps) {
+    const router = useRouter();
+    const [revision, setRevision] = useState(0);
+    const [refreshing, startTransition] = useTransition();
+    const discardDraft = useCallback(() => {
+        startTransition(() => {
+            setRevision((value) => value + 1);
+            router.refresh();
+        });
+    }, [router]);
+    return refreshing ? <Skeleton className="h-80 w-full" /> :
+        <ReportBuilderBody key={revision} {...props} onDiscard={discardDraft} />;
+}
+
+function ReportBuilderBody({ initialReport, initialTemplate, pipelines, owners, ownersFailed, tags, canReadGoals, onDiscard }: ReportBuilderProps & { onDiscard: () => void }) {
     const t = useTranslations('Reports');
     const showApiError = useApiErrorToast('Reports');
     const router = useRouter();
@@ -140,7 +149,7 @@ export default function ReportBuilderBoard({
     const guard = useUnsavedChangesGuard({
         isDirty: JSON.stringify({ name, description, cadence, config }) !== JSON.stringify(savedDraft),
         onClose: () => router.push(returnHref),
-        navigation: { push: router.push, replace: router.replace, renderedHref: search ? `${pathname}?${search}` : pathname },
+        navigation: { push: router.push, replace: router.replace, renderedHref: search ? `${pathname}?${search}` : pathname, onDiscard },
     });
 
     const layoutById = useMemo(

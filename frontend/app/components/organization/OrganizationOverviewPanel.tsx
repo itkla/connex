@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 
 import { navigateAfterWorkspaceSelection } from "@/app/lib/renderedWorkspace";
+import { requestGuardedNavigation } from "@/app/hooks/useUnsavedChangesGuard";
 import OrganizationIdentityForm from "@/app/components/organization/OrganizationIdentityForm";
 import OrganizationLifecyclePanel from "@/app/components/organization/OrganizationLifecyclePanel";
 import OrganizationLayoutPanel from "@/app/components/organization/OrganizationLayoutPanel";
@@ -145,18 +146,20 @@ export default function OrganizationOverviewPanel({
         }
     }
 
-    async function navigate(workspaceId: number, href: string) {
-        try {
-            const completed = await runInWorkspace(workspaceId, async () => {
-                navigateAfterWorkspaceSelection(() => {
-                    router.push(href);
-                    router.refresh();
+    function navigate(workspaceId: number, href: string) {
+        requestGuardedNavigation(async () => {
+            try {
+                const completed = await runInWorkspace(workspaceId, async () => {
+                    navigateAfterWorkspaceSelection(() => {
+                        router.push(href);
+                        router.refresh();
+                    });
                 });
-            });
-            if (!completed) toastError(t("switchInProgress"));
-        } catch (error) {
-            showApiError(error, "navigationFailed");
-        }
+                if (!completed) toastError(t("switchInProgress"));
+            } catch (error) {
+                showApiError(error, "navigationFailed");
+            }
+        });
     }
 
     if (orgRole === null || state.accessDenied) return <NoAccessCard />;

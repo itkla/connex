@@ -6,8 +6,23 @@ type NavigationAction = () => void | Promise<void>;
 type PendingNavigation = { navigate: NavigationAction; onCancel?: () => void };
 type NavigationGuard = {
     request: (navigate: NavigationAction, onCancel?: () => void) => void;
+    onPopState: (event: PopStateEvent) => void;
 };
 const navigationGuards = new Set<NavigationGuard>();
+let historyListenerInstalled = false;
+
+/**
+ * Installs the shared guard's dispatcher before hydration registers Next's listener.
+ * Native Window popstate delivery can invoke target listeners in registration order,
+ * irrespective of capture; a later editor listener cannot prevent an earlier router restore.
+ */
+export function initializeUnsavedChangesHistoryGuard(): void {
+    if (typeof window === 'undefined' || historyListenerInstalled) return;
+    historyListenerInstalled = true;
+    window.addEventListener('popstate', (event) => {
+        [...navigationGuards].at(-1)?.onPopState(event);
+    }, true);
+}
 type HistoryPosition = { key: string; index: number };
 
 function currentHistoryPosition(): HistoryPosition | null {
@@ -55,6 +70,8 @@ type GuardOptions = {
         replace?: (href: string) => void;
         /** Synchronously invalidates editor continuations before any accepted departure. */
         onBeforeLeave?: () => void;
+        /** Disposes the discarded draft, including when navigation retains this editor route. */
+        onDiscard: () => void;
     };
 };
 
@@ -81,7 +98,8 @@ type Guard = {
  * Boundary subscriptions update in layout effects so committed edits are protected before passive
  * effects or the next native browser event. Dirty checks remain active
  * for the entire mounted lifetime. `allowNavigation` is versioned so a late save cannot redirect after
- * a newer departure; successful saves must update their saved draft baseline. Restoration uses the
+ * a newer departure; successful saves must update their saved draft baseline. Discard disposes the draft
+ * through its owner, after any known traversal replay reconciles the router. Restoration uses the
  * native history prototype so Next does not interpret restoring the address bar as a new route.
  */
 export function useUnsavedChangesGuard({ isDirty, onClose, enabled = true, navigation }: GuardOptions): Guard {
@@ -91,7 +109,7 @@ export function useUnsavedChangesGuard({ isDirty, onClose, enabled = true, navig
     const currentNavigationVersion = useRef(0);
     const editorEntry = useRef<{ url: string; state: unknown; position: HistoryPosition | null } | null>(null);
     const restoringTraversal = useRef<{ sourceKey: string; navigate: NavigationAction } | null>(null);
-    const acceptedTraversal = useRef<string | null>(null);
+    const acceptedTraversal = useRef<{ key: string; complete: () => void } | null>(null);
     const mounted = useRef(false);
     const readsDirtyState = typeof isDirty === 'function';
     const active = enabled && (readsDirtyState || isDirty);
@@ -139,6 +157,7 @@ export function useUnsavedChangesGuard({ isDirty, onClose, enabled = true, navig
     const push = navigation?.push;
     const replace = navigation?.replace ?? push;
     const onBeforeLeave = navigation?.onBeforeLeave;
+    const discardDraft = navigation?.onDiscard;
     const allowNavigation = useCallback((navigate: NavigationAction) => {
         if (!mounted.current || navigationVersion !== currentNavigationVersion.current) return false;
         currentNavigationVersion.current += 1;
@@ -173,8 +192,7 @@ export function useUnsavedChangesGuard({ isDirty, onClose, enabled = true, navig
 
     useLayoutEffect(() => {
         if (!push) return;
-        const navigationGuard = { request: requestNavigation };
-        navigationGuards.add(navigationGuard);
+        initializeUnsavedChangesHistoryGuard();
         const onClick = (event: MouseEvent) => {
             if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey
                 || event.shiftKey || event.altKey || !hasUnsavedChanges()) return;
@@ -203,8 +221,9 @@ export function useUnsavedChangesGuard({ isDirty, onClose, enabled = true, navig
             }
             const accepted = acceptedTraversal.current;
             acceptedTraversal.current = null;
-            if (accepted && position?.key === accepted) {
+            if (accepted && position?.key === accepted.key) {
                 replace(href);
+                accepted.complete();
                 return;
             }
             if (destination.pathname === source.pathname && destination.search === source.search) {
@@ -217,10 +236,10 @@ export function useUnsavedChangesGuard({ isDirty, onClose, enabled = true, navig
                 if (delta !== 0) {
                     restoringTraversal.current = {
                         sourceKey: entry.position.key,
-                        navigate: () => {
-                            acceptedTraversal.current = position.key;
+                        navigate: () => new Promise<void>((complete) => {
+                            acceptedTraversal.current = { key: position.key, complete };
                             window.history.go(delta);
-                        },
+                        }),
                     };
                     window.history.go(-delta);
                     return;
@@ -229,12 +248,12 @@ export function useUnsavedChangesGuard({ isDirty, onClose, enabled = true, navig
             window.History.prototype.replaceState.call(window.history, entry.state, '', entry.url);
             requestNavigation(() => replace(href));
         };
+        const navigationGuard = { request: requestNavigation, onPopState };
+        navigationGuards.add(navigationGuard);
         document.addEventListener('click', onClick, true);
-        window.addEventListener('popstate', onPopState, true);
         return () => {
             navigationGuards.delete(navigationGuard);
             document.removeEventListener('click', onClick, true);
-            window.removeEventListener('popstate', onPopState, true);
         };
     }, [hasUnsavedChanges, push, replace, requestNavigation]);
 
@@ -254,12 +273,17 @@ export function useUnsavedChangesGuard({ isDirty, onClose, enabled = true, navig
     const onDiscard = useCallback(() => {
         const navigate = pendingNavigation.current?.navigate ?? onClose;
         pendingNavigation.current = null;
-        if (push) allowNavigation(navigate);
+        if (push) allowNavigation(() => {
+            const pending = navigate();
+            if (pending && acceptedTraversal.current) return pending.finally(() => discardDraft?.());
+            discardDraft?.();
+            return pending;
+        });
         else {
             setConfirmOpen(false);
             navigate();
         }
-    }, [allowNavigation, onClose, push]);
+    }, [allowNavigation, discardDraft, onClose, push]);
 
     return {
         onOpenChange,

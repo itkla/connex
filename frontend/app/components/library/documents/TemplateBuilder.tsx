@@ -1,6 +1,6 @@
 'use client';
 
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState, useTransition } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { ChevronLeftIcon } from '@heroicons/react/24/outline';
@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Skeleton } from '@/components/ui/skeleton';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
 import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';
 import DocumentBodyEditor from '@/app/components/library/documents/editor/DocumentBodyEditor';
@@ -93,6 +94,20 @@ function toDraft(template: DocumentTemplate | null, termsLabel: string): Draft {
  * chips and a line-items placeholder. The server owns generation and all money math.
  */
 export default function TemplateBuilder({ template }: { template: DocumentTemplate | null }) {
+    const router = useRouter();
+    const [revision, setRevision] = useState(0);
+    const [refreshing, startTransition] = useTransition();
+    const discardDraft = useCallback(() => {
+        startTransition(() => {
+            setRevision((value) => value + 1);
+            router.refresh();
+        });
+    }, [router]);
+    return refreshing ? <Skeleton className="h-80 w-full" /> :
+        <TemplateBuilderBody key={revision} template={template} onDiscard={discardDraft} />;
+}
+
+function TemplateBuilderBody({ template, onDiscard }: { template: DocumentTemplate | null; onDiscard: () => void }) {
     const t = useTranslations('DocumentTemplateBuilder');
     const showApiError = useApiErrorToast('DocumentTemplateBuilder');
     const router = useRouter();
@@ -109,7 +124,7 @@ export default function TemplateBuilder({ template }: { template: DocumentTempla
     const guard = useUnsavedChangesGuard({
         isDirty: JSON.stringify(draft) !== JSON.stringify(savedDraft),
         onClose: () => router.push('/library/documents'),
-        navigation: { push: router.push, replace: router.replace, renderedHref: search ? `${pathname}?${search}` : pathname },
+        navigation: { push: router.push, replace: router.replace, renderedHref: search ? `${pathname}?${search}` : pathname, onDiscard },
     });
 
     const patch = (next: Partial<Draft>) => setDraft((prev) => ({ ...prev, ...next }));

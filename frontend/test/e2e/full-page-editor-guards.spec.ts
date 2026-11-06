@@ -14,6 +14,26 @@ const editors = [
 async function observeHistory(page: Page) {
     await page.addInitScript(() => {
         const bubbleReached = new WeakMap<Event, boolean>();
+        const propagationStopped = new WeakSet<Event>();
+        const stopImmediate = Event.prototype.stopImmediatePropagation;
+        Event.prototype.stopImmediatePropagation = function () {
+            if (this.type === 'popstate') {
+                propagationStopped.add(this);
+                console.info('[editor-history]', JSON.stringify({
+                    phase: 'propagation-stopped', eventPhase: this.eventPhase,
+                    url: window.location.pathname + window.location.search + window.location.hash,
+                    stack: new Error().stack,
+                }));
+            }
+            stopImmediate.call(this);
+        };
+        window.navigation?.addEventListener('navigate', (event) => {
+            console.info('[editor-history]', JSON.stringify({
+                phase: 'navigate', navigationType: event.navigationType, canIntercept: event.canIntercept,
+                cancelable: event.cancelable, destination: event.destination.url, nativeIndex: event.destination.index,
+                apiVisible: typeof window.navigation !== 'undefined',
+            }));
+        });
         let sequence = 0;
         window.addEventListener('popstate', (event) => {
             const destination = window.location.pathname + window.location.search + window.location.hash;
@@ -21,6 +41,7 @@ async function observeHistory(page: Page) {
             const eventNumber = ++sequence;
             console.info('[editor-history]', JSON.stringify({
                 phase: 'received', sequence: eventNumber, destination, trusted: event.isTrusted,
+                eventPhase: event.eventPhase, targetIsWindow: event.target === window,
                 stateKind: state === null ? 'null' : typeof state,
                 nativeIndex: window.navigation?.currentEntry?.index ?? null,
             }));
@@ -33,6 +54,7 @@ async function observeHistory(page: Page) {
                     destination,
                     afterDispatch: window.location.pathname + window.location.search + window.location.hash,
                     bubbleReached: bubbleReached.get(event),
+                    propagationStopped: propagationStopped.has(event),
                     nextState: state !== null && typeof state === 'object' && '__NA' in state && state.__NA === true,
                     editorVisible: editor instanceof HTMLElement && editor.getClientRects().length > 0,
                     draftPresent: editor instanceof HTMLInputElement && editor.value.length > 0,
@@ -190,6 +212,7 @@ test('report Cancel from a direct link returns to reports without browser histor
 });
 
 test('Keep editing preserves a known Forward destination and its deal search', async ({ page }) => {
+    await observeHistory(page);
     await page.goto('/insights/reports');
     await page.locator('a[href="/insights/reports/new"]').first().click();
     await page.locator('a[href="/records/deals"]:visible').first().click();
@@ -215,7 +238,7 @@ test('Keep editing preserves a known Forward destination and its deal search', a
     await expect(search).toHaveValue('History destination');
 });
 
-test('Discard after removing a workflow inspection query protects the retained draft again', async ({ page }) => {
+test('Discard after removing a workflow inspection query reloads the saved workflow and protects fresh edits', async ({ page }) => {
     const savedName = `Inspection guard ${randomUUID()}`;
     await page.goto('/workflows/new');
     const name = page.getByRole('textbox', { name: 'Workflow name', exact: true });
@@ -244,14 +267,15 @@ test('Discard after removing a workflow inspection query protects the retained d
     await expect(discard).toBeVisible();
     await discard.getByRole('button', { name: 'Discard changes', exact: true }).click();
     await expect(page).toHaveURL(workflowUrl);
-    await expect(name).toHaveValue(`${savedName} edited`);
+    await expect(name).toHaveValue(savedName);
+    await name.fill(`${savedName} new edit`);
     const warning = page.waitForEvent('dialog');
     const reload = page.evaluate(() => window.location.reload());
     const nativeWarning = await warning;
     expect(nativeWarning.type()).toBe('beforeunload');
     await nativeWarning.dismiss();
     await reload;
-    await expect(name).toHaveValue(`${savedName} edited`);
+    await expect(name).toHaveValue(`${savedName} new edit`);
     await page.locator('a[href="/records/deals"]:visible').first().click();
     await expect(discard).toBeVisible();
     await discard.getByRole('button', { name: 'Discard changes', exact: true }).click();

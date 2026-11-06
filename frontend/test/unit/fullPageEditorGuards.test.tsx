@@ -6,11 +6,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import TemplateBuilder from '@/app/components/library/documents/TemplateBuilder';
 import ReportBuilderBoard from '@/app/components/reports/ReportBuilderBoard';
+import { useNotificationWorkspaceActions } from '@/app/components/notifications/useNotificationWorkspaceActions';
 import { blankReportConfig } from '@/app/components/reports/reportConfig';
 import { requestGuardedNavigation, useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
 import { useWorkspace, WorkspaceProvider } from '@/app/hooks/useWorkspace';
 import { bindRenderedWorkspace, releaseRenderedWorkspace, renderedWorkspaceId } from '@/app/lib/renderedWorkspace';
-import type { DocumentTemplate, ReportDefinition, Workspace } from '@/app/lib/types';
+import type { DocumentTemplate, Notification, ReportDefinition, Workspace } from '@/app/lib/types';
 import common from '@/messages/en/common.json';
 import documents from '@/messages/en/document-templates.json';
 import reports from '@/messages/en/reports.json';
@@ -57,7 +58,8 @@ const workspaces: Workspace[] = [1, 2].map((id) => ({
 function mountGuardedWorkspace() {
     return renderHook(() => ({
         workspace: useWorkspace(),
-        guard: useUnsavedChangesGuard({ isDirty: true, onClose: vi.fn(), navigation: { push: mocks.push, renderedHref: '/' } }),
+        notifications: useNotificationWorkspaceActions(),
+        guard: useUnsavedChangesGuard({ isDirty: true, onClose: vi.fn(), navigation: { push: mocks.push, renderedHref: '/', onDiscard: vi.fn() } }),
     }), { wrapper: ({ children }) => <WorkspaceProvider initialWorkspaces={workspaces} initialActiveId={1}>{children}</WorkspaceProvider> });
 }
 
@@ -87,6 +89,86 @@ function unloadPrevented() {
 }
 
 describe('full-page editor navigation', () => {
+    it.each([1, 2, 'global'] as const)('guards notification opens in workspace %s before any side effects', async (workspaceId) => {
+        mocks.switchWorkspace.mockResolvedValue(undefined);
+        const notification: Notification = {
+            id: 71, type: workspaceId === 'global' ? 'workspace.join' : 'task.assigned',
+            workspaceId: workspaceId === 'global' ? undefined : workspaceId,
+            category: 'tasks', severity: 'info', templateVersion: 1, title: 'Task',
+            actionUrl: '/activity/tasks?task=41', triggeredAt: '', createdAt: '', updatedAt: '',
+        };
+        const beforeOpen = vi.fn(async () => {});
+        const { result } = mountGuardedWorkspace();
+        let opening: Promise<boolean> | undefined;
+        act(() => { opening = result.current.notifications.openInNotificationWorkspace(notification, notification.actionUrl, beforeOpen); });
+        expect(result.current.guard.confirm.open).toBe(true);
+        expect(mocks.switchWorkspace).not.toHaveBeenCalled();
+        expect(renderedWorkspaceId()).toBe(1);
+        expect(beforeOpen).not.toHaveBeenCalled();
+        expect(mocks.push).not.toHaveBeenCalled();
+        await act(async () => { result.current.guard.confirm.onKeepEditing(); expect(await opening).toBe(true); });
+        expect(beforeOpen).not.toHaveBeenCalled();
+        expect(mocks.switchWorkspace).not.toHaveBeenCalled();
+        act(() => { opening = result.current.notifications.openInNotificationWorkspace(notification, notification.actionUrl, beforeOpen); });
+        await act(async () => { result.current.guard.confirm.onDiscard(); expect(await opening).toBe(true); });
+        expect(beforeOpen).toHaveBeenCalledOnce();
+        if (workspaceId === 2) {
+            expect(mocks.switchWorkspace).toHaveBeenCalledExactlyOnceWith(2);
+            expect(mocks.replace).toHaveBeenCalledWith(notification.actionUrl);
+            expect(renderedWorkspaceId()).toBe(2);
+        } else {
+            expect(mocks.switchWorkspace).not.toHaveBeenCalled();
+            expect(mocks.push).toHaveBeenCalledWith(notification.actionUrl);
+        }
+    });
+
+    it('guards cross-workspace notification actions while allowing actions that stay in the editor workspace', async () => {
+        mocks.switchWorkspace.mockResolvedValue(undefined);
+        const notification: Notification = {
+            id: 72, workspaceId: 2, type: 'task.assigned', category: 'tasks', severity: 'info',
+            templateVersion: 1, title: 'Task', triggeredAt: '', createdAt: '', updatedAt: '',
+        };
+        const action = vi.fn(async () => {});
+        const { result } = mountGuardedWorkspace();
+        let executing: Promise<boolean> | undefined;
+        act(() => { executing = result.current.notifications.executeInNotificationWorkspace(notification, action); });
+        expect(result.current.guard.confirm.open).toBe(true);
+        expect(action).not.toHaveBeenCalled();
+        expect(mocks.switchWorkspace).not.toHaveBeenCalled();
+        await act(async () => { result.current.guard.confirm.onKeepEditing(); expect(await executing).toBe(true); });
+        expect(action).not.toHaveBeenCalled();
+        act(() => { executing = result.current.notifications.executeInNotificationWorkspace(notification, action); });
+        await act(async () => { result.current.guard.confirm.onDiscard(); expect(await executing).toBe(true); });
+        expect(action).toHaveBeenCalledOnce();
+        expect(renderedWorkspaceId()).toBe(2);
+        expect(mocks.replace).toHaveBeenCalledWith('/dashboard');
+        await act(async () => { expect(await result.current.notifications.executeInNotificationWorkspace(notification, action)).toBe(true); });
+        expect(action).toHaveBeenCalledTimes(2);
+        expect(result.current.guard.confirm.open).toBe(false);
+    });
+
+    it.each(['report', 'template'] as const)('discards a pending new %s so its later response cannot retain the draft or duplicate it', async (kind) => {
+        const pending = Promise.withResolvers<ReportDefinition | DocumentTemplate>();
+        mocks.createReport.mockReturnValue(pending.promise);
+        mocks.createTemplate.mockReturnValue(pending.promise);
+        const path = kind === 'report' ? '/insights/reports/new' : '/library/documents/new';
+        window.history.replaceState({ __NA: true }, '', path);
+        mount(kind);
+        const oldInput = screen.getByLabelText('Name');
+        fireEvent.change(oldInput, { target: { value: 'Discarded creation' } });
+        fireEvent.click(screen.getByRole('button', { name: kind === 'report' ? reports.Reports.builder.save : documents.DocumentTemplateBuilder.save }));
+        act(() => requestGuardedNavigation(() => mocks.push(`${path}?mode=other`)));
+        fireEvent.click(await screen.findByRole('button', { name: common.ConfirmDiscard.discard }));
+        const fresh = await screen.findByLabelText('Name');
+        expect(fresh).not.toBe(oldInput);
+        expect(fresh).toHaveProperty('value', '');
+        await act(async () => pending.resolve(kind === 'report' ? report : template));
+        expect(fresh).toHaveProperty('value', '');
+        expect(fresh.matches(':disabled')).toBe(false);
+        fireEvent.click(screen.getByRole('button', { name: kind === 'report' ? reports.Reports.builder.save : documents.DocumentTemplateBuilder.save }));
+        expect(kind === 'report' ? mocks.createReport : mocks.createTemplate).toHaveBeenCalledOnce();
+        expect(unloadPrevented()).toBe(false);
+    });
     it('guards workspace selection before switching or publishing a new workspace', async () => {
         mocks.switchWorkspace.mockResolvedValue(undefined);
         const { result } = mountGuardedWorkspace();
@@ -135,7 +217,7 @@ describe('full-page editor navigation', () => {
     it('retains an explicit navigation destination when the dismissal callback changes', () => {
         const destination = vi.fn();
         const close = vi.fn();
-        const { result, rerender } = renderHook(({ onClose }) => useUnsavedChangesGuard({ isDirty: true, onClose, navigation: { push: mocks.push, renderedHref: '/' } }), {
+        const { result, rerender } = renderHook(({ onClose }) => useUnsavedChangesGuard({ isDirty: true, onClose, navigation: { push: mocks.push, renderedHref: '/', onDiscard: vi.fn() } }), {
             initialProps: { onClose: vi.fn() },
         });
         act(() => requestGuardedNavigation(destination));
@@ -160,7 +242,8 @@ describe('full-page editor navigation', () => {
         fireEvent.click(back);
         fireEvent.click(await screen.findByRole('button', { name: common.ConfirmDiscard.discard }));
         expect(mocks.push).toHaveBeenCalledWith(kind === 'report' ? '/insights/reports' : '/library/documents');
-        expect(unloadPrevented()).toBe(true);
+        expect(await screen.findByLabelText('Name')).toHaveProperty('value', '');
+        expect(unloadPrevented()).toBe(false);
     });
 
     it.each(['report', 'template'] as const)('allows an untouched existing %s to return without prompting', (kind) => {
@@ -218,7 +301,7 @@ describe('full-page editor navigation', () => {
         expect(unloadPrevented()).toBe(true);
     });
 
-    it.each(['report', 'template'] as const)('cleans a saved %s after accepted query-only history without redirecting', async (kind) => {
+    it.each(['report', 'template'] as const)('resets a discarded existing %s after query-only history and isolates its pending save', async (kind) => {
         const pending = Promise.withResolvers<ReportDefinition | DocumentTemplate>();
         mocks.updateReport.mockReturnValue(pending.promise);
         mocks.updateTemplate.mockReturnValue(pending.promise);
@@ -233,14 +316,17 @@ describe('full-page editor navigation', () => {
         act(() => { window.dispatchEvent(new PopStateEvent('popstate', { state: null })); });
         fireEvent.click(await screen.findByRole('button', { name: common.ConfirmDiscard.discard }));
         expect(window.location.search).toBe('?mode=second');
-        expect(unloadPrevented()).toBe(true);
+        const fresh = await screen.findByLabelText('Name');
+        expect(fresh).not.toBe(input);
+        expect(fresh).toHaveProperty('value', kind === 'report' ? report.name : template.name);
+        expect(unloadPrevented()).toBe(false);
         await act(async () => pending.resolve(kind === 'report' ? report : template));
         expect(mocks.push).not.toHaveBeenCalled();
-        expect(mocks.refresh).not.toHaveBeenCalled();
+        expect(mocks.refresh).toHaveBeenCalledOnce();
         expect(unloadPrevented()).toBe(false);
         fireEvent.click(screen.getByRole('button', { name: kind === 'report' ? 'Cancel' : 'Documents' }));
         expect(screen.queryByRole('dialog')).toBeNull();
-        fireEvent.change(input, { target: { value: 'New unsaved content' } });
+        fireEvent.change(fresh, { target: { value: 'New unsaved content' } });
         expect(unloadPrevented()).toBe(true);
     });
 
@@ -299,7 +385,7 @@ describe('full-page editor navigation', () => {
         await act(async () => finish(kind === 'report' ? report : template));
         expect(mocks.push).toHaveBeenCalledExactlyOnceWith('/records/deals');
         expect(unloadPrevented()).toBe(false);
-        fireEvent.change(input, { target: { value: 'Edited after the response' } });
+        fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Edited after the response' } });
         expect(unloadPrevented()).toBe(true);
     });
 

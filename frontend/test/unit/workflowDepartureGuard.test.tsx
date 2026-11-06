@@ -66,6 +66,24 @@ async function startCreation() {
 }
 
 describe('workflow creation departure', () => {
+    it('discards pending creation into a fresh unlocked editor after accepted query navigation', async () => {
+        window.history.replaceState({ __NA: true }, '', '/workflows/new');
+        const pending = await startCreation();
+        const oldInput = screen.getByRole('textbox', { name: 'Workflow name' });
+        expect(oldInput.matches(':disabled')).toBe(true);
+        act(() => openResult(mocks, '/workflows/new?mode=outline'));
+        fireEvent.click(await screen.findByRole('button', { name: 'Discard changes' }));
+        const fresh = await screen.findByRole('textbox', { name: 'Workflow name' });
+        expect(fresh).not.toBe(oldInput);
+        expect(fresh).toHaveProperty('value', '');
+        expect(fresh.matches(':disabled')).toBe(false);
+        await act(async () => { pending.resolve(created); });
+        expect(fresh).toHaveProperty('value', '');
+        expect(fresh.matches(':disabled')).toBe(false);
+        expect(mocks.replace).not.toHaveBeenCalled();
+        fireEvent.change(fresh, { target: { value: 'A new workflow' } });
+        expect(fresh).toHaveProperty('value', 'A new workflow');
+    });
     it.each(['/workflows/41', '/workflows/41?mode=outline#selected-node'])(
         'keeps the existing workflow guarded when global search selects its current route (%s)', async (href) => {
             const nativeReplace = window.history.replaceState.bind(window.history);
@@ -89,7 +107,11 @@ describe('workflow creation departure', () => {
                 expect(mocks.push).toHaveBeenCalledExactlyOnceWith('/workflows/41?mode=different');
                 const afterQuery = new Event('beforeunload', { cancelable: true });
                 window.dispatchEvent(afterQuery);
-                expect(afterQuery.defaultPrevented).toBe(true);
+                expect(afterQuery.defaultPrevented).toBe(false);
+                const fresh = await screen.findByRole('textbox', { name: 'Workflow name' });
+                expect(fresh).not.toBe(input);
+                expect(fresh).toHaveProperty('value', created.name);
+                fireEvent.change(fresh, { target: { value: 'New unsaved edit' } });
                 act(() => openResult(mocks, '/records/deals'));
                 await screen.findByRole('dialog', { name: 'Discard unsaved changes?' });
                 fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));

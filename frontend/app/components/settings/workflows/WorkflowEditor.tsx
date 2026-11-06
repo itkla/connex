@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -80,12 +80,24 @@ export default function WorkflowEditor({
     workflowId?: number;
     triggeredSendEnabled: boolean;
 }) {
+    const router = useRouter();
+    const [revision, setRevision] = useState(0);
+    const [refreshing, startTransition] = useTransition();
+    const discardDraft = useCallback(() => {
+        startTransition(() => {
+            setRevision((value) => value + 1);
+            router.refresh();
+        });
+    }, [router]);
     return (
-        <ReactFlowProvider>
-            <WorkflowEditorBody
-                workflowId={workflowId}
-                triggeredSendEnabled={triggeredSendEnabled}
-            />
+        <ReactFlowProvider key={revision}>
+            {refreshing ? <Skeleton className="h-80 w-full" /> : (
+                <WorkflowEditorBody
+                    workflowId={workflowId}
+                    triggeredSendEnabled={triggeredSendEnabled}
+                    onDiscard={discardDraft}
+                />
+            )}
         </ReactFlowProvider>
     );
 }
@@ -93,9 +105,11 @@ export default function WorkflowEditor({
 function WorkflowEditorBody({
     workflowId,
     triggeredSendEnabled,
+    onDiscard,
 }: {
     workflowId?: number;
     triggeredSendEnabled: boolean;
+    onDiscard: () => void;
 }) {
     const t = useTranslations("WorkspaceWorkflows");
     const tr = useTranslations("WorkflowAuthoring");
@@ -120,6 +134,7 @@ function WorkflowEditorBody({
             replace: router.replace,
             renderedHref: search ? `${pathname}?${search}` : pathname,
             onBeforeLeave: editor.cancelCreationContinuation,
+            onDiscard,
         },
     });
     const loadedWorkflow = editor.workflow;

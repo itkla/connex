@@ -28,11 +28,16 @@ vi.mock('motion/react', () => ({
 const nextState = { __NA: true, __PRIVATE_NEXTJS_INTERNALS_TREE: ['test-tree'] };
 
 function DraftEditor({ href }: { href: string }) {
+    const [revision, setRevision] = useState(0);
+    return <DraftBody key={revision} href={href} onDiscard={() => setRevision((value) => value + 1)} />;
+}
+
+function DraftBody({ href, onDiscard }: { href: string; onDiscard: () => void }) {
     const [draft, setDraft] = useState('');
     const guard = useUnsavedChangesGuard({
         isDirty: draft.length > 0,
         onClose: () => router.push('/list'),
-        navigation: { push: router.push, replace: router.replace, renderedHref: href },
+        navigation: { push: router.push, replace: router.replace, renderedHref: href, onDiscard },
     });
     useLayoutEffect(() => { if (draft) dirtyCommit(); }, [draft]);
     return <>
@@ -194,7 +199,7 @@ describe('editor navigation invariants', () => {
         expect(window.location.pathname).toBe('/list');
     });
 
-    it.each(['no-op', 'query-only', 'hash-only', 'pending-async'])('always rearms a retained editor after accepted %s navigation', async (kind) => {
+    it.each(['no-op', 'query-only', 'hash-only', 'pending-async'])('disposes discarded content after accepted %s navigation and protects fresh edits', async (kind) => {
         mount();
         dirty();
         const pending = Promise.withResolvers<void>();
@@ -204,7 +209,11 @@ describe('editor navigation invariants', () => {
             if (kind === 'pending-async') return pending.promise;
         }));
         await discard();
-        expect(screen.getByRole('textbox', { name: 'Draft' })).toHaveProperty('value', 'Retained editor content');
+        expect(screen.getByRole('textbox', { name: 'Draft' })).toHaveProperty('value', '');
+        const clean = new Event('beforeunload', { cancelable: true });
+        window.dispatchEvent(clean);
+        expect(clean.defaultPrevented).toBe(false);
+        dirty();
         expectProtected();
         await act(async () => { pending.resolve(); });
         expectProtected();
@@ -288,12 +297,40 @@ describe('editor navigation invariants', () => {
         expect(window.location.pathname).toBe('/list');
     });
 
+    it('reconciles a known traversal to a null-state fragment before disposing the discarded guard instance', async () => {
+        vi.stubGlobal('navigation', {
+            get currentEntry() {
+                return window.location.pathname === '/editor'
+                    ? { key: 'editor-entry', index: 2 }
+                    : window.location.hash
+                        ? { key: 'list-fragment', index: 1 }
+                        : { key: 'list-entry', index: 0 };
+            },
+        });
+        mount('/list');
+        fireEvent.click(screen.getByRole('link', { name: common.CommonContentShell.skipToContent }));
+        await waitFor(() => expect(window.location.hash).toBe('#app-main'));
+        expect(window.history.state ?? null).toBeNull();
+        act(() => router.push('/editor'));
+        dirty();
+        window.history.back();
+        await screen.findByRole('dialog', { name: 'Discard unsaved changes?' });
+        expect(window.location.pathname).toBe('/editor');
+        await discard();
+        await screen.findByRole('heading', { name: 'Destination page' });
+        expect(window.location.pathname + window.location.hash).toBe('/list#app-main');
+    });
+
     it.each(['/editor?source=other', '/editor?source=original#app-main'])('keeps retained editor protection after native query/hash traversal to %s', async (destination) => {
         mount();
         dirty();
         window.history.replaceState(null, '', destination);
         act(() => { window.dispatchEvent(new PopStateEvent('popstate', { state: null })); });
-        if (destination.includes('source=other')) await discard();
+        if (destination.includes('source=other')) {
+            await discard();
+            expect(screen.getByRole('textbox', { name: 'Draft' })).toHaveProperty('value', '');
+            dirty();
+        }
         else expect(screen.queryByRole('dialog')).toBeNull();
         expect(window.location.pathname + window.location.search + window.location.hash).toBe(destination);
         expectProtected();
