@@ -57,7 +57,6 @@ import type {
     ConnectedAccountProvider,
     DashboardWidgetType,
     DealKpis,
-    DealMetrics,
     DealRevenueSeries,
     RelationshipDashboard,
     TaskSummary as TaskSummaryCounts,
@@ -77,6 +76,8 @@ import Greeting from '@/app/components/dashboard/Greeting';
 import IntroOpportunities from '@/app/components/dashboard/IntroOpportunities';
 import OverviewCard from '@/app/components/dashboard/OverviewCard';
 import PipelineChart from '@/app/components/dashboard/PipelineChart';
+import DashboardCurrencyScope from '@/app/components/dashboard/DashboardCurrencyScope';
+import { currencyCountsForMetrics, resolveDealViewCurrency } from '@/app/components/overview/analytics/currencyScope';
 import RecentFiles from '@/app/components/dashboard/RecentFiles';
 import RecentMoves from '@/app/components/dashboard/RecentMoves';
 import Rise from '@/app/components/motion/Rise';
@@ -166,24 +167,6 @@ const EMPTY_RELATIONSHIP_DASHBOARD: RelationshipDashboard = {
 
 const DASHBOARD_RANGE: RollingRangeKey = '90d';
 
-/**
- * Picks the currency with the most deals from the server-computed {@link DealMetrics}, so the
- * dashboard's aggregate widgets scope to the workspace's dominant currency rather than the
- * currency that happens to dominate a bounded page slice. Falls back to {@code 'USD'}.
- */
-function dominantCurrency(metrics: DealMetrics): string {
-    let best = 'USD';
-    let bestCount = -1;
-    for (const entry of metrics.byCurrency) {
-        const count = entry.openCount + entry.closedCount;
-        if (count > bestCount) {
-            bestCount = count;
-            best = entry.currency;
-        }
-    }
-    return best;
-}
-
 function present<T>(value: T | null): value is T {
     return value != null;
 }
@@ -264,9 +247,10 @@ export async function loadActivationExtras(cookie: string | null): Promise<{
     };
 }
 
-export default async function Dashboard() {
+export default async function Dashboard({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
     const t = await getTranslations('DashboardPage');
     const tUnavailable = await getTranslations('SectionUnavailable');
+    const tCurrency = await getTranslations('DealCurrencyScope');
 
     const cookie = (await headers()).get('cookie');
     const userResult = await getCurrentUserResultFromCookie(cookie);
@@ -427,7 +411,9 @@ export default async function Dashboard() {
         || setupCounts.stages === 0;
     const activationExtrasPromise = activationNeedsEvaluation ? loadActivationExtras(cookie) : null;
 
-    const currency = dominantCurrency(dealMetrics);
+    const params = await searchParams;
+    const currencyCounts = currencyCountsForMetrics(dealMetrics);
+    const currency = resolveDealViewCurrency(currencyCounts, typeof params.currency === 'string' ? params.currency : null);
     const [dealKpisResult, pipelineValuesResult, revenueSeriesResult, openRevenueSeriesResult, stageDistributionResult] = await Promise.all([
         toResult(getDealKpisFromCookie(cookie, currency, DASHBOARD_RANGE)),
         toResult(getDealPipelineValueFromCookie(cookie, currency, DASHBOARD_RANGE)),
@@ -514,8 +500,11 @@ export default async function Dashboard() {
         ? warmthArrival(warmthFacetsResult.data.warmthBands)
         : null;
 
-    const chartCard = (child: ReactNode) => (
-        <div className="h-full rounded-2xl border border-border bg-card p-6">{child}</div>
+    const chartCard = (child: ReactNode, monetary = false) => (
+        <div className="h-full rounded-2xl border border-border bg-card p-6">
+            {monetary && <p className="mb-3 text-xs font-medium text-muted-foreground">{tCurrency('widgetBasis', { currency })}</p>}
+            {child}
+        </div>
     );
 
     const widgetNodes: Record<DashboardWidgetType, ReactNode> = {
@@ -587,24 +576,27 @@ export default async function Dashboard() {
             </div>
         ),
         analyticsKpis: kpisAvailable
-            ? <AnalyticsKpisWidget kpis={dealKpis} currency={currency} />
+            ? <div className="h-full space-y-3">
+                <p className="text-xs font-medium text-muted-foreground">{tCurrency('widgetBasis', { currency })}</p>
+                <AnalyticsKpisWidget kpis={dealKpis} currency={currency} />
+            </div>
             : <SectionUnavailable />,
         revenueTrend: revenueAvailable
             ? chartCard(
-                <RevenueTrend series={revenueSeries} currency={currency} range={DASHBOARD_RANGE} timezone={timezone} />,
+                <RevenueTrend series={revenueSeries} currency={currency} range={DASHBOARD_RANGE} timezone={timezone} />, true,
             )
             : <SectionUnavailable />,
         winRate: kpisAvailable
-            ? chartCard(<WinRateDonut kpis={dealKpis} currency={currency} />)
+            ? chartCard(<WinRateDonut kpis={dealKpis} currency={currency} />, true)
             : <SectionUnavailable />,
         pipelineValue: pipelineValuesAvailable
             ? chartCard(
-                <PipelineValue values={pipelineValues} pipelines={pipelines} currency={currency} />,
+                <PipelineValue values={pipelineValues} pipelines={pipelines} currency={currency} />, true,
             )
             : <SectionUnavailable />,
         stageFunnel: stageFunnelAvailable
             ? chartCard(
-                <StageFunnel distribution={stageDistribution} pipelines={pipelines} stages={stages} currency={currency} />,
+                <StageFunnel distribution={stageDistribution} pipelines={pipelines} stages={stages} currency={currency} />, true,
             )
             : <SectionUnavailable />,
         activityVolume: activityVolumeResult.ok
@@ -696,6 +688,7 @@ export default async function Dashboard() {
                         </div>
                     </section>
                 ) : null}
+                {currencyKnown && <DashboardCurrencyScope counts={currencyCounts} currency={currency} />}
                 <Rise delay={activationVisible ? 0.18 : 0.09}>
                     <DashboardGrid
                         initialWidgets={initialWidgets}
