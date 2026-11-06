@@ -149,6 +149,8 @@ vi.mock('@/app/hooks/useWorkspace', () => ({
     useWorkspace: () => state,
 }));
 
+vi.mock('@/app/hooks/usePermissions', () => ({ usePermission: () => true }));
+
 vi.mock('@/app/hooks/useApiErrorToast', () => ({
     useApiErrorToast: () => vi.fn(),
 }));
