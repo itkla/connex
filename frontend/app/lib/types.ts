@@ -6419,3 +6419,16 @@ export type DocumentAcceptanceFailureKind =
     | "unavailable"
     | "throttled"
     | "service-unavailable";
+
+/** Fixed-size supporting projections for the authenticated member's My Work surface. */
+export type MyWorkReadSections = {
+    history: { tasks: Task[]; activities: Activity[]; notes: Note[] };
+    pulse: NoteActivityDay[];
+    relationships: {
+        counts: Record<TemperatureBand, number> & { cooling: number };
+        contacts: Contact[];
+        temperatures: RelationshipTemperature[];
+    };
+    "deal-kpis": { currency: string; metrics: DealMetrics; kpis: DealKpis };
+    risks: { risks: DealRisk[]; deals: Deal[]; inputLimitExceeded: boolean };
+};
