@@ -136,7 +136,13 @@ for (const locale of ['en', 'ja'] as const) {
             })]),
         });
         await expect(dialog.getByText(t('missingCloseDates', { count: 2 }), { exact: true })).toBeVisible();
-        await expect(dialog.getByText(t('futureCloseDate'), { exact: true })).toBeVisible();
+        for (let pageIndex = 0; pageIndex < 5; pageIndex += 1) {
+            await dialog.getByRole('button', { name: t('nextPage'), exact: true }).click();
+        }
+        await expect(dialog.locator('[data-import-row="102"]').getByText(t('futureCloseDate'), { exact: true })).toBeVisible();
+        for (let pageIndex = 0; pageIndex < 5; pageIndex += 1) {
+            await dialog.getByRole('button', { name: t('previousPage'), exact: true }).click();
+        }
         const historicalRow = dialog.getByRole('row').filter({ hasText: 'Historic won' }).first();
         await expect(historicalRow.getByText(new RegExp(t('fields.closedAt')))).toContainText('2025');
         await expect(historicalRow.getByText(new RegExp(t('fields.createdAt')))).toContainText('2025');
