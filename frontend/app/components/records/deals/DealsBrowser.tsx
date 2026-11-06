@@ -1312,6 +1312,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                     (id) => segmentFields?.tags.find((tag) => String(tag.id) === id)?.name ?? id,
                     (id) => memberById.get(Number(id))?.displayName ?? id,
                     "deal",
+                    condition.op === 'in' ? segmentOptions : undefined,
                 ),
                 onRemove: () => changeDefinition(removeSegmentCondition(definition, groupPath, conditionIndex)),
             };

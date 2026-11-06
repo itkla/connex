@@ -70,6 +70,8 @@
     "op": {
       "is": "である",
       "isNot": "ではない",
+      "in": "のいずれかである",
+      "notIn": "のいずれでもない",
       "contains": "を含む",
       "notContains": "を含まない",
       "has": "を持つ",
@@ -243,6 +245,7 @@
     "summaryOr": " または ",
     "summaryAnd": " かつ ",
     "summaryNot": "次の条件に一致しない（{conditions}）",
+    "valueSeparator": "、",
     "unavailableValue": "参照できないレコード",
     "durationDays": "{days}日"
   },

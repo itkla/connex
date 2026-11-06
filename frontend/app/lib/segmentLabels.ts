@@ -5,6 +5,7 @@ const DEFAULT_DAYS = 30;
 const OPERATOR_TOKENS: Record<string, { positive: string; negative?: string }> = {
     equals: { positive: 'is', negative: 'isNot' },
     is: { positive: 'is', negative: 'isNot' },
+    in: { positive: 'in', negative: 'notIn' },
     contains: { positive: 'contains', negative: 'notContains' },
     starts_with: { positive: 'startsWith' },
     is_set: { positive: 'isSet', negative: 'isEmpty' },
@@ -30,6 +31,8 @@ export function segmentFieldLabel(field: string | undefined, recordType: string,
  * "Tag is not Priority". {@code resolveTagName} maps a tag id to its name. Used by the removable
  * condition chips outside the builder; operator-only comparisons (is set / is empty) render without a
  * value. Derives the operator token from the condition's op + negate, independent of the catalog.
+ * Reference options resolve every ID in saved membership comparisons; callers may omit them for
+ * scalar labels they have already resolved.
  */
 export function segmentConditionLabel(
     condition: SegmentCondition,
@@ -37,6 +40,7 @@ export function segmentConditionLabel(
     resolveTagName: (id: string) => string,
     resolveOwnerName?: (id: string) => string,
     recordType = "company",
+    options?: RuleBuilderOptions | null,
 ): string {
     if (condition.type === "predicate") {
         const key = condition.key ?? "";
@@ -57,13 +61,22 @@ export function segmentConditionLabel(
     if (condition.op === "within_days") {
         return describe(t("chipField", { field, op, value: t("durationDays", { days: condition.days ?? DEFAULT_DAYS }) }));
     }
-    const value = condition.field === "tag"
-        ? resolveTagName(condition.value ?? "")
-        : condition.field === "owner" && resolveOwnerName
-            ? resolveOwnerName(condition.value ?? "")
-            : condition.field === "status" && ["open", "won", "lost"].includes(condition.value ?? "")
-                ? t(`status.${condition.value}`)
-            : (condition.value ?? "");
+    const resolveValue = (raw: string): string => {
+        const references = condition.field === 'company' ? options?.companies
+            : condition.field === 'stage' ? options?.stages
+                : condition.field === 'owner' ? options?.owners : undefined;
+        if (['company', 'stage', 'owner'].includes(condition.field ?? '')
+            && (options !== undefined || condition.op === 'in')) {
+            return references?.find((item) => item.id === Number(raw))?.name ?? t('unavailableValue');
+        }
+        if (condition.field === 'tag') return resolveTagName(raw);
+        if (condition.field === 'owner' && resolveOwnerName) return resolveOwnerName(raw);
+        if (condition.field === 'status' && ['open', 'won', 'lost'].includes(raw)) return t(`status.${raw}`);
+        return raw;
+    };
+    const value = condition.op === 'in'
+        ? (condition.values ?? []).map(resolveValue).join(t('valueSeparator')) || t('unavailableValue')
+        : resolveValue(condition.value ?? '');
     return describe(t("chipField", { field, op, value }));
 }
 
@@ -76,15 +89,10 @@ export function segmentDefinitionLabel(
     options?: RuleBuilderOptions | null,
 ): string {
     const parts = (definition.conditions ?? []).map((condition) => {
-        const references = condition.field === "company" ? options?.companies
-            : condition.field === "stage" ? options?.stages : undefined;
-        const display = ["company", "stage"].includes(condition.field ?? "") && condition.value
-            ? { ...condition, value: references?.find((item) => String(item.id) === condition.value)?.name ?? t("unavailableValue") }
-            : condition;
-        return segmentConditionLabel(display, t,
+        return segmentConditionLabel(condition, t,
             (id) => fields?.tags.find((tag) => String(tag.id) === id)?.name ?? t("unavailableValue"),
             (id) => options?.owners.find((owner) => String(owner.id) === id)?.name ?? t("unavailableValue"),
-            recordType);
+            recordType, options ?? null);
     });
     for (const group of definition.groups ?? []) {
         const label = segmentDefinitionLabel(group, recordType, t, fields, options);

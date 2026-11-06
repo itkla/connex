@@ -108,7 +108,7 @@ for (const locale of ['en', 'ja'] as const) {
         const seed = seeder(page.request, fixture.workspaceId, await csrfBootstrap(page.request));
         const config = { match: 'all', negate: true, conditions: [
             { type: 'field', field: 'name', op: 'equals', value: 'Sakura', negate: true },
-            { type: 'field', field: 'company', op: 'is', value: String(fixture.companies.primary.id) },
+            { type: 'field', field: 'company', op: 'in', values: [String(fixture.companies.primary.id)], negate: true },
         ] };
         const workflow = await seed.post('/api/workflows', {
             name: `Contact conditions ${randomUUID()}`, recordType: 'person', executionMode: 'user',
@@ -133,7 +133,7 @@ for (const locale of ['en', 'ja'] as const) {
             .replace('{op}', copy('records', 'SmartSegments.op.isNot')).replace('{value}', 'Sakura');
         const companyCondition = copy('records', 'SmartSegments.chipField')
             .replace('{field}', copy('records', 'SmartSegments.field.company'))
-            .replace('{op}', copy('records', 'SmartSegments.op.is')).replace('{value}', fixture.companies.primary.name);
+            .replace('{op}', copy('records', 'SmartSegments.op.notIn')).replace('{value}', fixture.companies.primary.name);
         const summary = copy('records', 'SmartSegments.summaryNot').replace('{conditions}', nameCondition + copy('records', 'SmartSegments.summaryAnd') + companyCondition);
         await expect(step).toContainText(summary);
         await step.click();

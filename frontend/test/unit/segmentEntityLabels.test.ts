@@ -1,7 +1,7 @@
 import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
 import { segmentConditionLabel, segmentDefinitionLabel } from '@/app/lib/segmentLabels';
-import type { SegmentDefinition } from '@/app/lib/types';
+import type { RuleBuilderOptions, SegmentDefinition } from '@/app/lib/types';
 import en from '@/messages/en/records.json';
 import ja from '@/messages/ja/records.json';
 
@@ -96,5 +96,59 @@ describe.each([
             { type: 'field', field: 'name', op: 'starts_with', value: 'Sakura', negate: true },
         ] }, 'person', t, null);
         expect(label).toBe(t('summaryNot', { conditions: t('chipField', { field: contact, op: t('op.startsWith'), value: 'Sakura' }) }));
+    });
+
+    const membershipOptions: RuleBuilderOptions = {
+        companies: [{ id: 42, name: 'Sakura Foods' }, { id: 43, name: 'Lotus Labs' }],
+        stages: [{ id: 42, name: 'Discovery', pipeline: 'Sales' }, { id: 43, name: 'Review', pipeline: 'Sales' }],
+        owners: [{ id: 42, name: 'Mika' }, { id: 43, name: 'Aya' }],
+    };
+
+    it.each([false, true])('preserves pre-resolved scalar chips with negate=%s', (negate) => {
+        const stage = { type: 'field' as const, field: 'stage', op: 'is', value: 'Discovery', negate };
+        const owner = { type: 'field' as const, field: 'owner', op: 'is', value: '42', negate };
+        const op = t(negate ? 'op.isNot' : 'op.is');
+        expect(segmentConditionLabel(stage, t, String, undefined, 'deal')).toBe(
+            t('chipField', { field: t('field.stage'), op, value: 'Discovery' }),
+        );
+        expect(segmentConditionLabel(owner, t, String, () => 'Mika', 'company')).toBe(
+            t('chipField', { field: t('field.owner'), op, value: 'Mika' }),
+        );
+    });
+    const membershipFields = [
+        { field: 'company', recordType: 'person', names: ['Sakura Foods', 'Lotus Labs'] },
+        { field: 'stage', recordType: 'deal', names: ['Discovery', 'Review'] },
+        { field: 'owner', recordType: 'company', names: ['Mika', 'Aya'] },
+    ];
+
+    describe.each(membershipFields)('$field membership', ({ field, recordType, names }) => {
+        it.each([false, true])('renders every resolved operand with negate=%s', (negate) => {
+            const condition = { type: 'field' as const, field, op: 'in', values: ['42', '43'], negate };
+            const definition: SegmentDefinition = { match: 'all', conditions: [condition] };
+            const before = JSON.stringify(definition);
+            const expected = t('chipField', {
+                field: t(`field.${field}`), op: t(negate ? 'op.notIn' : 'op.in'),
+                value: names.join(t('valueSeparator')),
+            });
+            expect(segmentDefinitionLabel(definition, recordType, t, null, membershipOptions)).toBe(expected);
+            expect(segmentConditionLabel(condition, t, String, undefined, recordType, membershipOptions)).toBe(expected);
+            expect(JSON.stringify(definition)).toBe(before);
+        });
+
+        it.each([false, true])('keeps unresolved operands visible without raw IDs with negate=%s', (negate) => {
+            const condition = { type: 'field' as const, field, op: 'in', values: ['42', '99999'], negate };
+            const definition: SegmentDefinition = { match: 'all', conditions: [condition] };
+            const label = segmentDefinitionLabel(definition, recordType, t, null, membershipOptions);
+            expect(label).toBe(t('chipField', {
+                field: t(`field.${field}`), op: t(negate ? 'op.notIn' : 'op.in'),
+                value: [names[0], t('unavailableValue')].join(t('valueSeparator')),
+            }));
+            expect(label).not.toContain('99999');
+            const withoutOptions = segmentDefinitionLabel(definition, recordType, t, null);
+            expect(withoutOptions).toBe(t('chipField', {
+                field: t(`field.${field}`), op: t(negate ? 'op.notIn' : 'op.in'),
+                value: [t('unavailableValue'), t('unavailableValue')].join(t('valueSeparator')),
+            }));
+        });
     });
 });

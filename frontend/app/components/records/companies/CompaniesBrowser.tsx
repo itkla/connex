@@ -871,7 +871,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
         ...facetChips(facets, filterState, setFilterState),
         ...(!showArchived ? segmentConditionEntries(definition) : []).map(({ condition, groupPath, conditionIndex }) => ({
             id: `segment:${[...groupPath, conditionIndex].join(':')}`,
-            label: segmentConditionLabel(condition, tSeg, resolveTagName, resolveOwnerName),
+            label: segmentConditionLabel(condition, tSeg, resolveTagName, resolveOwnerName, 'company', condition.op === 'in' ? segmentOptions : undefined),
             onRemove: () => setDefinition((current) => removeSegmentCondition(current, groupPath, conditionIndex)),
         })),
     ];

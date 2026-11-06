@@ -70,6 +70,8 @@
     "op": {
       "is": "is",
       "isNot": "is not",
+      "in": "is one of",
+      "notIn": "is none of",
       "contains": "contains",
       "notContains": "doesn't contain",
       "has": "has",
@@ -243,6 +245,7 @@
     "summaryOr": " or ",
     "summaryAnd": " and ",
     "summaryNot": "Not ({conditions})",
+    "valueSeparator": ", ",
     "unavailableValue": "Unavailable record",
     "durationDays": "{days} days"
   },
