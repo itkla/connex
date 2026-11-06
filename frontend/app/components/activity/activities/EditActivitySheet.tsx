@@ -30,7 +30,7 @@ import {
     useContactTargetSearch,
     useDealTargetSearch,
 } from '@/app/hooks/useRecordTargetSearch';
-import { type Activity, type Contact, type Deal, type UpdateActivityPayload } from '@/app/lib/types';
+import { type Activity, type ContactPickerOption, type Deal, type UpdateActivityPayload } from '@/app/lib/types';
 import { toDatetimeLocalValue, toMysqlDateTime } from '@/app/lib/utils';
 
 const inputClass =
@@ -89,7 +89,7 @@ export default function EditActivitySheet({
     activity: Activity;
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    persons: Contact[];
+    persons: ContactPickerOption[];
     deals: Deal[];
     originWorkspaceId: number | null;
 }) {

@@ -1,6 +1,6 @@
 'use client';
 
-import { type ReactNode, useCallback, useMemo } from 'react';
+import { type ReactNode, useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import type { UniqueIdentifier } from '@dnd-kit/core';
 import { UserIcon, BriefcaseIcon } from '@heroicons/react/24/outline';
@@ -12,14 +12,15 @@ import { kanbanAccessibility } from '@/app/components/kanban/kanbanAccessibility
 import NoteContent from '@/app/components/activity/notes/NoteContent';
 import { useLiveNow } from '@/app/hooks/useNow';
 import { DUE_CHIP, formatDue } from '@/app/components/activity/tasks/taskDue';
+import { taskBoardAfterMove, taskBoardIndex, taskBoardPosition } from './taskBoardPosition';
 import { moveTask } from '@/app/lib/api';
 import { noteContentToPlainText } from '@/app/lib/references';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
-import type { Contact, Deal, Task, TaskStatus, User } from '@/app/lib/types';
+import type { ContactPickerOption, Deal, Task, TaskStatus, User } from '@/app/lib/types';
 
 interface TasksKanbanProps {
     tasks: Task[];
-    personById: Map<number, Contact>;
+    personById: Map<number, ContactPickerOption>;
     dealById: Map<number, Deal>;
     userById: Map<number, User>;
     onMoved: () => void;
@@ -70,6 +71,8 @@ export default function TasksKanban({
     );
 
     const tasksById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
+    const confirmedTasks = useRef(tasks);
+    useLayoutEffect(() => { confirmedTasks.current = tasks; }, [tasks]);
 
     const renderCard = useCallback(
         (task: Task, dragHandle?: ReactNode) => {
@@ -139,14 +142,16 @@ export default function TasksKanban({
         async (taskId: number, columnId: string, index: number) => {
             try {
                 if (columnId !== 'todo' && columnId !== 'in_progress' && columnId !== 'done') return false;
-                const saved = await moveTask(taskId, columnId, index);
+                const saved = await moveTask(taskId, columnId, taskBoardPosition(confirmedTasks.current, taskId, columnId, index));
+                const visibleIndex = taskBoardIndex(confirmedTasks.current, taskId, saved.status, saved.position);
+                confirmedTasks.current = taskBoardAfterMove(confirmedTasks.current, saved);
                 const announcement = t('a11ySaved', {
                     name: noteContentToPlainText(saved.description),
                     column: columns.find((column) => column.id === saved.status)?.label ?? '',
                     position: saved.position + 1,
                 });
                 onMoved();
-                return { columnId: saved.status, index: saved.position, announcement };
+                return { columnId: saved.status, index: visibleIndex, announcement };
             } catch (err) {
                 showApiError(err, 'moveFailed');
                 throw err;

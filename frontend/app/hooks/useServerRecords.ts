@@ -12,6 +12,7 @@ export { SERVER_RECORDS_URL_KEYS } from '@/app/hooks/listStateUrl';
 
 type RecordsState<T> = Page<T> & {
     workspaceId: number | null;
+    requestKey: string | null;
     loading: boolean;
     error: Error | null;
 };
@@ -28,6 +29,8 @@ type RecordsState<T> = Page<T> & {
  * values land. That path is for browsers whose `sort` value space conflicts with the records-browser
  * `sort`/`dir` pair — they write pagination through their own owned-params writer instead of
  * enabling full `urlSync`.
+ * `requestContext` refreshes server-owned windows (such as a profile calendar day) without sending a client date.
+ * Set `retainPreviousData` false when a changed filter must hide the previous selection immediately.
  * Retryable failures retain the last successful page in the same workspace and expose `error` until a successful retry.
  * Authentication and permission failures discard that page so later outages cannot reveal denied rows again.
  * Consumers must handle expired sessions and access denials separately, never showing empty-state copy for a failure.
@@ -42,12 +45,14 @@ export function useServerRecords<T, P extends PageParams = PageParams>(
     options: {
         defaultSize?: number;
         urlSync?: boolean;
+        retainPreviousData?: boolean;
+        requestContext?: string;
         seedQuery?: string;
         seedPage?: string;
         seedSize?: string;
     } = {},
 ) {
-    const { defaultSize = 25, urlSync = false, seedQuery, seedPage, seedSize } = options;
+    const { defaultSize = 25, urlSync = false, seedQuery, seedPage, seedSize, retainPreviousData = true, requestContext = '' } = options;
     const searchParams = useSearchParams();
     const pathname = usePathname();
     const { activeWorkspaceId } = useWorkspace();
@@ -58,13 +63,9 @@ export function useServerRecords<T, P extends PageParams = PageParams>(
     const seededSizeParam = (urlSync ? seed?.get('size') : seedSize) ?? null;
 
     const [records, setRecords] = useState<RecordsState<T>>({
-        workspaceId: activeWorkspaceId, items: [], total: 0, loading: true, error: null,
+        workspaceId: activeWorkspaceId, requestKey: null, items: [], total: 0, loading: true, error: null,
     });
     const currentWorkspace = records.workspaceId === activeWorkspaceId;
-    const items = currentWorkspace ? records.items : [];
-    const total = currentWorkspace ? records.total : 0;
-    const loading = !currentWorkspace || records.loading;
-    const error = currentWorkspace ? records.error : null;
     const [page, setPage] = useState(() => parseListInt(seededPageParam, 1));
     const [size, setSize] = useState(() => parseListInt(seededSizeParam, defaultSize, Math.max(defaultSize, MAX_URL_PAGE_SIZE)));
     const [query, setQuery] = useState(seededQuery);
@@ -74,6 +75,12 @@ export function useServerRecords<T, P extends PageParams = PageParams>(
     const [revision, setRevision] = useState(0);
 
     const extraKey = JSON.stringify(extraParams);
+    const requestKey = JSON.stringify([page, size, debouncedQuery, sortKey, sortDirection, extraKey, requestContext]);
+    const currentRequest = currentWorkspace && (retainPreviousData || records.requestKey === requestKey);
+    const items = currentRequest ? records.items : [];
+    const total = currentRequest ? records.total : 0;
+    const loading = !currentRequest || records.loading;
+    const error = currentRequest ? records.error : null;
 
     const debounceMountedRef = useRef(false);
     useEffect(() => {
@@ -86,12 +93,13 @@ export function useServerRecords<T, P extends PageParams = PageParams>(
         return () => clearTimeout(id);
     }, [query]);
 
-    const prevExtraKeyRef = useRef(extraKey);
+    const resetKey = JSON.stringify([extraKey, requestContext]);
+    const prevExtraKeyRef = useRef(resetKey);
     useEffect(() => {
-        if (prevExtraKeyRef.current === extraKey) return;
-        prevExtraKeyRef.current = extraKey;
+        if (prevExtraKeyRef.current === resetKey) return;
+        prevExtraKeyRef.current = resetKey;
         setPage(1);
-    }, [extraKey]);
+    }, [resetKey]);
 
     useEffect(() => {
         if (!urlSync) return;
@@ -110,12 +118,13 @@ export function useServerRecords<T, P extends PageParams = PageParams>(
     const load = useCallback(() => {
         let active = true;
         setRecords((previous) => previous.workspaceId === activeWorkspaceId
+            && (retainPreviousData || previous.requestKey === requestKey)
             ? { ...previous, loading: true }
-            : { workspaceId: activeWorkspaceId, items: [], total: 0, loading: true, error: null });
+            : { workspaceId: activeWorkspaceId, requestKey, items: [], total: 0, loading: true, error: null });
         fetcher({ page, size, q: debouncedQuery || undefined, sort: sortKey ?? undefined, dir: sortDirection, ...JSON.parse(extraKey) } as P)
             .then((res) => {
                 if (!active) return;
-                setRecords({ ...res, workspaceId: activeWorkspaceId, loading: false, error: null });
+                setRecords({ ...res, workspaceId: activeWorkspaceId, requestKey, loading: false, error: null });
                 const maxPage = Math.max(1, Math.ceil(res.total / size));
                 if (page > maxPage) setPage(maxPage);
             })
@@ -130,7 +139,7 @@ export function useServerRecords<T, P extends PageParams = PageParams>(
             })
             .finally(() => { if (active) setRecords((previous) => ({ ...previous, loading: false })); });
         return () => { active = false; };
-    }, [fetcher, page, size, debouncedQuery, sortKey, sortDirection, extraKey, activeWorkspaceId]);
+    }, [fetcher, page, size, debouncedQuery, sortKey, sortDirection, extraKey, activeWorkspaceId, requestKey, retainPreviousData]);
 
     // eslint-disable-next-line react-hooks/set-state-in-effect
     useEffect(() => load(), [load, revision]);

@@ -2,7 +2,7 @@
 import { act, type ComponentProps, type ReactNode } from 'react';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { DndContext, type DragEndEvent } from '@dnd-kit/core';
-import { NextIntlClientProvider } from 'next-intl';
+import { createTranslator, NextIntlClientProvider } from 'next-intl';
 import { afterEach, beforeEach, expect, it, vi, type Mock } from 'vitest';
 import TasksKanban from '@/app/components/activity/tasks/TasksKanban';
 import type { Task } from '@/app/lib/types';
@@ -38,11 +38,12 @@ const drag = (column = 'in_progress', id = 1, target: number | string = `col:${c
     over: { id: target, data: { current: typeof target === 'number' ? { sortable: { containerId: `col:${column}` } } : {} }, disabled: false, rect: { top: 0, left: 0, right: 10, bottom: 10, width: 10, height: 10 } },
     activatorEvent: new KeyboardEvent('keydown'), collisions: null, delta: { x: 0, y: 0 },
 });
-function mount(locale: 'en' | 'ja', boardTasks: Task[] = [task]) {
-    render(<NextIntlClientProvider locale={locale} timeZone="UTC" messages={locale === 'en' ? en : ja}>
+function content(locale: 'en' | 'ja', boardTasks: Task[] = [task]) {
+    return <NextIntlClientProvider locale={locale} timeZone="UTC" messages={locale === 'en' ? en : ja}>
         <TasksKanban tasks={boardTasks} personById={new Map()} dealById={new Map()} userById={new Map()} onMoved={mocks.moved} onOpen={vi.fn()} reduce />
-    </NextIntlClientProvider>);
+    </NextIntlClientProvider>;
 }
+function mount(locale: 'en' | 'ja', boardTasks: Task[] = [task]) { return render(content(locale, boardTasks)); }
 async function drop(column = 'in_progress', id = 1, target: number | string = `col:${column}`) {
     const event = drag(column, id, target);
     await act(async () => mocks.props?.onDragStart?.(event));
@@ -106,7 +107,7 @@ for (const locale of ['en', 'ja'] as const) {
         const restored = catalog.a11yRestored.replace('{name}', 'B').replace('{column}', catalog.statusTodo).replace('{position}', '2');
         await waitFor(() => expect(screen.getAllByRole('status').some((status) => status.textContent === restored)).toBe(true));
         expect(mocks.move).toHaveBeenNthCalledWith(1, 1, 'todo', 0);
-        expect(mocks.move).toHaveBeenNthCalledWith(2, 2, 'in_progress', 0);
+        expect(mocks.move).toHaveBeenNthCalledWith(2, 2, 'in_progress', 2_147_483_647);
         expect(mocks.error).toHaveBeenCalledWith(error, 'moveFailed');
         expect(mocks.moved).toHaveBeenCalledOnce();
     });
@@ -123,5 +124,55 @@ for (const locale of ['en', 'ja'] as const) {
         expect(screen.getAllByRole('status').filter((status) => status.textContent)).toEqual([live]);
         expect(document.querySelector('[data-kanban-drag-handle="1"]')?.closest('section')?.textContent).toContain(catalog.statusInProgress);
         expect(mocks.moved).toHaveBeenCalledOnce();
+    });
+    it(`${locale}: preserves paged positions, one announcement owner and displayed rollback order`, async () => {
+        const source = { ...task, status: 'in_progress' as const };
+        const b = { ...task, id: 2, description: 'B', position: 30 };
+        const c = { ...task, id: 3, description: 'C', position: 40 };
+        mocks.move.mockResolvedValueOnce({ ...source, status: 'todo', position: 40 });
+        mount(locale, [source, b, c]);
+        await drop('todo', 1, 2);
+        expect(mocks.move).toHaveBeenCalledWith(1, 'todo', 40);
+        const column = screen.getByRole('heading', { name: catalog.statusTodo }).closest('section');
+        if (!column) throw new Error('Missing destination column');
+        const displayed = () => [...column.querySelectorAll('[data-kanban-drag-handle]')]
+            .map((handle) => Number(handle.getAttribute('data-kanban-drag-handle')));
+        expect(displayed()).toEqual([2, 1, 3]);
+        const saved = catalog.a11ySaved.replace('{name}', 'Example').replace('{column}', catalog.statusTodo).replace('{position}', '41');
+        expect(screen.getAllByRole('status').filter((status) => status.textContent).map((status) => status.textContent)).toEqual([saved]);
+        mocks.move.mockRejectedValueOnce(new Error('refused'));
+        await drop('done', 1);
+        expect(displayed()).toEqual([2, 1, 3]);
+        const restored = catalog.a11yRestored.replace('{name}', 'Example').replace('{column}', catalog.statusTodo).replace('{position}', '2');
+        await waitFor(() => expect(screen.getAllByRole('status').filter((status) => status.textContent)
+            .map((status) => status.textContent)).toEqual([restored]));
+    });
+    it(`${locale}: translates successive paged drops using confirmed positions before refresh`, async () => {
+        const a = { ...task, description: 'A', position: 30 };
+        const b = { ...task, id: 2, description: 'B', position: 40 };
+        const c = { ...task, id: 3, description: 'C', position: 50 };
+        mocks.move.mockResolvedValueOnce({ ...a, position: 50 }).mockResolvedValueOnce({ ...c, position: 50 });
+        mount(locale, [a, b, c]);
+        await drop('todo');
+        await drop('todo', 3);
+        expect(mocks.move).toHaveBeenNthCalledWith(1, 1, 'todo', 50);
+        expect(mocks.move).toHaveBeenNthCalledWith(2, 3, 'todo', 50);
+        const column = screen.getByRole('heading', { name: catalog.statusTodo }).closest('section');
+        if (!column) throw new Error('Missing source column');
+        expect([...column.querySelectorAll('[data-kanban-drag-handle]')]
+            .map((handle) => Number(handle.getAttribute('data-kanban-drag-handle')))).toEqual([2, 1, 3]);
+    });
+    it(`${locale}: does not restore a task removed by paging or filtering while its save is pending`, async () => {
+        let save: ((task: Task) => void) | undefined;
+        mocks.move.mockImplementation(() => new Promise<Task>((resolve) => { save = resolve; }));
+        const view = mount(locale);
+        await drop();
+        view.rerender(content(locale, []));
+        await act(async () => save?.({ ...task, status: 'in_progress', position: 0 }));
+        const column = screen.getByRole('heading', { name: catalog.statusInProgress }).closest('section');
+        if (!column) throw new Error('Missing destination column');
+        const t = createTranslator({ locale, messages: { ActivityTasks: catalog }, namespace: 'ActivityTasks' });
+        expect(column.textContent).toContain(t('kanbanCount', { count: 0 }));
+        expect(document.querySelectorAll('[data-kanban-drag-handle]')).toHaveLength(0);
     });
 }

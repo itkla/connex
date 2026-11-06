@@ -26,13 +26,13 @@ import { ENTITY_COMMANDS } from '@/app/components/activity/notes/commands/slashC
 import RecordSelect from '@/app/components/records/RecordSelect';
 import { Checkbox } from '@/components/ui/checkbox';
 import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';
-import { useDealTargetSearch } from '@/app/hooks/useRecordTargetSearch';
+import { useDealTargetSearch, useMemberTargetSearch } from '@/app/hooks/useRecordTargetSearch';
 import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
 
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
-import { getCompanyPeople, getUsers, updateTask } from '@/app/lib/api';
-import { type Contact, type Deal, type Task, type UpdateTaskPayload, type User } from '@/app/lib/types';
+import { getCompanyPeople, updateTask } from '@/app/lib/api';
+import type { Contact, Deal, Task, UpdateTaskPayload } from '@/app/lib/types';
 import { calendarDateInputValue } from '@/app/lib/utils';
 
 const inputClass = 'w-full rounded-lg bg-muted px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none ring-1 ring-border transition focus:ring-2 focus:ring-brand';
@@ -74,8 +74,6 @@ export default function EditTaskSheet({
     const t = useTranslations('ActivityEditTaskSheet');
     const showApiError = useApiErrorToast('ActivityEditTaskSheet');
     const [draft, setDraft] = useState<TaskDraft>(() => toDraft(task));
-    const [users, setUsers] = useState<User[]>([]);
-    const [contacts, setContacts] = useState<Contact[]>([]);
     const [isSaving, setIsSaving] = useState(false);
     const dealSearch = useDealTargetSearch(open, [task.dealId], deals);
     const { fieldErrors, setFieldErrors, reset: resetFieldErrors, clearError } = useFieldErrors();
@@ -94,17 +92,17 @@ export default function EditTaskSheet({
         onClose: () => handleOpenChange(false),
     });
 
+    const memberSearch = useMemberTargetSearch(open, [draft.assignedToId]);
+    const [contacts, setContacts] = useState<Contact[]>([]);
+    const users = memberSearch.users;
+
     useEffect(() => {
         if (!open) return;
-        Promise.all([
-            getUsers().catch(() => [] as User[]),
-            companyId != null
-                ? getCompanyPeople(companyId).catch(() => [] as Contact[])
-                : Promise.resolve([] as Contact[]),
-        ]).then(([nextUsers, nextContacts]) => {
-            setUsers(nextUsers);
-            setContacts(nextContacts);
-        });
+        const controller = new AbortController();
+        const request = companyId != null ? getCompanyPeople(companyId, { signal: controller.signal }) : Promise.resolve([]);
+        request.then((items) => { if (!controller.signal.aborted) setContacts(items); })
+            .catch(() => { if (!controller.signal.aborted) setContacts([]); });
+        return () => controller.abort();
     }, [companyId, open]);
 
     const saveUpdates = async () => {
@@ -189,6 +187,8 @@ export default function EditTaskSheet({
                                 onValueChange={(value) => setDraft((d) => ({ ...d, assignedToId: parseInt(value) }))}
                                 placeholder={t('selectUserPlaceholder')}
                                 className={inputClass}
+                                onInputValueChange={memberSearch.onInputValueChange}
+                                serverSearch={memberSearch.serverSearch}
                                 options={users.map((user) => ({
                                     id: user.id,
                                     label: user.displayName,

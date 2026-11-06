@@ -1,9 +1,11 @@
 'use client';
 
+import { subscribeToRecordMutations } from '@/app/lib/record-mutation-events';
+
 import { getDateTimeFormatter } from '@/app/lib/intlFormatters';
 import { calendarDayInTimeZone } from '@/app/lib/timeZone';
 import { parseCalendarDateUtc } from '@/app/lib/utils';
-import { useCallback, useEffect, useMemo, useState, type ComponentType } from 'react';
+import { useEffect, useMemo, useState, type ComponentType } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useTimeZone, useLocale, useTranslations } from 'next-intl';
 import Link from 'next/link';
@@ -22,6 +24,12 @@ import {
 import { PlusIcon } from '@heroicons/react/24/solid';
 
 import { useLiveNow } from '@/app/hooks/useNow';
+import { useServerRecords } from '@/app/hooks/useServerRecords';
+import { useActivityListFilters } from '@/app/hooks/useActivityListFilters';
+import { useContactTargetSearch, useDealTargetSearch, useMemberTargetSearch } from '@/app/hooks/useRecordTargetSearch';
+import { useCompanySearch } from '@/app/hooks/useCompanySearch';
+import { RecordListState } from '@/app/components/records/RecordListState';
+import ActivityListPagination from '@/app/components/activity/ActivityListPagination';
 import { SearchField, FilterBar, MultiSelectFilter, type FilterChipData } from '@/app/components/filters';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -43,7 +51,7 @@ import Rise from '@/app/components/motion/Rise';
 import { ACTIVITY_TYPES, TYPE_META, normalizeType, type ActivityType } from '@/app/components/activity/activities/activityTypes';
 import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
-import { deleteActivity, getActivityById } from '@/app/lib/api';
+import { deleteActivity, getActivityById, getActivitiesPage } from '@/app/lib/api';
 import { isProviderOwnedActivity } from '@/app/lib/connectedCapture';
 import { ACTIVITY_URL_KEY, parseDeepLinkId } from '@/app/hooks/listStateUrl';
 import { useOwnedUrlParams } from '@/app/hooks/useOwnedUrlParams';
@@ -53,16 +61,11 @@ import { useScopedViewPreference } from '@/app/hooks/useScopedViewPreference';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { toastSuccess } from '@/app/lib/toast';
-import { noteContentToPlainText } from '@/app/lib/references';
 import { parseMysqlDateTime } from '@/app/lib/utils';
 import { cn } from '@/lib/utils';
-import type { Activity, Contact, Deal, User } from '@/app/lib/types';
+import type { Activity, ContactPickerOption, Deal, User } from '@/app/lib/types';
 
 type Props = {
-    activities: Activity[];
-    persons: Contact[];
-    deals: Deal[];
-    users: User[];
     currentUserId: number;
     originWorkspaceId: number | null;
 };
@@ -99,18 +102,6 @@ function isPlanned(a: Activity, now: number, timeZone: string): boolean {
     return ts !== -Infinity && startOfDayKey(ts, timeZone) > startOfDayKey(now, timeZone);
 }
 
-function bumpOption(map: Map<string, { label: string; count: number }>, key: string, label: string) {
-    const e = map.get(key);
-    if (e) e.count++;
-    else map.set(key, { label, count: 1 });
-}
-
-function toOptions(map: Map<string, { label: string; count: number }>) {
-    return [...map.entries()]
-        .sort((a, b) => b[1].count - a[1].count || a[1].label.localeCompare(b[1].label))
-        .map(([value, { label, count }]) => ({ value, label, total: count }));
-}
-
 function toggleInSet(setter: React.Dispatch<React.SetStateAction<Set<string>>>, value: string) {
     setter((prev) => {
         const next = new Set(prev);
@@ -121,10 +112,6 @@ function toggleInSet(setter: React.Dispatch<React.SetStateAction<Set<string>>>, 
 }
 
 export default function ActivitiesBrowser({
-    activities,
-    persons,
-    deals,
-    users,
     currentUserId,
     originWorkspaceId,
 }: Props) {
@@ -133,35 +120,53 @@ export default function ActivitiesBrowser({
     const t = useTranslations('ActivityPage');
     const tf = useTranslations('Filters');
     const showApiError = useApiErrorToast('ActivityPage');
+    const showPickerError = useApiErrorToast('ActivityList');
     const locale = useLocale();
     const timeZone = useTimeZone() ?? 'UTC';
     const reduce = useReducedMotion() ?? false;
     const now = useLiveNow();
 
-    const personById = useMemo(() => new Map(persons.map((p) => [p.id, p])), [persons]);
-    const dealById = useMemo(() => new Map(deals.map((d) => [d.id, d])), [deals]);
-    const userById = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
-
-    const [query, setQuery] = useState('');
-    const [creatorFilter, setCreatorFilter] = useState<Set<string>>(new Set());
-    const [personFilter, setPersonFilter] = useState<Set<string>>(new Set());
-    const [dealFilter, setDealFilter] = useState<Set<string>>(new Set());
-    const [companyFilter, setCompanyFilter] = useState<Set<string>>(new Set());
+    const searchParams = useSearchParams();
+    const urlPreference = searchParams.get('type');
+    const listFilters = useActivityListFilters();
+    const { personFilter, setPersonFilter, dealFilter, setDealFilter, companyFilter, setCompanyFilter } = listFilters;
+    const [creatorFilter, setCreatorFilter] = [listFilters.memberFilter, listFilters.setMemberFilter];
     const [filter, setFilter] = useScopedViewPreference<Filter>({
         storageKey: FILTER_STORAGE_KEY,
         userId: currentUserId,
         workspaceId: activeWorkspaceId,
-        initialValue: null,
-        fallback: 'all',
+        initialValue: isFilter(urlPreference) ? urlPreference : listFilters.hasRecordContext ? 'all' : null,
+        fallback: isFilter(urlPreference) ? urlPreference : 'all',
         isValue: isFilter,
     });
+    const records = useServerRecords(getActivitiesPage, { ...listFilters.params, type: filter }, { urlSync: true, retainPreviousData: false });
+    const activities = records.items;
+    const { query, setQuery, reload } = records;
+    useEffect(() => subscribeToRecordMutations((entity) => {
+        if (entity === 'activity') reload();
+    }), [reload]);
+    const personSearch = useContactTargetSearch(true, [...records.items.map((item) => item.personId), ...personFilter].map((id) => id == null ? null : Number(id)));
+    const dealSearch = useDealTargetSearch(true, [...records.items.map((item) => item.dealId), ...dealFilter].map((id) => id == null ? null : Number(id)));
+    const memberSearch = useMemberTargetSearch(true, [currentUserId, ...records.items.map((item) => item.createdById), ...listFilters.memberFilter].map(Number));
+    const companySearch = useCompanySearch(true, [...companyFilter].map(Number));
+    const pickerError = personSearch.error ?? dealSearch.error ?? memberSearch.error ?? companySearch.error;
+    useEffect(() => {
+        if (pickerError != null) showPickerError(pickerError, 'pickerLoadFailed', 'pickerLoadFailedBody');
+    }, [pickerError, showPickerError]);
+    const persons = personSearch.contacts;
+    const deals = dealSearch.deals;
+    const users = memberSearch.users;
+    const personById = useMemo(() => new Map(persons.map((p) => [p.id, p])), [persons]);
+    const dealById = useMemo(() => new Map(deals.map((d) => [d.id, d])), [deals]);
+    const userById = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
+
     const [editing, setEditing] = useState<Activity | null>(null);
     const [creating, setCreating] = useState(false);
     const [deleting, setDeleting] = useState<Activity | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
     const returnSnapshot = useRecordReturnScroll('activities', true);
 
-    const searchParams = useSearchParams();
+    useOwnedUrlParams({ type: filter });
     const [deepLinkSettled, setDeepLinkSettled] = useState(
         () => parseDeepLinkId(searchParams.get(ACTIVITY_URL_KEY)) === null,
     );
@@ -183,97 +188,14 @@ export default function ActivitiesBrowser({
         deepLinkSettled,
     );
 
-    const typeCounts = useMemo(() => {
-        const counts: Record<Filter, number> = { all: 0, Call: 0, Email: 0, Meeting: 0, Note: 0, Other: 0 };
-        for (const a of activities) {
-            counts.all++;
-            counts[normalizeType(a.type)]++;
-        }
-        return counts;
-    }, [activities]);
+    const dimensionOptions = {
+        creators: users.map((u) => ({ value: String(u.id), label: u.displayName || u.username })),
+        persons: persons.map((p) => ({ value: String(p.id), label: p.name })),
+        deals: deals.map((d) => ({ value: String(d.id), label: d.name })),
+        companies: companySearch.companies.map((c) => ({ value: String(c.id), label: c.name })),
+    };
 
-    const weekPulse = useMemo(() => {
-        const today = startOfDayKey(now, timeZone);
-        const days = Array.from({ length: 7 }, (_, i) => ({ key: today - (6 - i) * DAY_MS, count: 0 }));
-        const index = new Map(days.map((d, i) => [d.key, i]));
-        for (const a of activities) {
-            const ts = activityTime(a);
-            if (ts === -Infinity) continue;
-            const i = index.get(startOfDayKey(ts, timeZone));
-            if (i != null) days[i].count++;
-        }
-        const total = days.reduce((sum, d) => sum + d.count, 0);
-        const max = Math.max(1, ...days.map((d) => d.count));
-        return { days, total, max, today };
-    }, [activities, now, timeZone]);
-
-    const companyIdForActivity = useCallback(
-        (a: Activity) => {
-            if (a.personId == null) return null;
-            const person = personById.get(a.personId);
-            return person?.company?.id ?? person?.companyId ?? null;
-        },
-        [personById],
-    );
-
-    const typeActivities = useMemo(
-        () => activities.filter((a) => filter === 'all' || normalizeType(a.type) === filter),
-        [activities, filter],
-    );
-
-    const dimensionOptions = useMemo(() => {
-        const creators = new Map<string, { label: string; count: number }>();
-        const persons_ = new Map<string, { label: string; count: number }>();
-        const deals_ = new Map<string, { label: string; count: number }>();
-        const companies = new Map<string, { label: string; count: number }>();
-        for (const a of typeActivities) {
-            const creator = userById.get(a.createdById);
-            if (creator) bumpOption(creators, String(a.createdById), creator.displayName || creator.username);
-            if (a.personId != null) {
-                const person = personById.get(a.personId);
-                if (person) bumpOption(persons_, String(person.id), person.name);
-            }
-            if (a.dealId != null) {
-                const deal = dealById.get(a.dealId);
-                if (deal) bumpOption(deals_, String(deal.id), deal.name);
-            }
-            const companyId = companyIdForActivity(a);
-            if (companyId != null) {
-                const company = a.personId != null ? personById.get(a.personId)?.company : undefined;
-                if (company) bumpOption(companies, String(companyId), company.name);
-            }
-        }
-        return {
-            creators: toOptions(creators),
-            persons: toOptions(persons_),
-            deals: toOptions(deals_),
-            companies: toOptions(companies),
-        };
-    }, [typeActivities, userById, personById, dealById, companyIdForActivity]);
-
-    const filtered = useMemo(() => {
-        const q = query.trim().toLowerCase();
-        return typeActivities
-            .filter((a) => {
-                if (creatorFilter.size && !creatorFilter.has(String(a.createdById))) return false;
-                if (personFilter.size && !(a.personId != null && personFilter.has(String(a.personId)))) return false;
-                if (dealFilter.size && !(a.dealId != null && dealFilter.has(String(a.dealId)))) return false;
-                if (companyFilter.size) {
-                    const companyId = companyIdForActivity(a);
-                    if (!(companyId != null && companyFilter.has(String(companyId)))) return false;
-                }
-                if (!q) return true;
-                const haystacks = [
-                    a.subject,
-                    a.notes ? noteContentToPlainText(a.notes) : null,
-                    a.personId ? personById.get(a.personId)?.name : null,
-                    a.dealId ? dealById.get(a.dealId)?.name : null,
-                    userById.get(a.createdById)?.displayName,
-                ];
-                return haystacks.some((s) => s?.toLowerCase().includes(q));
-            })
-            .sort((a, b) => activityTime(b) - activityTime(a));
-    }, [typeActivities, query, creatorFilter, personFilter, dealFilter, companyFilter, companyIdForActivity, personById, dealById, userById]);
+    const filtered = activities;
 
     const groups = useMemo(() => {
         const today = startOfDayKey(now, timeZone);
@@ -328,7 +250,7 @@ export default function ActivitiesBrowser({
             await deleteActivity(deleting.id);
             toastSuccess(t('toastDeleted'));
             setDeleting(null);
-            router.refresh();
+            records.reload();
         } catch (err) {
             showApiError(err, 'toastFailedDelete');
         } finally {
@@ -346,7 +268,6 @@ export default function ActivitiesBrowser({
     const dimensionsActive =
         creatorFilter.size > 0 || personFilter.size > 0 || dealFilter.size > 0 || companyFilter.size > 0;
     const emptyMessage = query.trim() || filter !== 'all' || dimensionsActive ? t('emptyFiltered') : t('empty');
-    const hasAny = activities.length > 0;
 
     const labelFor = (options: { value: string; label: string }[], value: string) =>
         options.find((o) => o.value === value)?.label ?? value;
@@ -386,12 +307,6 @@ export default function ActivitiesBrowser({
                     />
                 </Rise>
 
-                {hasAny && (
-                    <Rise delay={0.06}>
-                        <WeekPulse pulse={weekPulse} reduce={reduce} t={t} />
-                    </Rise>
-                )}
-
                 <Rise delay={0.12}>
                     <div className="grid grid-cols-1 gap-6 md:grid-cols-[200px_minmax(0,1fr)] md:gap-10">
                         <aside className="md:sticky md:top-6 md:self-start">
@@ -405,7 +320,7 @@ export default function ActivitiesBrowser({
                                         Icon={f === 'all' ? Squares2X2Icon : TYPE_META[f].Icon}
                                         tint={f === 'all' ? undefined : TYPE_META[f].chip}
                                         label={f === 'all' ? t('filterAll') : t(`type${f}` as 'typeCall')}
-                                        count={typeCounts[f]}
+                                        count={filter === f ? records.total : undefined}
                                         active={filter === f}
                                         reduce={reduce}
                                         onClick={() => setFilter(f)}
@@ -433,11 +348,12 @@ export default function ActivitiesBrowser({
                                     />
                                 }
                             >
-                                {dimensionOptions.creators.length > 0 && (
+                                {(
                                     <MultiSelectFilter
                                         label={tf('creator')}
                                         ariaLabel={tf('creator')}
                                         options={dimensionOptions.creators}
+                                        search={{ value: memberSearch.query, onChange: memberSearch.onInputValueChange, state: memberSearch.serverSearch }}
                                         selected={creatorFilter}
                                         onToggle={(v) => toggleInSet(setCreatorFilter, v)}
                                         onClear={() => setCreatorFilter(new Set())}
@@ -445,11 +361,12 @@ export default function ActivitiesBrowser({
                                         scroll
                                     />
                                 )}
-                                {dimensionOptions.persons.length > 0 && (
+                                {(
                                     <MultiSelectFilter
                                         label={tf('contact')}
                                         ariaLabel={tf('contact')}
                                         options={dimensionOptions.persons}
+                                        search={{ value: personSearch.query, onChange: personSearch.onInputValueChange, state: personSearch.serverSearch }}
                                         selected={personFilter}
                                         onToggle={(v) => toggleInSet(setPersonFilter, v)}
                                         onClear={() => setPersonFilter(new Set())}
@@ -457,11 +374,12 @@ export default function ActivitiesBrowser({
                                         scroll
                                     />
                                 )}
-                                {dimensionOptions.deals.length > 0 && (
+                                {(
                                     <MultiSelectFilter
                                         label={tf('deal')}
                                         ariaLabel={tf('deal')}
                                         options={dimensionOptions.deals}
+                                        search={{ value: dealSearch.query, onChange: dealSearch.onInputValueChange, state: dealSearch.serverSearch }}
                                         selected={dealFilter}
                                         onToggle={(v) => toggleInSet(setDealFilter, v)}
                                         onClear={() => setDealFilter(new Set())}
@@ -469,11 +387,12 @@ export default function ActivitiesBrowser({
                                         scroll
                                     />
                                 )}
-                                {dimensionOptions.companies.length > 0 && (
+                                {(
                                     <MultiSelectFilter
                                         label={tf('company')}
                                         ariaLabel={tf('company')}
                                         options={dimensionOptions.companies}
+                                        search={{ value: companySearch.query, onChange: companySearch.onInputValueChange, state: companySearch.serverSearch }}
                                         selected={companyFilter}
                                         onToggle={(v) => toggleInSet(setCompanyFilter, v)}
                                         onClear={() => setCompanyFilter(new Set())}
@@ -482,7 +401,9 @@ export default function ActivitiesBrowser({
                                     />
                                 )}
                             </FilterBar>
-                            {isEmpty ? (
+                            <ActivityListPagination page={records.page} size={records.size} total={records.total} loading={records.loading} onPageChange={records.setPage} />
+                            <RecordListState error={records.error} loading={records.loading} hasRecords={activities.length > 0} onRetry={records.reload}>
+                            {records.loading && !activities.length ? null : isEmpty ? (
                                 <ActivityEmptyState filtered={!!query.trim() || filter !== 'all'} message={emptyMessage} />
                             ) : (
                                 <ul className="relative">
@@ -539,6 +460,7 @@ export default function ActivitiesBrowser({
                                     </AnimatePresence>
                                 </ul>
                             )}
+                            </RecordListState>
                         </div>
                     </div>
                 </Rise>
@@ -549,7 +471,7 @@ export default function ActivitiesBrowser({
                     activity={editing}
                     open={!!editing}
                     onOpenChange={(open) => {
-                        if (!open) setEditing(null);
+                        if (!open) { setEditing(null); records.reload(); }
                     }}
                     persons={persons}
                     deals={deals}
@@ -581,45 +503,6 @@ export default function ActivitiesBrowser({
     );
 }
 
-function WeekPulse({
-    pulse,
-    reduce,
-    t,
-}: {
-    pulse: { days: { key: number; count: number }[]; total: number; max: number; today: number };
-    reduce: boolean;
-    t: ReturnType<typeof useTranslations>;
-}) {
-    return (
-        <div className="flex items-center gap-5 rounded-2xl border border-border bg-card p-4">
-            <div className="shrink-0">
-                <div className="text-2xl font-semibold tabular-nums text-foreground">{pulse.total}</div>
-                <div className="mt-0.5 text-xs font-medium text-muted-foreground">{t('weekTotalLabel')}</div>
-            </div>
-            <div
-                className="ml-auto flex h-10 items-end gap-1.5"
-                role="img"
-                aria-label={t('weekPulseAria', { count: pulse.total })}
-            >
-                {pulse.days.map((day, i) => {
-                    const isToday = day.key === pulse.today;
-                    const height = Math.max(0.1, day.count / pulse.max) * 40;
-                    return (
-                        <motion.span
-                            key={day.key}
-                            className={cn('block w-2 rounded-full', isToday ? 'bg-brand' : 'bg-brand/35')}
-                            style={{ height, transformOrigin: 'bottom' }}
-                            initial={reduce ? false : { scaleY: 0 }}
-                            animate={{ scaleY: 1 }}
-                            transition={{ duration: reduce ? 0 : 0.5, delay: reduce ? 0 : i * 0.04, ease: EASE_OUT }}
-                        />
-                    );
-                })}
-            </div>
-        </div>
-    );
-}
-
 function FilterButton({
     Icon,
     tint,
@@ -632,7 +515,7 @@ function FilterButton({
     Icon: IconType;
     tint?: string;
     label: string;
-    count: number;
+    count?: number;
     active: boolean;
     reduce: boolean;
     onClick: () => void;
@@ -660,7 +543,7 @@ function FilterButton({
                 <span className={cn('truncate', active && 'font-medium')}>{label}</span>
             </span>
             <span className={cn('relative z-10 shrink-0 text-xs tabular-nums', active ? 'text-brand-text/70' : 'text-muted-foreground')}>
-                {count}
+                {count ?? ''}
             </span>
         </button>
     );
@@ -671,7 +554,7 @@ type TimelineRowProps = {
     reduce: boolean;
     connectUp: boolean;
     connectDown: boolean;
-    person?: Contact;
+    person?: ContactPickerOption;
     deal?: Deal;
     creator?: User;
     time: string;

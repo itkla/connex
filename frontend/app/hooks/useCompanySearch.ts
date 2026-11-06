@@ -82,6 +82,7 @@ export function useCompanySearch(
     }, [enabled, normalizedQuery, selectedKey, stableSelectedIds]);
 
     return {
+        query,
         companies: mergeCompanies(result?.companies ?? [], seeds),
         options: current?.options ?? EMPTY_COMPANIES,
         serverSearch: createServerPickerSearch(normalizedQuery, current ? { query: current.query, items: current.options } : null),

@@ -4,28 +4,35 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ComboboxRootChangeEventDetails } from '@base-ui/react/combobox';
 
 import {
-    getContactById,
+    getContactReferences,
     getContactsPage,
     getDealById,
     getDealsPage,
+    getUserOptions,
+    getUserById,
 } from '@/app/lib/api';
 import { createServerPickerSearch, pickerQueryKey } from '@/lib/server-picker-search';
-import type { Contact, Deal, Page } from '@/app/lib/types';
+import type { ContactPickerOption, Deal, Page, User } from '@/app/lib/types';
 
 const SEARCH_SIZE = 50;
 const SEARCH_DELAY_MS = 200;
 const EMPTY_IDS: Array<number | null | undefined> = [];
-const EMPTY_CONTACTS: Contact[] = [];
+const EMPTY_CONTACTS: ContactPickerOption[] = [];
 const EMPTY_DEALS: Deal[] = [];
+const EMPTY_USERS: User[] = [];
 
-type RecordTarget = { id: number; name: string };
+type RecordTarget = { id: number; name?: string; displayName?: string; username?: string };
+
+function targetLabel(target: RecordTarget): string {
+    return target.name ?? target.displayName ?? target.username ?? '';
+}
 
 function mergeTargets<T extends RecordTarget>(...groups: T[][]): T[] {
     const byId = new Map<number, T>();
     for (const group of groups) {
         for (const target of group) byId.set(target.id, target);
     }
-    return [...byId.values()].sort((left, right) => left.name.localeCompare(right.name));
+    return [...byId.values()].sort((left, right) => targetLabel(left).localeCompare(targetLabel(right)));
 }
 
 function selectedKey(ids: Array<number | null | undefined>): string {
@@ -39,7 +46,7 @@ function useRecordTargetSearch<T extends RecordTarget>(
     ids: Array<number | null | undefined>,
     seeds: T[],
     loadPage: (query: string, signal: AbortSignal) => Promise<Page<T>>,
-    loadById: (id: number, signal: AbortSignal) => Promise<T>,
+    loadByIds: (ids: number[], signal: AbortSignal) => Promise<T[]>,
 ) {
     const [query, setQuery] = useState('');
     const [targets, setTargets] = useState<T[]>(seeds);
@@ -58,19 +65,11 @@ function useRecordTargetSearch<T extends RecordTarget>(
         if (!enabled) return;
         const controller = new AbortController();
         const timer = window.setTimeout(() => {
-            const hydrated: T[] = [];
             Promise.all([
                 loadPage(normalizedQuery, controller.signal),
-                Promise.all(stableIds.map((id) =>
-                    loadById(id, controller.signal).then(
-                        (target) => {
-                            hydrated.push(target);
-                        },
-                        () => undefined,
-                    ),
-                )),
+                loadByIds(stableIds, controller.signal),
             ])
-                .then(([page]) => {
+                .then(([page, hydrated]) => {
                     if (controller.signal.aborted) return;
                     setResult({ query: normalizedQuery, idsKey, items: page.items, error: null });
                     setTargets((current) => {
@@ -91,9 +90,10 @@ function useRecordTargetSearch<T extends RecordTarget>(
             window.clearTimeout(timer);
             controller.abort();
         };
-    }, [enabled, normalizedQuery, idsKey, stableIds, stableIdSet, seeds, loadPage, loadById]);
+    }, [enabled, normalizedQuery, idsKey, stableIds, stableIdSet, seeds, loadPage, loadByIds]);
 
     return {
+        query,
         targets,
         serverSearch,
         loading: enabled && serverSearch.pending,
@@ -107,27 +107,31 @@ function useRecordTargetSearch<T extends RecordTarget>(
 const loadContactsPage = (query: string, signal: AbortSignal) =>
     getContactsPage({ q: query || undefined, size: SEARCH_SIZE }, { signal });
 
-const loadContactById = (id: number, signal: AbortSignal) =>
-    getContactById(id, { signal });
+const loadContactsByIds = (ids: number[], signal: AbortSignal) =>
+    getContactReferences(ids, { signal });
 
 const loadDealsPage = (query: string, signal: AbortSignal) =>
     getDealsPage({ q: query || undefined, size: SEARCH_SIZE }, { signal });
 
-const loadDealById = (id: number, signal: AbortSignal) =>
-    getDealById(id, { signal });
+async function loadIndividually<T>(ids: number[], signal: AbortSignal, load: (id: number, init: RequestInit) => Promise<T>) {
+    const targets = await Promise.all(ids.map((id) => load(id, { signal }).catch(() => null)));
+    return targets.filter((target) => target !== null);
+}
+
+const loadDealsByIds = (ids: number[], signal: AbortSignal) => loadIndividually(ids, signal, getDealById);
 
 /** Provides open-only, debounced, server-paged contact targets while retaining selected records. */
 export function useContactTargetSearch(
     enabled: boolean,
     ids: Array<number | null | undefined> = EMPTY_IDS,
-    seeds: Contact[] = EMPTY_CONTACTS,
+    seeds: ContactPickerOption[] = EMPTY_CONTACTS,
 ) {
-    const result = useRecordTargetSearch(
+    const result = useRecordTargetSearch<ContactPickerOption>(
         enabled,
         ids,
         seeds,
         loadContactsPage,
-        loadContactById,
+        loadContactsByIds,
     );
     return { ...result, contacts: result.targets };
 }
@@ -143,7 +147,23 @@ export function useDealTargetSearch(
         ids,
         seeds,
         loadDealsPage,
-        loadDealById,
+        loadDealsByIds,
     );
     return { ...result, deals: result.targets };
+}
+
+const loadMembersPage = async (query: string, signal: AbortSignal) => {
+    const items = await getUserOptions(query, { signal });
+    return { items, total: items.length };
+};
+const loadMembersByIds = (ids: number[], signal: AbortSignal) => loadIndividually(ids, signal, getUserById);
+
+/** Provides bounded active-member search while retaining the selected assignees or creators. */
+export function useMemberTargetSearch(
+    enabled: boolean,
+    ids: Array<number | null | undefined> = EMPTY_IDS,
+    seeds: User[] = EMPTY_USERS,
+) {
+    const result = useRecordTargetSearch(enabled, ids, seeds, loadMembersPage, loadMembersByIds);
+    return { ...result, users: result.targets };
 }
