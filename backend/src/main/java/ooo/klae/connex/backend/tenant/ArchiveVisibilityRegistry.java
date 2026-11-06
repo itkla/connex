@@ -171,6 +171,9 @@ public final class ArchiveVisibilityRegistry {
                 + "`companyJoin` drops an archived employer from the contact's company projection; "
                 + "only the browser page/count/ids statements opt into the archived set, owned-only, "
                 + "so it can be reviewed and restored.");
+        declare(entries, "MyWorkReadMapper", ArchiveStrategy.EXCLUDE_ARCHIVED,
+            "Personal relationship counts and display candidates exclude archived contacts before "
+                + "aggregating their warmth or selecting bounded display ids.");
         declare(entries, "CompanyMapper", ArchiveStrategy.ARCHIVE_TOGGLE,
             "The shared `visible` fragment excludes archived companies from every ordinary read; only "
                 + "the browser page/count/ids statements opt into the archived set, owned-only. "

@@ -70,6 +70,28 @@ Per-surface deviations are product decisions, not precedent for inventing a new 
 
 ## Signed-off adaptations
 
+### My Work
+
+`/me` is the personal daily surface. Its existing source-owned queue streams independently of
+relationship intelligence, deal KPIs, attention panels, the pulse, and recent history. Every section
+keeps failed, permission-denied, and genuinely empty reads distinct; Retry refreshes the server read,
+and an expired session follows the sign-in flow. Previously loaded values never substitute for a
+failed or denied section.
+
+Supporting reads use `/api/my-work/{relationships,deal-kpis,risks,pulse,history}`. The server resolves
+the active workspace and current actor; callers cannot select another member. Personal relationships
+are active, processable contacts owned by that member and visible in the active workspace, including
+shared-in contacts under the contact list's canonical `scope=me` visibility and organization ceiling.
+Full-corpus warmth counts are aggregated in SQL; only the warmest 18 and the six most urgent cooling
+contacts are hydrated. History loads the latest 25 assigned tasks, 25 authored activities, and 25
+visible authored note previews, with the
+existing note continuation. The 84-day UTC pulse remains complete independently of those previews,
+using activity timestamps, completed-task update timestamps, and visible-note creation timestamps.
+Risk ranking retains the existing 1,000-candidate interactive ceiling; overflow shows unavailable
+guidance instead of an incomplete all-clear. Currency changes re-fetch the personal KPI partition,
+preserve other URL parameters, and acknowledge the pending navigation. The reporting window and
+currency semantics remain those in `PRODUCT.md`.
+
 ### Pipeline setup and order
 
 When New deal has no pipelines, offer pipeline creation in a nested responsive dialog and retain

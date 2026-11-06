@@ -38,9 +38,9 @@ function averageCycle(period: Period): number {
 }
 
 /**
- * Aggregates authorized personal deals in one currency using Analytics' calendar windows,
- * Monday buckets, baseline eligibility, and UTC calendar-day cycle lengths (MySQL DATEDIFF).
- * Personal calculations remain available to members whose role cannot narrow the Analytics API.
+ * Reference calculation for the currency regression fixtures introduced with #2267.
+ * Pins calendar windows, Monday buckets, baseline eligibility, and UTC calendar-day cycles
+ * independently of the server aggregates now used by My Work.
  */
 export function personalDealKpis(deals: Deal[], currency: string, window: AnalyticsWindow, timezone: string): DealKpis {
     const current = emptyPeriod();

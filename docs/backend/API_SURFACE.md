@@ -77,6 +77,19 @@ non-CORS requests. This is not an end-to-end token, tenant-interceptor, provider
 SSO ceremony test. `/api/v1` and framework protocol routes retain their dedicated tests and are not
 counted by this sentinel test. No alternate port, proxy deployment, or production traffic is tested.
 
+## My Work supporting reads
+
+Authenticated `GET /api/my-work/history`, `/pulse`, `/relationships`, `/deal-kpis`, and `/risks`
+resolve the caller and active workspace in `MyWorkReadService`. No user id, member selection, or
+workspace query parameter changes that scope. These are personal projections, separate from the
+administrator-only member-scoping controls on the Analytics endpoints. `deal-kpis` accepts a
+currency from the caller's own currency buckets and otherwise selects the most common currency
+(alphabetical tie-break, USD when empty). It delegates to the existing calendar-window KPI service
+for the latest 90 workspace-local dates and ISO-week trends, preserving all previous-period and
+currency boundaries. Supporting-query failures propagate to the section boundary.
+
+See [the My Work presentation and bounds contract](../frontend/PRODUCT_GRAMMAR.md#my-work).
+
 ## Note link updates
 
 `PUT /api/notes/{id}` distinguishes an omitted `person` or `deal` property from explicit
