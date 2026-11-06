@@ -32,6 +32,7 @@ import { toastError, toastSuccess } from '@/app/lib/toast';
 import { compareByColor, copyToClipboard, readableTextColor } from '@/app/lib/utils';
 import type { Tag } from '@/app/lib/types';
 import Rise from '@/app/components/motion/Rise';
+import TagMembersSheet from '@/app/components/library/tags/TagMembersSheet';
 import TagDialog from '@/app/components/library/tags/TagDialog';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import { PageHeader } from '@/app/components/PageHeader';
@@ -66,6 +67,7 @@ export default function TagsBrowser({ tags: initialTags }: Props) {
 
     const [tags, setTags] = useState<Tag[]>(initialTags);
     const [query, setQuery] = useState('');
+    const [memberTag, setMemberTag] = useState<Tag | null>(null);
     const [sort, setSort] = useState<SortKey>('color');
 
     const [dialogOpen, setDialogOpen] = useState(false);
@@ -221,6 +223,7 @@ export default function TagsBrowser({ tags: initialTags }: Props) {
                                 key={tag.id}
                                 tag={tag}
                                 reduce={reduce}
+                                onOpen={() => setMemberTag(tag)}
                                 onEdit={() => openEdit(tag)}
                                 onCopy={() => handleCopy(tag)}
                                 onDelete={() => setDeletingTag(tag)}
@@ -234,6 +237,8 @@ export default function TagsBrowser({ tags: initialTags }: Props) {
                 </ul>
             )}
             </Rise>
+
+            {memberTag ? <TagMembersSheet key={memberTag.id} tag={memberTag} onClose={() => setMemberTag(null)} /> : null}
 
             <TagDialog
                 open={dialogOpen}
@@ -276,13 +281,14 @@ export default function TagsBrowser({ tags: initialTags }: Props) {
 type TileProps = {
     tag: Tag;
     reduce: boolean;
+    onOpen: () => void;
     onEdit: () => void;
     onCopy: () => void;
     onDelete: () => void;
     t: ReturnType<typeof useTranslations>;
 };
 
-function TagTile({ tag, reduce, onEdit, onCopy, onDelete, t }: TileProps) {
+function TagTile({ tag, reduce, onOpen, onEdit, onCopy, onDelete, t }: TileProps) {
     const ink = readableTextColor(tag.color);
 
     return (
@@ -294,9 +300,9 @@ function TagTile({ tag, reduce, onEdit, onCopy, onDelete, t }: TileProps) {
             >
                 <motion.button
                     type="button"
-                    onClick={onEdit}
+                    onClick={onOpen}
                     whileTap={reduce ? undefined : { scale: 0.98 }}
-                    aria-label={t('editAria', { name: tag.name })}
+                    aria-label={t('membersAria', { name: tag.name })}
                     className="flex h-24 w-full items-end p-3 text-left"
                     style={{ backgroundColor: tag.color }}
                 >

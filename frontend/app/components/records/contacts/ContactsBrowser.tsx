@@ -24,6 +24,7 @@ import { useRecordDensity } from '@/app/hooks/useRecordDensity';
 import { isStaleRecordError } from '@/app/lib/recordEditConflict';
 import { useRecordEditConflict } from '@/app/hooks/useRecordEditConflict';
 import ContactEditConflictDialog from './ContactEditConflictDialog';
+import { contactWorkflowScope } from './contactWorkflowScope';
 import { contactDraftChanged, reconcileSavedContactDraft, submitContactDraftUpdate, toContactDraft as toDraft } from './contactEditConflict';
 import { useInlineEdit } from '@/app/hooks/useInlineEdit';
 import ColumnVisibilityMenu from '@/app/components/records/ColumnVisibilityMenu';
@@ -100,6 +101,7 @@ function withoutArchived(state: FilterState): FilterState {
 }
 /** Every server filter the browser derives from its filter state, shared by the page, ids, and export reads. */
 type ContactFilterParams = WarmthFilterParams & {
+    tagIds?: number[];
     companies?: string[];
     titles?: string[];
     noCompany?: boolean;
@@ -164,6 +166,11 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
             .filter((state): state is ContactFirstResponseState => state !== null);
         const params: ContactFilterParams = { ...warmthRequestParams(filterState) };
         if (companies.length) params.companies = companies;
+        const tagIds = (filterState.tag ?? []).map((key) => {
+            const id = Number(key);
+            return Number.isSafeInteger(id) && id > 0 ? id : -1;
+        });
+        if (tagIds.length) params.tagIds = tagIds;
         if (titles.length) params.titles = titles;
         if (company.includes(FILTER_EMPTY)) params.noCompany = true;
         if (stages.length) params.lifecycleStages = stages;
@@ -250,6 +257,9 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
         if (scopeChanged && !allMatchingActive) clearSelection();
     }, [selectionScope, allMatchingActive, clearSelection]);
 
+    const [tags, setTags] = useState<Tag[]>([]);
+    useEffect(() => { getTags().then(setTags).catch(() => setTags([])); }, []);
+
     const [personFacets, setPersonFacets] = useState<PersonFacets | null>(null);
     const loadFacets = useCallback(() => {
         getPersonFacets({ warmth: true })
@@ -281,6 +291,11 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
     const facets = useMemo<ColumnFilterFacet[]>(() => {
         if (!personFacets) return [];
         const out: ColumnFilterFacet[] = [];
+        const tagOptions = tags.map((tag) => ({ key: String(tag.id), label: tag.name }));
+        for (const key of filterState.tag ?? []) {
+            if (!tagOptions.some((option) => option.key === key)) tagOptions.push({ key, label: t('tagUnavailable') });
+        }
+        if (tagOptions.length) out.push({ key: 'tag', label: t('filterTag'), options: tagOptions });
         const companyOptions = personFacets.companies.map((name) => ({ key: name, label: name }));
         if (personFacets.hasNoCompany) companyOptions.push({ key: FILTER_EMPTY, label: t('filterNoCompany') });
         if (companyOptions.length) out.push({ key: 'company', label: t('columnCompany'), options: companyOptions });
@@ -335,7 +350,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
             out.push({ key: WARMTH_FILTER_KEY, label: t('columnWarmth'), options: warmthOptions });
         }
         return out;
-    }, [personFacets, filterState, t, tl, tp, tsla, ttemp]);
+    }, [personFacets, tags, filterState, t, tl, tp, tsla, ttemp]);
 
     const [members, setMembers] = useState<WorkspaceMember[]>([]);
     useEffect(() => { getActiveWorkspaceMembers().then(setMembers).catch(() => setMembers([])); }, []);
@@ -415,9 +430,6 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
     const [isSaving, setIsSaving] = useState(false);
     const [changeCompanyOpen, setChangeCompanyOpen] = useState(false);
     const [isClearingCompany, setIsClearingCompany] = useState(false);
-
-    const [tags, setTags] = useState<Tag[]>([]);
-    useEffect(() => { getTags().then(setTags).catch(() => setTags([])); }, []);
 
     const [bulkTag, setBulkTag] = useState<{ open: boolean; mode: 'add' | 'remove' }>({ open: false, mode: 'add' });
     const [bulkOwnerOpen, setBulkOwnerOpen] = useState(false);
@@ -862,22 +874,22 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
     const workflowSelection = useMemo(() => {
         if (selectedIds.size === 0) return null;
         const warmthNarrowed = hasWarmthFilter(filterState);
-        const canResolveFilter = allMatchingActive && !showArchived && !warmthNarrowed;
-        const scope = allMatchingActive && activeSavedViewId !== null && !warmthNarrowed
-            ? { kind: 'saved_view' as const, savedViewId: activeSavedViewId }
-            : canResolveFilter
-            ? {
-                kind: 'filter_match' as const,
-                filter: {
-                    query: query.trim() || undefined,
-                    companies: filterParams.companies,
-                    titles: filterParams.titles,
-                    noCompany: filterParams.noCompany,
-                    memberScope: filterParams.scope,
-                    memberIds: filterParams.memberIds,
-                },
-            }
-            : { kind: 'explicit_selection' as const, recordIds: selectedContactIds };
+        const scope = contactWorkflowScope({
+            allMatchingActive,
+            activeSavedViewId,
+            showArchived,
+            warmthNarrowed,
+            tagIds: filterParams.tagIds,
+            recordIds: selectedContactIds,
+            filter: {
+                query: query.trim() || undefined,
+                companies: filterParams.companies,
+                titles: filterParams.titles,
+                noCompany: filterParams.noCompany,
+                memberScope: filterParams.scope,
+                memberIds: filterParams.memberIds,
+            },
+        });
         return {
             type: 'person' as const,
             ids: selectedIds,

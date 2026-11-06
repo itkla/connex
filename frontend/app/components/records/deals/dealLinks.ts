@@ -69,7 +69,7 @@ export function pipelineDealsHref(pipelineId: number): string {
  */
 export function riskDealsHref(levels: readonly DealRiskFilterLevel[]): string {
     const selected = levels.length > 0 ? levels : DEAL_RISK_LEVELS;
-    return `${DEALS_BROWSER_PATH}?${DEAL_RISK_FILTER_KEY}=${selected.join(',')}`;
+    return `${DEALS_BROWSER_PATH}?${DEAL_RISK_FILTER_KEY}=${selected.join(',')}&${DEAL_STATUS_FILTER_KEY}=open`;
 }
 
 /**

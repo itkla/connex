@@ -57,7 +57,7 @@ class PersonServiceUnitTest {
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(mapper.countPersons(
             7, "[7,8,9]", "Security", null, null, false, MemberScope.allTeam(),
-            null, false, null, false, null, false, false, null)).thenReturn(1001L);
+            null, false, null, false, null, false, false, null, null)).thenReturn(1001L);
 
         assertThrows(BadRequestException.class,
             () -> service.getMatchingPersonIds(
@@ -66,6 +66,6 @@ class PersonServiceUnitTest {
 
         verify(mapper, never()).getPersonIdsFiltered(
             7, "[7,8,9]", "Security", null, null, false, MemberScope.allTeam(), null, false, null, false,
-            null, false, false, null, 1000);
+            null, false, false, null, 1000, null);
     }
 }

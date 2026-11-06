@@ -84,6 +84,11 @@ The core flow specs do not rely on pre-seeded credentials. The `setup-desktop` a
 
 Because each browser project registers a **fresh user and workspace**, desktop and phone runs are tenant-isolated, rerunnable, and safe to execute in parallel against a shared dev database. Throwaway users accumulate in the dev DB; that is accepted (tenant-isolated).
 
+The workspace seeder checks HTTP success before decoding a response and reports the path, status
+and bounded response body on failure. Use `seed.post` for JSON object responses and
+`seed.postEmpty` for void endpoints, including adding a contact to a deal. An empty successful
+response must not be parsed as JSON; creation endpoints must still return their record object.
+
 `campaign-metrics.spec.ts` registers a separate user and workspace for each case with empty storage
 state. Its extra contacts must stay outside the shared project workspace: adding contacts there
 can move another spec's seeded contact off its sorted first page, even when the new contacts have
@@ -241,7 +246,7 @@ Known scope cut: evidence peek and write-tool approval are still not driven from
 `note-persistence.spec.ts` covers contact mentions in both note editors after typing and on
 an immediate save, saved link preservation, response-driven header links, explicit removal
 through the dialog selectors, and unchanged body bytes during metadata edits. Its notification
-case registers two isolated accounts, completes the owner's passkey step-up, adds and accepts
+case registers two isolated accounts, completes the owner's passkey step-up, invites and accepts
 the second workspace member, then verifies a real `note.mention` notification after saving a
 member mention. The ordinary notifications spec still does not mark a real notification as read.
 
@@ -301,6 +306,12 @@ The public-docs browser case selects a category and then an article explicitly; 
 ## Ownership-offer confinement parity
 
 Slice 4o changes only the shared API confinement gate in this backend lane. Run `pnpm exec vitest run test/unit/passkeyApprovalApi.test.ts` for exact server/client method/path allowlist parity. Authenticated `GET /api/ownership-offers` and self-only `POST /api/ownership-offers/{id}/decline` remain reachable while confined; acceptance, creation and revocation require the normal privileged gate. The frontend implementation owns card/member-panel and browser coverage against [the actual backend contract](backend/OWNERSHIP_OFFERS.md). Shared/default-catalog inbox tests retain ordinary notification behavior; the self-offer card is authoritative on every catalog layout.
+
+`invitation-privacy.spec.ts` drives email invitations in English and Japanese. Pending entries stay
+address-only and outside the active member count, including after the recipient exchanges the link
+but before final acceptance. After acceptance the collaborator appears normally. The test also
+covers replacement invitations and revocation; membership fixtures redeem the same purpose-bound
+email invitation through `support/invitations.ts`.
 
 `editorNativeHistoryOrdering.test.tsx` models Chromium native Window dispatch at AT_TARGET in registration order, including a Next listener that synchronously restores the route and unmounts the editor. JSDOM's ordinary dispatch instead visits capture listeners first and cannot expose this race. The test imports the real synchronous client instrumentation before mounting Next, then checks unknown Back, indexed Back, a native-fragment source, and known Forward with its original search. Keep editing retains the draft and native warning; repeated traversal followed by Discard renders the captured destination. Removing only startup initialization must fail the regression because Next restores first. The hook's layout registration remains necessary to publish committed edits; it does not establish listener priority.
 

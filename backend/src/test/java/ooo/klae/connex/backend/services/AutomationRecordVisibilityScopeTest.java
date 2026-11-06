@@ -47,7 +47,6 @@ import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
-import ooo.klae.connex.backend.notifications.NotificationDelivery;
 import ooo.klae.connex.backend.services.RecordVisibilityScopeControlAccess.RecordVisibilityScope;
 import ooo.klae.connex.backend.services.WorkflowDefinitionValidator.CompiledWorkflow;
 import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
@@ -290,8 +289,9 @@ class AutomationRecordVisibilityScopeTest {
         return new RuleActionExecutor(
             mock(TaskService.class), mock(ActivityService.class), mock(CompanyService.class),
             mock(PersonService.class), mock(LeadResponseSlaService.class), dealService, mock(NoteService.class),
-            mock(NotificationDelivery.class), mock(TagMapper.class), mock(DealDocumentMapper.class),
-            mock(CampaignTriggeredSendService.class));
+            mock(WorkflowNotificationDeliveryService.class), mock(TagMapper.class), mock(DealDocumentMapper.class),
+            mock(CampaignTriggeredSendService.class), mock(WorkspaceService.class), mock(UserCalendarService.class),
+            mock(WorkflowTaskCreationService.class));
     }
 
     private static RuleAction changeStage(int stageId) {

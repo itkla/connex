@@ -261,11 +261,16 @@ class IdentityInvitationTrustIntegrationTest {
             .andExpect(jsonPath("$.message").value("Verify your email address before joining this workspace"));
         assertNoMembership(forged);
 
-        invite("members", address)
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.message").value("This account's email is unverified; send an invite instead"));
+        MvcResult targetedInvite = invite("members", address)
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.member").doesNotExist())
+            .andExpect(jsonPath("$.invite.email").value(address))
+            .andExpect(jsonPath("$.invite.token").isString())
+            .andReturn();
         assertNoMembership(forged);
         assertCrmDenied(browser.session());
+        acceptEmailInvite(targetedInvite, browser.session(), target.getId());
+        assertTrue(workspaceMapper.isMember(target.getId(), forged.getId()));
         User persisted = userMapper.getUserById(forged.getId());
         assertNotNull(persisted);
         assertFalse(persisted.isEmailVerified());
@@ -317,22 +322,31 @@ class IdentityInvitationTrustIntegrationTest {
                 .with(csrf().asHeader()).contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(
                     Map.of("email", account.user().getEmail(), "role", "member"))))
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.message").value("This account's email is unverified; send an invite instead"));
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.member").doesNotExist())
+            .andExpect(jsonPath("$.invite.email").value(account.user().getEmail()))
+            .andExpect(jsonPath("$.invite.token").isString());
         assertFalse(workspaceMapper.isMemberIncludingPending(second.getId(), account.user().getId()));
+        assertCrmDenied(account.session(), second.getId());
 
         verificationService.confirm(verificationTokenFor(account.user()));
         User verified = userMapper.getUserById(account.user().getId());
         assertNotNull(verified);
         assertTrue(verified.isEmailVerified());
-        mockMvc.perform(post("/api/workspaces/{id}/members", second.getId())
+        MvcResult verifiedInvite = mockMvc.perform(post("/api/workspaces/{id}/members", second.getId())
                 .session(secondSession).header("X-Workspace-Id", second.getId())
                 .with(csrf().asHeader()).contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(
                     Map.of("email", account.user().getEmail(), "role", "member"))))
-            .andExpect(result -> assertEquals(200, result.getResponse().getStatus(),
-                () -> String.valueOf(result.getResolvedException())));
-        assertTrue(workspaceMapper.isMemberIncludingPending(second.getId(), account.user().getId()));
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.member").doesNotExist())
+            .andExpect(jsonPath("$.invite.email").value(account.user().getEmail()))
+            .andExpect(jsonPath("$.invite.token").isString())
+            .andReturn();
+        assertFalse(workspaceMapper.isMemberIncludingPending(second.getId(), account.user().getId()));
+        assertCrmDenied(account.session(), second.getId());
+        acceptEmailInvite(verifiedInvite, account.session(), second.getId());
+        assertTrue(workspaceMapper.isMember(second.getId(), account.user().getId()));
     }
 
     @ParameterizedTest
@@ -387,18 +401,26 @@ class IdentityInvitationTrustIntegrationTest {
     }
 
     @Test
-    void membersEndpointRejectsUnverifiedPreregistration() throws Exception {
+    void membersEndpointIssuesScopedTokenForUnverifiedPreregistration() throws Exception {
         Account account = preregister();
 
-        invite("members", account.user().getEmail())
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.message").value("This account's email is unverified; send an invite instead"));
+        MvcResult created = invite("members", account.user().getEmail())
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.member").doesNotExist())
+            .andExpect(jsonPath("$.invite.email").value(account.user().getEmail()))
+            .andExpect(jsonPath("$.invite.token").isString())
+            .andReturn();
 
         assertNoMembership(account.user());
         mockMvc.perform(post("/api/workspaces/{id}/accept", target.getId())
                 .session(account.session()).with(csrf().asHeader()))
             .andExpect(status().isNotFound());
         assertCrmDenied(account.session());
+        acceptEmailInvite(created, account.session(), target.getId());
+        assertTrue(workspaceMapper.isMember(target.getId(), account.user().getId()));
+        User accepted = userMapper.getUserById(account.user().getId());
+        assertNotNull(accepted);
+        assertFalse(accepted.isEmailVerified());
     }
 
     @Test
@@ -928,9 +950,27 @@ class IdentityInvitationTrustIntegrationTest {
     }
 
     private void assertCrmDenied(MockHttpSession session) throws Exception {
+        assertCrmDenied(session, target.getId());
+    }
+
+    private void assertCrmDenied(MockHttpSession session, int workspaceId) throws Exception {
         mockMvc.perform(get("/api/companies/page").session(session)
-                .header("X-Workspace-Id", target.getId()))
+                .header("X-Workspace-Id", workspaceId))
             .andExpect(status().isForbidden());
+    }
+
+    private void acceptEmailInvite(MvcResult invitation, MockHttpSession session, int workspaceId) throws Exception {
+        String token = objectMapper.readTree(invitation.getResponse().getContentAsString())
+            .get("invite").get("token").asString();
+        Browser browser = bootstrap(session);
+        Flow flow = exchange("/api/invites", OneTimeLinkFlowCookie.WORKSPACE_INVITE, token, browser);
+        assertCrmDenied(browser.session(), workspaceId);
+        mockMvc.perform(post("/api/invites/accept")
+                .session(browser.session()).cookie(browser.bindingCookie(), flow.cookie())
+                .with(csrf().asHeader()).contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of("flowId", flow.id()))))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.id").value(workspaceId));
     }
 
     private Browser bootstrap(MockHttpSession session) throws Exception {

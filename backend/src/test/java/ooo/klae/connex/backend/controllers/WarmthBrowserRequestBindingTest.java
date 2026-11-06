@@ -108,10 +108,32 @@ class WarmthBrowserRequestBindingTest {
     }
 
     @Test
+    void contactTagFiltersReachPageIdsAndExportAndMalformedIdsFail() throws Exception {
+        List<Integer> tags = List.of(12, 34);
+        when(personService.queryPersonsPage(
+            any(), any(), any(), any(), any(), anyBoolean(), any(), any(), anyBoolean(), any(),
+            anyBoolean(), any(), anyBoolean(), anyBoolean(), any(), anyInt(), anyInt(), eq(tags)))
+            .thenReturn(new ooo.klae.connex.backend.dto.PageResponse<>(List.of(), 0L));
+        when(exportService.exportPersons(any(), any(), any(), anyBoolean(), any(), any(),
+            anyBoolean(), any(), anyBoolean(), any(), anyBoolean(), any(), eq(tags))).thenReturn("contacts");
+
+        persons.perform(get("/api/persons/page").param("tagIds", "12", "34")).andExpect(status().isOk());
+        persons.perform(get("/api/persons/ids").param("tagIds", "12", "34")).andExpect(status().isOk());
+        exports.perform(get("/api/exports/persons").param("tagIds", "12", "34")).andExpect(status().isOk());
+        verify(personService).queryPersonsPage(any(), any(), any(), any(), any(), anyBoolean(), any(),
+            any(), anyBoolean(), any(), anyBoolean(), any(), anyBoolean(), anyBoolean(), any(), anyInt(), anyInt(), eq(tags));
+        verify(personService).getMatchingPersonIds(any(), any(), any(), anyBoolean(), any(), any(),
+            anyBoolean(), any(), anyBoolean(), any(), anyBoolean(), anyBoolean(), any(), eq(tags));
+        verify(exportService).exportPersons(any(), any(), any(), anyBoolean(), any(), any(),
+            anyBoolean(), any(), anyBoolean(), any(), anyBoolean(), any(), eq(tags));
+        persons.perform(get("/api/persons/page").param("tagIds", "invalid")).andExpect(status().isBadRequest());
+    }
+
+    @Test
     void theContactsPageAcceptsWarmthBandsNoWarmthAndTheDecayHorizonTogether() throws Exception {
         when(personService.queryPersonsPage(
             any(), any(), any(), any(), any(), anyBoolean(), any(), any(), anyBoolean(), any(),
-            anyBoolean(), any(), anyBoolean(), anyBoolean(), any(), anyInt(), anyInt()))
+            anyBoolean(), any(), anyBoolean(), anyBoolean(), any(), anyInt(), anyInt(), eq(null)))
             .thenReturn(new ooo.klae.connex.backend.dto.PageResponse<>(List.of(), 0L));
 
         persons.perform(get("/api/persons/page")
@@ -130,7 +152,7 @@ class WarmthBrowserRequestBindingTest {
     void aWarmthSortNoLongerFailsTheContactsPage() throws Exception {
         when(personService.queryPersonsPage(
             any(), any(), any(), any(), any(), anyBoolean(), any(), any(), anyBoolean(), any(),
-            anyBoolean(), any(), anyBoolean(), anyBoolean(), any(), anyInt(), anyInt()))
+            anyBoolean(), any(), anyBoolean(), anyBoolean(), any(), anyInt(), anyInt(), eq(null)))
             .thenReturn(new ooo.klae.connex.backend.dto.PageResponse<>(List.of(), 0L));
 
         persons.perform(get("/api/persons/page").param("sort", "warmth"))
@@ -144,7 +166,7 @@ class WarmthBrowserRequestBindingTest {
     void anOrdinaryContactsPageResolvesNoWarmthFilterAtAll() throws Exception {
         when(personService.queryPersonsPage(
             any(), any(), any(), any(), any(), anyBoolean(), any(), any(), anyBoolean(), any(),
-            anyBoolean(), any(), anyBoolean(), anyBoolean(), any(), anyInt(), anyInt()))
+            anyBoolean(), any(), anyBoolean(), anyBoolean(), any(), anyInt(), anyInt(), eq(null)))
             .thenReturn(new ooo.klae.connex.backend.dto.PageResponse<>(List.of(), 0L));
 
         persons.perform(get("/api/persons/page").param("sort", "name"))
@@ -157,7 +179,7 @@ class WarmthBrowserRequestBindingTest {
     void theNoHistoryFacetKeyIsAcceptedAsABandValue() throws Exception {
         when(personService.queryPersonsPage(
             any(), any(), any(), any(), any(), anyBoolean(), any(), any(), anyBoolean(), any(),
-            anyBoolean(), any(), anyBoolean(), anyBoolean(), any(), anyInt(), anyInt()))
+            anyBoolean(), any(), anyBoolean(), anyBoolean(), any(), anyInt(), anyInt(), eq(null)))
             .thenReturn(new ooo.klae.connex.backend.dto.PageResponse<>(List.of(), 0L));
 
         persons.perform(get("/api/persons/page").param("warmthBands", "warm", "__none__"))
@@ -172,7 +194,7 @@ class WarmthBrowserRequestBindingTest {
     void commaJoinedBandsBindAsSeparateValues() throws Exception {
         when(personService.queryPersonsPage(
             any(), any(), any(), any(), any(), anyBoolean(), any(), any(), anyBoolean(), any(),
-            anyBoolean(), any(), anyBoolean(), anyBoolean(), any(), anyInt(), anyInt()))
+            anyBoolean(), any(), anyBoolean(), anyBoolean(), any(), anyInt(), anyInt(), eq(null)))
             .thenReturn(new ooo.klae.connex.backend.dto.PageResponse<>(List.of(), 0L));
 
         persons.perform(get("/api/persons/page").param("warmthBands", "hot,cool,__none__"))
@@ -193,7 +215,7 @@ class WarmthBrowserRequestBindingTest {
             any(), anyBoolean(), any(),
             anyBoolean(), any(),
             anyBoolean(), anyBoolean(),
-            any(), anyInt(), anyInt());
+            any(), anyInt(), anyInt(), eq(null));
     }
 
     @Test
@@ -203,7 +225,7 @@ class WarmthBrowserRequestBindingTest {
 
         verify(personService).getMatchingPersonIds(
             eq(null), eq(null), eq(null), eq(false), any(), eq(null), eq(false), eq(null), eq(false),
-            eq(null), eq(false), eq(false), any(WarmthFilter.class));
+            eq(null), eq(false), eq(false), any(WarmthFilter.class), eq(null));
     }
 
     @Test
@@ -269,11 +291,11 @@ class WarmthBrowserRequestBindingTest {
         ArgumentCaptor<WarmthFilter> captor = ArgumentCaptor.forClass(WarmthFilter.class);
         verify(personService).getMatchingPersonIds(
             eq(null), eq(null), eq(null), eq(false), any(), eq(null), eq(false), eq(null), eq(false),
-            eq(null), eq(false), eq(false), captor.capture());
+            eq(null), eq(false), eq(false), captor.capture(), eq(null));
         assertBands(captor.getValue(), Set.of(), false, 60);
 
         when(exportService.exportPersons(any(), any(), any(), anyBoolean(), any(), any(),
-            anyBoolean(), any(), anyBoolean(), any(), anyBoolean(), any())).thenReturn("contacts");
+            anyBoolean(), any(), anyBoolean(), any(), anyBoolean(), any(), eq(null))).thenReturn("contacts");
         when(exportService.exportCompanies(any(), any(), anyBoolean(), any(), any(), any()))
             .thenReturn("companies");
         exports.perform(get("/api/exports/persons").param("goesColdWithinDays", "60"))
@@ -284,7 +306,7 @@ class WarmthBrowserRequestBindingTest {
         ArgumentCaptor<WarmthFilter> contactExport = ArgumentCaptor.forClass(WarmthFilter.class);
         verify(exportService).exportPersons(
             eq(null), eq(null), eq(null), eq(false), any(), eq(null), eq(false), eq(null),
-            eq(false), eq(null), eq(false), contactExport.capture());
+            eq(false), eq(null), eq(false), contactExport.capture(), eq(null));
         assertBands(contactExport.getValue(), Set.of(), false, 60);
         ArgumentCaptor<WarmthFilter> companyExport = ArgumentCaptor.forClass(WarmthFilter.class);
         verify(exportService).exportCompanies(
@@ -301,7 +323,7 @@ class WarmthBrowserRequestBindingTest {
 
         verify(personService).getMatchingPersonIds(
             any(), any(), any(), anyBoolean(), any(), any(), anyBoolean(), any(), anyBoolean(),
-            any(), anyBoolean(), anyBoolean(), any(WarmthFilter.class));
+            any(), anyBoolean(), anyBoolean(), any(WarmthFilter.class), eq(null));
         verify(companyService).getMatchingCompanyIds(
             any(), any(), anyBoolean(), any(), any(), anyBoolean(), any(WarmthFilter.class));
     }
@@ -313,7 +335,7 @@ class WarmthBrowserRequestBindingTest {
 
         verify(personService, never()).getMatchingPersonIds(
             any(), any(), any(), anyBoolean(), any(), any(), anyBoolean(), any(), anyBoolean(),
-            any(), anyBoolean(), anyBoolean(), any());
+            any(), anyBoolean(), anyBoolean(), any(), eq(null));
     }
 
     /** The resolver matched the warmth sort case-insensitively while the mapper matched exactly. */
@@ -321,7 +343,7 @@ class WarmthBrowserRequestBindingTest {
     void anUppercaseWarmthSortIsCanonicalizedBeforeReachingTheMapperWhitelist() throws Exception {
         when(personService.queryPersonsPage(
             any(), any(), any(), any(), any(), anyBoolean(), any(), any(), anyBoolean(), any(),
-            anyBoolean(), any(), anyBoolean(), anyBoolean(), any(), anyInt(), anyInt()))
+            anyBoolean(), any(), anyBoolean(), anyBoolean(), any(), anyInt(), anyInt(), eq(null)))
             .thenReturn(new ooo.klae.connex.backend.dto.PageResponse<>(List.of(), 0L));
 
         persons.perform(get("/api/persons/page").param("sort", "WARMTH"))
@@ -330,7 +352,7 @@ class WarmthBrowserRequestBindingTest {
         ArgumentCaptor<String> sortKey = ArgumentCaptor.forClass(String.class);
         verify(personService).queryPersonsPage(
             any(), sortKey.capture(), any(), any(), any(), anyBoolean(), any(), any(), anyBoolean(),
-            any(), anyBoolean(), any(), anyBoolean(), anyBoolean(), any(), anyInt(), anyInt());
+            any(), anyBoolean(), any(), anyBoolean(), anyBoolean(), any(), anyInt(), anyInt(), eq(null));
         assertEquals("warmth", sortKey.getValue());
     }
 
@@ -342,7 +364,7 @@ class WarmthBrowserRequestBindingTest {
             anyBoolean(), any(),
             anyBoolean(), anyBoolean(),
             captor.capture(), anyInt(),
-            anyInt());
+            anyInt(), eq(null));
         return captor.getValue();
     }
 
