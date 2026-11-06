@@ -24,6 +24,7 @@ import { cn } from '@/lib/utils';
 import { ApiError, commitImport, getCustomFieldSchema, isWorkspaceUnavailableError, previewImport, search } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { usePermission } from '@/app/hooks/usePermissions';
+import { workspaceDefaultCurrency } from '@/app/lib/currencies';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import {
@@ -136,7 +137,7 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
     };
     const reduceMotion = useReducedMotion();
     const canCreateCustomField = usePermission('CUSTOM_FIELD_MANAGE');
-    const { activeWorkspaceId } = useWorkspace();
+    const { activeWorkspaceId, activeWorkspace } = useWorkspace();
     const workspaceKey =
         requestWorkspaceKey(requestInit) || activeWorkspaceId?.toString() || '';
     const [step, setStep] = useState<Step>('upload');
@@ -508,6 +509,11 @@ export default function ImportDialog({ entity, open, onOpenChange, onImported, r
                     <DialogTitle>{t(`title.${entity}`)}</DialogTitle>
                     <DialogDescription className="sr-only">{t('description')}</DialogDescription>
                     <StepRail step={step} />
+                    {entity === 'deals' && (
+                        <p className="text-sm text-muted-foreground">
+                            {t('dealCurrencyDefault', { currency: preview?.defaultCurrency ?? workspaceDefaultCurrency(activeWorkspace) })}
+                        </p>
+                    )}
                     {parsed && (step === 'map' || step === 'review') && (
                         <p className="mt-2 text-xs text-muted-foreground">
                             {t('detectedEncoding', { encoding: t(`encoding.${parsed.encoding}`) })}

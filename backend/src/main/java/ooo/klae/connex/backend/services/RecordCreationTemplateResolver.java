@@ -394,6 +394,12 @@ public class RecordCreationTemplateResolver {
             : context.recordType() == RecordCreationRecordType.deal && "stage".equals(field.key())
                 ? dealDefaults.stage()
                 : resolveDefault(field.key(), field.defaultSpec(), context);
+        if ("currency".equals(field.key()) && defaultValue == null
+                && context.recordType() == RecordCreationRecordType.deal) {
+            defaultValue = new DefaultValue(
+                objectMapper.valueToTree(workspaceService.getCurrentDefaultCurrency()),
+                RecordCreationDefaultOrigin.policy);
+        }
         if ("company".equals(field.key()) && context.relatedCompanyId() != null) {
             defaultValue = new DefaultValue(
                 objectMapper.valueToTree(context.relatedCompanyId()),

@@ -5843,6 +5843,13 @@ export function updateWorkspaceIdentity(
     });
 }
 
+export function updateWorkspaceDefaultCurrency(id: number, defaultCurrency: string, expectedIdentityVersion: number) {
+    return patchJson<Types.WorkspaceIdentity>(`/api/workspaces/${id}/default-currency`, {
+        defaultCurrency,
+        expectedIdentityVersion,
+    });
+}
+
 export function switchWorkspace(id: number) {
     return withClientRequestIdentityReset(
         () => recoverWorkspaceSelectionResponse(

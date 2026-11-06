@@ -9,6 +9,7 @@ import { Loader2Icon } from "lucide-react";
 
 import AccessDenied from "@/app/components/AccessDenied";
 import PermissionsUnavailable from "@/app/components/PermissionsUnavailable";
+import WorkspaceCurrencyPanel from "@/app/components/settings/WorkspaceCurrencyPanel";
 import Rise from "@/app/components/motion/Rise";
 import { SettingsSection } from "@/app/components/settings/SettingsSection";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
@@ -68,6 +69,7 @@ function WorkspaceIdentityForm({ workspace }: { workspace: Workspace }) {
             name: workspace.name,
             slug: workspace.slug,
             timezone: workspace.timezone,
+            defaultCurrency: workspace.defaultCurrency,
             identityVersion: workspace.identityVersion,
         };
         const optimistic = { ...previous, name: normalizedName, timezone };
@@ -219,5 +221,8 @@ export default function WorkspaceIdentityPanel() {
         return <AccessDenied variant="inline" title={t("noAccessTitle")} body={t("noAccessBody")} />;
     }
     if (!activeWorkspace) return null;
-    return <WorkspaceIdentityForm key={activeWorkspace.id} workspace={activeWorkspace} />;
+    return <>
+        <WorkspaceIdentityForm key={activeWorkspace.id} workspace={activeWorkspace} />
+        <WorkspaceCurrencyPanel key={`currency:${activeWorkspace.id}`} workspace={activeWorkspace} />
+    </>;
 }

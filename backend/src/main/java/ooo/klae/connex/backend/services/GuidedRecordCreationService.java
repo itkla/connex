@@ -263,6 +263,9 @@ public class GuidedRecordCreationService {
                 }
             }
         }
+        if (deal.getCurrency() == null || deal.getCurrency().isBlank()) {
+            deal.setCurrency(workspaceService.getCurrentDefaultCurrency());
+        }
     }
 
     private void applyCustomOrTagsDefault(

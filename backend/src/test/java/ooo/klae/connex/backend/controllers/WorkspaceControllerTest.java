@@ -105,6 +105,17 @@ class WorkspaceControllerTest {
     }
 
     @Test
+    void currencySettingUsesAuthenticatedActorAndVersionPrecondition() {
+        var request = new ooo.klae.connex.backend.dto.UpdateWorkspaceCurrencyRequest();
+        request.setDefaultCurrency("EUR");
+        request.setExpectedIdentityVersion(4L);
+        when(workspaceService.updateDefaultCurrency(9, 7, "EUR", 4L)).thenReturn(
+            new WorkspaceIdentityDto(9, 3, "Workspace", "workspace", null, "EUR", 5L, null));
+        assertEquals("EUR", controller.updateDefaultCurrency(9, request).defaultCurrency());
+        verify(workspaceService).updateDefaultCurrency(9, 7, "EUR", 4L);
+    }
+
+    @Test
     void updateIdentityDelegatesActorAndCompleteMutableIdentity() {
         UpdateWorkspaceIdentityRequest request = new UpdateWorkspaceIdentityRequest();
         request.setName("Renamed");
@@ -113,7 +124,7 @@ class WorkspaceControllerTest {
         request.setExpectedTimezone(null);
         request.setExpectedIdentityVersion(4L);
         WorkspaceIdentityDto expected = new WorkspaceIdentityDto(
-            9, 3, "Renamed", "immutable", "Pacific/Honolulu", 5L, "2026-08-03 12:00:00");
+            9, 3, "Renamed", "immutable", "Pacific/Honolulu", null, 5L, "2026-08-03 12:00:00");
         when(workspaceService.updateIdentity(
             9, 7, "Renamed", "Pacific/Honolulu", "Original", null, 4L)).thenReturn(expected);
 

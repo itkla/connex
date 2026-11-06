@@ -75,6 +75,22 @@ class GuidedRecordCreationServiceTest {
     }
 
     @Test
+    void missingGuidedCurrencyUsesWorkspaceDefaultAndExplicitTemplateCurrencyIsPreserved() {
+        when(workspaceService.getCurrentDefaultCurrency()).thenReturn("EUR");
+        when(dealService.createReviewed(any(), eq("proof"), any(), eq(MutationAdmission.UNRESTRICTED), eq(SCOPE)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
+        GuidedDealCreateRequestDto request = new GuidedDealCreateRequestDto(
+            new GuidedDealRecordDto("Renewal", BigDecimal.TEN, null, 8, 9, null, null, "proof"),
+            null, Map.of(), List.of());
+        assertEquals("EUR", service.createDeal(request).getCurrency());
+        RecordCreationTemplateUseDto template = use(RecordCreationRecordType.deal);
+        when(augmentationService.resolvePreliminary(RecordCreationRecordType.deal, template, SCOPE))
+            .thenReturn(resolved(RecordCreationRecordType.deal, field("currency", null, true, node("GBP"))));
+        assertEquals("GBP", service.createDeal(new GuidedDealCreateRequestDto(
+            request.record(), template, Map.of(), List.of())).getCurrency());
+    }
+
+    @Test
     void personMaterializesActiveDefaultsAndDelegatesCustomFieldsAndTagsAtomically() {
         RecordCreationTemplateUseDto use = use(RecordCreationRecordType.person);
         ResolvedCreationTemplateDto resolved = resolved(

@@ -13,3 +13,8 @@ export type CurrencyCode = (typeof CURRENCY_CODES)[number];
 export function isKnownCurrency(code: string): code is CurrencyCode {
     return (CURRENCY_CODES as readonly string[]).includes(code);
 }
+
+/** Effective new-deal default; absence retains USD without guessing from locale or stored deals. */
+export function workspaceDefaultCurrency(workspace: { defaultCurrency?: string | null } | null | undefined): string {
+    return workspace?.defaultCurrency ?? 'USD';
+}

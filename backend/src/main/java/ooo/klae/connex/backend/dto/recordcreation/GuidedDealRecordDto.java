@@ -20,7 +20,7 @@ public record GuidedDealRecordDto(
     @NotBlank @Size(max = 255) String name,
     @NotNull @DecimalMin("0.00") @Digits(integer = 13, fraction = 2) @DecimalMax("9999999999999.99")
     BigDecimal value,
-    @NotBlank @Size(max = 8) String currency,
+    @Size(max = 8) String currency,
     @NotNull @Positive Integer pipeline,
     @NotNull @Positive Integer stage,
     @Positive Integer company,

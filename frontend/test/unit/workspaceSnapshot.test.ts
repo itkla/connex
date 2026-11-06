@@ -181,6 +181,15 @@ describe("identity mutations preserve membership state", () => {
         orgRole: "admin",
     };
 
+    it("keeps a saved currency through an older server payload and an optimistic name edit", () => {
+        const saved = { ...workspace, defaultCurrency: "EUR", identityVersion: 1 };
+        const stale = { ...workspace, defaultCurrency: null };
+        expect(adoptWorkspaces([saved], [stale], [stale])[0]?.defaultCurrency).toBe("EUR");
+        expect(preservePublishedWorkspaceIdentities([stale], [saved]).workspaces[0]?.defaultCurrency).toBe("EUR");
+        const renamed = { id: 7, name: "Renamed", slug: "before", timezone: null, identityVersion: 1 };
+        expect(applyWorkspaceIdentity([saved], renamed)[0]?.defaultCurrency).toBe("EUR");
+    });
+
     it("replaces mutable workspace identity without changing the viewer's roles", () => {
         expect(applyWorkspaceIdentity([workspace], {
             id: 7,

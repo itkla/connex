@@ -157,6 +157,13 @@
         "showArchived": "Show archived ({count})"
     },
     "WorkspaceIdentity": {
+        "currencyTitle": "Default deal currency",
+        "currencyDescription": "New deals start in this currency. Existing deals and amounts stay as they are.",
+        "currencyLabel": "Default currency",
+        "currencyEffective": "Current default: {currency}, chosen in workspace settings. You can choose another currency for an individual deal.",
+        "currencyFallback": "Current default: {currency}. No workspace default has been saved, so new deals use the original USD default. Save a currency to choose one explicitly.",
+        "currencyInvalid": "Choose a supported currency from the list.",
+        "currencySaved": "Default deal currency saved",
         "title": "Workspace identity",
         "description": "Keep the name people see and the time boundary used for shared reporting accurate.",
         "nameLabel": "Workspace name",

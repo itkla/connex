@@ -76,6 +76,7 @@ class ApiCredentialManagementLockOrderTest {
     void setUp() {
         WorkspaceService workspaceService = new WorkspaceService(
             workspaceMapper,
+            mock(ooo.klae.connex.backend.services.WorkspaceCurrencyControlAccess.class),
             userMapper,
             organizationMapper,
             mock(ooo.klae.connex.backend.ai.assistant.AiAssistantPrivacyService.class),

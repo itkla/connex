@@ -1,5 +1,6 @@
 {
   "importExport": {
+    "dealCurrencyDefault": "通貨が未指定の新規案件には、ワークスペースの現在の既定の通貨（{currency}）を使用します。既存の案件は、通貨を指定した場合にのみ変更されます。",
     "title": {
       "persons": "連絡先をインポート",
       "companies": "会社をインポート",

@@ -33,6 +33,7 @@ import type { RelationshipMapAvailability } from '@/app/lib/api';
 import { renderedWorkspaceId, workspacePinnedRequest } from '@/app/lib/renderedWorkspace';
 import { type BusinessCardImportDraft, CreateContactPayload, type Company, type CreateDealPayload, type Stage, type WorkspaceMember } from '@/app/lib/types';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { workspaceDefaultCurrency } from '@/app/lib/currencies';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 
 function emptyContactPayload(companyId: number): CreateContactPayload {
@@ -45,11 +46,11 @@ function emptyContactPayload(companyId: number): CreateContactPayload {
     };
 }
 
-function emptyDealPayload(companyId: number): CreateDealPayload {
+function emptyDealPayload(companyId: number, currency: string): CreateDealPayload {
     return {
         name: '',
         value: 0,
-        currency: 'USD',
+        currency,
         pipeline: 0,
         stage: 0,
         company: companyId,
@@ -67,7 +68,8 @@ export default function CompanyActionsMenu({
     const router = useRouter();
     const t = useTranslations('CompaniesActionsMenu');
     const showApiError = useApiErrorToast('CompaniesActionsMenu');
-    const { activeWorkspaceId } = useWorkspace();
+    const { activeWorkspaceId, activeWorkspace } = useWorkspace();
+    const defaultCurrency = workspaceDefaultCurrency(activeWorkspace);
     const owned = company.workspaceId == null || company.workspaceId === activeWorkspaceId;
     const { inputRef: attachmentInputRef, uploading: attachmentsUploading, openPicker: openAttachmentPicker, onFilesSelected: onAttachmentFilesSelected } = useAttachmentUploader('company', company.id);
     const [archiveOpen, setArchiveOpen] = useState(false);
@@ -102,7 +104,7 @@ export default function CompanyActionsMenu({
     }, []);
 
     const [newDealPayload, setNewDealPayload] = useState<CreateDealPayload>(
-        () => emptyDealPayload(company.id),
+        () => emptyDealPayload(company.id, defaultCurrency),
     );
     const setContextualDealPayload = useCallback((
         nextPayload: SetStateAction<CreateDealPayload>,
@@ -149,13 +151,13 @@ export default function CompanyActionsMenu({
     const closeNewDealDialog = (open: boolean) => {
         setNewDealDialogOpen(open);
         if (!open) {
-            setNewDealPayload(emptyDealPayload(company.id));
+            setNewDealPayload(emptyDealPayload(company.id, defaultCurrency));
             setDealCreationSucceeded(false);
         }
     };
 
     const showNewDealDialog = () => {
-        setNewDealPayload(emptyDealPayload(company.id));
+        setNewDealPayload(emptyDealPayload(company.id, defaultCurrency));
         setNewDealDialogOpen(true);
     };
 
@@ -254,7 +256,7 @@ export default function CompanyActionsMenu({
                 name: newDealPayload.name.trim(),
                 value: Number.isFinite(newDealPayload.value) ? newDealPayload.value : 0,
                 actualValue: Number.isFinite(newDealPayload.actualValue) ? newDealPayload.actualValue : undefined,
-                currency: newDealPayload.currency.trim() || 'USD',
+                currency: newDealPayload.currency.trim() || defaultCurrency,
                 pipeline: newDealPayload.pipeline || null,
                 stage: newDealPayload.stage || null,
                 company: company.id,

@@ -34,6 +34,7 @@ import ooo.klae.connex.backend.dto.MfaAttestationCodeDto;
 import ooo.klae.connex.backend.dto.MyWorkspacesDto;
 import ooo.klae.connex.backend.dto.UpdateMemberRoleRequest;
 import ooo.klae.connex.backend.dto.UpdateWorkspaceIdentityRequest;
+import ooo.klae.connex.backend.dto.UpdateWorkspaceCurrencyRequest;
 import ooo.klae.connex.backend.dto.WorkspaceIdentityDto;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.dto.WorkspaceSelectionDto;
@@ -102,6 +103,15 @@ public class WorkspaceController {
             request.getTimezone(),
             request.getExpectedName(),
             request.getExpectedTimezone(),
+            request.getExpectedIdentityVersion());
+    }
+
+    @PatchMapping("/{id}/default-currency")
+    public WorkspaceIdentityDto updateDefaultCurrency(
+            @PathVariable int id,
+            @Valid @RequestBody UpdateWorkspaceCurrencyRequest request) {
+        return workspaceService.updateDefaultCurrency(
+            id, authService.getCurrentUser().getId(), request.getDefaultCurrency(),
             request.getExpectedIdentityVersion());
     }
 
