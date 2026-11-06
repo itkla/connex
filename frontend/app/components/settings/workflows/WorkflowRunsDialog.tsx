@@ -170,9 +170,10 @@ export default function WorkflowRunsDialog({
                                 const target = targets.values.get(runTargetKey(run));
                                 const targetFallback = run.trigger?.recordId == null
                                     ? "runs.scheduledTarget"
-                                    : !["person", "company", "deal", "task"].includes(run.trigger?.recordType ?? "")
+                                    : !["person", "company", "deal", "task", "document"].includes(run.trigger?.recordType ?? "")
                                         ? "runs.targetNameNotRecorded"
-                                        : targets.pending.has(runTargetKey(run)) ? "runs.targetLoading" : "runs.targetUnavailable";
+                                        : targets.pending.has(runTargetKey(run)) ? "runs.targetLoading"
+                                            : run.trigger?.recordType === "document" ? "runs.documentTargetUnavailable" : "runs.targetUnavailable";
                                 return (
                                     <li key={run.runKey} className="space-y-3 px-6 py-4">
                                         <div className="flex flex-wrap items-center justify-between gap-2">

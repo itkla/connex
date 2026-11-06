@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.dto;
 
 import java.util.List;
+import java.util.Map;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -20,6 +21,13 @@ public class ImportPreviewResult {
     private int invalid;
     private List<RowAnalysis> rows;
     private String duplicateReviewProof;
+    private Map<String, List<DuplicateCandidateDto>> companyCandidates;
+
+    public ImportPreviewResult(
+            int total, int toCreate, int toUpdate, int toSkip, int invalid,
+            List<RowAnalysis> rows, String duplicateReviewProof) {
+        this(total, toCreate, toUpdate, toSkip, invalid, rows, duplicateReviewProof, Map.of());
+    }
 
     public ImportPreviewResult(
             int total,

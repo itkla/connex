@@ -37,6 +37,7 @@ import { useLiveNow } from '@/app/hooks/useNow';
 import { usePrivilegedMfaConfinement, usePrivilegedMfaReadiness } from '@/app/hooks/usePrivilegedMfaConfinement';
 import { usePermissionCheck } from '@/app/hooks/usePermissions';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
+import { requestGuardedNavigation } from '@/app/hooks/useUnsavedChangesGuard';
 import { subscribeAiAvailabilityChange } from '@/app/lib/aiAvailabilityEvents';
 import {
     ApiError,
@@ -1262,7 +1263,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         setInstantOpen(true);
         setOpen(false);
     }, []);
-    const openWorkspace = useCallback(() => {
+    const openWorkspace = useCallback(() => requestGuardedNavigation(() => {
         workspaceReturnRef.current = true;
         setWorkspaceSourceContext({
             identity,
@@ -1272,7 +1273,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         setOpen(false);
         const session = activeSessionRef.current;
         router.push(session ? `/ask-connex/${session.id}` : '/ask-connex');
-    }, [context.record, context.selection, identity, router]);
+    }), [context.record, context.selection, identity, router]);
     /**
      * Writes one job into the composer and brings Ask Connex on screen.
      *

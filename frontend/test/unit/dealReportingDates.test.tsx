@@ -5,6 +5,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import { describe, expect, it, vi } from 'vitest';
 import type { Deal } from '@/app/lib/types';
 import dealMessages from '@/messages/en/deals.json';
+import { TooltipProvider } from '@/components/ui/tooltip';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock('@/app/hooks/usePermissions', () => ({ usePermission: () => true }));
@@ -34,7 +35,7 @@ describe('deal list close dates match the reporting calendar', () => {
             ]) {
                 const markup = renderToStaticMarkup(
                     <NextIntlClientProvider locale="en" timeZone={profile} messages={dealMessages}>
-                        {view}
+                        <TooltipProvider>{view}</TooltipProvider>
                     </NextIntlClientProvider>,
                 );
                 const document = new DOMParser().parseFromString(markup, 'text/html');
