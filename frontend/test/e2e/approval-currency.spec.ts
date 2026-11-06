@@ -24,7 +24,14 @@ for (const [locale, theme] of [['en', 'light'], ['ja', 'dark']] as const) {
         await context.addInitScript((choice) => localStorage.setItem('theme', choice), theme);
         await page.emulateMedia({ colorScheme: theme });
         await page.goto('/settings/workspace/crm');
-        await page.getByRole('button', { name: message(locale, 'approval-policies', 'ApprovalPoliciesBrowser.newButton'), exact: true }).filter({ visible: true }).click();
+        const policyHeader = page.getByRole('heading', {
+            name: message(locale, 'approval-policies', 'ApprovalPoliciesBrowser.title'), exact: true,
+        }).locator('xpath=ancestor::section[1]');
+        const newPolicy = policyHeader.getByRole('button', {
+            name: message(locale, 'approval-policies', 'ApprovalPoliciesBrowser.newButton'), exact: true,
+        });
+        await expect(newPolicy).toHaveCount(1);
+        await newPolicy.click();
         const dialog = page.getByRole('dialog');
         const label = (key: string) => message(locale, 'approval-policies', `ApprovalPolicyDialog.${key}`);
         await dialog.getByLabel(label('nameLabel')).fill(`Currency ${suffix}`);
