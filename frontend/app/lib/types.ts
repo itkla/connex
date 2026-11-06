@@ -4595,6 +4595,13 @@ export type GeneratedDocumentSummary = {
     updatedAt?: string;
 };
 
+/** Minimal reference returned only when its parent deal is readable in the current workspace. */
+export type GeneratedDocumentTarget = {
+    id: number;
+    dealId: number;
+    title?: string;
+};
+
 /** Filters accepted by the cross-deal generated-document index. */
 export type GeneratedDocumentsPageParams = PageParams & MemberScopeParams & {
     status?: DocumentStatus[];
