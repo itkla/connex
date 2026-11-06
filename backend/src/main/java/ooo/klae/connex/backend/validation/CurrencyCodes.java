@@ -22,6 +22,22 @@ public final class CurrencyCodes {
         }
     }
 
+    /** Compares existing bucket names without guessing aliases or performing conversion. */
+    public static boolean equivalent(String left, String right) {
+        return left != null && right != null
+            && left.trim().toUpperCase(Locale.ROOT).equals(right.trim().toUpperCase(Locale.ROOT));
+    }
+
+    /** Preserves an unchanged stored value; newly supplied values must be ISO monetary codes. */
+    public static String updated(String value, String stored) {
+        return equivalent(value, stored) ? stored : optional(value);
+    }
+
+    /** Applies the deal creation default only to missing values, then validates explicit input. */
+    public static String forDealCreation(String value) {
+        return value == null || value.isBlank() ? "USD" : required(value);
+    }
+
     /** Returns an uppercase monetary code, refusing missing, blank, and unrecognized values. */
     public static String required(String value) {
         if (!isSupported(value)) {

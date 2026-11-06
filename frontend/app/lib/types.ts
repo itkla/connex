@@ -210,6 +210,7 @@ export type ImportPreviewResult = {
 export type ImportRowError = {
     rowIndex: number;
     reason: string;
+    errors?: string[] | null;
 };
 
 export type ImportResult = {
@@ -2281,6 +2282,7 @@ export type DealDocument = {
     createdBy: number | null;
     content: DocumentContent;
     requiresApproval: boolean;
+    approvalConfigurationError?: string | null;
     latestApproval?: DocumentApproval | null;
 };
 

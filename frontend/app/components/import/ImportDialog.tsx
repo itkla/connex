@@ -821,7 +821,7 @@ function ReviewStep({
                                                     row.errors?.length ? 'text-destructive' : 'text-muted-foreground',
                                                 )}>
                                                     {row.errors?.length
-                                                        ? row.errors.map((error) => importRowErrorMessage(error, t('currencyInvalid'))).join('; ')
+                                                        ? importRowErrorMessage(row.errors, t('currencyInvalid'))
                                                         : row.matchedLabel ?? (nameColumn && parsed ? parsed.rows[row.rowIndex]?.[nameColumn] ?? '' : '')}
                                                 </p>
                                                 {row.dealDates && (
@@ -1186,7 +1186,7 @@ function DoneStep({ result, entity, parsed }: { result: ImportResult; entity: Im
         result.failed.forEach((failure) => {
             const row = parsed.rows[failure.rowIndex];
             if (!row) return;
-            lines.push([...parsed.headers.map((h) => row[h] ?? ''), importRowErrorMessage(failure.reason, t('currencyInvalid'))].map(csvCell).join(','));
+            lines.push([...parsed.headers.map((h) => row[h] ?? ''), importRowErrorMessage(failure.errors ?? failure.reason, t('currencyInvalid'))].map(csvCell).join(','));
         });
         const blob = new Blob([String.fromCharCode(0xfeff) + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
         const url = URL.createObjectURL(blob);

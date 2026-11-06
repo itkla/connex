@@ -28,6 +28,9 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import ooo.klae.connex.backend.dto.FacetCount;
+import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.services.CurrencyFilterService;
 import ooo.klae.connex.backend.ai.AiGenerationAdapterService;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.PageResponse;
@@ -51,6 +54,7 @@ class CurrencyBoundaryMvcTest {
     private ExportService exports;
     private ApprovalPolicyService policies;
     private MockMvc mvc;
+    private DealMapper buckets;
 
     @BeforeEach
     void setup() {
@@ -61,13 +65,15 @@ class CurrencyBoundaryMvcTest {
         exports = mock(ExportService.class, invocation -> "");
         policies = mock(ApprovalPolicyService.class);
         WorkspaceService workspace = mock(WorkspaceService.class);
+        buckets = mock(DealMapper.class);
+        var currencyFilters = new CurrencyFilterService(buckets, workspace);
         MemberScopeResolver scopes = mock(MemberScopeResolver.class);
         when(workspace.getCurrentAnalyticsTimezone()).thenReturn("UTC");
         when(scopes.resolve(any(), any(), anyInt())).thenReturn(MemberScope.allTeam());
         mvc = MockMvcBuilders.standaloneSetup(
             new DealController(deals, mock(BulkOperationService.class), mock(DealRiskService.class),
-                mock(AiGenerationAdapterService.class), workspace, scopes),
-            new ExportController(exports, scopes, mock(WarmthFilterResolver.class), workspace),
+                mock(AiGenerationAdapterService.class), workspace, currencyFilters, scopes),
+            new ExportController(exports, scopes, mock(WarmthFilterResolver.class), workspace, currencyFilters),
             new ApprovalPolicyController(policies),
             new LegacyRecordCreationController(mock(PersonService.class), mock(CompanyService.class), deals))
             .setControllerAdvice(new GlobalExceptionHandler(mock(ErrorReporter.class), mock(TenantContext.class)))
@@ -96,6 +102,20 @@ class CurrencyBoundaryMvcTest {
         MockHttpServletRequestBuilder request = get(path)
             .param("from", "2026-01-01").param("to", "2026-01-31").param("granularity", "month");
         return currency == null ? request : request.param("currency", currency);
+    }
+
+    @ParameterizedTest
+    @MethodSource("endpoints")
+    void everyMoneyFilterPreservesExistingLegacyBuckets(String path) throws Exception {
+        for (String currency : List.of("X-LOCAL", "US$", "USDT", " jpy ")) {
+            when(buckets.countsByCurrency(0)).thenReturn(List.of(
+                new FacetCount(currency, 1, null)));
+            mvc.perform(filterRequest(path, currency)).andExpect(status().isOk());
+            Object service = path.startsWith("/api/exports") ? exports : deals;
+            assertEquals(currency, mockingDetails(service).getInvocations().iterator().next()
+                .getArguments()[currencyArgumentIndex(path)]);
+            org.mockito.Mockito.clearInvocations(deals, exports);
+        }
     }
 
     @ParameterizedTest
@@ -134,10 +154,27 @@ class CurrencyBoundaryMvcTest {
     }
 
     private static Stream<Arguments> invalidWrites() {
-        return Stream.of("/api/deals", "/api/deals/42", "/api/approval-policies",
-            "/api/approval-policies/42", "/api/approval-policies/42/impact")
-            .flatMap(path -> Stream.of("", " ", "yen", "JP1", "XXX", "XTS")
-                .map(currency -> Arguments.of(path, currency)));
+        return Stream.concat(
+            Stream.of("yen", "JP1", "USDT", "XXX", "XTS").map(currency -> Arguments.of("/api/deals", currency)),
+            Stream.of("", " ", "yen", "JP1", "XXX", "XTS")
+                .map(currency -> Arguments.of("/api/approval-policies", currency)));
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.NullAndEmptySource
+    @org.junit.jupiter.params.provider.ValueSource(strings = {" ", "  "})
+    void missingDealCreationCurrencyReachesDefaultingServiceButUpdatesRefuseIt(String currency) throws Exception {
+        when(deals.createReviewed(any(), any())).thenAnswer(invocation -> invocation.getArgument(0));
+        String body = "{\"name\":\"Default currency\",\"value\":100,\"pipeline\":1,\"stage\":1"
+            + (currency == null ? "" : ",\"currency\":\"" + currency + "\"") + "}";
+        mvc.perform(post("/api/deals").contentType(MediaType.APPLICATION_JSON).content(body))
+            .andExpect(status().isOk());
+        assertEquals(currency, ((ooo.klae.connex.backend.beans.Deal) mockingDetails(deals).getInvocations()
+            .iterator().next().getArguments()[0]).getCurrency());
+        org.mockito.Mockito.clearInvocations(deals);
+        mvc.perform(put("/api/deals/42").contentType(MediaType.APPLICATION_JSON).content(body))
+            .andExpect(status().isBadRequest()).andExpect(jsonPath("$.fieldErrors.currency").exists());
+        verifyNoInteractions(deals);
     }
 
     @ParameterizedTest
@@ -149,6 +186,22 @@ class CurrencyBoundaryMvcTest {
             "{\"name\":\"Currency test\"," + fields + "\"currency\":\"" + currency + "\"}"))
             .andExpect(status().isBadRequest()).andExpect(jsonPath("$.fieldErrors.currency").exists());
         verifyNoInteractions(deals, policies);
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"X-LOCAL", "US$", " jpy "})
+    void existingDealAndPolicyRequestsBindUnchangedStoredCurrencies(String currency) throws Exception {
+        when(deals.update(org.mockito.ArgumentMatchers.eq(42), any())).thenAnswer(invocation -> invocation.getArgument(1));
+        when(policies.update(org.mockito.ArgumentMatchers.eq(42), any(), org.mockito.ArgumentMatchers.anyBoolean(), any()))
+            .thenAnswer(invocation -> invocation.getArgument(1));
+        String dealBody = "{\"name\":\"Legacy deal\",\"value\":100,\"pipeline\":1,\"stage\":1,\"currency\":\"" + currency + "\"}";
+        String policyBody = "{\"name\":\"Legacy policy\",\"minTotal\":100,\"currency\":\"" + currency + "\"}";
+        mvc.perform(put("/api/deals/42").contentType(MediaType.APPLICATION_JSON).content(dealBody))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.currency").value(currency));
+        mvc.perform(put("/api/approval-policies/42").contentType(MediaType.APPLICATION_JSON).content(policyBody))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.currency").value(currency));
+        mvc.perform(post("/api/approval-policies/42/impact").contentType(MediaType.APPLICATION_JSON).content(policyBody))
+            .andExpect(status().isOk());
     }
 
     @Test
@@ -163,7 +216,11 @@ class CurrencyBoundaryMvcTest {
 
     @Test
     void savedPolicyValidityIsReadOnly() throws Exception {
-        when(policies.create(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(policies.create(any())).thenAnswer(invocation -> {
+            ooo.klae.connex.backend.beans.ApprovalPolicy policy = invocation.getArgument(0);
+            policy.setCurrency(ooo.klae.connex.backend.validation.CurrencyCodes.optional(policy.getCurrency()));
+            return policy;
+        });
         mvc.perform(post("/api/approval-policies").contentType(MediaType.APPLICATION_JSON).content(
             "{\"name\":\"Currency test\",\"minTotal\":100,\"currency\":\" jpy \",\"currencyValid\":false}"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.currency").value("JPY"))

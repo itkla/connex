@@ -148,10 +148,17 @@ Do not add a dependency-first lock pass; it reverses the interactive mutation or
 
 ## Deal currencies
 
-A supplied nonblank currency cell uses the shared `CurrencyCodes` monetary validator in preview
-and commit row validation. Supported ISO 4217 codes become uppercase; unsupported codes are row
-errors before duplicate/dependency writes. Omitted cells keep the existing import merge/default
-semantics. Existing stored currencies are not inferred or repaired.
+Preview and commit validate supplied nonblank currency cells after resolving the existing deal
+match. `CurrencyCodes.updated` retains an unchanged stored spelling, including legacy buckets and
+padded/lowercase codes. New rows and changed currencies require supported ISO monetary codes.
+The locked target recheck uses normalized equality and refuses a legacy value that is no longer
+unchanged before dependency or record writes. Omitted cells keep existing import merge/default
+semantics; stored currencies are never inferred or repaired.
+
+Currency row refusals use `CURRENCY_INVALID`. Review and downloadable errors localize individual
+errors before joining them, including combined currency/amount errors. Other diagnostic details
+remain unchanged. Currency admission remains inside the existing preview/commit proof and locked
+revalidation sequence.
 
 ## Deal history dates
 

@@ -31,10 +31,21 @@ class CurrencyCodesTest {
 
     @ParameterizedTest
     @NullAndEmptySource
-    @ValueSource(strings = {" ", "yen", "JP", "JPYY", "JP1", "XXX", "XTS", "XAU", "ＪＰＹ", "ınr"})
+    @ValueSource(strings = {" ", "yen", "JP", "JPYY", "JP1", "USDT", "XXX", "XTS", "XAU", "ＪＰＹ", "ınr"})
     void rejectsMissingOrNonmonetaryCodes(String code) {
         assertFalse(CurrencyCodes.isSupported(code));
         assertThrows(BadRequestException.class, () -> CurrencyCodes.required(code));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"X-LOCAL", "US$", "USDT", " jpy ", "usd"})
+    void unchangedStoredCurrenciesSurviveNormalizedRoundTrips(String stored) {
+        assertEquals(stored, CurrencyCodes.updated(stored.trim().toUpperCase(Locale.ROOT), stored));
+        assertTrue(CurrencyCodes.equivalent(stored, stored.trim().toUpperCase(Locale.ROOT)));
+        if (!CurrencyCodes.isSupported(stored)) {
+            assertThrows(BadRequestException.class, () -> CurrencyCodes.required(stored));
+            assertThrows(BadRequestException.class, () -> CurrencyCodes.updated(stored, "JPY"));
+        }
     }
 
     @Test
@@ -43,8 +54,26 @@ class CurrencyCodesTest {
         assertThrows(BadRequestException.class, () -> CurrencyCodes.optional(" "));
     }
 
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {" ", "\t"})
+    void missingDealCreationCurrencyDefaultsWithoutDefaultingOtherBoundaries(String value) {
+        assertEquals("USD", CurrencyCodes.forDealCreation(value));
+        assertThrows(BadRequestException.class, () -> CurrencyCodes.required(value));
+        try (var factory = Validation.buildDefaultValidatorFactory()) {
+            DealDto deal = new DealDto();
+            deal.setCurrency(value);
+            var validator = factory.getValidator();
+            assertTrue(validator.validateProperty(deal, "currency", ValidCurrency.OnCreate.class).isEmpty());
+            assertFalse(validator.validateProperty(deal, "currency", ValidCurrency.OnUpdate.class).isEmpty());
+            GuidedDealRecordDto guided = new GuidedDealRecordDto("Deal", BigDecimal.TEN, value, 1, 1, null, null, null);
+            assertTrue(validator.validateProperty(guided, "currency").isEmpty());
+            assertNull(guided.toBean().getCurrency());
+        }
+    }
+
     @Test
-    void allDealAndPolicyDtosUseTheSameConstraintAndCanonicalization() {
+    void createDtosShareIsoValidationWhileUpdatesRetainTheirSubmittedValue() {
         try (var factory = Validation.buildDefaultValidatorFactory()) {
             var validator = factory.getValidator();
             DealDto deal = new DealDto();
@@ -54,12 +83,12 @@ class CurrencyCodesTest {
                 policy.setCurrency(code);
                 GuidedDealRecordDto guided = new GuidedDealRecordDto("Deal", BigDecimal.TEN, code, 1, 1, null, null, null);
                 boolean valid = CurrencyCodes.isSupported(code);
-                assertEquals(valid, validator.validateProperty(deal, "currency").isEmpty());
-                assertEquals(valid, validator.validateProperty(policy, "currency").isEmpty());
-                assertEquals(valid, validator.validateProperty(guided, "currency").isEmpty());
+                assertEquals(valid || code.isBlank(), validator.validateProperty(deal, "currency", ValidCurrency.OnCreate.class).isEmpty());
+                assertEquals(valid, validator.validateProperty(policy, "currency", ValidCurrency.OnCreate.class).isEmpty());
+                assertEquals(valid || code.isBlank(), validator.validateProperty(guided, "currency").isEmpty());
                 if (valid) {
-                    assertEquals("JPY", deal.toBean().getCurrency());
-                    assertEquals("JPY", policy.toBean().getCurrency());
+                    assertEquals(code, deal.toBean().getCurrency());
+                    assertEquals(code, policy.toBean().getCurrency());
                     assertEquals("JPY", guided.toBean().getCurrency());
                 }
             }

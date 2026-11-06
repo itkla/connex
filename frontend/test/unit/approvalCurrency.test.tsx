@@ -50,10 +50,9 @@ function localized(child: ReactNode, locale: 'en' | 'ja' = 'en') {
 }
 
 async function chooseCurrency(currency: string) {
-    const trigger = document.getElementById('policy-currency');
-    if (!trigger) throw new Error('Currency picker missing');
-    fireEvent.keyDown(trigger, { key: 'Enter' });
-    fireEvent.click(await screen.findByRole('option', { name: currency }));
+    const input = document.getElementById('policy-currency');
+    if (!input) throw new Error('Currency entry missing');
+    fireEvent.change(input, { target: { value: currency } });
 }
 
 describe('import currency refusal', () => {
@@ -61,17 +60,21 @@ describe('import currency refusal', () => {
         expect(importRowErrorMessage('CURRENCY_INVALID', messages.importExport.currencyInvalid))
             .toBe(messages.importExport.currencyInvalid);
         expect(importRowErrorMessage('Other row detail', messages.importExport.currencyInvalid)).toBe('Other row detail');
+        expect(importRowErrorMessage('CURRENCY_INVALID; Invalid deal value: oops', messages.importExport.currencyInvalid))
+            .toBe(`${messages.importExport.currencyInvalid}; Invalid deal value: oops`);
+        expect(importRowErrorMessage(['Invalid deal value: oops; detail', 'CURRENCY_INVALID'], messages.importExport.currencyInvalid))
+            .toBe(`Invalid deal value: oops; detail; ${messages.importExport.currencyInvalid}`);
     });
 });
 
 describe('approval currency correction', () => {
-    it.each(['en', 'ja'] as const)('warns about saved invalid currency and saves only an explicit correction in %s', async (locale) => {
+    it.each(['en', 'ja'] as const)('warns about a saved currency and allows an explicit correction in %s', async (locale) => {
         const messages = (locale === 'ja' ? ja : en).ApprovalPolicyDialog;
         const saved = vi.fn();
         render(localized(<ApprovalPolicyDialog open policy={policy} onOpenChange={vi.fn()} onSaved={saved} />, locale));
         expect(screen.getByRole('alert').textContent).toContain('YEN');
         const save = screen.getByRole('button', { name: messages.save });
-        expect(save.hasAttribute('disabled')).toBe(true);
+        expect(save.hasAttribute('disabled')).toBe(false);
         await chooseCurrency('JPY');
         expect(screen.queryByRole('alert')).toBeNull();
         fireEvent.click(save);
@@ -96,10 +99,25 @@ describe('approval currency correction', () => {
         expect(screen.getByRole('button', { name: en.ApprovalPolicyDialog.save }).hasAttribute('disabled')).toBe(false);
     });
 
-    it('retains a valid saved currency outside the picker shortlist', () => {
+    it.each(['KWD', 'CLF'])('allows a newly entered supported code outside the old shortlist: %s', async (currency) => {
+        render(localized(<ApprovalPolicyDialog open policy={{ ...policy, currency: 'JPY', currencyValid: true }} onOpenChange={vi.fn()} onSaved={vi.fn()} />));
+        await chooseCurrency(currency);
+        fireEvent.click(screen.getByRole('button', { name: en.ApprovalPolicyDialog.save }));
+        await waitFor(() => expect(updateApprovalPolicy).toHaveBeenCalledWith(1,
+            expect.objectContaining({ currency }), expect.anything()));
+    });
+
+    it('keeps an existing non-ISO value unchanged when other policy fields are edited', async () => {
+        render(localized(<ApprovalPolicyDialog open policy={{ ...policy, currency: 'X-LOCAL' }} onOpenChange={vi.fn()} onSaved={vi.fn()} />));
+        fireEvent.click(screen.getByRole('button', { name: en.ApprovalPolicyDialog.save }));
+        await waitFor(() => expect(updateApprovalPolicy).toHaveBeenCalledWith(1,
+            expect.objectContaining({ currency: 'X-LOCAL' }), expect.anything()));
+    });
+
+    it('retains a valid saved currency while editing', () => {
         render(localized(<ApprovalPolicyDialog open policy={{ ...policy, currency: 'KWD', currencyValid: true }} onOpenChange={vi.fn()} onSaved={vi.fn()} />));
         expect(screen.queryByRole('alert')).toBeNull();
-        expect(document.getElementById('policy-currency')?.textContent).toContain('KWD');
+        expect(screen.getByDisplayValue('KWD')).toBeTruthy();
         expect(screen.getByRole('button', { name: en.ApprovalPolicyDialog.save }).hasAttribute('disabled')).toBe(false);
     });
 });

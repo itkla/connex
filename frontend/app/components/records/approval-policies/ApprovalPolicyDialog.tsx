@@ -15,7 +15,6 @@ import {
     DialogClose,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { CURRENCY_CODES } from '@/app/lib/currencies';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import {
@@ -60,7 +59,6 @@ type Props = {
 
 const DOCUMENT_TYPES: DocumentType[] = ['quote', 'proposal', 'order_form', 'contract'];
 const ALL_TYPES = 'all';
-const NO_CURRENCY = 'none';
 
 const isDocumentType = (value: string): value is DocumentType =>
     DOCUMENT_TYPES.some((documentType) => documentType === value);
@@ -175,11 +173,11 @@ export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSav
     const set = <K extends keyof Draft>(key: K, value: Draft[K]) =>
         setDraft((prev) => ({ ...prev, [key]: value }));
 
-    const savedCurrency = policy?.currency?.trim().toUpperCase();
-    const currencyOptions: readonly string[] = savedCurrency && policy?.currencyValid === true
-        ? [...new Set([...CURRENCY_CODES, savedCurrency])]
-        : CURRENCY_CODES;
-    const invalidCurrency = draft.currency !== '' && !currencyOptions.includes(draft.currency.trim().toUpperCase());
+    const unchangedCurrency = policy?.currency != null
+        && draft.currency.trim().toUpperCase() === policy.currency.trim().toUpperCase();
+    const invalidCurrency = draft.currency !== '' && !unchangedCurrency
+        && !/^[A-Za-z]{3}$/.test(draft.currency.trim());
+    const legacyCurrency = unchangedCurrency && policy?.currencyValid === false;
     const minTotalNeedsCurrency = draft.minTotal.trim() !== '' && draft.currency.trim() === '';
     const chainIsValid = draft.steps.every(
         (step) =>
@@ -194,7 +192,8 @@ export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSav
         name: draft.name.trim(),
         active: draft.active,
         documentType: isDocumentType(draft.documentType) ? draft.documentType : null,
-        currency: draft.currency.trim() === '' ? null : draft.currency.trim().toUpperCase(),
+        currency: unchangedCurrency ? policy?.currency ?? null
+            : draft.currency.trim() === '' ? null : draft.currency.trim().toUpperCase(),
         minTotal: draft.minTotal.trim() === '' ? null : Number(draft.minTotal),
         minDiscountPercent: draft.minDiscountPercent.trim() === '' ? null : Number(draft.minDiscountPercent),
         mode: draft.mode,
@@ -365,23 +364,16 @@ export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSav
                         </div>
                         <div className="space-y-2">
                             <Label htmlFor="policy-currency">{t('currencyLabel')}</Label>
-                            <Select
-                                value={invalidCurrency ? '' : draft.currency.trim().toUpperCase() || NO_CURRENCY}
-                                onValueChange={(value) => set('currency', value === NO_CURRENCY ? '' : value)}
+                            <Input
+                                id="policy-currency"
+                                value={draft.currency}
+                                maxLength={8}
+                                placeholder={t('currencyPlaceholder')}
+                                onChange={(event) => set('currency', event.target.value)}
                                 disabled={saving}
-                            >
-                                <SelectTrigger id="policy-currency" className="w-full"
-                                    aria-invalid={minTotalNeedsCurrency || invalidCurrency || undefined}
-                                    aria-describedby="policy-currency-hint">
-                                    <SelectValue placeholder={draft.currency || t('currencyPlaceholder')} />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value={NO_CURRENCY}>{t('currencyNone')}</SelectItem>
-                                    {currencyOptions.map((currency) => (
-                                        <SelectItem key={currency} value={currency}>{currency}</SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+                                aria-invalid={minTotalNeedsCurrency || invalidCurrency || undefined}
+                                aria-describedby="policy-currency-hint"
+                            />
                         </div>
                     </div>
                     <div className="grid grid-cols-2 gap-3">
@@ -413,14 +405,14 @@ export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSav
                             />
                         </div>
                     </div>
-                    {invalidCurrency ? (
+                    {invalidCurrency || legacyCurrency ? (
                         <p id="policy-currency-hint" role="alert" className="text-xs text-destructive">
-                            {t('currencyInvalid', { currency: draft.currency })}
+                            {t(legacyCurrency ? 'currencyLegacy' : 'currencyInvalid', { currency: draft.currency })}
                         </p>
                     ) : minTotalNeedsCurrency ? (
                         <p id="policy-currency-hint" className="text-xs text-destructive">{t('currencyRequired')}</p>
                     ) : (
-                        <p id="policy-currency-hint" className="text-xs text-muted-foreground">{t('thresholdHint')}</p>
+                        <p id="policy-currency-hint" className="text-xs text-muted-foreground">{t('currencyCodeHint')} {t('thresholdHint')}</p>
                     )}
                     <div className="space-y-3 border-t border-border pt-4">
                         <p className="text-sm font-medium">{t('chainTitle')}</p>

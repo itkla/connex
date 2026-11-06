@@ -32,7 +32,7 @@
     "deleteFailed": "Couldn't delete the policy",
     "entityLabel": "policy",
     "invalidCurrencyCondition": "Currency needs correction",
-    "invalidCurrencyActive": "Document approval is blocked. Edit this policy and choose a valid currency.",
+    "invalidCurrencyActive": "Matching documents need this currency configuration corrected. Edit this policy to review it.",
     "invalidCurrencyInactive": "Choose a valid currency before activating this policy."
   },
   "ApprovalPolicyDialog": {
@@ -104,7 +104,8 @@
     "impactMore": "{count, plural, one {and # more} other {and # more}}",
     "impactBack": "Keep editing",
     "impactConfirm": "Save and end them",
-    "currencyNone": "No currency",
-    "currencyInvalid": "“{currency}” is not a supported currency. Choose the intended currency to save this policy."
+    "currencyInvalid": "“{currency}” is not a supported currency. Choose the intended currency to save this policy.",
+    "currencyLegacy": "“{currency}” is a saved currency. It can be kept unchanged. To correct it, enter a supported currency code.",
+    "currencyCodeHint": "Enter a supported three-letter currency code, such as JPY, USD, KWD or CLF."
   }
 }

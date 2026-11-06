@@ -39,7 +39,8 @@ public class ApprovalPolicyDto {
         message = "documentType must be quote, proposal, order_form, or contract")
     private String documentType;
 
-    @ValidCurrency
+    @ValidCurrency(groups = ValidCurrency.OnCreate.class)
+    @Size(max = 8)
     private String currency;
 
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
@@ -102,7 +103,7 @@ public class ApprovalPolicyDto {
         p.setName(name);
         p.setActive(active == null ? true : active);
         p.setDocumentType(documentType == null || documentType.isBlank() ? null : documentType);
-        p.setCurrency(CurrencyCodes.optional(currency));
+        p.setCurrency(currency);
         p.setMinTotal(minTotal);
         p.setMinDiscountPercent(minDiscountPercent);
         p.setMode(mode == null || mode.isBlank() ? "sequential" : mode);

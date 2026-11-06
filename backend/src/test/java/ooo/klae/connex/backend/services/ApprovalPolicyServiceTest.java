@@ -107,23 +107,40 @@ class ApprovalPolicyServiceTest extends AbstractServiceTest {
     @Test
     void invalidStoredCurrencyRemainsVisibleAndCanBeExplicitlyCorrected() {
         ApprovalPolicy saved = policy(null, "JPY", "100", null);
-        Deal deal = jpyDeal();
-        DealDocumentDto document = quote(deal);
         jdbcTemplate.update("UPDATE approval_policy SET currency = ? WHERE workspace_id = ? AND id = ?",
-            "YEN", saved.getWorkspaceId(), saved.getId());
+            "X-LOCAL", saved.getWorkspaceId(), saved.getId());
         ApprovalPolicy invalid = policyService.getAll().stream()
             .filter(candidate -> candidate.getId() == saved.getId()).findFirst().orElseThrow();
         assertFalse(ApprovalPolicyDto.from(invalid).isCurrencyValid());
-        assertEquals("YEN", invalid.getCurrency());
-        assertThrows(InvalidApprovalCurrencyException.class,
-            () -> documentService.updateStatus(deal.getId(), document.id(), "final"));
-        assertThrows(InvalidApprovalCurrencyException.class,
-            () -> approvalService.requestApproval(deal.getId(), document.id(), null));
+        invalid.setName("Updated legacy policy");
+        policyService.impact(saved.getId(), invalid);
+        assertEquals("X-LOCAL", policyService.update(saved.getId(), invalid, false, null).getCurrency());
         invalid.setCurrency(" jpy ");
         ApprovalPolicy corrected = policyService.update(saved.getId(), invalid, false, null);
         assertEquals("JPY", corrected.getCurrency());
         assertTrue(ApprovalPolicyDto.from(corrected).isCurrencyValid());
-        assertEquals("final", documentService.updateStatus(deal.getId(), document.id(), "final").status());
+    }
+
+    @Test
+    void invalidApplicablePolicyDoesNotHideDraftOrFinalDocumentSnapshots() {
+        Deal deal = jpyDeal();
+        addLine(deal, "500", "1", null, null);
+        DealDocumentDto finalized = quote(deal);
+        documentService.updateStatus(deal.getId(), finalized.id(), "final");
+        DealDocumentDto draft = quote(deal);
+        ApprovalPolicy saved = policy(null, "JPY", "100", null);
+        jdbcTemplate.update("UPDATE approval_policy SET currency = ? WHERE workspace_id = ? AND id = ?",
+            "YEN", saved.getWorkspaceId(), saved.getId());
+        jdbcTemplate.update("UPDATE deal_document SET currency = ?, content = REPLACE(content, ?, ?) WHERE workspace_id = ? AND deal_id = ?",
+            "YEN", "JPY", "YEN", workspace.getId(), deal.getId());
+        List<DealDocumentDto> documents = documentService.getForDeal(deal.getId());
+        assertEquals(2, documents.size());
+        DealDocumentDto blocked = documents.stream().filter(doc -> doc.id() == draft.id()).findFirst().orElseThrow();
+        assertTrue(blocked.requiresApproval());
+        assertEquals(InvalidApprovalCurrencyException.CODE, blocked.approvalConfigurationError());
+        assertNull(documents.stream().filter(doc -> doc.id() == finalized.id()).findFirst().orElseThrow().approvalConfigurationError());
+        assertThrows(InvalidApprovalCurrencyException.class,
+            () -> documentService.updateStatus(deal.getId(), draft.id(), "final"));
     }
 
     @Test

@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.controllers;
 
+import static org.mockito.Mockito.mock;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -32,6 +33,9 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import ooo.klae.connex.backend.dto.FacetCount;
+import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.services.CurrencyFilterService;
+import FacetCount;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.WarmthFilter;
 import ooo.klae.connex.backend.exceptions.GlobalExceptionHandler;
@@ -86,7 +90,9 @@ class WarmthBrowserRequestBindingTest {
         GlobalExceptionHandler exceptionHandler =
             new GlobalExceptionHandler(errorReporter, tenantContext);
         exports = MockMvcBuilders.standaloneSetup(new ExportController(
-                exportService, memberScopeResolver, warmthFilterResolver, workspaceService))
+                exportService, memberScopeResolver, warmthFilterResolver, workspaceService,
+                new CurrencyFilterService(
+                    mock(DealMapper.class), workspaceService)))
             .setControllerAdvice(exceptionHandler)
             .build();
         persons = MockMvcBuilders.standaloneSetup(new PersonController(

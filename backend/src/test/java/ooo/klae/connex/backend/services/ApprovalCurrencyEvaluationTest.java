@@ -41,24 +41,37 @@ class ApprovalCurrencyEvaluationTest {
         return document;
     }
 
-    @Test
-    void invalidExistingPoliciesBlockEvaluationEvenAfterAnEarlierMatch() {
-        ApprovalPolicy blanket = policy(null);
-        blanket.setMinTotal(null);
-        for (String currency : new String[]{"yen", "", " ", "XXX"}) {
-            ApprovalPolicy invalid = policy(currency);
-            assertThrows(InvalidApprovalCurrencyException.class,
-                () -> service.firstMatch(List.of(blanket, invalid), document(), null));
-            assertFalse(ApprovalPolicyDto.from(invalid).isCurrencyValid());
-            assertEquals(currency, invalid.getCurrency());
-        }
+    private DocumentContent content(String total) {
+        BigDecimal amount = new BigDecimal(total);
+        return new DocumentContent(null, null, null, null, null, null, null, List.of(),
+            new DealLineItemTotalsDto("JPY", amount, BigDecimal.ZERO, amount, BigDecimal.ZERO, amount));
     }
 
     @Test
-    void missingThresholdCurrencyBlocksEvaluationAndIsVisibleToAdmins() {
-        ApprovalPolicy missing = policy(null);
+    void invalidPoliciesRefuseOnlyMatchingCurrencyBucketsAndThresholds() {
+        ApprovalPolicy invalid = policy("YEN");
+        invalid.setMinTotal(new BigDecimal("1000000"));
+        DealDocument usd = document();
+        usd.setCurrency("USD");
+        org.junit.jupiter.api.Assertions.assertNull(service.firstMatch(List.of(invalid), usd, content("10")));
+        org.junit.jupiter.api.Assertions.assertNull(service.firstMatch(List.of(invalid), usd, content("2000000")));
+        DealDocument legacy = document();
+        legacy.setCurrency(" yen ");
+        org.junit.jupiter.api.Assertions.assertNull(service.firstMatch(List.of(invalid), legacy, content("10")));
         assertThrows(InvalidApprovalCurrencyException.class,
-            () -> service.firstMatch(List.of(missing), document(), null));
+            () -> service.firstMatch(List.of(invalid), legacy, content("2000000")));
+        ApprovalPolicy blanket = policy(null);
+        blanket.setMinTotal(null);
+        assertThrows(InvalidApprovalCurrencyException.class,
+            () -> service.firstMatch(List.of(blanket, invalid), legacy, content("2000000")));
+        assertFalse(ApprovalPolicyDto.from(invalid).isCurrencyValid());
+        assertEquals("YEN", invalid.getCurrency());
+    }
+
+    @Test
+    void missingCurrencyDoesNotInventABucketAndRemainsVisibleToAdmins() {
+        ApprovalPolicy missing = policy(null);
+        org.junit.jupiter.api.Assertions.assertNull(service.firstMatch(List.of(missing), document(), content("100")));
         assertFalse(ApprovalPolicyDto.from(missing).isCurrencyValid());
         missing.setMinTotal(null);
         assertTrue(ApprovalPolicyDto.from(missing).isCurrencyValid());

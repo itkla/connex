@@ -24,33 +24,38 @@ for (const [locale, theme] of [['en', 'light'], ['ja', 'dark']] as const) {
         await context.addInitScript((choice) => localStorage.setItem('theme', choice), theme);
         await page.emulateMedia({ colorScheme: theme });
         await page.goto('/settings/workspace/crm');
-        await page.getByRole('button', { name: message(locale, 'approval-policies', 'ApprovalPoliciesBrowser.newButton'), exact: true }).click();
+        await page.getByRole('button', { name: message(locale, 'approval-policies', 'ApprovalPoliciesBrowser.newButton'), exact: true }).filter({ visible: true }).click();
         const dialog = page.getByRole('dialog');
         const label = (key: string) => message(locale, 'approval-policies', `ApprovalPolicyDialog.${key}`);
         await dialog.getByLabel(label('nameLabel')).fill(`Currency ${suffix}`);
         await dialog.getByLabel(label('minTotalLabel')).fill('1000');
         const save = dialog.getByRole('button', { name: label('save'), exact: true });
         await expect(save).toBeDisabled();
-        await dialog.getByRole('combobox', { name: label('currencyLabel') }).click();
-        await page.getByRole('option', { name: 'JPY', exact: true }).click();
+        await dialog.getByLabel(label('currencyLabel')).fill('YEN');
+        const refused = page.waitForResponse((response) => response.url().endsWith('/api/approval-policies')
+            && response.request().method() === 'POST' && response.status() === 400);
+        await save.click();
+        await refused;
+        await expect(dialog).toBeVisible();
+        await expect(dialog.getByLabel(label('nameLabel'))).toHaveValue(`Currency ${suffix}`);
+        await dialog.getByLabel(label('currencyLabel')).fill('KWD');
         await expect(save).toBeEnabled();
         const created = page.waitForResponse((response) => response.url().endsWith('/api/approval-policies')
             && response.request().method() === 'POST' && response.ok());
         await save.click();
         const body: unknown = await (await created).json();
-        expect(body).toMatchObject({ currency: 'JPY', currencyValid: true, minTotal: 1000 });
+        expect(body).toMatchObject({ currency: 'KWD', currencyValid: true, minTotal: 1000 });
         await expect(dialog).toBeHidden();
         await page.reload();
         const row = page.getByRole('row').filter({ hasText: `Currency ${suffix}` });
         await expect(row).toBeVisible();
         await row.getByText(`Currency ${suffix}`, { exact: true }).click();
-        await expect(dialog.getByRole('combobox', { name: label('currencyLabel') })).toContainText('JPY');
-        await dialog.getByRole('combobox', { name: label('currencyLabel') }).click();
-        await page.getByRole('option', { name: 'USD', exact: true }).click();
+        await expect(dialog.getByLabel(label('currencyLabel'))).toHaveValue('KWD');
+        await dialog.getByLabel(label('currencyLabel')).fill('CLF');
         await save.click();
         await expect(dialog).toBeHidden();
         await page.reload();
         await row.getByText(`Currency ${suffix}`, { exact: true }).click();
-        await expect(dialog.getByRole('combobox', { name: label('currencyLabel') })).toContainText('USD');
+        await expect(dialog.getByLabel(label('currencyLabel'))).toHaveValue('CLF');
     });
 }
