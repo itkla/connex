@@ -10,10 +10,25 @@ This document is authoritative for person/company/deal identity matching, duplic
 - Hydrate the same-organization workspace visibility allowlist through the established control-access service, then use visibility-scoped `IdentityMapper` reads.
 - Strong evidence is exact canonical identity (email, phone, domain, external id as applicable).
 - Weak evidence is exact normalized name after a bounded broad candidate read and Java recheck.
+- Company name review also recognizes the boundary legal forms documented in
+  [Duplicate Review](DUPLICATE_REVIEW.md), after Unicode width/case/kana folding. These are weak
+  review keys only; canonical identity/name keys are unchanged. Variants never authorize
+  automatic attachment or merging.
 - Never auto-attach an unreviewed weak, shared, ambiguous, truncated, or aggregate-overflow result.
 - Every mapper statement remains parameterized and tenant/visibility scoped.
 
 Direct responses remain bounded to the established candidate ceiling; CSV responses retain their per-row and whole-request bounds. A truncated result is not acknowledgeable proof of completeness.
+
+Direct person review can explicitly permit separate creation from a bounded name-only result
+through `allowSeparateCreation`, while retaining `truncated=true`. This permission requires
+complete, empty canonical email/phone results, explicit user acknowledgement, and the same
+server-issued keyed proof at the locked final recheck, including when the displayed candidate list
+is empty. The existing duplicate proof store binds actor/workspace, normalized request, displayed
+result and the visible broad-name count/highest ID; expiry and transactional consumption prevent
+forgery and replay. Counts are not a substitute for consumption: deletion could restore them.
+The final preflight echoes the acknowledged proof instead of replacing a still-valid one.
+See [Duplicate Review](DUPLICATE_REVIEW.md#manual-creation-and-client-preflight).
+It never permits reuse or import resolution; company and deal overflow still blocks.
 
 ### Person CSV identity decisions
 
@@ -69,6 +84,7 @@ The server-derived context binds the proof to the complete workflow snapshot, in
 - field mapping;
 - duplicate action;
 - manual links;
+- explicit per-source-row company dependency links and skipped source-row indices;
 - referenced-company decisions;
 - rendered candidate/create-vs-match decisions.
 
@@ -114,11 +130,38 @@ While locks are held:
 
 ## CSV dependency resolution
 
-Person/deal previews bind exact referenced-company names to the proof; deal proofs also bind every rendered create-vs-match decision.
+Person/deal previews bind referenced-company names and explicit per-source-row company choices to
+the proof; deal proofs also bind every rendered create-vs-match decision. The preview exposes each
+required dependency separately from the imported record's own duplicate candidates. Every source
+row remains addressable even when combined with another row.
+
+Company names are weak evidence: even a single visible name candidate requires explicit selection.
+`companyLinks` maps source-row indices to visible candidate ids. A reviewed bulk action expands to
+those same explicit row choices, only for rows with the same dependency key and the selected company
+in their complete visible candidate set. It does not establish a reusable name-to-company rule.
+Truncated results cannot be selected. Unselected ambiguous dependencies remain invalid. The chosen
+id is rechecked against the fresh canonical preflight response under the existing duplicate mutex;
+changing the choice or the visible result requires a fresh one-use proof. Conflicting company choices
+on rows combined into one mutation fail closed when that dependency is consumed, independent of row
+order. Every same-key contributor must resolve its own choice; bulk application remains explicit.
+Unused dependencies on skipped matches or already-filled company links do not block the import.
+An unresolved company choice that could target an existing owned deal still requires deal-update
+permission at preview admission; this permission check does not choose or attach the company.
+Candidate groups are serialized once in the preview's `companyCandidates` catalogue; source rows
+refer to the group by key. Repeating a dependency across many rows does not multiply the bounded
+candidate response.
+
+`skippedRows` retains original row indices but excludes those rows from validation, candidate
+requests, combining and dependency writes. Skips are counted in preview and commit. Editing a value
+changes the raw ordered request snapshot; edits obey the same server validation as uploaded values.
+Changing values, mapping, links or skips requires another preview. Neither skipping nor correction
+alters the existing target/identity lock order.
 
 At commit:
 
-- a unique visible company dependency may be reused;
+- an explicitly selected visible company dependency may be reused;
+- legal-form variants remain weak review evidence and never attach automatically; CSV rows using
+  a variant stay unresolved until an explicit visible candidate choice is reviewed and proof-bound;
 - ambiguous/truncated dependencies fail closed only for rows that consume them;
 - do not create a dependency under the duplicate mutex until all required target/identity revalidation passes;
 - lock writable matched targets individually in ascending record id and canonical identity groups in deterministic kind/value order;
@@ -220,6 +263,22 @@ A disabled recipient preference retains its baseline. An import-caused deal-risk
 Person/company/deal create forms, staged contacts, and OCR review use the shared duplicate-preflight hook/client contract with complete current identity fields and the same `RequestInit`/workspace scope as the mutation.
 
 CSV clients retain only the proof for the exact preview snapshot and include it in the corresponding commit. Auth/workspace transitions discard stale proof state.
+
+The CSV review pages all source rows, including skipped and combined rows, and filters by status or
+pending decisions. Candidate lists are collapsed, with secondary suggestions suppressed for resolved
+matches. Phone layouts wrap values and actions without requiring horizontal table scrolling.
+Structured row `problems` carry stable codes and optional field labels for English/Japanese copy;
+legacy `errors`/`reason` fields are diagnostic compatibility fields and are never rendered directly.
+Batch mapping and review-limit refusals expose stable `IMPORT_*` codes. Existing-field mappings use
+the member-facing active schema. Two columns resolving to one definition (including Create aliases)
+are rejected during preview. Server-resolved mapping collisions return stable codes keyed by both
+source columns, so the Map step shows each refusal inline rather than reproducing database key
+resolution in the browser. Changing a mapping clears its stale refusal. A missing or archived mapped
+definition refuses commit rather than silently dropping its values; that refusal refreshes the active
+schema, preserves the draft and old target, and requires an explicit replacement or Ignore choice.
+The Map step also offers Refresh fields without discarding the draft. A failed commit discards its possibly consumed
+proof while retaining the file and choices, shows recovery guidance for its actual refusal category,
+and offers Map or a fresh review. The changed-input banner appears only when the input changed.
 
 ## Review checklist
 

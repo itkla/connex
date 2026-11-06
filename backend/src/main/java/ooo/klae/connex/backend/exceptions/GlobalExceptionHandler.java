@@ -104,6 +104,13 @@ public class GlobalExceptionHandler {
             .body(codedError(ex.getCode(), ex.getMessage()));
     }
 
+    @ExceptionHandler(ImportValidationException.class)
+    public ResponseEntity<Map<String, Object>> importValidation(ImportValidationException ex) {
+        Map<String, Object> body = new LinkedHashMap<>(codedError(ex.getCode(), ex.getMessage()));
+        if (!ex.getFieldErrors().isEmpty()) body.put("fieldErrors", ex.getFieldErrors());
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
+    }
+
     @ExceptionHandler(NativeConnectException.class)
     public ResponseEntity<Map<String, String>> nativeConnect(NativeConnectException ex) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)

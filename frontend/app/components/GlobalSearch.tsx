@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { requestGuardedNavigation } from '@/app/hooks/useUnsavedChangesGuard';
 import { useTranslations } from 'next-intl';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { Command as CommandPrimitive } from 'cmdk';
@@ -293,7 +294,8 @@ export default function GlobalSearch() {
         if (!trimmed || composingRef.current) return;
         setInlineOpen(false);
         setActiveIndex(-1);
-        router.push(`/search?query=${encodeURIComponent(trimmed)}`);
+        const href = `/search?query=${encodeURIComponent(trimmed)}`;
+        requestGuardedNavigation(() => router.push(href), { destination: href });
     };
 
     const runAction = (id: string) => {
