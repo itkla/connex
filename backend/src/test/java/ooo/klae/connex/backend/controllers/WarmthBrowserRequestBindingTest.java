@@ -35,7 +35,6 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.services.CurrencyFilterService;
-import FacetCount;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.WarmthFilter;
 import ooo.klae.connex.backend.exceptions.GlobalExceptionHandler;
