@@ -42,6 +42,7 @@ import ooo.klae.connex.backend.dto.DuplicateMatchEvidenceDto;
 import ooo.klae.connex.backend.dto.DuplicateMatchKind;
 import ooo.klae.connex.backend.dto.DuplicateMatchStrength;
 import ooo.klae.connex.backend.dto.DuplicateNameKey;
+import ooo.klae.connex.backend.dto.DuplicateNameMatchState;
 import ooo.klae.connex.backend.dto.DuplicatePreflightResponse;
 import ooo.klae.connex.backend.dto.PersonDuplicatePreflightRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
@@ -97,15 +98,46 @@ public class DuplicatePreflightService {
      * @param request bounded candidate values
      * @return ranked visible candidates
      */
-    @Transactional(readOnly = true)
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_CREATE)
     public DuplicatePreflightResponse preflightPerson(PersonDuplicatePreflightRequest request) {
-        return matchPersons(
-            List.of(Objects.requireNonNull(request, "request")),
+        RecordVisibilityScope scope = recordVisibilityScopeControlAccess.getForWorkspace(
+            workspaceService.getCurrentWorkspaceId());
+        return recordVisibilityScopeControlAccess.withWorkspaceScope(
+            workspaceService.getCurrentWorkspaceId(), scope, () -> preflightPersonWithinVisibilityScope(request));
+    }
+
+    private DuplicatePreflightResponse preflightPersonWithinVisibilityScope(PersonDuplicatePreflightRequest request) {
+        NormalizedRequest normalized = normalizePerson(Objects.requireNonNull(request, "request"));
+        rateLimiter.requireAllowed(workUnits(List.of(normalized)));
+        duplicateDecisionLockService.lockCurrentOrganization();
+        DuplicatePreflightResponse response = match(
+            "person",
+            List.of(normalized),
             PUBLIC_CANDIDATE_LIMIT,
-            Admission.INTERACTIVE,
-            null,
-            null).responses().getFirst();
+            false,
+            identityMapper::findVisiblePersonIdentityMatches,
+            identityMapper::findVisiblePersonNameMatches).getFirst();
+        if (!response.allowSeparateCreation()) {
+            return response;
+        }
+        String workflow = boundedPersonWorkflow(normalized);
+        String result = boundedPersonResult(normalized, response);
+        String proof = dealReviewProofService.isConsumable(request.reviewToken(), workflow, result)
+            ? Objects.requireNonNull(request.reviewToken())
+            : dealReviewProofService.issueBoundedPerson(workflow, result);
+        return new DuplicatePreflightResponse(
+            "person", response.candidates(), response.truncated(), proof, true);
+    }
+
+    /** Checks advisory person candidates without acquiring a decision mutex or issuing a review proof. */
+    @Transactional(readOnly = true)
+    @RequirePermission(Permission.PERSON_CREATE)
+    public boolean personCandidatesExist(PersonDuplicatePreflightRequest request) {
+        DuplicatePreflightResponse response = matchPersons(
+            List.of(Objects.requireNonNull(request, "request")), PUBLIC_CANDIDATE_LIMIT,
+            Admission.INTERACTIVE, null, null).responses().getFirst();
+        return response.truncated() || !response.candidates().isEmpty();
     }
 
     /**
@@ -213,7 +245,15 @@ public class DuplicatePreflightService {
             false,
             identityMapper::findVisiblePersonIdentityMatches,
             identityMapper::findVisiblePersonNameMatches).getFirst();
-        requireReviewed(response, duplicateReviewToken, true);
+        if (response.allowSeparateCreation()) {
+            if (!dealReviewProofService.consume(
+                    duplicateReviewToken, boundedPersonWorkflow(normalized), boundedPersonResult(normalized, response))) {
+                throw duplicateReviewConflict(duplicateReviewToken, false);
+            }
+        } else {
+            requireReviewed(response, duplicateReviewToken);
+            dealReviewProofService.invalidateSubmitted(duplicateReviewToken, boundedPersonWorkflow(normalized));
+        }
     }
 
     /**
@@ -636,18 +676,10 @@ public class DuplicatePreflightService {
     private static void requireReviewed(
             DuplicatePreflightResponse response,
             String duplicateReviewToken) {
-        requireReviewed(response, duplicateReviewToken, false);
-    }
-
-    private static void requireReviewed(
-            DuplicatePreflightResponse response,
-            String duplicateReviewToken,
-            boolean allowSeparatePerson) {
-        boolean separatePerson = allowSeparatePerson && response.allowSeparateCreation();
-        if (response.truncated() && !separatePerson) {
+        if (response.truncated()) {
             throw duplicateReviewConflict(duplicateReviewToken, true);
         }
-        if ((!response.candidates().isEmpty() || separatePerson)
+        if (!response.candidates().isEmpty()
                 && !Objects.equals(response.reviewToken(), duplicateReviewToken)) {
             throw duplicateReviewConflict(duplicateReviewToken, false);
         }
@@ -1023,6 +1055,24 @@ public class DuplicatePreflightService {
         for (DuplicateCandidateDto candidate : candidates) {
             updateCandidateDigest(digest, candidate);
         }
+        return HexFormat.of().formatHex(digest.digest());
+    }
+
+    private String boundedPersonWorkflow(NormalizedRequest request) {
+        return workflowFingerprint("connex-bounded-person-create-v1", List.of(request),
+            Integer.toString(workspaceService.getCurrentWorkspaceId()));
+    }
+
+    private String boundedPersonResult(NormalizedRequest request, DuplicatePreflightResponse response) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        DuplicateNameMatchState state = Objects.requireNonNull(identityMapper.findVisiblePersonNameMatchState(
+            workspaceId, workspaceScopeControlAccess.getForWorkspace(workspaceId).workspaceIdsJson(),
+            namePattern(request.normalizedName().orElseThrow())));
+        MessageDigest digest = sha256();
+        updateDigest(digest, "connex-bounded-person-result-v1");
+        updateDigest(digest, response.reviewToken());
+        updateDigest(digest, Long.toString(state.matchCount()));
+        updateDigest(digest, Long.toString(state.highestRecordId()));
         return HexFormat.of().formatHex(digest.digest());
     }
 

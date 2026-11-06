@@ -14,7 +14,7 @@ Evidence classes:
 Company weak-name review additionally compares boundary legal-form variants through
 `MatchingService.normalizeCompanyNameForReview`: 株式会社, 有限会社, 合同会社, their
 parenthesized abbreviations, and the suffixes Inc./Incorporated, Co., Ltd., Ltd./Limited,
-K.K. and GmbH. Unicode width, case and kana folding precedes this comparison. This review
+K.K., LLC/L.L.C. and GmbH. Unicode width, case and kana folding precedes this comparison. This review
 key never replaces canonical names or identity keys. A variant never authorizes automatic
 attachment or merging; CSV company dependencies retain canonical-exact name validation.
 
@@ -107,13 +107,33 @@ filtering a bounded prefilter cannot prove that unseen exact names do not exist.
 person review may return `allowSeparateCreation=true` only when every supplied canonical
 identity lookup is complete and empty. The user can then explicitly acknowledge the displayed
 bounded name review and create a separate contact, even if no exact candidate survived the
-prefilter. The same token, including this permission and the displayed result, must still
-match the final recheck under the duplicate mutex and identity locks. New strong evidence or
-a changed displayed result invalidates that acknowledgement. This is permission to create,
+prefilter. This exceptional path requires a server-issued, expiring, one-use proof. The issuer
+uses the existing configured audit-integrity HMAC secret with a separate bounded-person domain,
+the actor/workspace, normalized request/result fingerprints and a cryptographic random nonce.
+Only the token hash and non-PII binding fingerprints are stored in the existing
+`deal_duplicate_review_proof` table through `DealDuplicateReviewProofService`; its historical
+name does not imply a deal foreign key. Existing expiry, actor and workspace cleanup applies.
+
+The result binds both the displayed candidates/permission and the complete visible broad-name
+prefilter's count and highest record ID. That aggregate is conservative broad evidence, not
+an exact normalized-name total, and uses the display query's visibility/restriction predicates.
+Issuance and the final recheck acquire the existing organization duplicate mutex. Creation
+rechecks identities and the current result, then atomically consumes the exact unexpired proof
+for the same actor/workspace/normalized request in its transaction. Successful creation commits
+the proof deletion; rollback preserves it. Deleting a created record cannot revive the proof,
+even if the count and highest ID return to their earlier values. New strong evidence or a
+changed displayed/aggregate result requires fresh review. Client final preflight echoes the
+acknowledged proof and preserves it only while the entire binding still matches.
+
+This is permission to create,
 never proof of completeness for reuse, imports, automatic linking or merging. Those paths
 retain their existing truncation guards. Company and deal overflow remain blocking.
 
 The frontend uses the shared duplicate-preflight hook/request scope rather than implementing feature-specific matching.
+
+Assistant person preparation uses `personCandidatesExist`, the read-only advisory matcher;
+it neither takes the duplicate mutex nor issues a proof. Truncation still refuses automatic
+assistant creation. Approval retains the canonical locked creation check.
 
 ## Locking and mutation recheck
 

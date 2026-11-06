@@ -164,6 +164,7 @@ export type PersonDuplicatePreflightRequest = {
     name?: string | null;
     emails: string[];
     phones: string[];
+    reviewToken?: string | null;
 };
 
 export type CompanyDuplicatePreflightRequest = {

@@ -11,7 +11,7 @@ public final class CompanyReviewNameNormalizer {
     private static final Pattern PREFIX = Pattern.compile("^" + JAPANESE_FORM + "\\s*");
     private static final Pattern SUFFIX = Pattern.compile(
         "\\s*" + JAPANESE_FORM + "$|(?:^|[\\s,]+)"
-            + "(?:inc\\.?|incorporated|co\\.?\\s*,?\\s*ltd\\.?|ltd\\.?|limited|k\\.?\\s*k\\.?|gmbh)$");
+            + "(?:inc\\.?|incorporated|co\\.?\\s*,?\\s*ltd\\.?|ltd\\.?|limited|k\\.?\\s*k\\.?|gmbh|l\\.?l\\.?c\\.?)$");
 
     private CompanyReviewNameNormalizer() {
     }

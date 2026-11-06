@@ -9,10 +9,13 @@ for (const locale of ['en', 'ja'] as const) {
     test(`creates a separate common-name contact after explicit bounded review in ${locale}`, async ({ page }) => {
         const name = locale === 'ja' ? '山田 太郎' : 'Jordan Lee';
         const email = `${randomUUID()}@example.test`;
-        const token = randomUUID();
+        const token = randomUUID().replaceAll('-', '') + randomUUID().replaceAll('-', '');
         const submitted: unknown[] = [];
+        const reviewBodies: unknown[] = [];
         await useLocale(page, locale);
         await page.route('**/api/duplicate-preflight/persons', async (route) => {
+            const reviewBody: unknown = route.request().postDataJSON();
+            reviewBodies.push(reviewBody);
             await route.fulfill({ json: {
                 recordType: 'person', truncated: true, allowSeparateCreation: true, reviewToken: token,
                 candidates: [{ recordType: 'person', recordId: 991, name, ownedByActiveWorkspace: true,
@@ -38,6 +41,7 @@ for (const locale of ['en', 'ja'] as const) {
         await create.click();
         await expect.poll(() => submitted.length).toBe(1);
         expect(submitted[0]).toMatchObject({ name, email, duplicateReviewToken: token });
+        expect(reviewBodies.at(-1)).toMatchObject({ reviewToken: token });
     });
 
     test(`reviews a company legal-form variant without creating or attaching it in ${locale}`, async ({ page }, testInfo) => {
@@ -46,8 +50,11 @@ for (const locale of ['en', 'ja'] as const) {
         await page.goto('/dashboard');
         await page.getByRole('button', { name: message(locale, 'actions', 'Actions.quickCreate.trigger'), exact: true }).click();
         await page.getByRole('option', { name: message(locale, 'actions', 'Actions.create.company'), exact: true }).click();
-        await page.getByLabel(message(locale, 'companies', 'CompaniesNewDialog.labelName'), { exact: true })
-            .fill(`${fixture.companyName} Co., Ltd.`);
+        const companyName = page.locator('#new-company-form').getByRole('textbox', {
+            name: `${message(locale, 'companies', 'CompaniesNewDialog.labelName')} *`, exact: true,
+        });
+        await expect(companyName).toBeEditable();
+        await companyName.fill(`${fixture.companyName}${locale === 'ja' ? ' ＬＬＣ' : ' LLC'}`);
         const warning = page.getByRole('region', { name: message(locale, 'common', 'DuplicateWarning.heading') });
         await expect(warning.getByText(fixture.companyName, { exact: true })).toBeVisible();
         await expect(warning.getByText(message(locale, 'common', 'DuplicateWarning.companyNameEvidence'))).toBeVisible();

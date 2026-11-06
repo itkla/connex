@@ -22,8 +22,13 @@ Direct responses remain bounded to the established candidate ceiling; CSV respon
 Direct person review can explicitly permit separate creation from a bounded name-only result
 through `allowSeparateCreation`, while retaining `truncated=true`. This permission requires
 complete, empty canonical email/phone results, explicit user acknowledgement, and the same
-request/result token at the locked final recheck, including when the displayed candidate list
-is empty. It never permits reuse or import resolution; company and deal overflow still blocks.
+server-issued keyed proof at the locked final recheck, including when the displayed candidate list
+is empty. The existing duplicate proof store binds actor/workspace, normalized request, displayed
+result and the visible broad-name count/highest ID; expiry and transactional consumption prevent
+forgery and replay. Counts are not a substitute for consumption: deletion could restore them.
+The final preflight echoes the acknowledged proof instead of replacing a still-valid one.
+See [Duplicate Review](DUPLICATE_REVIEW.md#manual-creation-and-client-preflight).
+It never permits reuse or import resolution; company and deal overflow still blocks.
 
 ### Person CSV identity decisions
 

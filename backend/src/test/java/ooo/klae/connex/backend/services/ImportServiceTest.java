@@ -204,8 +204,9 @@ class ImportServiceTest extends AbstractServiceTest {
             .contains("Multiple visible companies"));
     }
 
-    @Test
-    void legalFormVariantIsReviewedWithoutAutomaticallyAttachingACompany() {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {" Inc.", " LLC", " ＬＬＣ", " L.L.C."})
+    void legalFormVariantIsReviewedWithoutAutomaticallyAttachingACompany(String suffix) {
         String companyName = "Reviewed variant " + unique();
         Company existing = new Company();
         existing.setWorkspaceId(workspace.getId());
@@ -213,7 +214,7 @@ class ImportServiceTest extends AbstractServiceTest {
         companyMapper.insert(existing);
         ImportRequest request = req(
             List.of(map("Name", "name"), map("Company", "company")),
-            List.of(Map.of("Name", "Variant person " + unique(), "Company", companyName + " Inc.")),
+            List.of(Map.of("Name", "Variant person " + unique(), "Company", companyName + suffix)),
             "fill_empty");
 
         ImportPreviewResult preview = importService.previewPersons(request);

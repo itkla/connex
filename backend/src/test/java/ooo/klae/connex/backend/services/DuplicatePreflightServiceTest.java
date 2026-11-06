@@ -19,6 +19,7 @@ import static org.mockito.Mockito.when;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.Objects;
 import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -37,6 +38,7 @@ import ooo.klae.connex.backend.dto.DealDuplicatePreflightRequest;
 import ooo.klae.connex.backend.dto.DuplicateCandidateRow;
 import ooo.klae.connex.backend.dto.DuplicateMatchKind;
 import ooo.klae.connex.backend.dto.DuplicateMatchStrength;
+import ooo.klae.connex.backend.dto.DuplicateNameMatchState;
 import ooo.klae.connex.backend.dto.DuplicatePreflightResponse;
 import ooo.klae.connex.backend.dto.PersonDuplicatePreflightRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
@@ -63,6 +65,8 @@ class DuplicatePreflightServiceTest {
     @Mock private DuplicatePreflightRateLimiter.CommitAdmission commitAdmission;
 
     private DuplicatePreflightService service;
+    private String personWorkflow;
+    private String personResult;
 
     @BeforeEach
     void setUp() {
@@ -88,6 +92,28 @@ class DuplicatePreflightServiceTest {
         org.mockito.Mockito.lenient()
             .when(dealReviewProofService.issue(anyString(), anyString()))
             .thenReturn("e".repeat(64));
+        org.mockito.Mockito.lenient().when(identityMapper.findVisiblePersonNameMatchState(
+            eq(7), eq("[7,9]"), anyString())).thenReturn(new DuplicateNameMatchState(51, 51));
+        org.mockito.Mockito.lenient().when(dealReviewProofService.issueBoundedPerson(anyString(), anyString()))
+            .thenAnswer(invocation -> {
+                personWorkflow = invocation.getArgument(0, String.class);
+                personResult = invocation.getArgument(1, String.class);
+                return "f".repeat(64);
+            });
+        org.mockito.Mockito.lenient().when(dealReviewProofService.isConsumable(
+            eq("f".repeat(64)), anyString(), anyString())).thenAnswer(invocation ->
+                Objects.equals(personWorkflow, invocation.getArgument(1, String.class))
+                    && Objects.equals(personResult, invocation.getArgument(2, String.class)));
+        org.mockito.Mockito.lenient().when(dealReviewProofService.consume(
+            eq("f".repeat(64)), anyString(), anyString())).thenAnswer(invocation -> {
+                boolean accepted = Objects.equals(personWorkflow, invocation.getArgument(1, String.class))
+                    && Objects.equals(personResult, invocation.getArgument(2, String.class));
+                if (accepted) {
+                    personWorkflow = null;
+                    personResult = null;
+                }
+                return accepted;
+            });
     }
 
     @Test
@@ -103,6 +129,24 @@ class DuplicatePreflightServiceTest {
         DuplicatePreflightResponse interactive = service.preflightDeal(request);
         assertEquals(1, interactive.candidates().size());
         assertTrue(service.dealCandidatesExist(request));
+    }
+
+    @Test
+    void advisoryPersonCheckNeverLocksOrIssuesProofEvenWhenNameResultsOverflow() throws Exception {
+        when(matchingService.normalizeName("Jordan Lee")).thenReturn(Optional.of("jordan lee"));
+        when(identityMapper.findVisiblePersonNameMatches(eq(7), eq("[7,9]"), anyList(), eq(51)))
+            .thenReturn(IntStream.rangeClosed(1, 51).mapToObj(id -> row(
+                id, 7, "Jordan Lee", "name", "jordan lee")).toList())
+            .thenReturn(List.of());
+        PersonDuplicatePreflightRequest request = new PersonDuplicatePreflightRequest(
+            "Jordan Lee", List.of(), List.of());
+        assertTrue(service.personCandidatesExist(request));
+        assertFalse(service.personCandidatesExist(request));
+        org.mockito.Mockito.verifyNoInteractions(duplicateDecisionLockService, dealReviewProofService);
+        var method = DuplicatePreflightService.class.getMethod("personCandidatesExist", PersonDuplicatePreflightRequest.class);
+        assertTrue(method.getAnnotation(org.springframework.transaction.annotation.Transactional.class).readOnly());
+        assertEquals(ooo.klae.connex.backend.tenant.Permission.PERSON_CREATE,
+            method.getAnnotation(ooo.klae.connex.backend.tenant.RequirePermission.class).value());
     }
 
     @Test
@@ -364,7 +408,7 @@ class DuplicatePreflightServiceTest {
         service.requireReviewedPersonCreation(request, response.reviewToken());
         assertThrows(ConflictException.class, () -> service.requireReviewedBusinessCardPersonReuse(
             request, 1, response.reviewToken()));
-        verify(duplicateDecisionLockService, org.mockito.Mockito.times(3)).lockCurrentOrganization();
+        verify(duplicateDecisionLockService, org.mockito.Mockito.times(4)).lockCurrentOrganization();
     }
 
     @Test

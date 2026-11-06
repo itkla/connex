@@ -151,6 +151,7 @@ export function useDuplicatePreflight(
                     name: values.name,
                     emails: candidateList(values.email),
                     phones: candidateList(values.phone),
+                    reviewToken: dealReviewToken,
                 }, init);
             } else if (kind === 'company') {
                 response = await preflightCompanyDuplicates({
@@ -239,7 +240,7 @@ export function useDuplicatePreflight(
             };
         }
         const checked = await runCheck(
-            kind === 'deal' ? response?.reviewToken : undefined,
+            kind === 'deal' || kind === 'person' ? response?.reviewToken : undefined,
             init,
         );
         if (!checked || !canAcknowledgeDuplicatePreflight(checked)) {

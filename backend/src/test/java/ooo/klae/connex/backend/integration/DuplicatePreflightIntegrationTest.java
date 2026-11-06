@@ -353,6 +353,15 @@ class DuplicatePreflightIntegrationTest {
             .andReturn();
         String token = objectMapper.readTree(review.getResponse().getContentAsString())
             .path("reviewToken").asString();
+        mockMvc.perform(post("/api/duplicate-preflight/persons")
+                .with(csrf().asHeader())
+                .header("X-Workspace-Id", workspace.getId()).session(session)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {"name":"Jordan Lee","emails":["different@example.com"],"phones":[],"reviewToken":"%s"}
+                    """.formatted(token)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.reviewToken").value(token));
         String create = """
             {"name":"Jordan Lee","email":"different@example.com","phone":"","title":""}
             """;

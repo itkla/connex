@@ -161,6 +161,10 @@ class DuplicatePreflightDatabaseTest extends AbstractServiceTest {
         "さくら商事|合同会社さくら商事",
         "Sakura Robotics|Sakura Robotics Inc.",
         "Sakura Robotics Inc.|Sakura Robotics",
+        "Sakura Robotics|Sakura Robotics LLC",
+        "Sakura Robotics LLC|Sakura Robotics",
+        "Ｓａｋｕｒａ　Ｒｏｂｏｔｉｃｓ　ＬＬＣ|Sakura Robotics",
+        "Sakura Robotics|Ｓａｋｕｒａ　Ｒｏｂｏｔｉｃｓ　ＬＬＣ",
         "Sakura Robotics Co., Ltd.|Sakura Robotics K.K.",
         "Ｓａｋｕｒａ　Ｒｏｂｏｔｉｃｓ　Ｉｎｃ．|Sakura Robotics"
     })
@@ -326,11 +330,11 @@ class DuplicatePreflightDatabaseTest extends AbstractServiceTest {
         DealDuplicateReviewProofService issuer = new DealDuplicateReviewProofService(
             dealDuplicateReviewProofMapper,
             workspaceService,
-            duplicatePreflightProperties);
+            duplicatePreflightProperties, new ooo.klae.connex.backend.config.AuditIntegrityProperties());
         DealDuplicateReviewProofService consumer = new DealDuplicateReviewProofService(
             dealDuplicateReviewProofMapper,
             workspaceService,
-            duplicatePreflightProperties);
+            duplicatePreflightProperties, new ooo.klae.connex.backend.config.AuditIntegrityProperties());
         String workflow = "a".repeat(64);
         String result = "b".repeat(64);
         String proof = issuer.issue(workflow, result);
@@ -384,7 +388,7 @@ class DuplicatePreflightDatabaseTest extends AbstractServiceTest {
         DealDuplicateReviewProofService proofService = new DealDuplicateReviewProofService(
             dealDuplicateReviewProofMapper,
             workspaceService,
-            duplicatePreflightProperties);
+            duplicatePreflightProperties, new ooo.klae.connex.backend.config.AuditIntegrityProperties());
 
         String survivingProof = proofService.issue("a".repeat(64), "b".repeat(64));
         assertFalse(proofService.invalidateSubmitted(survivingProof, "c".repeat(64)));

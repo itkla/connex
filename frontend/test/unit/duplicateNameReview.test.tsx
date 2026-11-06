@@ -53,6 +53,9 @@ describe('bounded person-name review', () => {
         await act(async () => { decision = await result.current.reviewNow(); });
         expect(decision?.allowed).toBe(true);
         expect(decision?.duplicateReviewToken).toBe(response.reviewToken);
+        expect(api.preflight).toHaveBeenLastCalledWith(expect.objectContaining({
+            reviewToken: response.reviewToken,
+        }), undefined);
     });
 
     it.each(['person', 'company', 'deal'] as const)('keeps ordinary truncated %s reviews blocked', async (kind) => {
@@ -80,6 +83,21 @@ describe('bounded person-name review', () => {
         let decision: DuplicatePreflightDecision | undefined;
         await act(async () => { decision = await result.current.reviewNow(); });
         expect(decision?.allowed).toBe(false);
+        expect(result.current.acknowledged).toBe(false);
+    });
+
+    it('requires fresh acknowledgement when an expired proof is replaced during final review', async () => {
+        const response = boundedReview();
+        api.preflight.mockResolvedValue(response);
+        const { result } = renderHook(() => useDuplicatePreflight('person', { name: 'Jordan Lee' }));
+        await waitFor(() => expect(result.current.status).toBe('ready'));
+        act(() => result.current.setAcknowledged(true));
+        api.preflight.mockResolvedValue({ ...response, reviewToken: 'fresh-proof' });
+        let decision: DuplicatePreflightDecision | undefined;
+        await act(async () => { decision = await result.current.reviewNow(); });
+        expect(api.preflight).toHaveBeenLastCalledWith(expect.objectContaining({ reviewToken: response.reviewToken }), undefined);
+        expect(decision?.allowed).toBe(false);
+        expect(decision?.duplicateReviewToken).toBeNull();
         expect(result.current.acknowledged).toBe(false);
     });
 

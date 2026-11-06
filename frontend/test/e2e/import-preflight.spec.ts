@@ -75,7 +75,7 @@ test.describe("CSV duplicate review", () => {
         await page.locator('input[type="file"]').setInputFiles({
             name: "company-variant.csv",
             mimeType: "text/csv",
-            buffer: Buffer.from(`Name,Company\nVariant review contact,${fixture.companyName} Inc.\n`, "utf8"),
+            buffer: Buffer.from(`Name,Company\nVariant review contact,${fixture.companyName} LLC\n`, "utf8"),
         });
         await page.getByRole("button", { name: "Next" }).click();
         await expect(page.getByText(message("en", "importExport", "importExport.companyVariantNeedsReview"))).toBeVisible();

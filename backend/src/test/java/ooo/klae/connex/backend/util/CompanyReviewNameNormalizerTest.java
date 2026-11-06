@@ -24,6 +24,12 @@ class CompanyReviewNameNormalizerTest {
         "合同会社さくら商事|さくら商事",
         "（同）さくら商事|さくら商事",
         "Sakura Robotics Inc.|sakura robotics",
+        "Sakura Robotics LLC|sakura robotics",
+        "Sakura Robotics L.L.C.|sakura robotics",
+        "Ｓａｋｕｒａ　Ｒｏｂｏｔｉｃｓ　ＬＬＣ|sakura robotics",
+        "Sakura Robotics Ｌ．Ｌ．Ｃ．|sakura robotics",
+        "Sakura Robotics Llc Services|sakura robotics llc services",
+        "Shellc|shellc",
         "Ｓａｋｕｒａ　Ｒｏｂｏｔｉｃｓ　Ｉｎｃ．|sakura robotics",
         "Sakura Robotics, Incorporated|sakura robotics",
         "Sakura Robotics Co., Ltd.|sakura robotics",
@@ -43,7 +49,7 @@ class CompanyReviewNameNormalizerTest {
 
     @ParameterizedTest
     @NullAndEmptySource
-    @ValueSource(strings = {"株式会社", "(株)", "Inc.", "Co., Ltd.", "株式会社（株）", "\u0000さくら"})
+    @ValueSource(strings = {"株式会社", "(株)", "Inc.", "Co., Ltd.", "LLC", "ＬＬＣ", "L.L.C.", "株式会社（株）", "\u0000さくら"})
     void rejectsMissingBaseNames(String raw) {
         assertTrue(CompanyReviewNameNormalizer.normalize(raw).isEmpty());
     }
