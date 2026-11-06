@@ -402,7 +402,7 @@ export default function DealsKanban({
                 const visibleDestination = withDealMoved(loadedBoardDeals, moved)
                     .filter((deal) => deal.stage === moved.stage && matchesBoardDeal(deal))
                     .sort((left, right) => left.position - right.position || left.id - right.id);
-                return { columnId: String(moved.stage), index: visibleDestination.findIndex((deal) => deal.id === moved.id), position: moved.position, announcement: message };
+                return { columnId: String(moved.stage), index: visibleDestination.findIndex((deal) => deal.id === moved.id), announcement: message };
             } catch (err) {
                 showApiError(err, 'moveFailed');
                 throw err;

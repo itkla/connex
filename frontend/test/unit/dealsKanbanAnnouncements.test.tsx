@@ -91,7 +91,7 @@ for (const locale of ['en', 'ja'] as const) {
             }
             const final = result === 'saved'
                 ? catalog.moved.replace('{name}', 'Example').replace('{column}', 'Signed').replace('{position}', '3').replace('{outcome}', catalog.outcome.won)
-                : catalog.a11yRestored.replace('{name}', 'Example').replace('{column}', 'Proposal').replace('{position}', '5');
+                : catalog.a11yRestored.replace('{name}', 'Example').replace('{column}', 'Proposal').replace('{position}', '1');
             await waitFor(() => expect(live?.textContent).toBe(final));
             expect(screen.getAllByRole('status', { hidden: true }).filter((status) => status.textContent)).toEqual([live]);
             expect(mocks.success).not.toHaveBeenCalled();

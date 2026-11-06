@@ -156,7 +156,7 @@ it(`replaces a confirmation request in the same live region when ${resolution}`,
     const restored = 'Restored Original, position 1';
     const save = vi.fn(async () => {
         if (resolution === 'refused') throw new Error('refused');
-        return { columnId: 'next', index: 0, position: 2, announcement: saved };
+        return { columnId: 'next', index: 0, announcement: saved };
     });
     render(content(save, () => new Promise<boolean>((resolve) => { decide = resolve; }), items, {
         announcements: {

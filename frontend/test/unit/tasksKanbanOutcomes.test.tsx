@@ -33,18 +33,18 @@ vi.mock('@/app/hooks/useApiErrorToast', () => ({ useApiErrorToast: () => mocks.e
 vi.mock('@/app/lib/api', () => ({ moveTask: mocks.move }));
 
 const task: Task = { id: 1, description: 'Example', status: 'todo', position: 4, completed: false, assignedToId: 1, createdAt: '', updatedAt: '' };
-const drag = (column = 'in_progress'): DragEndEvent => ({
-    active: { id: 1, data: { current: {} }, rect: { current: { initial: null, translated: null } } },
-    over: { id: `col:${column}`, data: { current: {} }, disabled: false, rect: { top: 0, left: 0, right: 10, bottom: 10, width: 10, height: 10 } },
+const drag = (column = 'in_progress', id = 1, target: number | string = `col:${column}`): DragEndEvent => ({
+    active: { id, data: { current: {} }, rect: { current: { initial: null, translated: null } } },
+    over: { id: target, data: { current: typeof target === 'number' ? { sortable: { containerId: `col:${column}` } } : {} }, disabled: false, rect: { top: 0, left: 0, right: 10, bottom: 10, width: 10, height: 10 } },
     activatorEvent: new KeyboardEvent('keydown'), collisions: null, delta: { x: 0, y: 0 },
 });
-function mount(locale: 'en' | 'ja') {
+function mount(locale: 'en' | 'ja', boardTasks: Task[] = [task]) {
     render(<NextIntlClientProvider locale={locale} timeZone="UTC" messages={locale === 'en' ? en : ja}>
-        <TasksKanban tasks={[task]} personById={new Map()} dealById={new Map()} userById={new Map()} onMoved={mocks.moved} onOpen={vi.fn()} reduce />
+        <TasksKanban tasks={boardTasks} personById={new Map()} dealById={new Map()} userById={new Map()} onMoved={mocks.moved} onOpen={vi.fn()} reduce />
     </NextIntlClientProvider>);
 }
-async function drop(column = 'in_progress') {
-    const event = drag(column);
+async function drop(column = 'in_progress', id = 1, target: number | string = `col:${column}`) {
+    const event = drag(column, id, target);
     await act(async () => mocks.props?.onDragStart?.(event));
     await act(async () => mocks.props?.onDragOver?.(event));
     await act(async () => mocks.props?.onDragEnd?.(event));
@@ -55,7 +55,7 @@ afterEach(cleanup);
 
 for (const locale of ['en', 'ja'] as const) {
     const catalog = locale === 'en' ? en.ActivityTasks : ja.ActivityTasks;
-    it(`${locale}: announces a requested task move, then its restored source and position on refusal`, async () => {
+    it(`${locale}: announces a requested task move, then its displayed source position on refusal`, async () => {
         let refuse: ((error: Error) => void) | undefined;
         mocks.move.mockImplementation(() => new Promise<Task>((_, reject) => { refuse = reject; }));
         mount(locale);
@@ -65,7 +65,7 @@ for (const locale of ['en', 'ja'] as const) {
         expect(live.getAttribute('role')).toBe('status');
         const error = new Error('refused');
         await act(async () => refuse?.(error));
-        const restored = catalog.a11yRestored.replace('{name}', 'Example').replace('{column}', catalog.statusTodo).replace('{position}', '5');
+        const restored = catalog.a11yRestored.replace('{name}', 'Example').replace('{column}', catalog.statusTodo).replace('{position}', '1');
         await waitFor(() => expect(screen.getAllByRole('status').some((status) => status.textContent === restored)).toBe(true));
         expect(live.textContent).toBe(restored);
         expect(screen.getAllByRole('status').filter((status) => status.textContent)).toEqual([live]);
@@ -73,7 +73,7 @@ for (const locale of ['en', 'ja'] as const) {
         expect(mocks.error).toHaveBeenCalledWith(error, 'moveFailed');
         expect(mocks.moved).not.toHaveBeenCalled();
     });
-    it(`${locale}: restores the last saved task position after a successive move fails before refresh`, async () => {
+    it(`${locale}: restores the displayed task position after a successive move fails before refresh`, async () => {
         mocks.move.mockResolvedValueOnce({ ...task, status: 'in_progress', position: 0 });
         mount(locale);
         await drop();
@@ -84,6 +84,29 @@ for (const locale of ['en', 'ja'] as const) {
         const restored = catalog.a11yRestored.replace('{name}', 'Example').replace('{column}', catalog.statusInProgress).replace('{position}', '1');
         await waitFor(() => expect(screen.getAllByRole('status').some((status) => status.textContent === restored)).toBe(true));
         expect(document.querySelector('[data-kanban-drag-handle="1"]')?.closest('section')?.textContent).toContain(catalog.statusInProgress);
+        expect(mocks.error).toHaveBeenCalledWith(error, 'moveFailed');
+        expect(mocks.moved).toHaveBeenCalledOnce();
+    });
+    it(`${locale}: restores a peer's displayed position after another task was reordered before refresh`, async () => {
+        const a = { ...task, description: 'A', position: 2 };
+        const b = { ...task, id: 2, description: 'B', position: 0 };
+        const c = { ...task, id: 3, description: 'C', position: 1 };
+        mocks.move.mockResolvedValueOnce({ ...a, position: 0 });
+        mount(locale, [b, c, a]);
+        const column = screen.getByRole('heading', { name: catalog.statusTodo }).closest('section');
+        if (!column) throw new Error('Missing source column');
+        const displayed = () => [...column.querySelectorAll('[data-kanban-drag-handle]')].map((handle) => Number(handle.getAttribute('data-kanban-drag-handle')));
+        expect(displayed()).toEqual([2, 3, 1]);
+        await drop('todo', 1, 2);
+        expect(displayed()).toEqual([1, 2, 3]);
+        const error = new Error('peer move refused');
+        mocks.move.mockRejectedValueOnce(error);
+        await drop('in_progress', 2);
+        expect(displayed()).toEqual([1, 2, 3]);
+        const restored = catalog.a11yRestored.replace('{name}', 'B').replace('{column}', catalog.statusTodo).replace('{position}', '2');
+        await waitFor(() => expect(screen.getAllByRole('status').some((status) => status.textContent === restored)).toBe(true));
+        expect(mocks.move).toHaveBeenNthCalledWith(1, 1, 'todo', 0);
+        expect(mocks.move).toHaveBeenNthCalledWith(2, 2, 'in_progress', 0);
         expect(mocks.error).toHaveBeenCalledWith(error, 'moveFailed');
         expect(mocks.moved).toHaveBeenCalledOnce();
     });
