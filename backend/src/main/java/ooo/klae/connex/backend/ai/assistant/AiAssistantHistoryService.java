@@ -130,7 +130,7 @@ public class AiAssistantHistoryService {
         AiAgentScopePolicy mission = missionScope("person", personId);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         return mission == null
-                ? referenceService.hydrate(workspaceId, noteMapper.getAiAssistantVisibleNotesByPersonId(
+                ? referenceService.hydrateForMasking(workspaceId, noteMapper.getAiAssistantVisibleNotesByPersonId(
                         workspaceId, personId, workspaceService.getCurrentUserId(),
                         currentOrganizationWorkspaceIds(workspaceId), limit, includePrivateNotes))
                 : missionNotes(mission, noteMapper.getAiAssistantVisibleNotesByPersonId(
@@ -144,7 +144,7 @@ public class AiAssistantHistoryService {
         AiAgentScopePolicy mission = missionScope("deal", dealId);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         return mission == null
-                ? referenceService.hydrate(workspaceId, noteMapper.getAiAssistantVisibleNotesByDealId(
+                ? referenceService.hydrateForMasking(workspaceId, noteMapper.getAiAssistantVisibleNotesByDealId(
                         workspaceId, dealId, workspaceService.getCurrentUserId(),
                         currentOrganizationWorkspaceIds(workspaceId), limit, includePrivateNotes))
                 : missionNotes(mission, noteMapper.getAiAssistantVisibleNotesByDealId(
@@ -161,7 +161,7 @@ public class AiAssistantHistoryService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int currentUserId = workspaceService.getCurrentUserId();
         List<Integer> organizationWorkspaceIds = currentOrganizationWorkspaceIds(workspaceId);
-        return referenceService.hydrate(
+        return referenceService.hydrateForMasking(
                 workspaceId,
                 noteMapper.getAiAssistantVisibleNotesByCompanyId(
                         workspaceId,
@@ -182,7 +182,7 @@ public class AiAssistantHistoryService {
 
     private List<Activity> activities(int workspaceId, AiAgentScopePolicy mission, List<Activity> rows) {
         if (mission == null) {
-            return referenceService.hydrateActivities(workspaceId, rows);
+            return referenceService.hydrateActivitiesForMasking(workspaceId, rows);
         }
         return rows.stream()
                 .filter(row -> allowedParents(mission, row.getPerson(), row.getDeal()))
@@ -203,7 +203,7 @@ public class AiAssistantHistoryService {
 
     private List<Task> tasks(int workspaceId, AiAgentScopePolicy mission, List<Task> rows) {
         if (mission == null) {
-            return referenceService.hydrateTasks(workspaceId, rows);
+            return referenceService.hydrateTasksForMasking(workspaceId, rows);
         }
         return rows.stream()
                 .filter(row -> allowedParents(mission, row.getPerson(), row.getDeal()))

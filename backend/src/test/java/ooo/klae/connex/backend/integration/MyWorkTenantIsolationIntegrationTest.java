@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.integration;
 
+import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
@@ -187,8 +189,7 @@ class MyWorkTenantIsolationIntegrationTest {
             .andExpect(status().isOk()).andExpect(jsonPath("$.counts.cold").value(1))
             .andExpect(jsonPath("$.counts.cooling").value(1))
             .andExpect(jsonPath("$.contacts.length()").value(2))
-            .andExpect(jsonPath("$.contacts[?(@.name == 'Personal contact')].length()").value(1))
-            .andExpect(jsonPath("$.contacts[?(@.name == 'Cooling contact')].length()").value(1));
+            .andExpect(jsonPath("$.contacts[*].name", containsInAnyOrder("Personal contact", "Cooling contact")));
         for (String currency : List.of("JPY", "USD")) {
             mockMvc.perform(get("/api/my-work/deal-kpis").session(session)
                     .header("X-Workspace-Id", firstWorkspace.getId())
@@ -298,14 +299,15 @@ class MyWorkTenantIsolationIntegrationTest {
                 .header("X-Workspace-Id", firstWorkspace.getId())
                 .param("scope", "me").param("page", "1").param("size", "25"))
             .andExpect(status().isOk()).andExpect(jsonPath("$.total").value(2))
-            .andExpect(jsonPath("$.items[?(@.id == " + sharedContact + ")].length()").value(1));
+            .andExpect(jsonPath("$.items[*].id", containsInAnyOrder(localContact, sharedContact)));
         mockMvc.perform(get("/api/my-work/relationships").session(session)
                 .header("X-Workspace-Id", firstWorkspace.getId()))
             .andExpect(status().isOk()).andExpect(jsonPath("$.counts.hot").value(1))
             .andExpect(jsonPath("$.counts.cold").value(1)).andExpect(jsonPath("$.counts.cooling").value(1))
             .andExpect(jsonPath("$.contacts.length()").value(2))
-            .andExpect(jsonPath("$.contacts[?(@.id == " + sharedContact + ")].length()").value(1))
-            .andExpect(jsonPath("$.temperatures[?(@.id == " + sharedContact + " && @.trend == 'cooling')].length()").value(1));
+            .andExpect(jsonPath("$.contacts[*].id", containsInAnyOrder(localContact, sharedContact)))
+            .andExpect(jsonPath("$.temperatures[*].id", containsInAnyOrder(localContact, sharedContact)))
+            .andExpect(jsonPath("$.temperatures[?(@.id == " + sharedContact + ")].trend", contains("cooling")));
 
         jdbc.update("DELETE FROM person_share WHERE person_id = ? AND workspace_id = ?",
             sharedContact, firstWorkspace.getId());

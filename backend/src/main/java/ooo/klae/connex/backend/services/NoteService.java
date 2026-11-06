@@ -401,7 +401,7 @@ public class NoteService {
     }
 
     private Note hydrateReferences(int workspaceId, Note note) {
-        note.setReferences(referenceService.referencesFor(workspaceId, ReferenceService.SOURCE_NOTE, note.getId()));
+        note.setReferences(referenceService.referencesForReader(workspaceId, ReferenceService.SOURCE_NOTE, note.getId()));
         return note;
     }
 

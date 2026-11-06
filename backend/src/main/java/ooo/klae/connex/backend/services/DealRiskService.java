@@ -531,7 +531,7 @@ public class DealRiskService {
 
     /**
      * A cooling-stakeholder factor for one deal contact, or {@code null} when the contact is warm
-     * enough not to warrant one or is opted out of risk evaluation. A cold band is sharper than a
+     * enough not to warrant one, has no eligible history, or is opted out of risk evaluation. A cold band is sharper than a
      * cooling-but-still-cool band, and a key role (champion, decision maker, buyer, sponsor)
      * escalates either by one step.
      */
@@ -539,7 +539,7 @@ public class DealRiskService {
         if (person.isRiskExcluded()) {
             return null;
         }
-        if (warmth == null) {
+        if (warmth == null || warmth.getDaysSinceTouch() == null) {
             return null;
         }
         boolean cold = COLD_BAND.equals(warmth.getBand());

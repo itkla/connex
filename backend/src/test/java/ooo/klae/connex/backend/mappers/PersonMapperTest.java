@@ -243,7 +243,7 @@ class PersonMapperTest extends AbstractMapperTest {
         assertFalse(personMapper.getPersonsForNetworkReport(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), 10_000).stream()
             .anyMatch(person -> person.getId() == suspended.getId()));
         assertFalse(personMapper.getPersonsFiltered(
-            workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), null, null, null, false, allTeamScope(), null, false, null, false, null, false, false, null).stream()
+            workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), null, null, null, false, allTeamScope(), null, false, null, false, null, false, false, null, null).stream()
             .anyMatch(person -> person.getId() == suspended.getId()));
 
         assertNotNull(personMapper.getPersonById(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), suspended.getId()));
@@ -251,7 +251,7 @@ class PersonMapperTest extends AbstractMapperTest {
             .anyMatch(person -> person.getId() == suspended.getId()));
         assertTrue(personMapper.getPersonsPage(
             workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), null, null, null, null, null, false, allTeamScope(),
-            null, false, null, false, null, false, false, null, 10_000, 0).stream()
+            null, false, null, false, null, false, false, null, 10_000, 0, null).stream()
             .anyMatch(person -> person.getId() == suspended.getId()));
         assertTrue(personMapper.getPersonsByDealId(workspace.getId(), orgWorkspaceIdsJson(workspaceMapper, workspace.getId()), deal.getId()).stream()
             .anyMatch(person -> person.getId() == suspended.getId()));
@@ -286,6 +286,40 @@ class PersonMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void tagFiltersMatchPageCountIdsAndExportWithoutForeignWorkspaceTags() {
+        Person included = newPerson(newCompany());
+        Person untagged = newPerson(newCompany());
+        Tag first = newTag();
+        Tag second = newTag();
+        personMapper.addTag(workspace.getId(), included.getId(), first.getId());
+        personMapper.addTag(workspace.getId(), included.getId(), second.getId());
+        Workspace other = newWorkspace();
+        Tag foreign = ooo.klae.connex.backend.support.TestEntityFixtures.newTag(tagMapper, other);
+        personMapper.addTag(workspace.getId(), included.getId(), foreign.getId());
+        String scope = orgWorkspaceIdsJson(workspaceMapper, workspace.getId());
+        List<Integer> tags = List.of(first.getId(), second.getId());
+
+        assertEquals(List.of(included.getId()), personMapper.getPersonsPage(
+            workspace.getId(), scope, null, null, null, null, null, false, allTeamScope(),
+            null, false, null, false, null, false, false, null, 25, 0, tags)
+            .stream().map(Person::getId).toList());
+        assertEquals(1, personMapper.countPersons(workspace.getId(), scope, null, null, null, false,
+            allTeamScope(), null, false, null, false, null, false, false, null, tags));
+        assertEquals(List.of(included.getId()), personMapper.getPersonIdsFiltered(
+            workspace.getId(), scope, null, null, null, false, allTeamScope(),
+            null, false, null, false, null, false, false, null, 1000, tags));
+        assertEquals(List.of(included.getId()), personMapper.getPersonsFiltered(
+            workspace.getId(), scope, null, null, null, false, allTeamScope(),
+            null, false, null, false, null, false, false, null, tags).stream().map(Person::getId).toList());
+        assertEquals(0, personMapper.countPersons(workspace.getId(), scope, null, null, null, false,
+            allTeamScope(), null, false, null, false, null, false, false, null, List.of(foreign.getId())));
+        assertEquals(0, personMapper.countPersons(other.getId(), orgWorkspaceIdsJson(workspaceMapper, other.getId()),
+            null, null, null, false, allTeamScope(), null, false, null, false, null, false, false, null, tags));
+        assertFalse(personMapper.getPersonIdsFiltered(workspace.getId(), scope, null, null, null, false,
+            allTeamScope(), null, false, null, false, null, false, false, null, 1000, tags).contains(untagged.getId()));
+    }
+
+    @Test
     void getPersonsPageLimitsAndCountsWorkspaceRows() {
         Workspace pageWorkspace = newWorkspace();
         Person first = newPersonIn(pageWorkspace);
@@ -295,11 +329,11 @@ class PersonMapperTest extends AbstractMapperTest {
 
         List<Person> page = personMapper.getPersonsPage(
             pageWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, pageWorkspace.getId()), null, null, null, null, null, false, allTeamScope(),
-            null, false, null, false, null, false, false, null, 2, 0);
+            null, false, null, false, null, false, false, null, 2, 0, null);
 
         assertEquals(2, page.size());
         assertEquals(3, personMapper.countPersons(
-            pageWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, pageWorkspace.getId()), null, null, null, false, allTeamScope(), null, false, null, false, null, false, false, null));
+            pageWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, pageWorkspace.getId()), null, null, null, false, allTeamScope(), null, false, null, false, null, false, false, null, null));
         assertTrue(page.stream().noneMatch(person -> person.getId() == foreign.getId()));
         assertTrue(page.stream().allMatch(person -> List.of(first.getId(), second.getId(), third.getId()).contains(person.getId())));
     }
@@ -313,7 +347,7 @@ class PersonMapperTest extends AbstractMapperTest {
         Person foreign = newPerson(newCompany());
 
         List<Integer> ids = personMapper.getPersonIdsFiltered(
-            pageWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, pageWorkspace.getId()), null, null, null, false, allTeamScope(), null, false, null, false, null, false, false, null, 2);
+            pageWorkspace.getId(), orgWorkspaceIdsJson(workspaceMapper, pageWorkspace.getId()), null, null, null, false, allTeamScope(), null, false, null, false, null, false, false, null, 2, null);
 
         assertEquals(List.of(first.getId(), second.getId()), ids);
         assertFalse(ids.contains(foreign.getId()));
@@ -572,11 +606,11 @@ class PersonMapperTest extends AbstractMapperTest {
     private void assertOwnerScope(Workspace ws, MemberScope memberScope, List<Integer> expectedIds) {
         List<Integer> actualIds = personMapper.getPersonsPage(
             ws.getId(), orgWorkspaceIdsJson(workspaceMapper, ws.getId()), null, "name", "asc", null, null, false, memberScope,
-            null, false, null, false, null, false, false, null, 100, 0)
+            null, false, null, false, null, false, false, null, 100, 0, null)
             .stream().map(Person::getId).toList();
         assertEquals(expectedIds.stream().sorted().toList(), actualIds.stream().sorted().toList());
         assertEquals(expectedIds.size(), personMapper.countPersons(
-            ws.getId(), orgWorkspaceIdsJson(workspaceMapper, ws.getId()), null, null, null, false, memberScope, null, false, null, false, null, false, false, null));
+            ws.getId(), orgWorkspaceIdsJson(workspaceMapper, ws.getId()), null, null, null, false, memberScope, null, false, null, false, null, false, false, null, null));
     }
 
     private Map<String, Long> facetCounts(List<FacetCount> counts) {

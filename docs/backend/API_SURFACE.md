@@ -108,6 +108,15 @@ notes), not the person/deal relationship fields. Inline references in audited co
 establish which relationships were set, so those diffs cannot reliably reconstruct detached
 links. No automatic data repair is attempted.
 
+## Contact tag filtering
+
+`GET /api/persons/page`, `GET /api/persons/ids`, and `GET /api/exports/persons` accept
+`tagIds` as repeated or comma-separated integer values. Multiple tags match any selected tag;
+other contact filters still intersect that set. Page rows, totals, matching IDs and CSV export
+use the same tag membership predicate. Tags must belong to the resolved workspace, including
+when a contact is visible through sharing. An unknown or another workspace's tag matches no
+records. Existing visibility, matching-ID limits, export restrictions and export step-up apply.
+
 ## Global search group selection
 
 `GET /api/search?query=...` accepts optional `types` as repeated parameters, comma-separated

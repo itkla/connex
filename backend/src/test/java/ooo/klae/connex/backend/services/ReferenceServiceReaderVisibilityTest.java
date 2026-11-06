@@ -276,7 +276,7 @@ class ReferenceServiceReaderVisibilityTest {
 
     private void makeVisible(String type) {
         switch (type) {
-            case "user" -> when(members.getMemberIdsIncludingPending(eq(7), anyList())).thenReturn(List.of(42));
+            case "user" -> when(members.getActiveMemberIdsIn(eq(7), anyList())).thenReturn(List.of(42));
             case "person" -> when(people.getVisibleIdsIn(eq(7), org.mockito.ArgumentMatchers.anyString(), anyList())).thenReturn(List.of(42));
             case "deal" -> when(deals.getVisibleIdsIn(eq(7), anyList())).thenReturn(List.of(42));
             case "company" -> when(companies.getVisibleIdsIn(eq(7), org.mockito.ArgumentMatchers.anyString(), anyList())).thenReturn(List.of(42));
@@ -290,7 +290,7 @@ class ReferenceServiceReaderVisibilityTest {
 
     private void verifyTargetLookup(String type) {
         switch (type) {
-            case "user" -> verify(members).getMemberIdsIncludingPending(7, List.of(42));
+            case "user" -> verify(members).getActiveMemberIdsIn(7, List.of(42));
             case "person" -> verify(people).getVisibleIdsIn(7, "[7,8,9]", List.of(42));
             case "deal" -> verify(deals).getVisibleIdsIn(7, List.of(42));
             case "company" -> verify(companies).getVisibleIdsIn(7, "[7,8,9]", List.of(42));

@@ -155,6 +155,18 @@
     )
   </select>
 
+  <select id="getActiveMemberIdsIn" resultType="int">
+    SELECT user_id
+    FROM workspace_member
+    WHERE workspace_id = #{workspaceId}
+      AND status = 'active'
+      AND user_id IN
+      <foreach collection="userIds" item="userId" open="(" separator="," close=")">
+        #{userId}
+      </foreach>
+    ORDER BY user_id
+  </select>
+
   <select id="getMemberIdsIncludingPending" resultType="int">
     SELECT user_id
     FROM workspace_member
@@ -187,6 +199,20 @@
     ORDER BY u.display_name, u.id
   </select>
 
+  <select id="findPendingInvitationReferenceByEmail" resultType="String">
+    SELECT SHA2(CONCAT('pending-membership:', wm.membership_id), 256)
+    FROM workspace_member wm
+    JOIN app_user u ON u.id = wm.user_id
+    WHERE wm.workspace_id = #{workspaceId} AND wm.status = 'pending' AND u.email = #{email}
+  </select>
+
+  <select id="findPendingInvitationUserId" resultType="java.lang.Integer" flushCache="true" useCache="false">
+    SELECT user_id
+    FROM workspace_member
+    WHERE workspace_id = #{workspaceId} AND status = 'pending'
+      AND SHA2(CONCAT('pending-membership:', membership_id), 256) = #{reference}
+  </select>
+
   <select id="getMembersWithRoles" resultType="ooo.klae.connex.backend.dto.MemberDto">
     SELECT u.id, u.username, u.display_name AS displayName, u.email,
            u.profile_picture_url AS profilePictureUrl,
@@ -195,7 +221,7 @@
     FROM app_user u
     JOIN workspace_member wm ON wm.user_id = u.id
     LEFT JOIN workspace_role wr ON wr.id = wm.role_id
-    WHERE wm.workspace_id = #{workspaceId}
+    WHERE wm.workspace_id = #{workspaceId} AND wm.status = 'active'
     ORDER BY FIELD(wm.role, 'owner', 'admin', 'member'), u.display_name, u.id
   </select>
 
@@ -418,7 +444,7 @@
         </foreach>
         AND w.lifecycle_state = 'active'
         AND o.lifecycle_state = 'active'
-        AND wm.status IN ('active', 'pending')
+        AND wm.status = 'active'
         AND EXISTS (
           SELECT 1
           FROM workspace_member actor_membership

@@ -54,6 +54,24 @@ class InviteServiceClaimTest {
     }
 
     @Test
+    void creatingInvitationNeverResolvesRecipientAccounts() {
+        User actor = user("owner@example.com");
+        String email = "recipient@example.com";
+        when(workspaceService.getOrgId(7)).thenReturn(3);
+        when(orgAllowedDomainService.isJoinAllowed(3, email)).thenReturn(true);
+        WorkspaceInvite saved = pendingInvite();
+        saved.setEmail(email);
+        when(inviteMapper.findByTokenHash(org.mockito.ArgumentMatchers.anyString())).thenReturn(saved);
+
+        var result = inviteService.createInvite(7, actor, email, "member");
+
+        assertEquals(email, result.getInvite().getEmail());
+        assertEquals("pending", result.getInvite().getStatus());
+        verifyNoInteractions(userMapper);
+        verify(workspaceService).lockInviteGrantAuthorization(7, actor.getId(), null, "member");
+    }
+
+    @Test
     void lostClaimStopsBeforeEveryMembershipSideEffect() {
         WorkspaceInvite invite = pendingInvite();
         User user = user("recipient@example.com");
@@ -109,11 +127,10 @@ class InviteServiceClaimTest {
         existing.setId(10);
         when(workspaceService.getOrgId(7)).thenReturn(3);
         when(orgAllowedDomainService.isJoinAllowed(3, existing.getEmail())).thenReturn(true);
-        when(userMapper.getUserByEmail(existing.getEmail())).thenReturn(existing);
         doThrow(new BadRequestException(
             "That person is already a member of or invited to this workspace"))
             .when(workspaceService)
-            .lockInviteGrantAuthorization(7, actor.getId(), existing.getId(), "member");
+            .lockInviteGrantAuthorization(7, actor.getId(), null, "member");
 
         BadRequestException exception = assertThrows(
             BadRequestException.class,
@@ -133,7 +150,6 @@ class InviteServiceClaimTest {
         String email = "recipient@example.com";
         when(workspaceService.getOrgId(7)).thenReturn(3);
         when(orgAllowedDomainService.isJoinAllowed(3, email)).thenReturn(true);
-        when(userMapper.getUserByEmail(email)).thenReturn(null);
         doThrow(new ForbiddenException("Grant exceeds the actor's permissions"))
             .when(workspaceService)
             .lockInviteGrantAuthorization(7, actor.getId(), null, "admin");

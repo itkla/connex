@@ -43,8 +43,13 @@ class WarmthMapperXmlTest {
             "reference", LocalDateTime.of(2026, 6, 30, 0, 0),
             "model", RelationshipWarmthModel.current().sqlParameters(),
             "coolingOnly", true, "limit", 6);
+        var visibility = configuration.getSqlFragments()
+            .get(PersonMapper.class.getName() + ".visibleAny");
+        assertNotNull(visibility);
+        String canonicalVisibility = visibility.getStringBody().replaceAll("\\s+", " ").trim()
+            .replace("#{workspaceId}", "?").replace("#{orgWorkspaceIdsJson}", "?");
         for (String statement : List.of("relationshipCounts", "relationshipIds")) {
-            String sql = sql(configuration, MyWorkReadMapper.class, statement, parameters);
+            String sql = sql(configuration, MyWorkReadMapper.class, statement, parameters).replaceAll("\\s+", " ").trim();
             assertTrue(sql.contains("CASE LOWER(a.type)"));
             assertTrue(sql.contains("p.owner_id = ?"));
             assertTrue(sql.contains("p.archived_at IS NULL"));
@@ -52,11 +57,12 @@ class WarmthMapperXmlTest {
             assertTrue(sql.contains("p.provision_ceased_at IS NULL"));
             assertTrue(sql.contains("FROM person_share ps"));
             assertTrue(sql.contains("org_workspace.id = p.workspace_id"));
-            assertTrue(sql.contains("viewing_workspace.id = ?"));
+            assertTrue(sql.contains(canonicalVisibility));
+            assertFalse(sql.contains("viewing_workspace"));
             var bound = configuration.getMappedStatement(MyWorkReadMapper.class.getName() + "." + statement)
                 .getBoundSql(parameters);
-            assertEquals(List.of("orgWorkspaceIdsJson", "workspaceId"), bound.getParameterMappings().stream()
-                .limit(2).map(mapping -> mapping.getProperty()).toList());
+            assertEquals(List.of("workspaceId", "orgWorkspaceIdsJson", "workspaceId"),
+                bound.getParameterMappings().stream().limit(3).map(mapping -> mapping.getProperty()).toList());
             assertEquals(10, timeout(configuration, MyWorkReadMapper.class, statement));
         }
     }

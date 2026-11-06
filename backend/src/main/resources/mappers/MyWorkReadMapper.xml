@@ -37,10 +37,11 @@
   <sql id="personalScores">
     WITH personal AS (
       SELECT p.id FROM person p
-      WHERE EXISTS (
-        SELECT 1 FROM JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) viewing_workspace
-        WHERE viewing_workspace.id = #{workspaceId})
-        AND <include refid="ooo.klae.connex.backend.mappers.PersonMapper.visibleAny"/>
+      WHERE (p.workspace_id = #{workspaceId}
+        OR EXISTS (SELECT 1 FROM person_share ps
+          JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) org_workspace
+            ON org_workspace.id = p.workspace_id
+          WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId}))
         AND p.owner_id = #{userId}
         AND p.archived_at IS NULL AND p.suspended_at IS NULL AND p.provision_ceased_at IS NULL
     ), scores AS (
